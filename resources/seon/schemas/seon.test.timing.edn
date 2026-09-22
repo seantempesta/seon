@@ -1,0 +1,4 @@
+{:seon.test.timing/acquire-ms [:double {:min 0 :description "Milliseconds to acquire one member's branch, connection and forked context through the agent entrance."}]
+ :seon.test.timing/resolve-ms [:double {:min 0 :description "Milliseconds to resolve one member's test Var in its acquired program."}]
+ :seon.test.timing/run-ms [:double {:min 0 :description "Milliseconds from starting one member's body thread to observing its exit or the bound."}]
+ :seon.test.timing/release-ms [:double {:min 0 :description "Milliseconds to release one member's connection and unlink its branch."}]}

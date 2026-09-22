@@ -187,18 +187,22 @@
   `:seon.issue/cites` on one issue attribute, never by a new recogniser."
   [database]
   (let [installed (set (db/identity-attributes database))
-        registry (:seon.schema.projection/registry (db/carried-projection database))
+        projection (db/carried-projection database)
+        registry (:seon.schema.projection/registry projection)
+        ;; Keys and schemas come from ONE projection. Reading keys from the
+        ;; database's schema rows while resolving them in the carried
+        ;; projection refused every adoption that added a schema key: the
+        ;; transaction database holds the new rows before its carried
+        ;; projection advances (`:malli.core/invalid-schema` with schema nil).
         cites (into {}
-                    (for [[attribute] (db/q '[:find ?key :where
-                                                   [?e :seon.schema/key ?key]]
-                                                 database)
+                    (for [attribute (keys (:seon.schema.projection/forms projection))
                           :let [properties
                                 (m/properties (mr/schema registry attribute))]
                           cited (:seon.issue/cites properties)
                           :when (contains? installed cited)]
                       [cited attribute]))]
     (when (empty? cites)
-      (throw (ex-info "No issue attribute declares :seon.issue/cites in this database's schema rows."
+      (throw (ex-info "No issue attribute declares :seon.issue/cites in this database's carried projection."
                       {:seon.error/at (java.util.Date.)
         :seon.error/layer :seon.issue/request
         :seon.error/operation 'seon.issue/citation-attributes

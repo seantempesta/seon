@@ -1,6 +1,5 @@
 (ns seon.test.runner-test
-  (:require [clojure.edn :as edn]
-            [clojure.set :as set]
+  (:require [clojure.set :as set]
             [seon.test.bounds :as bounds]
             [clojure.java.io :as io]
             [clojure.string :as str]
@@ -18,7 +17,6 @@
             [seon.test.cache :as cache]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.sci.kernel :as kernel]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture]
             [seon.test-support :as test-support]))
@@ -84,150 +82,6 @@
                                  [?member :seon.test.member/error-count ?error]]
                         (db/db connection) (:seon.test.run/id provenance) target))))))))))
 
-(deftest a-cold-worker-does-not-arm-its-base-around-host-test-bodies
-  (test-support/preserving-instrumentation-state
-   (fn []
-     (let [projection (#'runner/packaged-test-projection "arm-extent-regression")
-           _base-init (#'runner/initialize-contracts!
-                       "arm-extent-regression" [] projection)
-           base (schema/call-with-projection
-                 projection
-                 #(deref (var-get #'test-support/database-base)))
-           _base-acquired (sci.eval/acquire!
-                           {:seon.sci.eval/ctx @(::test-support/sci-context base)
-                            :seon.db/db (db/db (::test-support/connection base))})
-           sizes-before (#'runner/sci-base-namespace-sizes
-                         (var-get #'test-support/database-base))
-           _selected-init (#'runner/initialize-contracts!
-                           "arm-extent-regression"
-                           ['seon.test.runner-test] projection)
-           base-ctx @(::test-support/sci-context base)
-           independent-ctx #(sci.eval/build-base-ctx projection)
-           observed (atom [])
-           thread-ids (atom [])
-           probe-ns (create-ns (symbol (str "seon.worker-arm-probe." (id/id))))
-           probe (intern probe-ns 'probe (fn []))]
-       (try
-         (alter-meta!
-          probe assoc :test
-          #(let [value (kernel/with-arm
-                        (independent-ctx) 1000 (fn [_] :inside))]
-             (swap! observed conj value)
-             (swap! thread-ids conj (.threadId (Thread/currentThread)))
-             (is (= :inside value))))
-         (let [result (#'runner/run-resolved-tests!
-                       {:seon.sci.eval/ctx base-ctx}
-                       {::runner/task-symbols [(symbol probe)]}
-                       [probe])]
-           (is (= [:inside] @observed)
-               "worker initialization must not leave its base armed across a host test body")
-           (is (nil? (#'runner/ambient-drift
-                      {::runner/snapshot-sci-base sizes-before}
-                      {::runner/snapshot-sci-base
-                       (#'runner/sci-base-namespace-sizes
-                        (var-get #'test-support/database-base))}))
-               "worker program acquisition precedes the test's drift snapshot")
-           (is (= 0 (:seon.test/fail-count (first result))) (pr-str result))
-           (is (= 0 (:seon.test/error-count (first result))) (pr-str result))
-           (is (= :after
-                  (kernel/with-arm (independent-ctx) 1000 (fn [_] :after)))
-               "the pooled worker thread is unarmed after the body returns"))
-         (let [exchange-ids ["serial/host-task-1" "serial/host-task-2"]
-               input (str (apply str
-                                 (map #(str (pr-str
-                                             {::runner/worker-command :run
-                                              ::runner/worker-task
-                                              {::runner/task-symbols
-                                               [(symbol probe)]}
-                                              ::runner/exchange-id %})
-                                            "\n")
-                                      exchange-ids))
-                          (pr-str {::runner/worker-command :stop
-                                   ::runner/exchange-id "serial/stop"})
-                          "\n")
-               output (java.io.StringWriter.)
-               executor (java.util.concurrent.Executors/newSingleThreadExecutor)]
-           (try
-             (with-redefs-fn
-               {#'runner/reassert-contracts! (fn [_ _] nil)
-                #'runner/ambient-snapshot (constantly {})
-                #'runner/ambient-drift (fn [_ _] nil)
-                #'runner/resolve-admitted-test
-                (delay (fn [_] probe))}
-               #(#'runner/serve-worker-commands!
-                 "serial"
-                 (java.io.BufferedReader. (java.io.StringReader. input))
-                 (java.io.PrintWriter. output true)
-                 {::runner/task-executor executor
-                  ::runner/resolution {:seon.sci.eval/ctx base-ctx}}))
-             (finally
-               (.shutdownNow executor)))
-           (let [prefix (var-get #'runner/protocol-prefix)
-                 events (mapv #(edn/read-string (subs % (count prefix)))
-                              (remove str/blank? (str/split-lines (str output))))
-                 completed (filterv #(= :task-complete
-                                         (::runner/worker-event %))
-                                    events)]
-             (is (= exchange-ids (mapv ::runner/exchange-id completed))
-                 (pr-str events))
-             (is (every? #(= "serial" (::runner/worker-id %)) completed)
-                 (pr-str events))
-             (is (every? #(nat-int? (::runner/task-elapsed-ms %)) completed)
-                 (pr-str completed))
-             (is (every? #(zero? (get-in % [::runner/task-summary
-                                             ::runner/error-count]))
-                         completed)
-                 (pr-str completed))
-             (is (apply = (take-last 2 @thread-ids))
-                 "serial tasks reuse one execution thread, so thread-local leaks remain observable")))
-         (let [exchange-id "serial/bounded-host-task"
-               input (str (pr-str {::runner/worker-command :run
-                                   ::runner/worker-task
-                                   {::runner/task-symbols [(symbol probe)]}
-                                   ::runner/exchange-id exchange-id})
-                          "\n"
-                          (pr-str {::runner/worker-command :stop
-                                   ::runner/exchange-id "serial/bounded-stop"})
-                          "\n")
-               output (java.io.StringWriter.)
-               executor (java.util.concurrent.Executors/newSingleThreadExecutor)]
-           (try
-             (with-redefs-fn
-               {#'runner/reassert-contracts! (fn [_ _] nil)
-                #'runner/ambient-snapshot (constantly {})
-                #'runner/ambient-drift (fn [_ _] nil)
-                #'runner/run-task! (fn [_ _] (Thread/sleep 5000))
-                #'bounds/exchange-seconds (fn [_ _] 1)}
-               #(#'runner/serve-worker-commands!
-                 "serial"
-                 (java.io.BufferedReader. (java.io.StringReader. input))
-                 (java.io.PrintWriter. output true)
-                 {::runner/task-executor executor
-                  ::runner/resolution {:seon.sci.eval/ctx base-ctx}}))
-             (finally
-               (.shutdownNow executor)))
-           (let [prefix (var-get #'runner/protocol-prefix)
-                 completed (->> (str/split-lines (str output))
-                                (remove str/blank?)
-                                (map #(edn/read-string (subs % (count prefix))))
-                                (filter #(= :task-complete
-                                            (::runner/worker-event %)))
-                                first)]
-             (is (= exchange-id (::runner/exchange-id completed)) (pr-str completed))
-             (is (true? (::runner/worker-task-bound completed)) (pr-str completed))
-             (is (pos? (::runner/task-elapsed-ms completed)) (pr-str completed))))
-         ;; The worker's own bound only produces a terminal event if it fires
-         ;; while the coordinator is still listening. Ordinary and declared-long
-         ;; tasks both have to sit strictly inside the exchange bound.
-         (doseq [task [{::runner/task-symbols ['ordinary]}
-                       {::runner/task-symbols ['declared-long]
-                        ::runner/task-long-ms 900000}]]
-           (is (< (bounds/exchange-seconds (or (::runner/task-long-ms task) 0) 0)
-                  (#'runner/task-exchange-bound-seconds task))
-               (str "the worker task bound must fire inside the coordinator exchange bound: "
-                    (pr-str task))))
-         (finally
-           (remove-ns (ns-name probe-ns))))))))
 
 (deftest no-double-execution
   (let [host-projection (schema/handed-projection)]

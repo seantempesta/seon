@@ -52,11 +52,12 @@
       (finally (remove-ns namespace-name)))))
 
 (defn- run-probe [connection test-var]
-  (let [database (db/db connection)]
-    (sut/run test-var connection {:seon.db/db database
-                                 :seon.test.run/cluster [:seon.cluster/name "default"]
-                                 :seon.test.run/provenance (runner/provenance database)
-                                 :seon.test/remaining-ms 100000})))
+  (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
+                         :seon.test/recording-connection connection
+                         :seon.test/policy :named
+                         :seon.test/identities
+                         #{(symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))}})]
+    (if (:seon.error/at result) result (first (:seon.test/results result)))))
 
 (deftest one-failing-is-becomes-one-failure-entity
   (support/with-database

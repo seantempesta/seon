@@ -14,16 +14,12 @@
   Completion is the presence of `:my.plan.item/completed-tx`; ready, blocked,
   parent, depth, and state are queries over current facts, never stored."
   (:require [clojure.string :as str]
-            [sci.core :as sci]
             [seon.db :as db]
-            [seon.error :as error]
             [seon.id :as id]
             [seon.issue :as issue]
             [seon.repl :as repl]
             [seon.schema.edn :as schema.edn]
-            [seon.sci.kernel :as sci.kernel]
-            [seon.test :as seon.test]
-            [seon.test.runner :as test.runner]))
+            [seon.test :as seon.test]))
 
 ;;; LOAD-CYCLE BOUNDARY. `seon.turn` requires `seon.plan`, and
 ;;; `seon.cluster.agent` requires `seon.turn`, so this namespace cannot
@@ -699,74 +695,40 @@
                  named)))))
 
 (defn run-issue-tests!
-  "Run an open issue's STALE tests under one shared evaluation deadline.
+  "Run an open issue's STALE tests as one request under the shared evaluation deadline.
   The ordinary turn's close is the one settlement that calls this. A close
   that changed nothing a test reaches runs nothing and leaves the recorded
-  results standing. Results, including
-  unavailable or expired tests, use the existing test writer."
+  results standing. Each test runs as an isolated agent on its own branch off
+  the agent's current commit; results, including unavailable or expired
+  tests, use the existing test writer."
   {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id] :nil]}
   [cluster agent-id]
   (let [connection (:seon.db/connection cluster)
         database (db/db connection)
         pending (stale-issue-tests database agent-id)]
     (when (seq pending)
+      (when-let [[test-eid _] (first (filter (comp nil? second) pending))]
+        (refuse! {:seon.error/at (java.util.Date.)
+                  :seon.error/layer :my.plan/constraint
+                  :seon.error/operation 'seon.plan/run-issue-tests!
+                  :seon.error/message "Plan request refused; a test entity named by the issue is required."
+                  :my.plan/refused-member :seon.issue/tests
+                  :seon.error/offending {:seon.agent/id agent-id :seon.db/ref test-eid}
+                  :seon.error/data {:seon.agent/id agent-id :seon.db/ref test-eid}
+                  :seon.plan/non-test-entity test-eid
+                  :seon.error/expected "a test entity named by the issue"}))
       (let [deadline (query-deadline database agent-id)
-            ctx (@cluster-agent-acquire-context! cluster agent-id)]
-        (doseq [[test-eid test-symbol] pending]
-          (let [remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
-                database (db/db connection)
-                provenance (test.runner/provenance database)
-                result
-                (cond
-                  (:seon.test.run/unavailable provenance) provenance
-                  test-symbol
-                  (let [qualified (symbol test-symbol)
-                        test-var (sci/resolve ctx qualified)
-                        metadata (meta test-var)
-                        runnable
-                        (sci/new-var
-                         (symbol (name qualified)) nil
-                         (assoc metadata
-                           :name (symbol (name qualified))
-                           :ns (or (:ns metadata)
-                                   (sci/create-ns
-                                    (symbol (namespace qualified))))
-                           :test
-                           (fn []
-                             (let [remaining (quot (- deadline (System/nanoTime)) 1000000)]
-                               (when-not (pos? remaining)
-                                 (throw (ex-info "The issue test set exhausted its evaluation deadline."
-                                                 {:seon.test/sym test-symbol})))
-                               (when-not (ifn? (:test metadata))
-                                 (throw (ex-info "The issue test has no runnable SCI Var."
-                                                 {:seon.test/sym test-symbol})))
-                               (if (var? test-var)
-                                 ((:test metadata))
-                                 (sci.kernel/with-arm
-                                  ctx remaining
-                                  (fn [_] ((:test metadata)))))))))]
-                    (seon.test/run
-                     runnable connection
-                     {:seon.db/db database
-                      :seon.db/connection connection
-                      :seon.sci.eval/ctx ctx
-                      :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name cluster)]
-                      :seon.test.run/provenance provenance
-                      :seon.test/remaining-ms (max 1 remaining-ms)}))
-                  :else
-                  (refuse! {:seon.error/at (java.util.Date.)
-                 :seon.error/layer :my.plan/constraint
-                 :seon.error/operation 'seon.plan/run-issue-tests!
-                 :seon.error/message "Plan request refused; a test entity named by the issue is required."
-                 :my.plan/refused-member :seon.issue/tests
-                 :seon.error/offending {:seon.agent/id agent-id :seon.db/ref test-eid}
-                 :seon.error/data {:seon.agent/id agent-id :seon.db/ref test-eid}
-                 :seon.plan/non-test-entity (get {:seon.agent/id agent-id :seon.db/ref test-eid} :seon.db/ref)
-                 :seon.error/expected "a test entity named by the issue"}))]
-            (when (or (:seon.test/execution-refusal result)
-                      (:seon.test.run/unavailable result))
-              (throw (ex-info (:seon.error/message result)
-                              (assoc result :my.plan/refused-member :seon.issue/tests))))))))
+            handle (@cluster-agent-acquire-context! cluster agent-id)
+            remaining-ms (quot (- deadline (System/nanoTime)) 1000000)
+            result (seon.test/run
+                    {:seon.test/execution handle
+                     :seon.test/recording-connection connection
+                     :seon.test/policy :named
+                     :seon.test/identities (into #{} (map second) pending)
+                     :seon.test/check-time-limit-ms (max 1 remaining-ms)})]
+        (when (:seon.error/at result)
+          (throw (ex-info (:seon.error/message result)
+                          (assoc result :my.plan/refused-member :seon.issue/tests))))))
     nil))
 
 (defn- done-query-result

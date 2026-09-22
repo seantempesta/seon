@@ -803,12 +803,17 @@
                                 (let [connection (store/open-branch! held-store branch)]
                                   (reset! allocated connection)
                                   connection))
+                 ;; A branch opened at the captured commit holds that commit's
+                 ;; immutable value, so its projection is the carried one.
                  _ (when @allocated
                      (db/carry-connection-projection-state!
                       connection
                       (sci.eval/projection-state
-                       @connection (schema/projection-from-database
-                                    @connection (db/carried-projection database)))))
+                       @connection
+                       (if (= (db/commit-id database) (db/commit-id @connection))
+                         (db/carried-projection database)
+                         (schema/projection-from-database
+                          @connection (db/carried-projection database))))))
                  _ (when (and create? agent-id)
                      (let [result (db/call-with-custody {}
                                     #(db/transact! connection

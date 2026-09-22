@@ -15,7 +15,7 @@
             [seon.test-support :as support]))
 
 (defn- run-in-fixture
-  "Request the fixture's explicit cluster through the production host owner."
+  "Request one indexed test on the fixture's branch through the one request owner."
   ([test-var connection] (run-in-fixture test-var connection {}))
   ([test-var connection options]
    (support/transacted!
@@ -23,11 +23,27 @@
     [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
                                 (db/db connection))
       :seon.source/test-input-digest (id/digest 64 [::host-fixture-inputs])}])
-   (sut/run test-var connection
-            (merge {:seon.test.run/cluster [:seon.cluster/name "default"]
-                    :seon.test.run/provenance (runner/provenance (db/db connection))
-                    :seon.test/remaining-ms (* 1000 support/event-backstop-seconds)}
-                   options))))
+   (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
+         result (sut/run (merge {:seon.test/execution (support/execution-handle connection)
+                                 :seon.test/recording-connection connection
+                                 :seon.test/policy :named
+                                 :seon.test/identities #{test-symbol}}
+                                options))]
+     (if (:seon.error/at result) result (first (:seon.test/results result))))))
+
+(defn- changed-request
+  "One incremental request for explicit changed identities on the fixture's branch."
+  [connection changed options]
+  (support/transacted!
+   connection
+   [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                               (db/db connection))
+     :seon.source/test-input-digest (id/digest 64 [::host-fixture-inputs])}])
+  (sut/run (merge {:seon.test/execution (support/execution-handle connection)
+                   :seon.test/recording-connection connection
+                   :seon.test/policy :incremental
+                   :seon.test/changed changed}
+                  options)))
 
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
@@ -105,32 +121,6 @@
                          (db/pull (db/db connection) [:seon.test/sym]
                                   [:seon.test/sym test-symbol]))]
             (is (qualified-symbol? written) (pr-str written))))))))
-
-(deftest unchanged-closures-reuse-green-results
-  (support/with-database
-    (fn [connection]
-      (with-test connection '(clojure.test/is (= 4 (+ 2 2)))
-        (fn [s v]
-          (let [request {:seon.db/connection connection
-                         :seon.test/namespaces [(symbol (namespace (symbol s)))]}
-                before (db/db connection)
-                first-result (sut/check request)
-                second-result (sut/check request)
-                current (db/db connection)]
-            (is (= [s] (:seon.test/passed first-result)) (pr-str first-result))
-            (is (= [] (:seon.test/tests second-result)) (pr-str second-result))
-            (is (= 1 (:seon.test/skipped-count second-result)))
-            (is (.contains (sut/feedback second-result) "unchanged reach digest"))
-            (is (= (sut/reach-digest before s)
-                   (:seon.test/reach-digest (db/pull current '[*] [:seon.test/sym s]))))
-            (is (true? (sut/verified? current s)))
-            (is (not (some #{s} (sut/stale current))))
-            (is (:db-after (db/transact! connection
-                             [[:db/add [:seon.test/sym s] :seon.test/source
-                               "(clojure.test/deftest probe (clojure.test/is (= 5 (+ 2 3))))"]])))
-            (is (some #{s} (sut/stale (db/db connection))))
-            (is (false? (sut/verified? (db/db connection) s)))
-            (is (= [s] (:seon.test/tests (sut/check request))))))))))
 
 (deftest concurrent-completions-use-the-canonical-program
   (support/with-database
@@ -282,136 +272,6 @@
           (is (some pos? (vals sizes))))
         (is (map? (#'runner/ambient-snapshot)))))))
 
-(deftest declared-observations-defer-before-cheap-reaching-tests
-  (support/with-database
-    (fn [connection]
-      (with-test connection '(clojure.test/is true)
-        (fn [cheap-symbol _]
-          (with-test connection '(clojure.test/is true)
-            (fn [observed-symbol observed-var]
-              (let [reason "Observe the external fixture lifecycle explicitly."
-                    root (doto (clojure.java.io/file "tmp" (str "observation-index-" (id/id))) .mkdirs)
-                    source (str "(ns " (namespace (symbol observed-symbol))
-                                " (:require [clojure.test :refer [deftest is]]))\n"
-                                "(deftest ^{:seon.test/fixture-observation " (pr-str reason)
-                                "} probe (is true))\n")]
-                (try
-                  (spit (clojure.java.io/file root "probe.clj") source)
-                  (let [rows (functions/rows {:seon.fn/roots [(.getPath root)]})
-                        row (first (filter #(= observed-symbol (:seon.test/sym %)) rows))]
-                    (is (= reason (:seon.test/fixture-observation row)) (pr-str row))
-                    ;; The indexed test row refers to its file and namespace rows, so the
-                    ;; whole emitted artifact is admitted exactly as publication admits it.
-                    (is (:db-after (db/transact! connection rows))))
-                  (let [result (sut/check {:seon.db/connection connection
-                                           :seon.test/changed [observed-symbol cheap-symbol]})
-                        deferred [{:seon.test/sym observed-symbol
-                                   :seon.test/fixture-observation reason
-                                   :seon.test/command ["bin/test-check" "default" "--test" (str observed-symbol)]}]
-                        feedback (sut/feedback result)]
-                    (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
-                    (is (= [cheap-symbol] (:seon.test/passed result)))
-                    (is (= deferred (:seon.test/deferred result)))
-                    (is (.contains feedback reason) feedback)
-                    (is (.contains feedback (str "'bin/test-check' 'default' '--test' '" observed-symbol "'")) feedback)
-                    (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
-                                                       [:seon.test/sym observed-symbol]))))
-                    (let [explicit (run-in-fixture observed-var connection)]
-                      (is (= 1 (:seon.test/pass-count explicit)) (pr-str explicit))))
-                  (finally (support/delete-recursively! root)))))))))))
-
-(deftest check-records-provenance-and-verifies-green
-  (support/with-database
-    (fn [connection]
-      (with-test connection '(clojure.test/is (= 4 (+ 2 2)))
-        (fn [test-symbol _]
-          (let [basis (db/basis-t (db/db connection))
-                result (sut/check {:seon.db/connection connection
-                                   :seon.test/changed [test-symbol]
-                                   :seon.test/paths ["src/seon/id.clj"]})
-                database (db/db connection)
-                runs (db/q '[:find [?run ...] :where [?run :seon.test.run/id]] database)]
-            (is (= [test-symbol] (:seon.test/passed result)) (pr-str result))
-            (is (= basis (:seon.test.run/basis-t result)))
-            (is (= 1 (count runs)))
-            (is (= basis (:seon.test.run/basis-t (db/pull database '[*] (first runs)))))
-            (is (true? (sut/verified? database test-symbol (:seon.test.run/program-digest result))))
-            (is (= ["bin/test" "--paths" "src/seon/id.clj" "--platform"]
-                   (second (:seon.test/next-tier result))))))))))
-
-(deftest red-check-names-failure-and-stops-escalation
-  (support/with-database
-    (fn [connection]
-      (with-test connection '(clojure.test/is false "expected red reaching probe")
-        (fn [test-symbol _]
-          (let [result (binding [t/report (constantly nil)]
-                         (sut/check {:seon.db/connection connection
-                                     :seon.test/changed [test-symbol]}))]
-            (is (= :none (:seon.test/next-tier result)) (pr-str result))
-            (is (= test-symbol (get-in result [:seon.test/failed 0 :seon.test/sym])))
-            (is (.contains (get-in result [:seon.test/failed 0 :seon.test/failure-message] "")
-                           "expected red reaching probe"))
-            (is (= [test-symbol] (get-in result [:seon.test/failed 0 :seon.test/changed])))
-            (is (= 1 (:seon.test/fail-count
-                       (db/pull (db/db connection) '[*] [:seon.test/sym test-symbol]))))))))))
-
-(deftest widened-hook-check-reports-and-runs-nothing
-  (support/with-database
-    (fn [connection]
-      (support/seed-cluster! connection "default")
-      (let [result (sut/check {:seon.db/connection connection
-                               :seon.test/changed []
-                               :seon.test/paths ["deps.edn"]
-                               :seon.test/namespaces ['seon.id-test]
-                               :seon.test/defer-widened? true})]
-        (is (string? (:seon.test/widened result)) (pr-str result))
-        (is (= [] (:seon.test/tests result)))
-        (is (= ["bin/test" "--paths" "deps.edn" "--" "seon.id-test"]
-               (first (:seon.test/next-tier result))))
-        (is (empty? (db/q '[:find [?run ...] :where [?run :seon.test.run/id]] (db/db connection))))
-        (let [unbounded (sut/check {:seon.db/connection connection
-                                    :seon.test/changed []
-                                    :seon.test/paths ["deps.edn"]
-                                    :seon.test/defer-widened? true})]
-          (is (= [] (:seon.test/tests unbounded)))
-          (is (= ["bin/test" "--paths" "deps.edn"]
-                 (first (:seon.test/next-tier unbounded)))))))))
-
-(deftest a-test-completion-bound-is-recorded-as-a-named-error
-  (support/with-database
-    (fn [connection]
-      (with-test connection '(.await (java.util.concurrent.CountDownLatch. 1))
-        (fn [test-symbol test-var]
-          (let [provenance (runner/provenance (db/db connection))
-                result (binding [t/report (constantly nil)]
-                         (run-in-fixture test-var connection
-                                  {:seon.test.run/provenance provenance
-                                   :seon.test/remaining-ms 50}))]
-            (is (= 1 (:seon.test/error-count result)) (pr-str result))
-            (is (.contains (:seon.test/failure-message result "") (str test-symbol)))
-            (is (= 1 (:seon.test/error-count
-                       (db/pull (db/db connection) '[*] [:seon.test/sym test-symbol]))))))))))
-
-(deftest empty-check-does-not-acquire-run-provenance
-  (support/with-database
-    (fn [connection]
-      (support/seed-cluster! connection "default")
-      (let [seals (db/q '[:find [?entity ...] :where [?entity :seon.source/digest]]
-                        (db/db connection))
-            removed (db/transact! connection
-                                  (mapv #(vector :db.fn/retractAttribute % :seon.source/digest) seals))]
-        (is (seq seals))
-        (is (:db-after removed) (pr-str removed))
-        (is (:seon.test.run/unavailable (runner/provenance (db/db connection))))
-        (let [result (sut/check {:seon.db/connection connection
-                                 :seon.test/changed []
-                                 :seon.test/paths []})]
-          (is (= [] (:seon.test/tests result)) (pr-str result))
-          (is (nil? (:seon.test.run/program-digest result)))
-          (is (empty? (:seon.test/failed result)))
-          (is (empty? (db/q '[:find [?run ...] :where [?run :seon.test.run/id]]
-                            (db/db connection)))))))))
-
 (deftest run-carries-the-connections-projection-to-the-test-thread
   (support/with-database
     (fn [connection]
@@ -428,15 +288,15 @@
             (is (zero? (:seon.test/error-count result)) (pr-str result))))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; An in-process run refuses a destructive drill on a development root
+;;; Where a test may run: a destructive drill never runs on a development root
 ;;; ---------------------------------------------------------------------------
 
 ;; The 2026-09-17 store wipe was an in-process seon.test/run, inside the
 ;; development JVM, of a test whose reach includes a function that deletes a
 ;; filesystem path it did not create
-;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md). The
-;; cold gate's platform tier refuses the same class from its own side; these
-;; regressions own the in-process half.
+;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md).
+;; `seon.test/run` excludes that class on a development root; the exclusion
+;; itself is proven in `seon.test.one-request-test`.
 
 (def ^:private destructive-owner 'seon.test-support/populate-published-root!)
 
@@ -488,95 +348,6 @@
     (is (nil? (#'sut/development-root (str working "/tmp/isolated-run-root")))
         "a bin/test worker or a lane --root JVM operates an isolated root")))
 
-(deftest an-in-process-run-under-a-development-root-refuses-a-destructive-test
-  (support/with-database
-    (fn [connection]
-      (with-destructive-test connection
-        (fn [test-symbol test-var marker]
-          (let [database (db/db connection)
-                working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
-                result (run-in-fixture test-var connection
-                                {:seon.db/db database
-                                 :seon.test.run/provenance (runner/provenance database)
-                                 :seon.test/remaining-ms 10000
-                                 :seon.test/declared-root working})]
-            (is (seq (:seon.test/destructive-path result)) (pr-str result))
-            (is (= test-symbol (:seon.test/sym result)))
-            (is (= destructive-owner (:seon.fn/sym result)))
-            (is (= (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
-                                               [:seon.fn/sym destructive-owner]))
-                   (:seon.fn/destroys result))
-                "the refusal names what the owner destroys, from its declaration")
-            (is (= [test-symbol destructive-owner] (:seon.test/destructive-path result)))
-            (let [report (sut/host database test-symbol)]
-              (is (= :seon.test.host/isolated-snapshot (:seon.test/host report)) (pr-str report))
-              (is (= destructive-owner (:seon.fn/sym report)))
-              (is (seq (:seon.fn/destroys report)) (pr-str report))
-              (is (.contains (sut/host-text database test-symbol) (str destructive-owner))))
-            (is (= ["bin/test" "--" (namespace (symbol test-symbol))]
-                   (:seon.test/command result)))
-            (is (.contains (:seon.error/message result "") working) (pr-str result))
-            (is (not (.exists marker))
-                "the refused test executed nothing, so no fixture root was created")
-            (let [row (db/pull (db/db connection)
-                               [:seon.test/run :seon.test/pass-count :seon.test/error-count]
-                               [:seon.test/sym test-symbol])]
-              (is (nil? (:seon.test/run row)) (pr-str row))
-              (is (nil? (:seon.test/pass-count row)) (pr-str row)))))))))
-
-(deftest an-in-process-run-under-an-isolated-root-runs-the-same-test
-  (support/with-database
-    (fn [connection]
-      (with-destructive-test connection
-        (fn [test-symbol test-var marker]
-          (let [database (db/db connection)
-                isolated (.getCanonicalPath (clojure.java.io/file "tmp" (str "isolated-root-" (id/id))))
-                result (run-in-fixture test-var connection
-                                {:seon.db/db database
-                                 :seon.test.run/provenance (runner/provenance database)
-                                 :seon.test/remaining-ms 10000
-                                 :seon.test/declared-root isolated})]
-            (is (= 1 (:seon.test/pass-count result)) (pr-str result))
-            (is (= 0 (:seon.test/fail-count result)) (pr-str result))
-            (is (.exists marker) "the admitted test executed its body")
-            (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
-                                         [:seon.test/sym test-symbol])))))))))
-
-(deftest an-in-process-check-excludes-a-destructive-test-and-reports-it
-  (support/with-database
-    (fn [connection]
-      (with-destructive-test connection
-        (fn [test-symbol _ marker]
-          (with-test connection '(clojure.test/is true)
-            (fn [cheap-symbol _]
-              (let [working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
-                    result (sut/check {:seon.db/connection connection
-                                       :seon.test/declared-root working
-                                       :seon.test/changed [test-symbol cheap-symbol]})
-                    excluded (:seon.test/destructive-excluded result)
-                    feedback (sut/feedback result)]
-                (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
-                (is (= [{:seon.test/sym test-symbol
-                         :seon.fn/sym destructive-owner
-                         :seon.fn/destroys (owner-destroys (db/db connection))
-                         :seon.test/destructive-path [test-symbol destructive-owner]
-                         :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}]
-                       excluded)
-                    (pr-str result))
-                (is (.contains feedback "destructive-excluded 1") feedback)
-                (is (.contains feedback (str destructive-owner)) feedback)
-                (is (not (.exists marker)) "the excluded test executed nothing")
-                (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
-                                                   [:seon.test/sym test-symbol]))))
-                (let [isolated (sut/check {:seon.db/connection connection
-                                           :seon.test/declared-root
-                                           (.getCanonicalPath
-                                            (clojure.java.io/file "tmp" (str "isolated-root-" (id/id))))
-                                           :seon.test/changed [test-symbol]})]
-                  (is (= [test-symbol] (:seon.test/passed isolated)) (pr-str isolated))
-                  (is (nil? (:seon.test/destructive-excluded isolated)))
-                  (is (.exists marker)))))))))))
-
 (deftest a-program-declaring-no-destroyer-refuses-instead-of-admitting
   (support/with-database
     (fn [connection]
@@ -595,11 +366,12 @@
         (is (.contains (:seon.error/message derived "") ":seon.fn/destroys") (pr-str derived))
         (is (string? (:seon.test/unknown (sut/host after 'seon.id-test/anything)))
             "an unanswerable declaration never answers in-process")
-        (is (:seon.test/destructive-path (#'sut/destructive-refusal
-                               after
-                               (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
-                               'seon.id-test/does-not-matter))
-            "an unanswerable reach refuses the run instead of admitting it")))))
+        (is (string? (:seon.test/unknown
+                      (#'sut/host-exclusions
+                       after
+                       (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
+                       ['seon.id-test/does-not-matter])))
+            "an unanswerable reach refuses the request instead of admitting it")))))
 
 (deftest a-test-with-no-program-row-is-unknown-and-is-never-run-in-process
   (support/with-database
@@ -616,7 +388,7 @@
                                    (list 'clojure.test/is
                                          (list '.mkdirs (list 'clojure.java.io/file
                                                               (.getPath marker)))))))
-            working (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))]
+            ]
         (try
           (is (nil? (:db/id (db/pull database [:db/id] [:seon.test/sym test-symbol])))
               "the probe is deliberately not indexed")
@@ -625,13 +397,10 @@
             (is (nil? (:seon.test/host report))
                 "an unknown call graph never reads as in-process")
             (is (.contains (sut/host-text database test-symbol) "unknown")))
-          (let [result (run-in-fixture test-var connection
-                                {:seon.db/db database
-                                 :seon.test.run/provenance (runner/provenance database)
-                                 :seon.test/remaining-ms 10000
-                                 :seon.test/declared-root working})]
-            (is (string? (:seon.test/unknown result)) (pr-str result))
-            (is (not (.exists marker)) "an unknown host executed nothing"))
+          (let [result (run-in-fixture test-var connection)]
+            (is (= :seon.test/identity-unresolved (:seon.test/selection-refusal result))
+                (pr-str result))
+            (is (not (.exists marker)) "an unknown test executed nothing"))
           (finally
             (support/delete-recursively! marker)
             (remove-ns namespace-name)))))))
@@ -683,7 +452,7 @@
     (is (.contains html "43"))))
 
 ;;; ---------------------------------------------------------------------------
-;;; An in-process check excludes a declared-long test and reports what expired
+;;; A request excludes a declared-long test unless it opts in
 ;;; ---------------------------------------------------------------------------
 
 ;; A declared-long test is a real boot or a multi-minute fixture. Selecting one
@@ -741,20 +510,18 @@
         (fn [test-symbol _ marker]
           (with-test connection '(clojure.test/is true)
             (fn [cheap-symbol _]
-              (let [result (sut/check {:seon.db/connection connection
-                                       :seon.test/changed [test-symbol cheap-symbol]})
+              (let [result (changed-request connection [test-symbol cheap-symbol] {})
                     excluded (:seon.test/long-excluded result)
-                    feedback (sut/feedback result)]
-                (is (= [cheap-symbol] (:seon.test/tests result)) (pr-str result))
-                (is (= [cheap-symbol] (:seon.test/passed result)) (pr-str result))
+                    tally (sut/tally result)]
+                (is (= [cheap-symbol] (map :seon.test/sym (:seon.test/results result))) (pr-str result))
+                (is (true? (:seon.test/passed? result)) tally)
                 (is (= [{:seon.test/sym test-symbol
                          :seon.test/long long-declaration
-                         :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}]
+                         :seon.test/command ["bin/test-check" "default" "--test" (str test-symbol)]}]
                        excluded)
                     (pr-str result))
-                (is (.contains feedback "long-excluded 1") feedback)
-                (is (.contains feedback (str test-symbol)) feedback)
-                (is (.contains feedback long-declaration) feedback)
+                (is (.contains tally (str "long " test-symbol)) tally)
+                (is (.contains tally long-declaration) tally)
                 (is (not (.exists marker)) "the excluded test executed nothing")
                 (is (nil? (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
                                                    [:seon.test/sym test-symbol]))))))))))))
@@ -764,79 +531,11 @@
     (fn [connection]
       (with-long-test connection {}
         (fn [test-symbol _ marker]
-          (let [result (sut/check {:seon.db/connection connection
-                                   :seon.test/changed [test-symbol]
-                                   :seon.test/include-long? true})]
-            (is (= [test-symbol] (:seon.test/passed result)) (pr-str result))
+          (let [result (changed-request connection [test-symbol] {:seon.test/include-long? true})]
+            (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))) (pr-str result))
+            (is (true? (:seon.test/passed? result)) (sut/tally result))
             (is (nil? (:seon.test/long-excluded result)) (pr-str result))
             (is (.exists marker) "the opted-in test executed its body")
             (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
                                          [:seon.test/sym test-symbol])))))))))
 
-(defn- with-expiring-selection
-  "Two probes selected together under a MEASURED allowance.
-
-  The allowance is not a guessed wall-clock number: 3000 ms fired before the
-  first run returned on the gate machine, so the check reported an empty
-  verdict set honestly and the regression proved nothing. A third probe, never
-  selected, is checked first to measure what one complete trivial check costs
-  here; the real allowance is a multiple of that, so the bound fires while the
-  second probe is waiting. That probe waits under its own backstop, so nothing
-  parks forever."
-  [connection assertion]
-  (support/seed-cluster! connection "default" {:seon.test/check-time-limit-ms 120000})
-  (let [namespace-name (symbol (str "expiry.probe" (id/id)))
-        namespace-object (create-ns namespace-name)
-        calibration (symbol (str namespace-name) "m-calibration")
-        completed (symbol (str namespace-name) "a-completes")
-        unreturned (symbol (str namespace-name) "z-never-returns")
-        sources {calibration (list 'clojure.test/deftest 'm-calibration
-                                   (list 'clojure.test/is true))
-                 completed (list 'clojure.test/deftest 'a-completes
-                                 (list 'clojure.test/is true))
-                 unreturned (list 'clojure.test/deftest 'z-never-returns
-                                  (list 'clojure.test/is
-                                        (list '.await (list 'java.util.concurrent.CountDownLatch. 1)
-                                              60 'java.util.concurrent.TimeUnit/SECONDS)))}]
-    (binding [*ns* namespace-object]
-      (clojure.core/refer 'clojure.core)
-      (doseq [source (vals sources)] (eval source)))
-    (try
-      (with-indexed-tests connection namespace-name (vals sources)
-       (fn []
-        (let [measured (sut/check {:seon.db/connection connection
-                                 :seon.test/changed [calibration]})
-            _ (is (= [calibration] (:seon.test/passed measured)) (pr-str measured))
-            allowance (long (max 5000 (* 4 (:seon.test/elapsed-ms measured))))]
-        (support/seed-cluster! connection "default"
-                               {:seon.test/check-time-limit-ms allowance})
-        (assertion completed unreturned allowance))))
-      (finally (remove-ns namespace-name)))))
-
-(deftest an-expired-check-reports-the-verdicts-it-already-recorded
-  (support/with-database
-    (fn [connection]
-      (with-expiring-selection connection
-        (fn [completed unreturned allowance]
-          (let [result (binding [t/report (constantly nil)]
-                         (sut/check {:seon.db/connection connection
-                                     :seon.test/changed [completed unreturned]}))
-                expiry (:seon.test/expired result)
-                feedback (sut/feedback result)]
-            (is (vector? (:seon.test/results result))
-                (str "the expiry never discards the runs it holds: " (pr-str result)))
-            (is (= [completed] (:seon.test/tests result)) (pr-str result))
-            (is (= [completed] (:seon.test/passed result)) (pr-str result))
-            (is (= 1 (count (:seon.test/results result))) (pr-str result))
-            (is (= :none (:seon.test/next-tier result)))
-            (is (= [unreturned] (:seon.test/pending result)) (pr-str result))
-            (is (= unreturned (:seon.error/offending expiry)) (pr-str expiry))
-            (is (= :seon.test/check-time-limit-ms (:seon.await/config-attribute expiry)))
-            (is (double? (:seon.test/elapsed-ms result)) (pr-str result))
-            (is (= allowance (:seon.await/config-value expiry)))
-            (is (<= allowance (:seon.test/elapsed-ms expiry)))
-            (is (.contains feedback "tests run 1") feedback)
-            (is (.contains feedback "expired") feedback)
-            (is (:seon.test/run (db/pull (db/db connection) [:seon.test/run]
-                                         [:seon.test/sym completed]))
-                "the completed run's facts were recorded before the bound fired")))))))

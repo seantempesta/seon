@@ -2281,17 +2281,24 @@
          (assoc ctx ::acquisition acquired)))))))
 
 (defn- acquired-database?
-  "Whether this context already acquired the exact supplied database value."
+  "Whether this context already acquired the exact supplied database value.
+
+  Datahike's commit id names one immutable committed root
+  (`reference-code/datahike/src/datahike/db.cljc:385`). A branch opened at that
+  commit reads the same value through another connection, so a forked context
+  acquires no program again; speculative values carry no committed identity."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
   [ctx database]
   (let [snapshot @(::kernel/program-snapshot ctx)
         previous (:seon.db/db snapshot)
-        value-id (db/committed-value-identity database)]
+        value-id (db/committed-value-identity database)
+        previous-id (when previous (db/committed-value-identity previous))]
     (boolean
      (and (::acquisition snapshot)
           (or (identical? previous database)
-              (and value-id previous
-                   (= value-id (db/committed-value-identity previous))))))))
+              (and (map? value-id) (map? previous-id)
+                   (= (:datahike.value/commit-id value-id)
+                      (:datahike.value/commit-id previous-id))))))))
 
 (defn acquire!
   "Acquire the supplied database once in this cluster context.
@@ -3357,7 +3364,7 @@
             ;; it gates: the candidate request already carries the connection
             ;; its evaluation runs on, so hand that value down and the test's
             ;; elided `seon.db` arities reach the agent's own cluster rather
-            ;; than refusing. Same seam, same value, as `seon.test/run-owned`.
+            ;; than refusing. Same seam, same value, as a `seon.test/run` member.
             (run-test
              (assoc (select-keys request [:seon.db/connection :seon.sci.eval/time-limit-ms])
                     :seon.sci.eval/ctx ctx :seon.test/var test-var)))))))

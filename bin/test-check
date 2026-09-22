@@ -1,52 +1,76 @@
 #!/usr/bin/env bb
-;; Run no JVM: use the operator's existing prepl transport to the live cluster.
+;; Run no JVM: send one seon.test/run request over the live cluster's prepl.
+;; bin/test-check [--root PATH] [CLUSTER] [--policy P] [--test NS/TEST]...
+;;                [--ns NS]... [--changed NS/SYM]... [--include-long]
+;;                [--time-limit-ms N]
+;; The execution value is the cluster's own handle; results record on its
+;; connection. Exit 0 only when the request answers :seon.test/passed? true.
 (require '[clojure.java.io :as io]
          '[seon.operator :as operator])
+
+(defn- usage! []
+  (throw (ex-info (str "Usage: bin/test-check [--root PATH] [CLUSTER] [--policy "
+                       "named|incremental|platform|all] [--test NS/TEST]... [--ns NS]... "
+                       "[--changed NS/SYM]... [--include-long] [--time-limit-ms N]") {})))
+
+(defn- parse [args]
+  (loop [args args request {}]
+    (if-let [flag (first args)]
+      (let [value (second args)]
+        (case flag
+          "--policy" (recur (drop 2 args) (assoc request :seon.test/policy (keyword value)))
+          "--test" (recur (drop 2 args) (update request :seon.test/identities (fnil conj #{}) (symbol value)))
+          "--ns" (recur (drop 2 args) (update request :seon.test/namespaces (fnil conj #{}) (symbol value)))
+          "--changed" (recur (drop 2 args) (update request :seon.test/changed (fnil conj []) (symbol value)))
+          "--include-long" (recur (rest args) (assoc request :seon.test/include-long? true))
+          "--time-limit-ms" (recur (drop 2 args)
+                                   (assoc request :seon.test/check-time-limit-ms
+                                          (or (parse-long (or value "")) (usage!))))
+          (usage!)))
+      request)))
 
 (let [[root args] (if (= "--root" (first *command-line-args*))
                     [(second *command-line-args*) (drop 2 *command-line-args*)]
                     ["." *command-line-args*])
-      cluster (or (first args) "default")
-      [_ selection test-symbol bound-option bound-value & extra] args
+      [cluster args] (if (and (first args) (not (.startsWith ^String (first args) "--")))
+                       [(first args) (rest args)]
+                       ["default" args])
       root (.getCanonicalPath (io/file root))
       advertisement (#'operator/advertisement root cluster)
-      eval! (fn [form timeout-ms]
-              (#'operator/prepl-value! advertisement (pr-str form) timeout-ms))
       transport-bound (#'operator/operator-silence-backstop-ms {})
-      ;; The prepl socket read timeout is a SILENCE backstop, and one check
-      ;; emits nothing until it returns: the transport must outlast the work
-      ;; the cluster will do. Without an explicit --time-limit-ms the shipped
-      ;; decision for the cluster's own check allowance is the only bound this
-      ;; script can know without a second round trip; the cluster re-reads its
-      ;; effective dial and remains the authority over the work itself.
-      ;; (The var holds a delay; the decisions are its forced value.)
       shipped-check-bound (get @@#'operator/shipped-default-decisions
                                :seon.test/check-time-limit-ms)]
   (try
-    (when (and selection
-               (not (and (= "--test" selection) test-symbol
-                         (qualified-symbol? (symbol test-symbol))
-                         (or (nil? bound-option)
-                             (and (= "--time-limit-ms" bound-option)
-                                  (pos-int? (parse-long (or bound-value "")))))
-                         (empty? extra))))
-      (throw (ex-info "Usage: bin/test-check [--root PATH] [CLUSTER [--test NS/TEST [--time-limit-ms N]]]" {})))
-    (when-not advertisement
-      (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
-    (when-not (pos-int? shipped-check-bound)
-      (throw (ex-info "config/default.edn declares no :seon.test/check-time-limit-ms; the transport has no backstop to derive." {})))
-    (let [bound (some-> bound-value parse-long)
-          request (cond-> {:seon.boot/cluster-name cluster
-                           :seon.db/connection (list 'seon.cluster.boot/connection cluster)}
-                    test-symbol (assoc :seon.test/sym (list (quote quote) (symbol test-symbol)))
-                    bound (assoc :seon.test/check-time-limit-ms bound))
-          result (eval! (list 'seon.test/check-request request)
-                        (+ (or bound shipped-check-bound) transport-bound))]
-      (println (or (:seon.test.check/text result)
-                   (:seon.error/message result)
-                   (pr-str result)))
-      (when-not (true? (:seon.test.check/passed? result))
-        (System/exit 1)))
+    (let [request (parse args)
+          request (cond-> request
+                    (not (:seon.test/policy request))
+                    (assoc :seon.test/policy
+                           (if (or (seq (:seon.test/identities request))
+                                   (seq (:seon.test/namespaces request)))
+                             :named :incremental)))]
+      (when-not (#{:named :incremental :platform :all} (:seon.test/policy request))
+        (usage!))
+      (when-not advertisement
+        (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
+      (when-not (pos-int? shipped-check-bound)
+        (throw (ex-info "config/default.edn declares no :seon.test/check-time-limit-ms; the transport has no backstop to derive." {})))
+      (let [form (list 'let ['handle (list :seon.turn.loop/cluster
+                                           (list 'get (list 'deref 'seon.operator.runtime/running-instances)
+                                                 cluster))
+                             'result (list 'seon.test/run
+                                           (list 'merge (list 'quote request)
+                                                 {:seon.test/execution 'handle
+                                                  :seon.test/recording-connection
+                                                  (list :seon.db/connection 'handle)}))]
+                       [(list 'seon.test/tally 'result)
+                        (list 'true? (list :seon.test/passed? 'result))])
+            result (#'operator/prepl-value! advertisement (pr-str form)
+                                            (+ (or (:seon.test/check-time-limit-ms request)
+                                                   shipped-check-bound)
+                                               transport-bound))]
+        (println (if (vector? result) (first result) (or (:seon.error/message result) (pr-str result))))
+        (when-not (and (vector? result) (true? (second result)))
+          (System/exit 1))))
     (catch Exception failure
       (binding [*out* *err*]
         (println "check unavailable:" (ex-message failure)))

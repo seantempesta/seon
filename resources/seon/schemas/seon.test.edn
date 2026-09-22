@@ -177,38 +177,6 @@
  :seon.test/reaching-request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.test/changed :seon.test/changed]]
- :seon.test/check-request
- [:map [:seon.db/connection :seon.db/connection]
-  [:my.program/context {:optional true} :my.program/context]
-  [:seon.test/class-loader {:optional true} :seon.test/class-loader]
-  [:seon.test/changed {:optional true} :seon.test/changed]
-  [:seon.test/paths {:optional true} :seon.test/paths]
-  [:seon.test/namespaces {:optional true} :seon.test/namespaces]
-  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
-  [:seon.test/declared-root {:optional true} :seon.test/declared-root]
-  [:seon.test/defer-widened? {:optional true} :boolean]
-  [:seon.test/include-long? {:optional true} :boolean]]
- :seon.test/run-options
- [:map [:seon.test.run/provenance :seon.test.run/provenance]
-  [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
-  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
-  [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
-  [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]
-  [:seon.db/db {:optional true} :seon.db/database-value]
-  [:seon.db/connection {:optional true}
-   [:and {:description "The custody the test BODY runs under: present means the run is that cluster's own work and the body's elided seon.db arities reach it; absent means none. It is not the connection the result facts are committed through, which is the call's own argument."}
-    :seon.db/connection]]
-  [:seon.test/declared-root {:optional true} :seon.test/declared-root]
-  [:seon.test/remaining-ms [:int {:min 1}]]]
- :seon.test/run-owned-request
- [:map {:description "One of the calling agent's own declared tests, with the connection call preparation supplies from its environment."}
-  [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]
-  [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
-  [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
-  [:seon.db/connection :seon.db/connection]
-  [:my.program/context :my.program/context]
-  [:seon.test/class-loader {:optional true} :seon.test/class-loader]
-  [:seon.test/var :seon.test/var]]
  :seon.test/host-error
  [:or :seon.test/selection-error :seon.test/admission-error
   :seon.test/execution-error :seon.test/unknown-error
@@ -217,7 +185,6 @@
   :seon.db/invalid-read-error :seon.schema/missing-projection-error
   :seon.db.write/error :seon.db.write/validation-refusal
   :seon.instrument/contract-error]
- :seon.test/host-result [:or :seon.test/result :seon.test/host-error]
  :seon.test/reuse-request
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.test/identity :seon.test/identity]
@@ -267,35 +234,6 @@
   [:type [:= :fail]] [:var :seon.test/var] [:message :string]
   [:expected [:map [:seon.test/time-limit-ms :seon.test/time-limit-ms]]]
   [:actual [:map [:seon.test/elapsed-ms :seon.test/elapsed-ms]]]]
- :seon.test/expired
- [:and {:description "The declared check bound fired with runs already recorded. It names what never returned; the verdicts it accompanies are the tests that did complete."}
-  :seon.error/base
-  [:map
-   [:seon.await/config-attribute :seon.await/config-attribute]
-   [:seon.await/config-value :seon.await/config-value]
-   [:seon.test/elapsed-ms :seon.test/elapsed-ms]]]
- :seon.test/check-result
- [:map
-  [:seon.test/skipped-count {:optional true} :seon.test/skipped-count]
-  [:seon.test/skip-reason {:optional true} :seon.test/skip-reason]
-  [:seon.test/tests [:vector :seon.test/sym]]
-  [:seon.test/passed [:vector :seon.test/sym]]
-  [:seon.test/failed
-   [:vector [:map [:seon.test/sym :seon.test/sym]
-             [:seon.test/failures {:optional true} [:vector :seon.test.failure/value]]
-             [:seon.test/failure-message :string]
-             [:seon.test/changed :seon.test/changed]]]]
-  [:seon.test/results :seon.test/results]
-  [:seon.test.run/basis-t :seon.test.run/basis-t]
-  [:seon.test.run/program-digest {:optional true} :seon.test.run/program-digest]
-  [:seon.test/elapsed-ms :seon.test/elapsed-ms]
-  [:seon.test/next-tier :seon.test/next-tier]
-  [:seon.test/widened {:optional true} :string]
-  [:seon.test/pending {:optional true} [:vector :seon.test/sym]]
-  [:seon.test/deferred {:optional true} :seon.test/deferred]
-  [:seon.test/destructive-excluded {:optional true} :seon.test/destructive-excluded]
-  [:seon.test/long-excluded {:optional true} :seon.test/long-excluded]
-  [:seon.test/expired {:optional true} :seon.test/expired]]
  :seon.test/adoption-identities [:set :seon.db/ref]
  :seon.test/adoption-inputs [:set :string]
  :seon.test/adoption-cluster :seon.db/ref
@@ -346,4 +284,60 @@
   [:map {:seon.db/attributes true}
    [:seon.test/execution-refusal :seon.test/execution-refusal]
    [:seon.test/error-test-symbol {:optional true} :seon.test/error-test-symbol]]]
+
+ ; One test request (track 1.3d commit 4): a test is an isolated agent for one body.
+ :seon.test/execution
+ [:and {:description "The execution value a test request runs: an agent context source or an acquired execution handle. Its connection's current commit is captured once per request."}
+  :seon.agent/context-source]
+ :seon.test/recording-connection
+ [:and {:description "The durable authority a request admits and records on. It holds the execution branch; it never grants a test body custody."}
+  :seon.db/connection]
+ :seon.test/policy :seon.test.run/policy
+ :seon.test/request
+ [:map
+  [:seon.test/execution :seon.test/execution]
+  [:seon.test/recording-connection :seon.test/recording-connection]
+  [:seon.test/policy :seon.test/policy]
+  [:seon.test/identities {:optional true} [:set :seon.test/sym]]
+  [:seon.test/namespaces {:optional true} [:set :symbol]]
+  [:seon.test/changed {:optional true} :seon.test/changed]
+  [:seon.test/include-long? {:optional true} :boolean]
+  [:seon.test/check-time-limit-ms {:optional true} :seon.test/check-time-limit-ms]]
+ :seon.test/executed-count [:int {:min 0}]
+ :seon.test/reused-count [:int {:min 0}]
+ :seon.test/passed? [:boolean {:description "True only when every obligation of the request has green evidence; exclusions, pending and unfinished members are unfulfilled."}]
+ :seon.test/pending [:vector {:description "Admitted members never started: the request bound fired, a platform member was red, or a body did not exit."} :seon.test/sym]
+ :seon.test/unfinished
+ [:vector {:description "Members whose body thread was still live at the bound; each keeps its branch until it exits."}
+  [:map [:seon.test/sym :seon.test/sym]
+   [:seon.agent/branch :seon.agent/branch]
+   [:seon.test/failure-message :seon.test/failure-message]]]
+ :seon.test/recording-refusal :seon.error/value
+ :seon.test/timings
+ [:vector {:description "Measured per-member phases on the member's own branch: acquisition, Var resolution, body, and unlink."}
+  [:map [:seon.test/sym :seon.test/sym]
+   [:seon.agent/branch :seon.agent/branch]
+   [:seon.test.timing/acquire-ms :seon.test.timing/acquire-ms]
+   [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
+   [:seon.test.timing/run-ms :seon.test.timing/run-ms]
+   [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]
+ :seon.test/run-result
+ [:map
+  [:seon.test.run/id :seon.test.run/id]
+  [:seon.test.run/policy :seon.test.run/policy]
+  [:seon.test.run/basis-t :seon.test.run/basis-t]
+  [:seon.test.run/program-digest :seon.test.run/program-digest]
+  [:seon.source/commit-id :seon.source/commit-id]
+  [:seon.test/results :seon.test.runner/captured-results]
+  [:seon.test/executed-count :seon.test/executed-count]
+  [:seon.test/reused-count :seon.test/reused-count]
+  [:seon.test/timings :seon.test/timings]
+  [:seon.test/passed? :seon.test/passed?]
+  [:seon.test/elapsed-ms :seon.test/elapsed-ms]
+  [:seon.test/destructive-excluded {:optional true} :seon.test/destructive-excluded]
+  [:seon.test/deferred {:optional true} :seon.test/deferred]
+  [:seon.test/long-excluded {:optional true} :seon.test/long-excluded]
+  [:seon.test/pending {:optional true} :seon.test/pending]
+  [:seon.test/unfinished {:optional true} :seon.test/unfinished]
+  [:seon.test/recording-refusal {:optional true} :seon.test/recording-refusal]]
 }

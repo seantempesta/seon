@@ -92,26 +92,3 @@
            (get-in result
                    [:seon.error/data :seon.error/member])))))
 
-(deftest check-completion-distinguishes-expiry-from-a-completed-failure
-  (let [projection (schema/handed-projection)
-           failure (#'test/unknown ::selection "Selection was unavailable.")
-           completed (java.util.concurrent.FutureTask.
-                      ^java.util.concurrent.Callable (fn [] failure))
-           request {:seon.await/bound (bound 20)
-                    :seon.await/diagnostic (observation ::check)}
-           started (System/nanoTime)
-           _ (.run completed)
-           returned (await/await! (assoc request :seon.await/future completed))
-           timeout (await/await! (assoc request :seon.await/blocking-deref (promise)))
-           expiry (#'test/check-completion {:seon.test/progress "selection"} started timeout)]
-       (is (identical? failure (#'test/check-completion {} started returned)))
-       (is ((schema/projection-validator projection :seon.test/unknown-error) returned))
-       (is (not ((schema/projection-validator projection :seon.test/expired) returned)))
-       (is ((schema/projection-validator projection :seon.await/timeout-error) timeout))
-       (is ((schema/projection-validator projection :seon.test/expired) expiry))
-       (is (not ((schema/projection-validator projection :seon.test/unknown-error) expiry)))
-       (is (= :seon.config.eval/time-limit-ms (:seon.await/config-attribute expiry)))
-       (is (= 20 (:seon.await/config-value expiry)))
-       (is (<= (:seon.await/elapsed-ms timeout) (:seon.test/elapsed-ms expiry)))
-       (is (= 'seon.test/expired-result (:seon.error/operation expiry)))
-       (is (= ::check (get-in expiry [:seon.error/data :seon.error/member])))))

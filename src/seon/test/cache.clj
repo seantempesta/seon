@@ -67,7 +67,8 @@
 (defn- file-input-digests
   "Hash Git's tracked and non-ignored files by repository-relative path.
   Directory links and submodule directories are never traversed.
-  The gate snapshot carries the source Git index but hashes its own bytes."
+  The gate snapshot carries the source Git index but hashes its own bytes:
+  Git's index identity cannot detect uncommitted working-tree content."
   {:malli/schema [:=> [:cat [:string {:min 1}]]
                   [:map-of [:string {:min 1}] [:string {:min 1}]]]}
   [root]
@@ -216,7 +217,7 @@
             (not (source-file? path))))))
 
 (defn gitlink-digests
-  "Hash Git pins; recorded snapshot pins take precedence over the live index."
+  "Read Git commit identities; snapshot pins take precedence over the live index."
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [root]
   (let [recorded (io/file root "dependency-pins.txt")
@@ -239,7 +240,7 @@
                           tokens (vec (enumeration-seq
                                        (java.util.StringTokenizer. (subs line 0 tab))))]
                       [(subs line (inc tab))
-                       (sha-256 (.getBytes ^String (second tokens) "UTF-8"))]))))
+                       (second tokens)]))))
           (str/split-lines text))))
 
 (defn toolchain-dependencies

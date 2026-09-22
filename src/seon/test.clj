@@ -1,22 +1,19 @@
 (ns seon.test
-  "Agent-facing test execution over the one JVM test runner."
+  "One test request on the agent execution lifecycle, and the recorded evidence it reads."
   (:require
             [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
-            [seon.await :as await]
             [seon.config :as config]
             [seon.cluster.store :as store]
             [seon.db :as db]
-            [seon.env :as env]
             [seon.fn :as functions]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.test.cache :as cache]
             [seon.test.runner :as runner])
-  (:import [clojure.lang DynamicClassLoader]
-           [java.util.concurrent FutureTask]))
+  (:import [java.util.concurrent FutureTask]))
+
 
 (defn- unknown
   {:malli/schema [:=> [:cat :seon.schema/value :string] :seon.test/unknown-error]}
@@ -96,30 +93,6 @@
     (catch Exception failure
       (unknown test-symbol (str "Recorded green comparison is unavailable: " (ex-message failure))))))
 
-(defn test-loader
-  "Build a loader from the tool owner's ordered, resolved test classpath."
-  {:malli/schema [:=> [:cat :seon.test/classpath]
-                  [:or :seon.test/class-loader :seon.error/value]]}
-  [{roots :seon.test/classpath-roots root :seon.test/classpath-root
-    digest :seon.dev-cache/digest}]
-  (let [loaded-cache (System/getProperty "seon.dependency-cache.path")]
-    (if (and digest loaded-cache
-             (not= digest (.getName (io/file loaded-cache))))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.test/resolution
-        :seon.error/operation 'seon.test/test-loader
-        :seon.error/message "The JVM loaded a different dependency cache; adding URLs cannot replace its classes."
-        :seon.error/member :seon.dev-cache/digest
-        :seon.error/expected digest
-        :seon.error/offending (.getName (io/file loaded-cache))
-        :seon.error/data {:seon.test/classpath-root root}}
-      (let [loader (DynamicClassLoader. (clojure.lang.RT/baseLoader))]
-    (doseq [path roots]
-      (let [file (io/file path)]
-        (.addURL loader (.toURL (.toURI (if (.isAbsolute file) file
-                                          (io/file root path)))))))
-        loader))))
-
 (defn- with-test-loader
   ([work] (with-test-loader (clojure.lang.RT/baseLoader) work))
   ([loader work]
@@ -130,69 +103,67 @@
       (with-bindings {clojure.lang.Compiler/LOADER loader} (work))
       (finally (.setContextClassLoader thread previous))))))
 
-(defn- event-backstop-ms []
-  ;; `seon.test-support` lives under `test/`, off this namespace's classpath
-  ;; until `with-test-loader` installs the test loader: a deliberate late
-  ;; dependency, never a load-cycle dodge.
-  (with-test-loader
-    #(long (* 1000 @(requiring-resolve 'seon.test-support/event-backstop-seconds)))))
-
-(defn- bounded-result [test-var timeout-ms custody]
+(defn- bounded-result
+  "Observe the body thread's exit under the request bound; cancellation is not exit.
+  `exited!` runs once the body thread has exited: at once when it exits inside
+  the bound, otherwise on a watcher that joins the live thread."
+  {:malli/schema [:=> [:cat :seon.test/var [:int {:min 1}]
+                       [:map [:seon.db/connection {:optional true} :seon.db/connection]
+                        [:seon.sci.eval/ctx :seon.sci.eval/ctx]]
+                       [:fn clojure.core/ifn?]]
+                  :seon.test.runner/captured-result]}
+  [test-var timeout-ms custody exited!]
   (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
+        markers (program/test-markers (meta test-var) (meta (:ns (meta test-var))))
+        ;; The SCI arm interrupts interpreted bodies at the declared per-test
+        ;; bound; `duration-failures` fails any body that completes over it.
+        body-bound (or (:seon.test/long-ms markers) 5000)
         task (FutureTask.
               (bound-fn []
                 (with-test-loader
-                  #(if (:seon.sci.eval/ctx custody)
-                     (sci.eval/run-test
-                      (assoc custody :seon.test/var test-var
-                                     :seon.sci.eval/time-limit-ms timeout-ms))
-                     (runner/run-var! test-var custody)))))
-        thread (.unstarted (Thread/ofVirtual) task)]
+                  #(sci.eval/run-test
+                    (assoc custody :seon.test/var test-var
+                                   :seon.sci.eval/time-limit-ms body-bound)))))
+        thread (.unstarted (Thread/ofVirtual) task)
+        failed (fn [message exited?]
+                 {:seon.test/sym test-symbol
+                  :seon.test.member/began? false
+                  :seon.test.member/ended? false
+                  :seon.test.run/terminated? exited?
+                  :seon.test/pass-count 0 :seon.test/fail-count 0
+                  :seon.test/error-count 1 :seon.test/failure-message message})]
     (.start thread)
-    (try
-      (let [result (await/await!
-                     {:seon.await/future task,
-                      :seon.await/bound
-                      {:seon.await/config-attribute :seon.test/remaining-ms,
-                       :seon.await/config-value timeout-ms},
-                      :seon.await/diagnostic
-                      {:seon.error/layer :test
-                       :seon.error/operation :seon.test/run
-                       :seon.error/expected :test-completion
-                       :seon.error/offending :pending
-                       :seon.error/data {:seon.test/sym test-symbol}}})]
-        (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
-          {:seon.test/sym test-symbol,
-           :seon.test.member/began? false,
-           :seon.test.member/ended? false,
-           :seon.test.run/terminated? (.isDone task),
-           :seon.test/pass-count 0,
-           :seon.test/fail-count 0,
-           :seon.test/error-count 1,
-           :seon.test/failure-message (:seon.error/message result)}
-          (assoc result :seon.test.run/terminated? true)))
-      (catch
-        Exception
-        failure
-        (when (instance? InterruptedException failure) (throw failure))
-        {:seon.test/sym test-symbol,
-         :seon.test.member/began? false,
-           :seon.test.member/ended? false,
-           :seon.test.run/terminated? (.isDone task),
-           :seon.test/pass-count 0,
-         :seon.test/fail-count 0,
-         :seon.test/error-count 1,
-         :seon.test/failure-message
-         (str
-           "Test execution failed: "
-           (or (some-> failure ex-cause ex-message) (ex-message failure)))})
-      ;; Expiry bounds observation. Interrupting a fixture during Datahike's
-      ;; permit handoff can abandon an already-granted roster permit. The
-      ;; daemon virtual thread must finish its resource scopes normally.
-      (finally (when-not (.isDone task) (.cancel task false))))))
+    (let [watch-exit! (fn []
+                        ;; A timeout is not termination: the watcher releases
+                        ;; resources only after it observes the body's exit.
+                        (.start (Thread/ofVirtual) ^Runnable (fn [] (.join thread) (exited!))))]
+      (try
+        (if (.join thread (java.time.Duration/ofMillis timeout-ms))
+          (do
+            (exited!)
+            (let [result (.get task)]
+              (if (:seon.test/not-runnable result)
+                (failed (:seon.error/message result) true)
+                (assoc result :seon.test.run/terminated? true))))
+          (do
+            (watch-exit!)
+            (failed (str "Test " test-symbol " did not exit within "
+                         ":seon.test/check-time-limit-ms remainder " timeout-ms " ms; thread "
+                         (.threadId thread) " remains live and keeps its branch until it exits. "
+                         "No further body may start.")
+                    false)))
+        (catch InterruptedException _
+          (.interrupt (Thread/currentThread))
+          (watch-exit!)
+          (failed (str "Interrupted while awaiting actual exit of " test-symbol
+                       "; thread " (.threadId thread) ".")
+                  false))
+        (catch java.util.concurrent.ExecutionException failure
+          (failed (str "Test execution failed: " (ex-message (ex-cause failure)))
+                  true))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; An in-process run refuses a destructive drill on a development root
+;;; Where a test may run: a destructive drill never runs on a development root
 ;;; ---------------------------------------------------------------------------
 
 (defn- development-root
@@ -354,252 +325,7 @@
            (str/join " " (:seon.test/command report)))
       :else "runs: in the cluster process")))
 
-(defn- destructive-refusal
-  "Refuse one in-process run that would execute a destructive drill, or nil.
-
-  A test reaching a function that declares `:seon.fn/destroys` deletes a
-  filesystem path it did not create. Run in the JVM that operates the
-  developer's own checkout, that is the 2026-09-17 incident: an in-process run
-  emptied `data/store`
-  (`docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md`). The
-  rule was prose; this is the check, and it reads the ONE derivation `host`
-  reads. It fires only for a JVM whose DECLARED operator root is that
-  development root — a `bin/test` worker or a lane's `--root` scratch JVM runs
-  the same test untouched. The refusal names the test, the owner it reaches,
-  what that owner destroys, the call path between them, and the cold
-  invocation that may run it. An UNANSWERABLE host is refused too: an unknown
-  call graph is never admitted as safe."
-  [database declared-root test-symbol]
-  (when-let [root (development-root declared-root)]
-    (let [report (host database test-symbol)]
-      (cond
-        (and (map? report) (contains? report :seon.error/at) (contains? report :seon.error/layer) (contains? report :seon.error/operation)) (assoc report :seon.test/next-tier :none)
-
-        (= :seon.test.host/isolated-snapshot (:seon.test/host report))
-        (let [evidence (dissoc report :seon.test/host)
-              owner (:seon.fn/sym report)]
-          (merge
-            evidence
-            {:seon.error/at (java.util.Date.)
-             :seon.error/layer :seon.test/execution
-             :seon.error/operation 'seon.test/run
-             :seon.error/message (str test-symbol " reaches " owner
-                  ", which deletes a filesystem path it did not create ("
-                  (or (:seon.fn/destroys report) "declared :seon.fn/destroys")
-                  "), and this JVM was launched to operate the development "
-                  "root " root ". Run it cold — bin/test -- "
-                  (namespace (symbol test-symbol))
-                  " — or in a JVM under an isolated operator root "
-                  "(bin/seon --root tmp/<lane>-root). Call path: "
-                  (str/join " -> " (:seon.test/destructive-path report)) ".")
-             :seon.test/next-tier :none
-             :seon.error/expected :isolated-operator-root
-             :seon.error/offending root
-             :seon.error/data evidence}))))))
-
-(defn- execute-admitted!
-  "Run one declared test Var, commit its result facts, and return them.\n\n  The connection is ordinarily supplied by call preparation from the calling\n  agent's environment. The returned value is pulled from the transaction's\n  `:db-after`, so it cannot disagree with the facts that were committed.\n\n  A test whose program-graph reach includes a function declaring\n  `:seon.fn/destroys` is REFUSED, without executing, in a JVM whose declared operator root is the\n  development checkout it runs in; the refusal names the test, the owner, the\n  call path, and the cold invocation that may run it. `:seon.test/declared-root`\n  in the options is that declaration when the caller genuinely holds one;\n  absent, this JVM's own is read once here.\n\n  The test BODY runs under exactly the custody the options hand it:\n  `:seon.db/connection` present means the run is that cluster's own work and\n  the body's elided `seon.db` arities reach it; absent means none, which is\n  what a host REPL calling this is. `run-owned` is the agent's entry and\n  supplies its evaluation's connection. The `connection` argument is where\n  the RESULT FACTS are committed and never decides the body's custody."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.test/execution-error]]
-    [:=>
-     [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
-     [:or :seon.test/result :seon.test/execution-error]]]}
-  ([test-var connection]
-    (let [database (db/db connection)
-          provenance (runner/provenance database)]
-      (if (and (map? provenance) (contains? provenance :seon.error/at) (contains? provenance :seon.error/layer) (contains? provenance :seon.error/operation))
-        (assoc provenance :seon.test/execution-refusal :seon.test.run/provenance)
-        (execute-admitted!
-          test-var
-          connection
-          {:seon.db/db database,
-           :seon.test.run/provenance provenance,
-           :seon.test/remaining-ms (event-backstop-ms)}))))
-  ([test-var connection options]
-    (let [database (or (:seon.db/db options) (db/db connection))]
-      (if (and (map? database) (contains? database :seon.error/at) (contains? database :seon.error/layer) (contains? database :seon.error/operation))
-        (assoc database :seon.test/execution-refusal :seon.db/db)
-        (let [provenance (:seon.test.run/provenance options)
-              declared (if-let [entry (find options :seon.test/declared-root)]
-                         (val entry)
-                         (store/declared-operator-root))
-              refusal (destructive-refusal
-                        database declared
-                        (symbol (str (:ns (meta test-var))) (str (:name (meta test-var)))))
-              ;; AN IN-PROCESS RUN HAPPENS INSIDE A LIVE CLUSTER'S JVM.
-              ;; Whatever a test leaves in that cluster's schema projection
-              ;; refuses every later write it attempts, so afterwards the
-              ;; projection is advanced to the one the cluster's OWN FACTS
-              ;; declare and every disagreeing key is NAMED. The snapshot is
-              ;; evidence for that naming, not the thing put back: a run that
-              ;; coincides with a committed retraction must not have it
-              ;; reasserted (AGENTS §2.1).
-              registry-before (runner/live-cluster-schema-states)
-              result (cond
-                       refusal (assoc refusal :seon.test/execution-refusal :seon.test/destructive-refused)
-                       (and (map? provenance) (contains? provenance :seon.error/at) (contains? provenance :seon.error/layer) (contains? provenance :seon.error/operation)) provenance
-                       :else
-                       (schema/call-with-projection
-                         (db/carried-projection database)
-                         #(bounded-result test-var (:seon.test/remaining-ms options)
-                                          (select-keys options [:seon.db/connection :seon.sci.eval/ctx]))))
-              restored (runner/restore-live-cluster-schema! registry-before)
-              drifted (runner/schema-restore-drift restored)
-              ;; A COMMITTED change is the writer doing its job during the
-              ;; run, so it is named on the way past and is nobody's failure.
-              _ (when (seq (remove (set drifted) restored))
-                  (println "Live cluster schema facts changed during the run:"
-                           (pr-str (vec (remove (set drifted) restored)))))
-              result (if (or (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation)) (empty? drifted))
-                       result
-                       (-> result
-                           (update :seon.test/error-count (fnil inc 0))
-                           (update :seon.test/failure-message
-                                   #(str (when % (str % "\n"))
-                                         "Live cluster schema registry changed and was restored: "
-                                         (pr-str drifted)))))]
-          (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
-            (assoc result :seon.test/execution-refusal :seon.test/var)
-            (let [committed (runner/commit-results!
-                              connection
-                              {:seon.db/db database,
-                               :seon.test.runner/results [result],
-                               :seon.test/run-basis-t (:seon.test.run/basis-t provenance),
-                               :seon.test/run-at (:seon.test.run/at provenance),
-                               :seon.test.run/provenance provenance
-                               :seon.test.run/terminated? (true? (:seon.test.run/terminated? result))})]
-              (if (and (map? committed) (contains? committed :seon.error/at) (contains? committed :seon.error/layer) (contains? committed :seon.error/operation))
-                (assoc committed :seon.test/execution-refusal :seon.test.run/members)
-                (first committed)))))))))
-
-
-(declare prepare-tests! resolve-test selection-admission admit-run selection-refusal)
-
-(defn- recorded-host-result
-  "Return this admitted member's recorded result, or name missing coverage."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :qualified-symbol]
-                  [:or :seon.test/result :seon.test/execution-error]]}
-  [database run-id test-symbol]
-  (let [results (runner/run-results database run-id)]
-    (if (:seon.error/at results)
-      (assoc results :seon.test/execution-refusal :seon.test.run/members)
-        (or (first (filter #(= test-symbol (:seon.test/sym %)) results))
-            (assoc (unknown test-symbol (str "Run " run-id " has no recorded coverage for " test-symbol "."))
-                   :seon.test/execution-refusal :seon.test.member/symbol)))))
-
-(defn- host-admission!
-  "Admit one explicitly scoped host request through the shared selector and writer."
-  {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol :seon.test/run-options]
-                  [:or :seon.test.run/admission :seon.test/host-error]]}
-  [connection test-symbol options]
-  (let [database (db/db connection)
-        environment (env/of (:seon.sci.eval/ctx options))
-        cluster (or (:seon.test.run/cluster options)
-                    (when-let [name (or (:seon.boot/cluster-name options)
-                                        (:seon.boot/cluster-name environment))]
-                      [:seon.cluster/name name]))
-        admission (selection-admission
-                   (cond-> {:seon.db/db database
-                            :seon.test.run/provenance (:seon.test.run/provenance options)
-                            :seon.test.run/policy :named
-                            :seon.test/include-long? true
-                            :seon.test/identities #{test-symbol}}
-                     cluster (assoc :seon.test.run/cluster cluster)
-                     (:seon.test/run-basis-t options)
-                     (assoc :seon.test.run/change-basis-t (:seon.test/run-basis-t options))))
-        admission (if (and (not (:seon.error/at admission))
-                           (:seon.test/run-basis-t options)
-                           (not= (:seon.test/run-basis-t options) (db/basis-t database))
-                           (seq (:seon.test.run/members admission)))
-                    (selection-refusal database :seon.test/invalid-basis
-                      "A historical host request needs matching recorded green evidence; only the current program can execute."
-                      (:seon.test/run-basis-t options))
-                    admission)
-        report (when-not (:seon.error/at admission)
-                 (db/transact! connection [[:db.fn/call admit-run admission]]))]
-    (cond
-      (:seon.error/at admission) admission
-      (:seon.error/at report) report
-      :else
-      (let [reserved (db/q '[:find [?symbol ...] :in $ ?run-id
-                             :where [?run :seon.test.run/id ?run-id]
-                                    [?run :seon.test.run/members ?member]
-                                    [?member :seon.test.member/symbol ?symbol]]
-                           (:db-after report)
-                           (get-in admission [:seon.test.run/provenance :seon.test.run/id]))]
-        (if (:seon.error/at reserved) reserved
-            (update admission :seon.test.run/members
-                    (fn [members]
-                      (filterv #((set reserved) (:seon.test.member/symbol %)) members))))))))
-
-(defn run
-  "Select, admit and record one host test through the shared result authority.
-  Cluster custody is explicit in options or in the supplied SCI environment.
-  The result connection never grants the test body's database custody."
-  {:malli/schema [:function
-                  [:=> [:cat :seon.test/var :seon.db/connection] [:or :seon.test/result :seon.test/execution-error]]
-                  [:=> [:cat :seon.test/var :seon.db/connection :seon.test/run-options]
-                   [:or :seon.test/result :seon.test/execution-error]]]}
-  ([test-var connection]
-   (run test-var connection {:seon.test.run/provenance (runner/provenance (db/db connection))
-                            :seon.test/remaining-ms (event-backstop-ms)}))
-  ([test-var connection options]
-   (let [run-id (get-in options [:seon.test.run/provenance :seon.test.run/id])
-         test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
-         prior (db/pull (db/db connection) [:seon.test.run/selection-tx]
-                        [:seon.test.run/id run-id])]
-     (cond
-       (:seon.db/invalid-read prior)
-       (assoc prior :seon.test/execution-refusal :seon.test.run/selection-tx)
-       (:seon.test.run/selection-tx prior)
-       (let [pending (db/q '[:find ?member . :in $ ?run-id ?symbol
-                             :where [?run :seon.test.run/id ?run-id]
-                                    [?run :seon.test.run/members ?member]
-                                    [?member :seon.test.member/symbol ?symbol]
-                                    (not [?member :seon.test.member/completed-tx])]
-                           (db/db connection) run-id test-symbol)]
-         (cond
-           (:seon.db/invalid-read pending)
-           (assoc pending :seon.test/execution-refusal :seon.test.member/completed-tx)
-           pending (execute-admitted! test-var connection options)
-           :else (recorded-host-result (db/db connection) run-id test-symbol)))
-       :else
-       (let [admission (host-admission! connection test-symbol options)]
-         (cond
-           (:seon.error/at admission)
-           (assoc admission :seon.test/execution-refusal :seon.test.run/selection-tx)
-           (seq (:seon.test.run/members admission))
-           (execute-admitted! test-var connection options)
-           :else
-           (recorded-host-result (db/db connection) run-id test-symbol)))))))
-
-(defn run-owned
-  "Admit an agent's test in its explicit cluster and record through the shared writer.
-  Matching green evidence is returned with its original confidence and no body execution."
-  {:malli/schema [:=> [:cat :seon.test/run-owned-request] :seon.test/host-result]}
-  [{connection :seon.db/connection test-var :seon.test/var :as request}]
-  (let [database (db/db connection)
-        test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
-        provenance (runner/provenance database)
-        options (merge (select-keys request [:seon.test.run/cluster :seon.boot/cluster-name
-                                             :seon.test/run-basis-t])
-                       {:seon.db/db database :seon.db/connection connection
-                        :seon.sci.eval/ctx (get-in request [:my.program/context :seon.sci.eval/ctx])
-                        :seon.test.run/provenance provenance
-                        :seon.test/remaining-ms (event-backstop-ms)})
-        admission (host-admission! connection test-symbol options)]
-    (cond
-      (:seon.error/at admission) admission
-      (empty? (:seon.test.run/members admission))
-      (recorded-host-result (db/db connection) (:seon.test.run/id provenance) test-symbol)
-      :else
-      (let [prepared (prepare-tests! database connection request)
-            resolved (if (:seon.error/at prepared) prepared
-                         (resolve-test (assoc prepared :seon.test/identity test-symbol)))]
-        (if (:seon.error/at resolved) resolved
-            (execute-admitted! resolved connection
-                               (assoc options :seon.sci.eval/ctx (:seon.sci.eval/ctx prepared))))))))
+(declare resolve-test selection-admission admit-run)
 
 (defn- selection-refusal
   "Name unavailable evidence on the supplied immutable database."
@@ -763,72 +489,8 @@
                        (not [?member :seon.test.member/error])]
               database members))))
 
-(defn- select-snapshot
-  "Select supplied snapshot membership against this authority's recorded facts."
-  {:malli/schema [:=> [:cat :seon.test.selection/request] :seon.test.selection/result]}
-  [{database :seon.db/db run :seon.test.run/provenance
-    candidates :seon.test.run/members inputs :seon.test.run/input-digest :as request}]
-  (when-not (and (:seon.test.run/overlay-input-digest run) inputs (vector? candidates))
-    (let [refusal (selection-refusal database :seon.test/input-evidence-unavailable
-                                    "Snapshot selection requires its complete provenance and membership." run)]
-      (throw (ex-info (:seon.error/message refusal) refusal))))
-  (let [rows (selection-read!
-              (db/q '[:find ?run ?member ?symbol ?selected
-                      :in $ ?base ?overlay ?program ?basis ?branch
-                      :where [?run :seon.test.run/published-base-digest ?base]
-                             [?run :seon.test.run/overlay-input-digest ?overlay]
-                             [?run :seon.test.run/program-digest ?program]
-                             [?run :seon.test.run/basis-t ?basis]
-                             [?run :seon.test.run/branch ?branch]
-                             [?run :seon.test.run/selection-tx ?selected]
-                             [?run :seon.test.run/members ?member]
-                             [?member :seon.test.member/symbol ?symbol]]
-                    database (:seon.test.run/published-base-digest run)
-                    (:seon.test.run/overlay-input-digest run)
-                    (:seon.test.run/program-digest run) (:seon.test.run/basis-t run)
-                    (:seon.test.run/branch run)))
-        _ (when (map? rows)
-            (let [refusal (selection-refusal database :seon.test/input-evidence-unavailable
-                                            "The recording authority could not query snapshot evidence." rows)]
-              (throw (ex-info (:seon.error/message refusal) refusal))))
-        latest (into {} (map (fn [[run-eid member sym _]] [sym [run-eid member]]))
-                     (sort-by #(nth % 3) rows))
-        green (green-members database (map second (vals latest)))
-        reused (filterv #(green (second (get latest (:seon.test.member/symbol %)))) candidates)
-        executable (remove (set reused) candidates)
-        unchanged
-        (mapv (fn [member]
-                (let [sym (:seon.test.member/symbol member)
-                      [run-eid member-eid] (get latest sym)
-                      counts (selection-read! (db/pull database
-                                               [:seon.test.member/pass-count]
-                                               member-eid))
-                      old-run (selection-read! (db/pull database
-                                                [:seon.test.run/id :seon.test.run/at] run-eid))]
-                  (merge (select-keys run [:seon.test.run/published-base-digest
-                                          :seon.test.run/overlay-input-digest
-                                          :seon.test.run/basis-t :seon.test.run/program-digest])
-                         {:seon.test/sym sym :seon.test/unchanged true
-                          :seon.test/pass-count (:seon.test.member/pass-count counts)
-                          :seon.test/fail-count 0 :seon.test/error-count 0
-                          :seon.test/run-at (:seon.test.run/at old-run)
-                          :seon.test/run-basis-t (:seon.test.run/basis-t run)
-                          :seon.test/run [:seon.test.run/id (:seon.test.run/id old-run)]
-                          :seon.test.run/input-digest inputs}))) reused)]
-    {:seon.test.run/basis-t (:seon.test.run/basis-t run)
-     :seon.test.run/policy (get request :seon.test.run/policy :named)
-     :seon.test.run/include-long? (true? (:seon.test/include-long? request))
-     :seon.test.run/input-digest inputs
-     :seon.test.run/namespaces (set (:seon.test/namespaces request))
-     :seon.test.run/identities (set (:seon.test/identities request))
-     :seon.test.run/covered-by (into #{} (map #(second (get latest (:seon.test.member/symbol %)))) reused)
-     :seon.test.run/members (mapv (fn [member]
-                                  {:seon.test/sym (:seon.test.member/symbol member)
-                                   :seon.test.member/reasons (:seon.test.member/reasons member)}) executable)
-     :seon.test.selection/unchanged unchanged}))
-
 (defn select
-  "Select test memberships from explicit cluster or published-branch custody.
+  "Select test memberships from explicit cluster custody.
   Baselines and outstanding work derive from admitted run/member facts, ordered
   by selection transaction. Calls, references and declared subjects use one
   union gate walk. Named requests retain their declared eligibility scope.
@@ -842,13 +504,7 @@
     requested-namespaces :seon.test/namespaces requested-identities :seon.test/identities
     supplied-basis :seon.test.run/change-basis-t :as request}]
   (try
-    (if (and (:seon.test.run/published-base-digest (:seon.test.run/provenance request))
-             (or (not= :incremental (:seon.test.run/policy request))
-                 (seq requested-namespaces) (seq requested-identities)))
-      (select-snapshot request)
-    (if-not (or cluster
-                (and (:seon.test.run/published-base-digest (:seon.test.run/provenance request))
-                     (= :current-src (:seon.test.run/branch (:seon.test.run/provenance request)))))
+    (if-not cluster
       (selection-refusal database :seon.test/cluster-required "Selection requires explicit cluster custody." :absent)
       (let [cluster-row (when cluster (selection-read! (db/pull database [:db/id :seon.cluster/name] cluster)))
             cluster-id (:db/id cluster-row)
@@ -907,32 +563,6 @@
             _ (when-not input-digest
                 (refuse! :seon.test/input-evidence-unavailable
                          "The publication has no unique external-input identity." (vec sources)))
-            _ (when (and (nil? cluster)
-                         (not= input-digest (:seon.test.run/input-digest request)))
-                (let [{published :seon.test.selection/published-inputs
-                       requested :seon.test.selection/requested-inputs}
-                      (:seon.test.selection/input-evidence request)
-                      comparable? (and (map? published) (map? requested)
-                                       (= input-digest (cache/input-evidence-digest published))
-                                       (= (:seon.test.run/input-digest request)
-                                          (cache/input-evidence-digest requested)))
-                      differences (when comparable?
-                                    (cache/differing-inputs published requested))]
-                  (throw
-                   (ex-info
-                    "The requested external inputs differ from the published database."
-                    (update-in
-                     (selection-refusal
-                      database :seon.test/input-evidence-unavailable
-                      "The requested external inputs differ from the published database."
-                      (:seon.test.run/input-digest request))
-                     [:seon.error/data]
-                     merge
-                     (cond-> {:seon.test.selection/published-input-digest input-digest
-                              :seon.test.selection/requested-input-digest
-                              (:seon.test.run/input-digest request)}
-                       comparable?
-                       (assoc :seon.test.selection/input-differences differences)))))))
             _ (when-not (selection-read!
                           (db/q '[:find ?test . :where [?test :seon.test/sym]] database))
                 (refuse! :seon.test/population-unknown "No indexed test population is available." :absent))
@@ -1084,11 +714,6 @@
                          (if (seq reasons) (assoc result symbol reasons) result)))
                      (sorted-map) eligible)
             digest (selection-read! (runner/program-digest database))
-            _ (when (and (nil? cluster)
-                         (not= (:seon.test.run/program-digest (:seon.test.run/provenance request)) digest))
-                (refuse! :seon.test/coverage-unknown
-                         "The published database no longer contains the requested program."
-                         (:seon.test.run/provenance request)))
             latest (reduce
                     (fn [result run-eid]
                       (reduce (fn [result member]
@@ -1164,7 +789,7 @@
           (seq removed-files) (assoc :seon.test.selection/removed (vec (sort removed-files)))
           comparison (assoc :seon.test.run/change-basis-t comparison)
           (seq namespaces) (assoc :seon.test.run/namespaces namespaces)
-          (seq identities) (assoc :seon.test.run/identities identities)))))
+          (seq identities) (assoc :seon.test.run/identities identities))))
     (catch clojure.lang.ExceptionInfo failure
       (let [refusal (ex-data failure)]
         (if (or (:seon.test/selection-refusal refusal)
@@ -1212,14 +837,6 @@
                         (mapv (fn [member]
                                 {:seon.test.member/symbol (:seon.test/sym member)
                                  :seon.test.member/reasons (:seon.test.member/reasons member)}) members)))))))))
-
-(defn check-request-admission
-  "Admit the in-process host's immutable selection request through the shared owner."
-  {:malli/schema [:=> [:cat :seon.test.selection/request]
-                  [:or :seon.test.run/admission :seon.test/selection-error :seon.test/unknown-error :seon.test.run/unavailable-error
-                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [request]
-  (selection-admission request))
 
 (defn- admission-refusal!
   {:malli/schema [:=> [:cat :keyword :seon.test.run/id :seon.schema/value :seon.schema/value] :nil]}
@@ -1506,12 +1123,6 @@
      []
      (stale-in database (vec (sort (distinct test-symbols)))))))
 
-(defn- commands [paths namespaces]
-  [(into (into ["bin/test"] (when (seq paths) (into ["--paths"] paths)))
-         (when (seq namespaces) (into ["--"] (map str namespaces))))
-   (into (into ["bin/test"] (when (seq paths) (into ["--paths"] paths)))
-         ["--platform"])])
-
 (defn resolve-test
   "Resolve an admitted test in the host or acquired SCI program by provenance."
   {:malli/schema [:=> [:cat :seon.test/resolution-request]
@@ -1535,8 +1146,11 @@
                      [:seon.test/sym test-symbol])
         acquired (sci.eval/acquired-program ctx)
         acquired-db (:seon.db/db acquired)
-        wanted (runner/program-digest database)
-        actual (when acquired-db (runner/program-digest acquired-db))
+        ;; One Datahike commit id names one immutable value: a member branch
+        ;; at the acquired commit holds the acquired program by construction.
+        same-commit? (and acquired-db (= (db/commit-id database) (db/commit-id acquired-db)))
+        wanted (when-not same-commit? (runner/program-digest database))
+        actual (when (and acquired-db (not same-commit?)) (runner/program-digest acquired-db))
         source (:seon.test/source row)
         admission (:seon.schema.admission/source row)]
     (cond
@@ -1552,7 +1166,7 @@
       (refuse :seon.test/provenance-unknown "The test lacks matching source, namespace or analysis evidence." row)
       (and (map? wanted) (contains? wanted :seon.error/at) (contains? wanted :seon.error/layer) (contains? wanted :seon.error/operation)) wanted
       (and (map? actual) (contains? actual :seon.error/at) (contains? actual :seon.error/layer) (contains? actual :seon.error/operation)) actual
-      (not= wanted actual)
+      (and (not same-commit?) (not= wanted actual))
       (refuse :seon.test/program-mismatch "The SCI context did not acquire the tested program."
               {:seon.test.run/program-digest wanted :seon.test/acquired-digest actual})
       (seq (:seon.test/acquisition-refusals acquired))
@@ -1578,554 +1192,6 @@
         (catch Exception failure
           (refuse :seon.test/classpath-unavailable
                   (or (ex-message failure) (.getName (class failure))) test-symbol))))))
-
-(defn- prepare-tests! [database connection request]
-  (let [context (:my.program/context request)
-        loader (or (:seon.test/class-loader request)
-                   (some-> (:my.program/base-ctx context) sci.eval/acquired-program
-                           :seon.test/class-loader)
-                   (clojure.lang.RT/baseLoader))
-        ctx (or (:my.program/base-ctx context)
-                (with-test-loader loader #(sci.eval/cluster-ctx database connection)))]
-    (if (and (map? ctx) (contains? ctx :seon.error/at) (contains? ctx :seon.error/layer) (contains? ctx :seon.error/operation))
-      ctx
-      (do
-        (when-not (:seon.db/db (sci.eval/acquired-program ctx))
-          (with-test-loader loader
-            #(sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})))
-        {:seon.db/db database :seon.db/connection connection
-         :seon.schema/projection (schema/projection-from-database database)
-         :seon.test/class-loader loader :seon.sci.eval/ctx ctx}))))
-
-(defn- relative-path [path]
-  (let [root (.toPath (.getCanonicalFile (io/file ".")))
-        file (.toPath (.getCanonicalFile (io/file path)))]
-    (str (.relativize root file))))
-
-(defn check-admission
-  "Prepare check admission through the shared selector, without reading files."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/check-request]
-                  [:or :seon.test.run/admission :seon.test/selection-error :seon.test/unknown-error :seon.test.run/unavailable-error
-                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [database {changed :seon.test/changed paths :seon.test/paths
-             cluster :seon.boot/cluster-name :as request}]
-  (let [file-symbols (when (seq paths)
-                       (db/q '[:find [?symbol ...] :in $ [?path ...]
-                               :where [?file :seon.fn.file/relative-path ?path]
-                                      [?entity :seon.fn/file ?file]
-                                      (or [?entity :seon.fn/sym ?symbol]
-                                          [?entity :seon.test/sym ?symbol])]
-                             database (mapv relative-path paths)))
-        seeds (when-not (and (map? file-symbols)
-                             (contains? file-symbols :seon.error/at)
-                             (contains? file-symbols :seon.error/layer)
-                             (contains? file-symbols :seon.error/operation))
-                (vec (concat changed file-symbols)))]
-    (if (and (map? file-symbols)
-             (contains? file-symbols :seon.error/at)
-             (contains? file-symbols :seon.error/layer)
-             (contains? file-symbols :seon.error/operation)) file-symbols
-      (check-request-admission (cond-> {:seon.db/db database
-                       :seon.test/namespaces (set (:seon.test/namespaces request))
-                       :seon.test/changed seeds
-                       :seon.test/include-long? (true? (:seon.test/include-long? request))}
-                cluster (assoc :seon.test.run/cluster [:seon.cluster/name cluster])
-                (:seon.test.run/cluster request) (assoc :seon.test.run/cluster (:seon.test.run/cluster request))
-                (:seon.test.run/change-basis-t request)
-                (assoc :seon.test.run/change-basis-t (:seon.test.run/change-basis-t request)))))))
-
-(defn- check-in-process
-  [{connection :seon.db/connection changed :seon.test/changed
-    paths :seon.test/paths namespaces :seon.test/namespaces
-    cluster :seon.boot/cluster-name defer? :seon.test/defer-widened?
-    :as request}
-   progress]
-  (let [started (System/nanoTime)
-        database (db/db connection)
-        selection (check-admission database request)
-        effective (when-not (and (map? selection)
-                                 (contains? selection :seon.error/at)
-                                 (contains? selection :seon.error/layer)
-                                 (contains? selection :seon.error/operation)) (config/effective database cluster))
-        paths (mapv relative-path paths)
-        widened (when (some #((:seon.test.member/reasons %) :first-run)
-                            (:seon.test.run/members selection)) ["first run for these gate inputs"])
-        selected (if (and (map? selection)
-                          (contains? selection :seon.error/at)
-                          (contains? selection :seon.error/layer)
-                          (contains? selection :seon.error/operation)) selection
-                   (mapv :seon.test.member/symbol (:seon.test.run/members selection)))
-        deferred (when-not (and (map? selected)
-                                (contains? selected :seon.error/at)
-                                (contains? selected :seon.error/layer)
-                                (contains? selected :seon.error/operation))
-                   (into []
-                         (keep (fn [test-symbol]
-                                 (when-let [reason (:seon.test/fixture-observation
-                                                   (db/pull database [:seon.test/fixture-observation]
-                                                            [:seon.test/sym test-symbol]))]
-                                   {:seon.test/sym test-symbol
-                                    :seon.test/fixture-observation reason
-                                    :seon.test/command ["bin/test-check" (or cluster "default")
-                                                        "--test" test-symbol]})))
-                         selected))
-        long-excluded (:seon.test/long-excluded selection)
-        ;; A test reaching a declared destructive owner never runs in the
-        ;; development JVM: the same rule seon.test/run enforces per Var, applied
-        ;; to the whole selection so the exclusion is reported, never silent.
-        ;; The declaration this check genuinely holds travels with every run it
-        ;; starts: a seam that re-read the JVM property would decide twice.
-        declared (if-let [entry (find request :seon.test/declared-root)]
-                   (val entry)
-                   (store/declared-operator-root))
-        destructive (when-not (and (map? selected)
-                                   (contains? selected :seon.error/at)
-                                   (contains? selected :seon.error/layer)
-                                   (contains? selected :seon.error/operation))
-                      (let [owners (when (development-root declared)
-                                     (destroyers database))
-                            reach (cond
-                                    (nil? owners) nil
-                                    (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation)) owners
-                                    :else (destructive-reach database))]
-                        (cond
-                          (nil? reach) []
-                          (and (map? reach) (contains? reach :seon.error/at) (contains? reach :seon.error/layer) (contains? reach :seon.error/operation)) reach
-                          :else (into []
-                                      (keep #(destructive-exclusion database owners reach %))
-                                      selected))))
-        excluded (if (vector? destructive)
-                   (set (map :seon.test/sym destructive))
-                   #{})
-        runnable (if (or (and (map? selected)
-                              (contains? selected :seon.error/at)
-                              (contains? selected :seon.error/layer)
-                              (contains? selected :seon.error/operation)) (and (map? destructive)
-                                                      (contains? destructive :seon.error/at)
-                                                      (contains? destructive :seon.error/layer)
-                                                      (contains? destructive :seon.error/operation))
-                         (and widened defer?)) []
-                     (filterv (complement (-> excluded
-                                              (into (map :seon.test/sym) deferred)
-                                              (into (map :seon.test/sym) long-excluded)))
-                              selected))
-        provenance (:seon.test.run/provenance selection)
-        admitted (when (and (not (and (map? selected)
-                                      (contains? selected :seon.error/at)
-                                      (contains? selected :seon.error/layer)
-                                      (contains? selected :seon.error/operation)))
-                            (not (and (map? destructive)
-                                      (contains? destructive :seon.error/at)
-                                      (contains? destructive :seon.error/layer)
-                                      (contains? destructive :seon.error/operation)))
-                            (not (and (map? effective)
-                                      (contains? effective :seon.error/at)
-                                      (contains? effective :seon.error/layer)
-                                      (contains? effective :seon.error/operation))))
-                   (db/transact! connection [[:db.fn/call admit-run
-                       (cond-> (assoc selection :seon.test.run/members
-                                      (filterv #((set runnable) (:seon.test.member/symbol %))
-                                               (:seon.test.run/members selection)))
-                         (or (seq long-excluded) (seq excluded) (seq deferred) (and widened defer?))
-                         (assoc :seon.test.run/exclusions
-                                (vec (concat
-                                      (map (fn [entry] {:seon.test.member/symbol (:seon.test/sym entry)
-                                                        :seon.test.selection/disposition :long}) long-excluded)
-                                      (for [test-symbol selected :when (not ((set runnable) test-symbol))]
-                                        {:seon.test.member/symbol test-symbol
-                                         :seon.test.selection/disposition
-                                         (if (excluded test-symbol) :destructive :deferred)})))))]]))]
-    (cond
-      (and (map? effective)
-           (contains? effective :seon.error/at)
-           (contains? effective :seon.error/layer)
-           (contains? effective :seon.error/operation)) effective
-      (and (map? admitted)
-           (contains? admitted :seon.error/at)
-           (contains? admitted :seon.error/layer)
-           (contains? admitted :seon.error/operation)) admitted
-      (and (map? provenance)
-           (contains? provenance :seon.error/at)
-           (contains? provenance :seon.error/layer)
-           (contains? provenance :seon.error/operation)) provenance
-      (and (map? selected)
-           (contains? selected :seon.error/at)
-           (contains? selected :seon.error/layer)
-           (contains? selected :seon.error/operation)) selected
-      (and (map? destructive)
-           (contains? destructive :seon.error/at)
-           (contains? destructive :seon.error/layer)
-           (contains? destructive :seon.error/operation)) (assoc destructive :seon.test/next-tier :none)
-      :else
-      (let [selected (vec (sort selected))
-            namespaces (vec (sort (distinct (or (seq namespaces)
-                                                (map #(symbol (namespace (symbol %))) selected)))))
-            deadline (+ started (* 1000000 (:seon.test/check-time-limit-ms effective)))
-            initial (cond-> {:seon.test/tests [] :seon.test/passed [] :seon.test/failed []
-                             :seon.test/results (vec (:seon.test.selection/unchanged selection))
-                             :seon.test.run/basis-t (db/basis-t database)
-                             :seon.test/next-tier (commands paths namespaces)}
-                      (nil? changed) (assoc :seon.test/skipped-count
-                                           (count (:seon.test.selection/unchanged selection))
-                                           :seon.test/skip-reason "recorded result covers unchanged program facts")
-                      (seq deferred) (assoc :seon.test/deferred deferred)
-                      (seq destructive) (assoc :seon.test/destructive-excluded destructive)
-                      (seq long-excluded) (assoc :seon.test/long-excluded long-excluded)
-                      provenance (assoc :seon.test.run/program-digest
-                                        (:seon.test.run/program-digest provenance))
-                      widened (assoc :seon.test/widened
-                                     (str "the reaching set cannot bound this change: "
-                                          (str/join ", " widened))))
-            _ (swap! progress assoc :seon.test/recorded initial :seon.test/pending (vec runnable))
-            prepared (when (seq runnable)
-                       (swap! progress assoc :seon.test/progress "test namespace loading and contract arming")
-                       (prepare-tests! database connection request))
-            result
-            (if (and (map? prepared) (contains? prepared :seon.error/at) (contains? prepared :seon.error/layer) (contains? prepared :seon.error/operation))
-              (assoc prepared :seon.test/next-tier :none)
-            (loop [remaining (sort-by (fn [test-symbol]
-                                           [(if (some #(and (= test-symbol (:seon.test.member/symbol %))
-                                                            ((:seon.test.member/reasons %) :platform))
-                                                      (:seon.test.run/members selection)) 0 1)
-                                            test-symbol]) runnable) result initial]
-              (if-let [test-symbol (first remaining)]
-                (let [_ (swap! progress assoc :seon.test/progress test-symbol
-                               :seon.test/pending (vec remaining))
-                      remaining-ms (quot (- deadline (System/nanoTime)) 1000000)]
-                  (if-not (pos? remaining-ms)
-                    (-> result
-                        (assoc :seon.test/next-tier :none :seon.test/pending (vec remaining))
-                        (update :seon.test/failed conj
-                                {:seon.test/sym test-symbol :seon.test/changed changed
-                                 :seon.test/failure-message
-                                 "Total :seon.test/check-time-limit-ms bound fired before this test."}))
-                    (let [outcome (try
-                                    (let [test-var (resolve-test
-                                                    (assoc prepared :seon.test/identity
-                                                           (symbol test-symbol)))]
-                                      (if (and (map? test-var) (contains? test-var :seon.error/at) (contains? test-var :seon.error/layer) (contains? test-var :seon.error/operation))
-                                        test-var
-                                      (run test-var connection
-                                           (cond-> {:seon.db/db database
-                                                    :seon.db/connection connection
-                                                    :seon.sci.eval/ctx (:seon.sci.eval/ctx prepared)
-                                                    :seon.test.run/provenance provenance
-                                                    :seon.test/remaining-ms remaining-ms}
-                                             declared
-                                             (assoc :seon.test/declared-root declared)))))
-                                    (catch Exception failure
-                                      (when (instance? InterruptedException failure)
-                                        (throw failure))
-                                      (unknown test-symbol (ex-message failure))))
-                          green? (and (not (and (map? outcome) (contains? outcome :seon.error/at) (contains? outcome :seon.error/layer) (contains? outcome :seon.error/operation)))
-                                      (pos? (:seon.test/pass-count outcome))
-                                      (zero? (:seon.test/fail-count outcome))
-                                      (zero? (:seon.test/error-count outcome)))
-                          next-result
-                          (cond-> (update result :seon.test/tests conj test-symbol)
-                            (not (and (map? outcome) (contains? outcome :seon.error/at) (contains? outcome :seon.error/layer) (contains? outcome :seon.error/operation))) (update :seon.test/results conj outcome)
-                            green? (update :seon.test/passed conj test-symbol)
-                            (not green?)
-                            (update :seon.test/failed conj
-                                    {:seon.test/sym test-symbol
-                                     :seon.test/changed (vec changed)
-                                     :seon.test/failure-message
-                                     (if (and (map? outcome) (contains? outcome :seon.error/at) (contains? outcome :seon.error/layer) (contains? outcome :seon.error/operation)) (:seon.error/message outcome)
-                                         (failure-message outcome))
-                                     :seon.test/failures (vec (:seon.test/failures outcome))})
-                            (not green?) (assoc :seon.test/next-tier :none))]
-                      ;; The verdicts recorded so far travel with the check, so
-                      ;; the total bound firing reports them instead of
-                      ;; discarding them for one bare unknown.
-                      (swap! progress assoc :seon.test/recorded next-result
-                             :seon.test/pending (vec (next remaining)))
-                      (if (and (not green?)
-                               (some #(and (= test-symbol (:seon.test.member/symbol %))
-                                           ((:seon.test.member/reasons %) :platform))
-                                     (:seon.test.run/members selection)))
-                        (assoc next-result :seon.test/pending (vec (next remaining)))
-                        (recur (next remaining) next-result)))))
-                result)))]
-        (assoc result :seon.test/elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0))))))
-
-(defn- expired-result
-  "Report the verdicts a check already recorded when its total bound fired.
-
-  The bound firing is honest about the test that never returned; discarding the
-  runs that DID complete is not — a caller reading one bare unknown cannot tell
-  a slow selection from a red one. `check-in-process` publishes its accumulating
-  result and its remaining selection as it goes, so the expiry is derived from
-  what the check genuinely holds: the completed runs with their verdicts, plus
-  the typed expiry naming what was pending."
-  {:malli/schema [:=> [:cat :map :int :seon.await/timeout-error]
-                  [:or :seon.test/check-result :seon.test/expired]]}
-  [snapshot started timeout]
-  (let [phase (:seon.test/progress snapshot)
-        recorded (:seon.test/recorded snapshot)
-        pending (vec (:seon.test/pending snapshot))
-        elapsed (/ (double (- (System/nanoTime) started)) 1000000.0)
-        expiry (-> timeout
-                   (dissoc :seon.await/elapsed-ms)
-                   (assoc :seon.error/operation 'seon.test/expired-result
-                          :seon.error/layer :seon.test/execution
-                          :seon.test/elapsed-ms elapsed
-                          :seon.error/offending phase
-                          :seon.test/next-tier :none)
-                   (assoc-in [:seon.error/data :seon.test/pending] pending))]
-    (if (map? recorded)
-      (cond-> (assoc recorded
-                     :seon.test/next-tier :none
-                     :seon.test/expired expiry
-                     :seon.test/elapsed-ms
-                     elapsed)
-        (seq pending) (assoc :seon.test/pending pending))
-      expiry)))
-
-(defn- check-completion
-  "Preserve completed results; only an observed await timeout becomes expiry."
-  {:malli/schema
-   [:=> [:cat :map :int
-         [:or :seon.test/check-result :seon.await/timeout-error
-          :seon.test/selection-error :seon.test/unknown-error :seon.test/admission-error
-          :seon.test.run/unavailable-error :seon.config/error :seon.db.write/error
-          :seon.db.availability/error :seon.db/invalid-read-error :seon.schema/missing-projection-error]]
-    [:or :seon.test/check-result :seon.test/expired
-     :seon.test/selection-error :seon.test/unknown-error :seon.test/admission-error
-     :seon.test.run/unavailable-error :seon.config/error :seon.db.write/error
-     :seon.db.availability/error :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [snapshot started result]
-  (if (contains? result :seon.await/elapsed-ms)
-    (expired-result snapshot started result)
-    result))
-
-(defn check
-  "Run tests observing this change in the calling JVM and record their facts.
-
-  Without :seon.test/changed, select stale results and report unchanged skips.
-  Supply :seon.test/changed symbols or adoption identities and optional
-  :seon.test/paths for exact escalation commands. Widening inputs select the
-  supplied affected namespaces, or all declared test namespaces when unknown.
-  Hook callers set :seon.test/defer-widened? to report widening without running.
-  A selected test reaching a function that declares `:seon.fn/destroys` is
-  EXCLUDED, never run,
-  when this JVM operates the development checkout; the exclusions are reported
-  with their owner, call path, and cold command in :seon.test/destructive-excluded.
-  A selected test declared :seon.test/long is EXCLUDED the same way and reported
-  by name with its declared reason and cold command in :seon.test/long-excluded;
-  :seon.test/include-long? true runs them, spending the same one allowance.
-  When that allowance fires, the completed runs are returned WITH their verdicts
-  and the typed expiry naming what was pending in :seon.test/expired.
-  Red results return :seon.test/next-tier :none. Every failure names its test
-  and the changed identities it reaches. Selection is admitted before execution,
-  including a zero-member request. Declared exclusions and deferred requests
-  are recorded separately from executable memberships. A bound or red platform
-  member leaves the admitted, unexecuted remainder outstanding.
-  Selection, loading, and execution
-  share the total :seon.test/check-time-limit-ms fact; each test receives
-  the remaining allowance. Timeout reports expiry without interrupting resource acquisition."
-  {:malli/schema [:=> [:cat :seon.test/check-request]
-                  [:or :seon.test/check-result :seon.test/expired :seon.test/selection-error :seon.test/unknown-error
-                   :seon.test/admission-error :seon.test.run/unavailable-error
-                   :seon.config/error :seon.db.write/error :seon.db.availability/error
-                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [{connection :seon.db/connection cluster :seon.boot/cluster-name :as request}]
-  (let [database (db/db connection)
-        custody (when cluster (db/pull database [:db/id :seon.cluster/name] [:seon.cluster/name cluster]))
-        effective (when (:seon.cluster/name custody) (config/effective database cluster))]
-    (cond
-      (nil? cluster) (selection-refusal database :seon.test/cluster-required "Check requires explicit cluster custody." :absent)
-      (and (map? custody)
-           (contains? custody :seon.error/at)
-           (contains? custody :seon.error/layer)
-           (contains? custody :seon.error/operation)) custody
-      (not (:seon.cluster/name custody)) (selection-refusal database :seon.test/cluster-unavailable "The requested cluster is absent." cluster)
-      (and (map? effective) (contains? effective :seon.error/at) (contains? effective :seon.error/layer) (contains? effective :seon.error/operation)) (assoc effective :seon.test/next-tier :none)
-      (not (:seon.test/check-time-limit-ms effective))
-      (unknown :seon.test/check-time-limit-ms "Apply cluster configuration to supply the declared test check time limit.")
-      :else
-        (let [started (System/nanoTime)
-              progress (atom {:seon.test/progress "reaching selection"})
-              task (FutureTask. ^java.util.concurrent.Callable
-                                (bound-fn [] (check-in-process request progress)))
-              thread (.unstarted (Thread/ofVirtual) ^Runnable task)]
-          (.start thread)
-          (try
-            (let [result (await/await!
-                          {:seon.await/future task
-                           :seon.await/bound
-                           {:seon.await/config-attribute :seon.test/check-time-limit-ms
-                            :seon.await/config-value (:seon.test/check-time-limit-ms effective)}
-                           :seon.await/diagnostic
-                           {:seon.error/layer :test
-                            :seon.error/operation ::check
-                            :seon.error/expected :check-result
-                            :seon.error/offending :pending
-                            :seon.error/data {:seon.test/changed (:seon.test/changed request)}
-          :seon.error/member :seon.test/check-completion}})]
-              (when-let [n (:seon.test/skipped-count result)]
-                (println "Skipped" n "tests:" (:seon.test/skip-reason result)))
-              (check-completion @progress started result))
-            (catch Exception failure
-              (let [phase (:seon.test/progress @progress)]
-                (unknown phase (str "Check failed at " phase ": "
-                                    (or (some-> failure ex-cause ex-message)
-                                        (ex-message failure))))))
-            (finally (when-not (.isDone task) (.cancel task false))))))))
-
-(defn check-adoption
-  "Check the last converged development adoption in this calling JVM.
-
-  Changes and paths come from its commit transaction. Missing adoption facts
-  are unknown, never green. Widened edits only report the namespace gate."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name]
-                  [:or :seon.test/check-result :seon.error/value
-                   :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
-  [connection cluster-name]
-  (let [database (db/db connection)
-        transaction (db/q '[:find (max ?t) . :in $ ?name
-                            :where [?c :seon.cluster/name ?name]
-                            [?t :seon.test/adoption-cluster ?c]] database cluster-name)
-        adoption (when (integer? transaction)
-                   (db/pull database
-                            '[:seon.test/adoption-cluster
-                              :seon.test/adoption-inputs
-                              {:seon.test/adoption-identities
-                               [:seon.ns/name :seon.fn/sym :seon.test/sym :seon.schema/key]}]
-                            transaction))]
-    (cond
-      (and (map? transaction) (contains? transaction :seon.error/at) (contains? transaction :seon.error/layer) (contains? transaction :seon.error/operation)) transaction
-      (and (map? adoption) (contains? adoption :seon.error/at) (contains? adoption :seon.error/layer) (contains? adoption :seon.error/operation)) adoption
-      (not (:seon.test/adoption-cluster adoption))
-      (unknown cluster-name "The latest adoption has no recorded changed identities; adopt with the updated recording owner first.")
-      :else
-      (check {:seon.db/connection connection
-              :seon.boot/cluster-name cluster-name
-              :seon.test/changed (mapv program/row-identity (:seon.test/adoption-identities adoption))
-              :seon.test/paths (vec (:seon.test/adoption-inputs adoption))
-              :seon.test/defer-widened? true}))))
-
-(defn feedback
-  "Format complete in-process check feedback, including executable next tiers."
-  {:malli/schema [:=> [:cat [:or :seon.test/check-result :seon.error/value]] :string]}
-  [result]
-  (let [quote-arg (fn [s] (str "'" (str/replace s "'" "'\"'\"'") "'"))
-        invocations (when (vector? (:seon.test/next-tier result))
-                   (map #(str/join " " (map quote-arg %)) (:seon.test/next-tier result)))]
-    (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
-      (str "check unavailable: " (:seon.error/message result))
-      (str (when-let [reason (:seon.test/widened result)] (str "widened: " reason "; "))
-           "tests run " (count (:seon.test/tests result))
-           " / passed " (count (:seon.test/passed result))
-           " / failed " (count (:seon.test/failed result))
-           " / elapsed " (:seon.test/elapsed-ms result) " ms"
-           (when-let [n (:seon.test/skipped-count result)]
-             (str " / skipped " n ": " (:seon.test/skip-reason result)))
-           (when-let [excluded (seq (:seon.test/destructive-excluded result))]
-             (str " / destructive-excluded " (count excluded)))
-           (when-let [excluded (seq (:seon.test/long-excluded result))]
-             (str " / long-excluded " (count excluded)))
-           (when-let [expiry (:seon.test/expired result)]
-             (str " / expired: " (:seon.error/message expiry)))
-           (apply str (for [failure (:seon.test/failed result)]
-                        (str "\n" (:seon.test/sym failure) " reaches "
-                             (pr-str (:seon.test/changed failure)) ": "
-                             (:seon.test/failure-message failure))))
-           (apply str (for [deferred (:seon.test/deferred result)]
-                        (str "\ndeferred " (:seon.test/sym deferred) ": "
-                             (:seon.test/fixture-observation deferred)
-                             "; run " (str/join " " (map quote-arg (:seon.test/command deferred))))))
-           (apply str (for [excluded (:seon.test/destructive-excluded result)]
-                        (str "\ndestructive " (:seon.test/sym excluded) " reaches "
-                             (:seon.fn/sym excluded)
-                             (when-let [what (:seon.fn/destroys excluded)]
-                               (str " (" what ")"))
-                             "; never in process on a development root — run "
-                             (str/join " " (map quote-arg (:seon.test/command excluded))))))
-           (apply str (for [excluded (:seon.test/long-excluded result)]
-                        (str "\nlong " (:seon.test/sym excluded) ": "
-                             (:seon.test/long excluded)
-                             "; one declared-long test spends the whole check allowance — run "
-                             (str/join " " (map quote-arg (:seon.test/command excluded))))))
-           (if (seq invocations) (str "\nrun " (str/join " then " invocations))
-               "\nnext-tier: none; fix failures first")))))
-
-(defn check-request
-  "Perform one operator test check in the cluster JVM.
-
-  Projection, configuration, preparation and execution belong to this call.
-  The supplied bound covers the whole operation; without an override the
-  cluster's declared check allowance applies. Missing observations return a
-  typed error. Successful observations always carry all three assertion
-  counts, including a genuine zero, and the CLI verdict and display text."
-  {:malli/schema [:=> [:cat :seon.test.check/request]
-                  :seon.test.check/response]}
-  [{connection :seon.db/connection cluster :seon.boot/cluster-name
-    test-symbol :seon.test/sym override :seon.test/check-time-limit-ms}]
-  (let [database (db/db connection)
-        projection (db/carried-projection database)]
-    (schema/call-with-projection
-     projection
-     (fn []
-       (let [effective (config/effective database cluster)
-             bound (or override (:seon.test/check-time-limit-ms effective))]
-         (cond
-           (and (map? effective) (contains? effective :seon.error/at) (contains? effective :seon.error/layer) (contains? effective :seon.error/operation)) effective
-           (not (pos-int? bound))
-           (unknown :seon.test/check-time-limit-ms
-                    "Apply cluster configuration to supply the test check allowance.")
-           :else
-           (let [started (System/nanoTime)
-                 task
-                 (FutureTask.
-                  ^java.util.concurrent.Callable
-                  (bound-fn []
-                    (let [result
-                          (if test-symbol
-                            (let [prepared (prepare-tests! database connection {})
-                                  remaining (- bound (long (/ (- (System/nanoTime) started) 1000000)))]
-                              (cond
-                                (and (map? prepared) (contains? prepared :seon.error/at) (contains? prepared :seon.error/layer) (contains? prepared :seon.error/operation)) prepared
-                                (not (pos? remaining))
-                                (unknown test-symbol "Test preparation exhausted the check allowance.")
-                                :else
-                                (let [test-var (resolve-test (assoc prepared :seon.test/identity test-symbol))]
-                                  (if (:seon.error/at test-var) test-var
-                                      (run test-var connection
-                                           {:seon.test.run/cluster [:seon.cluster/name cluster]
-                                            :seon.test.run/provenance (runner/provenance (db/db connection))
-                                            :seon.test/remaining-ms remaining})))))
-                            (check-adoption connection cluster))]
-                      (if (and (map? result) (contains? result :seon.error/at) (contains? result :seon.error/layer) (contains? result :seon.error/operation))
-                        result
-                        (let [results (if test-symbol [result] (:seon.test/results result))
-                              passes (reduce + 0 (map :seon.test/pass-count results))
-                              failures (reduce + 0 (map :seon.test/fail-count results))
-                              errors (reduce + 0 (map :seon.test/error-count results))]
-                          {:seon.test/pass-count passes
-                           :seon.test/fail-count failures
-                           :seon.test/error-count errors
-                           :seon.test.check/text (if test-symbol (pr-str result) (feedback result))
-                           :seon.test.check/passed?
-                           (boolean (and (zero? failures) (zero? errors)
-                                         (not (:seon.test/expired result))
-                                         (or (not test-symbol) (pos? passes))))})))))]
-             (.start (.unstarted (Thread/ofVirtual) ^Runnable task))
-             (try
-               (await/await!
-                {:seon.await/future task
-                 :seon.await/bound {:seon.await/config-attribute :seon.test/check-time-limit-ms
-                                    :seon.await/config-value bound}
-                 :seon.await/diagnostic
-                 {:seon.error/layer :test
-                  :seon.error/operation ::check-request
-                  :seon.error/expected :seon.test.check/result
-                  :seon.error/offending :pending
-                  :seon.error/member :check-completion
-                  :seon.await/subject (cond-> {:seon.boot/cluster-name cluster}
-                    test-symbol (assoc :seon.test/sym test-symbol))}})
-               (catch Exception failure
-                 (unknown (or test-symbol cluster) (ex-message failure)))
-               (finally (when-not (.isDone task) (.cancel task false)))))))))))
 
 (defn owned-symbols
   "Read the test symbols declared in the calling agent's assigned namespace."
@@ -2179,3 +1245,356 @@
                   (zero? (:seon.test/fail-count result))
                   (zero? (:seon.test/error-count result))
                   (= program-digest (:seon.test.run/program-digest result)))))))
+;;; ---------------------------------------------------------------------------
+;;; One test request: a test is an isolated agent that lives for one body
+;;; ---------------------------------------------------------------------------
+
+;;; LOAD-CYCLE BOUNDARY. `seon.cluster.agent` requires `seon.turn`, which
+;;; requires `seon.plan`, which requires this namespace. One resolution per
+;;; entrance Var, realized at first use.
+(def ^:private acquire-context!
+  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
+
+(def ^:private release-context!
+  (delay (requiring-resolve 'seon.cluster.agent/release-context!)))
+
+(defn- request-refusal
+  "Name one refused request member with the value it carried."
+  {:malli/schema [:=> [:cat :keyword :string :seon.schema/value] :seon.test/selection-error]}
+  [kind message offending]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.test/selection
+   :seon.error/operation 'seon.test/run
+   :seon.error/message message
+   :seon.error/expected :seon.test/request
+   :seon.error/offending offending
+   :seon.test/selection-refusal kind})
+
+(defn- host-exclusions
+  "Members that never execute in a JVM operating the development checkout.
+
+  A member reaching a `:seon.fn/destroys` owner deletes a filesystem path it
+  did not create; a member declaring `:seon.test/fixture-observation` needs a
+  file-backed root. Both run on the platform host, whose command is named.
+  Any other JVM (a scratch or platform root) excludes nothing."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :string] [:vector :seon.test/sym]]
+                  [:or [:map [:seon.test/destructive-excluded :seon.test/destructive-excluded]
+                        [:seon.test/deferred :seon.test/deferred]]
+                   :seon.error/value]]}
+  [database declared-root symbols]
+  (if-not (development-root declared-root)
+    {:seon.test/destructive-excluded [] :seon.test/deferred []}
+    (let [owners (destroyers database)
+          reach (if (:seon.error/at owners) owners (destructive-reach database))]
+      (if (:seon.error/at reach)
+        reach
+        (let [destructive (into [] (keep #(destructive-exclusion database owners reach %)) symbols)
+              excluded (set (map :seon.test/sym destructive))
+              deferred (into []
+                             (keep (fn [test-symbol]
+                                     (when-let [reason (and (not (excluded test-symbol))
+                                                            (:seon.test/fixture-observation
+                                                             (db/pull database [:seon.test/fixture-observation]
+                                                                      [:seon.test/sym test-symbol])))]
+                                       {:seon.test/sym test-symbol
+                                        :seon.test/fixture-observation reason
+                                        :seon.test/command ["bin/test" "--platform" "--" (str test-symbol)]})))
+                             symbols)]
+          {:seon.test/destructive-excluded
+           (mapv #(assoc % :seon.test/command ["bin/test" "--platform" "--" (str (:seon.test/sym %))])
+                 destructive)
+           :seon.test/deferred deferred})))))
+
+(defn- member-result
+  "Execute one admitted member on its own branch off the captured commit.
+
+  The branch, its connection and its forked context come from the agent
+  entrance, exactly as an isolated agent's do. The body runs under that
+  branch's custody on its own thread; the branch is unlinked only after the
+  body's thread has been observed to exit. A body still live at the bound keeps
+  its branch, is named, and admits no further body."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.test/sym [:int {:min 1}]]
+                  [:map [:seon.test/result :seon.test.runner/captured-result]
+                   [:seon.test/timings
+                    [:map [:seon.agent/branch :seon.agent/branch]
+                     [:seon.test.timing/acquire-ms :seon.test.timing/acquire-ms]
+                     [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
+                     [:seon.test.timing/run-ms :seon.test.timing/run-ms]
+                     [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
+  [request-handle test-symbol remaining-ms]
+  (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
+        started (System/nanoTime)
+        child (@acquire-context! request-handle nil
+                                 {:seon.agent/isolate? true
+                                  :seon.cluster.registry/from (:seon.source/commit-id request-handle)})
+        acquired (elapsed started)
+        ctx (:seon.sci.eval/ctx child)
+        failed (fn [message]
+                 {:seon.test/sym test-symbol
+                  :seon.test.member/began? false :seon.test.member/ended? false
+                  :seon.test.run/terminated? true
+                  :seon.test/pass-count 0 :seon.test/fail-count 0 :seon.test/error-count 1
+                  :seon.test/failure-message message})
+        started (System/nanoTime)
+        test-var (resolve-test
+                  {:seon.db/db (:seon.db/db child)
+                   :seon.db/connection (:seon.db/connection child)
+                   :seon.test/identity test-symbol
+                   :seon.sci.eval/ctx ctx
+                   :seon.schema/projection (:seon.schema/projection child)
+                   :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
+                                               (clojure.lang.RT/baseLoader))})
+        resolved (elapsed started)
+        started (System/nanoTime)
+        registry-before (runner/live-cluster-schema-states)
+        result (if (:seon.error/at test-var)
+                 (failed (:seon.error/message test-var))
+                 (schema/call-with-projection
+                  (:seon.schema/projection child)
+                  ;; An agent (SCI) test is the member branch's own work, so
+                  ;; its elided `seon.db` arities reach that branch. A host
+                  ;; test body inherits no custody; its fixtures find the
+                  ;; member through the SCI arm governing its thread.
+                  #(bounded-result test-var remaining-ms
+                                   (cond-> {:seon.sci.eval/ctx ctx}
+                                     (not (var? test-var))
+                                     (assoc :seon.db/connection (:seon.db/connection child)))
+                                   (fn [] (@release-context! child) nil))))
+        executed (elapsed started)
+        drifted (runner/schema-restore-drift
+                 (runner/restore-live-cluster-schema! registry-before))
+        result (if (empty? drifted)
+                 result
+                 (-> result
+                     (update :seon.test/error-count (fnil inc 0))
+                     (update :seon.test/failure-message
+                             #(str (when % (str % "\n"))
+                                   "Live cluster schema registry changed and was restored: "
+                                   (pr-str drifted)))))
+        started (System/nanoTime)]
+    (when (:seon.error/at test-var)
+      (@release-context! child))
+    {:seon.test/result (cond-> result
+                         (not (:seon.test.run/terminated? result))
+                         (assoc :seon.agent/branch (:seon.agent/branch child)))
+     :seon.test/timings {:seon.agent/branch (:seon.agent/branch child)
+                         :seon.test.timing/acquire-ms acquired
+                         :seon.test.timing/resolve-ms resolved
+                         :seon.test.timing/run-ms executed
+                         :seon.test.timing/release-ms (elapsed started)}}))
+
+(defn- green?
+  {:malli/schema [:=> [:cat :seon.test/result] :boolean]}
+  [result]
+  (and (pos? (:seon.test/pass-count result 0))
+       (zero? (:seon.test/fail-count result 0))
+       (zero? (:seon.test/error-count result 0))))
+
+(defn run
+  "Answer one test request on the execution value it names.
+
+  `:seon.test/execution` is an agent context source or execution handle; the
+  request captures its current commit once. `:seon.test/policy` selects
+  eligibility (`:named` needs identities or namespaces; `:incremental` derives
+  changed reach and outstanding obligations from recorded evidence; `:platform`
+  the declared rows; `:all` every eligible row). Selection and admission read
+  and write the explicit `:seon.test/recording-connection`, which must hold the
+  execution branch. A member whose recorded green still holds is answered from
+  the record with `:seon.test/unchanged` and no execution.
+
+  Each executed member is an isolated agent for one body: a fresh branch off
+  the captured commit through `seon.cluster.agent/acquire-context!`, the body
+  under that branch's custody (`seon.sci.eval/run-test`), its result recorded
+  on the recording connection, and the branch unlinked by
+  `release-context!` after the body's thread exits. The request is bounded by
+  `:seon.test/check-time-limit-ms` (request member or the cluster's dial); a
+  body still live at the bound fails, keeps its branch, and admits no further
+  body. Members reaching a destructive owner or declaring a file-backed fixture
+  are excluded in a JVM operating the development checkout, with the platform
+  command. `:seon.test/passed?` is true only when every obligation has green
+  evidence: exclusions, pending and unfinished members are unfulfilled."
+  {:malli/schema [:=> [:cat :seon.test/request]
+                  [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
+                   :seon.test/admission-error :seon.test.run/unavailable-error
+                   :seon.config/error :seon.db.write/error :seon.db/invalid-read-error
+                   :seon.schema/missing-projection-error]]}
+  [{execution :seon.test/execution recording :seon.test/recording-connection
+    policy :seon.test/policy identities :seon.test/identities
+    namespaces :seon.test/namespaces :as request}]
+  (let [started (System/nanoTime)
+        elapsed #(/ (- (System/nanoTime) started) 1000000.0)
+        cluster (:seon.cluster/name execution)
+        database (db/db (:seon.db/connection execution))
+        effective (config/effective database cluster)
+        bound (or (:seon.test/check-time-limit-ms request)
+                  (:seon.test/check-time-limit-ms effective))]
+    (cond
+      (:seon.error/at effective) effective
+      (and (= :named policy) (empty? identities) (empty? namespaces))
+      (request-refusal :seon.test/policy-unscoped
+                       "A :named request needs :seon.test/identities or :seon.test/namespaces."
+                       (select-keys request [:seon.test/policy]))
+      (not (pos-int? bound))
+      (unknown :seon.test/check-time-limit-ms
+               "Apply cluster configuration to supply the declared test check time limit.")
+      :else
+      (let [selection (selection-admission
+                       (cond-> {:seon.db/db database
+                                :seon.test.run/cluster [:seon.cluster/name cluster]
+                                :seon.test.run/policy policy
+                                :seon.test/include-long? (true? (:seon.test/include-long? request))}
+                         (seq identities) (assoc :seon.test/identities (set identities))
+                         (seq namespaces) (assoc :seon.test/namespaces (set namespaces))
+                         (seq (:seon.test/changed request))
+                         (assoc :seon.test/changed (vec (:seon.test/changed request)))))
+            selected (when-not (:seon.error/at selection)
+                       (mapv :seon.test.member/symbol (:seon.test.run/members selection)))
+            exclusions (when selected
+                         (host-exclusions database (store/declared-operator-root) selected))
+            runnable (when (and selected (not (:seon.error/at exclusions)))
+                       (let [excluded (set (map :seon.test/sym
+                                                (concat (:seon.test/destructive-excluded exclusions)
+                                                        (:seon.test/deferred exclusions))))]
+                         (vec (remove excluded selected))))
+            provenance (:seon.test.run/provenance selection)
+            admitted (when runnable
+                       (db/transact!
+                        recording
+                        [[:db.fn/call admit-run
+                          (cond-> (assoc selection :seon.test.run/members
+                                         (filterv #((set runnable) (:seon.test.member/symbol %))
+                                                  (:seon.test.run/members selection)))
+                            (or (seq (:seon.test/long-excluded selection))
+                                (not= (count runnable) (count selected)))
+                            (assoc :seon.test.run/exclusions
+                                   (vec (concat
+                                         (for [entry (:seon.test/long-excluded selection)]
+                                           {:seon.test.member/symbol (:seon.test/sym entry)
+                                            :seon.test.selection/disposition :long})
+                                         (for [entry (:seon.test/destructive-excluded exclusions)]
+                                           {:seon.test.member/symbol (:seon.test/sym entry)
+                                            :seon.test.selection/disposition :destructive})
+                                         (for [entry (:seon.test/deferred exclusions)]
+                                           {:seon.test.member/symbol (:seon.test/sym entry)
+                                            :seon.test.selection/disposition :deferred})))))]]))]
+        (cond
+          (:seon.error/at selection) selection
+          (:seon.error/at exclusions) exclusions
+          (:seon.error/at admitted) admitted
+          :else
+          (let [platform? (fn [test-symbol]
+                            (some #(and (= test-symbol (:seon.test.member/symbol %))
+                                        ((:seon.test.member/reasons %) :platform))
+                                  (:seon.test.run/members selection)))
+                ordered (sort-by (fn [test-symbol] [(if (platform? test-symbol) 0 1) test-symbol])
+                                 runnable)
+                request-handle (when (seq ordered)
+                                 (@acquire-context! execution nil
+                                                    {:seon.agent/isolate? true
+                                                     :seon.cluster.registry/from (db/commit-id database)}))
+                deadline (+ started (* 1000000 bound))
+                outcome
+                (try
+                  (loop [remaining ordered
+                         outcome {:seon.test/results [] :seon.test/timings []}]
+                    (if-let [test-symbol (first remaining)]
+                      (let [remaining-ms (quot (- deadline (System/nanoTime)) 1000000)]
+                        (if-not (pos? remaining-ms)
+                          (assoc outcome :seon.test/pending (vec remaining))
+                          (let [{result :seon.test/result timings :seon.test/timings}
+                                (member-result request-handle test-symbol remaining-ms)
+                                committed (runner/commit-results!
+                                           recording
+                                           {:seon.db/db database
+                                            :seon.test.runner/results [(dissoc result :seon.agent/branch)]
+                                            :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                                            :seon.test/run-at (:seon.test.run/at provenance)
+                                            :seon.test.run/provenance provenance
+                                            :seon.test.run/terminated?
+                                            (true? (:seon.test.run/terminated? result))})
+                                outcome (-> outcome
+                                            (update :seon.test/timings conj
+                                                    (assoc timings :seon.test/sym test-symbol))
+                                            (update :seon.test/results conj
+                                                    (if (:seon.error/at committed)
+                                                      (assoc result :seon.test/recording-refusal committed)
+                                                      (merge result (first committed)))))]
+                            (cond
+                              (:seon.error/at committed)
+                              (assoc outcome :seon.test/recording-refusal committed
+                                             :seon.test/pending (vec (next remaining)))
+                              (not (:seon.test.run/terminated? result))
+                              (assoc outcome :seon.test/unfinished [result]
+                                             :seon.test/pending (vec (next remaining)))
+                              (and (platform? test-symbol) (not (green? result)))
+                              (assoc outcome :seon.test/pending (vec (next remaining)))
+                              :else (recur (next remaining) outcome)))))
+                      outcome))
+                  (finally
+                    (when request-handle (@release-context! request-handle))))
+                reused (vec (:seon.test.selection/unchanged selection))
+                results (into (vec (:seon.test/results outcome)) reused)
+                excluded (concat (:seon.test/destructive-excluded exclusions)
+                                 (:seon.test/deferred exclusions))]
+            (cond-> {:seon.test.run/id (:seon.test.run/id provenance)
+                     :seon.test.run/policy policy
+                     :seon.test.run/basis-t (:seon.test.run/basis-t provenance)
+                     :seon.test.run/program-digest (:seon.test.run/program-digest provenance)
+                     :seon.source/commit-id (db/commit-id database)
+                     :seon.test/results results
+                     :seon.test/executed-count (count (:seon.test/results outcome))
+                     :seon.test/reused-count (count reused)
+                     :seon.test/timings (:seon.test/timings outcome)
+                     :seon.test/passed?
+                     (boolean (and (every? green? results)
+                                   (seq results)
+                                   (empty? excluded)
+                                   (empty? (:seon.test/pending outcome))
+                                   (empty? (:seon.test/unfinished outcome))
+                                   (nil? (:seon.test/recording-refusal outcome))))
+                     :seon.test/elapsed-ms (elapsed)}
+              (seq (:seon.test/destructive-excluded exclusions))
+              (assoc :seon.test/destructive-excluded (:seon.test/destructive-excluded exclusions))
+              (seq (:seon.test/deferred exclusions))
+              (assoc :seon.test/deferred (:seon.test/deferred exclusions))
+              (seq (:seon.test/long-excluded selection))
+              (assoc :seon.test/long-excluded (:seon.test/long-excluded selection))
+              (seq (:seon.test/pending outcome))
+              (assoc :seon.test/pending (:seon.test/pending outcome))
+              (seq (:seon.test/unfinished outcome))
+              (assoc :seon.test/unfinished (:seon.test/unfinished outcome))
+              (:seon.test/recording-refusal outcome)
+              (assoc :seon.test/recording-refusal (:seon.test/recording-refusal outcome)))))))))
+
+(defn tally
+  "Render one request's answer as the text a launcher prints.
+  The recorded counts come from the run's result; failures show their claims."
+  {:malli/schema [:=> [:cat [:or :seon.test/run-result :seon.error/value]] :string]}
+  [result]
+  (if (:seon.error/at result)
+    (str "test request refused: " (:seon.error/message result))
+    (let [results (:seon.test/results result)
+          red (remove green? results)]
+      (str "run " (:seon.test.run/id result)
+           " / executed " (:seon.test/executed-count result)
+           " / reused " (:seon.test/reused-count result)
+           " / pass " (reduce + 0 (map #(:seon.test/pass-count % 0) results))
+           " / fail " (reduce + 0 (map #(:seon.test/fail-count % 0) results))
+           " / error " (reduce + 0 (map #(:seon.test/error-count % 0) results))
+           " / " (Math/round (double (:seon.test/elapsed-ms result))) " ms"
+           " / passed? " (:seon.test/passed? result)
+           (apply str (for [failure red]
+                        (str "\nred " (:seon.test/sym failure) ": " (failure-message failure))))
+           (apply str (for [entry (:seon.test/unfinished result)]
+                        (str "\nunfinished " (:seon.test/sym entry) " on branch "
+                             (:seon.agent/branch entry) ": " (:seon.test/failure-message entry))))
+           (when-let [pending (seq (:seon.test/pending result))]
+             (str "\npending (not started): " (str/join " " pending)))
+           (apply str (for [entry (concat (:seon.test/destructive-excluded result)
+                                          (:seon.test/deferred result))]
+                        (str "\nexcluded " (:seon.test/sym entry) " — run "
+                             (str/join " " (:seon.test/command entry)))))
+           (apply str (for [entry (:seon.test/long-excluded result)]
+                        (str "\nlong " (:seon.test/sym entry) ": " (:seon.test/long entry))))
+           (when-let [refusal (:seon.test/recording-refusal result)]
+             (str "\nrecording refused: " (:seon.error/message refusal)))))))

@@ -667,13 +667,17 @@
         desired
         (into [(:seon.config/desired-row compiled)]
               (:seon.config/initialization compiled))
+        ;; An inherited config row no cluster entity owns is reconciled away;
+        ;; a row another cluster's required `:seon.cluster/config` names is that
+        ;; cluster's, and retracting it would invalidate its referrer.
         inherited-config-identities
         (into #{}
               (map (fn [cluster-name]
                      [:seon.config/cluster cluster-name]))
               (db/q '[:find [?cluster-name ...]
                       :where
-                      [_ :seon.config/cluster ?cluster-name]]
+                      [?config :seon.config/cluster ?cluster-name]
+                      (not [_ :seon.cluster/config ?config])]
                     database))
         identities (into inherited-config-identities
                          (keep #(row-identity projection %))

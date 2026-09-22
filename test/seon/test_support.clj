@@ -7,6 +7,7 @@
             [clojure.test :as test]
             [datahike.api :as d]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as agent]
             [seon.cluster.export :as cluster.export]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
@@ -14,7 +15,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.error :as error]
             [seon.fs :as fs]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
@@ -22,6 +22,7 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.test.cache :as cache])
   (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
@@ -252,38 +253,6 @@
               (reset! manifest-cache {publication manifest})
               manifest))))))
 
-(def ^:private branch-leases
-  ;; Datahike deletes a branch from the roster but retains its head until whole
-  ;; store deletion. Reusing released names bounds retained heads by peak nested
-  ;; fixture concurrency rather than total trial count.
-  (atom {:seon.test-support/available []
-         :seon.test-support/next 0}))
-
-(defn- acquire-branch!
-  []
-  (let [[before _]
-        (swap-vals!
-         branch-leases
-         (fn [{available :seon.test-support/available
-               next-id :seon.test-support/next
-               :as leases}]
-           (if (seq available)
-             (assoc leases :seon.test-support/available (pop available))
-             (assoc leases :seon.test-support/next (inc next-id)))))
-        available (:seon.test-support/available before)]
-    (if (seq available)
-      (peek available)
-      ;; `pr-str` emits this keyword into every diagnostic that transports a
-      ;; live connection roster, and `clojure.edn/read-string` refuses a
-      ;; keyword whose name begins with a digit. The name must round-trip.
-      (keyword "seon.test-support.fixture"
-               (str "fixture-" (:seon.test-support/next before))))))
-
-(defn- release-branch!
-  [branch]
-  (swap! branch-leases update :seon.test-support/available conj branch)
-  nil)
-
 (defn- checked-fixture-result
   "Stop setup at its first flat refusal, naming it and retaining its data.
 
@@ -344,272 +313,38 @@
           true (assoc :seon.db/tx-data tx-data)))))
     report))
 
-(defn- close-base!
-  "Release one canonical base exactly once.
+(defn- held-handle
+  "The execution handle the agent entrance retains for `connection`, or nil.
 
-   A base is closed either by JVM shutdown or by retirement, and a retired base
-   must not be closed a second time from its own shutdown hook: the second
-   `d/delete-database` throws inside a hook, where nothing reports it."
-  [{::keys [configuration connection private-root closed cleanup-hook]}]
-  (when (or (nil? closed) (compare-and-set! closed false true))
-    (when cleanup-hook
-      (try
-        (.removeShutdownHook (Runtime/getRuntime) ^Thread cleanup-hook)
-        ;; Shutdown is already running: the hook is about to close this base
-        ;; itself, and the guard above makes that a no-op.
-        (catch IllegalStateException _ nil)))
-    (try
-      (try
-        (d/release connection)
-        (finally (d/delete-database configuration)))
-      (finally
-        (when private-root (delete-recursively! private-root)))))
-  nil)
+  `seon.cluster.agent/acquire-context!` keeps every handle it acquires in the
+  context state its environment carries; the connection's carried projection
+  state is that environment. No registry beside it is consulted."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/connection]]
+                  [:or :nil :seon.agent/execution-handle]]}
+  [connection]
+  (when connection
+    (let [environment (env/of {env/state-carrier
+                               (:seon.sci.eval/projection-state (meta connection))})]
+      (some (fn [[_ handle]]
+              (when (identical? connection (:seon.db/connection handle)) handle))
+            (some-> (:seon.agent/context-state environment) deref)))))
 
-(defn- create-base
-  "Open a private copy of the published store; never analyze source here."
-  [base]
-  (let [base (or base (System/getProperty "seon.test.published-base")
-                 (:seon.test.cache/base
-                  (cache/newest-base (System/getProperty "seon.test.source-root" ".")
-                                     (System/getProperty "seon.test.git-sha" "HEAD"))))
-        parent (doto (io/file "tmp" "fixture-bases") .mkdirs)
-        private-root (str (java.nio.file.Files/createTempDirectory
-                           (.toPath parent) "base-"
-                           (make-array java.nio.file.attribute.FileAttribute 0)))]
-    (try
-      (let [private-store (clone-directory! (io/file base "data" "store")
-                                             (io/file private-root "store"))
-            ;; Ordinary fixtures open and branch only from the published head.
-            ;; Its retained commit ancestry is export work proportional to the
-            ;; publication's whole history, not fixture acquisition work.
-            _ (cluster.export/reidentify-branches!
-               private-store #{source/current-branch})
-            source-configuration (store/datahike-configuration private-store)
-            ;; The worker owns this file-store copy. Datahike's tiered
-            ;; ready-store copies every backend key into memory on connect;
-            ;; ordinary file-store branches already share immutable roots.
-            configuration (-> source-configuration
-                              (dissoc :fuse-index-roots? :index-config)
-                              (assoc :branch source/current-branch))
-            connection (d/connect configuration)]
-        (try
-          (let [database @connection
-                projection (or (db/carried-projection database)
-                               (schema/projection-from-database
-                                database (or (schema/handed-projection) {})))
-                state (sci.eval/projection-state database projection)]
-            (db/carry-connection-projection-state! connection state)
-            {::configuration configuration
-             ::connection connection
-             ::closed (atom false)
-             ::private-root private-root
-             ::sci-context
-             (delay (sci.eval/cluster-ctx (db/db connection) connection state))})
-          (catch Throwable failure
-            (close-base! {::configuration configuration ::connection connection})
-            (throw failure))))
-      (catch Throwable failure
-        (delete-recursively! private-root)
-        (throw failure)))))
-
-(defprotocol Held
-  "Take and return a hold on a shared canonical base.
-
-   Datahike refuses to delete a branch under an active connection, so a base a
-   run still branches from cannot be closed under it. A hold is the one fact
-   that says so."
-  (acquire-base! [this]
-    "Return `{:seon.test-support/value base :seon.test-support/hold token}`.")
-  (release-base! [this held]
-    "Return a hold taken by `acquire-base!`, closing a retired base at zero."))
-
-(defn- adjust-holders
-  [state completion delta]
-  (swap!
-   state
-   (fn [current]
-     (-> current
-         (cond-> (identical? completion (::completion current))
-           (update ::holders (fnil + 0) delta))
-         (update ::retired
-                 (fn [retired]
-                   (mapv (fn [entry]
-                           (cond-> entry
-                             (identical? completion (::completion entry))
-                             (update ::holders (fnil + 0) delta)))
-                         retired)))))))
-
-(defn- retrying-base
-  "Share one daemon construction PER PUBLICATION KEY; retain successful values,
-   never failures.
-
-   `key-fn` names the publication a base built now would carry. When it differs
-   from the key the current base was built under, that base is RETIRED and a
-   new construction starts, so a converged development adoption is a cache miss
-   by construction and no lane ever rebuilds a base by hand. A retired base is
-   closed only after its last holder releases it, on a daemon thread, so a run
-   holding the old base finishes on it while a later run gets the new one and
-   no branch is deleted under an active connection.
-
-   `state` is DATA. Reloading this namespace must neither discard a realized
-   base nor keep an older namespace's construction code, so the process-wide
-   base keeps its state in a `defonce` atom and its behaviour in these Vars.
-
-   The one- and two-argument arities own a private state atom; the
-   one-argument arity keys nothing and behaves exactly as before."
-  {:malli/schema
-   [:function
-    [:=> [:cat :seon.instrument/callable] :seon.schema/value]
-    [:=> [:cat :seon.instrument/callable :seon.instrument/callable] :seon.schema/value]
-    [:=> [:cat :seon.call-preparation/state :seon.instrument/callable :seon.instrument/callable] :seon.schema/value]]}
-  ([construct] (retrying-base (atom {::retired []}) (constantly nil) construct))
-  ([key-fn construct] (retrying-base (atom {::retired []}) key-fn construct))
-  ([state key-fn construct]
-   (let [;; At most ONE construction runs at a time. A publication that
-         ;; advances while a construction is in flight supersedes it, and
-         ;; without this bound two lanes adopting minutes apart would put two
-         ;; full canonical populations on the machine at once. A superseded
-         ;; construction still completes, so every caller already waiting on it
-         ;; gets a base, and retirement closes it once it is realized.
-         construction-lock (Object.)
-         start!
-         (fn [completion publication]
-           (let [projection (schema/handed-projection)
-                 loader (ClassLoader/getSystemClassLoader)
-                 work
-                 (fn []
-                   (let [result
-                         (try
-                           (with-bindings {clojure.lang.Compiler/LOADER loader}
-                             (locking construction-lock
-                               (if projection
-                                 (schema/call-with-projection projection construct)
-                                 (construct))))
-                           (catch Throwable failure
-                             (.printStackTrace failure)
-                             (seon.error.refusal/diagnostic
-                              {:seon.test.run/unavailable true
-                               :seon.test.run/provenance-failure (str "Canonical fixture base construction failed: " (ex-message failure))
-                               :seon.error/at (java.util.Date.)
-                               :seon.error/layer :seon.test/fixture
-                               :seon.error/operation 'seon.test-support/create-base
-                               :seon.error/message (str "Canonical fixture base construction failed: "
-                                    (ex-message failure))
-                               :seon.error/throwable failure
-                               :seon.error/expected :constructed-base
-                               :seon.error/data (or (ex-data failure) {})})))]
-                     (if (:seon.test.run/unavailable result)
-                       (do (swap! state
-                                  (fn [current]
-                                    (cond-> current
-                                      (identical? completion (::completion current))
-                                      (dissoc ::completion ::key))))
-                           (deliver completion result))
-                       ;; The base carries the publication it was built from,
-                       ;; so a run can name its own coherence boundary.
-                       (deliver completion
-                                (assoc result :seon.test-support/publication-key
-                                       publication)))))]
-             (doto (Thread. ^Runnable work "seon-test-database-base")
-               (.setDaemon true)
-               (.setContextClassLoader loader)
-               (.start))))
-         sweep!
-         (fn []
-           (let [closable? (fn [entry]
-                             (and (zero? (::holders entry 0))
-                                  (realized? (::completion entry))))
-                 [before _] (swap-vals! state update ::retired
-                                        #(vec (remove closable? %)))
-                 closing (into []
-                               (comp (filter closable?)
-                                     (map (comp deref ::completion))
-                                     (remove :seon.test.run/unavailable))
-                               (::retired before))]
-             (when (seq closing)
-               (doto (Thread. ^Runnable #(run! close-base! closing)
-                              "seon-test-database-base-retire")
-                 (.setDaemon true)
-                 (.start)))))
-         entry!
-         (fn []
-           (let [publication (key-fn)
-                 completion
-                 (locking state
-                   (let [{current-key ::key completion ::completion} @state]
-                     (if (and completion (= publication current-key))
-                       completion
-                       (let [fresh (promise)]
-                         (swap! state
-                                (fn [current]
-                                  (cond-> (assoc current ::key publication
-                                                 ::completion fresh
-                                                 ::holders 0)
-                                    completion
-                                    (update ::retired conj
-                                            {::completion completion
-                                             ::holders (::holders current 0)}))))
-                         (start! fresh publication)
-                         fresh))))]
-             (sweep!)
-             completion))]
-     (reify
-       clojure.lang.IPending
-       (isRealized [_]
-         ;; A base built under a SUPERSEDED publication is not a realized base
-         ;; for this run: an observer that guards its deref with `realized?`
-         ;; (`seon.test.runner`'s drift snapshot does) must not be the caller
-         ;; that pays for the next construction.
-         (boolean (let [{publication ::key completion ::completion} @state]
-                    (and completion
-                         (= publication (key-fn))
-                         (realized? completion)))))
-       clojure.lang.IDeref
-       (deref [_] @(entry!))
-       Held
-       (acquire-base! [_]
-         (let [completion (entry!)]
-           ;; Register the hold BEFORE waiting: a key change between the
-           ;; comparison and the wait retires this completion, and the
-           ;; registration then lands on the retired entry, which is exactly
-           ;; what keeps it open under this run.
-           (adjust-holders state completion 1)
-           {:seon.test-support/hold completion
-            :seon.test-support/value @completion}))
-       (release-base! [_ held]
-         (when-let [completion (:seon.test-support/hold held)]
-           (adjust-holders state completion -1)
-           (sweep!))
-         nil)))))
-
-(defonce ^:private base-state
-  ;; The process-wide base's STATE, kept across reloads of this namespace.
-  (atom {::retired []}))
-
-(def ^:private database-base
-  ;; One successful base per PUBLICATION per JVM. A caller can stop waiting
-  ;; without interrupting construction; failed attempts report a typed value
-  ;; and the next call retries. A development adoption that advances
-  ;; `:current-src` is a miss, so an accreted arity is provable in process.
-  (retrying-base
-   base-state
-   publication-key
-   (fn []
-     (let [base (create-base (System/getProperty "seon.test.published-base"))
-           hook (Thread. ^Runnable #(close-base! base)
-                         "seon-test-database-base-cleanup")]
-       (.addShutdownHook (Runtime/getRuntime) hook)
-       (assoc base ::cleanup-hook hook)))))
-
-(def ^:private ^:dynamic *held-base*
-  "The canonical base value the ENCLOSING fixture holds.
-
-   `fork-cluster-ctx` must fork the ctx of the base this fixture's connection
-   actually branched from. Reaching for the current base instead would, at the
-   exact moment a development adoption advances the publication, fork a NEW
-   base's ctx over an OLD base's branch."
-  nil)
+(defn execution-handle
+  "The executing test's handle: the one held for `connection`, else for this
+  body's custody, else for the member whose SCI context arms this thread.
+  `seon.test/run` executes every body on a member branch the entrance
+  acquired and arms that member's context around the body."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/connection]] :seon.agent/execution-handle]}
+  [connection]
+  (or (held-handle connection)
+      (held-handle db/*conn*)
+      (held-handle (some-> (kernel/current-arm) :seon.sci.kernel/ctx env/of :seon.db/connection))
+      (throw (ex-info (str "The canonical fixture needs an executing test handle: run the "
+                           "test through seon.test/run, whose member branch the agent "
+                           "entrance acquired.")
+                      {:seon.error/operation 'seon.test-support/with-database
+                       :seon.error/expected :seon.agent/execution-handle
+                       :seon.error/offending (if db/*conn* :no-held-handle :no-custody)}))))
 
 (defn- seeded-cluster-name
   "The one cluster this fixture stood up, DERIVED, or nil when it seeded none."
@@ -621,8 +356,9 @@
       (first names))))
 
 (defn fork-cluster-ctx
-  "Pass the fixture base and optional cluster environment to the production fork.
-  Custody, projection and environment repointing belong to sci.eval."
+  "Fork the executing handle's context onto `connection` through the production fork.
+  Custody, projection and environment repointing belong to sci.eval; a named
+  cluster environment keeps the entrance's context state and held store."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/connection] :seon.sci.eval/ctx]
                   [:=> [:cat :seon.db/connection [:maybe :seon.boot/cluster-name]]
@@ -630,17 +366,21 @@
   ([connection]
    (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
   ([connection cluster-name]
-   (let [base-ctx @(::sci-context
-                    (checked-fixture-result (or *held-base* @database-base)))
+   (let [handle (execution-handle connection)
          database (db/db connection)
          projection-state (:seon.sci.eval/projection-state (meta database))]
      (sci.eval/fork-cluster-ctx
-      base-ctx database connection projection-state
+      (:seon.sci.eval/ctx handle) database connection projection-state
       (cond-> {}
         cluster-name
         (assoc :seon.env/environment
                (env/refuse-incomplete-environment!
-                (env/environment {:seon.boot/cluster-name cluster-name}))))))))
+                (env/environment
+                 (cond-> {:seon.boot/cluster-name cluster-name
+                          :seon.agent/context-state (:seon.agent/context-state handle)}
+                   (:seon.store/store handle)
+                   (assoc :seon.store/store (:seon.store/store handle)))))))))))
+
 
 (defn agent-value
   "Evaluate `source` at the boundary an AGENT actually calls, and return the
@@ -905,91 +645,83 @@
                    (pr-str (without-duplicate-error check))))))))
 
 (defn- run-database-body
-  [connection projection-state extra-schema body]
-  (db/carry-connection-projection-state! connection projection-state)
-  (schema/call-with-projection-state
-   projection-state
-   (fn []
-     (when (seq extra-schema)
-       (checked-fixture-result (db/transact! connection {:tx-data extra-schema})))
-     (body connection))))
+  "Call `body` with `connection` as its custody, under the projection the
+  connection carries: the fixture's writes are its own branch's work."
+  [connection extra-schema body]
+  (db/call-with-custody
+   {:seon.db/connection connection}
+   #(schema/call-with-projection-state
+     (:seon.sci.eval/projection-state (meta connection))
+     (fn []
+       (when (seq extra-schema)
+         (checked-fixture-result (db/transact! connection {:tx-data extra-schema})))
+       (body connection)))))
 
-(defn- with-fresh-database [database-id extra-schema options body]
-  ((requiring-resolve 'seon.test.runner/fixture-observation!)
-   'seon.test-support/with-fresh-database options)
-  ;; Store-global tests copy immutable published data into a distinct store.
-  ;; They never reconstruct that data by indexing the program again.
-  (let [base (create-base nil)]
+(defn- with-fresh-database
+  "Run `body` on an independent, empty in-memory store carrying the executing
+  program's installed attribute schema. Blob keys, roster and GC are
+  store-global, so a subject over them needs a store, not a branch; its
+  program facts are the test's own writes."
+  [database-id extra-schema body]
+  (let [handle (execution-handle db/*conn*)
+        source (db/db (:seon.db/connection handle))
+        source-config (:config source)
+        configuration (cond-> {:store {:backend :memory :id (or database-id (random-uuid))}
+                               :schema-flexibility (:schema-flexibility source-config)
+                               :keep-history? (:keep-history? source-config)}
+                        (contains? source-config :attribute-refs?)
+                        (assoc :attribute-refs? (:attribute-refs? source-config)))
+        attributes (into []
+                         (keep (fn [[ident attribute]]
+                                 (when (and (keyword? ident) (namespace ident)
+                                            (not (#{"db" "db.install" "db.type" "db.cardinality"
+                                                    "db.unique" "db.part"} (namespace ident))))
+                                   (dissoc attribute :db/id))))
+                         (d/schema source))
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
     (try
-      ;; fork-database reads :db, regardless of source-config :branch
-      ;; (Datahike versioning.cljc:620). This private store has no :db writer.
-      (d/force-branch! @(::connection base) :db #{:current-src})
-      (let [configuration
-            (d/fork-database (::configuration base)
-                             {:store {:backend :memory
-                                      :id (or database-id (random-uuid))}})
-            connection (d/connect configuration)]
-        (try
-          (let [projection (db/carried-projection (db/db (::connection base)))
-                state (sci.eval/projection-state @connection projection)]
-            (binding [*held-base* base]
-              (run-database-body connection state extra-schema body)))
-          (finally
-            (d/release connection)
-            (d/delete-database configuration))))
-      (finally (close-base! base)))))
+      (d/transact connection attributes)
+      (db/carry-connection-projection-state!
+       connection (sci.eval/projection-state @connection (db/carried-projection source)))
+      (run-database-body connection extra-schema body)
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))
 
 (defn- with-branched-database
+  "Run `body` on a fresh branch off the commit the executing handle was
+  acquired at, acquired and released through the agent entrance: an isolated
+  agent for one fixture. A nested fixture never sees its parent's writes."
   [extra-schema body]
-  ;; HOLD the base across the whole fixture. A development adoption that lands
-  ;; mid-run retires this base rather than closing it, so the branch below is
-  ;; never deleted under its own active connection, and the NEXT fixture gets
-  ;; the base built from the new publication.
-  (let [held (acquire-base! database-base)
-        base (:seon.test-support/value held)
-        {configuration :seon.test-support/configuration
-         base-connection :seon.test-support/connection} (try
-                                        (checked-fixture-result base)
-                                        (catch Throwable failure
-                                          (release-base! database-base held)
-                                          (throw failure)))
-        base-projection (db/carried-projection (db/db base-connection))
-        branch (acquire-branch!)]
+  (let [parent (execution-handle db/*conn*)
+        handle (agent/acquire-context!
+                parent nil {:seon.agent/isolate? true
+                            :seon.cluster.registry/from (:seon.source/commit-id parent)})]
     (try
-      ;; Fork the sealed base head in the worker-owned file store.
-      (d/branch! base-connection (get configuration :branch :db) branch)
-      (let [branch-configuration (assoc configuration :branch branch)
-            connection (schema/call-with-projection
-                        base-projection #(d/connect branch-configuration))]
-        (try
-          (let [state (sci.eval/projection-state @connection base-projection)]
-            (binding [*held-base* base]
-              (run-database-body connection state extra-schema body)))
-          (finally (d/release connection))))
-      (finally
-        ;; Datahike refuses deletion while a child connection remains active.
-        ;; Return the name only after successful retirement; a teardown failure
-        ;; quarantines the lease rather than reusing live mutable state.
-        (when (contains? (d/branches base-connection) branch)
-          (d/delete-branch! base-connection branch))
-        (release-branch! branch)
-        (release-base! database-base held)))))
+      (run-database-body (:seon.db/connection handle) extra-schema body)
+      (finally (agent/release-context! handle)))))
 
 (defn with-database
-  "Run `body` on an isolated branch of the published test database.
+  "Run `body` on an isolated branch of the executing test's database.
 
-   The worker opens the published population without indexing source.
-   Every invocation gets its own branch, connection, datoms, history and writer.
+   Every invocation acquires its own branch, connection, datoms, history and
+   writer through `seon.cluster.agent/acquire-context!` off the commit the
+   executing handle was acquired at, runs the body under that connection's
+   custody, and releases it (unlinked) through `release-context!`. It
+   never copies a store and never indexes source. It needs the handle that
+   `seon.test/run` acquired for the member; without one it refuses by name.
    `:seon.test-support/extra-schema` installs synthetic declarations.
 
-   `:seon.test-support/database-id` preserves physical-store identity through
-   the isolated store path. Store-global blob tests request
-   `:seon.test-support/fresh-store?` because blob keys are outside branch facts."
+   `:seon.test-support/fresh-store?` (or `:seon.test-support/database-id`)
+   supplies an independent empty in-memory store with the installed attribute
+   schema, for store-global subjects such as blob keys."
   ([body] (with-database {} body))
-  ([{:seon.test-support/keys [database-id extra-schema fresh-store?], :as options} body]
+  ([{:seon.test-support/keys [database-id extra-schema fresh-store?]} body]
     (if (or database-id fresh-store?)
-      (with-fresh-database database-id extra-schema options body)
+      (with-fresh-database database-id extra-schema body)
       (with-branched-database extra-schema body))))
+
 
 (defn turn-closed-at
   "The instant a turn closed, read THROUGH its closing transaction ref.

@@ -1,4 +1,11 @@
 {:my.test/check-request
- [:map {:description "The agent protocol receives its acquired program context and writer through call preparation; test options are validated by seon.test/check."}
+ [:map {:description "The agent protocol receives its acquired program context and writer through call preparation; the changed identities select the reaching tests."}
   [:seon.db/connection :seon.db/connection]
+  [:my.program/context :my.program/context]
+  [:seon.test/changed {:optional true} :seon.test/changed]]
+ :my.test/run-request
+ [:map {:description "My namespace's tests: call preparation supplies my acquired context, writer, database and identity."}
+  [:seon.db/connection :seon.db/connection]
+  [:seon.db/db :seon.db/database-value]
+  [:seon.agent/id :seon.agent/id]
   [:my.program/context :my.program/context]]}

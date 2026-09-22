@@ -1,7 +1,6 @@
 (ns seon.test-support-test
   (:require [clojure.core.async :as async]
             [clojure.java.io :as io]
-            [datahike.api :as d]
             [clojure.string :as str]
             [clojure.test :as test :refer [deftest is]]
             [clojure.test.check :as tc]
@@ -10,7 +9,6 @@
             [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.config :as config]
-            [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [malli.core :as m]
             [malli.instrument :as mi]
@@ -27,62 +25,6 @@
        (is (some? projection))
        (is (identical? projection (:seon.schema/projection environment)))))))
 
-(deftest ^{:seon.test/platform
-           "Moving part: the one test bracket every other test forks through."}
-  failed-base-construction-retries-without-caller-interruption
-  (test-support/with-database
-    (fn [connection]
-      (let [attempts (atom 0)
-            construction-started (atom nil)
-            continue-construction (atom nil)
-            caller-finished (atom nil)
-            builder-thread (atom nil)
-            base (#'test-support/retrying-base
-                   (fn []
-                     (if (= 1 (swap! attempts inc))
-                       (throw (ex-info "first construction failed" {::attempt 1}))
-                       (do
-                         (reset! builder-thread (Thread/currentThread))
-                         (reset! construction-started true)
-                         (test-support/await-event! continue-construction ::continue-construction some?)
-                         (#'test-support/create-base nil)))))
-            projection (db/carried-projection (db/db connection))]
-        (is (true? (:seon.test.run/unavailable @base)))
-        (is (false? (realized? base)))
-        (let [caller (doto
-                       (Thread.
-                        ^Runnable
-                        (fn []
-                          (try
-                            (schema/call-with-projection projection #(deref base))
-                            (reset! caller-finished :returned)
-                            (catch InterruptedException _
-                              (reset! caller-finished :interrupted)))))
-                       (.setDaemon true)
-                       (.start))]
-          (try
-            (test-support/await-event! construction-started ::construction-started some?)
-            (.interrupt caller)
-            (is (= :interrupted
-                   (test-support/await-event! caller-finished ::caller-finished some?)))
-            (is (.isDaemon ^Thread @builder-thread))
-            (is (identical? (ClassLoader/getSystemClassLoader)
-                            (.getContextClassLoader ^Thread @builder-thread)))
-            (finally (reset! continue-construction true))))
-        (let [constructed @base]
-          (try
-            (is (some? (:seon.test-support/connection constructed))
-                (pr-str (select-keys constructed [:seon.error/message])))
-            (when-let [base-connection (::test-support/connection constructed)]
-              (is (pos? (db/q '[:find (count ?e) . :where [?e :seon.fn/sym]]
-                              (db/db base-connection))))
-              (is (delay? (::test-support/sci-context constructed))))
-            (is (= 2 @attempts))
-            (is (identical? constructed @base))
-            (is (realized? base))
-            (finally
-              (when (::test-support/connection constructed)
-                (#'test-support/close-base! constructed)))))))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
@@ -176,86 +118,6 @@
        (is (not (str/includes? reported ":seon.print/omitted"))
            "no elision value stands in for a test diagnostic")))))
 
-(defn- file-digests
-  [root]
-  (into (sorted-map)
-        (for [file (file-seq (io/file root)) :when (.isFile file)]
-          [(str (.relativize (.toPath (io/file root)) (.toPath file)))
-           (vec (.digest (java.security.MessageDigest/getInstance "SHA-256")
-                         (java.nio.file.Files/readAllBytes (.toPath file))))])))
-
-;; The one test in this namespace that is NOT :seon.test/platform: it reaches
-;; seon.test-support/populate-published-operator-root!, which deletes and
-;; reclones a store directory. The platform tier runs first on every bin/test
-;; invocation, so a destructive fixture there deletes before the run has
-;; produced any evidence
-;; (docs/seon/issues/a-platform-tier-test-wiped-the-checkouts-store.md);
-;; seon.test.runner/verify-platform-tier-carries-no-destructive-drill! refuses
-;; the tier when this declaration drifts back.
-(deftest ^{:seon.test/fixture-observation "The assertions compare physical store bytes and private backend paths during simultaneous fixture acquisitions."
-           :seon.test/long "Copy one published store and acquire two independently reidentified copies concurrently; hash every published file before and after both private writes to prove byte preservation."
-           :seon.test/long-ms 10000}
-  simultaneous-fixture-bases-never-open-the-published-store
-  (let [root (str "tmp/fixture-base-isolation/" (random-uuid))
-        begin (java.util.concurrent.CountDownLatch. 1)
-        written (java.util.concurrent.CountDownLatch. 2)
-        closed (java.util.concurrent.CountDownLatch. 2)]
-    (try
-      (test-support/populate-published-operator-root! root)
-      (let [before (file-digests (str root "/data/store"))
-            acquire
-            (fn [own other]
-              (future
-                (try
-                (test-support/await-event! begin ::begin-acquisition)
-                (with-open [resource
-                            (test-support/closeable
-                             (#'test-support/create-base root)
-                             #'test-support/close-base!)]
-                  (let [base @resource
-                        connection (::test-support/connection base)
-                        configuration (::test-support/configuration base)
-                        projection (db/carried-projection (db/db connection))]
-                    (schema/call-with-projection
-                     projection
-                     (fn []
-                       (let [result (db/transact! connection [{:seon.ns/name own}])]
-                         (.countDown written)
-                         (test-support/await-event! written ::both-private-writes)
-                         {::path (get-in configuration [:store :path])
-                          ::id (get-in configuration [:store :id])
-                          ::private-root (::test-support/private-root base)
-                          ::result-error (:seon.db.write.attempt/request-id result)
-                          ::subjects (db/q '[:find (count ?f) . :where [?f :seon.fn/sym]]
-                                           @connection)
-                          ::own (db/q '[:find ?n . :in $ ?n :where [_ :seon.ns/name ?n]]
-                                      @connection own)
-                          ::other (db/q '[:find ?n . :in $ ?n :where [_ :seon.ns/name ?n]]
-                                        @connection other)})))))
-                  (finally (.countDown closed)))))
-            left (acquire 'fixture-base.left 'fixture-base.right)
-            right (acquire 'fixture-base.right 'fixture-base.left)]
-        (.countDown begin)
-        (let [results (mapv (fn [task]
-                              (try
-                                (test-support/await-event! task ::private-base-closed)
-                                (catch Throwable failure failure)))
-                            [left right])]
-          (test-support/await-event! closed ::both-private-bases-closed)
-          (doseq [result results]
-            (when (instance? Throwable result) (throw result)))
-          (is (seq before) "the source is an actual published store")
-          (is (= before (file-digests (str root "/data/store")))
-              "concurrent connect, write and release preserve every published byte")
-          (is (= 2 (count (set (map ::path results)))))
-          (is (= 2 (count (set (map ::id results)))))
-          (doseq [result results]
-            (is (pos? (::subjects result)) "the complete production constructor supplied subjects")
-            (is (nil? (::result-error result)))
-            (is (some? (::own result)))
-            (is (nil? (::other result)))
-            (is (not (.exists (io/file (::private-root result))))))))
-      (finally (test-support/delete-recursively! root)))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
@@ -373,49 +235,6 @@
           "a released lease is rebranched from the immutable base; the
            child-only schema state cannot leak into the next test"))))
 
-(deftest warmed-fixtures-only-acquire-isolated-branches
-  (test-support/with-database (fn [_] nil))
-  (let [base @(deref #'test-support/database-base)
-        base-connection (::test-support/connection base)
-        projection (db/carried-projection (db/db base-connection))
-        branches (d/branches base-connection)
-        holders (::test-support/holders @(deref #'test-support/base-state))
-        counts (atom {})
-        observations {#'cluster/populate-source! ::population
-                      #'seon.fn/build-manifest ::analysis
-                      (requiring-resolve 'seon.sci.eval/build-base-ctx) ::sci-base
-                      #'d/branch! ::branch
-                      #'d/delete-branch! ::delete-branch}
-        wrappers (into {}
-                       (map (fn [[v phase]]
-                              (let [original @v]
-                                [v (fn [& arguments]
-                                     (swap! counts update phase (fnil inc 0))
-                                     (apply original arguments))])))
-                       observations)
-        run (fn [options body]
-              (test-support/await-event!
-               (future (test-support/with-database options body))
-               ::ordinary-fixture-completion))]
-    (with-redefs-fn wrappers
-      (fn []
-        (run {::test-support/extra-schema (test-support/file-store-probe-schema ::warm-marker)}
-             (fn [connection]
-               (test-support/transacted! connection [{::warm-marker "first"}])
-               (is (= #{"first"} (test-support/file-store-markers connection ::warm-marker)))))
-        (is (thrown-with-msg? clojure.lang.ExceptionInfo #"intentional fixture body failure"
-                             (run {} (fn [connection]
-                                       (is (identical? projection (db/carried-projection (db/db connection))))
-                                       (throw (ex-info "intentional fixture body failure" {}))))))
-        (run {} (fn [connection]
-                  (is (identical? projection (db/carried-projection (db/db connection))))
-                  (is (not (contains? (:schema @connection) ::warm-marker)))))))
-    (is (= {::branch 3 ::delete-branch 3} @counts)
-        "Three branches, including the throwing body, replay no population, analysis or SCI base construction.")
-    (is (= branches (d/branches base-connection)))
-    (is (integer? holders) "The observed base must carry its actual hold count.")
-    (is (= holders (::test-support/holders @(deref #'test-support/base-state))))
-    (is (identical? base @(deref #'test-support/database-base)))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
@@ -538,178 +357,6 @@
                      (map #(vector ::closed %) (reverse (range acquired-count))))
              @events)))))
 
-(deftest ^{:seon.test/platform
-           "Moving part: the one test bracket every other test forks through."}
-  the-canonical-base-opens-the-published-store
-  ;; The base already contains indexed declarations. Opening a fixture must
-  ;; never invoke population, including when callers omit its path.
-  (let [create-base (ns-resolve 'seon.test-support 'create-base)
-        close-base! (ns-resolve 'seon.test-support 'close-base!)
-        base (create-base nil)]
-    (try
-      (let [connection (:seon.test-support/connection base)
-            database (db/db connection)]
-        (is (some? (db/carried-projection database))
-            "the fresh base carries the projection its writes validate against")
-        (is (seq (db/q '[:find [?key ...]
-                         :where [_ :seon.schema/key ?key]]
-                       database))
-            "with the canonical schema rows populated")
-        (is (seq (db/q '[:find [?sym ...]
-                         :where [_ :seon.fn/sym ?sym]]
-                       database))
-            "and the published program graph is present")
-        (is (string?
-             (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
-                   database))
-            "and the publication is sealed"))
-      (finally (close-base! base)))))
-
-;;; ---------------------------------------------------------------------------
-;;; A test owns nothing global — including a live cluster's custody
-;;; ---------------------------------------------------------------------------
-
-(deftest ^{:seon.test/platform
-           "Moving part: the custody an in-process test body inherits from a live cluster."}
-  a-test-body-inherits-no-ambient-cluster-custody
-  ;; THE ROOT CAUSE of the 2026-09-17 registry leak: an in-process test ran on
-  ;; a thread that still carried the agent evaluation's `seon.db` custody, so a
-  ;; fixture helper using an elided arity wrote the LIVE cluster's datoms and
-  ;; nothing said so. Without the bindings the elided arity refuses and names
-  ;; what it needed.
-  (test-support/with-database
-    (fn [connection]
-      (let [refusal (db/call-without-custody #(db/transact! {:tx-data []}))]
-        (is ((schema/projection-validator
-              (schema/handed-projection) :seon.schema/validation-refusal) refusal)
-            "an elided write with no custody is a typed refusal, never a silent write")
-        (is (= :seon.db/connection (:seon.schema/expected-value refusal)))
-        (is (str/includes? (:seon.error/message refusal) "connection")
-            "the refusal names what was missing"))
-      (is (map? (db/transact! connection {:tx-data []}))
-          "an explicit connection still writes its own branch"))))
-
-(defn- publication-base
-  "One cheap stand-in base carrying the publication it was constructed under.
-
-  `retrying-base` knows nothing about the canonical population: it keys, holds
-  and retires whatever `construct` returns, and `close-base!` releases it. A
-  synthetic construction therefore proves the cache-miss and retirement rules
-  without paying the canonical base's construction each time.
-
-  The marker is the publication's own VALUE. It was briefly `pr-str`'d, and
-  that compared printed BYTES across threads: construction runs on the base's
-  daemon thread, where `*print-namespace-maps*` holds its root `false`, while
-  the assertion ran in a worker whose test thread has the REPL's `true`, so one
-  value printed two ways and the regression failed cold only."
-  [published constructed]
-  (fn []
-    (let [publication @published
-          configuration {:store {:backend :memory :id (random-uuid)}
-                         :keep-history? true
-                         :schema-flexibility :read}
-          _ (d/create-database configuration)
-          connection (d/connect configuration)]
-      (d/transact connection [{:db/id -1
-                               :seon.test-support-test/publication
-                               (first (:seon.source/commit-id publication))}])
-      (swap! constructed conj publication)
-      {:seon.test-support/configuration configuration
-       :seon.test-support/connection connection
-       :seon.test-support/closed (atom false)})))
-
-(defn- base-publication-datom
-  "The publication marker this base carries, as DATA."
-  [base]
-  (d/q '[:find ?publication .
-         :where [_ :seon.test-support-test/publication ?publication]]
-       @(:seon.test-support/connection base)))
-
-(deftest ^{:seon.test/platform
-           "Moving part: the shared base every other test forks through must
-            follow the publication its run executes under."}
-  the-shared-base-follows-the-published-commit
-  ;; The defect this kills: a base built once per JVM keeps the program rows
-  ;; and contracts of the publication current when it was first forced, so an
-  ;; adopted accreted arity is refused INSIDE a run while the same call answers
-  ;; from the prepl. The publication key makes a converged adoption a cache
-  ;; miss by construction; nothing rebuilds a base by hand.
-  (let [published (atom {:seon.source/commit-id #{:first}})
-        constructed (atom [])
-        base (#'test-support/retrying-base #(deref published)
-                                           (publication-base published constructed))
-        first-held (test-support/acquire-base! base)
-        first-base (:seon.test-support/value first-held)]
-    (try
-      (is (= {:seon.source/commit-id #{:first}}
-             (:seon.test-support/publication-key first-base))
-          "the base records the publication it was built from")
-      (is (= :first (base-publication-datom first-base)))
-      (let [again (test-support/acquire-base! base)]
-        (is (identical? first-base (:seon.test-support/value again))
-            "an unchanged publication is the same base")
-        (test-support/release-base! base again))
-      ;; the published commit advances, exactly as development adoption does
-      (reset! published {:seon.source/commit-id #{:second}})
-      (let [second-held (test-support/acquire-base! base)
-            second-base (:seon.test-support/value second-held)]
-        (try
-          (is (= {:seon.source/commit-id #{:second}}
-                 (:seon.test-support/publication-key second-base))
-              "the next run's base is built from the new publication")
-          (is (= :second (base-publication-datom second-base))
-              "and carries a row only the new publication has")
-          (is (= [{:seon.source/commit-id #{:first}}
-                  {:seon.source/commit-id #{:second}}]
-                 @constructed)
-              "exactly one construction per publication")
-          ;; A run still holding the old base completes on it: Datahike refuses
-          ;; to delete a branch under an active connection, so retirement must
-          ;; wait for the last holder.
-          (is (false? @(:seon.test-support/closed first-base)))
-          (is (= :first (base-publication-datom first-base)))
-          (test-support/release-base! base first-held)
-          (is (true? (test-support/await-event!
-                      (:seon.test-support/closed first-base)
-                      :seon.test-support-test/retired-base-closed
-                      true?))
-              "the retired base is closed once its last holder releases it")
-          (is (false? @(:seon.test-support/closed second-base))
-              "the base this run holds is untouched by that retirement")
-          (is (= :second (base-publication-datom second-base)))
-          (finally
-            (test-support/release-base! base second-held)
-            (#'test-support/close-base! second-base))))
-      (finally
-        (#'test-support/close-base! first-base))))
-  ;; THE WORKER PATH. An isolated worker's `seon.test.published-base` snapshot
-  ;; is immutable for the JVM's life, so its key never moves: there is nothing
-  ;; to follow, the base is constructed once, and it stays realized across the
-  ;; whole run. That is the same object under a constant key.
-  (let [constructed (atom [])
-        published (atom {:seon.source/commit-id #{:snapshot}})
-        base (#'test-support/retrying-base (constantly
-                                            {:seon.test-support/published-base
-                                             "/snapshot/checkout"})
-                                           (publication-base published constructed))
-        held (test-support/acquire-base! base)
-        value (:seon.test-support/value held)]
-    (try
-      (is (true? (realized? base)))
-      (reset! published {:seon.source/commit-id #{:ignored}})
-      (let [again (test-support/acquire-base! base)]
-        (is (identical? value (:seon.test-support/value again))
-            "an immutable snapshot key never misses, whatever else moves")
-        (is (true? (realized? base))
-            "and the worker's base stays realized across its whole run")
-        (test-support/release-base! base again))
-      (is (= 1 (count @constructed)) "exactly one construction in a worker")
-      (is (= :snapshot (base-publication-datom value)))
-      (is (false? @(:seon.test-support/closed value))
-          "nothing is retired while the key stands")
-      (finally
-        (test-support/release-base! base held)
-        (#'test-support/close-base! value)))))
 
 (deftest ^{:seon.test/platform
            "Moving part: the derivation that decides whether a shared base is

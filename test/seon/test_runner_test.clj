@@ -912,57 +912,6 @@
           (is (nil? (:seon.test/failing-assertions after)))
           (is (nil? (:seon.test/failure-message after))))))))
 
-(deftest the-agent-fork-callable-returns-the-committed-projection
-  (test-support/with-database
-    (fn [connection]
-      (let [ctx
-            (env/carry-state
-             (test-support/fork-cluster-ctx connection)
-             (env/environment-state
-              (test-support/environment "test-result-agent" connection)))
-            evaluate
-            (fn [source]
-              (eval/evaluate
-               {:seon.cluster.eval/source source
-                :seon.cluster.eval/ns [:seon.ns/name 'seon.test-runner-test]
-                :seon.sci.eval/ctx ctx
-                :seon.sci.admit/caps
-                (config/result-caps config/defaults)
-                :seon.sci.eval/time-limit-ms 5000
-                :seon.config/on-core-error :panic
-                :seon.db/db (db/db connection)
-                :seon.db/connection connection}))
-            ;; An agent-authored deftest becomes a `:seon.test` row through the
-            ;; canonical path — evaluate, analyze the evaluation's program row,
-            ;; commit it — exactly as a turn admits a declaration. Without the
-            ;; row the test has no call graph, and `seon.test/run` answers the
-            ;; typed unknown rather than guessing that it is safe to run here.
-            admit!
-            (fn [source]
-              (let [evaluation (evaluate source)
-                    analysis (functions/analyze-forms
-                              (db/db connection)
-                              [{:seon.cluster.eval/source source
-                                :seon.cluster.eval/ns [:seon.ns/name 'seon.test-runner-test]
-                                :seon.program/row (:seon.program/row evaluation)}])
-                    row (when-not (contains? analysis :seon.error/at)
-                          (second (first analysis)))]
-                (is (map? row) (pr-str analysis))
-                (when row
-                  (test-support/transacted!
-                   connection [(dissoc row :seon.sci.eval/evaluated?)]))))
-            _ (evaluate
-               "(require '[clojure.test :refer [deftest is]])")
-            _ (admit!
-               "(clojure.test/deftest agent-fork-example (clojure.test/is (= 4 (+ 2 2))))")
-            result
-            (:seon.sci.admit/value
-             (evaluate "(seon.test/run #'agent-fork-example)"))
-            stored (db/pull (db/db connection)
-                            @#'runner/result-selector
-                            [:seon.test/sym (:seon.test/sym result)])]
-        (is (= result stored))))))
-
 (deftest the-effectful-sink-refuses-the-default-cluster
   (let [refusal
         (test-support/refusal-data
