@@ -5,7 +5,7 @@
   Repeated arming preserves unchanged wrappers; teardown cannot remove them. Changed roots
   or contract declarations are armed on the next apply!.
   Compiled validators belong to the immutable projection that defines them.
-  Host calls without cluster custody use the packaged JVM program captured at
+  Host calls without cluster custody use the supplied program captured at
   arming; they never consult Malli's global registry."
   (:require [seon.error.refusal]
             [clojure.edn :as edn]
@@ -626,18 +626,20 @@
    (fn []
      (let [contract (get (:seon.schema.projection/function-contracts projection)
                          function-symbol authored)
-           bound (bind-contract-predicates
-                  projection
-                  ((mi/-f->original schema/compilable-form)
-                   contract
-                   ((mi/-f->original schema/predicate-functions-in) projection)))
+           retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
+           bound (when-not retained
+                   (bind-contract-predicates
+                    projection
+                    ((mi/-f->original schema/compilable-form)
+                     contract
+                     ((mi/-f->original schema/predicate-functions-in) projection))))
            caps (assoc caps
                        :seon.config.eval.result/max-bytes
                        (:seon.config.error/max-evidence-bytes policy))
            options {:registry (mr/composite-registry
                                (:seon.schema.projection/registry projection)
                                (mr/var-registry))}
-           compiled (m/schema bound options)
+           compiled (or retained (m/schema bound options))
            arities (mapv m/-function-info (m/-function-schema-arities compiled))
            refusal? ((mi/-f->original schema/projection-cache-value)
                      projection ::refusal-validator
@@ -779,9 +781,10 @@
           :seon.error.evidence/value (:seon.error/member request)}))
 
 (defn apply!
-  "Arm loaded Vars whose contract or referenced declarations changed.
-  Compare each wrapper's captured definitions with the supplied projection.
-  Unrelated declaration changes preserve wrapper identity.
+  "Arm only the supplied changed function identities on adoption.
+  A missing changed-identities member collects the complete loaded program.
+  An identity without a retained contract is disarmed on adoption.
+  Unrelated contracts are neither inspected nor re-armed.
 
   Host wrappers capture the supplied disposition and recording operation at
   arm time. Calls validate through their supplied projection or the captured
@@ -793,7 +796,8 @@
     caps :seon.sci.admit/caps
     max-evidence-bytes :seon.config.error/max-evidence-bytes
     commit-fault! :seon.flow/commit-fault!
-    supplied-projection :seon.schema/projection}]
+    supplied-projection :seon.schema/projection
+    :as request}]
   (cond
     (and (= :record mode) (not (fn? commit-fault!)))
     (registration-error 'seon.instrument/apply!
@@ -833,13 +837,32 @@
                                   (:seon.config.error/max-evidence-bytes defaults))}
                        (and (= :record mode) commit-fault!)
                        (assoc :seon.flow/commit-fault! commit-fault!))
-              contracts (collect-contracts! caps)
-              pending (remove (fn [[candidate authored]]
-                                (current-wrapper? candidate authored projection @candidate policy))
-                              contracts)
-              bootstrap (when (seq pending)
-                          ((mi/-f->original schema/declaration-projection)
-                           (schema.edn/packaged-forms)))]
+              changed (find request :seon.instrument/changed-identities)
+              candidates (when changed
+                           (into #{}
+                                 (keep (fn [[_ function-symbol]]
+                                         (when (find-ns (symbol (namespace function-symbol)))
+                                           (find-var function-symbol))))
+                                 (val changed)))
+              contracts (if changed
+                          (into {}
+                                (keep (fn [candidate]
+                                        (when (and (bound? candidate)
+                                                   (not (primitive-fn? @candidate))
+                                                   (mr/schema (:seon.schema.projection/registry projection)
+                                                              (var-symbol candidate)))
+                                          (when-let [authored (mi/-schema candidate)]
+                                            [candidate authored]))))
+                                candidates)
+                          (collect-contracts! caps))
+              pending (if changed
+                        contracts
+                        (remove (fn [[candidate authored]]
+                                  (current-wrapper? candidate authored projection @candidate policy))
+                                contracts))]
+          (doseq [candidate candidates
+                  :when (and (bound? candidate) (not (find contracts candidate)))]
+            (alter-var-root candidate mi/-f->original))
           (doseq [[candidate authored] pending]
             (try
               (binding [*compiling-contract* true]
@@ -849,7 +872,8 @@
                 (let [data (registration-cause-data failure)
                       diagnostic
                       (registration-error (var-symbol candidate)
-                       {:seon.error/message "The loaded function contract cannot compile."
+                       {:seon.error/message (str "The loaded function contract " (var-symbol candidate)
+                                                " cannot compile: " (ex-message failure))
                         :seon.error/layer :instrumentation
                         :seon.error/operation 'seon.instrument/apply!
                         :seon.error/expected authored
@@ -858,7 +882,8 @@
                         :seon.error/member (var-symbol candidate)})]
                   (throw (ex-info (:seon.error/message diagnostic)
                                   diagnostic failure)))))
-            (arm-var! candidate authored projection bootstrap caps policy))
+            (when changed (alter-var-root candidate mi/-f->original))
+            (arm-var! candidate authored projection projection caps policy))
           {:seon.instrument/registered (count contracts)
            :seon.instrument/instrumented (count (instrumented))})))))
 

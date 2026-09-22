@@ -22,8 +22,12 @@
                   :fn [:qualified-symbol {:seon.db/index true :description "The observed function identity, including historical fault attribution. It never requires or creates a definition row."}],
                   :instrumented [:int {:min 0}],
                   :registered [:int {:min 0}],
+                  :changed-identities [:set [:tuple [:= :seon.fn/sym] :qualified-symbol]],
                   :request
                   [:map
+                   [:seon.instrument/changed-identities
+                    {:optional true}
+                    :seon.instrument/changed-identities]
                    [:seon.config/on-core-error
                     :seon.config/on-core-error]
                    [:seon.schema/projection

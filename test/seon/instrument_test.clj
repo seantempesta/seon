@@ -576,26 +576,18 @@
                     :seon.config.eval.result/max-collection 4
                     :seon.config.eval.result/max-string 32
                     :seon.config.eval.result/max-nodes 64)]
-    (try
-      (instrument/apply! {:seon.config/on-core-error :panic
-                          :seon.sci.admit/caps caps})
+    (doseq [policy [{:seon.sci.admit/caps caps} {}]]
+      (instrument/apply!
+       (merge {:seon.config/on-core-error :panic
+               :seon.schema/projection (schema/handed-projection)
+               :seon.instrument/changed-identities #{[:seon.fn/sym 'seon.error/value]}}
+              policy))
       (let [data (try (error/value "not a fact")
                       (catch Exception thrown (ex-data thrown)))]
-        (is (= ["not a fact"]
-               (:seon.error/offending data))
-            "arguments remain bounded ordinary data, never a printed value")
-        (is (= :seon.error/fact
-               (:seon.error/expected data)))
+        (is (= ["not a fact"] (:seon.error/offending data)))
+        (is (= :seon.error/fact (:seon.error/expected data)))
         (is (nil? (::instrument/args (:seon.error/data data)))
-            "semantic evidence is not duplicated as serialized arguments"))
-      (finally (instrument/remove!))))
-  (instrumented!
-   (fn [_]
-     (let [data (try (error/value "not a fact")
-                     (catch Exception thrown (ex-data thrown)))]
-       (is (= ["not a fact"]
-              (:seon.error/offending data))
-           "re-arming without caps cannot replace the shared reporter")))))
+            "semantic evidence is not duplicated as serialized arguments")))))
 
 (deftest arglist-lookup-failures-retain-their-cause
   (let [lookup (#'instrument/diagnostic-arglists 'unqualified)]
@@ -621,7 +613,14 @@
                     :seon.config.eval.result/max-nodes 1024)]
     (try
       (instrument/apply! {:seon.config/on-core-error :panic
-                          :seon.sci.admit/caps caps})
+                          :seon.sci.admit/caps caps
+                          :seon.instrument/changed-identities
+                          #{[:seon.fn/sym 'seon.instrument-test/declared-map-input]}
+                          :seon.schema/projection
+                          (schema/projection-with-function-contract
+                           (schema/handed-projection) 'seon.instrument-test/declared-map-input
+                           (:malli/schema (meta #'declared-map-input))
+                           {:seon.schema.admission/source :core})})
       (let [failure
             (try
               (declared-map-input
@@ -777,25 +776,32 @@
    (fn []
      (let [names [(gensym "policy-first-") (gensym "policy-second-")]
            candidates (mapv #(intern 'seon.instrument-test % identity) names)
-           projection (schema/handed-projection)
+           symbols (mapv #(symbol "seon.instrument-test" (str %)) names)
+           identities (set (map #(vector :seon.fn/sym %) symbols))
+           projection (reduce #(schema/projection-with-function-contract
+                                %1 %2 [:=> [:cat :int] :int]
+                                {:seon.schema.admission/source :core})
+                              (schema/handed-projection) symbols)
            defaults config/defaults]
        (try
          (doseq [candidate candidates]
            (alter-meta! candidate assoc :malli/schema [:=> [:cat :int] :int]))
            (instrument/apply! {:seon.config/on-core-error :panic
-                               :seon.schema/projection projection})
+                               :seon.schema/projection projection
+                               :seon.instrument/changed-identities identities})
            (let [roots (mapv deref candidates)
                  policy (:seon.instrument/policy (meta (first roots)))
-                 request (assoc policy :seon.schema/projection projection)]
+                 request (assoc policy :seon.schema/projection projection
+                                       :seon.instrument/changed-identities identities)]
              (is (= (:seon.config.error/max-evidence-bytes defaults)
                     (:seon.config.error/max-evidence-bytes policy)))
              (is (every? #(= policy (:seon.instrument/policy (meta %))) roots))
              (doseq [candidate candidates]
                (is (= 7 (candidate 7)))
                (is (thrown? Exception (candidate "not an integer"))))
-             (instrument/apply! request)
+             (instrument/apply! (assoc request :seon.instrument/changed-identities #{}))
              (is (every? true? (map identical? roots (map deref candidates)))
-                 "the same acquired policy preserves wrappers")
+                 "an empty adoption preserves wrappers")
              (doseq [changed [(update request :seon.config.error/max-evidence-bytes inc)
                               (update-in request [:seon.sci.admit/caps
                                                   :seon.config.eval.result/max-string] inc)]]
@@ -805,7 +811,7 @@
                  (is (every? false? (map identical? before (map deref candidates)))
                    "changed captured policy cannot reuse the previous closure")
                (doseq [candidate candidates]
-                 (is (= (dissoc changed :seon.schema/projection)
+                 (is (= (dissoc changed :seon.schema/projection :seon.instrument/changed-identities)
                         (:seon.instrument/policy (meta @candidate))))))))
            (let [effective defaults
                  caps (config/result-caps effective)
@@ -918,7 +924,7 @@
         (ns-unmap 'seon.instrument-test candidate-name)
         (ns-unmap 'seon.instrument-test unrelated-name)))))
 
-(deftest cold-arming-derives-wrapper-identity-without-a-predicate-binding
+(deftest cold-arming-keeps-acquired-predicates-without-an-ambient-binding
   (let [projection (#'seon.test.arm/packaged-test-projection "cold-arming-regression")
         candidate-name (symbol (str "cold-contract-" (random-uuid)))
         candidate (intern 'seon.instrument-test candidate-name identity)
@@ -930,7 +936,7 @@
                (:seon.instrument/contract-digest (meta @candidate))
                :seon.instrument-test/value (candidate "juniper")})]
     (try
-      (is (not (contains? projection :seon.schema.projection/predicate-functions)))
+      (is (map? (:seon.schema.projection/predicate-functions projection)))
       (let [bound (schema/call-with-projection projection arm)]
         (alter-var-root candidate (constantly identity))
         (let [cold (with-bindings {#'schema/*projection* nil
@@ -1461,3 +1467,62 @@
     (is (= "The contract humanizer failed." (ex-message failure)))
     (is (= "original cause" (:seon.instrument-test/reporting-evidence (ex-data failure))))
     (is (not ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure))))))
+
+(deftest adoption-arms-only-the-named-identity
+  (let [names ['changed-wrapper 'unchanged-wrapper]
+        candidates (mapv #(intern 'seon.instrument-test % identity) names)
+        symbols (mapv #(symbol "seon.instrument-test" (str %)) names)
+        contract [:=> [:cat :int] :int]
+        projection (reduce #(schema/projection-with-function-contract
+                             %1 %2 contract {:seon.schema.admission/source :core})
+                           (schema/handed-projection) symbols)
+        request {:seon.config/on-core-error :panic :seon.schema/projection projection
+                 :seon.instrument/changed-identities (set (map #(vector :seon.fn/sym %) symbols))}]
+    (try
+      (doseq [candidate candidates] (alter-meta! candidate assoc :malli/schema contract))
+      (instrument/apply! request)
+      (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))
+            result (instrument/apply!
+                    (assoc request :seon.instrument/changed-identities
+                           #{[:seon.fn/sym (first symbols)]}))
+            replaced (into #{} (keep (fn [[v root]] (when-not (identical? root @v) v))) before)]
+        (is (= #{(first candidates)} replaced))
+        (is (= 1 (count replaced)))
+        (is (= 1 (:seon.instrument/registered result)))
+        (is (identical? (get before (second candidates)) @(second candidates)))
+        (is (= 3 ((first candidates) 3)))
+        (let [roots (mapv deref candidates)]
+          (instrument/apply! (assoc request :seon.instrument/changed-identities #{}))
+          (is (every? true? (map identical? roots (map deref candidates))))))
+      (finally (doseq [name names] (ns-unmap 'seon.instrument-test name))))))
+
+(deftest adoption-disarms-a-retired-contract
+  (let [name 'retired-wrapper
+        sym 'seon.instrument-test/retired-wrapper
+        candidate (intern 'seon.instrument-test name identity)
+        contract [:=> [:cat :int] :int]
+        base (schema/handed-projection)
+        projection (schema/projection-with-function-contract
+                    base sym contract {:seon.schema.admission/source :core})
+        request {:seon.config/on-core-error :panic :seon.schema/projection projection
+                 :seon.instrument/changed-identities #{[:seon.fn/sym sym]}}]
+    (try
+      (alter-meta! candidate assoc :malli/schema contract)
+      (instrument/apply! request)
+      (is (contains? (instrument/instrumented) candidate))
+      (let [original (mi/-f->original @candidate)]
+        (instrument/apply! (assoc request :seon.schema/projection base))
+        (is (identical? original @candidate))
+        (is (not (contains? (instrument/instrumented) candidate))))
+      (finally (ns-unmap 'seon.instrument-test name)))))
+
+(deftest cold-arming-covers-the-complete-armable-population
+  (doseq [candidate (instrument/instrumented)]
+    (alter-var-root candidate mi/-f->original))
+  (let [population (instrument/armable (map ns-name (all-ns)))
+        applied (instrument/apply! {:seon.config/on-core-error :panic
+                                    :seon.schema/projection (schema/handed-projection)})]
+    (is (pos? (count population)))
+    (is (= population (instrument/instrumented)))
+    (is (= (count population) (:seon.instrument/registered applied)
+           (:seon.instrument/instrumented applied)))))
