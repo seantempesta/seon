@@ -480,8 +480,7 @@
                                   "probe-received-connection? {:seon.db/connection 1}"))]
              (is (= :input (:seon.instrument/check refusal)))
              (is (= 'seon.call-preparation-test/probe-received-connection?
-                    (:seon.error/operation
-                     (:seon.error/data refusal))))
+                    (:seon.error/operation refusal)))
              (is (= [{:seon.db/connection 1}]
                     (:seon.error/offending refusal))
                  "the caller's 1 reached the callee unreplaced")))

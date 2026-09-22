@@ -467,3 +467,25 @@ all procs replying and 15 errored receipts. No lifecycle or adoption action occu
 
 The final evidence-only commit changes no executable input. Its post-commit load
 log is `tmp/b3-head-evidence-load.log`; the final response reports its exit status.
+
+
+### Platform follow-up: flat operation assertions
+
+The three failures in `tmp/platform-gate-2026-09-22-after-1.1.log:1158-1171`
+were retired expectations, not a missing operation. `refusal-data`
+(`test/seon/test_support.clj:869`) returns the flat map unchanged;
+`violation` (`src/seon/instrument.clj:379`) constructs the operation at the top
+level. Corrected three assertions in `test/seon/env_test.clj` and the one sibling
+assertion in `test/seon/call_preparation_test.clj`. A multiline search across
+`test/` finds no remaining nested operation access. Domain-specific nested data
+assertions retain their existing meaning.
+
+`bin/test-fast --paths test/seon/env_test.clj -- seon.env-test` passed, exit 0:
+run `0f5b17e81d70`, 5 executed, 0 reused, 73 assertions, 0 failures, 0 errors.
+Log: `tmp/b3-followup-env.log`. The snapshot was HEAD `0358eb0ac` plus only the
+env test change; contracts reported 1,689 registered and instrumented Vars.
+The sibling assertion receives the same correction; it was not part of this run.
+The concurrently edited production wrapper was read only. Unrelated sibling-file
+changes were excluded by staging only this assertion against HEAD. Changed files
+are the two test files and this note; no production or plan file was edited.
+The post-commit prescribed HEAD-load evidence is `tmp/b3-followup-head-load.log`.
