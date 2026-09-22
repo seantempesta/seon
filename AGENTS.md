@@ -86,6 +86,12 @@ of seconds: name work proportional to the whole program that should follow a cha
 A branch pointer is cheap; constructing a full context is a separate operation.
 Source observation hashes its admitted inputs; unchanged adoption compares commit ids.
 Use the dependency's cache; do not place a second cache beside it. Measure memory too.
+**No slow operation escapes unnoticed (owner, 2026-09-23: "by design most ops should be
+sub second").** Every lane times every operation it runs — boot, publication, test run,
+probe, reload — and reports each over one second with its phase breakdown. Over ten
+seconds is a defect: name it in the report, file or extend its issue note in the same
+beat. "Known cost", "expected for a scratch boot" and "priming" are not explanations;
+the orchestrator rejects a report that carries a slow operation without its number.
 
 **Derive state; do not remember it.** A stored observation is not current derived
 state. Carry derived values with their immutable authority. A check must report its
