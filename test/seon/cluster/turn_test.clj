@@ -12,6 +12,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [datahike.api :as d]
             [seon.cluster.message :as my.message]
             [seon.run :as my.turn]
             [seon.ai :as ai]
@@ -1811,6 +1812,58 @@
             (is (str/includes? rendered reply-text))
             (is (str/includes? rendered (:seon.cluster.eval/error evaluation))
                 "the saved diagnostic reaches the agent history for correction")))))))
+
+(deftest a-prose-only-provider-reply-settles-without-parking-the-turn-proc
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            reports (atom [])
+            reply-text "I explained the result without another form."
+            completion (async/chan 1)
+            faults (async/chan 1)]
+        (with-open [executor (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor)]
+          (let [handle (assoc cluster
+                              :seon.flow/executor executor
+                              :seon.turn.loop/completion completion
+                              :seon.agent/fault-channel faults
+                              :seon.agent/turn-backstop-state (atom nil))]
+            (test-support/transacted!
+             connection
+             (turn/open-tx {:seon.turn/id "prose-only"
+                            :seon.turn/agent [:seon.agent/id "agent-a"]
+                            :seon.turn/trigger [:seon.message/id "m-1"]
+                            :seon.turn/opened-tx "datomic.tx"}))
+            (is (false? (contains? (:schema (db/db connection))
+                                   (keyword "seon.error" "kind"))))
+            (d/listen connection ::prose-only #(swap! reports conj %))
+            (async/offer! completion :seon.agent/ready)
+            (try
+              (with-redefs [ai/complete
+                            (fn [_projection _request]
+                              {:seon.ai/text reply-text
+                               :seon.ai/finish-reason "stop"})]
+                (let [[state report]
+                      (turn/step {:seon.agent/id "agent-a"
+                                  :seon.turn.loop/cluster handle}
+                                 :seon.agent/episode :seon.agent/wake)
+                      database (db/db connection)
+                      evaluation (first (agent-evaluations database))]
+                  (is (int? (:db/id evaluation)) (pr-str report))
+                  (is (= reply-text (:seon.cluster.eval/source evaluation)))
+                  (is (str/includes? (or (:seon.cluster.eval/error evaluation) "")
+                                     "no form"))
+                  (is (seq @reports))
+                  (is (every? (fn [transaction]
+                                (every? #(contains? (:schema (:db-after transaction)) (:a %))
+                                        (:tx-data transaction)))
+                              @reports))
+                  (is (nil? (:seon.turn.loop/parked state)))
+                  (is (zero? (:seon.turn.loop/write-refusals state 0)))
+                  (is (nil? (async/poll! faults)))))
+              (finally
+                (d/unlisten connection ::prose-only)
+                (async/close! completion)
+                (async/close! faults)))))))))
 
 (deftest a-completing-disposition-closes-in-the-terminal-transaction
   (with-cluster fake-evaluate
