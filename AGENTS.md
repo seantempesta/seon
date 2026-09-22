@@ -253,6 +253,12 @@ unions remains pending an explicitly owned producer, checker and regression; do 
 claim that guarantee from declared contracts alone. A polymorphic boundary must justify its schema.
 No general error predicate, copied error union or discriminator stamp.
 
+**No swallowed errors (owner, 2026-09-23: "Do not allow swallowing of errors").** A
+`catch` either handles a declared case or re-surfaces the failure with its whole cause:
+class, message, `ex-data`, the cause chain and the Seon frames. Returning nil, a bare
+message, a default value, or a diagnostic that drops the throwable is a defect — the
+2026-09-23 nuke refused as "Keyword cannot be cast to Number" with no frame because
+`boot.clj`'s request catch kept only `ex-message`.
 Agent mistakes are flat values. Core errors follow the configured panic/record policy;
 a failed graph is positively visible. Database failure is handled at the reachable
 REPL, never through another durable replay store.
