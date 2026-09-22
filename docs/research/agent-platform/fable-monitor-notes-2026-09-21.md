@@ -120,3 +120,14 @@ true` site (730 lines), convert the 167 propagation guards, one class regression
 `landing/lane-b3-kind-cut-2026-09-21.md`. Default is restarted by the orchestrator
 after it lands. (3) A vigilance check every 20 minutes reviews each lane commit as a
 principal engineer would and resumes a drifting lane with the exact defect.
+
+## 22:20 local — platform tier GREEN; kind-cut in slice A
+
+`bin/test --platform` at `b4b35d79e`: 81 executed, 606 assertions, 0 failures, 0 errors
+(`tmp/platform-gate-2026-09-21c.log`). The chain: `efc3f4e39` moved the three
+destructive publication namespaces out of the tier; lane `gate-widening` (`dbb1bc79b`,
+`b4b35d79e`) fixed `widening-path?` so a bare graph root never widens (three-case
+regression) and declared the selection lifecycle test's bound from three measurements
+(6,336 / 5,067 / 4,903 ms → 8,000 ms with reason). Cut 1 now has a checkpoint gate.
+Lane `kind-cut` committed the fails-before regression (`aba6d445e`) and is converting
+the settle path (turn, reply, cluster/agent dirty); RESTART NEEDED follows slice A.
