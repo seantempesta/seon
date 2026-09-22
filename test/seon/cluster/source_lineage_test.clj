@@ -9,6 +9,7 @@
   [seon.cluster.source :as source]
   [seon.cluster.store :as store]
   [seon.db :as db]
+  [seon.id :as id]
   [seon.fs :as fs]
   [seon.test.cache :as cache]
   [seon.cluster.source-test :as source-test]
@@ -105,49 +106,6 @@
        "complete population repairs stale rows under an equal digest")))))))
 
 (deftest
- ^#:seon.test{:fixture-observation "A database branch cannot isolate the physical-store head against an upsert based on an older publication."}
- stale-incremental-upsert-preserves-the-newer-publication
- ((deref #'source-test/with-store)
-  (fn
-   [opened]
-   (let
-    [a
-     ((deref #'source-test/publish)
-      opened
-      (deref #'source-test/digest-a))
-     b
-     ((deref #'source-test/publish)
-      opened
-      (deref #'source-test/digest-b))
-     data
-     ((deref #'source-test/refusal)
-      (fn*
-       []
-       ((deref #'source-test/upsert)
-        opened
-        (:seon.source/commit-id a)
-        (deref #'source-test/digest-c)
-        [#:seon.source.test{:marker "stale"}])))]
-    (is (= :stale-branch-head (:type data)))
-    (is
-     (=
-      (:seon.source/commit-id b)
-      (:seon.source/commit-id (source/current opened))))
-    (let
-     [connection (store/open-branch! opened source/current-branch)]
-     (try
-      (is
-       (=
-        #{(deref #'source-test/digest-b)}
-        ((deref #'source-test/source-digests) connection)))
-      (is
-       (=
-        #{(deref #'source-test/digest-b)}
-        ((deref #'source-test/markers) connection)))
-      (finally (d/release connection))))
-    (is (empty? ((deref #'source-test/scratch-branches) opened)))))))
-
-(deftest
  ^#:seon.test{:fixture-observation "A database branch cannot isolate competing physical-store publications held across a latch."
               :long "Three marker publications, one held on an explicit latch, exercise the stale branch-head decision.", :long-ms 10000} failed-and-stale-builds-preserve-the-published-head
  ((deref #'source-test/with-store)
@@ -196,7 +154,7 @@
         (try
          ((deref #'source-test/publish)
           opened
-          (deref #'source-test/digest-c))
+          (id/digest 64 [:competing-publication]))
          (finally (.countDown release)))
         stale-result
         (deref

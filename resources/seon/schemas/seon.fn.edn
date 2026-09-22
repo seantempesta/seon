@@ -168,6 +168,9 @@
           :changed-paths [:set :string],
           :index-request
           [:map
+           [:seon.program/rows {:optional true} :seon.program/rows]
+           [:seon.fn/root {:optional true} :string]
+           [:seon.fn.analyzer/sources {:optional true} [:map-of :string :string]]
            [:seon.db/connection
             {:optional true}
             :seon.db/connection]

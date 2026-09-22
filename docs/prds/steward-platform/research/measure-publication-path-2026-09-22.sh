@@ -52,6 +52,8 @@ fi
 if [[ "${PUBLICATION_CLOCK_RESUME:-0}" != 1 ]]; then
   run fork bin/seon --root "$ROOT" init head2
 fi
+# Explicitly load the two targets and align their baseline outside the clocks.
+reload_clock prepare > "$ROOT/prepare.edn"
 # Case A: the first adoption after the fork - nothing changed on disk, the cluster row has no adoption recorded yet.
 run adopt-first bin/seon --root "$ROOT" init --dev head --changed src/my/note.clj
 # Case A2: no change at all, cluster already at the published commit.

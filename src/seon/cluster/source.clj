@@ -101,21 +101,56 @@
   [request]
   (:seon.source/digest (snapshot request)))
 
-(defn path-digests
-  "Read only the named files; directory inputs use the recorded Git pins."
+(defn capture-paths
+  "Read named inputs once; carry the same Clojure text to the analyzer.
+  Directory inputs contribute their recorded Git pin, never a recursive walk."
   {:malli/schema [:=> [:cat :string [:vector :string]]
-                  :seon.source/relative-file-digests]}
+                  [:tuple :seon.source/relative-file-digests [:map-of :string :string]]]}
   [directory paths]
   (let [pins (when (some #(.isDirectory (io/file directory %)) paths)
                (test.cache/gitlink-digests directory))]
-    (into {}
-          (keep (fn [path]
-                  (let [file (io/file directory path)]
-                    (cond
-                      (.isFile file)
-                      [path (schema/sha-256 [(Files/readAllBytes (.toPath file))])]
-                      (get pins path) [path (get pins path)]))))
-          paths)))
+    (reduce (fn [[digests sources] path]
+              (let [file (io/file directory path)]
+                (cond
+                  (.isFile file)
+                  (let [bytes (Files/readAllBytes (.toPath file))]
+                    [(assoc digests path (schema/sha-256 [bytes]))
+                     (if (some #(str/ends-with? path %) [".clj" ".cljc"])
+                       (assoc sources (.getCanonicalPath file) (String. ^bytes bytes "UTF-8"))
+                       sources)])
+                  (get pins path) [(assoc digests path (get pins path)) sources]
+                  :else [digests sources])))
+            [{} {}] paths)))
+
+(defn path-digests
+  "Read digests of named inputs through the publication capture owner."
+  {:malli/schema [:=> [:cat :string [:vector :string]] :seon.source/relative-file-digests]}
+  [directory paths]
+  (first (capture-paths directory paths)))
+
+(defn discover-paths
+  "Discover declared publication inputs from the checkout or export inventory."
+  {:malli/schema [:=> [:cat :string :seon.source/roots] [:vector :string]]}
+  [directory roots]
+  (let [inputs (test.cache/input-roots directory)
+        roots (set roots)]
+    (into [] (comp (filter #(or (test.cache/input-path? inputs %)
+                               (and (test.cache/input-path? roots %)
+                                    (test.cache/source-file? %))))
+                   (distinct))
+          (test.cache/input-paths directory))))
+
+(defn classify-paths
+  "Analyzer configuration invalidates every source; loaded dependencies require reset."
+  {:malli/schema [:=> [:cat [:set :string] [:set :string]] [:enum :selected :all]]}
+  [changed gitlinks]
+  (let [dependencies (into #{} (filter #(or (= "deps.edn" %) (gitlinks %))) changed)]
+    (when (seq dependencies)
+      (refuse! ::reset-needed "RESET NEEDED: loaded dependencies changed."
+               {:seon.source/changed-paths (vec (sort dependencies))}))
+    (if (some #(or (= ".clj-kondo" %) (str/starts-with? % ".clj-kondo/")) changed)
+      :all
+      :selected)))
 
 (defn stored-path-digests
   "Seek each named input by its unique file identity in one database value."

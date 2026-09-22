@@ -7,8 +7,26 @@
 (let [[root mode] *command-line-args*
       endpoint (when-not (= mode "compile-offline")
                  (edn/read-string (slurp (str root "/data/clusters/head/prepl.edn"))))
+      prepare
+      `(do
+         (require '~'my.note '~'seon.id)
+         (seon.cluster/refresh-source! ~root ["src/my/note.clj" "src/seon/id.clj"] "head")
+         (let [database# (seon.db/db (seon.cluster.boot/connection "head"))]
+           (seon.instrument/apply!
+            {:seon.schema/projection (seon.schema/projection-from-database database#)
+             :seon.config/on-core-error :panic})))
       capture
-      '(do (intern 'user 'publication-clock-roots
+      '(do
+         (intern 'user 'publication-clock-reloads (atom []))
+         (add-watch @(ns-resolve 'seon.cluster 'source-refresh-holder)
+                    :publication-clock
+                    (fn [_ _ _ current]
+                      (let [phase (:seon.operator.lock/phase current)
+                            prefix "development reload "]
+                        (when (and phase (clojure.string/starts-with? phase prefix))
+                          (swap! @(ns-resolve 'user 'publication-clock-reloads)
+                                 conj (symbol (subs phase (count prefix))))))))
+         (intern 'user 'publication-clock-roots
                (into {} (for [n (all-ns) v (vals (ns-interns n))
                               :when (and (bound? v) (:seon.instrument/var (meta @v)))]
                           [v @v]))) nil)
@@ -22,11 +40,9 @@
                                      (str (:name (meta v))))))]
          {:vars-rearmed (count changed) :symbols (vec (sort changed))
           :namespaces-reloaded
-          (vec (sort (into #{} (keep (fn [[v original]]
-                                      (when (and (bound? v)
-                                                 (not (identical? (malli.instrument/-f->original original)
-                                                                  (malli.instrument/-f->original @v))))
-                                        (ns-name (:ns (meta v)))))) before)))})
+          (let [namespaces @@(ns-resolve 'user 'publication-clock-reloads)]
+            (remove-watch @(ns-resolve 'seon.cluster 'source-refresh-holder) :publication-clock)
+            namespaces)})
       compile-form
       '(let [database (seon.db/db (seon.cluster.boot/connection "head"))
              namespaces (seon.cluster/development-namespaces database [[:seon.ns/name 'seon.id]])
@@ -49,7 +65,7 @@
           :heap-used-bytes (- (.totalMemory (Runtime/getRuntime))
                               (.freeMemory (Runtime/getRuntime)))
           :namespaces rows})
-      form (case mode "capture" capture "report" report "compile" compile-form
+      form (case mode "prepare" prepare "capture" capture "report" report "compile" compile-form
                      "compile-offline" compile-form)]
   (if (= mode "compile-offline")
     (do

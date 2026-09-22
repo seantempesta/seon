@@ -2170,16 +2170,24 @@
       (seq findings) (assoc :seon.fn.manifest/findings findings))))
 
 (defn- analyzed-artifacts
-  {:malli/schema [:=> [:cat :map :seon.fn/roots :string
-                       [:vector :string]
-                       [:or :nil :seon.db/database-value] [:or :nil :string]]
-                  [:vector :seon.fn.file/artifact]]}
-  [projection roots directory paths database cache-root]
+  {:malli/schema [:function
+                   [:=> [:cat :map :seon.fn/roots :string [:vector :string]
+                         [:or :nil :seon.db/database-value] [:or :nil :string]]
+                    [:vector :seon.fn.file/artifact]]
+                   [:=> [:cat :map :seon.fn/roots :string [:vector :string]
+                         [:or :nil :seon.db/database-value] [:or :nil :string]
+                         [:maybe [:map-of :string :string]]]
+                    [:vector :seon.fn.file/artifact]]]}
+  ([projection roots directory paths database cache-root]
+   (analyzed-artifacts projection roots directory paths database cache-root nil))
+  ([projection roots directory paths database cache-root captured]
   (if (empty? paths)
     []
     (let [forms (:seon.schema.projection/forms projection)
           files (mapv io/file paths)
-          contexts (source-contexts files)
+          contexts (if captured
+                     (update-vals (select-keys captured paths) text-context)
+                     (source-contexts files))
           analysis (analyzer/analyze
                     (cond-> {::analyzer/sources (update-vals contexts :text)
                              ::analyzer/config-root (str (io/file directory analyzer/config-directory))}
@@ -2205,7 +2213,7 @@
               (let [path (.getCanonicalPath ^java.io.File file)]
                 (artifact row-shapes directory file (containing-root directory roots file)
                           (get contexts path) (get rows path []) (get findings path []))))
-            files))))
+            files)))))
 
 (declare report-identities)
 
@@ -2267,10 +2275,13 @@
   (let [directory (fs/absolute-path (fs/source-directory) (or (:seon.fn/root request) "."))
         roots (:seon.fn/roots request)
         database (:seon.source/previous-database request)
-        selected (:seon.fn/changed-paths request)
+        captured (::analyzer/sources request)
+        selected (or (:seon.fn/changed-paths request)
+                     (when captured (into #{} (map (partial fs/relative-path directory)) (keys captured))))
         files (if selected
                 (into [] (comp (map #(rooted-file directory %))
-                               (filter source-file?)
+                               (filter #(if captured (contains? captured (.getCanonicalPath ^java.io.File %))
+                                           (source-file? %)))
                                (filter #(containing-root directory roots %))) (sort selected))
                 (source-files directory roots))
         prior-projection (when database (db/carried-projection database))
@@ -2289,7 +2300,7 @@
             (throw (ex-info (:seon.error/message previous) previous)))
         _ (analyzer/forget-namespaces! cache-root (into #{} (keep :seon.ns/name) previous))
         artifacts (analyzed-artifacts projection roots directory
-                     (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root)
+                     (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
         removed (set/difference (into #{} (keep :seon.fn/sym) previous)
                                (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))]
     (assert-capability-contracts! artifacts database removed)))

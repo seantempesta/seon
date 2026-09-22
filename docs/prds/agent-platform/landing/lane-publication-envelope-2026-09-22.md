@@ -1,6 +1,6 @@
 ---
 type: landing
-status: partial landing; rows 2 and 7 and row 6 aggregates held
+status: independent rows 2, 6, 7, 8 landed; B4 retirement seams held; latency targets unmet
 created: 2026-09-22
 ---
 
@@ -30,9 +30,16 @@ own JVMs and are not evidence of default adoption or browser paint.
   `test/fast.clj:31` reads the snapshot digest. Those files are excluded.
   Consequently the seal and both aggregate producers remain. The independent
   scalar-upsert path can leave with its callers and schema keys.
-- **Row 7 held:** its complete input-reader move requires excluded
-  `src/seon/test/cache.clj`; classification must also replace manifest analysis
-  selection in held `fn.clj`. No parallel copy of these readers was created.
+- **Row 7 file path converted:** `source-snapshot`, `current-source-snapshot`,
+  `require-publication-resources!`, and the second observation are deleted.
+  Capture supplies the exact text consumed by the existing analyzer mirror.
+  Pathless discovery compares current inventory plus stored paths; `.clj-kondo`
+  changes analyze all source paths; dependency-file/gitlink changes refuse with
+  `:seon.cluster.source/reset-needed`. The input-reader move remains held:
+  `input-paths`, `input-roots`, `gitlink-digests`, `toolchain-dependencies` are
+  still in excluded `src/seon/test/cache.clj`, not in the released `fn.clj`
+  regions. The source owner calls that existing implementation; it does not
+  copy it. `source/snapshot` and its schema remain for `seon.test.fast`.
 - **Row 8 independent:** retain Clojure reload, remove cyclic name-order
   fallback and blind retry, compute one closure across both database values,
   verify reloaded file digests before recording adoption, produce arming
@@ -298,3 +305,135 @@ this is neither an obsolete assertion to delete nor a failure in the changed
 publication owner. The new row-reconciliation regression therefore remains
 unproven by the installed test fixture. Real scratch boot and successful leaf/core
 adoption are separate positive evidence. No suite or cold gate was run.
+
+## Row 7 continuation and final proof boundary
+
+Row 2 implementation: `cfa76f4dd`. Its exact `git archive` loads
+`seon.cluster`, `seon.cluster.source`, and `seon.fn` (exit 0). The measured
+row-2-after `fn.clj` and `cluster.clj` blobs equal that archive's blobs.
+The before snapshot is `af865af2e`; row-2-after is `b2dc1de06` plus owned paths;
+row-7-after is `980b36700` plus owned paths. Other committed lanes changed between
+these snapshots, so these clocks are observations of each landing state, not a
+controlled attribution of every millisecond to this lane.
+
+The row-7 schema-resource change declares the carried rows, source directory,
+and captured analyzer text in `:seon.fn/index-request`. B4's manifest entries
+remain. Required from-zero command, in the owned source snapshot:
+
+```
+bin/seon --root /Users/sean/src/seon/tmp/publication-envelope-root reset --force
+```
+
+Exit 0; readiness **89,310 ms**, missing layers `[]`, source commit
+`6ab2c9cc-7f92-5442-b2f7-cf36a3866202`. The subsequent read-only MCP JVM form
+used `(seon.cluster.boot/connection "default")` on THAT SCRATCH ROOT, read
+`:seon.schema/form` for `:seon.fn/index-request`, and found the installed
+`:seon.program/rows`, `:seon.fn/root`, `:seon.fn.analyzer/sources` members.
+Resolving the retired snapshot and resource-check Vars returned false. **4 ms**.
+The earlier `extends-schema?` root-turn panic is historical: this snapshot
+includes the recorder lane's repair; no such panic appeared in this scratch
+reset log. This is readiness and schema evidence, not a platform-tier pass.
+
+On the row-7 measurement JVM, the read-only capture/classification probe returned
+in **13 ms**:
+
+```clojure
+{:captured-digest-matches true
+ :leaf :selected
+ :analyzer-config :all
+ :dependency {:seon.cluster.source/refused :seon.cluster.source/reset-needed
+              :seon.cluster.source/rule :seon.cluster.source/reset-needed
+              :seon.source/changed-paths ["deps.edn"]}}
+```
+
+Exact forms/envelopes: `tmp/publication-envelope-evidence/row7-mcp-probes.json`.
+The first probe during boot returned missing projection state, not a pass;
+the later ready-JVM probe above supplies the positive evidence.
+
+The row-7 focused run `1b74e6218a04` recorded **35 executed, 0 reused, 71 assertions,
+0 failures, 25 errors**. All 25 errors are the same stale-base
+`seon.search/ping-map-fn?` fixture refusal. The new capture-race and typed
+classification tests completed without failure/error (315 ms and 1 ms,
+respectively). Discovery excludes documentation and preserves individual schema
+resource paths. The old empty-request/no-inventory expectation was converted to
+an explicit unchanged-path/one-capture expectation: an empty request now means
+pathless discovery. Its database-backed body remains unproven by the stale fixture.
+The owned snapshots, actual scratch publication/adoption, and live probes were
+used despite this foreign boundary; no foreign session or file was changed.
+
+Late last-reader audit found the row-6 `upsert` test helper still referenced by
+`source_evidence_test.clj` and the stale-upsert case in `source_lineage_test.clj`.
+They test retired machinery and leave here (README §6 question 1). The surviving
+failed/stale-publication race remains and computes its third digest through
+`seon.id`; it no longer names the deleted fixture constant. This repairs a missed
+test-side reader from the earlier row-6 slice, not a new publication mechanism.
+
+## Final clocks with actual reload events
+
+The final script explicitly loads and arms the two target namespaces outside the
+clocks. An installed watch on the existing publication-progress atom observes
+`development reload NS` events; it is removed after each request. Var counts
+compare armed roots before/after the request. They are whole-JVM observations,
+including newly armed Vars, not a claim that the A1 selection consumer landed.
+The earlier root-comparison-only namespace counts are superseded by these events.
+
+[Raw clocks, namespace lists and Var symbols](publication-envelope-clocks-2026-09-22.edn).
+Row-2-after is also row-7-before. Rows 6 and 8 were already committed when ownership
+was released: their original unavailable before/after evidence above remains
+unavailable; later clocks cannot reconstruct those historical JVMs.
+
+| State | Request | elapsed ms | namespaces reloaded | Vars re-armed |
+|---|---|---:|---:|---:|
+| before row 2 | explicit no-change | 290.208 | 0 | 0 |
+| before row 2 | leaf docstring | 4416.786 | 1 | 3 |
+| before row 2 | `seon.id` docstring | 15626.076 | 158 | 1552 |
+| after row 2 / before row 7 | explicit no-change | 303.917 | 0 | 0 |
+| after row 2 / before row 7 | leaf docstring | 4697.414 | 1 | 3 |
+| after row 2 / before row 7 | `seon.id` docstring | 15747.582 | 158 | 1551 |
+| after row 7 | explicit no-change | 300.562 | 0 | 0 |
+| after row 7 | leaf docstring | 5527.306 | 1 | 138 |
+| after row 7 | `seon.id` docstring | 21038.291 | 374 | 1672 |
+
+**The sub-second leaf target is not met.** The seal and aggregate input hashing
+remain at B4's seam; caller selection/lint and broad arming remain their current
+owners. The repaired root turn also loads more tests: the final core reload set
+contains all 90 namespaces from the original sample plus additional namespaces,
+including tests. No dependency-selection narrowing was implemented from the
+unapproved per-declaration proposal.
+
+## Per-namespace compile distribution
+
+The original committed 90-namespace sample totals **3042.042 ms** (individual
+measurements sum to 3041.436 ms; loop/timer overhead is 0.606 ms). Median **29.442**,
+p90 **74.511**, p95 **91.474**, maximum **119.157 ms** (nearest-rank percentiles).
+[All 90 costs, sorted](publication-envelope-compile-distribution-2026-09-22.csv)
+derive directly from the retained raw EDN, not a new estimate.
+
+| Namespace | compile ms |
+|---|---:|
+| `seon.turn` | 119.157 |
+| `seon.test.runner` | 111.851 |
+| `seon.db` | 103.563 |
+| `seon.render.web` | 102.188 |
+| `seon.fn` | 91.474 |
+| `seon.sci.eval` | 86.927 |
+| `seon.config` | 80.774 |
+| `seon.render.transcript` | 80.765 |
+| `seon.error` | 78.964 |
+| `seon.cluster` | 74.511 |
+
+These ten total **930.173 ms (30.6%)**; the cost is distributed, not dominated by
+one namespace. `seon.id` itself is **3.453 ms (0.11%)**. If the proposed declaration
+classification proves that a particular body/docstring change needs only its own
+namespace, the measured compile component could fall from about 3042 ms to about
+3.5 ms for this example. That is a conditional compile-only sizing bound, not a
+prediction of end-to-end publication latency or permission to narrow macro,
+protocol, type/record, inline or `definline` reloads.
+
+A second successful [live compile sample](publication-envelope-loaded-compile-2026-09-22.edn)
+measures the final **374-namespace** loaded closure at **8570.820 ms**, heap-used
+**1,404,152,560 bytes** after compilation. The original 90-namespace unarmed sample
+reported **762,877,088 bytes**. These are point-in-time heap observations, not
+allocation deltas or comparable retained-memory measurements. Earlier live compile
+attempts refused under the old installed contracts; only this successful sample
+supplies the later compile observation.

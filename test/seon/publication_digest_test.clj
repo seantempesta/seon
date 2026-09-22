@@ -3,6 +3,7 @@
             [clojure.java.shell :as shell]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
+            [seon.cluster.source :as source]
             [seon.test-support :as support]))
 
 (deftest issue-notes-do-not-identify-the-program
@@ -11,8 +12,8 @@
                  (let [file (io/file directory path)]
                    (io/make-parents file)
                    (spit file text)))
-        snapshot #(cluster/source-snapshot cluster/source-roots
-                                            (.getCanonicalPath directory))]
+        snapshot #(source/path-digests (.getCanonicalPath directory)
+                                      (source/discover-paths (.getCanonicalPath directory) cluster/source-roots))]
     (try
       (write! "src/fixture.clj" "(ns fixture)\n(def value 1)\n")
       (write! "test/fixture_test.clj" "(ns fixture-test)\n")
@@ -22,15 +23,15 @@
       (is (zero? (:exit (shell/sh "git" "init" "-q" :dir (str directory)))))
       (is (zero? (:exit (shell/sh "git" "add" "deps.edn" "config/default.edn" :dir (str directory)))))
       (let [before (snapshot)]
-        (is (seq (:seon.source/relative-file-digests before)))
+        (is (seq before))
         (write! "docs/seon/issues/fixture.md" "# After\n")
         (write! "src/README.md" "# Source documentation\n")
-        (is (= (:seon.source/digest before) (:seon.source/digest (snapshot))))
-        (is (= (:seon.source/relative-file-digests before)
-               (:seon.source/relative-file-digests (snapshot))))
+        (is (= before (snapshot)))
+        (is (= before
+               (snapshot)))
         (write! "deps.edn" "{:paths [\"src\" \"resources\"] :deps {example/lib {:mvn/version \"2\"}}}\n")
-        (is (not= (:seon.source/digest before) (:seon.source/digest (snapshot)))
-            "Producer dependency inputs cannot hit an older publication's seal.")
+        (is (not= before (snapshot))
+            "Changed dependency bytes differ from the prior file observation.")
         (write! "src/fixture.clj" "(ns fixture)\n(def value 2)\n")
-        (is (not= (:seon.source/digest before) (:seon.source/digest (snapshot)))))
+        (is (not= before (snapshot))))
       (finally (support/delete-recursively! directory)))))

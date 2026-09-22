@@ -1584,38 +1584,6 @@
                        (when-not (identical? token (::holder-token current))
                          current))))))))))
 
-(defn source-snapshot
-  "Snapshot the declared roots and individual publication input files.
-
-  The zero-arity reads the declared `source-roots`; a publication hands the
-  roots it captured at its own entry (`publication-roots`)."
-  {:malli/schema [:function
-                  [:=> [:cat] :seon.source/snapshot]
-                  [:=> [:cat :seon.source/roots] :seon.source/snapshot]
-                  [:=> [:cat :seon.source/roots :string] :seon.source/snapshot]]}
-  ([] (source-snapshot source-roots))
-  ([roots] (source-snapshot roots (fs/source-directory)))
-  ([roots directory]
-  (let [tree-snapshot
-        (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
-        all-inputs (test.cache/input-digests directory)
-        input-roots (test.cache/input-roots directory)
-        external (test.cache/toolchain-dependencies directory input-roots)
-        file-digests
-        (into (sorted-map)
-              (merge (:seon.source/relative-file-digests tree-snapshot) external))
-        ;; Producer pins and analyzer configuration identify the publication
-        ;; even when no Clojure file changed. Documentation remains outside
-        ;; the gate's declared input inventory.
-        digest (id/digest 64 [file-digests])]
-    {:seon.source/digest digest
-     :seon.source/test-input-digest (test.cache/test-input-digest directory all-inputs)
-     :seon.source/relative-file-digests (into (sorted-map) file-digests)})))
-
-(defn- current-source-snapshot
-  [roots]
-  (source-snapshot (:seon.source/roots roots) (:seon.fn/root roots)))
-
 (defn- current-source!
   "The exact published source commit new clusters fork.
   Boot never indexes files: absent publication tells the operator to run
@@ -1784,7 +1752,7 @@
         (finally (when database (d/release-materialized-db database)))))))
 
 (defn- full-source-refresh!
-  "One publication path: reconcile changed artifacts on the current lineage."
+  "Capture, compare, classify and analyze selected rows on the current lineage."
   [root store roots]
   (let [published (current-publication store nil)
         committed (when published
@@ -1798,17 +1766,29 @@
                                     (and (test.cache/input-path? (set (:seon.source/roots roots)) %)
                                          (some (partial str/ends-with? %) [".clj" ".cljc" ".edn"])))
                                requested-paths)
-            partial? (some? committed)
-            observed (if partial?
-                       (source/path-digests directory requested)
-                       (:seon.source/relative-file-digests (current-source-snapshot roots)))
+            partial? (and committed (seq requested-paths))
+            inventory (if partial? requested
+                          (source/discover-paths directory (:seon.source/roots roots)))
+            [observed captured] (source/capture-paths directory inventory)
             paths (if partial? requested
-                      (vec (into (set (keys observed))
+                      (vec (into (set inventory)
                                  (when committed
                                    (db/q '[:find [?path ...]
                                            :where [_ :seon.fn.file/relative-path ?path]] committed)))))
             prior (if committed (source/stored-path-digests committed paths) {})
-            changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)]
+            changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)
+            classification (cond
+                             (nil? committed) :all
+                             (empty? changed) :selected
+                             :else (source/classify-paths changed (set (keys (test.cache/gitlink-digests directory)))))
+            analysis-paths (if (= :all classification)
+                             (into changed (if partial?
+                                             (source/discover-paths directory (:seon.source/roots roots))
+                                             inventory))
+                             changed)
+            [additional additional-sources]
+            (source/capture-paths directory (vec (remove (set inventory) analysis-paths)))
+            captured (merge captured additional-sources)]
     (if (and committed (empty? changed)
              (not-any? (requiring-resolve 'seon.issue/note-path?) requested-paths))
       published
@@ -1816,7 +1796,7 @@
                      (into {} (db/q '[:find ?path ?digest
                                       :where [?file :seon.fn.file/relative-path ?path]
                                              [?file :seon.fn.file/digest ?digest]] committed)))
-            inputs (if partial? (merge (apply dissoc stored requested) observed) observed)
+            inputs (merge (if partial? (merge (apply dissoc stored requested) observed) observed) additional)
             snapshot {:seon.source/relative-file-digests inputs
                       :seon.source/digest (id/digest 64 [(into (sorted-map) inputs)])
                       :seon.source/test-input-digest
@@ -1824,15 +1804,16 @@
                                                     (test.cache/input-digests directory))}
             digest (:seon.source/digest snapshot)]
       (let [database (when published (source/database store (:seon.source/commit-id published)))
-            selected (when database changed)]
+            selected analysis-paths]
         (try
-          (let [paths selected
+          (let [paths (when database selected)
                 analyzed (seon.fn/analyze-rows
                           (cond-> {:seon.fn/root directory
                                    :seon.fn/roots (:seon.fn/roots roots)
+                                   :seon.fn/changed-paths selected
+                                   :seon.fn.analyzer/sources captured
                                    :seon.source/relative-file-digests inputs}
-                            database (assoc :seon.fn/changed-paths selected
-                                            :seon.source/previous-database database)))
+                            database (assoc :seon.source/previous-database database)))
                 previous-findings (when database
                                     (seon.fn/file-rows database (vec paths) :seon.lint/file))
                 _ (when (:seon.error/at previous-findings)
@@ -1842,12 +1823,6 @@
                           (cond-> #{:program}
                             (some #(str/starts-with? % "resources/seon/schemas/") changed) (conj :schema-resource)
                             (contains? changed config/default-manifest-path) (conj :config)))
-                _ (when-not (= observed
-                               (if partial? (source/path-digests directory requested)
-                                   (:seon.source/relative-file-digests (current-source-snapshot roots))))
-                    (refused! "Source changed during publication; retry."
-                              {:seon.cluster.source/phase :adoption
-                               :seon.source/digest-before digest}))
                 _ (report-source-progress! (str "branch publication started: "
                                                 (if paths (count paths) (count (filter :seon.fn.file/relative-path analyzed)))
                                                 " inputs"))
@@ -2168,29 +2143,12 @@
     nil)
     (finally (d/release-materialized-db published-database)))))))
 
-(defn- require-publication-resources!
-  "A snapshot may vary program inputs, but loaded resources must be identical."
-  {:malli/schema [:=> [:cat :string] :nil]}
-  [directory]
-  (when-not (= (.getCanonicalPath (io/file directory)) (fs/source-directory))
-    (let [roots (test.cache/input-roots directory)
-          inputs (fn [root]
-                   (into {} (filter (fn [[path _]] (test.cache/input-path? roots path)))
-                         (test.cache/input-digests root)))
-          requested (inputs directory)
-          loaded (inputs (fs/source-directory))
-          changed (mapcat val (test.cache/changed-inputs loaded requested))]
-      (when (seq changed)
-        (refused! "Snapshot resources differ from the hosting JVM's source tree; align the declared inputs before publication."
-                  {:seon.fn/root directory :seon.source/changed-paths (vec (sort changed))}))))
-  nil)
-
 (defn refresh-source!
   "Publish the current source tree onto the one `current-src` branch.
 
   Content digests select changed inputs and declaration edges select affected
-  files. Every entry point reuses the published manifest and the current
-  database history. Complete analysis is only needed without a prior manifest.
+  files. The captured input bytes produce rows directly; the current database
+  supplies prior identities. Analyzer configuration changes select every source.
   A post-reload source-change refusal leaves the adoption record unchanged;
   the next request reconciles from the last adopted source database."
   {:malli/schema
@@ -2212,7 +2170,6 @@
    (with-source-refresh-monitor!
     (fn []
      (report-source-progress! "bootstrap configuration")
-     (require-publication-resources! directory)
      (let [instance (when development-cluster
                       (get @running-instances development-cluster))
            _ (when (and development-cluster (not instance))

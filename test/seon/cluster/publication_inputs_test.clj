@@ -76,14 +76,14 @@
          (is (empty? @lint-files)))))))
 
 (deftest schema-resource-paths-are-inputs-without-a-derived-merged-entry
-  (let [inputs (:seon.source/relative-file-digests (cluster/source-snapshot))]
-    (is (get inputs "resources/seon/schemas/seon.ns.edn"))
+  (let [inputs (set (source/discover-paths (fs/source-directory) cluster/source-roots))]
+    (is (contains? inputs "resources/seon/schemas/seon.ns.edn"))
     (is (not (contains? inputs "resources/seon/schemas"))))
   (is (not-any? #{"resources/seon/bootstrap.edn"} cluster/source-roots)))
 
 (deftest ^{:seon.test/long "Canonical fixture plus a private physical publication store copy measured 6.10 s; the real branch head is the assertion subject."
            :seon.test/long-ms 10000}
-  an-empty-change-request-hashes-no-files-and-keeps-the-head
+  an-unchanged-explicit-path-is-captured-once-and-keeps-the-head
   (support/with-database
    (fn [_]
      (let [root (str "tmp/publication-inputs/" (random-uuid))]
@@ -95,19 +95,19 @@
            (try
              (let [before (source/current opened)
                    calls (atom [])
-                   path-digests source/path-digests
-                   result (with-redefs [source/path-digests
+                   capture-paths source/capture-paths
+                   result (with-redefs [source/capture-paths
                                         (fn [directory paths]
                                           (swap! calls conj paths)
-                                          (path-digests directory paths))]
+                                          (capture-paths directory paths))]
                             (#'cluster/full-source-refresh!
                              (str root "/data/clusters") opened
                              {:seon.fn/root (fs/source-directory)
                               :seon.fn/roots functions/source-roots
                               :seon.source/roots cluster/source-roots
-                              :seon.source/changed-paths []}))]
+                              :seon.source/changed-paths ["src/my/note.clj"]}))]
                (is (false? (:seon.source/built? result)))
-               (is (= [[]] @calls))
+               (is (= ["src/my/note.clj"] (vec (mapcat identity @calls))))
                (is (= before (source/current opened))))
              (finally (store/release-store! opened))))
          (finally (support/delete-recursively! root)))))))
@@ -128,3 +128,32 @@
            "a publication input row alone does not declare an analysis input")
        (is (empty? (functions/file-rows database [] :seon.lint/file)))
        (is (empty? (functions/file-rows database ["missing-file.clj"] :seon.fn/file)))))))
+
+(deftest publication-classifies-configuration-and-loaded-dependencies
+  (is (= :selected (source/classify-paths #{"src/my/note.clj"} #{"reference-code/sci"})))
+  (is (= :all (source/classify-paths #{".clj-kondo/config.edn"} #{})))
+  (doseq [path ["deps.edn" "reference-code/sci"]]
+    (let [refusal (try (source/classify-paths #{path} #{"reference-code/sci"})
+                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+      (is (= :seon.cluster.source/reset-needed (:seon.cluster.source/rule refusal)))
+      (is (= [path] (:seon.source/changed-paths refusal))))))
+
+(deftest captured-source-is-the-analysis-and-digest-authority
+  (let [root (io/file "tmp" (str "publication-capture-" (random-uuid)))
+        file (io/file root "src/captured.clj")
+        directory (.getCanonicalPath root)
+        path "src/captured.clj"]
+    (io/make-parents file)
+    (try
+      (spit file "(ns publication.captured)\n(defn value [] 1)\n")
+      (let [[digests captured] (source/capture-paths directory [path])]
+        (spit file "(ns publication.captured)\n(defn value [] 2)\n")
+        (let [rows (functions/analyze-rows
+                    {:seon.fn/root directory :seon.fn/roots ["src"]
+                     :seon.fn/changed-paths #{path} :seon.fn.analyzer/sources captured})
+              function (first (filter :seon.fn/sym rows))
+              file-row (first (filter :seon.fn.file/relative-path rows))]
+          (is (= "(defn value [] 1)" (:seon.fn/source function)))
+          (is (= (get digests path) (:seon.fn.file/digest file-row)))
+          (is (not= digests (source/path-digests directory [path])))))
+      (finally (support/delete-recursively! root)))))
