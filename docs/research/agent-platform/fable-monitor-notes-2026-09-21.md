@@ -272,3 +272,16 @@ medium) owns the diagnosis, the fix at the owner, and the evidence-naming refusa
   a loop, but it is not closed until A2 lands.
 - Next: re-prepare the fixture base (publication now records the complete input map),
   then the cold gate at HEAD.
+
+## 2026-09-22 05:30 local — default DOWN on purpose: settle writes reference a missing evaluation
+
+Since 10:19:52Z every write on default failed with `Nothing found for entity id
+[:seon.cluster.eval/id "…"]` (8 occurrences, a new eval id each time, the branch head
+`6ab25303…` never advancing; `seon.log:23322-23331`). Each retry is an agent turn and
+therefore a provider call, so the orchestrator ran `bin/seon down` to stop the spend.
+Lane `settle-missing-eval` (sol medium) reproduces on a scratch root with a virtual
+reply, names the seam (lookup ref before the row is written / a kind-cut change on the
+settle batch / mid-turn adoption) and fixes the owner. Base preparation is also
+blocked until `operator-client-defects` lands (its dirty schema resource makes the
+publication guard refuse: "Snapshot resources differ from the hosting JVM's source
+tree"). Default is restarted after both land.
