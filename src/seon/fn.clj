@@ -150,13 +150,14 @@
   does not have. This names the file, the offending span, the captured digest
   and length, and the file's current digest, so publication reports a source
   change instead of a bare index exception."
+  {:malli/schema [:=> [:cat :map :map :map] :nil]}
   [contexts entry detail]
   (let [path (::analyzer/filename entry)
         context (get contexts path)]
     (throw
      (ex-info
       "Source changed during analysis; a declaration span does not fit the analyzed text."
-      (merge {:seon.error/kind ::index-refused
+      (merge {
               :seon.error/diagnostic-cause ::source-changed-during-analysis
               :seon.fn/index-refused true
               :seon.fn/source-path path
@@ -182,7 +183,9 @@
         (span-refused! contexts entry {:seon.error/diagnostic-offending [row col]}))
       offset)))
 
-(defn- exact-source [contexts entry]
+(defn- exact-source
+  {:malli/schema [:=> [:cat :map :map] :string]}
+  [contexts entry]
   (let [{:keys [text]}
         (get contexts (::analyzer/filename entry))
         row (::analyzer/row entry)
@@ -191,11 +194,11 @@
         end-col (::analyzer/end-col entry)]
     (when-not text
       (throw (ex-info "Static declaration has no source file content."
-                      {:seon.error/kind ::index-refused
+                      {
                        ::analysis-entry entry :seon.fn/index-refused true})))
     (when-not (every? some? [row col end-row end-col])
       (throw (ex-info "Static declaration has no exact source span."
-                      {:seon.error/kind ::index-refused
+                      {
                        ::analysis-entry entry :seon.fn/index-refused true})))
     (let [start (character-offset contexts entry row col)
           end (character-offset contexts entry end-row end-col)]
@@ -602,7 +605,7 @@
       (throw
        (ex-info
         "A capability marker must name one qualified handler symbol."
-        {:seon.error/kind ::index-refused
+        {
          :seon.fn/capability-rule :invalid-handler-symbol
          :seon.fn/sym qualified
          :seon.effect/capability capability :seon.fn/index-refused true})))
@@ -1025,14 +1028,14 @@
        [:seon.fn/keywords {:optional true} :seon.fn/keywords]
        [:seon.test/subject {:optional true} :seon.test/subject]]
       [:maybe :seon.program/row]]
-     :seon.error/value]]}
+     :seon.error/value :seon.fn/namespace-unresolvable-error]]}
   [database source namespace-ref program-row]
   (let [result (analyze-forms
                 database
                 [(cond-> {:seon.cluster.eval/source source
                           :seon.cluster.eval/ns namespace-ref}
                    program-row (assoc :seon.program/row program-row))])]
-    (if (:seon.error/kind result) result (first result))))
+    (if (:seon.fn/namespace-unresolvable result) result (first result))))
 
 (def ^:private load-refusal-finding-types
   #{:syntax
@@ -1086,6 +1089,7 @@
              (::analyzer/findings analysis))))
 
 (defn- assert-clean-analysis!
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :nil]}
   [analysis first-party-functions]
   (let [findings (blocking-findings analysis first-party-functions)]
     (when (seq findings)
@@ -1099,7 +1103,7 @@
                                         (::analyzer/type finding) " "
                                         (::analyzer/message finding)))
                                  findings)))
-                      {:seon.error/kind ::index-refused
+                      {
                        ::findings findings
                        :seon.fn/index-refused true})))))
 
@@ -1216,6 +1220,7 @@
           (get rows "<stdin>"))))
 
 (defn- lint-rows
+  {:malli/schema [:=> [:cat :string [:fn seon.fn/source-file?] :map [:sequential :map] [:sequential :map]] [:vector :map]]}
   [directory file context rows findings]
   (let [path (.getCanonicalPath ^java.io.File file)
         declarations (filter :seon.fn/form-span rows)]
@@ -1234,7 +1239,7 @@
              ;; the typed refusal, and this caller reads it as a
              ;; file-scoped finding rather than fabricating a function.
              found (program/declaration-at declarations position)
-             declaration (when-not (:seon.error/kind found) found)
+             declaration (when-not (:seon.program/declarations-examined found) found)
              program-identity (program/row-identity declaration)
              owner (if program-identity (symbol (second program-identity)) (fs/relative-path directory path))
              finding-type (::analyzer/type finding)]
@@ -1407,7 +1412,7 @@
   Data rows may name a target by symbol or reference; keyword readers do not
   become invokers. The indexed walk and Datalog consumers share these rules."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+                  [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
   [database]
   (db/q '[:find ?caller ?target :in $ %
           :where (declared-edge ?caller ?target)]
@@ -1419,7 +1424,7 @@
                        [:map-of :int :qualified-symbol] [:set :qualified-symbol]
                        [:map-of :qualified-symbol [:set :qualified-symbol]]
                        [:sequential :qualified-symbol]]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
   [database identities tests incoming seeds]
   (loop [pending (vec seeds) seen #{}]
     (if-let [target (peek pending)]
@@ -1428,10 +1433,7 @@
         (let [calls (db/datoms database :avet :seon.fn/calls target)
               references (db/datoms database :avet :seon.fn/references target)
               subjects (db/datoms database :avet :seon.test/subject target)
-              refusal (some #(when (and (map? %)
-                                        (contains? % :seon.error/at)
-                                        (contains? % :seon.error/layer)
-                                        (contains? % :seon.error/operation)) %) [calls references subjects])]
+              refusal (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %) [calls references subjects])]
           (if refusal
             refusal
             (let [referrers (into (get incoming target #{})
@@ -1446,7 +1448,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential :qualified-symbol] :boolean]
                   [:or [:vector :seon.test/sym]
-                   [:map-of :qualified-symbol [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+                   [:map-of :qualified-symbol [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
   [database function-symbols union?]
   (let [identity-rows (db/q '[:find ?entity ?symbol
                              :where (or [?entity :seon.fn/sym ?symbol]
@@ -1461,10 +1463,7 @@
         handlers (db/q '[:find ?caller ?symbol
                          :where [?caller :seon.fn/sym]
                                 [?caller :seon.effect/capability ?symbol]] database)
-        refusal (some #(when (and (map? %)
-                                  (contains? % :seon.error/at)
-                                  (contains? % :seon.error/layer)
-                                  (contains? % :seon.error/operation)) %)
+        refusal (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %)
                       [identity-rows test-symbols declared file-references handlers])]
     (if refusal
       refusal
@@ -1481,10 +1480,8 @@
           (reduce (fn [result function-symbol]
                   (let [selected (gate-set-in database identities (set test-symbols)
                                               incoming [function-symbol])]
-                    (if (and (map? selected)
-                             (contains? selected :seon.error/at)
-                             (contains? selected :seon.error/layer)
-                             (contains? selected :seon.error/operation))
+                    (if (or (:seon.db/invalid-read selected)
+                            (:seon.schema/expected-value selected))
                       (reduced selected)
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols)))))))
@@ -1495,9 +1492,9 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/gate-request]
-     [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]
+     [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]
     [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
-     [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]]}
+     [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]]}
   ([{database :seon.db/db seeds :seon.fn/seeds}]
    (gate-sets-in database (vec seeds) true))
   ([database function-symbols]
@@ -1509,7 +1506,7 @@
    names are evidence; this query does not invent target definitions. Recorded
    test reach to absent names is reported separately as stale historical evidence."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.program/unresolved-report :seon.error/value]]}
+                  [:or :seon.program/unresolved-report :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [database]
   (let [rows (db/q '[:find ?attribute ?caller ?callee
                      :in $ [?attribute ...]
@@ -1528,9 +1525,9 @@
                     database)
         population (db/q '[:find (count ?entity) .
                            :where [?entity :seon.program/analyzed-source-digest]] database)]
-    (or (when (:seon.error/kind rows) rows)
-        (when (:seon.error/kind stale) stale)
-        (when (map? population) population)
+    (or (when (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) rows)
+        (when (or (:seon.db/invalid-read stale) (:seon.schema/expected-value stale)) stale)
+        (when (or (:seon.db/invalid-read population) (:seon.schema/expected-value population)) population)
         {:seon.db/basis-t (db/basis-t database)
          :seon.program/analyzed-count (or population 0)
          :seon.program/stale-test-reach
@@ -1547,18 +1544,18 @@
   explicitly pending subject; unresolved file references select that file's
   tests. Use gate-sets when one operation asks about several identities."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error
+                   :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
   [database function-symbol]
   (let [result (gate-sets database [function-symbol])]
-    (if (and (map? result)
-             (contains? result :seon.error/at)
-             (contains? result :seon.error/layer)
-             (contains? result :seon.error/operation)) result (get result function-symbol))))
+    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+      result (get result function-symbol))))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error
+                   :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
   [database function-symbol]
   (gate-set database function-symbol))
 
@@ -1614,7 +1611,7 @@
   Datahike bridge cannot store. Every function row participates, private
   included."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.fn.contract/report :seon.error/value]]}
+                  [:or :seon.fn.contract/report :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [database]
   (let [function-symbols (db/q '[:find [?symbol ...]
                                  :where
@@ -1633,9 +1630,9 @@
         projection (or (db/carried-projection database)
                        (schema/projection-from-database database))]
     (or
-     (when (:seon.error/kind function-symbols) function-symbols)
-     (when (:seon.error/kind specs) specs)
-     (when (:seon.error/kind caller-counts) caller-counts)
+     (when (or (:seon.db/invalid-read function-symbols) (:seon.schema/expected-value function-symbols)) function-symbols)
+     (when (or (:seon.db/invalid-read specs) (:seon.schema/expected-value specs)) specs)
+     (when (or (:seon.db/invalid-read caller-counts) (:seon.schema/expected-value caller-counts)) caller-counts)
      (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
            specs (into {} specs)
            caller-counts (into {} caller-counts)
@@ -1972,11 +1969,12 @@
      :seon.fn.output/paths paths}))
 
 (defn- capability-refused!
+  {:malli/schema [:=> [:cat :keyword :qualified-symbol :map] :nil]}
   [rule function-symbol data]
   (throw
    (ex-info
     "The declared capability graph is malformed."
-    (merge {:seon.error/kind ::index-refused
+    (merge {
             :seon.fn/capability-rule rule
             :seon.fn/sym function-symbol :seon.fn/index-refused true}
            data))))
@@ -2105,7 +2103,7 @@
         file (rooted-file directory path)]
     (when-not (source-file? file)
       (throw (ex-info "A file artifact requires one existing Clojure file."
-                      {:seon.error/kind ::index-refused
+                      {
                        :seon.fn/source-path (.getCanonicalPath file) :seon.fn/index-refused true})))
     (let [canonical-path (.getCanonicalPath file)
           contexts (source-contexts [file])
@@ -2192,7 +2190,7 @@
              (some (fn [[path n]] (when (> n 1) path))
                    (frequencies (map :seon.fn.file/relative-path desired-artifacts)))]
     (throw (ex-info "Manifest replacement carries a duplicate file path."
-                    {:seon.error/kind ::index-refused
+                    {
                      :seon.fn.file/relative-path duplicate-path :seon.fn/index-refused true})))
   (let [desired-by-path
         (into {} (map (juxt :seon.fn.file/relative-path identity)) desired-artifacts)
@@ -2536,11 +2534,12 @@
                (build-manifest request))
              (throw
               (ex-info "Program rows require a manifest or source roots."
-                       {:seon.error/kind ::index-refused :seon.fn/index-refused true}))))
+                       {:seon.fn/index-refused true}))))
           (:seon.fn/changed-paths request)
           (filter #((:seon.fn/changed-paths request) (:seon.fn.file/relative-path %))))))
 
 (defn- assert-one-row-per-identity!
+  {:malli/schema [:=> [:cat :seon.program/rows] :nil]}
   [desired]
   (when-let [duplicate
              (some (fn [[program-identity n]]
@@ -2549,10 +2548,11 @@
     (throw
      (ex-info
       "Source indexing refused a duplicate program identity."
-      {:seon.error/kind ::index-refused
+      {
        ::identity duplicate :seon.fn/index-refused true}))))
 
 (defn- assert-populated!
+  {:malli/schema [:=> [:cat :seon.program/rows] :nil]}
   [desired]
   (doseq [identity-attr [:seon.ns/name :seon.fn/sym]]
     (when-not (some identity-attr desired)
@@ -2560,7 +2560,7 @@
        (ex-info
         (str "Source indexing produced no " identity-attr
              " rows; refusing a partial program graph.")
-        {:seon.error/kind ::index-refused
+        {
          ::missing-population identity-attr :seon.fn/index-refused true})))))
 
 (defn- add-contract-facts
@@ -2779,6 +2779,7 @@
            :seon.schema/validate-render-contracts? true})))))
 
 (defn- desired-rows
+  {:malli/schema [:=> [:cat :seon.fn/index-request [:or :nil [:=> [:cat :string] :seon.schema/value]]] :seon.program/rows]}
   [request progress!]
   (let [source-rows (rows request)
         packaged-forms (declaration-forms request)
@@ -2817,7 +2818,7 @@
                      (schema/malli-form? (edn/read-string form-string)))
         (throw
          (ex-info "Source indexing refused a non-Malli schema declaration."
-                  {:seon.error/kind ::index-refused
+                  {
                    :seon.schema/key schema-key :seon.fn/index-refused true}))))
     (filterv
      #(desired-identities (program/row-identity %))
@@ -2846,6 +2847,7 @@
   nil)
 
 (defn- index-tempids
+  {:malli/schema [:=> [:cat [:vector :map] [:seqable :qualified-keyword]] [:map-of [:tuple :qualified-keyword :seon.schema/value] :string]]}
   [rows identity-attributes]
   (let [identities
         (into #{}
@@ -2861,7 +2863,7 @@
                              (throw
                               (ex-info
                                "Program indexing found multiple entity identities."
-                               {:seon.error/kind ::index-refused
+                               {
                                 ::identity (vec identities)
                                 :seon.fn/index-refused true})))
                            identities))))
@@ -2878,6 +2880,12 @@
   string tempids instead let namespace, declaration, shape, and call refs all
   resolve inside one transaction. Identified nested maps are emitted once per
   population, rather than normalized again at every owning declaration."
+  {:malli/schema
+   [:=> [:cat :seon.schema/projection [:vector :map] [:seqable :qualified-keyword]]
+    [:map
+     [:seon.fn/index-entities [:vector :map]]
+     [:seon.fn/index-identity-operations :seon.store/transaction-data]
+     [:seon.fn/index-keyword-operations :seon.store/transaction-data]]]}
   [projection rows identity-attributes]
   (let [identity-attribute-set (set identity-attributes)
         tempids (index-tempids rows identity-attributes)
@@ -2938,7 +2946,7 @@
                         (throw
                          (ex-info
                           "Program indexing found conflicting entity maps."
-                          {:seon.error/kind ::index-refused
+                          {
                            ::identity eid
                            :seon.fn/index-refused true}))))
                     (vswap! entities assoc eid entity)
@@ -3344,7 +3352,7 @@
                             [:seon.ns/name :seon.fn/sym :seon.test/sym])]
      (when (and existing (not previous-database))
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
-                       {:seon.error/kind ::index-refused
+                       {
                         ::existing-program-entity existing :seon.fn/index-refused true})))
      (if previous-database
        (let [previous-identities
@@ -3354,7 +3362,7 @@
                (do
                  (when-not (and previous-database (:seon.fn/previous-manifest request))
                    (throw (ex-info "Incremental indexing requires its published database and manifest."
-                                   {:seon.error/kind ::index-refused :seon.fn/index-refused true})))
+                                   {:seon.fn/index-refused true})))
                  (let [surviving (into #{} (mapcat :seon.fn.file/identities)
                                        (filter #(paths (:seon.fn.file/relative-path %))
                                                (get-in request [:seon.fn/manifest :seon.fn.manifest/artifacts])))]

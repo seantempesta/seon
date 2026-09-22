@@ -163,9 +163,12 @@
   nil)
 
 (defn- error-value
-  [kind message data]
-  {kind true
-   :seon.error/kind kind
+  {:malli/schema [:=> [:cat :qualified-symbol :qualified-keyword :string :map] :seon.error/base]}
+  [operation member message data]
+  {member true
+   :seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.db/database-read
+   :seon.error/operation operation
    :seon.error/message message
    :seon.error/data data})
 
@@ -207,6 +210,7 @@
   (if (:seon.schema/expected-value (ex-data error))
     (ex-data error)
     (error-value
+     (if (symbol? operation) operation (symbol (namespace operation) (name operation)))
      ::invalid-read
      (or (ex-message error) "Datahike refused the database read.")
      (cond-> {::operation operation
@@ -356,6 +360,7 @@
 
     (not (map? (:config @connection)))
     (error-value
+     'seon.db/connection-identity
      ::released-connection
      "This Datahike connection is released; a released connection has no identity."
      {::connection (str connection)})
@@ -1021,7 +1026,7 @@
                                          (:seon.db/index-page-options request)))
 
         (diagnostic
-         {:seon.error/kind ::unknown-read-operation
+         {
           :seon.error/message
           (str "seon.db/replay-read cannot replay the read operation "
                (pr-str (:seon.db/read-operation request)) ".")
@@ -1231,6 +1236,7 @@
    false for EVERY attribute: each decoded value silently lost its declared
    decoding, with no signal anywhere (critical finding #18). An absent
    installed schema is the refusal; consumers branch on it."
+  {:malli/schema [:=> [:cat :seon.schema/value :qualified-symbol] [:or [:map [:seon.db/installed-schema :map] [:seon.db/read-projection [:fn clojure.core/delay?]]] :seon.error/base]]}
   [database operation]
   (let [origin (when (db.utils/db? database) (schema-database database))
         installed (:schema origin)]
@@ -1242,7 +1248,7 @@
                   (let [failure (projection-fallback operation)]
                     (throw (ex-info (:seon.error/message failure) failure)))))}
       (diagnostic
-       {:seon.error/kind ::unreadable-declarations
+       {
         :seon.error/message
         (str operation " cannot decode a read: the supplied value carries no installed database schema.")
         :seon.error/diagnostic-layer :database-read
@@ -1400,10 +1406,11 @@
      (registered-attribute-candidates declarations attribute)}))
 
 (defn- unknown-attribute-error
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value :seon.schema/value] :seon.error/base]}
   [operation database attribute offending]
   (let [evidence (attribute-observation database attribute)]
     (diagnostic
-     {:seon.error/kind ::invalid-read
+     {
       :seon.error/message
       (str operation " cannot read uninstalled attribute "
            (pr-str attribute) ".")
@@ -1418,6 +1425,7 @@
       :seon.error/diagnostic-evidence evidence :seon.db/invalid-read true})))
 
 (defn- lookup-ref-error
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value] [:or :nil :seon.error/base]]}
   [operation database entity-id]
   (when (and (sequential? entity-id) (= 2 (count entity-id)))
     (let [[attribute value] entity-id
@@ -1434,7 +1442,7 @@
 
         (nil? (:db/unique declaration))
         (diagnostic
-         {:seon.error/kind ::invalid-read
+         {
           :seon.error/message
           (str operation " requires a unique lookup-ref attribute; "
                (pr-str attribute) " is not unique.")
@@ -1448,7 +1456,7 @@
 
         (not valid-value?)
         (diagnostic
-         {:seon.error/kind ::invalid-read
+         {
           :seon.error/message
           (str operation " received " (pr-str value) " for "
                (pr-str attribute) ", whose installed value type is "
@@ -1508,12 +1516,13 @@
     (cond-> values source-symbol (into [source-symbol]))))
 
 (defn- malformed-query-pattern-error
+  {:malli/schema [:=> [:cat :map :map] [:or :nil :seon.error/base]]}
   [request parsed-query]
   (when-let [pattern (some #(when (> (count (:pattern %)) 5) %)
                            (query-patterns parsed-query))]
     (let [offending (parsed-pattern-value pattern)]
       (diagnostic
-       {:seon.error/kind ::invalid-read
+       {
         :seon.error/message
         "seon.db/q received a data pattern with more than five positions."
         :seon.error/diagnostic-layer :database-read
@@ -1582,6 +1591,7 @@
      (filter #(instance? Pattern %) (parsed-nodes (:qwhere parsed-query))))))
 
 (defn- query-find-attributes
+  {:malli/schema [:=> [:cat :map :map [:sequential :seon.schema/value]] [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]]]]}
   [declarations parsed-query arguments]
   (let [variable-attributes (query-variable-attributes parsed-query arguments)
         elements (vec (parser/find-elements (:qfind parsed-query)))
@@ -1604,7 +1614,7 @@
                  (if (= (count encoded) (count attributes))
                    (vec encoded)
                    (throw (ex-info "Select the attribute alongside values with different storage codecs."
-                                   {:seon.error/kind ::invalid-read
+                                   {
                                     ::attributes attributes})))))))))
      elements)))
 
@@ -1884,9 +1894,10 @@
        "or (seon.db/q database query input ...) with an explicit database first."))
 
 (defn- query-input-shape-error
+  {:malli/schema [:=> [:cat :map [:sequential :seon.schema/value]] :seon.error/base]}
   [query-form arguments]
   (diagnostic
-   {:seon.error/kind ::invalid-read
+   {
     :seon.error/message (query-argument-message query-form arguments)
     :seon.error/diagnostic-layer :database-read
     :seon.error/diagnostic-operation 'seon.db/q
@@ -1941,12 +1952,13 @@
                       (subvec arguments position)))))))))
 
 (defn- missing-query-error
+  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.error/base]]}
   [query-input]
   (when (and (map? query-input)
              (contains? query-input :args)
              (not (contains? query-input :query)))
     (diagnostic
-     {:seon.error/kind ::invalid-read
+     {
       :seon.error/message
       "seon.db/q argument maps require :query."
       :seon.error/diagnostic-layer :database-read
@@ -2053,13 +2065,14 @@
           (dependency-error ::q cause)))))))
 
 (defn- missing-pull-selector-error
+  {:malli/schema [:=> [:cat :qualified-symbol [:sequential :seon.schema/value]] [:or :nil :seon.error/base]]}
   [public-operation arguments]
   (when (and (= 1 (count arguments))
              (map? (first arguments))
              (not (contains? (first arguments) :selector)))
     (let [request (first arguments)]
       (diagnostic
-       {:seon.error/kind ::invalid-read
+       {
         :seon.error/message
         (str public-operation " argument maps require :selector.")
         :seon.error/diagnostic-layer :database-read
@@ -2187,7 +2200,7 @@
 
       (< 1 (count declared))
       (diagnostic
-       {:seon.error/kind ::disagreeing-pull-schema
+       {
         :seon.error/message
         (str "The attributes present on this entity declare more than one "
              "row schema " (pr-str (vec (sort declared)))
@@ -2253,7 +2266,7 @@
         (if (validator value)
           value
           (diagnostic
-           {:seon.error/kind ::invalid-pulled-result
+           {
             :seon.error/message
             (str public-operation
                  " returned a value that does not satisfy the derived pulled form "
@@ -2330,6 +2343,7 @@
       (or refusal value))))
 
 (defn- pull-call
+  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result]]}
   [database arguments operation operation-key result-key public-operation]
   (if (and (map? database) (inst? (:seon.error/at database))
              (qualified-keyword? (:seon.error/layer database))
@@ -2346,7 +2360,7 @@
                             (vector? options) (not (map? (second arguments)))))]
           (when-not valid?
             (diagnostic
-             {:seon.error/kind ::invalid-read
+             {
               :seon.error/message
               (str public-operation " received invalid arguments " (pr-str arguments)
                    ". Use (" public-operation " selector " (if many? "eids" "eid")
@@ -2808,10 +2822,11 @@
      (reaches-external-sink ?called ?sink)]])
 
 (defn- diff-refusal
+  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
   [message member expected offending cause evidence]
   (diagnostic
    {::diff-refused true
-    :seon.error/kind ::diff-refused
+    
     :seon.error/message message
     :seon.error/diagnostic-layer :agent-boundary
     :seon.error/diagnostic-operation 'seon.db/diff
@@ -3378,6 +3393,7 @@
    #(m/validator compiled)))
 
 (defn- invalid-write
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword :seon.schema/value :seon.schema/value [:sequential :seon.schema/value] :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
   [_projection attribute compiled value path entity-form cause candidates]
   (let [form (if (= ::attribute-not-installed cause) compiled (m/form compiled))
         problem
@@ -3398,7 +3414,7 @@
               (= :malli.core/missing-key cause) (assoc :type cause))}))]
   (diagnostic
    (cond->
-    {:seon.error/kind ::invalid-write
+    {
      :seon.error/message
      (@error-problem-sentence
       'seon.db/transact! problem nil
@@ -3804,6 +3820,7 @@
         (if-let [refusal (::owned-refusal (ex-data exception))] refusal (throw exception))))))
 
 (defn- declared-arity-bounds
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value] [:or [:map-of :qualified-symbol [:set [:map [:seon.fn.arity/min :int] [:seon.fn.arity/max {:optional true} :int]]]] :seon.db/error-result]]}
   [query-fn database]
   (let [rows (query-fn '[:find ?function-symbol ?minimum ?maximum
                          :where
@@ -3812,7 +3829,7 @@
                          [?arity :seon.fn.arity/min ?minimum]
                          [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
                        database)]
-    (if (:seon.error/kind rows)
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
       rows
       (reduce
        (fn [bounds [function-symbol minimum maximum]]
@@ -3902,6 +3919,7 @@
                                            (schema/handed-projection))))
 
 (defn- write-render-target-error
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.error/base]]}
   [database]
   (let [missing
         (into []
@@ -3922,7 +3940,7 @@
                               [?schema :seon.schema/form ?form]] database)))]
     (when (seq missing)
       (diagnostic
-       {:seon.error/kind ::invalid-write
+       {
         ::transaction-refused true
         :seon.error/message "Render declarations name functions absent from the final program. Admit the definitions or repair the declarations in the same transaction."
         :seon.error/diagnostic-layer :database-write
@@ -3936,6 +3954,7 @@
 
 (defn- removed-definition-error
   "Check surviving names against the identities removed by an admitted change."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :map] [:set :qualified-keyword]] [:or :nil :seon.error/base]]}
   [database removed identity-attrs]
   (let [breaks
         (into []
@@ -3975,7 +3994,7 @@
     (when (seq breaks)
       (let [breaks (vec (sort-by pr-str breaks))]
         (diagnostic
-         {:seon.error/kind ::invalid-write
+         {
           ::transaction-refused true
           :seon.error/message "Program deletion leaves surviving referrers. Repair or retract every named referrer in the same transaction."
           :seon.error/diagnostic-layer :database-write
@@ -4006,6 +4025,7 @@
     (removed-definition-error database removed identity-attrs)))
 
 (defn- write-agent-retraction-error
+  {:malli/schema [:=> [:cat [:sequential :seon.db/transaction-report-datom]] [:or :nil :seon.error/base]]}
   [effective-datoms]
   (let [removed
         (into []
@@ -4016,7 +4036,7 @@
               effective-datoms)]
     (when (seq removed)
       (diagnostic
-       {:seon.error/kind ::invalid-write
+       {
         ::transaction-refused true
         :seon.error/message "Agents retain their identities. Archive the agent instead of retracting or renaming it."
         :seon.error/diagnostic-layer :database-write
@@ -4049,6 +4069,7 @@
 
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:or :nil :seon.db/error-result]]}
   [projection report]
   (let [database (:db-after report)
         before (:db-before report)
@@ -4108,7 +4129,7 @@
            (assoc result ::transaction-refused true)
            (when (seq mismatches)
            (diagnostic
-            {:seon.error/kind ::invalid-write
+            {
              ::transaction-refused true
              :seon.error/message "Recorded source argument counts disagree with the final prepared arities. Repair the callers or declaration in the same transaction."
              :seon.error/diagnostic-layer :database-write
@@ -4185,7 +4206,9 @@
                      (get (dbi/-schema database) (:seon.db/activation %)))
                rules)))))
 
-(defn- retention-check [before after actor]
+(defn- retention-check
+  {:malli/schema [:=> [:cat :map :map [:or :nil :int]] [:vector :seon.schema/value]]}
+  [before after actor]
   (doseq [key (set/union (set (keys before)) (set (keys after)))]
     (let [prior (get before key) current (get after key)
           creator (or (:seon.db/creator prior) (:seon.db/creator current))
@@ -4211,7 +4234,7 @@
                 (and (:seon.db/active? prior) (not authorized?) changed-authority?))
         (throw (ex-info
                 "Started issue tests and their authority must be preserved; only the creator may remove tests."
-                {:seon.error/kind :seon.db/retention-refused
+                {
                  :seon.error/message
                  (str "Cannot retract " (pr-str (first key)) " of "
                       (pr-str (or (:seon.db/entity prior) (:seon.db/entity current)))
@@ -4361,7 +4384,7 @@
                        :seon.store/transaction transaction
                        :seon.db/transaction-outcome-unknown true}]
                   (diagnostic
-                   {:seon.error/kind ::write-bound-exceeded
+                   {
                     :seon.error/message
                     (str "seon.db/transact! stopped waiting after " elapsed-ms
                          " ms (bound " write-time-limit-ms
@@ -4433,11 +4456,12 @@
               failure)))))))
 
 (defn- missing-transaction-data-error
+  {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.error/base]]}
   [transaction]
   (when (and (map? transaction)
              (not (contains? transaction :tx-data)))
     (diagnostic
-     {:seon.error/kind ::invalid-request
+     {
       :seon.error/message
       "seon.db/transact! argument maps require :tx-data."
       :seon.error/diagnostic-layer :database-write

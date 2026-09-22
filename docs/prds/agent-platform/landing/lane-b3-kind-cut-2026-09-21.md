@@ -433,3 +433,58 @@ adopted `6ab202d9-ae7d-5986-93c0-b2ce04592b0b`.
 Correction `448ff696-59ec-4b86-bb68-c5f350b5966b`:
 04:25:12.163086 → 04:25:57.423021Z, **45.259935 s**, SOURCE_BATCH,
 adopted `6ab20344-9717-54fc-accd-2331b3054ae1`. Both exceed ten seconds.
+
+## Database and function group
+
+All 24 database and remaining 23 function kind sites are removed. Diagnostic
+constructors keep their declared base shape; no new database error taxonomy was
+introduced. An attempted addition of six database facets was falsified by schema
+publication and canonical fixture acquisition and removed completely before this
+commit. `resources/seon/schemas/seon.db.edn` is unchanged.
+
+Retained decisions in this group:
+
+| Owner / decision | Declared member | Why the branch remains |
+| --- | --- | --- |
+| `db/declared-arity-bounds` | `db/invalid-read`, `schema/expected-value` | Reduce successful declaration rows into arity bounds. |
+| `fn/analyze-form` | `fn/namespace-unresolvable` | Select the analyzed form only after namespace resolution. |
+| `fn/lint-rows` | `program/declarations-examined` | Resolve and lint a found declaration; retain declaration lookup evidence otherwise. |
+| `fn/unresolved-callers`, three reads | `db/invalid-read`, `schema/expected-value` | Assemble unresolved-call evidence from successful query rows. |
+| `fn/contract-findings`, three reads | `db/invalid-read`, `schema/expected-value` | Rank contract findings from successful query rows. |
+| `fn/gate-set-in`, `fn/gate-sets-in` (acquisition and reduction), `fn/gate-set` | `db/invalid-read`, `schema/expected-value` | Walk successful dependency edges and select each seed's tests. |
+
+Contracts accreted: `analyze-form` admits its namespace-resolution error;
+`unresolved-callers` and `contract-findings` admit database invalid reads and
+schema validation refusals. `declared-reference-edges`, `gate-set-in`,
+`gate-sets-in`, both `gate-sets` arities, `gate-set`, and `tests-reaching` admit
+schema validation refusal, which `db/q` can already return. The indexer's
+`index-tempids` and `compile-index-transaction` accept partial row maps: their
+incremental caller supplies those, not complete program rows.
+
+`bin/test-fast --paths src/seon/db.clj src/seon/fn.clj -- seon.db-test seon.fn-test`:
+129 tests, 942 assertions, 60 failures, 5 errors; run `1f9febd4f539`, log
+`tmp/b3-db-fn-final.log`. Follow-up with the same paths and `-- seon.fn-test`:
+66 tests, 458 assertions, 26 failures, 5 errors (`tmp/b3-fn-union.log`). Both
+executions exited 1; recording refused `:seon.test/report-conflict`. The five
+error classes were undeclared validation refusal in reference-edge selection,
+nil Malli FunctionSchema in contract findings, missing issue-citation file in
+an index fixture, prepared-arity fixture refusal, and a missing turn-work
+situation in a legacy turn fixture. The reference-edge error still appeared
+after its authored union was widened; this is unresolved evidence, not a pass.
+The final two forwarding contracts were widened after that run and await the
+final matrix. Legacy kind assertions remain assigned to Slice C.
+
+Publication `e0471470-16a0-41e4-957b-48151213efc3` took **36.044719 s**
+(04:26:09.494427–04:26:45.539146Z), SOURCE_BATCH. Adding the initially too-narrow
+index contract caused subsequent publication refusal. Read-only probe:
+`(let [v (ns-resolve 'seon.fn 'compile-index-transaction)] {:contract (:malli/schema (meta v)) :wrapped-contract (:malli/schema (meta (var-get v)))})`
+returned the old `:seon.program/rows` argument and nil wrapped metadata in 4 ms.
+`(do (require 'seon.fn :reload) {:contract (:malli/schema (meta (ns-resolve 'seon.fn 'compile-index-transaction)))})`
+returned the corrected `[:vector :map]` argument in 203 ms. This was reload,
+not adoption. Publication subsequently converged at
+`6ab2067c-70dc-5121-b0e5-429ca67d9622`; removing the facet experiment converged
+at `6ab206c4-9bac-56ae-8edb-8b3ce75d078e`. A second reload probe,
+`(do (require 'seon.db :reload) {:constructor-contract (:malli/schema (meta (ns-resolve 'seon.db 'invalid-write))) :index-contract (:malli/schema (meta (ns-resolve 'seon.fn 'compile-index-transaction)))})`,
+confirmed the base diagnostic output and partial-row input in 185 ms.
+Publication `9c72d26e-a35b-40c6-a6bd-20cef326cf15` converged at
+`6ab208ca-b8fa-5aab-b55b-56fac64fee58`.
