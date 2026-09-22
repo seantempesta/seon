@@ -28,7 +28,8 @@
 
 (defn- calls-of
   [database sym]
-  (:seon.fn/calls (db/pull database [:seon.fn/calls] [:seon.fn/sym sym])))
+  ;; A pulled cardinality-many value is a vector; `contains?` needs the set.
+  (set (:seon.fn/calls (db/pull database [:seon.fn/calls] [:seon.fn/sym sym]))))
 
 (defn- delete-callee!
   "Publish the sample, remove `produce`, publish `callee.clj` incrementally."
