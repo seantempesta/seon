@@ -162,3 +162,22 @@ Added regression: 38 lines. Added measurement script: 36 lines. Existing unrelat
 documentation edits were preserved. Hook feedback reported pre-existing stale
 dependency citations outside these paths and the existing `identity` shadow at
 bridge line 58; neither is evidence of a failing new membership check.
+
+## Landing and cleanup
+
+Implementation commit: **`6ec971b07`**, five paths, 263 insertions / 2 deletions
+(documentation and measurement included). The final load exited 0 with
+`:committed-head-loaded` in `tmp/boot-process-committed-head-load.log`.
+The isolated checkout remained at its original detached base because Git refused
+switching over its owned modifications; an explicit comparison of every `src`,
+`resources`, `config`, `test`, `deps.edn` and `bb.edn` input against `6ec971b07`
+returned exit 0 and an empty diff (`tmp/boot-process-head-input-equality.diff`).
+Thus the load exercised the committed program bytes, not a claim that checkout
+switch succeeded. Subsequent shared HEAD changes were documentation only.
+
+All owned test/probe/load shells exited. `lsof -t +D` reported no holders on each
+of the four scratch stores (empty output, exit 1), then those roots were removed
+without following links. The boot JVM log survives in `tmp/boot-process-jvm.log`.
+The owned worktree's dependency symlink was unlinked before removing the worktree;
+vendored dependencies and foreign sessions were preserved. The handoff is
+`tmp/orchestrator/boot-process-attribute-summary.txt`.
