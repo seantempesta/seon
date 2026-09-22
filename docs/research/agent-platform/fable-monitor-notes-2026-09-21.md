@@ -1,0 +1,71 @@
+---
+type: reference
+status: running log; Fable monitors while the owner is away (2026-09-21 evening); Codex/root owns fixes
+created: 2026-09-21
+tags: [agent-platform, monitor, b1b, cut-1]
+---
+
+# Fable monitor notes
+
+Each entry: what was observed (file:line or command), why it matters, the smallest
+correct fix. Documentation only; no source, test, config, platform, suite or lane
+operations by Fable. The default JVM is never operated from here.
+
+## 18:40 local — after B1b integration (`171388062`) and default replacement
+
+**Observed.** `default` was replaced through the new operator: reset at 00:29:31Z
+destroyed `data/store` (358 MB), three boots followed (00:31:23Z, 00:32:46Z,
+00:33:26Z; `data/clusters/default/logs/seon.log:609-623`), the live JVM is pid 56288
+with `:seon.boot/missing-layers []` and `ready-ms 5468`. All eight drills recorded
+green (`landing/b1b-results-2026-09-21.txt`, elapsed 51–166 s; bounds 120–360 s,
+about 2–3× measured). Good.
+
+**1. Blocker class: a retired schema attribute with 178 live writers.**
+`:seon.error/kind` was retired from `resources/seon/schemas/seon.error.edn` on
+2026-09-19 (`bc8152438`, "Retire owned error kinds… under D12"), but 178 sites in 30
+`src/` files still construct error values carrying it (`rg '\{:seon.error/kind' src`).
+In memory that is harmless; when such a value is COMMITTED as a fact the writer
+refuses: `seon.log:624` `Bad entity attribute :seon.error/kind at [:db/add 37294
+:seon.error/kind :seon.cluster.reply/no-forms]`, ten occurrences at 20:04Z on the old
+JVM and one at 00:33:38Z on the new one. The old default hid it because its schema
+predated the retirement; the reset exposed it. This is the rule restored to the root
+today ("a schema resource and its loaded consumer land in one publication or not at
+all") violated two days ago. Smallest fix: the B3 commit-4 slice (README §4 step 1.5,
+"kind/class sites") converts the writers that reach `transact!` first — the reply
+no-forms path (`src/seon/cluster/reply.clj:323-352`, read at `turn.clj:3171,4282`) and
+the fault committer — and the remaining in-memory constructors in the same cut. Do
+NOT re-declare the attribute to silence it. Verify with the error count on `default`
+after the next boot (`grep -c "Bad entity attribute" data/clusters/default/logs/seon.log`).
+
+**2. The platform tier cannot run.** `landing/b1b-results-2026-09-21.txt` §platform-guard:
+`verify-platform-tier-carries-no-destructive-drill!` refuses because ten tests in
+`seon.cluster.source-test`, `source-lineage-test` and `source-evidence-test` reach
+`seon.test-support/populate-published-operator-root!` (deletes a path). Their platform
+membership is NAMESPACE-level (`test/seon/cluster/source_test.clj:1`,
+`source_evidence_test.clj:1`). Open since 2026-09-16 as a blocker
+(`docs/seon/issues/platform-flow-census-reaches-root-cleanup-through-scheduler.md`).
+Until it is resolved, "cut checkpoint = `bin/test --platform`" is not executable, so
+cut 1 has no gate. Smallest fix: drop the namespace-level `:seon.test/platform` from
+those three publication namespaces (they are destructive-root tests and belong to the
+bulk tier under an isolated root) and declare platform per-test only where a test does
+not reach the helper; the B1b `cold-start` drill stays platform. This is the
+orchestrator's decision, not a lane's; it is test metadata, no mechanism changes.
+
+**3. `Exception in thread ""`: `seon.error/diagnostic refused observation at
+[:seon.error/at]: expected the required key :seon.error/at`** (`seon.log:322,422,470,539`,
+old JVM). A constructor called without `:seon.error/at` throws on an unnamed thread,
+which is a fault escaping the fault committer. B3 step 1.1 (constructor supplies `at`)
+is the fix; note that it is already observed in production, not hypothetical.
+
+**4. Tooling.** (a) `bin/test-check`'s 5,000 ms request bound fired during B1b (landing
+note); no issue filed yet — file one or fix the bound owner. (b) Twelve `bb -m
+seon.dev.mcp` bridge processes are alive from sessions started 12:36–18:01; each is a
+child of the desktop app, so not orphans, but every one started before `171388062`
+serves the OLD `script/seon/dev/mcp.clj` and reports `{"seon.dev.mcp/failure":"request",
+"seon.dev.mcp/error":null}` against the new JVM. Each Claude session needs its bridge
+restarted (Fable did its own). (c) `data/clusters/default/logs/seon.log:629` shows
+`Testing seon.id-test` inside default's log: an in-process test run was executed on
+`default`; fine as iteration, but it means default's JVM has loaded test namespaces.
+
+**Next for root.** Finding 1 first (it corrupts every error commit on `default`), then 2
+(no checkpoint gate without it). Then README §4 steps 1.1–1.3 in order.
