@@ -14,14 +14,17 @@
                      ::extra :string
                      ::children [:vector {:seon.db/component true
                                           :seon.db/component-schema ::child} :seon.db/ref]
-                     ::root [:map {:seon.db/attributes true}
+                     ::root [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                              [::id ::id] [::children {:optional true} ::children]]
                      ::child [:map {:seon.db/attributes true}
-                              [::value ::value] [::extra {:optional true} ::extra] [::children {:optional true} ::children]])
+                              [::value ::value] [::extra {:optional true} ::extra] [::children {:optional true} ::children]]
+                     ::key [:string {:seon.db/identity true}]
+                     ::keyed [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+                              [::key ::key] [::value ::value] [::children {:optional true} ::children]])
         projection (schema/build-projection forms)]
     (support/with-database
      {::support/extra-schema
-      (schema.datahike/malli->datahike-schema-in projection [::id ::value ::extra ::children])}
+      (schema.datahike/malli->datahike-schema-in projection [::id ::key ::value ::extra ::children])}
      (fn [connection]
        (db/carry-connection-projection-state!
         connection (evaluation/projection-state @connection projection))
@@ -100,3 +103,15 @@
       (let [child (:seon.db/component-schema (malli.core/properties (seon.schema/structural-schema form)))]
         (is (and (qualified-keyword? child) (get forms child))
             (str "Owned relation must name its child schema: " attribute))))))
+
+(deftest one-invalid-root-among-many-refuses-by-its-identity
+  ;; The owning walk groups the report by root once; each root is validated
+  ;; against its own complete value, so the refusal names the invalid root.
+  (with-owned-tree
+    (fn [connection]
+      (let [valid (mapv #(hash-map ::key (str "k" %) ::value % ::children [{::value %}]) (range 200))]
+        (let [result (refuses-without-change connection
+                                             (conj valid {::key "bad" ::children [{::value 1}]}))]
+          (is (= {::key "bad"} (get-in result [:seon.error/data :seon.db/entity])) (pr-str result)))
+        (support/transacted! connection valid)
+        (is (= 200 (count (db/datoms (db/db connection) :avet ::key))))))))

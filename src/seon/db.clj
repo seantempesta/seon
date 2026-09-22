@@ -3095,7 +3095,13 @@
 
 (defn- write-owned-values-error
   "Validate complete owning values, reached through both sides of this report.
-   EAVT supplies every child; AVET discovers owners without pull's 1,000 cap."
+   EAVT supplies every child; AVET discovers owners without pull's 1,000 cap.
+   Every changed arity-bearing root's identity attributes are added to
+   `changed-identity-attributes`, the arity gate's input."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
+                       [:map-of :keyword :map] [:set :qualified-keyword]
+                       [:fn clojure.core/volatile?]]
+                  [:or :nil :seon.db/error-result]]}
   [projection report attribute-plans identity-attrs changed-identity-attributes]
   (let [before (:db-before report)
         after (:db-after report)
@@ -3211,25 +3217,36 @@
                            (conj active entity-id))))))))
         (when-let [entity-id (first (remove @visited current))]
           (fail! ::component-cycle {::entity entity-id}))
+        (let [;; A function's documentation/source coordinates do not alter
+              ;; prepared arities. Only its call facts, arity relation,
+              ;; identity, or changed owned components can do that. One pass
+              ;; over the report names every such root: a datom on the root
+              ;; itself through an arity-bearing attribute, or any datom on
+              ;; an entity the root owns on either side. Each entity's owning
+              ;; ancestors are walked once, so the work is linear in the
+              ;; report, never roots x datoms. A from-zero write asserts every
+              ;; root's own identity datom, so there every root is changed.
+              changed-roots
+              (delay
+               (let [tx-data (filter #(< (long (:e %)) const/tx0) (:tx-data report))]
+                 (into (into #{}
+                             (comp (filter #(#{:seon.fn/sym :seon.test/sym
+                                               :seon.fn/call-arities :seon.fn/arities}
+                                             (:a %)))
+                                   (map :e))
+                             tx-data)
+                       (mapcat (fn [entity]
+                                 (disj (into (owning-ancestors :before before [entity])
+                                             (owning-ancestors :after after [entity]))
+                                       entity)))
+                       (into #{} (map :e) tx-data))))]
         (or
          (some (fn [root]
                  (let [value (get @expanded root)
                        identities (merge (select-keys (row :before before root) identity-attrs)
                                          (select-keys value identity-attrs))]
-                   ;; A function's documentation/source coordinates do not alter
-                   ;; prepared arities. Only its call facts, arity relation,
-                   ;; identity, or changed owned components can do that.
                    (when (or (not (some identities [:seon.fn/sym :seon.test/sym]))
-                             (some (fn [datom]
-                                     (let [entity (:e datom)]
-                                       (if (= root entity)
-                                         (#{:seon.fn/sym :seon.test/sym
-                                            :seon.fn/call-arities :seon.fn/arities}
-                                          (:a datom))
-                                         (and (< (long entity) const/tx0)
-                                              (or ((owning-ancestors :before before [entity]) root)
-                                                  ((owning-ancestors :after after [entity]) root))))))
-                                   (:tx-data report)))
+                             (@changed-roots root))
                      (vswap! changed-identity-attributes into (keys identities)))
                    (when (and (seq value) (empty? identities))
                      (fail! ::unowned-entity {::entity root ::entity-value value}))
@@ -3242,7 +3259,7 @@
                      (when-let [refusal (write-entity-error after projection attribute-plans entity-id identities value [target])]
                        (update refusal :seon.error/data assoc
                                ::owner parent ::attribute attribute ::component-schema target)))))
-               @expanded)))
+               @expanded))))
       (catch clojure.lang.ExceptionInfo exception
         (if-let [refusal (::owned-refusal (ex-data exception))] refusal (throw exception))))))
 
