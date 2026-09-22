@@ -43,7 +43,7 @@
     Datahike's values-then-pointer barrier means even a copy taken mid
     commit opens at the previous head with the new values unreachable.
   - Refusals are loud ex-info
-    `{:seon.error/kind ::refused ::rule <which>}`, matching B0/B1
+    `{::refused <which> ::rule <which>}`, matching B0/B1
     (`src/seon/cluster/store.clj:161-167`).
 
   Crash walk (kill -9 at any point; the export path owns no durable
@@ -93,10 +93,10 @@
 
 (defn- refuse!
   "Refuse loudly with the one export error shape."
+  {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
   [rule message data]
   (throw (ex-info message
                   (assoc data
-                         :seon.error/kind ::refused
                          ::refused rule
                          ::rule rule))))
 
@@ -201,16 +201,17 @@
   "Put a byte-equivalent of the source store at `target`.
   Clone when the host can; otherwise re-transact, loudly. Only when
   BOTH fail does the export refuse, carrying both causes."
-  [store ^java.io.File target]
-  (let [source (:seon.store/dir store)
+  {:malli/schema [:=> [:cat :seon.store/store :string] :nil]}
+  [store target-path]
+  (let [target (io/file target-path)
+        source (:seon.store/dir store)
         cause (try
                 (when-not (clone! source target)
                   (ex-info (str "no clone command for this host: "
                                 (System/getProperty "os.name"))
                            {::os (System/getProperty "os.name")}))
                 (catch Throwable failure
-                  (if (= :seon.operator.subprocess/deadline-exceeded
-                         (:seon.error/kind (ex-data failure)))
+                  (if (:seon.operator.subprocess/phase (ex-data failure))
                     (throw failure)
                     failure)))]
     (when cause
@@ -330,7 +331,7 @@
     (.mkdirs (io/file parent))
     (let [temp (io/file parent (str ".store." (random-uuid) ".tmp"))]
       (try
-        (copy-store! store temp)
+        (copy-store! store (.getPath temp))
         (reidentify-at! (.getPath temp) (.getPath target))
         ; the temp name is the fence: only a complete, re-identified
         ; store ever takes the name anything opens

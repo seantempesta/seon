@@ -46,11 +46,12 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- refuse!
+  {:malli/schema [:=> [:cat :keyword :map] :nil]}
   [rule data]
   (throw
    (ex-info
     (str "Reconciliation refused: " (name rule) ".")
-    (merge {:seon.error/kind ::refused
+    (merge {
             ::rule rule :seon.reconcile/refused rule}
            data))))
 
@@ -421,7 +422,7 @@
   returning {::converged? false ::operations n}. Refusals are `plan`'s,
   surfaced before any transaction when the pre-check already sees them
   and atomically from inside the writer otherwise."
-  {:malli/schema [:=> [:cat :seon.db/connection ::request] ::result]}
+  {:malli/schema [:=> [:cat :seon.db/connection ::request] [:or ::result :seon.db/error-result]]}
   [connection request]
   (let [tx-data (plan (seon.db/db connection) request)
         operations (count tx-data)]
@@ -435,7 +436,7 @@
               :tx-meta
               {:seon.db/process
                [:seon.db.process/id (::process request)]}})]
-        (if (:seon.error/kind result)
+        (if (or (:seon.db.write.attempt/request-id result) (:seon.db/invalid-read result) (:seon.schema/expected-value result))
           result
           {::converged? false
            ::operations operations})))))

@@ -210,8 +210,8 @@
              (with-redefs-fn
                {copy-store-var
                 (fn [_store target]
-                  (reset! temporary target)
-                  (.mkdirs ^java.io.File target)
+                  (reset! temporary (io/file target))
+                  (.mkdirs (io/file target))
                   (java.nio.file.Files/createSymbolicLink
                    (.toPath (io/file target "linked-elsewhere"))
                    (.toAbsolutePath (.toPath outside))

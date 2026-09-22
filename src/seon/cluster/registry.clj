@@ -37,7 +37,7 @@
     landed nine (b2-plan §0.3). `a-concurrent-create-wave-loses-nothing`
     is that scar's standing regression.
   - Refusals are loud ex-info
-    `{:seon.error/kind ::refused ::rule <which>}`, matching B0/B1
+    `{::refused <which> ::rule <which>}`, matching B0/B1
     (`src/seon/cluster/store.clj:161-167`).
 
   Crash walk (kill -9 at any point; the OS releases the store's flock,
@@ -81,10 +81,11 @@
 
 (defn- refuse!
   "Refuse loudly with the one registry error shape."
+  {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
   [rule message data]
   (throw (ex-info message
                   (assoc data
-                         :seon.error/kind ::refused
+
                          ::refused rule
                          ::rule rule))))
 
@@ -424,6 +425,7 @@
         branches))
 
 (defn- branch-heads
+  {:malli/schema [:=> [:cat :seon.store/store [:seqable :seon.store/branch]] [:vector [:map [:seon.store/branch :seon.store/branch] [:seon.source/commit-id :seon.source/commit-id]]]]}
   [store branches]
   (mapv
    (fn [branch]
@@ -432,8 +434,7 @@
        (when-not commit-id
          (throw
           (ex-info "A roster branch has no readable head commit ID."
-                   {:seon.error/kind
-                    :seon.cluster.registry/branch-head-absent
+                   {
                     :seon.store/branch branch :seon.cluster.registry/branch-head-absent true})))
        {:seon.store/branch branch
         :seon.source/commit-id commit-id}))
@@ -496,13 +497,13 @@
 
 (defn- refuse-missing-candidates!
   "Refuse a dry-run enumeration that named a candidate with no file."
+  {:malli/schema [:=> [:cat :map] :map]}
   [inventory]
   (let [missing (:seon.cluster.registry/missing-candidate-files inventory)]
     (when (seq missing)
       (throw
        (ex-info "A dry-run candidate has no physical FileStore file."
-                {:seon.error/kind
-                 :seon.cluster.registry/candidate-file-absent
+                {
                  :seon.cluster.registry/missing-candidate-files
                  (vec missing) :seon.cluster.registry/candidate-file-absent true})))
     inventory))
@@ -518,6 +519,7 @@
       :else (recur (ex-cause current)))))
 
 (defn- dry-run!
+  {:malli/schema [:=> [:cat :seon.store/store :inst :map] :seon.cluster.registry/inventory]}
   [store remove-before options]
   (let [started-ns (System/nanoTime)
         token (Object.)
@@ -547,8 +549,7 @@
                             (elapsed-ms started-ns)))
                    (throw
                     (ex-info "Dry-run candidate enumeration is complete."
-                             {:seon.error/kind
-                              :seon.cluster.registry/dry-run-complete
+                             {
                               :seon.cluster.registry/dry-run-token token :seon.cluster.registry/dry-run-complete true}))))))
           (catch Throwable failure
             failure))]
@@ -569,8 +570,7 @@
       :else
       (throw
        (ex-info "Dry-run collection returned without its delete barrier."
-                {:seon.error/kind
-                 :seon.cluster.registry/dry-run-barrier-absent :seon.cluster.registry/dry-run-barrier-absent true})))))
+                {:seon.cluster.registry/dry-run-barrier-absent true})))))
 
 (defn- collect-and-inventory!
   "Sweep this store and take the dry run's inventory from the same sweep.

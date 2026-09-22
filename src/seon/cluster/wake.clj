@@ -236,14 +236,18 @@
         unindexed (unindexed-listened-attributes database)]
     (cond
       (empty? listened)
-      {:seon.error/kind ::no-listened-attributes
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.cluster.wake/declarations
+       :seon.error/operation 'seon.cluster.wake/declarations-refusal
        :seon.error/message
        (str "No attribute declares :seon.wake/listen, so nothing can ever "
             "wake an agent on this database.")
        :seon.cluster.wake/attributes #{}}
 
       (empty? inside)
-      {:seon.error/kind ::no-inside-attributes
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.cluster.wake/declarations
+       :seon.error/operation 'seon.cluster.wake/declarations-refusal
        :seon.error/message
        (str "No attribute declares :seon.wake/inside, so every wake would "
             "count as arriving from outside the agent and refill its turn "
@@ -251,7 +255,9 @@
        :seon.cluster.wake/attributes listened}
 
       (seq unindexed)
-      {:seon.error/kind ::unindexed-listened-attribute
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.cluster.wake/declarations
+       :seon.error/operation 'seon.cluster.wake/declarations-refusal
        :seon.error/message
        (str "A listened attribute is not in the :avet index, so its wakes "
             "read as absent: " (pr-str (vec (sort unindexed))))
@@ -276,7 +282,9 @@
                   [:maybe :seon.error/value]]}
   [database]
   (when (empty? (arming-attributes database))
-    {:seon.error/kind ::no-arming-attributes
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer :seon.cluster.wake/declarations
+     :seon.error/operation 'seon.cluster.wake/arming-refusal
      :seon.error/message
      (str "No attribute declares :seon.wake/arms, so an agent created while "
           "this cluster runs would never be armed and its derivable work "
@@ -381,8 +389,9 @@
 (defn- deliver!
   "`offer!` one payload-free wake and classify the answer.
   `fenced?` is a zero-arg derived check invoked only after a closed
-  offer. Faults on `::refused` — one classifier and one error kind.
+  offer. Faults on `::refused` — one delivery decision and its refusal.
   Returns the delivery."
+  {:malli/schema [:=> [:cat :seon.flow/channel :seon.agent/id :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]] :seon.cluster.wake/delivery]}
   [fault-channel key route channel fenced?]
   (let [offered (async/offer! channel ::wake)
         outcome (delivery offered
@@ -390,7 +399,7 @@
     (when (= ::refused outcome)
       (async/offer! fault-channel
                     (ex-info "a wake route refused delivery"
-                             {:seon.error/kind ::undeliverable-wake
+                             {
                               :seon.cluster.wake/undeliverable-wake key
                               :seon.error/message
                               "A wake route refused delivery."

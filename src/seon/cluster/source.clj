@@ -34,10 +34,11 @@
   [:seon.source/digest :seon.source/test-input-digest :seon.source/built-at])
 
 (defn- refuse!
+  {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
   [rule message data]
   (throw (ex-info message
                   (assoc data
-                         :seon.error/kind ::refused
+
                          ::refused rule
                          ::rule rule))))
 
@@ -191,7 +192,7 @@
     :seon.program/unresolved-report]}
   [database]
   (let [report (fn/unresolved-callers database)]
-    (when (:seon.error/kind report)
+    (when (or (:seon.db/invalid-read report) (:seon.schema/expected-value report))
       (refuse! ::publish-readback-failed
                "the published source unresolved-callers read was refused"
                {:seon.source/read 'seon.fn/unresolved-callers
@@ -351,7 +352,9 @@
     (test.cache/test-input-digest directory (test.cache/input-digests directory))
     (catch Exception failure
       (let [refusal (error/diagnostic
-                     {:seon.error/kind :seon.test/input-evidence-unavailable
+                     {:seon.error/at (java.util.Date.)
+                      :seon.error/layer :seon.source/publication
+                      :seon.error/operation 'seon.cluster.source/publish!
                       :seon.error/message "The publication input inventory is unavailable."
                       :seon.error/diagnostic-layer :source-publication
                       :seon.error/diagnostic-operation 'seon.cluster.source/publish!

@@ -114,7 +114,9 @@
                   [:or :seon.search/handle :seon.error/value]]}
   [environment]
   (or (:seon.search/handle environment)
-      {:seon.error/kind ::handle-absent
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.search/environment
+       :seon.error/operation 'seon.search/supplied-handle
        :seon.search/unavailable true
        :seon.error/message
        "This cluster's environment carries no search index handle."
@@ -555,7 +557,7 @@
             :seon.search/completion] :as state}]
    (when-not (and handle channel completion)
      (throw (ex-info "The search index proc is missing a required resource."
-                     {:seon.error/kind ::missing-resource :seon.search/missing-resource true})))
+                     {:seon.search/missing-resource true})))
    (assoc state
           ::flow/in-ports {::transactions channel}
           ::flow/out-ports {}

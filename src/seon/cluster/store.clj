@@ -95,6 +95,7 @@
                                  database-value?)
 
 (defn- fresh-file-lock
+  {:malli/schema [:=> [:cat] [:fn seon.cluster.store/file-lock-object?]]}
   []
   (let [lock-file
         (io/file "tmp/schema-generator" (str (random-uuid) ".lock"))
@@ -110,7 +111,7 @@
         (throw
          (ex-info
           "The file-lock generator could not acquire its fresh lock."
-          {:seon.error/kind :core-bug
+          {
            :seon.cluster.store/file-lock-generator-failed (.getPath lock-file)
            :seon.error/message
            "The file-lock generator could not acquire its fresh lock."
@@ -201,10 +202,11 @@
 
 (defn- refuse!
   "Refuse loudly with the one store error shape."
+  {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
   [rule message data]
   (throw (ex-info message
                   (assoc data
-                         :seon.error/kind ::refused
+
                          ::refused rule
                          ::rule rule))))
 

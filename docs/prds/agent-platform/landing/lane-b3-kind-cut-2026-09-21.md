@@ -488,3 +488,61 @@ at `6ab206c4-9bac-56ae-8edb-8b3ce75d078e`. A second reload probe,
 confirmed the base diagnostic output and partial-row input in 185 ms.
 Publication `9c72d26e-a35b-40c6-a6bd-20cef326cf15` converged at
 `6ab208ca-b8fa-5aab-b55b-56fac64fee58`.
+
+## Store, publication and operations group
+
+Construction keys were removed from artifact, registry, store, source, wake,
+search and reconciliation errors. Existing exception boundaries remain exception
+boundaries; flat refusals remain values. Wake declaration refusals and the search
+handle supplier now carry the required base timestamp, layer and operation.
+
+| Owner / retained decision | Declared member | Why the branch remains |
+| --- | --- | --- |
+| `cluster.boot/boot!`, reachability admission | `error/retryable?`; `datahike.gc-guard/mode` | Refuse unavailable admission before branch creation; distinguish roster contention from a sweep for the diagnostic. |
+| `cluster.export/copy-store!`, subprocess catch | `operator.subprocess/phase` | Preserve a deadline refusal instead of attempting export fallback after an uncompleted subprocess. |
+| `cluster.source/unresolved-report!` | `db/invalid-read`, `schema/expected-value` | Refuse publication when its unresolved-caller read cannot be verified. |
+| `reconcile/reconcile!` | `db.write.attempt/request-id`, `db/invalid-read`, `schema/expected-value` | Construct the convergence report only after the writer accepts the transaction. |
+
+`reconcile!` accretes `db/error-result`. Private `copy-store!` accepts a path
+string and constructs its File internally; its production caller and cleanup
+test replacement use that same contract. Added complete private contracts for
+the touched refusal constructors, registry inventory helpers and wake delivery.
+The wake route's exception evidence is polymorphic (`schema/value`); the actual
+channel, agent identity, callback and delivery result remain constrained.
+
+Dependency evidence: pinned Datahike `006e634ae955c186619adb5f3868cca29d8c97fb`,
+`reference-code/datahike/src/datahike/gc_guard.cljc`, lines 1–94 and 172–258:
+`try-reachability-permit!` returns a token or retryable refusal. Roster contention
+carries its requested mode; sweep contention does not. Boot supplies store id
+and `:roster` once per admission. Its CAS work is store-local, not a program scan.
+The dependency's legacy discriminator is outside this cut's requested roots;
+the first-party reader no longer uses it.
+
+Initial focused command selected artifact, boot, export, registry, source, store,
+wake, search and reconcile source paths and namespaces `seon.cluster.boot-test
+seon.cluster.export-test seon.cluster.registry-test seon.cluster.source-test
+seon.cluster.store-test seon.cluster.wake-test seon.search-test
+seon.reconcile-test`. Run `533dfe54143e`: **86 tests, 508 assertions, 28 failures,
+12 errors**, recorded, exit 1 (`tmp/b3-operations.log`). The export cleanup
+replacement still expected File (two errors); corrected to the path-string
+contract. Wake declaration refusal lacked base fields (one error); corrected.
+Other errors were refused synthetic component ownership, missing wake events,
+and a search fixture storing a symbol as a string. Remaining failures included
+old kind assertions, published scalar-row expectations, missing wake events,
+and elapsed bounds. These are recorded failures, not a green or an attribution
+to another lane.
+
+Correction command uses those same paths plus `test/seon/cluster/export_test.clj`
+and selects `seon.cluster.export-test seon.cluster.wake-test`:
+**23 tests, 117 assertions, 14 failures, 8 errors**, recorded, exit 1
+(`tmp/b3-operations-correction.log`). All six export tests pass. The wake base-field
+contract error is gone; refused fixture ownership and missing wake events remain.
+The final search supplier base-field correction awaits the final matrix.
+
+Publication correction `e8c81132-a4c3-4ba2-bbe0-bdf5698a00fe`:
+05:16:57.316913–05:17:21.796495Z, **24.479582 s**, SOURCE_BATCH,
+adopted `6ab20f55-036f-5d0d-8e8a-b5c253a55ad4`.
+Search correction `9c4610ec-6381-4a32-a449-978f5aa58fbf`:
+05:17:40.631815–05:17:54.267877Z, **13.636062 s**, SOURCE_BATCH,
+adopted `6ab20f7b-f403-590d-ab76-3a98251dc5bb`. Both exceed ten seconds;
+the hook exposes the batch phase, not an internal phase breakdown.

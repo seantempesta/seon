@@ -130,12 +130,12 @@
         existing-cluster? (contains? (registry/roster store) cluster-branch)
         source-base (when-not existing-cluster? (cluster/source-base! store))
         start-permit (gc-guard/try-reachability-permit! store-id :roster)
-        _ (when-let [kind (:seon.error/kind start-permit)]
+        _ (when (:seon.error/retryable? start-permit)
             (throw
              (ex-info
-              (if (= :sweep-in-progress kind)
-                "A reachability sweep is in progress; retry start later."
-                "Reachability publication is currently unavailable; retry start later.")
+              (if (:datahike.gc-guard/mode start-permit)
+                "Reachability publication is currently unavailable; retry start later."
+                "A reachability sweep is in progress; retry start later.")
               start-permit)))
         forked
         (try
