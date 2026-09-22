@@ -237,3 +237,10 @@ claiming the cold gate or platform proof ran.
 Final snapshot `run.iLmSfR` armed 1684/1684 contracts; the regression body
 measured 4.879695 s. The old snapshot worktree had no exact-root process
 holder before cleanup.
+
+Implementation commit: **64c31cf75** (`Bound base exports by operation and
+report completed work`), 10 owned paths, +470/−28 including evidence/docs.
+The isolated worktree and owned scratch roots have been removed; all owned
+foreground shell sessions exited. Raw evidence logs remain under `tmp/`.
+The orchestrator still owns `SEON_TEST_ORCHESTRATOR=1 bin/test --prepare-head-base`
+and platform/integration verification.
