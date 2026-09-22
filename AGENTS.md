@@ -396,8 +396,11 @@ the path and the change, and never edits it. A lane releases its paths by commit
 (`git commit --only -- <its paths>`) and naming them in its final report; the orchestrator
 then updates the ledger. The only limits on concurrency are these file holds and real
 dependencies — no lane count, no test-JVM slot, no prober cap (owner, 2026-09-23).
-**No git worktrees, ever (owner, 2026-09-23: "no more git worktrees").** A proof of HEAD
-plus a lane's diff runs from a `git archive` snapshot with the shared caches linked.
+**No git worktrees (owner, 2026-09-23: "no more git worktrees"; "If something needs a
+worktree it needs to be personally authorized by me").** A proof of HEAD plus a lane's diff
+runs from a `git archive` snapshot with the shared caches linked. A worktree is created
+only with the owner's personal authorization for that one use, asked directly with the
+reason; no lane, spec or orchestrator ruling grants it.
 
 Preserve unrelated edits. No `git add -A`, `reset --hard`, `stash` or shared file restore.
 Commit coherent path-limited slices. Native Codex collaboration, the documented CLI
