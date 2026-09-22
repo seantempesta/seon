@@ -84,3 +84,7 @@ Sighting 2026-09-22 21:10Z (lane validator-single-pass): `bin/test --prepare-hea
 HEAD `4135c518a` refused with the same `seon.db/render-diff-ai` ←
 `seon.render/invoke-selected` referrer (37 s, exit 1); default pid 51528 still runs code
 older than `f31074521`. RESET NEEDED (or reload of `seon.fn`/`seon.cluster` in default).
+
+## Update 2026-09-23: 6699de97a
+
+Both remaining items are fixed (a schema change adding a producer re-analyses its invokers; `fn/source-rows` keeps declared targets), along with the review P1s (a replacement target lost on re-analysis; a supplied file row taken as proof of reconciliation). Proven on retired branches of default; the armed runner run is pending the commit-5 runner.

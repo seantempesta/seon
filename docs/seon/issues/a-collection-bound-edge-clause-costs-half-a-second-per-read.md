@@ -20,3 +20,7 @@ The same shape runs in a loop in `seon.fn/assert-capability-contracts!`
 **3212.7 ms** for a three-file selection on default and dominates a two-file sample
 population (3.5–4.0 s). Wanted: the reverse walk reads AVET per edge attribute,
 as `gate-set-in` already does, and a sample population returns in well under a second.
+
+## Sighting 2026-09-23 (deletion-caller-edge, c843d621a)
+
+`file-identities` has the same collection-bound clause shape. In an instrumented 5-case run: `file-rows` 9,455 ms, `reconcile-tx-in` 8,857 ms, `report-identities` 4,919 ms, `assert-capability-contracts!` 3,402 ms.
