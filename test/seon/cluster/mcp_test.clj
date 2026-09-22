@@ -334,6 +334,35 @@
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
+(deftest runtime-observation-shows-unavailable-problems-with-their-cause
+  ;; `seon.problems/problems` may answer a declared refusal instead of the
+  ;; per-family map (observed on default 2026-09-23: latest-results refused
+  ;; an incomplete member). The observation must not count the refusal's
+  ;; keys (a Date is not countable) nor show counts that read as healthy.
+  (let [cluster-name "mcp-runtime-problems-unavailable-test"
+        refusal {:seon.error/at (java.util.Date.)
+                 :seon.error/layer :seon.test/execution
+                 :seon.error/operation 'seon.test.runner/latest-results
+                 :seon.error/message
+                 "The test execution evidence does not authorize this transition."
+                 :seon.error/expected :completed-member
+                 :seon.error/offending 'example-test/incomplete
+                 :seon.test/execution-refusal :seon.test/population-unknown}]
+    (swap! running-instances assoc cluster-name
+           {:seon.boot/cluster-connection ::connection})
+    (try
+      (with-redefs [boot/readiness
+                    (fn [_]
+                      {:seon.boot/cluster-name cluster-name
+                       :seon.problems/problems refusal})]
+        (let [result (cluster/mcp-runtime-observation cluster-name)]
+          (is (= refusal (:seon.dev.mcp/problems-unavailable result)))
+          (is (nil? (find result :seon.dev.mcp/problem-counts)))
+          (is (not (contains? (:seon.dev.mcp/readiness result)
+                              :seon.problems/problems)))))
+      (finally
+        (swap! running-instances dissoc cluster-name)))))
+
 (deftest ^{:seon.test/fixture-observation
            "Observes that flow health uses an ordinary canonical branch; the fresh-store owner is referenced only to assert zero acquisitions."}
   live-runtime-observation-hands-its-projection-to-flow-health

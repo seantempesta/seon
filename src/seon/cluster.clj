@@ -624,10 +624,17 @@
         (get-in instance
                 [:seon.sci.eval/ctx :seon.sci.eval/projection-state])
         ready (when instance ((requiring-resolve 'seon.cluster.boot/readiness) instance))
+        ;; `seon.problems/problems` answers the per-family map or a declared
+        ;; refusal (`:seon.error/at` present). A refusal is shown as the
+        ;; problems being unavailable, with its cause; counting it would
+        ;; count its keys, and an empty count would read as healthy.
+        problems (:seon.problems/problems ready)
+        unavailable (when (:seon.error/at problems) problems)
         problem-counts
-        (into (sorted-map)
-              (map (fn [[family rows]] [family (count rows)]))
-              (:seon.problems/problems ready))
+        (when (and ready (not unavailable))
+          (into (sorted-map)
+                (map (fn [[family rows]] [family (count rows)]))
+                problems))
         readiness-face
         (when ready
           (dissoc ready :seon.problems/problems))]
@@ -639,8 +646,9 @@
                (schema/call-with-projection-state
                 projection-state
                 #(oversight/flow-status (db/db connection) instance))
-               :unknown)
-             :seon.dev.mcp/problem-counts problem-counts}
+               :unknown)}
+      problem-counts (assoc :seon.dev.mcp/problem-counts problem-counts)
+      unavailable (assoc :seon.dev.mcp/problems-unavailable unavailable)
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
 
 ;;; ---------------------------------------------------------------------------

@@ -44,3 +44,15 @@ Batch-19 continuation, 2026-09-16 02:37 UTC: default PID 7595 remains alive,
 but MCP runtime status again refuses the occurrence count, now at signature
 index 4. Direct read-only JVM evaluation succeeds and confirms cluster custody
 and loaded test namespaces. The protected problem/error owners are unchanged.
+
+Re-observation 2026-09-23 (lane runtime-status-crash): default PID 70720,
+`runtime_status` failed with `count not supported on this type: Date` at
+`cluster.clj:629` because `seon.problems/problems` answered a declared refusal
+value (runner `latest-results`, `:seon.test/population-unknown`) and the
+observation counted its keys. `mcp-runtime-observation` now reports a refusal
+value as `:seon.dev.mcp/problems-unavailable` and omits
+`:seon.dev.mcp/problem-counts`; verified live on default. A contract violation
+*thrown* by the problems return boundary (this note's original sighting) still
+surfaces as the evaluation error envelope, which is evidence-complete. The
+current producer cause is filed at
+[an unfinished test run hides every problem family](an-unfinished-test-run-hides-every-problem-family.md).

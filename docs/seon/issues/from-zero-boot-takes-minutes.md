@@ -67,3 +67,8 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-23 | `535ce45cf` via `bin/seon --root <scratch> nuke --force`: both attempts refused by the gitlink-pin digest defect | nuke, refused twice | — | 120.67 (attempts 58.9 s + 50.3 s) | — | same |
 | 2026-09-23 | `76b42f90f` archive, `bin/seon nuke --force` on the repository root (every derived cache wiped first) | nuke (from-zero) | 106,787 | 147.44 (down 0.7 s, wipe 14.3 s, source 4.9 s, launch 127.2 s) | — | [lane-nuke-is-total](../../prds/agent-platform/landing/lane-nuke-is-total-2026-09-23.md) |
 | 2026-09-23 | `76b42f90f` JVM, `bin/seon reset rtest --force` (stop, unlink, fresh fork, start) | reset (fresh branch) | 8,500 | 14.77 (stop 6.2 s, unlink 9 ms) | — | same |
+
+Sighting 2026-09-23 (lane runtime-status-crash, read-only): default PID 70720,
+started 2026-09-22T21:47:19Z, readiness reports `:seon.boot/ready-ms 106787`
+(107 s) with `:seon.boot/recovered-runs 0`. Whether that start was from zero
+or a resume is not recorded in readiness; no phase breakdown was available.
