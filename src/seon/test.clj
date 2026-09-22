@@ -14,6 +14,7 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
+            [seon.test.cache :as cache]
             [seon.test.runner :as runner])
   (:import [clojure.lang DynamicClassLoader]
            [java.util.concurrent FutureTask]))
@@ -626,7 +627,8 @@
     :seon.error/diagnostic-cause kind
     :seon.error/diagnostic-evidence
     {:seon.test.run/basis-t (db/basis-t database)
-     :seon.test.run/branch (get-in (db/schema-database database) [:config :branch])}}) :seon.test/selection-refusal kind))
+     :seon.test.run/branch (get-in (db/schema-database database) [:config :branch])}})
+         :seon.test/selection-refusal kind))
 
 (defn- selection-read!
   "Carry a polymorphic query result unchanged; preserve a refused read exactly."
@@ -929,9 +931,30 @@
                          "The publication has no unique external-input identity." (vec sources)))
             _ (when (and (nil? cluster)
                          (not= input-digest (:seon.test.run/input-digest request)))
-                (refuse! :seon.test/input-evidence-unavailable
-                         "The requested external inputs differ from the published database."
-                         (:seon.test.run/input-digest request)))
+                (let [{published :seon.test.selection/published-inputs
+                       requested :seon.test.selection/requested-inputs}
+                      (:seon.test.selection/input-evidence request)
+                      comparable? (and (map? published) (map? requested)
+                                       (= input-digest (cache/input-evidence-digest published))
+                                       (= (:seon.test.run/input-digest request)
+                                          (cache/input-evidence-digest requested)))
+                      differences (when comparable?
+                                    (cache/differing-inputs published requested))]
+                  (throw
+                   (ex-info
+                    "The requested external inputs differ from the published database."
+                    (update-in
+                     (selection-refusal
+                      database :seon.test/input-evidence-unavailable
+                      "The requested external inputs differ from the published database."
+                      (:seon.test.run/input-digest request))
+                     [:seon.error/data :seon.error/diagnostic-evidence]
+                     merge
+                     (cond-> {:seon.test.selection/published-input-digest input-digest
+                              :seon.test.selection/requested-input-digest
+                              (:seon.test.run/input-digest request)}
+                       comparable?
+                       (assoc :seon.test.selection/input-differences differences)))))))
             _ (when-not (selection-read!
                           (db/q '[:find ?test . :where [?test :seon.test/sym]] database))
                 (refuse! :seon.test/population-unknown "No indexed test population is available." :absent))

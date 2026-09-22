@@ -471,6 +471,104 @@
     (doseq [extension [".clj" ".cljc" ".edn"]]
       (is (not (cache/widening-path? (str root "/example" extension)))))))
 
+(deftest differing-published-inputs-name-each-path-and-both-digests
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           source-digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)
+           published {"deps.edn" (apply str (repeat 64 "a"))
+                      "test/fixtures/input.txt" (apply str (repeat 64 "b"))}
+           requested {"deps.edn" (apply str (repeat 64 "c"))
+                      "test/fixtures/added.txt" (apply str (repeat 64 "d"))}
+           published-digest (cache/input-evidence-digest published)
+           requested-digest (cache/input-evidence-digest requested)
+           _ (support/transacted!
+              connection
+              [{:seon.source/digest source-digest
+                :seon.source/test-input-digest published-digest}])
+           database (db/db connection)
+           refusal
+           (sut/select
+            {:seon.db/db database
+             :seon.test.run/input-digest requested-digest
+             :seon.test.selection/input-evidence
+             {:seon.test.selection/published-inputs published
+              :seon.test.selection/requested-inputs requested}
+             :seon.test.run/policy :incremental
+             :seon.test.run/members []
+             :seon.test.run/provenance
+             {:seon.test.run/id (id/id)
+              :seon.test.run/at (java.util.Date.)
+              :seon.test.run/program-digest (runner/program-digest database)
+              :seon.test.run/published-base-digest (apply str (repeat 64 "e"))
+              :seon.test.run/overlay-input-digest (apply str (repeat 64 "f"))
+              :seon.test.run/basis-t (db/basis-t database)
+              :seon.test.run/branch :current-src}})
+           differences (get-in refusal [:seon.error/data
+                                         :seon.error/diagnostic-evidence
+                                         :seon.test.selection/input-differences])]
+       (is (= :seon.test/input-evidence-unavailable
+              (:seon.test/selection-refusal refusal)) (pr-str refusal))
+       (is (= [{:seon.test.selection/input-path "deps.edn"
+                :seon.test.selection/published-input-digest (apply str (repeat 64 "a"))
+                :seon.test.selection/requested-input-digest (apply str (repeat 64 "c"))}
+               {:seon.test.selection/input-path "test/fixtures/added.txt"
+                :seon.test.selection/published-input-digest :seon.error/absent
+                :seon.test.selection/requested-input-digest (apply str (repeat 64 "d"))}
+               {:seon.test.selection/input-path "test/fixtures/input.txt"
+                :seon.test.selection/published-input-digest (apply str (repeat 64 "b"))
+                :seon.test.selection/requested-input-digest :seon.error/absent}]
+              differences))
+       (let [printed (with-out-str (#'runner/print-selection-refusal! refusal))]
+         (doseq [path ["deps.edn" "test/fixtures/added.txt" "test/fixtures/input.txt"]]
+           (is (str/includes? printed path) printed))
+         (is (str/includes? printed "published=") printed)
+         (is (str/includes? printed "requested=") printed))))))
+
+(deftest documentation-only-input-changes-do-not-refuse-published-selection
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "documentation-selection")
+     (support/transacted! connection [{:seon.ns/name 'selection.fixture}])
+     (install-selection-program!
+      connection
+      "(clojure.test/deftest documentation-safe (clojure.test/is true))")
+     (let [base-inventory {"deps.edn" (apply str (repeat 64 "a"))
+                           "docs/base-note.md" (apply str (repeat 64 "b"))}
+           head-inventory (assoc base-inventory "docs/base-note.md"
+                                 (apply str (repeat 64 "c")))
+           published (cache/external-input-digests "." base-inventory)
+           requested (cache/external-input-digests "." head-inventory)
+           input-digest (cache/input-evidence-digest published)
+           database (db/db connection)
+           source-digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)
+           _ (support/transacted!
+              connection
+              [{:seon.source/digest source-digest
+                :seon.source/test-input-digest input-digest}])
+           database (db/db connection)
+           selection
+           (sut/select
+            {:seon.db/db database
+             :seon.test.run/input-digest (cache/input-evidence-digest requested)
+             :seon.test.selection/input-evidence
+             {:seon.test.selection/published-inputs published
+              :seon.test.selection/requested-inputs requested}
+             :seon.test.run/policy :incremental
+             :seon.test.run/members []
+             :seon.test.run/provenance
+             {:seon.test.run/id (id/id)
+              :seon.test.run/at (java.util.Date.)
+              :seon.test.run/program-digest (runner/program-digest database)
+              :seon.test.run/published-base-digest (apply str (repeat 64 "d"))
+              :seon.test.run/overlay-input-digest (apply str (repeat 64 "e"))
+              :seon.test.run/basis-t (db/basis-t database)
+              :seon.test.run/branch :current-src}})]
+       (is (= published requested))
+       (is (not (:seon.error/at selection)) (pr-str selection))
+       (is (contains? (set (map :seon.test/sym (:seon.test.run/members selection)))
+                      (fixture-symbol "documentation-safe")))))))
+
 (deftest omitted-dirty-callers-use-head-and-carry-recordable-provenance
   (let [root (.toFile (Files/createTempDirectory
                        (.toPath (io/file "tmp")) "overlay-head-"

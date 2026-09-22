@@ -5,12 +5,25 @@
   [:seon.test.run/cluster {:optional true} :seon.test.run/cluster]
   [:seon.test.run/provenance {:optional true} :seon.test.run/provenance]
   [:seon.test.run/input-digest {:optional true} :seon.test.run/input-digest]
+  [:seon.test.selection/input-evidence {:optional true} :seon.test.selection/input-evidence]
   [:seon.test.run/members {:optional true} [:vector :seon.test.member/member]]
   [:seon.test/namespaces {:optional true} [:set :symbol]]
   [:seon.test/identities {:optional true} [:set :qualified-symbol]]
   [:seon.test.run/change-basis-t {:optional true} :seon.db/basis-t]
   [:seon.test.run/policy {:optional true} :seon.test.run/policy]
   [:seon.test/include-long? {:optional true} :boolean]]
+ :seon.test.selection/input-digest
+ [:or :seon.source/digest [:= :seon.error/absent]]
+ :seon.test.selection/input-difference
+ [:map
+  [:seon.test.selection/input-path [:string {:min 1}]]
+  [:seon.test.selection/published-input-digest :seon.test.selection/input-digest]
+  [:seon.test.selection/requested-input-digest :seon.test.selection/input-digest]]
+ :seon.test.selection/input-differences [:vector :seon.test.selection/input-difference]
+ :seon.test.selection/input-evidence
+ [:map
+  [:seon.test.selection/published-inputs [:map-of :string :seon.source/digest]]
+  [:seon.test.selection/requested-inputs [:map-of :string :seon.source/digest]]]
  :seon.test.selection/widening [:enum :missing-basis :removed-file :outside-program-graph]
  :seon.test.selection/reused
  [:and :seon.test/result

@@ -75,6 +75,32 @@
                              "docs/example.md" "doc-v2")
                       (dissoc "test/seon/example_test.clj"))))))))
 
+(deftest external-input-evidence-names-differences-and-excludes-documentation
+  (let [deps-v1 (apply str (repeat 64 "a"))
+        deps-v2 (apply str (repeat 64 "b"))
+        fixture-v1 (apply str (repeat 64 "c"))
+        note-v1 (apply str (repeat 64 "d"))
+        note-v2 (apply str (repeat 64 "e"))
+        published {"deps.edn" deps-v1
+                   "test/fixtures/input.txt" fixture-v1
+                   "docs/base-note.md" note-v1}
+        requested {"deps.edn" deps-v2
+                   "test/fixtures/input.txt" fixture-v1
+                   "docs/base-note.md" note-v2}
+        published-evidence (cache/external-input-digests "." published)
+        requested-evidence (cache/external-input-digests "." requested)]
+    (is (= {"deps.edn" deps-v1
+            "test/fixtures/input.txt" fixture-v1}
+           published-evidence))
+    (is (= [{:seon.test.selection/input-path "deps.edn"
+             :seon.test.selection/published-input-digest deps-v1
+             :seon.test.selection/requested-input-digest deps-v2}]
+           (cache/differing-inputs published-evidence requested-evidence)))
+    (is (= (cache/input-evidence-digest published-evidence)
+           (cache/test-input-digest "." published)))
+    (is (not= (cache/input-evidence-digest published-evidence)
+              (cache/input-evidence-digest requested-evidence)))))
+
 (deftest nonindexed-graph-fixtures-invalidate-the-external-input-signature
   (let [roots (cache/input-roots ".")]
     (doseq [root cache/graph-roots]

@@ -265,6 +265,47 @@
   (let [root (.getCanonicalPath (io/file root))]
     (into (file-input-digests root) (gitlink-digests root))))
 
+(defn external-input-digests
+  "Select gate inputs that have no indexed declaration evidence."
+  {:malli/schema [:=> [:cat [:string {:min 1}] [:map-of :string :string]]
+                  [:map-of :string :string]]}
+  [root inputs]
+  (let [roots (input-roots root)]
+    (into {}
+          (filter (fn [[path _]] (widening-path? roots path)))
+          inputs)))
+
+(defn input-evidence-digest
+  "Digest an already selected, sorted external-input inventory."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] :seon.source/digest]}
+  [inputs]
+  (sha-256 (.getBytes (pr-str (into (sorted-map) inputs)) "UTF-8")))
+
+(defn differing-inputs
+  "Name every differing external input with both observed digests."
+  {:malli/schema
+   [:=>
+    [:cat [:map-of :string :string] [:map-of :string :string]]
+    [:vector
+     [:map
+      [:seon.test.selection/input-path [:string {:min 1}]]
+      [:seon.test.selection/published-input-digest
+       [:or :seon.source/digest [:= :seon.error/absent]]]
+      [:seon.test.selection/requested-input-digest
+       [:or :seon.source/digest [:= :seon.error/absent]]]]]]}
+  [published requested]
+  (into []
+        (keep (fn [path]
+                (let [published-digest (get published path ::absent)
+                      requested-digest (get requested path ::absent)]
+                  (when-not (= published-digest requested-digest)
+                    {:seon.test.selection/input-path path
+                     :seon.test.selection/published-input-digest
+                     (if (= ::absent published-digest) :seon.error/absent published-digest)
+                     :seon.test.selection/requested-input-digest
+                     (if (= ::absent requested-digest) :seon.error/absent requested-digest)}))))
+        (sort (into (set (keys published)) (keys requested)))))
+
 (defn test-input-digest
   "Digest the sorted inventory of gate inputs without indexed declarations,
   nonindexed graph-root fixtures and gitlinks included, for one checkout (`root` names the checkout the
@@ -275,10 +316,7 @@
                   [:=> [:cat [:string {:min 1}] [:map-of :string :string]] :seon.source/digest]]}
   ([inputs] (test-input-digest "." inputs))
   ([root inputs]
-   (let [roots (input-roots root)]
-     (sha-256 (.getBytes (pr-str (into (sorted-map)
-                                      (filter (fn [[path _]] (widening-path? roots path)))
-                                      inputs)) "UTF-8")))))
+   (input-evidence-digest (external-input-digests root inputs))))
 
 (defn- read-edn [file]
   (when (.isFile (io/file file))

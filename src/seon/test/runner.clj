@@ -3665,7 +3665,13 @@
   {:malli/schema [:=> [:cat :seon.test.run/provenance] :seon.source/test-selection-request]}
   [provenance]
   (let [inputs (cache/input-digests ".")
-        external (cache/test-input-digest "." inputs)]
+        requested (cache/external-input-digests "." inputs)
+        base (io/file (System/getProperty "seon.test.published-base"))
+        artifact (edn/read-string (slurp (io/file base "build/current-src.edn")))
+        published (or (:seon.source/test-input-digests artifact)
+                      (cache/external-input-digests
+                       "." (:seon.source/relative-file-digests artifact)))
+        external (cache/input-evidence-digest requested)]
     {:seon.test.run/provenance
      (assoc provenance
             :seon.test.run/published-base-digest
@@ -3674,8 +3680,25 @@
             :seon.test.run/overlay-input-digest
             (id/digest 64 [(into (sorted-map) (cache/source-inputs inputs)) external]))
      :seon.test.run/input-digest external
+     :seon.test.selection/input-evidence
+     {:seon.test.selection/published-inputs published
+      :seon.test.selection/requested-inputs requested}
      :seon.test.run/policy :incremental
      :seon.test.run/members []}))
+
+(defn- print-selection-refusal!
+  "Print the exact differing gate inputs carried by a selection refusal."
+  {:malli/schema [:=> [:cat :seon.error/base] :nil]}
+  [refusal]
+  (when-let [differences (seq (get-in refusal [:seon.error/data
+                                                :seon.error/diagnostic-evidence
+                                                :seon.test.selection/input-differences]))]
+    (println "bin/test: differing gate inputs:")
+    (doseq [difference differences]
+      (println " -" (:seon.test.selection/input-path difference)
+               "published=" (:seon.test.selection/published-input-digest difference)
+               "requested=" (:seon.test.selection/requested-input-digest difference))))
+  nil)
 
 (defn- worker-count
   {:malli/schema [:function
@@ -4837,6 +4860,7 @@
                           (let [result (record-snapshot! persistent-root
                                          (published-selection-request run-provenance))]
                             (when-not (:seon.test.run/provenance result)
+                              (print-selection-refusal! result)
                               (throw (ex-info "Published selection refused." result)))
                             result))
               run-provenance (or (:seon.test.run/provenance admission) run-provenance)

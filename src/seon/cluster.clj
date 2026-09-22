@@ -1667,6 +1667,7 @@
   ([roots directory]
   (let [tree-snapshot
         (source/snapshot {:seon.source/roots roots :seon.fn/root directory})
+        all-inputs (test.cache/input-digests directory)
         input-roots (test.cache/input-roots directory)
         external (test.cache/toolchain-dependencies directory input-roots)
         file-digests
@@ -1677,7 +1678,7 @@
         ;; the gate's declared input inventory.
         digest (id/digest 64 [file-digests])]
     {:seon.source/digest digest
-     :seon.source/test-input-digest (test.cache/test-input-digest directory file-digests)
+     :seon.source/test-input-digest (test.cache/test-input-digest directory all-inputs)
      :seon.source/relative-file-digests (into (sorted-map) file-digests)})))
 
 (defn- current-source-snapshot
@@ -1830,6 +1831,8 @@
   [published manifest snapshot]
   {:seon.source/digest (:seon.source/digest published)
    :seon.source/commit-id (:seon.source/commit-id published)
+   :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
+   :seon.source/test-input-digests (:seon.source/test-input-digests snapshot)
    :seon.source/relative-file-digests (:seon.source/relative-file-digests snapshot)
    :seon.fn/manifest manifest})
 
@@ -1885,7 +1888,9 @@
             inputs (if partial? (merge (apply dissoc stored requested) observed) observed)
             snapshot {:seon.source/relative-file-digests inputs
                       :seon.source/digest (id/digest 64 [(into (sorted-map) inputs)])
-                      :seon.source/test-input-digest (test.cache/test-input-digest directory inputs)}
+                      :seon.source/test-input-digest
+                      (test.cache/test-input-digest directory
+                                                    (test.cache/input-digests directory))}
             digest (:seon.source/digest snapshot)]
       (let [database (when published (source/database store (:seon.source/commit-id published)))
             selected (when database changed)
@@ -2283,21 +2288,31 @@
             (refresh-source! root (vec (sort paths)) nil directory))
           (let [published (source/current held)
                 database (source/database held (:seon.source/commit-id published))
-                digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])]
+                digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])
+                input-digest (db/q database '[:find ?digest .
+                                              :where [_ :seon.source/test-input-digest ?digest]])]
             (try
               (when (map? digest)
                 (refused! "The exported publication digest could not be read." digest))
+              (when (map? input-digest)
+                (refused! "The exported publication input digest could not be read." input-digest))
+              (when-not input-digest
+                (refused! "The exported publication has no input digest." :seon.error/absent))
               (report-source-progress! "publication export")
               (export/export! {:seon.store/store held
                                :seon.export/parent-dir (str (io/file destination "data"))})
               (let [manifest (seon.fn/database-manifest database directory
                                                         (:seon.fn/roots (publication-roots)) nil)
+                    input-digests (test.cache/external-input-digests
+                                   directory (test.cache/input-digests directory))
                     inputs (into {} (db/q '[:find ?path ?digest
                                             :where [?file :seon.fn.file/relative-path ?path]
                                                    [?file :seon.fn.file/digest ?digest]] database))]
                 (write-source-artifact! destination
                   (source-artifact (assoc published :seon.source/digest digest) manifest
-                                   {:seon.source/relative-file-digests inputs}))
+                                   {:seon.source/test-input-digest input-digest
+                                    :seon.source/test-input-digests input-digests
+                                    :seon.source/relative-file-digests inputs}))
                 (spit (io/file destination "manifest.edn") (pr-str manifest)))
               (spit (io/file destination "provenance.edn")
                     (pr-str {:seon.test.run/program-digest digest

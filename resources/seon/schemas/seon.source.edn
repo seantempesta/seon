@@ -7,6 +7,7 @@
               [:map
                [:seon.test.run/provenance [:and :seon.test.run/provenance :seon.test.run/snapshot]]
                [:seon.test.run/input-digest :seon.test.run/input-digest]
+               [:seon.test.selection/input-evidence {:optional true} :seon.test.selection/input-evidence]
                [:seon.test.run/members [:vector :seon.test.member/member]]
                [:seon.test.run/policy :seon.test.run/policy]
                [:seon.test/include-long? {:optional true} :boolean]
@@ -28,6 +29,7 @@
               [:re #:seon.db{:identity true} "^[0-9a-f]{64}$"],
               :test-input-digest
               [:and {:seon.db/identity false :description "Digest of the sorted publication input inventory outside the program graph, including pinned gitlink identities. Observed value survives its input files."} :seon.source/digest],
+              :test-input-digests [:map-of :string :seon.source/digest],
               :digest-request
               [:map [:seon.source/roots :seon.source/roots]
                     [:seon.fn/root {:optional true} :string]],
