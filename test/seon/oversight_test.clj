@@ -121,6 +121,8 @@
             caps (:seon.sci.admit/caps
                   (:seon.turn.loop/cluster instance))
             built (oversight/unit {:seon.db/db db
+                                   :seon.agent/routing
+                                   (:seon.agent/routing instance)
                                    :seon.sci.admit/caps caps})
             value (:seon.render/value built)
             root (first (:seon.oversight/agents value))
@@ -129,6 +131,10 @@
             declared-plumbing
             (set (keys (:procs (datafy/datafy
                                 (:seon.flow/graph instance)))))]
+        (testing "the routing every render path holds carries the cluster graph"
+          (is (identical? (:seon.flow/graph instance)
+                          (:seon.flow/graph
+                           @(:seon.agent/routing instance)))))
         (testing "the unit joins live ping data to the immutable facts"
           (is (some? built))
           (is (= `oversight/ai-story (:seon.render/ai built)))
@@ -198,8 +204,25 @@
             (is (true? (str/includes? body "data-agent=\"root\" data-state=\""))
                 "the HTTP render is a later observation, not the earlier unit's state")))))))
 
-(deftest a-database-without-a-cluster-handle-omits-the-block
+(deftest the-handed-routing-is-the-only-oversight-owner
   (support/with-database
     (fn [connection]
-      (let [source {:seon.db/db @connection}]
-        (is (nil? (oversight/unit source)))))))
+      (let [source {:seon.db/db @connection}
+            routing (atom {:seon.agent/armed {}
+                           :seon.flow/graph ::graph})]
+        (is (nil? (ns-resolve 'seon.oversight 'owning-instance))
+            "the call-time instance search no longer exists")
+        (is (nil? (oversight/unit source))
+            "a detached value does not acquire an ambient owner")
+        (is (nil? (oversight/unit
+                   (assoc source :seon.agent/routing (atom {}))))
+            "a routing entry without its joined graph has no live story")
+        (with-redefs-fn
+          {#'seon.oversight/fleet-value
+           (fn [database handed graph]
+             {:database database :routing handed :graph graph})}
+          (fn []
+            (is (= {:database @connection :routing routing :graph ::graph}
+                   (:seon.render/value
+                    (oversight/unit
+                     (assoc source :seon.agent/routing routing)))))))))))

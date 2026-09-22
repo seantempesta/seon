@@ -2921,7 +2921,15 @@
                  (emit-core-fault! handle reported))}))
            ::pages-mult
            (fn [_]
-             (async/mult pages-channel))}})
+             (async/mult pages-channel))
+           ;; A Flow proc has no handle on its own graph (core.async
+           ;; flow/impl.clj:166, "the only connection to a running flow is
+           ;; via channels"). Joins run before `resume`, so the render proc's
+           ;; routing entry holds the graph before its first pass: oversight
+           ;; reads the value it was handed, never a registry search.
+           ::routing-graph
+           (fn [{graph :seon.flow/graph}]
+             (swap! routing assoc :seon.flow/graph graph))}})
         fanout (::error-fanout joins)
         pages-mult (::pages-mult joins)]
     ;; the fault channel joins the routing entry so every later arm

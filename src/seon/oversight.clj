@@ -6,12 +6,11 @@
   replaceable compute is doing right now. This namespace joins those
   two values into one render unit and never commits the result.
 
-  The cluster instance is resolved by the database value's attached
-  Datahike connection identity, never by assuming one ambient cluster.
-  A caller may also supply `:seon.boot/instance` explicitly. When no
-  instance owns the database value, `unit` returns nil: omission is the
-  honest projection because historical or detached facts have no live
-  graph to describe.
+  The caller supplies the cluster's routing entry it already holds; the
+  cluster graph rides that entry from the moment the graph is joined, before
+  any proc resumes. When no routing entry or graph is supplied, `unit`
+  returns nil: omission is the honest projection because historical or
+  detached facts have no live graph to describe.
 
   Every armed agent graph contributes its mailbox and turn ping. A
   responsive turn proc with no current turn is parked; an open turn is
@@ -44,32 +43,6 @@
   [db]
   (:seon.config.flow/ping-timeout-ms
    (config/effective db (cluster-name db))))
-
-(defn- connection-identity
-  "The stable connection + generation portion of a committed db value."
-  [db]
-  (some-> (db/committed-value-identity db)
-          (select-keys [:datahike.value/connection-id
-                        :datahike.value/generation])))
-
-(defn- running-instances
-  "The cluster entry's process-local instances, if that owner is loaded."
-  []
-  ;; This namespace is loaded by `seon.cluster`; requiring that owner here
-  ;; would make the dependency cyclic. Resolve the read-only registry late and
-  ;; match by connection identity, never by assuming "the" cluster.
-  (some-> (ns-resolve 'seon.cluster 'running-instances) var-get deref))
-
-(defn- owning-instance
-  "The running instance whose branch connection owns `db`, or nil."
-  [db]
-  (when-let [wanted (connection-identity db)]
-    (some (fn [[_ instance]]
-            (let [connection (:seon.boot/cluster-connection instance)]
-              (when (and connection
-                         (= wanted (connection-identity @connection)))
-                instance)))
-          (running-instances))))
 
 (defn- current-run-id
   "The agent's open turn id, or nil when none is open."
@@ -165,9 +138,11 @@
 
 (defn- fleet-value
   "The complete process-local fleet value at one database value."
-  [db instance]
-  (let [routing (:seon.agent/routing instance)
-        armed (or (some-> routing deref :seon.agent/armed) {})
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/routing
+                       :seon.flow/graph]
+                  :map]}
+  [db routing graph]
+  (let [armed (or (some-> routing deref :seon.agent/armed) {})
         timeout-ms (ping-timeout-ms db)]
     {:seon.oversight/agents
      (into []
@@ -175,14 +150,14 @@
                   (agent-story db timeout-ms agent-id entry)))
            (sort-by key armed))
      :seon.oversight/plumbing
-     (plumbing-story (:seon.flow/graph instance) timeout-ms)}))
+     (plumbing-story graph timeout-ms)}))
 
 (defn flow-status
   "Return the current agent and plumbing Flow observations for one instance."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
                   :map]}
   [db instance]
-  (fleet-value db instance))
+  (fleet-value db (:seon.agent/routing instance) (:seon.flow/graph instance)))
 
 (defn unit
   "Build the live fleet render unit, or omit it without a cluster."
@@ -190,13 +165,11 @@
                   [:maybe :seon.render/unit]]}
   [source]
   (let [db (:seon.db/db source)
-        instance (or (:seon.boot/instance source)
-                     (owning-instance db))]
-    (when (and db
-               (:seon.agent/routing instance)
-               (:seon.flow/graph instance))
+        routing (:seon.agent/routing source)
+        graph (some-> routing deref :seon.flow/graph)]
+    (when (and db graph)
       (assoc source
-             :seon.render/value (fleet-value db instance)
+             :seon.render/value (fleet-value db routing graph)
              :seon.render/ai `ai-story
              :seon.render/html `html-table))))
 

@@ -550,7 +550,8 @@
   `:seon.agent/armed` by agent id (the management view); `:seon.agent/channels` by
   recipient ENTITY id (the wake handler's one-lookup delivery);
   `:seon.agent/fault-channel` set once when the cluster's fan-out stands, read by
-  every later arm."
+  every later arm; `:seon.flow/graph` the cluster graph, joined before it resumes,
+  read by oversight on every render path that holds this entry."
   {:malli/schema [:=> [:cat] :seon.agent/routing]}
   []
   (atom {:seon.agent/armed {} :seon.agent/channels {}}))

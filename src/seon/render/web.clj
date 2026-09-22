@@ -460,6 +460,7 @@
         (when (= id root-agent-id)
           (oversight/unit
            {:seon.db/db db
+            :seon.agent/routing (:seon.agent/routing request)
             :seon.agent/id root-agent-id
             :seon.sci.admit/caps caps
             :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
@@ -2095,6 +2096,7 @@
             call-id (root-call-id :seon.render/html registration-key)
             request
             (cond-> {:seon.db/db database
+                     :seon.agent/routing (:seon.agent/routing handle)
                      :seon.agent/id agent-id
                      :seon.render.web/root-agent-id
                      (:seon.render.web/root-agent-id handle)
