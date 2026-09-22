@@ -344,6 +344,14 @@ then reconnects and verifies. Reset loses database and private state; disposable
 synonymous with automatically reconstructible. Adoption freshness and browser paint
 are observed separately. Do not claim a disabled hook published an edit.
 
+**Mechanical edits are scripted, never read-and-edit fifty times (owner, 2026-09-23).**
+A conversion that follows one rule across many files — a rename, a caller sweep, a
+fixture conversion — is one script (`sed`, `perl`, a Babashka or Python form) run once
+over the whole set, then the lint (`clj-kondo`, `bin/seon-hook`'s syntax check) and a
+load, then the handful of sites the script could not express by hand. Reading a file
+to edit it is for the sites the rule does not cover. Tokens are a budget: fifty
+separate reads and edits for one rule is a defect in the lane, not diligence.
+
 Preserve unrelated edits. Own explicit paths; no `git add -A`, `reset --hard`, shared
 file restore or structural-edit worktree. Commit coherent path-limited slices. Native
 Codex collaboration or the documented CLI launcher handles lanes; do not nest delegation
