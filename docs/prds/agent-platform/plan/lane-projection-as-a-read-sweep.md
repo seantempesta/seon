@@ -1,6 +1,6 @@
 ---
 type: plan
-status: five-commit sweep specified; writer prerequisite requires scope decision before execution
+status: five-commit sweep specified; writer prerequisite RULED 2026-09-23 (owner): the projection is a memoized function of the database value (core.cache, keyed by `:cache-context`) — no writer stamp, no fork change, no single-flight; commit 1 is that memo
 ---
 Verified: 72 transport calls/24 src files; 25+ rows inspected; 13 corrections below; test census is now 511 text matches/86 files, not 509.
 Decision 1: cluster executor → `(:io (root-executors))`; callers carry their connection/context.
@@ -83,6 +83,19 @@ Own `schema.clj`, `db.clj`, `problems.clj`, `schema/datahike.clj`, `cluster.clj`
 `schema/load-projection` has exactly one contract: `[:=> [:catn [:seon.schema/database-value :map]] :seon.schema/projection]`. Validate real database and refuse missing schema rows using existing named refusal. Use the existing late-resolution idiom (`schema.clj:906`) for `db/carried-projection`; do not introduce a schema→db require cycle.
 Move `derive-projection-from-database`'s three row queries into the cold loader; preserve `projection-rows`/`projection-admissions`, duplicate identity checks, EDN decoding, admission provenance, render-contract validation and predicate data from `projection-from-rows`. Feed `build-projection` once with forms/contracts/options. Eliminate reusable fingerprint/rebuild selection. “≈40 lines” is a target for the query assembly, not permission to erase admission validation or squeeze code. Retain an internal parser helper if needed; delete the old public `projection-from-rows` with its converted direct tests in this commit.
 `projection-from-database` keeps only its existing one-argument contract and becomes a carried read followed by named refusal when absent. Convert two-arg calls in `sci/eval.clj:958,1009,1047,2264`, `test_support.clj:399`, and `runner.clj:1493` here; ordinary reads drop the reusable argument only after post-write carriage is correct, the last two are cold/audit loaders. `turn.clj:1236` is a writer transition, not an ordinary reader. No `(or carried (load-projection ...))` at an ordinary reader.
+
+### Ruled 2026-09-23 (owner): memoize the function, with Clojure's tools
+
+None of the three scopes below. The projection is a function of the database value,
+memoized through `clojure.core.cache` — already a Datahike dependency, used by Datahike's
+own schema cache (`reference-code/datahike/src/datahike/schema_cache.cljc`) — keyed by the
+committed value's `:cache-context` (`db.clj:838-873`), a bounded LRU whose bound is data. A
+miss derives from the value's declaration rows through `projection-from-rows`. `load-projection`
+IS that derivation; `carried-projection` becomes look-up-or-derive; the writer-side stamp
+(`carry-projection-state`) and any candidate carried through `row-tx` are deleted. Datahike's
+batching and late commits become irrelevant. The ordered-declaration case derives from the
+transaction's intermediate `with` value (unmemoized when it carries no context). Commit 1
+below is rewritten accordingly; the proof keeps A-then-B, abort, plus hit/miss counts.
 
 ### Writer prerequisite: the table cannot authorize a blind replacement
 
