@@ -166,7 +166,7 @@
     [:or :seon.render.walk/lookup :seon.db/error-result]]}
   [database entity]
   (let [pulled (db/pull database '[*] entity)]
-    (if (and (:seon.error/at pulled) (:seon.error/layer pulled) (:seon.error/operation pulled)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
       pulled
       (stable-lookup (db/populated-identity-attributes database) pulled))))
 
@@ -418,7 +418,7 @@
           requirers (db/q '[:find [?entity ...] :in $ ?name
                              :where [?entity :seon.ns/requires ?name]]
                            database namespace-name)]
-      (if (and (:seon.error/at requirers) (:seon.error/layer requirers) (:seon.error/operation requirers)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+      (if (or (:seon.db/invalid-read requirers) (:seon.schema/expected-value requirers))
         requirers
         (assoc entity
                :seon.ns/requires
@@ -431,13 +431,14 @@
 
 (defn- acquire-entity
   "Reuse one entity pull only while its recorded read evidence is current."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value :map :map :seon.render.walk/lookup :seon.render/cache] [:map [:seon.render.call/output :seon.schema/value] [:seon.render.call/basis-transaction :seon.db/basis-t] [:seon.render.call/read-evidence [:vector :seon.db/read-evidence]]]]}
   [projection database installed plan lookup cache]
   (let [cache-key [::entity-pull lookup]
         previous (get @cache cache-key)]
     (if (and previous
              (identical? (:datahike.pull/plan plan) (:datahike.pull/plan previous))
              (not (let [output (:seon.render.call/output previous)]
-               (and (:seon.error/at output) (:seon.error/layer output) (:seon.error/operation output)))) ;; debt: seon.db/pull declares :seon.error/value through seon.db/error-result.
+               (or (:seon.db/invalid-read output) (:seon.schema/expected-value output))))
              (db/read-evidence-current? database (:seon.render.call/read-evidence previous)))
       (let [refreshed (render/refresh-read-evidence database previous)]
         (swap! cache
@@ -465,7 +466,7 @@
                   (namespace-connections database entity (pull-width (:seon.sci.admit/caps plan)))
                   (if (seq reverse-selector)
                   (let [reverse-values (db/pull database reverse-selector lookup)]
-                    (if (and (:seon.error/at reverse-values) (:seon.error/layer reverse-values) (:seon.error/operation reverse-values)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
+                    (if (or (:seon.db/invalid-read reverse-values) (:seon.schema/expected-value reverse-values))
                       reverse-values
                       (merge entity reverse-values)))
                   entity))))
@@ -983,7 +984,7 @@
   admitted with its opening transaction. Generated system evaluations remain
   visible. Without a turn id, every stored evaluation participates."
   {:malli/schema [:=> [:cat :seon.render.walk/history-request]
-                  [:or [:vector :map] :seon.db/error-result :seon.render/error-result]]}
+                  [:or [:vector :map] :seon.db/error-result :seon.render/error-result :seon.agent/no-such-agent-error]]}
   [{database :seon.db/db lookup :seon.render.walk/lookup :as request}]
   (let [agent-id (:seon.agent/id
                   (db/pull database [:seon.agent/id] lookup))
@@ -993,7 +994,7 @@
         selected (when-let [id (:seon.turn/id request)]
                    (db/pull database [:db/id :seon.turn.work/situation]
                             [:seon.turn/id id]))]
-    (if (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) ;; debt: seon.eval/of-agent declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.agent/no-such-agent evaluations))
       evaluations
       (reduce
        (fn [entries saved]

@@ -681,6 +681,7 @@
     (ai-output pinned entries)))
 
 (defn- selected-run-identities
+  {:malli/schema [:=> [:cat :seon.render/unit] :map]}
   [unit]
   (let [db (:seon.db/db unit)
         agent (:seon.turn/agent unit)
@@ -695,8 +696,8 @@
                         db agent-ref))]
     {::selected-run-id (:seon.turn/id unit)
      ::selected-agent-id
-     (or supplied-agent-id (when-not (and (:seon.error/at queried) (:seon.error/layer queried) (:seon.error/operation queried)) queried)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
-     ::selected-run-error (when (and (:seon.error/at queried) (:seon.error/layer queried) (:seon.error/operation queried)) queried)})) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+     (or supplied-agent-id (when-not (or (:seon.db/invalid-read queried) (:seon.schema/expected-value queried)) queried))
+     ::selected-run-error (when (or (:seon.db/invalid-read queried) (:seon.schema/expected-value queried)) queried)}))
 
 (defn- missing-selected-run
 
@@ -811,6 +812,7 @@
                           (into entries (reasoning-attempts unit))))))
 
 (defn- turn-header
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id] :seon.render/hiccup]}
   [database turn-id]
   (let [row (db/pull database
                      '[:seon.turn/id {:seon.turn/opened-tx [:db/id :db/txInstant]} :seon.turn/reply-size
@@ -820,14 +822,14 @@
                             :where [?turn :seon.turn/id ?id]
                                    [?evaluation :seon.cluster.eval/run ?turn]]
                           database turn-id)]
-    (if (and (:seon.error/at row) (:seon.error/layer row) (:seon.error/operation row)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
       [:p (:seon.error/message row)]
       [:article {:class "seon-turn-header"}
        [:h3 (str "Turn " turn-id)]
        [:dl
         [:dt "Opened"] [:dd (pr-str (get-in row [:seon.turn/opened-tx :db/txInstant]))]
         [:dt "Trigger"] [:dd (or (get-in row [:seon.turn/trigger :seon.message/id]) "None")]
-        [:dt "Evaluations"] [:dd (if (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+        [:dt "Evaluations"] [:dd (if (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations))
                                    (:seon.error/message evaluations)
                                    (str (or evaluations 0)))]
         [:dt "Reply"] [:dd (if (find row :seon.turn/reply-size) "Recorded" "None")]]])))
@@ -884,14 +886,15 @@
 
 (defn- agent-config
   "The effective configuration of the cluster this agent belongs to."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.config/effective]}
   [database]
   (let [cluster-name
         (db/q '[:find ?cluster-name .
                 :where [_ :seon.cluster/name ?cluster-name]] database)
         effective (when (and cluster-name
-                             (not (and (:seon.error/at cluster-name) (:seon.error/layer cluster-name) (:seon.error/operation cluster-name)))) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+                             (not (or (:seon.db/invalid-read cluster-name) (:seon.schema/expected-value cluster-name))))
                     (config/effective database cluster-name))]
-    (if (and (map? effective) (nil? (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective)))) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
+    (if (and (map? effective) (nil? (or (:seon.db/invalid-read effective) (:seon.schema/expected-value effective) (:seon.config/error-key effective) (:seon.config/missing-effective effective))))
       effective
       config/defaults)))
 
@@ -921,7 +924,7 @@
                              [?run :seon.turn/opened-tx ?opened]]
                     :args [database agent-id]
                     :order-by '[?opened :desc ?run :desc]})]
-    (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
       rows
       (let [total (count rows)
             newest (into [] (take limit) rows)
@@ -930,7 +933,7 @@
                   (keep
                    (fn [[eid _opened]]
                      (let [row (db/pull database history-run-selector eid)]
-                       (when-not (and (:seon.error/at row) (:seon.error/layer row) (:seon.error/operation row)) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
+                       (when-not (or (:seon.db/invalid-read row) (:seon.schema/expected-value row))
                          (assoc row
                                 :seon.render.transcript/entries
                                 (history-entries
@@ -974,7 +977,7 @@
                              :seon.error/value]]
                   [:or :string :seon.db/error-result]]}
   [derived]
-  (if (and (:seon.error/at derived) (:seon.error/layer derived) (:seon.error/operation derived)) ;; debt: seon.render.transcript/agent-history via seon.db/q declares :seon.error/value, directly or through its result union.
+  (if (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
     derived
     (let [runs (:seon.render.transcript/runs derived)
           older (:seon.render.transcript/older-runs derived)]
@@ -1151,7 +1154,7 @@
                             [?runtime :seon.runtime/turns ?t]
                             [?t :seon.turn/id _ ?opened]]
                    database agent-id debug-turn-selector)]
-    (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) rows ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) rows
         (mapv (fn [ordinal [_ row]] (assoc row ::ordinal ordinal))
               (range) (sort-by (juxt first #(get-in % [1 :seon.turn/id])) rows)))))
 
@@ -1360,7 +1363,7 @@
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
-       (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) [:p {:class "seon-emission-error"} (:seon.error/message rows)] ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
+       (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) [:p {:class "seon-emission-error"} (:seon.error/message rows)]
        url
        [:p {:role "status" :data-init (str "@get('" url "')")}
         (if (::outline? request)
@@ -1430,7 +1433,7 @@
        [:p {:class "seon-session-meta"}
         (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
              " tokens · " (count entries) " emissions · oldest → newest")])]
-     (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
+     (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired))
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))
         (value/render-html (assoc request :seon.render/value acquired))]
@@ -1537,6 +1540,7 @@
   A model with recorded usage supplies its own ratio through
   `seon.cluster.prompt/agent-calibration`; an agent with no settled attempt
   yet uses the measured shipped prior rather than inventing one."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] :seon.ai.tokens/calibration]}
   [database agent-id rows]
   (let [model (some :seon.ai/model
                     (reverse (sort-by :seon.ai.attempt/ordinal
@@ -1544,7 +1548,7 @@
         fitted (when model
                  ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
                   database agent-id model))]
-    (if (or (nil? fitted) (and (:seon.error/at fitted) (:seon.error/layer fitted) (:seon.error/operation fitted))) ;; debt: seon.cluster.prompt/agent-calibration declares :seon.error/value, directly or through its result union.
+    (if (or (nil? fitted) (or (:seon.db/invalid-read fitted) (:seon.schema/expected-value fitted) (:seon.config/error-key fitted) (:seon.config/missing-effective fitted) (:seon.cluster.prompt/missing-cluster fitted) (:seon.cluster.prompt/missing-config fitted)))
       tokens/shipped-calibration
       fitted)))
 
@@ -1604,6 +1608,7 @@
   This is `seon.cluster.prompt/prompt`'s own text — `compose` over the
   selection, then the turn frame — not a second assembly of the same units.
   A refusal is shown as the refusal it is."
+  {:malli/schema [:=> [:cat :seon.cluster.prompt/request] :seon.render/hiccup]}
   [request]
   (let [composed (try
                    ((requiring-resolve 'seon.cluster.prompt/prompt)
@@ -1613,13 +1618,13 @@
                        (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal)) refusal (throw failure)))))]
     [:details {:class "seon-outline-everything" :data-preserve-attr "open"}
      [:summary
-      (if (and (:seon.error/at composed) (:seon.error/layer composed) (:seon.error/operation composed)) ;; debt: seon.cluster.prompt/prompt declares :seon.error/value, directly or through its result union.
+      (if (or (:seon.db/invalid-read composed) (:seon.schema/expected-value composed) (:seon.config/error-key composed) (:seon.render/refused-member composed) (:seon.render/candidates composed) (:seon.render/invalid-output composed) (:seon.render.unknown/reason composed) (:seon.render.transcript/refused-member composed) (:seon.render.web/refused-member composed) (:seon.render.web/function-unavailable composed) (:seon.turn/rule composed) (:seon.turn/error-turn-id composed) (:seon.turn/missing-opening-datom composed) (:seon.agent/no-such-agent composed) (:seon.cluster.reply/no-forms composed) (:seon.render.walk/missing-lookup composed) (:seon.turn/generated-read-attributes composed) (:seon.turn/compaction-agent-id composed) (:seon.db.write.attempt/request-id composed) (:seon.instrument/check composed) (:seon.config/missing-effective composed) (:seon.cluster.prompt/missing-cluster composed) (:seon.cluster.prompt/missing-config composed))
         "Show everything · the composed prompt was refused"
         (let [text (:seon.cluster.prompt/text composed)]
           (str "Show everything · the composed prompt · "
                (format "%,d" (utf8-size text)) " bytes · ≈"
                (format "%,d" (tokens/estimate text)) " tokens")))]
-     (if (and (:seon.error/at composed) (:seon.error/layer composed) (:seon.error/operation composed)) ;; debt: seon.cluster.prompt/prompt declares :seon.error/value, directly or through its result union.
+     (if (or (:seon.db/invalid-read composed) (:seon.schema/expected-value composed) (:seon.config/error-key composed) (:seon.render/refused-member composed) (:seon.render/candidates composed) (:seon.render/invalid-output composed) (:seon.render.unknown/reason composed) (:seon.render.transcript/refused-member composed) (:seon.render.web/refused-member composed) (:seon.render.web/function-unavailable composed) (:seon.turn/rule composed) (:seon.turn/error-turn-id composed) (:seon.turn/missing-opening-datom composed) (:seon.agent/no-such-agent composed) (:seon.cluster.reply/no-forms composed) (:seon.render.walk/missing-lookup composed) (:seon.turn/generated-read-attributes composed) (:seon.turn/compaction-agent-id composed) (:seon.db.write.attempt/request-id composed) (:seon.instrument/check composed) (:seon.config/missing-effective composed) (:seon.cluster.prompt/missing-cluster composed) (:seon.cluster.prompt/missing-config composed))
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value composed))]
        [:pre {:class "seon-session-raw"
@@ -1665,11 +1670,11 @@
      (session-header request (if (vector? rows) rows []))
      [:h2 "Session"]
      (cond
-       (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
+       (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value rows))]
 
-       (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
+       (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired))
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))]
 
@@ -1720,7 +1725,7 @@
 (defn- ledger-evaluations {:malli/schema [:=> [:cat :seon.render/context-request] [:or :nil [:map-of :int [:vector :map]] :seon.render.web/context-error]]}
   [request]
   (let [acquired (ledger-acquisition request)]
-    (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) acquired ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired)) acquired
         (get-in acquired [::ledger-data ::evaluations]))))
 
 (defn- ledger-url [agent-id turn-id query]
@@ -1778,7 +1783,7 @@
         definitions (db/q '[:find ?symbol ?tx
                              :where (or [?f :seon.fn/sym ?symbol ?tx]
                                         [?f :seon.test/sym ?symbol ?tx])] database)]
-    (if-let [failure (some #(when (and (:seon.error/at %) (:seon.error/layer %) (:seon.error/operation %)) %) [intervals steps messages definitions])] ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+    (if-let [failure (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %) [intervals steps messages definitions])]
       failure
       {::steps (group-by first steps) ::messages (group-by first messages)
        ;; Acquire each definition once, then relate it to the saved intervals.
@@ -1789,7 +1794,8 @@
                                   :when (<= from tx to)]
                               [id function-symbol])))})))
 
-(defn- turn-effects [effects row]
+(defn- turn-effects {:malli/schema [:=> [:cat :map :map] :map]}
+  [effects row]
   (let [turn-id (:seon.turn/id row)
         steps (get (::steps effects) turn-id)
         messages (get (::messages effects) turn-id)
@@ -1798,7 +1804,7 @@
                         (map #(str "message sent to " (second %)) messages)
                         (map #(str "definition installed during this turn: " (second %)) definitions))]
     (cond
-      (and (:seon.error/at effects) (:seon.error/layer effects) (:seon.error/operation effects)) {::details (:seon.error/message effects)} ;; debt: seon.render.transcript/ledger-effects via seon.db/q declares :seon.error/value, directly or through its result union.
+      (or (:seon.db/invalid-read effects) (:seon.schema/expected-value effects)) {::details (:seon.error/message effects)}
       (not (:seon.turn/closed-tx row)) {::details "Turn is still open."}
       :else {::details (if (seq details) (str/join " · " details) "—")
              ::summary (str/join " · " (cond-> []
@@ -1813,7 +1819,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:or [:sequential :map] :seon.db/error-result] [:maybe :map]]
                   [:or [:vector :map] :seon.db/error-result]]}
   [database rows evaluations]
-  (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) rows ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
+  (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) rows
     (mapv (fn [row]
             (let [attempts (mapv #(assoc % ::usage (attempt-usage %))
                                  (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row)))
@@ -1849,7 +1855,8 @@
      ::rows (mapv #(assoc % ::effects (turn-effects effects %)) rows)
      ::calibrations calibrations}))
 
-(defn- ledger-turn-body [request rows evaluations row]
+(defn- ledger-turn-body {:malli/schema [:=> [:cat :map [:sequential :map] [:or :nil :map] [:or :nil :map]] :seon.render/hiccup]}
+  [request rows evaluations row]
   (let [database (:seon.db/db request)
         ordinal (::ordinal row)
         provider? (= "Provider" (::kind row))
@@ -1911,7 +1918,7 @@
           (str (if provider? "Full context as sent" "Full context before reply")
                (when capture
                  (str ": " (format "%,d" (utf8-size capture)) " bytes · "
-                      (if (and (:seon.error/at calibration) (:seon.error/layer calibration) (:seon.error/operation calibration)) ;; debt: seon.cluster.prompt/agent-calibration declares :seon.error/value, directly or through its result union.
+                      (if (or (:seon.db/invalid-read calibration) (:seon.schema/expected-value calibration) (:seon.config/error-key calibration) (:seon.config/missing-effective calibration) (:seon.cluster.prompt/missing-cluster calibration) (:seon.cluster.prompt/missing-config calibration))
                         "estimate unavailable"
                         (str "rebuilt ≈" (format "%,d" (tokens/estimate capture calibration)) " tokens"))))
                (when-let [billed (::prompt usage)] (str " · billed " (format "%,d" billed))))]
@@ -1952,7 +1959,7 @@
   [request]
   (let [acquired (ledger-acquisition request)
         {::keys [rows evaluations calibrations]} (::ledger-data acquired)]
-    (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired))
       [:div {:id (ledger-body-id (:seon.turn/id request))} [:p (:seon.error/message acquired)]]
       (let [row (some #(when (= (:seon.turn/id request) (:seon.turn/id %)) %) rows)]
         (ledger-turn-body (assoc request ::calibrations calibrations) rows evaluations row)))))
@@ -2038,6 +2045,7 @@
 
 (defn- fault-problems
   "Detect delivered core faults and turns whose trigger points at a fault fact."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] [:vector :map]]}
   [database agent-id rows]
   (let [messages (db/q '[:find ?mid ?error (sum ?count) :with ?occurrence :in $ ?agent-id
                          :where [?a :seon.agent/id ?agent-id] [?m :seon.message/to ?a]
@@ -2045,7 +2053,7 @@
                                 [?m :seon.message/id ?mid]
                                 [?f :seon.error/occurrences ?occurrence]
                                 [?occurrence :seon.error.occurrence/count ?count]] database agent-id)]
-    (if (and (:seon.error/at messages) (:seon.error/layer messages) (:seon.error/operation messages)) ;; debt: seon.db/q declares :seon.error/value, directly or through its result union.
+    (if (or (:seon.db/invalid-read messages) (:seon.schema/expected-value messages))
       [(assoc (finding :faults "Fault delivery" []) ::unknown 1)
        (assoc (finding :fault-turns "Turns opened by faults" []) ::unknown 1)]
       (let [fault-message-ids (set (map first messages))
@@ -2065,7 +2073,7 @@
                      :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
                             [?c :seon.context.capture/prompt ?text]] database turn-id)
         opening (when (string? text) (turn/opening-db database turn-id))
-        frame (when (and opening (not (and (:seon.error/at opening) (:seon.error/layer opening) (:seon.error/operation opening)))) ;; debt: seon.turn/opening-db declares :seon.error/value, directly or through its result union.
+        frame (when (and opening (not (or (:seon.db/invalid-read opening) (:seon.schema/expected-value opening) (:seon.turn/missing-opening-datom opening))))
                 (repl/frame opening agent-id))
         suffix (str "\n\n" frame)]
     (when frame
@@ -2107,6 +2115,7 @@
 
 (defn- session-budget
   "Detect exhausted turn/step budgets and unavailable billing or rate evidence."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] :map]}
   [database agent-id rows]
   (let [attempts (vec (for [row rows a (:seon.turn/attempts row)]
                         {::turn row ::attempt a ::usage (::usage a)}))
@@ -2129,7 +2138,7 @@
         per-step (frequencies
                   (for [row rows :when (seq (:seon.turn/attempts row))]
                     (let [basis (turn/opening-db database (:seon.turn/id row))]
-                      (when-not (and (:seon.error/at basis) (:seon.error/layer basis) (:seon.error/operation basis)) ;; debt: seon.turn/opening-db declares :seon.error/value, directly or through its result union.
+                      (when-not (or (:seon.db/invalid-read basis) (:seon.schema/expected-value basis) (:seon.turn/missing-opening-datom basis))
                         (get-in (db/pull basis
                                          '[{:seon.agent/plan [{:my.plan/current-step [:my.plan.item/id]}]}]
                                          [:seon.agent/id agent-id])
@@ -2137,7 +2146,7 @@
     {::used (turn/episode-runs database agent-id)
      ::bound (#'turn/max-episode-runs database agent-id)
      ::completed (count (filter :my.plan.item/completed-tx steps))
-     ::steps (count steps) ::plan-unavailable (boolean (and (:seon.error/at plan) (:seon.error/layer plan) (:seon.error/operation plan))) ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
+     ::steps (count steps) ::plan-unavailable (boolean (or (:seon.db/invalid-read plan) (:seon.schema/expected-value plan) (:my.plan/missing-agent-id plan)))
      ::per-step per-step ::totals totals ::attempts (count attempts)
      ::missing-usage (count (remove #(every? number? (map (::usage %) [::prompt ::hit ::miss ::out])) attempts))
      ::cost (when (every? number? costs) (reduce + 0 costs))
@@ -2149,7 +2158,8 @@
                                             :seon.ai.model/cached-input-usd-per-mtok
                                             :seon.ai.model/output-usd-per-mtok])))) attempts))}))
 
-(defn- session-problems [request rows evaluations]
+(defn- session-problems {:malli/schema [:=> [:cat :map [:sequential :map] [:or :nil :map]] :map]}
+  [request rows evaluations]
   (let [database (:seon.db/db request)
         by-eid (into {} (map (juxt :db/id identity)) rows)
         saved (mapcat #(get evaluations (:db/id %) []) rows)
@@ -2173,9 +2183,9 @@
                     (assoc (finding :stale-but-unchanged "stale-but-unchanged reads"
                                     (map #(evaluation-match by-eid %)
                                          (concat empty-emissions
-                                                 (when-not (and (:seon.error/at refreshes) (:seon.error/layer refreshes) (:seon.error/operation refreshes)) ;; debt: seon.turn/changed-reads declares :seon.error/value, directly or through its result union.
+                                                 (when-not (or (:seon.db/invalid-read refreshes) (:seon.schema/expected-value refreshes))
                                                    (map #(get saved-by-eid (first %)) refreshes)))))
-                           ::unknown (if (and (:seon.error/at refreshes) (:seon.error/layer refreshes) (:seon.error/operation refreshes)) 1 0)) ;; debt: seon.turn/changed-reads declares :seon.error/value, directly or through its result union.
+                           ::unknown (if (or (:seon.db/invalid-read refreshes) (:seon.schema/expected-value refreshes)) 1 0))
                     (repeated-problem by-eid saved)
                     (empty-reply-problem rows saved)
                     (directory-problem database by-eid saved)
@@ -2335,20 +2345,20 @@
   [request]
   (let [acquired (ledger-acquisition request)
         {::keys [rows evaluations calibrations]} (::ledger-data acquired)
-        evaluations (if (and (:seon.error/at acquired) (:seon.error/layer acquired) (:seon.error/operation acquired)) acquired evaluations) ;; debt: seon.render/acquire-context! via seon.turn/system-turn declares :seon.error/value, directly or through its result union.
+        evaluations (if (or (:seon.db/invalid-read acquired) (:seon.schema/expected-value acquired) (:seon.config/error-key acquired) (:seon.render/refused-member acquired) (:seon.render/candidates acquired) (:seon.render/invalid-output acquired) (:seon.render.unknown/reason acquired) (:seon.render.transcript/refused-member acquired) (:seon.render.web/refused-member acquired) (:seon.render.web/function-unavailable acquired) (:seon.turn/rule acquired) (:seon.turn/error-turn-id acquired) (:seon.turn/missing-opening-datom acquired) (:seon.agent/no-such-agent acquired) (:seon.cluster.reply/no-forms acquired) (:seon.render.walk/missing-lookup acquired) (:seon.turn/generated-read-attributes acquired) (:seon.turn/compaction-agent-id acquired) (:seon.db.write.attempt/request-id acquired) (:seon.instrument/check acquired)) acquired evaluations)
         request (assoc request ::calibrations calibrations)
         selected (or (:seon.turn/id request) (:seon.turn/id (last rows)))
         expanded (conj (set (map :seon.turn/id (take-last 3 rows))) selected)
-        problems (when-not (or (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations))) ;; debt: seon.db/q / seon.db/pull-many; seon.eval/of-agent declares :seon.error/value, directly or through its result union.
+        problems (when-not (or (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.config/error-key evaluations) (:seon.render/refused-member evaluations) (:seon.render/candidates evaluations) (:seon.render/invalid-output evaluations) (:seon.render.unknown/reason evaluations) (:seon.render.transcript/refused-member evaluations) (:seon.render.web/refused-member evaluations) (:seon.render.web/function-unavailable evaluations) (:seon.turn/rule evaluations) (:seon.turn/error-turn-id evaluations) (:seon.turn/missing-opening-datom evaluations) (:seon.agent/no-such-agent evaluations) (:seon.cluster.reply/no-forms evaluations) (:seon.render.walk/missing-lookup evaluations) (:seon.turn/generated-read-attributes evaluations) (:seon.turn/compaction-agent-id evaluations) (:seon.db.write.attempt/request-id evaluations) (:seon.instrument/check evaluations)))
                    (session-problems request rows evaluations))]
     [:section {:id (session-id (:seon.agent/id request)) :class "seon-session seon-ledger" :data-author "seon"}
      [:div {:class "seon-session-sticky"} (session-header request rows)
       [:h2 "Turn ledger"]
       (when problems (problem-summary request problems))
-      (when-not (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) (ledger-strip request rows evaluations selected problems))] ;; debt: seon.eval/of-agent declares :seon.error/value, directly or through its result union.
+      (when-not (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.config/error-key evaluations) (:seon.render/refused-member evaluations) (:seon.render/candidates evaluations) (:seon.render/invalid-output evaluations) (:seon.render.unknown/reason evaluations) (:seon.render.transcript/refused-member evaluations) (:seon.render.web/refused-member evaluations) (:seon.render.web/function-unavailable evaluations) (:seon.turn/rule evaluations) (:seon.turn/error-turn-id evaluations) (:seon.turn/missing-opening-datom evaluations) (:seon.agent/no-such-agent evaluations) (:seon.cluster.reply/no-forms evaluations) (:seon.render.walk/missing-lookup evaluations) (:seon.turn/generated-read-attributes evaluations) (:seon.turn/compaction-agent-id evaluations) (:seon.db.write.attempt/request-id evaluations) (:seon.instrument/check evaluations)) (ledger-strip request rows evaluations selected problems))]
      (when problems (problems-html request problems))
      (cond
-       (and (:seon.error/at evaluations) (:seon.error/layer evaluations) (:seon.error/operation evaluations)) [:p (:seon.error/message evaluations)] ;; debt: seon.eval/of-agent declares :seon.error/value, directly or through its result union.
+       (or (:seon.db/invalid-read evaluations) (:seon.schema/expected-value evaluations) (:seon.config/error-key evaluations) (:seon.render/refused-member evaluations) (:seon.render/candidates evaluations) (:seon.render/invalid-output evaluations) (:seon.render.unknown/reason evaluations) (:seon.render.transcript/refused-member evaluations) (:seon.render.web/refused-member evaluations) (:seon.render.web/function-unavailable evaluations) (:seon.turn/rule evaluations) (:seon.turn/error-turn-id evaluations) (:seon.turn/missing-opening-datom evaluations) (:seon.agent/no-such-agent evaluations) (:seon.cluster.reply/no-forms evaluations) (:seon.render.walk/missing-lookup evaluations) (:seon.turn/generated-read-attributes evaluations) (:seon.turn/compaction-agent-id evaluations) (:seon.db.write.attempt/request-id evaluations) (:seon.instrument/check evaluations)) [:p (:seon.error/message evaluations)]
        (seq rows)
        (for [row rows
              :let [turn-id (:seon.turn/id row)
@@ -2393,7 +2403,7 @@
                         {:seon.runtime/listens [:seon.listen/attribute]}]}]
                      [:seon.agent/id agent-id]))]
     (cond
-      (and (:seon.error/at row) (:seon.error/layer row) (:seon.error/operation row)) row ;; debt: seon.db/pull declares :seon.error/value, directly or through its result union.
+      (or (:seon.db/invalid-read row) (:seon.schema/expected-value row) (:seon.render.transcript/refused-member row)) row
       (nil? (:seon.agent/runtime row))
       (let [observation
             {:seon.error/at (java.util.Date.)

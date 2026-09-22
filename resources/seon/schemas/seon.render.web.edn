@@ -180,5 +180,10 @@
  :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render.web/refused-member :seon.render.web/refused-member]]]
 
 
- :context-error [:or :seon.render.web/request-error :seon.render.web/function-unavailable-error :seon.render/error-result :seon.turn/error :seon.db/error-result]
+ :context-error [:or :seon.render.web/request-error :seon.render.web/function-unavailable-error
+                 :seon.render/error-result :seon.turn/error :seon.turn/refused-error
+                 :seon.turn/generated-read-depends-on-turns-error
+                 :seon.turn/compaction-refused-error :seon.cluster.reply/no-forms-error
+                 :seon.render.walk/no-such-entity-error :seon.agent/no-such-agent-error
+                 :seon.db/error-result]
 }

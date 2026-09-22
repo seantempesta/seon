@@ -102,7 +102,7 @@
   [selector entity-id cursor]
   (let [pulled (db/pull selector entity-id)]
 
-    (if (and (:seon.error/at pulled) (:seon.error/layer pulled) (:seon.error/operation pulled)) ;; debt: seon.db/pull declares :seon.error/value (directly or through :seon.db/error-result).
+    (if (or (:seon.db/invalid-read pulled) (:seon.schema/expected-value pulled))
       pulled
       (let [selected (at pulled cursor)]
         (if (:seon.render.data/root-description selected)
@@ -150,7 +150,7 @@
                        :limit limit :max-result-weight weight}
                 cursor (assoc :cursor (::index-cursor cursor))))]
 
-    (if (and (:seon.error/at page) (:seon.error/layer page) (:seon.error/operation page)) ;; debt: seon.db/index-page declares :seon.error/value (directly or through :seon.db/error-result).
+    (if (or (:seon.db/invalid-read page) (:seon.schema/expected-value page))
       page
       (cond-> {::datoms (:datahike.index-page/datoms page)
                ::complete? (:datahike.index-page/complete? page)}
@@ -179,7 +179,7 @@
                        (and (= offset start) (::index-cursor cursor))
                        (assoc :cursor (::index-cursor cursor))))]
 
-           (if (and (:seon.error/at page) (:seon.error/layer page) (:seon.error/operation page)) ;; debt: seon.db/index-page declares :seon.error/value (directly or through :seon.db/error-result).
+           (if (or (:seon.db/invalid-read page) (:seon.schema/expected-value page))
              (reduced page)
              (let [rows (into (::datoms result) (:datahike.index-page/datoms page))
                    more? (not (:datahike.index-page/complete? page))
@@ -212,9 +212,9 @@
         eid (:db/id found)]
     (cond
 
-      (and (:seon.error/at snapshot) (:seon.error/layer snapshot) (:seon.error/operation snapshot)) snapshot ;; debt: seon.db/database-value-identity declares :seon.error/value (directly or through :seon.db/error-result).
+      (or (:seon.db/invalid-read snapshot) (:seon.schema/expected-value snapshot)) snapshot
 
-      (and (:seon.error/at found) (:seon.error/layer found) (:seon.error/operation found)) found ;; debt: seon.db/pull declares :seon.error/value (directly or through :seon.db/error-result).
+      (or (:seon.db/invalid-read found) (:seon.schema/expected-value found)) found
       (nil? eid) (observation-error 'seon.render.data/entity-observation ::subject "The selected entity does not exist." subject)
       (not (and (matching-continuation? outgoing-cursor snapshot eid :outgoing)
                 (matching-continuation? incoming-cursor snapshot eid :incoming)))

@@ -72,7 +72,7 @@
   ;; refusal would carry nil budgets and every downstream render would then
   ;; read that absence as a policy (AGENTS.md section 2.4).
   (if (or (:seon.config/missing-effective effective)
-          (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective))) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
+          (or (:seon.config/error-key effective) (:seon.config/missing-effective effective) (:seon.db/invalid-read effective) (:seon.schema/expected-value effective)))
     effective
     {:seon.render.profile/id :seon.render.profile/agent
      :seon.render.profile/token-budget
@@ -107,7 +107,7 @@
   {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
   [request]
   (or (let [database (:seon.db/db request)]
-        (when (and database (not (and (:seon.error/at database) (:seon.error/layer database) (:seon.error/operation database)))) ;; debt: seon.db/db declares :seon.error/value, directly or through its result union.
+        (when (and database (not (or (:seon.db/invalid-read database) (:seon.schema/expected-value database))))
           (db/carried-projection database)))
       (:seon.schema/projection request)
       (some-> (:seon.sci.eval/ctx request) sci.kernel/context-projection)))
@@ -131,7 +131,7 @@
               effective (when cluster-name
                           (schema/call-with-projection
                            projection #(config/effective database cluster-name)))]
-          (if (and (:seon.error/at effective) (:seon.error/layer effective) (:seon.error/operation effective)) ;; debt: seon.config/effective declares :seon.error/value, directly or through its result union.
+          (if (or (:seon.config/error-key effective) (:seon.config/missing-effective effective) (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
             effective
             (or (when effective (agent-render-profile effective))
                 @default-agent-profile)))
@@ -708,6 +708,7 @@
 
 (defn- render-program-evidence
   "Follow recorded call edges once; retained calls carry these program rows."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :map] :seon.fn/sym] [:or :nil :map]]}
   [database snapshot selected]
   (loop [pending #{selected} visited #{}]
     (if (empty? pending)
@@ -719,7 +720,7 @@
                               '[:seon.fn/sym (limit :seon.fn/calls nil)]
                               (mapv #(vector :seon.fn/sym %) pending))
             visited (into visited pending)]
-        (if (and (:seon.error/at rows) (:seon.error/layer rows) (:seon.error/operation rows)) ;; debt: seon.db/q / seon.db/pull-many declares :seon.error/value, directly or through its result union.
+        (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
           nil
           (recur (into #{} (comp (mapcat :seon.fn/calls)
                                 (remove visited)) rows)
@@ -1657,7 +1658,7 @@
           basis (if turn-id
                   (@turn-opening-db database turn-id)
                   database)]
-      (if (and (:seon.error/at basis) (:seon.error/layer basis) (:seon.error/operation basis)) basis ;; debt: seon.turn/opening-db declares :seon.error/value, directly or through its result union.
+      (if (or (:seon.db/invalid-read basis) (:seon.schema/expected-value basis) (:seon.turn/missing-opening-datom basis)) basis
         (let [acquired (@render-web-derive-context!
                         (assoc request :seon.db/db basis))]
           acquired)))))
