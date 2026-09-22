@@ -35,16 +35,33 @@
   [name]
   (symbol "selection.fixture" name))
 
+(defn- selection-program-rows
+  {:malli/schema [:=> [:cat :seon.db/database-value :string] :seon.program/rows]}
+  [database source]
+  (let [projection (db/carried-projection database)]
+    (functions/source-rows
+     database (program/shapes-in projection)
+     (db/pull database '[*] [:seon.ns/name 'selection.fixture]) source
+     (set (keys (:seon.schema.projection/forms projection))))))
+
 (defn- install-selection-program!
   {:malli/schema [:=> [:cat :seon.db/connection :string] :nil]}
   [connection source]
-  (let [database (db/db connection)
-        rows (functions/source-rows database
-               (program/shapes-in (db/carried-projection database))
-               {:seon.ns/name 'selection.fixture} source
-               (set (keys (:seon.schema.projection/forms (db/carried-projection database)))))]
+  (let [rows (selection-program-rows (db/db connection) source)]
     (support/transacted! connection rows)
     nil))
+
+(defn- install-namespace!
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol] :nil]}
+  [connection namespace-name]
+  (support/transacted!
+   connection
+   [(program/declaration-row
+     (db/carried-projection (db/db connection))
+     {:seon.ns/name namespace-name
+      :seon.ns/source (str "(ns " namespace-name ")")}
+     :all :agent)])
+  nil)
 
 (defn- complete-selection-tx
   "Mark synthetic terminal evidence only on this admission's owned members."
@@ -87,7 +104,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "named-selection")
-     (support/transacted! connection [{:seon.ns/name 'selection.fixture}])
+     (install-namespace! connection 'selection.fixture)
      (install-selection-program!
       connection
       "(defn leaf [] 1)
@@ -117,9 +134,7 @@
                         (string? (:seon.test.run/program-digest %))
                         (string? (:seon.test.run/input-digest %)))
                    (:seon.test.selection/unchanged reused)))
-       (support/transacted! connection
-         [[:db/add [:seon.fn/sym (fixture-symbol "leaf")]
-           :seon.fn/source "(defn leaf [] 3)"]])
+       (install-selection-program! connection "(defn leaf [] 3)")
        (let [acquire runner/reach-digests
              requested (atom #{})
              changed (with-redefs [runner/reach-digests
@@ -144,7 +159,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "selection")
-     (support/transacted! connection [{:seon.ns/name 'selection.fixture}])
+     (install-namespace! connection 'selection.fixture)
      (let [source "(defn leaf [] 1)
                    (defn right [] (leaf))
                    (defn middle [] (leaf) (right))
@@ -244,13 +259,13 @@
            (support/transacted! connection [[:db.fn/call complete-selection-tx admission]])))
        (is (empty? (:seon.test.run/members (select!))))
        (testing "Spec and reference edits seed their owning definition"
-         (support/transacted! connection [{:seon.fn/sym (fixture-symbol "leaf")
-                                           :seon.fn/spec "[:=> [:cat] :int]"}])
+         (install-selection-program!
+          connection
+          "(defn leaf {:malli/schema [:=> [:cat] :int]} [] 3)")
          (is (= expected (symbols (select!)))
              "Unchanged green platform members remain discharged after a spec edit.")
          (complete-selection! connection request)
-         (support/transacted! connection [{:seon.fn/sym (fixture-symbol "stranger")
-                                           :seon.fn/references #{(fixture-symbol "leaf")}}])
+         (install-selection-program! connection "(defn stranger [] leaf 2)")
          (is (= #{(fixture-symbol "unrelated")} (symbols (select!)))
              "A reference edit executes only members whose reachable content changed.")
          (complete-selection! connection request))
@@ -259,7 +274,9 @@
                leaf (fixture-symbol "leaf")
                original (:db/id (db/pull database [:db/id] [:seon.fn/sym leaf]))
                removed (:db-after (d/with database [[:db/retractEntity original]]))
-               recreated (:db-after (d/with removed [(support/program-fn-row removed leaf "(defn leaf [] 9)")]))]
+               leaf-row (some #(when (= leaf (:seon.fn/sym %)) %)
+                              (selection-program-rows removed "(defn leaf [] 9)"))
+               recreated (:db-after (d/with removed [leaf-row]))]
            (is (not= original (:db/id (db/pull recreated [:db/id] [:seon.fn/sym leaf]))))
            (doseq [snapshot [removed recreated]]
              (is (= (conj expected (fixture-symbol "unrelated"))
@@ -313,9 +330,9 @@
    (fn [left]
      (support/with-database
       (fn [right]
-        (support/transacted! left [{:seon.ns/name 'selection.fixture}])
-        (support/transacted! right [{:seon.ns/name 'selection.offset}
-                                   {:seon.ns/name 'selection.fixture}])
+        (install-namespace! left 'selection.fixture)
+        (install-namespace! right 'selection.offset)
+        (install-namespace! right 'selection.fixture)
         (let [left-basis (db/basis-t (db/db left))
               right-basis (db/basis-t (db/db right))
               target (fixture-symbol "branch-leaf")
@@ -524,7 +541,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "documentation-selection")
-     (support/transacted! connection [{:seon.ns/name 'selection.fixture}])
+     (install-namespace! connection 'selection.fixture)
      (install-selection-program!
       connection
       "(clojure.test/deftest documentation-safe (clojure.test/is true))")

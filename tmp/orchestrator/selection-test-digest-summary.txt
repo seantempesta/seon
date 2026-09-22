@@ -1,0 +1,19 @@
+Selection fixture digest repair
+
+Owned change:
+- test/seon/test/selection_test.clj: namespace and synthetic declaration rows now go
+  through declaration-row/source-rows with the stored namespace context; no digest is
+  hand-associated.
+- docs/prds/agent-platform/landing/lane-selection-test-digest-2026-09-22.md
+
+Proof:
+- HEAD 394b58f09 isolated snapshot loads seon.test.selection-test (:head-loads).
+- Shared-newer-HEAD focused run: the two reported digest-refusal tests pass; 12 executed,
+  194 assertions, with 1 unrelated duration failure and 1 unrelated armed-contract error.
+- Fresh-base exact focused run could not start because isolated recording lacked a
+  published current-src; unavailable evidence is not reported green.
+
+Inventory:
+- Remaining :seon.fn/sym hits are reads/lookups, existing-row sparse updates, or
+  intentional refusal tests, except three bootstrap fixture regions noted in the landing
+  note; those require an owning whole-fixture conversion.
