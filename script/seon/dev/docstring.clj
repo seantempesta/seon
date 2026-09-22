@@ -159,9 +159,13 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- safe-sexpr
-  "n/sexpr guarded — returns nil on any tagged-literal / unreadable node."
+  "The node's form, or nil for a node rewrite-clj declares printable-only.
+
+  `n/sexpr-able?` is the dependency's own statement of the case
+  (`reference-code/rewrite-clj/src/rewrite_clj/node/protocols.cljc:34`); any
+  other failure propagates."
   [node]
-  (try (n/sexpr node) (catch Exception _ nil)))
+  (when (n/sexpr-able? node) (n/sexpr node)))
 
 (defn- extract-ns-name
   "First `(ns X ...)` form's name as a string, or nil."
