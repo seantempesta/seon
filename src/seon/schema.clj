@@ -1310,14 +1310,32 @@
    resolution, and acyclicity remain separate operations at that authority."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
-  (try
-    (let [encoded (pr-str value)
-          decoded (edn/read-string encoded)]
-      (and (= value decoded)
-           (some? (m/schema
-                   (compilable-form decoded {})
-                   {:registry structural-registry}))))
-    (catch Exception _ false)))
+  (let [encoded (pr-str value)
+        ;; Only each dependency's declared "not parseable" refusal is false:
+        ;; clojure.edn's RuntimeException (EdnReader.java:130, :174-177) and
+        ;; Malli's `-exception` ex-info with a `malli.core` :type
+        ;; (reference-code/malli/src/malli/core.cljc:203). Everything else
+        ;; propagates.
+        [decoded readable?] (try [(edn/read-string encoded) true]
+                                 (catch RuntimeException _ [nil false]))]
+    (boolean
+     (and readable?
+          (= value decoded)
+          (try
+            (some? (m/schema (compilable-form decoded {})
+                             {:registry structural-registry}))
+            (catch clojure.lang.ExceptionInfo failure
+              (let [data (ex-data failure)
+                    malli-type (:type data)]
+                ;; and this owner's own declared refusal for a predicate
+                ;; with no admitted callable (`compilable-form`, above), which
+                ;; fails closed without loading its namespace.
+                (if (or (and (qualified-keyword? malli-type)
+                             (= "malli.core" (namespace malli-type)))
+                        (= :seon.schema/unresolved-predicate
+                           (:seon.schema/error data)))
+                  false
+                  (throw failure)))))))))
 
 (register-core-predicate! 'seon.schema/malli-form? malli-form?)
 
@@ -1334,10 +1352,20 @@
        :gen/elements [nil false 0 "" :k [] {}]}]]
     :boolean]}
   [value]
-  (try
-    (pull-api/compile-pull-plan value)
-    true
-    (catch Exception _ false)))
+  ;; A pull selector is sequential (datalog-parser's parse-pull reads a
+  ;; vector of attr-specs). Its declared refusal is the ex-info carrying
+  ;; `{:error :parser/pull}` (datalog-parser 0.2.37 datalog/parser/pull.cljc:233,
+  ;; reached through reference-code/datahike/src/datahike/pull_api.cljc:58).
+  ;; Everything else propagates.
+  (boolean
+   (and (sequential? value)
+        (try
+          (pull-api/compile-pull-plan value)
+          true
+          (catch clojure.lang.ExceptionInfo failure
+            (if (= :parser/pull (:error (ex-data failure)))
+              false
+              (throw failure)))))))
 
 (register-core-predicate! 'seon.schema/pull-selector? pull-selector?)
 
@@ -3654,10 +3682,10 @@
    [:=> [:cat ::projection :qualified-symbol :seon.schema/arguments]
     :boolean]}
   [projection function-symbol arguments]
-  (try
-    (boolean (seq (function-matching-outputs-in
-                   projection function-symbol arguments)))
-    (catch Throwable _ false)))
+  ;; An undeclared symbol has no arities (`function-arities-in` answers []);
+  ;; nothing is parsed, so a failing validator propagates.
+  (boolean (seq (function-matching-outputs-in
+                 projection function-symbol arguments))))
 
 (defn function-returns-in?
   "True when one arity of `function-symbol` declares `output-schema`.
@@ -3670,10 +3698,10 @@
    [:=> [:cat ::projection :qualified-symbol ::registry-key]
     :boolean]}
   [projection function-symbol output-schema]
-  (try
-    (boolean (some (fn [[_ output]] (= output-schema output))
-                   (function-arities-in projection function-symbol)))
-    (catch Throwable _ false)))
+  ;; An undeclared symbol has no arities (`function-arities-in` answers []);
+  ;; nothing is parsed, so a failing validator propagates.
+  (boolean (some (fn [[_ output]] (= output-schema output))
+                 (function-arities-in projection function-symbol))))
 
 (defn function-accepts-and-returns-in?
   "True when one arity accepts `arguments` and declares `output-schema`."
@@ -3684,11 +3712,11 @@
          [::output-schema ::registry-key]]
     :boolean]}
   [projection function-symbol arguments output-schema]
-  (try
-    (boolean (some #{output-schema}
-                   (function-matching-outputs-in
-                    projection function-symbol arguments)))
-    (catch Throwable _ false)))
+  ;; An undeclared symbol has no arities (`function-arities-in` answers []);
+  ;; nothing is parsed, so a failing validator propagates.
+  (boolean (some #{output-schema}
+                 (function-matching-outputs-in
+                  projection function-symbol arguments))))
 
 (defn projection-explainer
   "Acquire the retained schema's Malli-owned explainer, with native paths."

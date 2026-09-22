@@ -103,22 +103,31 @@
   "True when the supplied expression is valid five-field Unix cron."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [expression]
-  (try
-    (when (string? expression)
-      (let [cron (.parse cron-parser expression)]
-        (.validate ^Cron cron)
-        true))
-    (catch Throwable _ false)))
+  (boolean
+   (when (string? expression)
+     (try
+       (.validate ^Cron (.parse cron-parser expression))
+       true
+       ;; cron-utils 9.2.1 (a Maven jar, not vendored under reference-code)
+       ;; refuses an unparseable or out-of-range expression with
+       ;; IllegalArgumentException from both `parse` and `validate` (observed
+       ;; at the REPL for "bad", "* * *", "" and "99 * * * *"). Every other
+       ;; failure propagates.
+       (catch IllegalArgumentException _ false)))))
 
 (defn valid-timezone?
   "True when `timezone` names an installed IANA time zone."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [timezone]
-  (try
-    (when (string? timezone)
-      (ZoneId/of timezone)
-      true)
-    (catch Throwable _ false)))
+  (boolean
+   (when (string? timezone)
+     (try
+       (ZoneId/of timezone)
+       true
+       ;; ZoneId/of declares DateTimeException for a malformed id and its
+       ;; subclass ZoneRulesException for an unknown region (JDK javadoc);
+       ;; every other failure propagates.
+       (catch java.time.DateTimeException _ false)))))
 
 (defn- execution-time
   ^ExecutionTime [expression]

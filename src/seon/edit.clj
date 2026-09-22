@@ -140,9 +140,13 @@
 
 (defn- location-sexpr
   [location]
-  (try
-    {:seon.edit/sexpr (z/sexpr location)}
-    (catch Throwable _ nil)))
+  ;; rewrite-clj declares which nodes have no form: `sexpr-able?` is false
+  ;; exactly for printable-only nodes (comments, whitespace, #_, reader
+  ;; macros without a form), whose `sexpr` throws "unsupported operation"
+  ;; (reference-code/rewrite-clj node/protocols.cljc:34, reader_macro.cljc:20).
+  ;; Asking first leaves nothing to catch.
+  (when (z/sexpr-able? location)
+    {:seon.edit/sexpr (z/sexpr location)}))
 
 (defn- single-form
   {:malli/schema [:=> [:cat :string :string] [:or :map :my.edit/parse-refused-error]]}
