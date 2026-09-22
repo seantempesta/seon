@@ -119,7 +119,7 @@ RESET NEEDED: no.
 | HEAD `da2086452` load check: git-archive snapshot, `clojure -M -e "(require 'seon.oversight 'seon.render.web 'seon.cluster 'seon.cluster.agent)"` | 19.2 s | load only; printed `:loaded nil` (the search Var does not resolve) |
 
 Everything over 10 s here is loading before work starts. Filed as
-`docs/seon/issues/a-focused-test-jvm-spends-thirty-seconds-before-its-first-test.md`.
+`docs/seon/issues/a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md` (rows appended).
 Live read-only probe on `default`: 3 ms.
 
 ## Commits
@@ -134,3 +134,115 @@ Live read-only probe on `default`: 3 ms.
   and HEAD `da2086452` loads (git-archive snapshot, fresh JVM).
 - Not proved: the booted fleet test and the HTTP/SSE paint on a real cluster
   (blocked by the stale base above); browser paint was not observed.
+
+## Follow-up: review findings (`docs/research/agent-platform/review-oversight-owning-instance-2026-09-23.md`)
+
+This section replaces the earlier text above where they disagree.
+
+1. **Missing live state is no longer silence.** When a request carries routing,
+   the caller is asking for live state. If the routing entry lacks
+   `:seon.agent/armed` or `:seon.flow/graph`, `unit` returns
+   `{:seon.oversight/missing [...]}` (`:seon.oversight/unavailable`).
+   `ai-story` and `html-table` render it as a visible diagnostic
+   (`data-fleet-oversight="unavailable"`, naming each missing member). A present
+   empty armed map is the only way to get an empty fleet. A request without
+   routing is a detached render and returns nil. The root page now assoc's
+   routing only when it is present, so a detached request never carries a nil
+   member.
+2. **Contracts.** New resource `resources/seon/schemas/seon.oversight.edn`
+   declares `:seon.oversight/live-state` (an open map of the routing contents
+   oversight reads), `:request`, `:unit`, `:fleet`, `:agent`,
+   `:proc-observation`, `:occupancy`, `:buffer` and `:unavailable`. The routing
+   entry is validated once per read, at `live-state`, whose contract is
+   `[:or :seon.oversight/live-state :seon.oversight/unavailable]`. Every
+   function in `seon.oversight` now has a contract, the private helpers
+   included (17 contracts).
+3. **Regressions.** `oversight-reads-the-handed-routing-and-names-what-it-lacks`
+   uses a real Flow graph in a real routing entry and covers three cases:
+   routing lacking the graph, lacking the armed map, and lacking both, each
+   asserting the visible diagnostic and the absence of an agents table. It also
+   asserts that the detached request returns nil. The booted test gains an SSE
+   section: it registers a root tab, taps the render proc's pages mult, writes
+   a note (a database wake), and asserts that the root package at or after that
+   basis carries the fleet table. The deleted-Var and stubbed `fleet-value`
+   assertions are gone.
+
+### Proof
+
+The schema-validating probe `tmp/oversight-owning-instance/probe2.clj`
+(`clojure -M:test`, working tree) builds the packaged projection with every
+oversight contract (`schema/build-projection`, 989 ms) and then validates the
+unit values:
+
+```clojure
+{:contracts 17, :build-ms 988.69, :unit-ms 4.84, :detached nil,
+ :fleet #:seon.oversight{:agents [], :plumbing [#:seon.oversight{:proc :probe/p, :ping :reply, :passes 0, :buffers [...]}]},
+ :fleet-valid? true, :live-state-valid? true,
+ :no-graph #:seon.oversight{:missing [:seon.flow/graph]}, :no-graph-valid? true,
+ :no-armed #:seon.oversight{:missing [:seon.agent/armed]},
+ :no-graph-ai "Live fleet state is unavailable: the routing entry lacks :seon.flow/graph.",
+ :no-graph-html "<section class=\"seon-card\" id=\"surface-fleet-oversight\"><h2>fleet</h2><p data-fleet-oversight=\"unavailable\" data-missing=\":seon.flow/graph\">Live fleet state is unavailable: the routing entry lacks :seon.flow/graph.</p></section>"}
+```
+
+**Live SSE after a database wake.** A booted scratch cluster (a `git archive`
+of `fe624bf22` plus this slice's paths) was probed through MCP `eval_clj`:
+register a root tab, tap `:seon.render.web/pages-mult`, offer the join, then
+`(seon.note/add! "oversight-wake" "The fleet repaints." conn "root")`. Result:
+
+```clojure
+{:first-root? true, :join-ms 588.29, :note "oversight-wake",
+ :wake-basis 536870938, :pkg-basis 536870938, :wake-ms 1675.6,
+ :fleet? true, :agents-table? true, :root-row? true, :unavailable? false,
+ :excerpt "surface-fleet-oversight\"><h2>fleet</h2><table data-fleet-oversight=\"agents\">...<tr data-agent=\"root\" data-state=\"mid-turn\">..."}
+```
+
+MCP `runtime_status` on the same root returned the full fleet through
+`flow-status`, reading the routing entry.
+
+**Incremental schema adoption** (owner 2026-09-23 ruling). On the same warm
+store, the `current-src` branch of a live store:
+`bin/seon --root <root> init --changed resources/seon/schemas/seon.oversight.edn src/seon/oversight.clj src/seon/render/web.clj`
+ran twice.
+
+- Retire: the resource was removed and both sources set to HEAD. It was
+  accepted as commit `6ab2ee8f…`, leaving 0 `:seon.oversight/*` schema rows.
+- Adopt: the resource and sources were restored. It was accepted as commit
+  `6ab2eed0…`, restoring 25 rows.
+
+The count was measured with `datahike.api/commit-as-db` on each commit, 27 ms.
+The 1.3e refusal case (retiring the resource while the writers survive) was
+not exercised: the writers were converted in the same publication.
+
+**Rule breach, reported.** Before the lane read the 2026-09-23
+no-from-zero ruling, it also ran one from-zero boot of that archive:
+128,569 ready-ms, 142.38 s wall, exit 0. An earlier from-zero attempt on the
+shared working tree exited 1 after 22.3 s. That was a foreign static-analysis
+refusal: `cluster.clj` `datahike.schema` unresolved, `declaration-changes`
+arity, and `seon.test` callers. The row is recorded in
+`docs/seon/issues/from-zero-boot-takes-minutes.md`.
+
+**Tests.** Not run. The coordinator states that armed fixture tests are blocked
+for every lane by
+`docs/seon/issues/incremental-publication-refuses-a-deletion-whose-unchanged-caller-edge-survives.md`,
+and the stale base above also still stands. The updated
+`seon.oversight-test` bodies are unverified by a test run.
+
+### Timings (follow-up, over 1 s)
+
+| operation | wall | phases |
+| --- | --- | --- |
+| probe2 JVM (`clojure -M:test`) | 13.7 s | projection build 989 ms; unit 4.8 ms; the rest is JVM start and load |
+| from-zero boot attempt, working tree | 22.3 s | refused by foreign static analysis |
+| from-zero boot, archive (rule breach) | 142.4 s | ready-ms 128,569 |
+| warm `start`, archive root | 31.5 s | ready-ms 14,774 |
+| `init --changed` retire | 60.4 s | no phase lines printed |
+| `init --changed` adopt | 60.6 s | no phase lines printed |
+| live SSE wake: note to root package | 1.68 s | join first package 588 ms |
+
+Everything over 10 s is filed:
+`a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md` (rows
+appended; this lane's duplicate thirty-seconds note is deleted into it),
+`from-zero-boot-takes-minutes.md` (rows appended), and the new
+`a-three-file-changed-path-publication-takes-a-minute.md`. The 1.68 s wake is
+over 1 s and under 10 s; its split between the note transaction, the wake and
+the render pass was not measured.

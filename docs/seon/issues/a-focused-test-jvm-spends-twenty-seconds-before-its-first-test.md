@@ -21,3 +21,15 @@ JVM start from namespace compilation.
 Every lane pays this per verification run. Wanted: a phase breakdown per run
 (JVM start, require, projection, arming, tests), then the deletion that makes
 a focused run seconds; a warm JVM (the REPL) is the obvious candidate.
+
+## Rows from lane oversight-owning-instance (2026-09-22)
+
+`bin/test-fast --paths <4 files> -- seon.oversight-test`, five tests: 49.8 s
+in total. The snapshot took 4-5 s. About 35 s passed before `PACKAGED TEST
+PROJECTION ACQUIRED`; this interval has no phase line of its own. Contract
+arming (1700 instrumented) took 4.1 s and the five test bodies 2.4 s. A bare
+`clojure -M:test` probe that requires `seon.flow`, `seon.oversight` and
+`seon.cluster` took 20.9 s wall for a 13 ms body; a later schema-validating
+probe took 13.7 s wall for a 5 ms unit body. Loading HEAD's `seon.cluster`
+and `seon.render.web` in a fresh JVM took 19.2 s.
+

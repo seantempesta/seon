@@ -1,0 +1,66 @@
+#:seon.oversight{:live-state
+                 [:map
+                  {:description "The routing entry's contents oversight reads: the armed agent graphs by agent id and the cluster graph joined before it resumes. Open: the entry carries other process-local members."}
+                  [:seon.agent/armed [:map-of :seon.agent/id :seon.agent/armed]]
+                  [:seon.flow/graph :seon.flow/graph]],
+                 :missing [:vector {:min 1 :description "The live-state members the handed routing entry did not hold."} :qualified-keyword],
+                 :unavailable
+                 [:map
+                  {:description "Live fleet state was requested with a routing entry that cannot answer it. Rendered visibly; never an empty fleet."}
+                  [:seon.oversight/missing :seon.oversight/missing]],
+                 :request
+                 [:map
+                  {:description "One oversight render source. Supplying routing asks for live state; omitting it is a detached render of facts with no live graph."}
+                  [:seon.db/db :seon.db/database-value]
+                  [:seon.agent/routing {:optional true} :seon.agent/routing]],
+                 :proc [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                              :seon.schema.admission/reason "core.async.flow permits arbitrary process identifiers; oversight preserves the supplied identifier."
+                              :gen/elements [:seon.agent/turn :seon.render.web/render]}],
+                 :ping [:enum :reply :unknown],
+                 :passes :int,
+                 :count [:int {:min 0}],
+                 :capacity [:int {:min 0}],
+                 :dropped [:int {:min 0}],
+                 :port :keyword,
+                 :occupancy
+                 [:map
+                  [:seon.oversight/count :seon.oversight/count]
+                  [:seon.oversight/capacity :seon.oversight/capacity]
+                  [:seon.oversight/dropped {:optional true} :seon.oversight/dropped]],
+                 :buffer
+                 [:map
+                  [:seon.oversight/count :seon.oversight/count]
+                  [:seon.oversight/capacity :seon.oversight/capacity]
+                  [:seon.oversight/dropped {:optional true} :seon.oversight/dropped]
+                  [:seon.oversight/port :seon.oversight/port]],
+                 :buffers [:vector :seon.oversight/buffer],
+                 :proc-observation
+                 [:map
+                  [:seon.oversight/proc :seon.oversight/proc]
+                  [:seon.oversight/ping :seon.oversight/ping]
+                  [:seon.oversight/passes {:optional true} :seon.oversight/passes]
+                  [:seon.oversight/buffers {:optional true} :seon.oversight/buffers]],
+                 :procs [:vector :seon.oversight/proc-observation],
+                 :plumbing [:vector :seon.oversight/proc-observation],
+                 :mailbox :seon.oversight/occupancy,
+                 :turn-buffer :seon.oversight/occupancy,
+                 :mailbox-passes :int,
+                 :turn-passes :int,
+                 :agent
+                 [:map
+                  [:seon.agent/id :seon.agent/id]
+                  [:seon.oversight/procs :seon.oversight/procs]
+                  [:seon.turn.work/episode-runs :seon.turn.work/episode-runs]
+                  [:seon.turn/id {:optional true} :seon.turn/id]
+                  [:seon.oversight/mailbox {:optional true} :seon.oversight/mailbox]
+                  [:seon.oversight/turn-buffer {:optional true} :seon.oversight/turn-buffer]
+                  [:seon.oversight/mailbox-passes {:optional true} :seon.oversight/mailbox-passes]
+                  [:seon.oversight/turn-passes {:optional true} :seon.oversight/turn-passes]],
+                 :agents [:vector :seon.oversight/agent],
+                 :fleet
+                 [:map
+                  [:seon.oversight/agents :seon.oversight/agents]
+                  [:seon.oversight/plumbing :seon.oversight/plumbing]],
+                 :unit
+                 [:and :seon.render/unit
+                  [:map [:seon.render/value [:or :seon.oversight/fleet :seon.oversight/unavailable]]]]}

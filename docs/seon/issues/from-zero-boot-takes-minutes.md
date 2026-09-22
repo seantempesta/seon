@@ -53,3 +53,5 @@ the launching shell's; load is `uptime`'s one-minute average at start.
 | 2026-09-22 | `bfe3445f8` frozen archive, JFR attached | from-zero | 170,338 | 191.21 | 11.30 | [from-zero-boot-cost](../../research/agent-platform/from-zero-boot-cost-2026-09-23.md) |
 | 2026-09-22 | same root, `down` then `start` | warm restart | 11,092 | 28.73 | 9.98 | same |
 | 2026-09-22 | same live JVM, second cluster `fzb2` forked from `current-src` | new cluster | 4,256 | 4.42 | 8.54 | same |
+| 2026-09-22 | `fe624bf22` archive + oversight follow-up (booted before the lane read the no-from-zero ruling) | from-zero | 128,569 | 142.38 | — | [lane-oversight-owning-instance](../../prds/agent-platform/landing/lane-oversight-owning-instance-2026-09-23.md) |
+| 2026-09-22 | same root, `start` | warm restart | 14,774 | 31.53 | — | same |

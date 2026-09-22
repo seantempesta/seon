@@ -8,9 +8,11 @@
 
   The caller supplies the cluster's routing entry it already holds; the
   cluster graph rides that entry from the moment the graph is joined, before
-  any proc resumes. When no routing entry or graph is supplied, `unit`
-  returns nil: omission is the honest projection because historical or
-  detached facts have no live graph to describe.
+  any proc resumes. A request without routing is a detached render: `unit`
+  returns nil because historical or detached facts have no live graph to
+  describe. A request WITH routing that cannot answer (no joined graph, no
+  armed map) is `:seon.oversight/unavailable`, rendered visibly; only a
+  present empty armed map means an empty fleet.
 
   Every armed agent graph contributes its mailbox and turn ping. A
   responsive turn proc with no current turn is parked; an open turn is
@@ -34,18 +36,23 @@
 ;;; absence of a reply remains unknown rather than becoming a health claim.
 
 (defn- cluster-name
+  "The database value's cluster name, or nil when no cluster row exists."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.cluster/name]]}
   [db]
   (db/q '[:find ?name .
          :where [_ :seon.cluster/name ?name]]
        db))
 
 (defn- ping-timeout-ms
+  "The configured Flow ping window for the database value's cluster."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.config.flow/ping-timeout-ms]}
   [db]
   (:seon.config.flow/ping-timeout-ms
    (config/effective db (cluster-name db))))
 
 (defn- current-run-id
   "The agent's open turn id, or nil when none is open."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] [:maybe :seon.turn/id]]}
   [db agent-id]
   (db/q '[:find ?run-id .
          :in $ ?agent-id
@@ -58,6 +65,7 @@
 
 (defn- occupancy
   "The count and capacity from one datafied Flow channel, or nil."
+  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :seon.oversight/occupancy]]}
   [channel]
   (when-let [buffer (:buffer channel)]
     (cond-> {:seon.oversight/count (:count buffer)
@@ -87,6 +95,9 @@
 
 (defn- agent-story
   "One armed agent's current story, including every declared proc."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.config.flow/ping-timeout-ms
+                       :seon.agent/id :seon.agent/armed]
+                  :seon.oversight/agent]}
   [db timeout-ms agent-id entry]
   (let [graph (:seon.flow/graph entry)
         ping (flow/ping graph :timeout-ms timeout-ms)
@@ -125,6 +136,8 @@
 
 (defn- plumbing-story
   "Every proc in the cluster graph, including a proc busy rendering us."
+  {:malli/schema [:=> [:cat :seon.flow/graph :seon.config.flow/ping-timeout-ms]
+                  :seon.oversight/plumbing]}
   [graph timeout-ms]
   (let [ping (flow/ping graph :timeout-ms timeout-ms)
         pids (sort (keys (:procs (datafy/datafy graph))))]
@@ -136,45 +149,59 @@
        (proc-ping pid (get ping pid)))
      pids)))
 
+(defn- live-state
+  "Read the routing entry once: its live state, or the members it lacks.
+  Both members are required by `:seon.oversight/live-state`; a missing one
+  is unavailable evidence, never an empty fleet."
+  {:malli/schema [:=> [:cat :seon.agent/routing]
+                  [:or :seon.oversight/live-state :seon.oversight/unavailable]]}
+  [routing]
+  (let [snapshot @routing
+        missing (into [] (remove #(find snapshot %))
+                      [:seon.agent/armed :seon.flow/graph])]
+    (if (seq missing)
+      {:seon.oversight/missing missing}
+      snapshot)))
+
 (defn- fleet-value
-  "The complete process-local fleet value at one database value."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/routing
-                       :seon.flow/graph]
-                  :map]}
-  [db routing graph]
-  (let [armed (or (some-> routing deref :seon.agent/armed) {})
-        timeout-ms (ping-timeout-ms db)]
-    {:seon.oversight/agents
-     (into []
-           (map (fn [[agent-id entry]]
-                  (agent-story db timeout-ms agent-id entry)))
-           (sort-by key armed))
-     :seon.oversight/plumbing
-     (plumbing-story graph timeout-ms)}))
+  "The complete process-local fleet value at one database value, or the
+  routing entry's declared unavailability."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/routing]
+                  [:or :seon.oversight/fleet :seon.oversight/unavailable]]}
+  [db routing]
+  (let [state (live-state routing)]
+    (if (:seon.oversight/missing state)
+      state
+      (let [timeout-ms (ping-timeout-ms db)]
+        {:seon.oversight/agents
+         (into []
+               (map (fn [[agent-id entry]]
+                      (agent-story db timeout-ms agent-id entry)))
+               (sort-by key (:seon.agent/armed state)))
+         :seon.oversight/plumbing
+         (plumbing-story (:seon.flow/graph state) timeout-ms)}))))
 
 (defn flow-status
   "Return the current agent and plumbing Flow observations for one instance."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
-                  :map]}
+                  [:or :seon.oversight/fleet :seon.oversight/unavailable]]}
   [db instance]
-  (fleet-value db (:seon.agent/routing instance) (:seon.flow/graph instance)))
+  (fleet-value db (:seon.agent/routing instance)))
 
 (defn unit
-  "Build the live fleet render unit, or omit it without a cluster."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/unit]]}
+  "Build the live fleet render unit; nil only for a detached request."
+  {:malli/schema [:=> [:cat :seon.oversight/request]
+                  [:maybe :seon.oversight/unit]]}
   [source]
-  (let [db (:seon.db/db source)
-        routing (:seon.agent/routing source)
-        graph (some-> routing deref :seon.flow/graph)]
-    (when (and db graph)
-      (assoc source
-             :seon.render/value (fleet-value db routing graph)
-             :seon.render/ai `ai-story
-             :seon.render/html `html-table))))
+  (when-let [routing (:seon.agent/routing source)]
+    (assoc source
+           :seon.render/value (fleet-value (:seon.db/db source) routing)
+           :seon.render/ai `ai-story
+           :seon.render/html `html-table)))
 
 (defn- ordinal
   "An English ordinal for a positive run count."
+  {:malli/schema [:=> [:cat [:int {:min 1}]] :string]}
   [value]
   (let [n (long value)
         mod100 (mod n 100)
@@ -189,19 +216,35 @@
 
 (defn- agent-story-text
   "An open turn proves work; no turn plus a pong proves parked; else unknown."
+  {:malli/schema [:=> [:cat :seon.oversight/agent] [:enum "mid-turn" "parked" "unknown"]]}
   [agent]
   (cond
     (:seon.turn/id agent) "mid-turn"
     (some? (:seon.oversight/turn-passes agent)) "parked"
     :else "unknown"))
 
+(defn- unavailable-text
+  "Name the live-state members the handed routing entry lacked."
+  {:malli/schema [:=> [:cat :seon.oversight/unavailable] :string]}
+  [unavailable]
+  (str "Live fleet state is unavailable: the routing entry lacks "
+       (str/join ", " (:seon.oversight/missing unavailable))
+       "."))
+
 (defn ai-story
   "Tell the fleet's current story in one concise line."
-  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
+  {:malli/schema [:=> [:cat :seon.oversight/unit] :string]}
   [unit]
-  (let [agents (:seon.oversight/agents (:seon.render/value unit))]
-    (if (empty? agents)
+  (let [value (:seon.render/value unit)
+        agents (:seon.oversight/agents value)]
+    (cond
+      (:seon.oversight/missing value)
+      (unavailable-text value)
+
+      (empty? agents)
       "No agent graphs are armed."
+
+      :else
       (str/join
        "; "
        (map
@@ -221,6 +264,7 @@
 
 (defn- occupancy-text
   "A compact `count/capacity` channel readout."
+  {:malli/schema [:=> [:cat [:maybe :seon.oversight/occupancy]] :string]}
   [found]
   (if found
     (str (:seon.oversight/count found)
@@ -232,11 +276,18 @@
 
 (defn html-table
   "Render the fleet story as the root page's live table."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.oversight/unit] :seon.render/hiccup]}
   [unit]
   (let [value (:seon.render/value unit)
         agents (:seon.oversight/agents value)
         plumbing (:seon.oversight/plumbing value)]
+    (if (:seon.oversight/missing value)
+      [:section {:id (block/surface-id :fleet-oversight)
+                 :class "seon-card"}
+       [:h2 "fleet"]
+       [:p {:data-fleet-oversight "unavailable"
+            :data-missing (str/join " " (:seon.oversight/missing value))}
+        (unavailable-text value)]]
     [:section {:id (block/surface-id :fleet-oversight)
                :class "seon-card"}
      [:h2 "fleet"]
@@ -270,4 +321,4 @@
                     " "
                     (or (:seon.oversight/passes proc)
                         "unknown")))
-             plumbing))]]]))
+             plumbing))]]])))

@@ -459,16 +459,18 @@
         fleet-call
         (when (= id root-agent-id)
           (oversight/unit
-           {:seon.db/db db
-            :seon.agent/routing (:seon.agent/routing request)
-            :seon.agent/id root-agent-id
-            :seon.sci.admit/caps caps
-            :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
-            :seon.sci.eval/time-limit-ms
-            (:seon.config.eval/time-limit-ms request)
-            :seon.config/on-core-error
-            (:seon.config/on-core-error request)
-            :seon.db/connection connection}))
+           ;; Routing present asks for live state; absent is a detached render.
+           (cond-> {:seon.db/db db
+                    :seon.agent/id root-agent-id
+                    :seon.sci.admit/caps caps
+                    :seon.sci.eval/ctx (:seon.sci.eval/ctx request)
+                    :seon.sci.eval/time-limit-ms
+                    (:seon.config.eval/time-limit-ms request)
+                    :seon.config/on-core-error
+                    (:seon.config/on-core-error request)
+                    :seon.db/connection connection}
+             (:seon.agent/routing request)
+             (assoc :seon.agent/routing (:seon.agent/routing request)))))
         fleet-output
         (some-> fleet-call
                 (assoc :seon.render/output :seon.render/html
@@ -2096,7 +2098,6 @@
             call-id (root-call-id :seon.render/html registration-key)
             request
             (cond-> {:seon.db/db database
-                     :seon.agent/routing (:seon.agent/routing handle)
                      :seon.agent/id agent-id
                      :seon.render.web/root-agent-id
                      (:seon.render.web/root-agent-id handle)
@@ -2119,7 +2120,10 @@
                      :seon.render/distance 2}
               (get-in streams [agent-id :seon.ai/partial])
               (assoc :seon.ai/partial
-                     (get-in streams [agent-id :seon.ai/partial])))
+                     (get-in streams [agent-id :seon.ai/partial]))
+
+              (:seon.agent/routing handle)
+              (assoc :seon.agent/routing (:seon.agent/routing handle)))
             root (refresh-root request retained call-id candidates)
             derive? (or derive-all?
                         (not= [(get-in streams [agent-id :seon.ai/partial])]

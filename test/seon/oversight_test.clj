@@ -1,6 +1,7 @@
 (ns seon.oversight-test
   "The fleet story over real booted Flow graphs and a real root page."
   (:require [clojure.core.async :as async]
+            [clojure.core.async.flow :as flow]
             [clojure.datafy :as datafy]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -10,6 +11,9 @@
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
+            [seon.flow :as seon.flow]
+            [seon.note :as note]
+            [seon.render.web :as web]
             [seon.oversight :as oversight]
             [seon.render.hiccup :as hiccup]
             [seon.test-support :as support])
@@ -48,6 +52,7 @@
     (let [unit {:seon.render/value
                 {:seon.oversight/agents
                  [(merge {:seon.agent/id "observed"
+                          :seon.oversight/procs []
                           :seon.turn.work/episode-runs 0}
                          observations)]
                  :seon.oversight/plumbing
@@ -189,11 +194,14 @@
                   {:seon.render/value
                    {:seon.oversight/agents
                     [{:seon.agent/id "agent-b"
+                      :seon.oversight/procs []
                       :seon.turn/id "run-3"
                       :seon.turn.work/episode-runs 3}
                      {:seon.agent/id "agent-c"
+                      :seon.oversight/procs []
                       :seon.oversight/turn-passes 0
-                      :seon.turn.work/episode-runs 0}]}}))))
+                      :seon.turn.work/episode-runs 0}]
+                    :seon.oversight/plumbing []}}))))
         (testing "the seeded block reaches the real root-page wire"
           (let [^HttpResponse response (fetch-root instance)
                 body (.body response)]
@@ -202,27 +210,89 @@
             (is (str/includes? body "data-fleet-oversight=\"agents\""))
             (is (str/includes? body "<td>root</td>"))
             (is (true? (str/includes? body "data-agent=\"root\" data-state=\""))
-                "the HTTP render is a later observation, not the earlier unit's state")))))))
+                "the HTTP render is a later observation, not the earlier unit's state")))
+        (testing "the render proc's SSE package after a database wake carries the fleet"
+          (let [view (:seon.render.web/view instance)
+                registration (:seon.render.web/registration view)
+                tap (async/chan (async/sliding-buffer 1))
+                connection (:seon.boot/cluster-connection instance)]
+            (#'web/register-tab! registration "root")
+            (async/tap (:seon.render.web/pages-mult view) tap)
+            (try
+              (async/offer! (:seon.render.web/render-channel view)
+                            {:seon.render.web/join true})
+              (support/await-event! tap "the joined tab's first root package"
+                                    #(contains? % "root"))
+              (let [saved (note/add! "oversight-wake" "The fleet repaints."
+                                     connection "root")
+                    wake-basis (db/basis-t @connection)
+                    packages
+                    (support/await-event!
+                     tap "a root package at or after the note's wake"
+                     #(some-> (get % "root")
+                              :seon.render.package/basis-transaction
+                              (>= wake-basis)))
+                    keyframe (String. ^bytes (:seon.render.package/keyframe-bytes
+                                              (get packages "root"))
+                                      "UTF-8")]
+                (is (= "oversight-wake" (:my.note/id saved)))
+                (is (str/includes? keyframe "surface-fleet-oversight"))
+                (is (str/includes? keyframe "data-fleet-oversight=\"agents\""))
+                (is (str/includes? keyframe "<td>root</td>"))
+                (is (not (str/includes? keyframe "data-fleet-oversight=\"unavailable\""))))
+              (finally
+                (async/untap (:seon.render.web/pages-mult view) tap)
+                (async/close! tap)
+                (#'web/deregister-tab! registration "root")))))))))
 
-(deftest the-handed-routing-is-the-only-oversight-owner
+(defn- probe-graph
+  "Start one real Flow graph with one idle proc; the caller stops it."
+  []
+  (::seon.flow/graph
+   (seon.flow/start-graph!
+    {::seon.flow/graph-definition
+     {:procs {:probe/idle
+              {:proc (flow/process
+                      (flow/map->step
+                       {:describe (fn [] {:ins {:in "wake"}})
+                        :transform (fn [state _ _] [state nil])}))}}}})))
+
+(deftest oversight-reads-the-handed-routing-and-names-what-it-lacks
   (support/with-database
     (fn [connection]
-      (let [source {:seon.db/db @connection}
-            routing (atom {:seon.agent/armed {}
-                           :seon.flow/graph ::graph})]
-        (is (nil? (ns-resolve 'seon.oversight 'owning-instance))
-            "the call-time instance search no longer exists")
-        (is (nil? (oversight/unit source))
-            "a detached value does not acquire an ambient owner")
-        (is (nil? (oversight/unit
-                   (assoc source :seon.agent/routing (atom {}))))
-            "a routing entry without its joined graph has no live story")
-        (with-redefs-fn
-          {#'seon.oversight/fleet-value
-           (fn [database handed graph]
-             {:database database :routing handed :graph graph})}
-          (fn []
-            (is (= {:database @connection :routing routing :graph ::graph}
-                   (:seon.render/value
-                    (oversight/unit
-                     (assoc source :seon.agent/routing routing)))))))))))
+      (let [db @connection
+            graph (probe-graph)]
+        (try
+          (testing "a detached request has no live story"
+            (is (nil? (oversight/unit {:seon.db/db db}))))
+          (testing "the handed routing and its joined graph are the fleet"
+            (let [routing (agent/routing)
+                  _ (swap! routing assoc :seon.flow/graph graph)
+                  built (oversight/unit {:seon.db/db db
+                                         :seon.agent/routing routing})
+                  value (:seon.render/value built)]
+              (is (= [] (:seon.oversight/agents value))
+                  "a present empty armed map is an empty fleet")
+              (is (= [{:seon.oversight/proc :probe/idle
+                       :seon.oversight/ping :reply}]
+                     (mapv #(select-keys % [:seon.oversight/proc
+                                            :seon.oversight/ping])
+                           (:seon.oversight/plumbing value))))
+              (is (= "No agent graphs are armed." (oversight/ai-story built)))))
+          (testing "routing that cannot answer is unavailable, visibly"
+            (doseq [[state missing]
+                    [[{:seon.agent/armed {}} [:seon.flow/graph]]
+                     [{:seon.flow/graph graph} [:seon.agent/armed]]
+                     [{} [:seon.agent/armed :seon.flow/graph]]]]
+              (let [built (oversight/unit {:seon.db/db db
+                                           :seon.agent/routing (atom state)})
+                    html (hiccup/->string (oversight/html-table built))]
+                (is (= {:seon.oversight/missing missing}
+                       (:seon.render/value built)))
+                (is (str/starts-with? (oversight/ai-story built)
+                                      "Live fleet state is unavailable"))
+                (is (str/includes? html "data-fleet-oversight=\"unavailable\""))
+                (is (not (str/includes? html "data-fleet-oversight=\"agents\""))
+                    "missing state never renders as an empty fleet"))))
+          (finally
+            (flow/stop graph)))))))
