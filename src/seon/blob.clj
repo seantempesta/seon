@@ -44,14 +44,17 @@
   "Serialize a value exactly when EDN preserves value, class, and metadata."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The EDN round-trip probe accepts arbitrary Clojure values and reports unsupported objects by absence of faithful text.", :gen/elements [nil false 0 "" :k [] {}]}]] [:maybe :string]]}
   [value]
-  (try
-    (let [serialized (binding [*print-meta* true] (pr-str value))
-          restored (edn/read-string serialized)]
-      (when (and (= value restored)
-                 (= (class value) (class restored))
-                 (= (meta value) (meta restored)))
-        serialized))
-    (catch Throwable _ nil)))
+  (let [serialized (binding [*print-meta* true] (pr-str value))
+        ;; A printed form EDN cannot read back is not faithful: clojure.edn
+        ;; declares "not readable" as a RuntimeException (EdnReader.java:130,
+        ;; :174-177). Printing failures and everything else propagate.
+        [restored readable?] (try [(edn/read-string serialized) true]
+                                  (catch RuntimeException _ [nil false]))]
+    (when (and readable?
+               (= value restored)
+               (= (class value) (class restored))
+               (= (meta value) (meta restored)))
+      serialized)))
 
 (defn store-faithful?
   "True exactly when the real EDN round trip preserves all fidelity axes."

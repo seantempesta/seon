@@ -35,7 +35,9 @@
                   :seon.render.data/cursor]}
   [path offset]
   {:seon.render.data/path
-   (let [parsed (try (edn/read-string (or path "")) (catch Throwable _ nil))]
+   ;; Only clojure.edn's declared "not readable" RuntimeException
+   ;; (EdnReader.java:130, :174-177) is the unreadable root; the rest propagates.
+   (let [parsed (try (edn/read-string (or path "")) (catch RuntimeException _ nil))]
      (if (vector? parsed) parsed []))
    :seon.render.data/offset
    (max 0 (or (when offset (parse-long offset)) 0))})

@@ -327,8 +327,8 @@
   [text]
   (try
     (coll? (edn/read-string {:default (fn [_tag value] value)} text))
-    (catch Exception _ false)
-    (catch StackOverflowError _ false)))
+    ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
+    (catch RuntimeException _ false)))
 
 (defn- finding
   [defect path detail]

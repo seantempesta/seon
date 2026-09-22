@@ -179,7 +179,8 @@
                (not (str/ends-with? token ".md")))
       (try
         (let [value (edn/read-string token)] (when (qualified-symbol? value) value))
-        (catch Exception _ nil)))))
+        ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
+        (catch RuntimeException _ nil)))))
 
 (defn- citation-attributes
   "Issue attributes by the identity attribute each declares that it collects.

@@ -766,7 +766,8 @@
     (boolean
      (some #{called}
            (tree-seq coll? seq (edn/read-string source))))
-    (catch Throwable _
+    ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
+    (catch RuntimeException _
       false)))
 
 (defn- contains-history-query?
@@ -775,7 +776,8 @@
     (let [elements (set (tree-seq coll? seq (edn/read-string source)))]
       (and (contains? elements :seon.cluster.eval/run)
            (contains? elements :seon.cluster.eval/run)))
-    (catch Throwable _
+    ;; clojure.edn declares "not readable EDN" as a RuntimeException (EdnReader.java:130, :174-177); every other failure propagates.
+    (catch RuntimeException _
       false)))
 
 (defn- root-read-agent-history?

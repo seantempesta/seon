@@ -74,7 +74,10 @@
        (try
          (= value (#?(:clj edn/read-string :cljs reader/read-string)
                    (pr-str value)))
-         (catch #?(:clj Throwable :cljs :default) _ false))))
+         ;; The reader's declared "not readable" failure only: clojure.edn's
+         ;; RuntimeException (EdnReader.java:130, :174-177); cljs.reader's
+         ;; ex-info. Everything else propagates.
+         (catch #?(:clj RuntimeException :cljs ExceptionInfo) _ false))))
 
 #?(:clj
    (defn overrides
