@@ -25,9 +25,25 @@
 (set! *warn-on-reflection* true)
 
 (deftest a-dead-procs-missing-ping-is-unknown-never-healthy
-  (is (= {:seon.oversight/proc :dead
+  (is (= {:seon.oversight/proc :probe/dead
           :seon.oversight/ping :unknown}
-         (oversight/proc-ping :dead nil))))
+         (oversight/proc-ping :probe/dead nil))))
+
+(deftest a-reply-without-flows-pass-count-is-refused-at-entry
+  ;; Armed contracts: a reply is Flow's declared ping shape or no reply at all.
+  (is (thrown? clojure.lang.ExceptionInfo
+               (oversight/proc-ping :probe/p {})))
+  (is (= {:seon.oversight/proc :probe/p
+          :seon.oversight/ping :reply
+          :seon.oversight/passes 3
+          :seon.oversight/buffers [{:seon.oversight/count 0
+                                    :seon.oversight/capacity 1
+                                    :seon.oversight/port :probe/in}]}
+         (oversight/proc-ping :probe/p
+                              {:clojure.core.async.flow/count 3
+                               :clojure.core.async.flow/ins
+                               {:probe/in {:buffer {:count 0 :capacity 1}}
+                                :probe/unbuffered {}}}))))
 
 (deftest a-sliding-wake-reports-every-overwritten-signal
   (let [channel (agent/wake-channel)]
@@ -56,12 +72,12 @@
                           :seon.turn.work/episode-runs 0}
                          observations)]
                  :seon.oversight/plumbing
-                 [(oversight/proc-ping :delayed nil)]}}
+                 [(oversight/proc-ping :probe/delayed nil)]}}
           ai (oversight/ai-story unit)
           html (hiccup/->string (oversight/html-table unit))]
       (is (str/starts-with? ai (str "observed: " expected)))
       (is (str/includes? html (str "data-state=\"" expected "\"")))
-      (is (str/includes? html ":delayed unknown"))
+      (is (str/includes? html ":probe/delayed unknown"))
       (is (not (str/includes? html "mid-pass"))))))
 
 (defn- await-fact

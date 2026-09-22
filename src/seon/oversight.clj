@@ -65,7 +65,8 @@
 
 (defn- occupancy
   "The count and capacity from one datafied Flow channel, or nil."
-  {:malli/schema [:=> [:cat [:maybe :map]] [:maybe :seon.oversight/occupancy]]}
+  {:malli/schema [:=> [:cat [:maybe :seon.oversight/flow-channel]]
+                  [:maybe :seon.oversight/occupancy]]}
   [channel]
   (when-let [buffer (:buffer channel)]
     (cond-> {:seon.oversight/count (:count buffer)
@@ -78,7 +79,8 @@
 
   A missing reply is explicitly unknown; presence in the graph never implies
   health."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow permits arbitrary process identifiers; this projection preserves the supplied identifier, including for a missing reply.", :gen/elements [nil false 0 "" :k [] {}]}] [:maybe :map]] :map]}
+  {:malli/schema [:=> [:cat :seon.oversight/proc [:maybe :seon.oversight/flow-reply]]
+                  :seon.oversight/proc-observation]}
   [proc-id reply]
   (if reply
     {:seon.oversight/proc proc-id

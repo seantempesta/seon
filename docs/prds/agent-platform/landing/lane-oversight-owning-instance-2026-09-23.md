@@ -258,3 +258,73 @@ HEAD `8a43e596a` loads in a fresh JVM from a `git archive` copy:
 `:loaded 17 true`, meaning 17 contracted Vars and the resource present on the
 classpath. Wall time 17.5 s, all of it JVM start and load (see the test-JVM
 note). RESET NEEDED: no.
+
+## Second review (`docs/research/agent-platform/review-validator-deletion-oversight-2026-09-23.md` §C and the catch audit)
+
+1. **Complete contracts.** `proc-ping` is now
+   `[:=> [:cat :seon.oversight/proc [:maybe :seon.oversight/flow-reply]] :seon.oversight/proc-observation]`,
+   and `occupancy` takes `[:maybe :seon.oversight/flow-channel]`. The new
+   declarations are the consumed dependency shapes: `:flow-reply` (Flow's pong,
+   `flow/impl.clj:272-278`), `:flow-ports`, `:flow-channel`
+   (`impl/channels.clj:310-318`) and `:flow-buffer` (`impl/buffers.clj:111-114`,
+   plus Seon's `:dropped`). The review's `(proc-ping :probe/p {})` case now fails
+   `:flow-reply` at entry. A missing reply stays explicitly `:unknown`.
+2. **No `:any`.** `:seon.oversight/proc` is `:qualified-keyword`, and
+   `proc-ping` reuses it; its inline `:any` is gone. Every Seon graph producer
+   names procs with qualified keywords: `seon.cluster/cluster-graph-definition`,
+   the blueprint in `seon.cluster.agent`, and the work-launcher and fault graphs
+   in `seon.flow`. **Out of scope, not fixed:** the producer-side declaration.
+   `seon.flow/start-graph!` still takes `[::graph-definition :map]`, so the pid
+   grammar is declared at the reader, not at the producer. That file is outside
+   this lane's paths.
+3. **No swallowed errors in `render/web.clj`.** Each site the review named:
+   - `:167` `read-query-value`, `query-entity` and `route-namespace` now share
+     `read-browser-edn` (tools.reader EDN). Only its declared
+     `:type :reader-exception` counts as unreadable input; every other failure
+     propagates. `route-namespace` no longer uses `clojure.core/read-string`.
+   - `:2932` `same-origin?` catches only `java.net.URISyntaxException` (a
+     malformed Origin header, which is refused).
+   - `:734` `turn-function-result` no longer catches. A function is
+     unavailable only when its own namespace has no `.clj`, `.cljc` or
+     `__init.class` resource. A namespace that exists but fails to load
+     propagates.
+   - `:3413` `data-response` still shows the declared `value-unreadable-error`
+     page, but the complete throwable, cause included, now goes to the
+     cluster's fault channel as an `ex-info` wrapper. The fault committer is the
+     existing normalizer. Without a fault channel the failure is rethrown.
+   - All five helpers have contracts.
+
+### Proof
+
+Probe `tmp/oversight-owning-instance/probe3.clj` (`clojure -M:test`, working
+tree): the packaged projection is built with the 17 oversight contracts plus
+the 4 new web contracts, and the helpers are called directly.
+
+```clojure
+{:build-ms 677.8, :contracts 17, :web-contracts 4,
+ :oversight-any-in-forms 0, :any-in-contracts 0,
+ :empty-reply-valid? false, :reply-valid? true, :unqualified-pid-valid? false,
+ :observation #:seon.oversight{:proc :probe/p, :ping :reply, :passes 3,
+                               :buffers [#:seon.oversight{:count 0, :capacity 1, :port :probe/in}]},
+ :observation-valid? true,
+ :read-edn {:malformed [:value nil], :eval-form [:value nil], :good [:value [:seon.agent/id "root"]]},
+ :route {:good seon.oversight, :bad nil}, :entity [:seon.agent/id "root"],
+ :unavailable-fn no.such.ns/f, :same-origin-bad false, :same-origin-good true}
+```
+
+Two EDN failure types were checked in a bare JVM: `clojure.edn/read-string`
+throws a plain `RuntimeException`, while tools.reader throws `ExceptionInfo`
+with `:type :reader-exception`. The narrow catch relies on that tag.
+
+The test file gains `a-reply-without-flows-pass-count-is-refused-at-entry`, and
+its test pids are qualified (`:probe/dead`, `:probe/delayed`). **Tests not
+run.** The fixture blocker stated above still stands.
+
+### Timings (second review, over 1 s)
+
+| operation | wall | phases |
+| --- | --- | --- |
+| probe3 JVM, final run | 17.3 s | projection build 678 ms; direct calls well under 1 s; the rest is JVM start and load |
+| probe3 JVM, two failed runs (probe errors: `:simple-symbol` is no Malli type; a traversal bug) | 23.0 s, 18.8 s | JVM start and load before the failure |
+| tools.reader failure-type probe (bare `clojure -M`) | 1.7 s | JVM start |
+| HEAD load check | recorded below | |

@@ -44,7 +44,7 @@
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.data.json :as json]
-            [clojure.edn :as edn]
+            [clojure.tools.reader.edn :as reader.edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
@@ -158,13 +158,24 @@
                      (URLDecoder/decode (or setting "") "UTF-8")]))))
         (str/split (or (:query-string request) "") #"&")))
 
-(defn- read-query-value
+(defn- read-browser-edn
+  "Read one browser-supplied EDN string, or nil when it is not readable EDN.
+  Only tools.reader's declared `:reader-exception` (malformed browser input)
+  is absence; every other failure propagates with its complete cause."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
   [setting]
   (try
-    (when-not (str/blank? setting)
-      (binding [*read-eval* false]
-        (edn/read-string setting)))
-    (catch Throwable _ nil)))
+    (reader.edn/read-string setting)
+    (catch clojure.lang.ExceptionInfo failure
+      (if (= :reader-exception (:type (ex-data failure)))
+        nil
+        (throw failure)))))
+
+(defn- read-query-value
+  {:malli/schema [:=> [:cat [:maybe :string]] :seon.schema/value]}
+  [setting]
+  (when-not (str/blank? setting)
+    (read-browser-edn setting)))
 
 (defn- positive-query-long
   [setting fallback maximum]
@@ -730,8 +741,14 @@
   {:malli/schema [:=> [:cat :qualified-symbol [:sequential :seon.schema/value]] [:or :seon.schema/value :seon.render.web/function-unavailable-error :seon.turn/error :seon.db/error-result]]}
 
   [function arguments]
-  (let [resolved (try (requiring-resolve function)
-                      (catch java.io.FileNotFoundException _ nil))]
+  ;; Unavailable means the function's own namespace has no source on the
+  ;; classpath; a namespace that exists but fails to load propagates.
+  (let [owner (namespace function)
+        root (str/replace (str/replace owner "-" "_") "." "/")
+        resolved (when (or (find-ns (symbol owner))
+                           (some #(io/resource (str root %))
+                                 [".clj" ".cljc" "__init.class"]))
+                   (requiring-resolve function))]
     (if resolved
       (apply resolved arguments)
       (let [observation
@@ -2929,7 +2946,9 @@
                   (or (and request-host (= origin-authority request-host))
                  (and (nil? request-host)
                       (contains? loopback-hosts origin-host)))))
-           (catch Throwable _
+           ;; A malformed Origin header is a cross-origin refusal; any other
+           ;; failure propagates.
+           (catch java.net.URISyntaxException _
              false))))))
 
 (defn- decode-form
@@ -3005,16 +3024,15 @@
        :body (:seon.error/message decision)})))
 
 (defn- query-entity
+  {:malli/schema [:=> [:cat [:maybe :string]] :seon.schema/value]}
   [encoded]
-  (try
-    (let [value (some-> encoded edn/read-string)]
-      (when (or (int? value)
-                (keyword? value)
-                (and (vector? value)
-                     (= 2 (count value))
-                     (qualified-keyword? (first value))))
-        value))
-    (catch Throwable _ nil)))
+  (let [value (some-> encoded read-browser-edn)]
+    (when (or (int? value)
+              (keyword? value)
+              (and (vector? value)
+                   (= 2 (count value))
+                   (qualified-keyword? (first value))))
+      value)))
 
 (defn- not-found
   [_request]
@@ -3024,14 +3042,12 @@
 
 (defn- route-namespace
   "Read one route segment as a round-tripping simple Clojure symbol."
+  {:malli/schema [:=> [:cat :string] [:maybe :seon.ns/name]]}
   [segment]
-  (try
-    (binding [*read-eval* false]
-      (let [value (read-string segment)]
-        (when (and (simple-symbol? value)
-                   (= segment (str value)))
-          value)))
-    (catch Throwable _ nil)))
+  (let [value (read-browser-edn segment)]
+    (when (and (simple-symbol? value)
+               (= segment (str value)))
+      value)))
 
 (defn- namespace-exists?
   [db namespace-name]
@@ -3411,6 +3427,19 @@
                      :seon.error/expected "a stored value at the requested digest"}]
                 observation))
             (catch Throwable failure
+              ;; The complete throwable goes to the cluster's fault
+              ;; committer, the one normalizer of cause chains; the page
+              ;; shows the declared unreadable-value error.
+              (if-let [fault-channel (:seon.render.web/fault-channel service)]
+                (async/offer!
+                 fault-channel
+                 {:clojure.core.async.flow/pid :seon.render.web/data
+                  :seon.agent/id id
+                  :clojure.core.async.flow/ex
+                  (ex-info "A stored value could not be read."
+                           {:seon.blob/digest value-digest}
+                           failure)})
+                (throw failure))
               (let [observation
                     {:seon.error/at (java.util.Date.)
                      :seon.error/layer :seon.render.web/render

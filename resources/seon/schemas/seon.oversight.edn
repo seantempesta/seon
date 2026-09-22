@@ -13,9 +13,24 @@
                   {:description "One oversight render source. Supplying routing asks for live state; omitting it is a detached render of facts with no live graph."}
                   [:seon.db/db :seon.db/database-value]
                   [:seon.agent/routing {:optional true} :seon.agent/routing]],
-                 :proc [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                              :seon.schema.admission/reason "core.async.flow permits arbitrary process identifiers; oversight preserves the supplied identifier."
-                              :gen/elements [:seon.agent/turn :seon.render.web/render]}],
+                 :proc [:qualified-keyword {:description "A Flow proc id. core.async.flow admits any value; every Seon graph producer (seon.cluster/cluster-graph-definition, seon.cluster.agent's blueprint, seon.flow's work-launcher and fault graphs) names its procs with qualified keywords, and this is the grammar oversight reads."}],
+                 :flow-buffer
+                 [:map
+                  {:description "clojure.core.async.impl.buffers/datafy-buffer (buffers.clj:111-114), plus :dropped from Seon's counted sliding buffer."}
+                  [:count [:int {:min 0}]]
+                  [:capacity [:int {:min 0}]]
+                  [:dropped {:optional true} [:int {:min 0}]]],
+                 :flow-channel
+                 [:map
+                  {:description "A datafied core.async channel (impl/channels.clj:310-318); :buffer is absent for an unbuffered channel."}
+                  [:buffer {:optional true} :seon.oversight/flow-buffer]],
+                 :flow-ports [:map-of :keyword :seon.oversight/flow-channel],
+                 :flow-reply
+                 [:map
+                  {:description "One proc's Flow ping reply (flow/impl.clj:272-278): the pass count and its datafied in- and out-ports. Absent when the proc did not answer within the window."}
+                  [:clojure.core.async.flow/count [:int {:min 0}]]
+                  [:clojure.core.async.flow/ins :seon.oversight/flow-ports]
+                  [:clojure.core.async.flow/outs {:optional true} :seon.oversight/flow-ports]],
                  :ping [:enum :reply :unknown],
                  :passes :int,
                  :count [:int {:min 0}],
