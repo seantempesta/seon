@@ -21,3 +21,7 @@ JVM start from namespace compilation.
 Every lane pays this per verification run. Wanted: a phase breakdown per run
 (JVM start, require, projection, arming, tests), then the deletion that makes
 a focused run seconds; a warm JVM (the REPL) is the obvious candidate.
+
+Sighting 2026-09-22 (same lane, follow-up): three namespaces including five
+`with-store` publication tests took 38.9 s of test time inside a 66.9 s run;
+each `with-store` copies the canonical store into a fresh physical store.

@@ -166,3 +166,79 @@ Snapshot directories deleted the same way. Retained: `tmp/publication-lock-evide
 (Codex lane evidence) and `tmp/publication-lock-lane/` logs and scripts.
 
 RESET NEEDED: no.
+
+## Review follow-up — commit `874918765`, datahike fork `fbd1ad2d`
+
+Review: `docs/research/agent-platform/review-publication-lock-deletion-2026-09-23.md`.
+Every finding was checked against source before editing; none was falsified.
+
+| finding | verified at | disposition |
+|---|---|---|
+| P1-1 analysis loses its expected head | `full-source-refresh!` omitted `:seon.source/expected-commit-id`; `publish!` defaulted to a reread head | **fixed**: the captured commit is passed; `publish!` refuses a moved head before scratch work with `publication-error` (Datahike's `:stale-branch-head` shape). Initial creation (no publication captured) passes no expectation, as before |
+| P1-3 success returns another writer's commit | `publish!` reread `registry/branch-commit-id` after `force-branch!` | **fixed at the dependency**: fork `fbd1ad2d` makes `force-branch!` return the commit it installed and verified under the roster permit (`versioning.cljc` readback, spec `:ret :uuid`, fork regression asserts it equals the branch head). `publish!` returns that commit; initial creation returns the scratch commit `registry/branch!` installed |
+| P1-4 operator init narrows the refusal | `boot.clj` `select-keys` on the result | **fixed**: refusal returned whole; `seon.operator.edn` `:response` names `:seon.source/publication-error` |
+| P1-2 adoption not serialized/guarded | confirmed | **partly fixed** (see below) |
+| P2 publication-base! consistency | confirmed | **fixed**: export, manifest and provenance name the refresh's own commit; after `export/export!` the head is compared and a move refuses by name. The export still copies the live store (no commit-scoped export exists) — a moved head is detected, not prevented |
+| P2 regression cannot prove the contest | confirmed | **fixed for publication**: new `both-admitted-publications-contest-the-guarded-update-and-return-their-own-head` holds both publishers at `publication branch head` after scratch work, releases them together: exactly one winner returning the installed head, one typed loser. Adoption contest not covered (no development instance in the fixture) |
+| P2 recorder obscures refusal / missing contracts | confirmed | **fixed**: `record-snapshot!` keeps the stale-head refusal (with `:seon.source/refused-test-run`); `full-source-refresh!` and `commit-persistent-results!` declare input and output |
+
+P1-2 now: development adoption refuses before its first write when
+`current-src` no longer names the published commit, and its record transaction
+carries `adoption-guard-tx`, which in the writer requires the cluster's adopted
+commit to be the one it started from and `current-src` to still name the
+adopted commit. This closes the reviewer's exact schedule (A publishes and
+pauses; B publishes and adopts; A resumes — A refuses at admission, or at its
+record). **Remaining gap:** two adoptions admitted at the same head can still
+interleave their row writes (`declaration-changes`, `seon.fn/index!`,
+`seon.issue/adopt!`) and JVM reloads; the loser's record refuses, but a stale
+row written after the winner's is not undone. Three options for the
+coordinator:
+
+1. Guard every adoption transaction with the same writer-side head check
+   (recommended): thread `adoption-guard-tx` as leading tx data into
+   `index!` (a declared optional index-request member), `declaration-changes`
+   and `issue/adopt!`. Guarantee: no stale adoption write commits after a newer
+   publication; the transactor orders the rest. Cost: one declared member in
+   `seon.fn` index-request, edits to `fn.clj` and `issue.clj` (currently held by
+   other lanes), ~1 h. Gives up: nothing for rows; JVM reload order stays
+   last-writer (both reload current files).
+2. Adopt only at the evaluation boundary through one per-cluster admission
+   (the plan's target: loaded namespaces advance between evaluations). Guarantee:
+   one adoption at a time by construction. Cost: design across the flow/turn
+   owners; hours. Gives up: immediate hook-time adoption.
+3. Accept the residual and repair on the next request: after a refused record,
+   the next adoption computes its delta from the recorded commit. Guarantee:
+   none for identities the stale write clobbered that the next delta omits.
+   Cost: nothing. Gives up: correctness under concurrent editors.
+
+Verification (`git archive` of HEAD `9d029820d` plus exactly this commit's
+hunks, fork at `fbd1ad2d`, base from `cluster/publication-base!`, armed
+contracts, disposable `run-tests.clj`): `seon.cluster.publication-lock-test`
+(5 tests incl. the three new), `seon.cluster.publication-report-test`,
+`seon.cluster.source-test` — 11 tests, 49 pass, 2 fail, 1 error; the three reds
+are the pre-existing `source-test` pair filed in
+`fixture-namespace-rows-lack-the-required-definition-digest.md`. Fork
+regression `datahike.test.versioning-test/guarded-force-rejects-a-stale-head`
+green (8.9 s JVM). The staged `cluster.clj`/`boot.clj` differ from the tested
+snapshot only by other lanes' hunks committed to HEAD meanwhile (`04ceaf4ad`
+and predecessors); this lane's hunks are byte-identical.
+
+Measurement clock: `docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`
+cannot run under the current rules: it creates a `git worktree` and pays a
+from-zero `bin/seon start` on a fresh root before any adoption clock, both
+ruled out (no worktrees; no scratch boot, owner 2026-09-23). No clock row is
+claimed. The script needs a mode that clocks publication and adoption against
+an already-held root.
+
+**Default needs a JVM restart** for the datahike gitlink bump (`41c79c1a` →
+`fbd1ad2d`); the running default loaded the old `force-branch!` (returns nil),
+and `publish!` in new source would read nil as its commit. RESET NEEDED: a
+default JVM restart after this commit is adopted (orchestrator).
+
+### Follow-up timings
+
+| operation | wall | note |
+|---|---|---|
+| fork versioning test JVM | 8.9 s | |
+| `publication-base!` over empty root (snapshot) | 93.3 s | full index — defect, from-zero-boot issue row |
+| armed focused run, 3 namespaces | 66.9 s | tests 38.9 s (three `with-store` publication tests each copy the canonical store) — defect, extends `a-focused-test-jvm-spends-twenty-seconds-before-its-first-test.md` |
