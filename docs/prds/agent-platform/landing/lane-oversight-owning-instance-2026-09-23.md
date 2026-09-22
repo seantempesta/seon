@@ -116,17 +116,21 @@ RESET NEEDED: no.
 | `bin/test-fast` focused run `6af40bd8eacf` | 49.8 s | snapshot 4 s; JVM + load until projection about 35 s; contracts armed 4.1 s; five tests 2.4 s |
 | `bin/test-fast` runs `1909e03da02a`, `34fd8e2534c2` | about 50 s each | snapshot 4-5 s; tests 2.4 s |
 | probe JVM `clojure -M:test tmp/oversight-owning-instance/probe.clj` | 20.9 s | probe body 13 ms; everything else is JVM start and namespace load |
-| HEAD load check (git-archive snapshot) | see commit report | |
+| HEAD `da2086452` load check: git-archive snapshot, `clojure -M -e "(require 'seon.oversight 'seon.render.web 'seon.cluster 'seon.cluster.agent)"` | 19.2 s | load only; printed `:loaded nil` (the search Var does not resolve) |
 
 Everything over 10 s here is loading before work starts. Filed as
 `docs/seon/issues/a-focused-test-jvm-spends-thirty-seconds-before-its-first-test.md`.
 Live read-only probe on `default`: 3 ms.
+
+## Commits
+
+- `da2086452` — the change, tests, this note, two issue notes.
 
 ## Verification boundary
 
 - Proved: the search is gone; the join places the graph before resume; `unit`
   builds the fleet value from the handed routing and omits it otherwise;
   `seon.cluster`, `seon.render.web`, `seon.oversight` load (probe JVM, working tree)
-  and HEAD loads after the commit (git-archive snapshot of HEAD, see commit report).
+  and HEAD `da2086452` loads (git-archive snapshot, fresh JVM).
 - Not proved: the booted fleet test and the HTTP/SSE paint on a real cluster
   (blocked by the stale base above); browser paint was not observed.
