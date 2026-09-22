@@ -353,3 +353,14 @@ projection + ambient transport deletion (astra low), 1.4b shape family (sol low)
 hook + `seon.search` (sol low). Gate policy from here: `bin/test --platform` at step
 landings; the bulk tier once at the end of cut 1. The loop prompt was rewritten to
 say exactly this.
+
+## 2026-09-22 08:50 local — ruling for 1.1: the constructor's Throwable input is `:seon.error/throwable`
+
+`constructor-slice` probed that `:seon.error/cause` is declared `:seon.db/ref` (the
+error-chain ref), so a Throwable under that key makes the promised `:seon.error/base`
+output invalid. Resolved with names the schema already declares, not a new decision:
+the constructor input is `[:seon.error/throwable {:optional true} :seon.error/throwable]`;
+the Throwable is consumed into `:seon.error/frame` and `:seon.error/exception-class`
+and never carried in the returned base (B3 §2a's store row lists frame/exception-class,
+never the object); `:seon.error/cause` stays the stored ref. lane-b3 §2a is corrected
+by the lane in the constructor commit.
