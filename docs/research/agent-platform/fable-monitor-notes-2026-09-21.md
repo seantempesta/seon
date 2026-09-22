@@ -401,3 +401,8 @@ cannot be hosted in a fork, so cut 1 isolates by file ownership and snapshots.
 Platform tier after 1.1: 83 executed, 3 failures in one test (`env_test.clj:349,367,380`
 expects the retired nested `:seon.error/data` path) — `constructor-slice` resumed to
 fix the expectation or hand a wrapper defect to the error-schema lane by name.
+- Correction 11:10: A2's c1 is read-evidence currency (turn context; edits `turn.clj`) and
+  c2 is the codec behind the §6.2 comparator proof; neither is the adoption cost. Track
+  1.3c is A2's storage retention (c10 GC sweep, c12 keep-history key, the epoch-cutoff
+  retention decision, `:db/noHistory` on churn attributes), then §6.2 → f1 → c2 for 1.4.
+  README §4 row corrected. The 1.2 digest lane is launched (sol low).
