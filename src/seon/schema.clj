@@ -2785,8 +2785,10 @@
     :seon.error/member :seon.schema/database-value
     :seon.error/data {:seon.schema/database-value db}})
 
-(defn- derive-projection-from-database
-  [db reusable-projection]
+(defn load-projection
+  "Derive the complete projection from this database value's declaration rows."
+  {:malli/schema [:=> [:catn [:seon.schema/database-value :map]] ::projection]}
+  [db]
   (when-not (db-utils/db? db)
     (let [refusal (refuse-projection-source db)]
       (throw (ex-info (:seon.error/message refusal) refusal))))
@@ -2799,31 +2801,23 @@
     :seon.schema/function-source-rows
     (projection-rows db :seon.fn/sym :seon.fn/source false)
     :seon.schema/artifact-exports #{}
-    :seon.schema/pure-predicate-symbols #{}}
-   reusable-projection))
+    :seon.schema/pure-predicate-symbols #{}}))
+
+(defonce ^:private database-projection
+  (delay (requiring-resolve 'seon.db/carried-projection)))
 
 (defn projection-from-database
-  "Build the immutable program projection at exactly `db`.
+  "Read the projection derived from this database value, memoized when committed.
 
-   The caller owns the resulting projection and passes it to later operations.
-   A matching full fingerprint reuses the supplied projection. A supplied
-   declaration projection can retain compiled roots when its forms and
-   predicate bindings exactly match the stored declarations. No process-global
-   holder retains a cluster's projection."
+  The second arity remains for existing constructors; its formerly reusable
+  projection cannot override the supplied database's declaration rows."
   {:malli/schema
    [:function
     [:=> [:catn [:seon.schema/database-value :map]] ::projection]
     [:=> [:catn [:seon.schema/database-value :map]
-                 [::projection ::projection]]
-     ::projection]]}
-  ([db]
-   (derive-projection-from-database db {}))
-  ([db reusable-projection]
-   ;; The reusable value may carry process-local predicate functions which are
-   ;; deliberately absent from its pure fingerprint. It therefore remains an
-   ;; explicit caller-owned optimization rather than entering the database-only
-   ;; cache.
-   (derive-projection-from-database db reusable-projection)))
+                 [::projection ::projection]] ::projection]]}
+  ([db] (@database-projection db))
+  ([db _reusable-projection] (@database-projection db)))
 
 (defn projection-with-schema
   "Validate the projection produced by exactly one schema replacement."

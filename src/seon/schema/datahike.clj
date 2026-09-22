@@ -406,7 +406,7 @@
   [db projection f & args]
   (encode-transaction-data-in
    projection
-   (apply f (vary-meta db assoc :seon.schema/projection projection) args)))
+   (apply f db args)))
 
 (defn- explicit-value-members
   "Avoid Datahike treating two keyword members as one identity lookup ref."

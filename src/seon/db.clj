@@ -3,7 +3,8 @@
   an explicit immutable database value or connection, or, when custody is
   elided, the current connection of the calling agent's cluster (`*conn*`,
   bound per evaluation). Failures return flat `:seon.error` values."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.cache.wrapped :as cache]
+            [clojure.edn :as edn]
             [clojure.set :as set]
             [clojure.string :as str]
             [clojure.walk :as walk]
@@ -1209,12 +1210,73 @@
     :seon.schema/expected-value :seon.schema/projection
     :seon.schema/refused-value {:seon.db/operation operation}})
 
-(defn carried-projection
-  "The schema origin's immutable carried projection, or nil when absent."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value] [:maybe :seon.schema/projection]]}
+(def projection-cache-policy
+  "Bound retained compiled projections independently of the number of commits."
+  {::projection-cache-size 8
+   ::projection-cache-reason
+   "Retain eight recent declaration populations for active branches and retained reports; older populations derive again without retaining an unbounded compiled program population."})
+
+;; The same core.cache wrapped LRU used by datahike.schema-cache:8.
+(defonce ^:private projection-cache
+  (cache/lru-cache-factory {} :threshold (::projection-cache-size projection-cache-policy)))
+
+(def ^:private projection-attributes
+  "The attributes `schema/load-projection` reads from a database value."
+  [:seon.schema/key :seon.schema/form :seon.schema.admission/source
+   :seon.fn/sym :seon.fn/spec :seon.fn/source])
+
+(defn- projection-cache-key
+  "The part of Datahike's cache-context a projection derivation depends on.
+
+  `datahike.query/advance-query-cache-context` (query.cljc:2568) advances one
+  attribute revision per changed attribute and the conservative revision on
+  schema or unknown change; `source-context-unchanged?` (query.cljc:2963)
+  compares exactly these members. A commit touching no declaration attribute
+  therefore keys the same population."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
-  (:seon.schema/projection (meta (schema-database database))))
+  (let [context (:cache-context database)]
+    (assoc (select-keys context [:datahike.cache/connection-id
+                                 :datahike.cache/generation
+                                 :datahike.cache/conservative-revision])
+           :datahike.cache/attribute-revisions
+           (select-keys (:datahike.cache/attribute-revisions context)
+                        projection-attributes))))
+
+(defn- declares-program?
+  "True when this value holds declaration rows its projection can derive from."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :boolean]}
+  [database]
+  (boolean (and (get (:schema database) :seon.schema/key)
+                (first (d/datoms database :avet :seon.schema/key)))))
+
+(defn carried-projection
+  "Derive this database value's projection, memoizing attached committed values.
+
+  A temporal view reads its origin's declarations, as its installed schema
+  does. Datahike clears cache-context for speculative values. Those values
+  derive directly, so ordered declarations observe all earlier transaction
+  operations. A value holding no declaration rows yet (genesis, before its
+  first population) cannot derive one: it reads the construction projection
+  its cold boundary supplied, or refuses by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
+  [database]
+  (let [origin (schema-database database)]
+    (cond
+      (not (declares-program? origin))
+      (or (:seon.schema/projection (meta database))
+          (:seon.schema/projection (meta origin))
+          (let [failure (projection-fallback 'seon.db/carried-projection)]
+            (throw (ex-info (:seon.error/message failure) failure))))
+
+      (datahike.db/committed-value-identity origin)
+      ;; Store the delay before forcing it: concurrent misses share the winning
+      ;; cell even when core.cache's atom retries its insertion.
+      @(cache/lookup-or-miss projection-cache (projection-cache-key origin)
+                             (fn [_] (delay (schema/load-projection origin))))
+
+      :else
+      (schema/load-projection origin))))
 
 (defn- read-declarations
   "The declaration table for one read, or the flat refusal naming what is missing.
@@ -1231,10 +1293,7 @@
     (if (seq installed)
       {::installed-schema installed
        ::read-projection
-       (delay (or (carried-projection origin)
-                  (schema/handed-projection)
-                  (let [failure (projection-fallback operation)]
-                    (throw (ex-info (:seon.error/message failure) failure)))))}
+       (delay (carried-projection origin))}
       (diagnostic
        {:seon.error/message (str operation " cannot decode a read: the supplied value carries no installed database schema.")
         :seon.db.read/unreadable-declarations operation
@@ -3283,8 +3342,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
   [database]
-  (arity-mismatches-with q database (or (carried-projection database)
-                                           (schema/handed-projection))))
+  (arity-mismatches-with q database (carried-projection database)))
 
 (defn- write-render-target-error
   {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.error/base]]}
@@ -3676,13 +3734,10 @@
              (qualified-symbol? (:seon.error/operation connection)))
     connection
     (try
-      (let [carried-state (connection-projection-state connection)
-            projection
-            (or (some-> carried-state deref :seon.schema/projection)
-                (carried-projection database)
-                (schema/handed-projection)
-                (let [failure (projection-fallback 'seon.db/transact!)]
-                  (throw (ex-info (:seon.error/message failure) failure))))]
+      ;; A publication or genesis write supplies the candidate its own
+      ;; declarations will produce; every other write reads its value's own.
+      (let [projection (or (:seon.schema/projection (meta database))
+                           (carried-projection database))]
         (or (write-error database projection transaction)
             (let [bound-attribute :seon.config.db/write-time-limit-ms
                   configured-bounds
@@ -3753,20 +3808,7 @@
                                  [:seon.db/connection-identity
                                   :seon.store/branch])
                     :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
-                (let [state
-                      (or (when (identical? projection
-                                             (:seon.schema/projection
-                                              (some-> carried-state deref)))
-                            carried-state)
-                          (env/environment-state
-                           (env/environment
-                            {:seon.db/connection connection
-                             :seon.boot/cluster-name
-                             (name (:branch (:config database)))
-                             :seon.schema/projection projection})))]
-                  (-> report
-                      (update :db-before carry-projection-state state)
-                      (update :db-after carry-projection-state state)))))))
+                report))))
       (catch Throwable throwable
         (let [data (error.refusal/refusal throwable)]
           (cond
