@@ -47,20 +47,21 @@
            nested (db/transact! connection
                                 [{:seon.problems/id "nested"
                                   :seon.turn/_attempts [{:seon.turn/id 42}]}])]
-       (is (= :seon.db/invalid-write (:seon.error/kind refused)))
+       (is (string? (:seon.db.write.attempt/request-id refused)))
        (is (= [:seon.cluster.eval/run] (vec (rest (:seon.db/path refused)))))
        (is (int? (first (:seon.db/path refused))))
        (is (str/includes? (:seon.error/message refused) ":seon.cluster.eval/run"))
-       (is (= :seon.db/invalid-write (:seon.error/kind wrong)))
+       (is (string? (:seon.db.write.attempt/request-id wrong)))
        (is (= [0 :my.plan.item/title] (:seon.db/path wrong)))
        (is (= [0 :seon.turn/_attempts 0 :seon.turn/id] (:seon.db/path nested)))
        (is (= before (:t @connection)))))))
 
 (defn- refused
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction :qualified-keyword :seon.schema/value [:sequential :seon.schema/value]] :seon.db/error-result]}
   [connection transaction attribute offending path]
   (let [before (:t @connection)
         result (db/transact! connection transaction)]
-    (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
+    (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
     (is (= attribute (:seon.db/attribute result)))
     (is (= offending (:seon.db/offending result)))
     (if (= :seon.error/unknown offending)
@@ -157,7 +158,7 @@
              {:my.plan.item/id "feedback/single" :my.plan.item/title "Single"
               :my.plan.item/needs "feedback/step"}
              [:db/add "feedback/step" :my.plan.item/needs "datomic.tx"]])]
-       (is (nil? (:seon.error/kind result)) (pr-str result))
+       (is (some? (:db-after result)) (pr-str result))
        (is (= #{"feedback/step" "feedback/next" "feedback/single"}
               (set (db/q '[:find [?id ...] :where [_ :my.plan.item/id ?id]] @connection))))
        (is (some? (db/q '[:find ?instant . :where

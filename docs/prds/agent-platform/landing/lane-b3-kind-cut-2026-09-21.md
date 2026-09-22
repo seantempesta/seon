@@ -19,6 +19,11 @@ No final green or live default settlement claim is made.
 
 ### Final settlement verification, 2026-09-22 07:00 UTC
 
+Runner/transaction/turn-work run `a64dc228cada` completed and recorded
+**55 tests / 367 assertions / 15 failures / 1 error**. Its deliberate failure
+fixture executed inside the runner tests; those nested fixture executions are
+not additional selected tests and are not counted as standalone green evidence.
+
 The schema/test-evidence batch completed **82 tests / 659 assertions /
 93 failures / 73 errors**. The recording authority refused the result.
 
@@ -31,6 +36,8 @@ its tests invoke concurrent launcher/JVM processes and `bin/test` gates
 namespace would violate this lane's explicit one-JVM and no-`bin/test`
 instructions. Its kind callers are converted; process-drill execution remains
 with the orchestrator. The final matrix records load verification separately.
+`clojure -M:test -e "(require 'seon.test-runner-integration-test) (shutdown-agents)"`
+exited 0 in an exclusive JVM. It ran no test bodies and launched no test workers.
 
 The rendering/read-evidence batch completed **183 tests / 683 assertions /
 89 failures / 25 errors**. Result recording was refused. Its observed failures

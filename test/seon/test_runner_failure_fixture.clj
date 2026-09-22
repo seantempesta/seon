@@ -17,9 +17,10 @@
   nil)
 
 (defn- refusal
-  [error-class signature]
+  {:malli/schema [:=> [:cat :string] :seon.error/throwable]}
+  [signature]
   (doto (ex-info "one repeated refusal"
-                 {:seon.error/kind error-class
+                 {
                   :seon.error/signature signature})
     (.setStackTrace
      (into-array
@@ -31,8 +32,7 @@
                                   19))))))
 
 (deftest repeated-identical-error
-  (let [failure (refusal :seon.fixture/refused
-                         (apply str (repeat 64 "a")))]
+  (let [failure (refusal (apply str (repeat 64 "a")))]
     (dotimes [_ 7]
       (clojure.test/do-report
        {:type :error
@@ -41,5 +41,4 @@
         :actual failure}))))
 
 (deftest distinct-error
-  (throw (refusal :seon.fixture/different
-                  (apply str (repeat 64 "b")))))
+  (throw (refusal (apply str (repeat 64 "b")))))

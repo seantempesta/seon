@@ -26,7 +26,8 @@
            [java.util.concurrent CountDownLatch TimeUnit]))
 
 (defn- assert-one-terminal-error!
-  [case-name result expected-kind]
+  {:malli/schema [:=> [:cat :string :map] :boolean]}
+  [case-name result]
   (is (= {::runner/test-count 1
           ::runner/pass-count 0
           ::runner/fail-count 0
@@ -36,9 +37,7 @@
   (is (= 1 (count (::runner/task-results result))))
   (is (= (symbol "seon.exchange-test" case-name)
          (:seon.test/sym (first (::runner/task-results result)))))
-  (is (= expected-kind
-         (get-in result [::runner/worker-exchange-result
-                         :seon.error/kind])))
+  (is (keyword? (get-in result [::runner/worker-exchange-result ::runner/missing-worker-event])))
   (is (= [(symbol "seon.exchange-test" case-name)]
          (get-in result [::runner/worker-exchange-result
                          ::runner/task-symbols]))))
@@ -187,7 +186,7 @@
               ::runner/exchange-id "readiness-exit/readiness"
               ::runner/expected-worker-event :ready
               ::runner/completion-bound-seconds 1})]
-        (is (= ::runner/worker-exited (:seon.error/kind result)))
+        (is (integer? (:seon.test.runner/worker-exit result)))
         (is (= "readiness-exit" (::runner/worker-id result)))
         (is (= 17 (::runner/worker-exit result)))
         (is (= :ready (::runner/missing-worker-event result)))
@@ -223,8 +222,7 @@
                             (* 1000 test-support/event-backstop-seconds)
                             ::task-backstop)]
           (is (not= ::task-backstop result))
-          (assert-one-terminal-error! "killed" result
-                                      ::runner/worker-exited)))
+          (assert-one-terminal-error! "killed" result)))
       (finally
         (.close watcher)
         ((deref (var fixture/stop-injected-worker!)) worker)))))
@@ -239,7 +237,7 @@
               "os._exit(17)\n"))]
     (try
       (let [result ((deref (var fixture/execute-injected-task!)) worker ((deref (var fixture/exchange-task)) "re-arm-death"))]
-        (assert-one-terminal-error! "re-arm-death" result ::runner/re-arm-failed)
+        (assert-one-terminal-error! "re-arm-death" result)
         (is (= 17 (get-in result [::runner/worker-exchange-result
                                   ::runner/worker-exit])))
         (is (= :worker-exchange
@@ -257,8 +255,7 @@
             test-support/event-backstop-seconds TimeUnit/SECONDS)
       (let [result ((deref (var fixture/execute-injected-task!)) worker
                                            ((deref (var fixture/exchange-task)) "write-failure"))]
-        (assert-one-terminal-error! "write-failure" result
-                                    ::runner/worker-write-failure))
+        (assert-one-terminal-error! "write-failure" result))
       (finally
         ((deref (var fixture/stop-injected-worker!)) worker)))))
 
@@ -276,8 +273,7 @@
             (with-redefs-fn
               {#'runner/task-exchange-bound-seconds (constantly 1)}
               #((deref (var fixture/execute-injected-task!)) worker ((deref (var fixture/exchange-task)) "bounded")))]
-        (assert-one-terminal-error! "bounded" result
-                                    ::runner/worker-exchange-bound)
+        (assert-one-terminal-error! "bounded" result)
         (is (false? (.isAlive ^Process (::runner/worker-process worker)))
             "the bounded worker is retired before another dispatch"))
       (finally
@@ -701,8 +697,7 @@
                 (fn []
                   (#'runner/stop-owned-process-tree!
                    (#'runner/process-tree-ownership process)))))]
-        (is (= :seon.test.runner/process-tree-exit-backstop
-               (:seon.error/kind refusal)))
+        (is (some? (:seon.test.runner/process-tree-phase refusal)))
         (is (true? (:seon.test.runner/forced-completion? refusal)))
         (is (contains? (into #{} (map ::runner/process-id)
                              (::runner/processes refusal))

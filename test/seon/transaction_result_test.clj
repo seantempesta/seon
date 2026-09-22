@@ -35,5 +35,5 @@
        (let [before (db/basis-t @connection)
              refused (support/agent-value
                       ctx "(seon.db/transact! [[:db/add \"bad\" :my.plan.item/title 42]])")]
-         (is (= :seon.db/invalid-write (:seon.error/kind refused)) (pr-str refused))
+         (is (string? (:seon.db.write.attempt/request-id refused)) (pr-str refused))
          (is (= before (db/basis-t @connection))))))))

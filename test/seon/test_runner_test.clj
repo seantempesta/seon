@@ -771,8 +771,7 @@
                #(throw
                  (ex-info
                   "the evidence sink is deliberately unavailable"
-                  {:seon.error/kind
-                   ::runner/injected-persistent-recording-failure}))
+                  {}))
                ::runner/recording-label "persistent results"})))]
       (is (= expected-exit @exit*)
           "a gate requires durable evidence as well as passing tests")
@@ -781,7 +780,7 @@
                             "bin/test: persistent results NOT recorded:")))
       (is (str/includes?
            output
-           ":seon.test.runner/injected-persistent-recording-failure"))
+           "the evidence sink is deliberately unavailable"))
       (is (not (str/includes? output "Recorded 1 executed"))
           "A recording refusal cannot print a successful recorded tally."))))
 
@@ -1490,35 +1489,33 @@
         (ex-info
          (str "The cluster threw during the prepl operation: "
               "clojure.lang.ExceptionInfo: record-results! refused completion")
-         {:seon.error/kind :seon.operator/prepl-exception
+         {
           :seon.operator/cause "record-results! refused completion"
           :seon.operator/exception-data
-          {:seon.error/kind :seon.instrument/contract-violated}
+          {}
           :seon.operator/form "(try (require 'seon.cluster.source)"
           :seon.operator/events [{:tag :ret :exception true}]})
         failure (#'runner/recording-failure
                  (fn [] (throw operator-failure)))
         notice (#'runner/recording-failure-notice "persistent results" failure)]
-    (testing "the refusal value keeps the raiser's kind and data"
-      (is (= :seon.operator/prepl-exception (:seon.error/kind failure)))
+    (testing "the refusal value keeps the raiser's message and data"
       (is (= "record-results! refused completion"
              (:seon.operator/cause (:seon.error/data failure))))
-      (is (= {:seon.error/kind :seon.instrument/contract-violated}
+      (is (= {}
              (:seon.operator/exception-data
               (:seon.error/data failure)))))
     (testing "the printed gate line names the cluster's cause"
       (is (str/includes? notice "persistent results NOT recorded:") notice)
-      (is (str/includes? notice ":seon.operator/prepl-exception") notice)
       (is (str/includes? notice "record-results! refused completion") notice)
-      (is (str/includes? notice ":seon.instrument/contract-violated") notice)
+      (is (str/includes? notice ":seon.operator/exception-data") notice)
       (is (not (str/includes? notice ":seon.operator/events"))
           "the raw prepl events stay out of the one-line notice"))
-    (testing "a refusal with no data still prints kind and message"
+    (testing "a recorder without committed references names the missing evidence"
       (let [bare (#'runner/recording-failure
-                  (fn [] {:seon.error/kind ::probe
+                  (fn [] {
                           :seon.error/message "bare"}))]
         (is (= (str "bin/test: persistent results NOT recorded: "
-                    ":seon.test-runner-test/probe bare")
+                    "The recorder returned no committed result references.")
                (#'runner/recording-failure-notice "persistent results" bare)))))))
 
 (defn- synthetic-results

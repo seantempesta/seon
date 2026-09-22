@@ -30,7 +30,7 @@
 (def ^:private now (Date. 1700000000000))
 (def ^:private digest (apply str (repeat 64 "a")))
 (def ^:private lint-refusal
-  {:seon.error/kind :seon.turn.loop/lint-rejected
+  {
    :seon.error/message "Static analysis rejected this source form."
    :seon.error/data {:seon.fn.analyzer/findings
                      [{:seon.fn.analyzer/level :error}]}})
