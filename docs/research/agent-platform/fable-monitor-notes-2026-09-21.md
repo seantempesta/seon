@@ -334,3 +334,22 @@ them by root-cause class with owner seams and a lane plan
 (`docs/research/agent-platform/cold-gate-triage-2026-09-22.md`). No cut-1 step 1.1
 lane launches until the classes in B3's files are down. Store 7.6 GB, publication
 paused, default pid 38968.
+
+## 2026-09-22 08:20 local — back on the plan (owner)
+
+Owner: follow the ruled order, not the full-suite reds; delete first, write the
+replacement, develop in the REPL, then test; no bulk tier mid-cut. Status against
+README §4: 1.3b (B1b) done; B3 commit 4 (kind/class) done; 1.1, 1.2, 1.3, 1.4, 1.4b,
+1.5 (hook, search) not started. The three triage lanes were stopped: `ce83344ce`
+(symbols in program fixtures) and `370fe907a` (turn dependency inputs, continuation
+wait evidence) landed coherent; `error-facets`' partial edit is shelved at
+`tmp/error-facets-partial-2026-09-22.patch` (instrument.clj:774 idea).
+Launched: `constructor-slice` (astra low) = step 1.1, alone in src (275 sites; the
+`at` input change is atomic). Resumed beside it: `string-test-symbols` (test files
+only, told to leave `diagnostic-*` lines alone). Queued, in this order, one lane at a
+time in src: `error-facets` and `turn-shapes` from their shelved state (owner: finish
+partial side work), then 1.2 digest (sol low), 1.3 wrappers (astra low), 1.4
+projection + ambient transport deletion (astra low), 1.4b shape family (sol low), 1.5
+hook + `seon.search` (sol low). Gate policy from here: `bin/test --platform` at step
+landings; the bulk tier once at the end of cut 1. The loop prompt was rewritten to
+say exactly this.
