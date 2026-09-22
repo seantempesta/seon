@@ -730,30 +730,30 @@
        first))
 
 (defn- cancel-timer
+  "Forget the armed instant. A core.async timeout cannot be cancelled and needs
+  no cancelling: a kick it delivers later only starts one more pass, which
+  re-derives due work and the next instant from the current database value."
+  {:malli/schema [:=> [:cat :map] :map]}
   [state]
-  (when-let [^Thread timer (::timer state)]
-    (.interrupt timer))
-  (dissoc state ::timer ::timer-at))
+  (dissoc state ::timer-at))
 
 (defn- arm-timer
+  "Arm core.async's own timer for the next nominal instant.
+
+  No thread is started, so none can outlive the proc: the timeout channel's
+  callback only offers the payload-free kick, and an offer onto a kick channel
+  the stop transition closed returns false."
+  {:malli/schema [:=> [:cat :map [:maybe :inst]] :map]}
   [state ^Date nominal-at]
   (let [state (cancel-timer state)]
     (if-not nominal-at
       state
       (let [delay-ms (max 0 (- (.getTime nominal-at)
                                (System/currentTimeMillis)))
-            kick (:seon.schedule/channel state)
-            timer
-            (-> (Thread/ofVirtual)
-                (.name (str "seon-schedule-"
-                            (:seon.agent/id state)))
-                (.start
-                 (fn []
-                   (try
-                     (Thread/sleep delay-ms)
-                     (async/offer! kick ::kick)
-                     (catch InterruptedException _ nil)))))]
-        (assoc state ::timer timer ::timer-at nominal-at)))))
+            kick (:seon.schedule/channel state)]
+        (async/take! (async/timeout delay-ms)
+                     (fn [_] (async/offer! kick ::kick)))
+        (assoc state ::timer-at nominal-at)))))
 
 (def ^:private relevant-attributes
   #{:seon.schedule.task/id
@@ -773,7 +773,7 @@
 (defn schedule-step
   "The per-agent schedule proc in Flow's four arities.
 
-  It owns one virtual timer and one Datahike listener, both disposable. Timer
+  It owns one core.async timeout and one Datahike listener, both disposable. Timer
   and relevant-fact callbacks offer the same payload-free kick. Every transform
   derives due work and the next instant again from the current database value."
   {:malli/schema

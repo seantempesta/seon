@@ -1,5 +1,6 @@
 (ns seon.schedule-test
-  (:require [clojure.repl :as repl]
+  (:require [clojure.core.async :as async]
+            [clojure.repl :as repl]
             [clojure.test :refer [deftest is testing]]
             [malli.core :as m]
             [seon.cluster.agent :as agent]
@@ -411,3 +412,25 @@
              :seon.agent/id "root"})]
        (is (= #{:seon.agent/mailbox :seon.agent/turn :seon.agent/schedule}
               (set (keys (:procs definition)))))))))
+
+(deftest the-schedule-timer-kicks-at-its-instant-through-core-async
+  ;; Behavior class: the schedule proc's timer is core.async's own timeout, so
+  ;; it starts no thread and a kick after stop is a false offer, never a throw.
+  (let [kick (async/chan (async/sliding-buffer 1))
+        nominal-at (Date. (+ (System/currentTimeMillis) 50))
+        armed (#'schedule/arm-timer {:seon.schedule/channel kick} nominal-at)]
+    (is (= nominal-at (:seon.schedule/timer-at armed)))
+    (is (= :seon.schedule/kick
+           (test-support/await-event! kick ::schedule-timer-kick)))
+    (is (not (contains? (#'schedule/cancel-timer armed)
+                        :seon.schedule/timer-at))))
+  (testing "a kick arriving after the stop transition closed the channel is dropped"
+    (let [kick (async/chan (async/sliding-buffer 1))
+          armed (#'schedule/arm-timer {:seon.schedule/channel kick}
+                                      (Date. (+ (System/currentTimeMillis) 20)))
+          ;; the stale kick fires at 20 ms; this bounded take returns at 60 ms
+          after (async/timeout 60)]
+      (async/close! kick)
+      (is (some? (:seon.schedule/timer-at armed)))
+      (is (nil? (async/<!! after)))
+      (is (nil? (async/poll! kick))))))
