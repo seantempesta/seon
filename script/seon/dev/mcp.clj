@@ -478,8 +478,12 @@
          (list 'clojure.core/eval (list 'quote form)))))
 
 (defn- sci-evaluation-form
-  {:malli/schema [:=> [:cat :string :string :symbol :boolean] :string]}
-  [source cluster namespace-symbol read-only?]
+  {:malli/schema [:function
+                  [:=> [:cat :string :string :symbol :boolean] :string]
+                  [:=> [:cat :string :string :symbol :boolean [:maybe :string]] :string]]}
+  ([source cluster namespace-symbol read-only?]
+   (sci-evaluation-form source cluster namespace-symbol read-only? nil))
+  ([source cluster namespace-symbol read-only? branch]
   (pr-str
    `(do
       ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
@@ -500,25 +504,34 @@
                "' has a live JVM REPL, but its cluster layer is degraded; "
                "SCI evaluation is unavailable.")
          :seon.dev.mcp/cluster ~cluster}
-        ((requiring-resolve 'seon.sci.eval/evaluate)
+        (let [handle# (when ~branch
+                        ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                         (assoc cluster# :seon.store/store (:seon.store/store instance#))
+                         nil {:seon.agent/branch (keyword ~branch)}))]
+         (try
+          ((requiring-resolve 'seon.sci.eval/evaluate)
          ;; THE KEYS `evaluate` DECLARES. These were the retired
           ;; `:seon.cluster.run.form/*` spellings, so SCI evaluation mode
           ;; handed the evaluator no source at all — invisible until the
           ;; gate and this cluster armed the contract that says so.
          {:seon.cluster.eval/source ~source
           :seon.cluster.eval/ns [:seon.ns/name '~namespace-symbol]
-          :seon.sci.eval/ctx (:seon.sci.eval/ctx instance#)
+          :seon.sci.eval/ctx (if handle# (:seon.sci.eval/ctx handle#)
+                                             (:seon.sci.eval/ctx instance#))
           :seon.sci.admit/caps (:seon.sci.admit/caps cluster#)
           :seon.sci.eval/time-limit-ms
           (:seon.config.eval/time-limit-ms cluster#)
           :seon.config/on-core-error
-          (:seon.config/on-core-error cluster#)}))))))
+          (:seon.config/on-core-error cluster#)})
+          (finally
+            (when handle#
+              ((requiring-resolve 'seon.cluster.agent/release-context!) handle#)))))))))))
 
 (defn- remote-evaluation-form
-  [{:seon.dev.mcp/keys [form source read-only?]} mode cluster namespace-symbol]
+  [{:seon.dev.mcp/keys [form source read-only? branch]} mode cluster namespace-symbol]
   (case mode
     "jvm" (jvm-evaluation-form form namespace-symbol (true? read-only?))
-    "sci" (sci-evaluation-form source cluster namespace-symbol (true? read-only?))))
+    "sci" (sci-evaluation-form source cluster namespace-symbol (true? read-only?) branch)))
 
 (defn- execute-clj-eval
   [{:keys [code root cluster mode session_id timeout_ms] :as request}]
@@ -533,7 +546,16 @@
                       :seon.dev.mcp/namespace-symbol
                       (namespace-symbol! (:namespace request))
                       :seon.dev.mcp/mode
-                      (evaluation-mode! mode)}
+                      (let [selected (evaluation-mode! mode)
+                            branch (:branch request)]
+                        (when (and branch
+                                   (or (not= selected "sci")
+                                       (not (string? branch))
+                                       (str/blank? branch)
+                                       (str/starts-with? branch ":")))
+                          (throw (ex-info "Branch selection requires SCI mode and a branch name without a leading colon."
+                                          {:seon.dev.mcp/failure :invalid-branch})))
+                        selected)}
                      (catch Throwable throwable
                        {:seon.dev.mcp/error throwable}))]
     (if-let [throwable (:seon.dev.mcp/error validation)]
@@ -552,7 +574,8 @@
           (let [remote-form
               (remote-evaluation-form
                (assoc (:seon.dev.mcp/evaluation validation)
-                      :seon.dev.mcp/read-only? (true? (:read_only request)))
+                      :seon.dev.mcp/read-only? (true? (:read_only request))
+                      :seon.dev.mcp/branch (:branch request))
                mode cluster namespace-symbol)
               {:keys [writer endpoint] :as session}
               (current-clj-session! root cluster session-id)]
@@ -727,7 +750,7 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) evaluates through seon.sci.eval/evaluate with the cluster's live shared SCI ctx, admission caps, contracts, print grammar, and time limit: it MUTATES that shared per-cluster ctx, so a debug def enters the agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl and retains raw *1/*2 before the cluster-side value projection. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) evaluates through seon.sci.eval/evaluate with admission caps, contracts, print grammar, and time limit. An optional branch selects an isolated context through the agent acquisition entrance; otherwise it MUTATES the cluster's shared SCI ctx, so a debug def enters the live agents' world, and it creates NO run or receipts because the run loop owns those facts. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Exactly one Clojure form; wrap an intentional sequence in (do ...)."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
@@ -735,6 +758,7 @@
                                :namespace {:type "string" :description "Clojure namespace for either mode. Defaults to user; a missing JVM namespace is created and refers clojure.core."}
                                :read_only {:type "boolean" :description "Declare that this evaluation changes no runtime code or mutable state; preserves retained pages. Omitted or false conservatively invalidates them."}
                                :mode {:type "string" :enum ["jvm" "sci"] :description "jvm evaluates in the host io-prepl; sci evaluates through the cluster's shared SCI ctx. Defaults to jvm."}
+                               :branch {:type "string" :description "SCI only: existing branch name without a leading colon. Acquires its isolated execution handle through the agent entrance; omission uses the shared cluster context."}
                                :session_id {:type "string" :description "Stateful io-prepl session id. Defaults to 'default'."}
                                :timeout_ms {:type "integer" :minimum 1 :maximum 120000}}
                   :required ["code"]}}

@@ -63,7 +63,7 @@
            (let [turn-id (fixture/submit! handle routing (str source "\n(dir my.agents.juniper)"))
                  saved (vec (entries turn-id))
                  definition (first (filter #(= source (:seon.cluster.eval/source %)) saved))
-                 retained (agent/acquire-context! handle "juniper")
+                 retained (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))
                  result-var (when definition (sci/resolve retained (admit/result-handle (:seon.cluster.eval/id definition))))
                  result (when result-var @result-var)]
              (is (= 2 (count saved)) (pr-str saved))
@@ -86,7 +86,7 @@
            ; Acceptance and rejected replacement exercise the same retained context.
            (fixture/submit! handle routing
                             "(defn largest-customer {:malli/schema [:=> [:cat :int] :int]} [x] x)")
-           (let [retained (agent/acquire-context! handle "juniper")
+           (let [retained (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))
                  accepted @(sci/resolve retained function-symbol)]
              (fixture/submit! handle routing source)
              (is (identical? accepted @(sci/resolve retained function-symbol)))

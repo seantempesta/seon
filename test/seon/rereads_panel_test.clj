@@ -68,7 +68,7 @@
             (is (string? (:seon.turn/id result)))
             (is (= [maximum] (mapv :seon.cluster.eval/source added)))
             (is (= [0] (mapv :seon.cluster.eval/ordinal added)))
-            (is (= 101 @(sci/resolve (agent/acquire-context! handle "juniper")
+            (is (= 101 @(sci/resolve (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))
                                      (:seon.repl/handle (repl/entity-emission (first added))))))
             (is (= (+ @expected-count (count (refreshed-ids before (observed-bases connection))))
                    (:data-problem-count (second (first (stale-check connection handle))))))

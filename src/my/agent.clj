@@ -2,6 +2,8 @@
   "Read and update my record through request maps."
   (:refer-clojure :exclude [identity])
   (:require [seon.agent :as agent]
+            [seon.db :as db]
+            [seon.cluster.registry :as registry]
             [seon.run :as run]))
 
 (defn identity
@@ -54,3 +56,18 @@
   [request]
   (agent/settings! (dissoc request :seon.db/connection :seon.agent/id)
                    (:seon.db/connection request) (:seon.agent/id request)))
+
+(defn branch
+  "Read my explicit custody branch and its live or isolated mode."
+  {:malli/schema [:=> [:cat :my.plan/request]
+                  [:map [:seon.agent/branch :seon.agent/branch]
+                   [:seon.agent/mode :seon.agent/mode]]]}
+  [{database :seon.db/db agent-id :seon.agent/id}]
+  (let [branch (:seon.agent/branch
+                (db/pull database '[:seon.agent/branch] [:seon.agent/id agent-id]))
+        cluster (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
+    (when-not (and branch cluster)
+      (throw (ex-info "Agent branch and cluster must both be present."
+                      {:seon.agent/id agent-id})))
+    {:seon.agent/branch branch
+     :seon.agent/mode (if (= branch (registry/cluster-branch cluster)) :live :isolated)}))

@@ -1,4 +1,31 @@
-#:seon.agent{:archived-tx [:and {:description "The transaction that archived this retained agent identity. Archival only filters presentation; it does not stop its graph, detach ownership or disable resumption."} :seon.db/ref]
+#:seon.agent{:branch [:keyword {:description "The explicit branch supplying this agent’s custody; equal to the cluster branch for live execution."}]
+ :mode [:enum :live :isolated]
+ :context-source [:map
+  [:seon.db/connection :seon.db/connection]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.agent/context-state :seon.agent/context-state]
+  [:seon.cluster/name :seon.cluster/name]]
+ :execution-handle [:map
+  [:seon.cluster/name :seon.cluster/name]
+  [:seon.agent/context-state :seon.agent/context-state]
+  [:seon.sci.eval/base-ctx :seon.sci.eval/ctx]
+  [:seon.db/connection :seon.db/connection]
+  [:seon.db/db :seon.db/database-value]
+  [:seon.source/commit-id :seon.source/commit-id]
+  [:seon.schema/projection :seon.schema/projection]
+  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+  [:seon.env/environment :seon.env/environment]
+  [:seon.agent/branch :seon.agent/branch]
+  [:seon.agent/mode :seon.agent/mode]
+  [:seon.agent/owns-connection? :boolean]
+  [:seon.agent/owns-branch? :boolean]
+  [:seon.store/store {:optional true} :seon.store/store]]
+ :acquisition-options [:map
+  [:seon.agent/branch {:optional true} :seon.agent/branch]
+  [:seon.agent/isolate? {:optional true} :boolean]
+  [:seon.cluster.registry/from {:optional true} :seon.source/commit-id]
+  [:seon.store/store {:optional true} :seon.store/store]]
+ :archived-tx [:and {:description "The transaction that archived this retained agent identity. Archival only filters presentation; it does not stop its graph, detach ownership or disable resumption."} :seon.db/ref]
 :runtime [:and {:seon.db/component true :seon.db/component-schema :seon.runtime/entity :description "The agent owns its runtime and turn history."} :seon.db/ref]
 :agent
                      [:map
@@ -17,6 +44,7 @@
                        :seon.render/html
                        seon.cluster.agent/render-identity-html}
                       [:seon.agent/id :seon.agent/id]
+                      [:seon.agent/branch :seon.agent/branch]
                       [:seon.agent/archived-tx {:optional true} :seon.agent/archived-tx]
                       [:seon.agent/namespace
                        {:optional true}
@@ -51,6 +79,7 @@
                      :creation-request
                      [:map
                       [:seon.agent/id :seon.agent/id]
+                      [:seon.agent/branch {:optional true} :seon.agent/branch]
                       [:seon.ns/name :seon.ns/name]
                       [:seon.cluster/name :seon.cluster/name]],
                      :creation-result

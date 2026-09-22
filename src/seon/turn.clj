@@ -2151,8 +2151,8 @@
             turn-id (when (and write? (seq selected))
                       (next-id database (:seon.cluster/name handle) agent-id))
             agent-ctx (when turn-id
-                        (@cluster-agent-acquire-context!
-                         handle agent-id))
+                        (:seon.sci.eval/ctx
+                         (@cluster-agent-acquire-context! handle agent-id)))
             previews (second
                       (reduce
                        (fn [[ordinal previews] source]

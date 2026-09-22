@@ -2407,7 +2407,8 @@
      :seon.sci.eval/ctx]
     [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
           :seon.db/connection :seon.sci.eval/projection-state
-          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
+           [:seon.env/environment {:optional true} :seon.env/environment]]]
      :seon.sci.eval/ctx]]}
   ([base-ctx db connection]
    (fork-cluster-ctx base-ctx db connection
@@ -2418,8 +2419,19 @@
    (let [projection (or (:seon.schema/projection
                          (some-> supplied-projection-state deref))
                         (schema/projection-from-database db))
-         projection-state (or supplied-projection-state
-                              (projection-state db projection))
+         receiving-environment
+         (env/refuse-incomplete-environment!
+          (env/environment
+           (assoc (dissoc (or (:seon.env/environment arm-request)
+                             (some-> supplied-projection-state deref)
+                             (env/of base-ctx))
+                          :seon.db/db :seon.agent/id :seon.turn/id
+                          :my.program/executing-ctx :seon.sci.kernel/arm)
+                  :seon.db/connection connection
+                  :seon.db/basis-t (db/basis-t db)
+                  :seon.schema/projection projection)))
+         projection-state (env/environment-state receiving-environment)
+         _ (db/carry-connection-projection-state! connection projection-state)
          ctx (call-preparation/install
               (env/carry-state
                (assoc (sci/fork base-ctx)

@@ -74,6 +74,9 @@
             [seon.db :as db]
             [seon.blob :as blob]
             [seon.cluster.status :as cluster.status]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
+            [seon.id :as id]
             [seon.env :as env]
             [seon.issue.opening :as issue.opening]
             [seon.error :as error]
@@ -188,11 +191,14 @@
   {:malli/schema [:=> [:cat :seon.agent/creation-request]
                   :seon.agent/creation-tx]}
   [{agent-id :seon.agent/id
-    namespace-name :seon.ns/name}]
+    namespace-name :seon.ns/name
+    cluster-name :seon.cluster/name
+    branch :seon.agent/branch}]
   (let [namespace-ref [:seon.ns/name namespace-name]]
     [[:db.fn/call #'namespace-seed-call namespace-name]
      {:db/id (str "agent:" agent-id)
       :seon.agent/id agent-id
+      :seon.agent/branch (or branch (registry/cluster-branch cluster-name))
       :seon.agent/namespace namespace-ref
       :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
       :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
@@ -702,25 +708,162 @@
    (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
+(defn release-context!
+  "Release an execution handle after its caller has observed actual exit.
+
+  No graph is started by acquisition. The caller owns execution and must join
+  its work before release. Live handles own nothing; borrowed branches persist."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle] :nil]}
+  [handle]
+  (when (:seon.agent/owns-connection? handle)
+    (store/release-branch! (:seon.db/connection handle)))
+  (when (:seon.agent/owns-branch? handle)
+    (registry/retire-branch!
+     {:seon.store/store (:seon.store/store handle)
+      :seon.store/branch (:seon.agent/branch handle)}))
+  (when (or (:seon.agent/owns-connection? handle)
+            (:seon.agent/owns-branch? handle))
+    (swap! (:seon.agent/context-state handle)
+           (fn [contexts]
+             (into {} (remove (fn [[[branch _] _]]
+                                (= branch (:seon.agent/branch handle)))) contexts))))
+  nil)
+
 (defn acquire-context!
-  "Acquire the agent's live context independently of whether its graph is armed."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id]
-                  :seon.sci.eval/ctx]}
-  [handle agent-id]
-  (let [contexts (:seon.agent/context-state handle)]
-    (when-not contexts
-      (throw (ex-info "Agent context acquisition requires the cluster's context state."
-                      {:seon.agent/id agent-id})))
-    (locking contexts
-      (let [acquired (sci.eval/fork-for-turn
-                      (cond-> {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
-                               :seon.db/db @(:seon.db/connection handle)
-                               :seon.agent/id agent-id}
-                        (get @contexts agent-id)
-                        (assoc :seon.sci.eval/agent-ctx (get @contexts agent-id))))
-            ctx (:seon.sci.eval/ctx acquired)]
-        (swap! contexts assoc agent-id ctx)
-        ctx))))
+  "Acquire a coherent execution handle without starting any graph.
+
+  The ordinary arity reads the agent's explicit branch. Live execution borrows
+  the cluster connection. An isolation request allocates a fresh branch off
+  the captured commit (or current head); a named branch without isolation
+  selects an existing branch, as the MCP tool does. The existing context state
+  retains the handles and private SCI objects across evaluation boundaries."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.agent/context-source :seon.agent/id]
+     :seon.agent/execution-handle]
+    [:=> [:cat :seon.agent/context-source [:maybe :seon.agent/id]
+          :seon.agent/acquisition-options]
+     :seon.agent/execution-handle]]}
+  ([handle agent-id] (acquire-context! handle agent-id {}))
+  ([handle agent-id options]
+   (let [contexts (:seon.agent/context-state handle)
+         parent (:seon.db/connection handle)
+         database (db/db parent)
+         live-branch (registry/cluster-branch (:seon.cluster/name handle))
+         source-ctx (or (:seon.sci.eval/base-ctx handle) (:seon.sci.eval/ctx handle))
+         branch (or (:seon.agent/branch options)
+                    (when (:seon.agent/isolate? options)
+                      (keyword (str "agent-" (id/id))))
+                    (when agent-id
+                      (:seon.agent/branch
+                       (db/pull database '[:seon.agent/branch]
+                                [:seon.agent/id agent-id]))))
+         held-store (or (:seon.store/store options) (:seon.store/store handle))]
+     (when-not (and contexts branch)
+       (throw (ex-info "Acquisition requires context state and an explicit agent branch."
+                       {:seon.agent/id agent-id :seon.agent/branch branch})))
+     (when (and (:seon.agent/isolate? options) (= branch live-branch))
+       (throw (ex-info "Isolation cannot borrow the live cluster branch."
+                       {:seon.agent/branch branch})))
+     (locking contexts
+       (let [key [branch agent-id]
+             previous (get @contexts key)
+             branch-owner (some (fn [[[held-branch _] execution]]
+                                  (when (= branch held-branch) execution)) @contexts)
+             isolated? (not= branch live-branch)
+             create? (and isolated? (nil? previous)
+                          (or (:seon.agent/isolate? options)
+                              (nil? (:seon.agent/branch options))))
+             _ (when (and isolated? (nil? previous) (nil? held-store))
+                 (throw (ex-info "Isolated acquisition requires the held store."
+                                 {:seon.agent/branch branch})))
+             created (when create?
+                       (registry/branch!
+                        {:seon.store/store held-store
+                         :seon.store/branch branch
+                         :seon.cluster.registry/from
+                         (or (:seon.cluster.registry/from options)
+                             (db/commit-id database))}))
+             _ (when (and create? (not (:seon.cluster/created? created)))
+                 (throw (ex-info "Isolation requires a fresh owned branch."
+                                 {:seon.agent/branch branch})))
+             allocated (atom nil)]
+         (try
+           (let [borrowed (or (:seon.db/connection branch-owner)
+                            (when (and isolated? (not create?) (nil? previous))
+                            (registry/active-branch-connection
+                             {:seon.store/store held-store :seon.store/branch branch})))
+                 connection (or (:seon.db/connection previous)
+                                (when-not isolated? parent)
+                                borrowed
+                                (let [connection (store/open-branch! held-store branch)]
+                                  (reset! allocated connection)
+                                  connection))
+                 _ (when @allocated
+                     (db/carry-connection-projection-state!
+                      connection
+                      (sci.eval/projection-state
+                       @connection (schema/projection-from-database
+                                    @connection (db/carried-projection database)))))
+                 _ (when (and create? agent-id)
+                     (let [result (db/call-with-custody {}
+                                    #(db/transact! connection
+                                      [{:db/id [:seon.agent/id agent-id]
+                                        :seon.agent/branch branch}]))]
+                       (when-not (:db-after result)
+                         (throw (ex-info "Branch assignment refused." result)))))
+                 selected (db/db connection)
+                 base (or (when-not isolated? source-ctx)
+                          (:seon.sci.eval/base-ctx previous)
+                          (:seon.sci.eval/base-ctx branch-owner)
+                          (sci.eval/fork-cluster-ctx
+                           source-ctx selected connection
+                           (sci.eval/projection-state selected
+                            (db/carried-projection selected))
+                           {:seon.env/environment (or (env/of handle) (env/of source-ctx))}))
+                 _ (sci.eval/acquire!
+                    {:seon.sci.eval/ctx base :seon.db/db selected})
+                 refusals (:seon.test/acquisition-refusals (sci.eval/acquired-program base))
+                 _ (when (seq refusals)
+                     (throw (ex-info "Program acquisition refused."
+                                     {:seon.test/acquisition-refusals refusals})))
+                 ctx (if (nil? agent-id)
+                       base
+                       (:seon.sci.eval/ctx
+                        (sci.eval/fork-for-turn
+                         (cond-> {:seon.sci.eval/ctx base
+                                  :seon.db/db selected :seon.agent/id agent-id}
+                           previous (assoc :seon.sci.eval/agent-ctx
+                                           (:seon.sci.eval/ctx previous))))))
+                 acquired (cond->
+                           {:seon.cluster/name (:seon.cluster/name handle)
+                            :seon.db/connection connection
+                            :seon.db/db selected
+                            :seon.source/commit-id (db/commit-id selected)
+                            :seon.schema/projection (db/carried-projection (db/db connection))
+                            :seon.sci.eval/ctx ctx
+                            :seon.sci.eval/base-ctx base
+                            :seon.env/environment (env/of ctx)
+                            :seon.agent/context-state contexts
+                            :seon.agent/branch branch
+                            :seon.agent/mode (if isolated? :isolated :live)
+                            :seon.agent/owns-connection?
+                            (boolean (or @allocated (:seon.agent/owns-connection? previous)))
+                            :seon.agent/owns-branch?
+                            (boolean (or create? (:seon.agent/owns-branch? previous)))}
+                            agent-id (assoc :seon.agent/id agent-id)
+                            held-store (assoc :seon.store/store held-store))]
+             (swap! contexts assoc key acquired)
+             acquired)
+           (catch Throwable failure
+             (when-let [connection @allocated]
+               (try (store/release-branch! connection)
+                    (catch Throwable cleanup (.addSuppressed failure cleanup))))
+             (when create?
+               (try (registry/retire-branch!
+                     {:seon.store/store held-store :seon.store/branch branch})
+                    (catch Throwable cleanup (.addSuppressed failure cleanup))))
+             (throw failure))))))))
 
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
@@ -757,6 +900,8 @@
                 (throw (ex-info "arm! refused: no such agent in facts."
                                 {:seon.agent/id agent-id
                                  :seon.agent/no-such-agent agent-id})))
+            execution (acquire-context! handle agent-id)
+            connection (:seon.db/connection execution)
             wake-ch (wake-channel)
             schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
@@ -767,9 +912,11 @@
             turn-completion-backstop-ms
             (:seon.config.agent/turn-completion-backstop-ms settings)
             _ (async/>!! completion :seon.agent/ready)
-            agent-handle (assoc handle
-                                :seon.sci.eval/agent-ctx
-                                (acquire-context! handle agent-id)
+            agent-handle (assoc (merge handle execution)
+                                :seon.sci.eval/ctx (:seon.sci.eval/base-ctx execution)
+                                :seon.sci.eval/projection-state
+                                (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
+                                :seon.sci.eval/agent-ctx (:seon.sci.eval/ctx execution)
                                 :seon.cluster.wake/armer-channel
                                 (:seon.cluster.wake/channel handle)
                                 :seon.cluster.wake/channel wake-ch

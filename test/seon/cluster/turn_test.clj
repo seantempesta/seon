@@ -1349,8 +1349,8 @@
                (agent/creation-tx {:seon.cluster/name "turn-test"
                                   :seon.agent/id "s3-peer"
                                   :seon.ns/name 'my.agents.s3-peer})))
-        (let [author (agent/acquire-context! cluster "agent-a")
-              peer (agent/acquire-context! cluster "s3-peer")]
+        (let [author (:seon.sci.eval/ctx (agent/acquire-context! cluster "agent-a"))
+              peer (:seon.sci.eval/ctx (agent/acquire-context! cluster "s3-peer"))]
           (is (some? (sci.core/resolve peer function-symbol)))
         (with-redefs [ai/complete
                       (fn [_projection _]
@@ -1368,7 +1368,7 @@
             (is (= source (:seon.fn/source admitted))))
           (sci.eval/acquire! {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
                              :seon.db/db @connection})
-          (agent/acquire-context! cluster "agent-a")
+          (:seon.sci.eval/ctx (agent/acquire-context! cluster "agent-a"))
           (is (identical? (#'sci.eval/context-projection (:seon.sci.eval/ctx cluster))
                           (#'sci.eval/context-projection author))
               "the retained handle receives the rebuilt base's contract environment")

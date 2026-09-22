@@ -621,38 +621,26 @@
       (first names))))
 
 (defn fork-cluster-ctx
-  "Fork the process source base's acquired SCI ctx for `connection`.
-
-  THE ENVIRONMENT RIDES THE CTX, exactly as boot puts it there
-  (`seon.cluster`, `env/replace-environment!` into the projection state).
-  Without it `seon.call-preparation/hook` finds no connection and returns its
-  arguments untouched, so every supplied default is inert: a producer
-  contracted `[value database]` — the shape an attribute-declared HTML
-  producer takes — was then invoked with one argument and answered
-  `ArityException`, which the walk recorded as a renderer failure. A fixture
-  that omits a declared input is the defect, not the contract (§5.1).
-
-  The cluster name is DERIVED from the database rather than remembered: a
-  fixture that seeded exactly one cluster gets a production-shaped
-  environment; one that seeded none carries no environment, as before."
+  "Pass the fixture base and optional cluster environment to the production fork.
+  Custody, projection and environment repointing belong to sci.eval."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/connection] :seon.sci.eval/ctx]
+                  [:=> [:cat :seon.db/connection [:maybe :seon.boot/cluster-name]]
+                   :seon.sci.eval/ctx]]}
   ([connection]
    (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
   ([connection cluster-name]
    (let [base-ctx @(::sci-context
                     (checked-fixture-result (or *held-base* @database-base)))
          database (db/db connection)
-         projection (db/carried-projection database)
          projection-state (:seon.sci.eval/projection-state (meta database))]
-     (when cluster-name
-       (env/replace-environment!
-        projection-state
-        (env/refuse-incomplete-environment!
-         (env/environment {:seon.boot/cluster-name cluster-name
-                           :seon.db/connection connection
-                           :seon.db/basis-t (db/basis-t (db/db connection))
-                           :seon.schema/projection projection}))))
-     (sci.eval/fork-cluster-ctx base-ctx (db/db connection) connection
-                                projection-state))))
+     (sci.eval/fork-cluster-ctx
+      base-ctx database connection projection-state
+      (cond-> {}
+        cluster-name
+        (assoc :seon.env/environment
+               (env/refuse-incomplete-environment!
+                (env/environment {:seon.boot/cluster-name cluster-name}))))))))
 
 (defn agent-value
   "Evaluate `source` at the boundary an AGENT actually calls, and return the
