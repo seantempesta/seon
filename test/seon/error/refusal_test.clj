@@ -84,11 +84,75 @@
                   :x/member {:x/detail "retained"}}
            returned (error.refusal/diagnostic (assoc value :seon.error/throwable failure))]
        (is (= (assoc value :seon.error/frame '[example.Failure run "failure.clj" 42]
-                          :seon.error/exception-class 'java.lang.Exception)
-              returned))
+                          :seon.error/exception-class 'java.lang.Exception
+                          :seon.error/message "specific cause"
+                          :seon.error/chain [{:seon.error/throwable-class "java.lang.Exception"
+                                              :seon.error/message "specific cause"}])
+              returned)
+           "A host frame is the frame, but it is not a first-party frame of the link.")
        (.setStackTrace failure (make-array StackTraceElement 0))
-       (is (= (assoc value :seon.error/exception-class 'java.lang.Exception)
-              (error.refusal/diagnostic (assoc value :seon.error/throwable failure))))))
+       (is (= (assoc value :seon.error/exception-class 'java.lang.Exception
+                     :seon.error/message "specific cause"
+                     :seon.error/chain [{:seon.error/throwable-class "java.lang.Exception"
+                                         :seon.error/message "specific cause"}])
+              (error.refusal/diagnostic (assoc value :seon.error/throwable failure))))
+       (is (= "stated" (:seon.error/message
+                        (error.refusal/diagnostic
+                         (assoc value :seon.error/message "stated"
+                                :seon.error/throwable failure))))
+           "A stated message is preserved; only an absent one derives from the root.")))
+
+(defn- framed
+  "A throwable whose stack is exactly `frames`."
+  [^Throwable throwable frames]
+  (doto throwable
+    (.setStackTrace (into-array StackTraceElement
+                                (map (fn [[class-name method file line]]
+                                       (StackTraceElement. class-name method file (int line)))
+                                     frames)))))
+
+(def ^:private wrapped
+  ;; The census F0 shape: a wrapper ex-info around the ex-info that broke.
+  (delay
+   (let [root (framed (ex-info "Keyword cannot be cast to Number" {:seon.probe/leaf 1})
+                      [["clojure.lang.Numbers" "ops" "Numbers.java" 1095]
+                       ["seon.probe$inner" "invokeStatic" "probe.clj" 4]
+                       ["seon.error$prepare" "invokeStatic" "error.clj" 9]])]
+     (framed (ex-info "wrapper" {:seon.probe/outer 2} root)
+             [["seon.probe$outer" "invokeStatic" "probe.clj" 5]
+              ["my.work$run" "invoke" "work.clj" 7]]))))
+
+(def ^:private observation
+  {:seon.error/at (java.util.Date. 0)
+   :seon.error/layer :x/y
+   :seon.error/operation 'a/b})
+
+(deftest a-wrapped-cause-is-recorded-whole
+  (let [returned (error.refusal/diagnostic (assoc observation :seon.error/throwable @wrapped))]
+    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+             :seon.error/message "wrapper"
+             :seon.error/data {:seon.probe/outer 2}
+             :seon.error/frames '[[seon.probe$outer invokeStatic "probe.clj" 5]
+                                  [my.work$run invoke "work.clj" 7]]}
+            {:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+             :seon.error/message "Keyword cannot be cast to Number"
+             :seon.error/data {:seon.probe/leaf 1}
+             :seon.error/frames '[[seon.probe$inner invokeStatic "probe.clj" 4]]}]
+           (:seon.error/chain returned))
+        "Every link keeps class, message, ex-data and only its first-party frames.")
+    (is (= "Keyword cannot be cast to Number" (:seon.error/message returned))
+        "The root message is what the reader is told.")
+    (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class returned)))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) returned)
+        "The chain validates as the declared base member.")))
+
+(deftest the-frame-comes-from-the-root-cause
+  (is (= '[clojure.lang.Numbers ops "Numbers.java" 1095]
+         (:seon.error/frame (error.refusal/diagnostic
+                             (assoc observation :seon.error/throwable @wrapped))))
+      "The wrapper's frame is the catch site; the root's is where it broke.")
+  (is (= '[clojure.lang.Numbers ops "Numbers.java" 1095]
+         (error.refusal/root-frame @wrapped))))
 
 (deftest constructor-output-keeps-the-producing-contract
   (let [projection (-> (schema/handed-projection)

@@ -146,16 +146,6 @@
         (str "An unclassified " (.getName (class source)) " arrived where an "
              "error was expected."))))
 
-(defn- top-frame
-  "The Throwable's first complete stack frame as Clojure data."
-  {:malli/schema [:=> [:cat [:or :nil :seon.error/throwable]]
-                  [:or :nil :seon.error/frame]]}
-  [failure]
-  (when-let [^StackTraceElement frame (when failure (first (.getStackTrace ^Throwable failure)))]
-    (when-let [file (.getFileName frame)]
-      [(symbol (.getClassName frame)) (symbol (.getMethodName frame))
-       file (long (.getLineNumber frame))])))
-
 (declare declared-schema-keys stored-observation observation-selector latest-fact)
 
 (defn- signature
@@ -345,15 +335,6 @@
           (print/emit-text (:seon.sci.admit/print-node admitted)
                            (print/default-options)))))))
 
-(def ^:private machinery-namespace-prefixes
-  ;; DERIVED FROM WHAT THESE FRAMES ARE, exactly as
-  ;; `seon.instrument/caller-frame` derives its own: the host, the
-  ;; language, the contract library, core.async's dispatch, and the fault
-  ;; machinery are what CAUGHT the failure. None of them is a place to go
-  ;; and edit, and naming one routes the fault to the steward of the
-  ;; checker instead of the steward of the code that broke.
-  ["clojure." "java." "jdk." "sun." "malli." "seon.error" "seon.instrument"])
-
 (defn- stack-failing-function
   "The first first-party function on the Throwable's stack, as `ns/name`.
 
@@ -366,31 +347,14 @@
   itself knows; every other fault class arrives with a proc name, which
   is not a function and resolves no steward.
 
-  Demunged Clojure frames read `ns/fn`, `ns/fn--1234` for a compiled
-  arity and `ns/outer/fn` for a closure, so the failing function is the
-  first two segments with the compiler's suffix dropped. A frame that
-  demunges to no `/` is a host class and is not a function at all."
+  Which frame names a function, and which frames are the machinery that
+  caught the failure, is `seon.error.refusal/frame-function`'s one rule."
   {:malli/schema [:=> [:cat [:or :nil :seon.error/throwable]]
                   [:or :nil :qualified-symbol]]}
   [^Throwable failure]
   (when failure
     (some (fn [^StackTraceElement frame]
-            (let [demunged (clojure.lang.Compiler/demunge
-                            (.getClassName frame))
-                  separator (.indexOf demunged "/")]
-              (when (pos? separator)
-                (let [frame-ns (subs demunged 0 separator)
-                      simple (subs demunged (inc separator))
-                      simple (if-let [nested (.indexOf simple "/")]
-                               (if (neg? nested) simple (subs simple 0 nested))
-                               simple)
-                      simple (let [suffix (.indexOf simple "--")]
-                               (if (neg? suffix) simple (subs simple 0 suffix)))]
-                  (when (and (seq simple)
-                             (not (some #(.startsWith ^String frame-ns
-                                                      ^String %)
-                                        machinery-namespace-prefixes)))
-                    (symbol frame-ns simple))))))
+            (error.refusal/frame-function (symbol (.getClassName frame))))
           (.getStackTrace failure))))
 
 (defn- contract-violation-data
@@ -584,12 +548,14 @@
         function (or (when (qualified-symbol? operation) operation)
                      (:seon.instrument/fn instrument-data)
                      (stack-failing-function failure))
-        frame (top-frame failure)
+        frame (error.refusal/root-frame failure)
+        chain (when failure (error.refusal/chain failure))
         observation (merge (cond-> {:seon.error/at at
                                     :seon.error/layer :seon.error/normalization
                                     :seon.error/operation (or function 'seon.error/normalize)}
                              class-name (assoc :seon.error/exception-class (symbol class-name))
-                             frame (assoc :seon.error/frame frame))
+                             frame (assoc :seon.error/frame frame)
+                             chain (assoc :seon.error/chain chain))
                            (when (map? error-value) error-value))
         observation (cond-> observation
                       (= :seon.error/normalization-error declared-schema)
@@ -759,12 +725,18 @@
   [fact]
   (try
     (admit/semantic-value (edn/read-string (:seon.error/data-edn fact)))
-    (catch Throwable failure
-      {:seon.error/at (or (:seon.error/at fact) (java.util.Date.))
-       :seon.error/layer :seon.error/reading
-       :seon.error/operation 'seon.error/fact-source
-       :seon.error/expected-key :seon.error/data-edn
-       :seon.error/message (str "Stored error evidence could not be read: " (ex-message failure))})))
+    ;; Stored evidence that does not read is itself a reading error;
+    ;; the diagnostic carries the failure's whole cause chain and frames.
+    (catch Exception failure
+      (error.refusal/diagnostic
+       {:seon.error/at (or (:seon.error/at fact) (java.util.Date.))
+        :seon.error/layer :seon.error/reading
+        :seon.error/operation 'seon.error/fact-source
+        :seon.error/expected-key :seon.error/data-edn
+        :seon.error/message (str "Stored error evidence could not be read: "
+                                 (or (not-empty (ex-message failure))
+                                     (.getName (class failure))))
+        :seon.error/throwable failure}))))
 
 (defn- flat-data
   {:malli/schema [:=> [:cat :map]
@@ -1058,8 +1030,19 @@
                                                (or (db/carried-projection database)
                                                    (:seon.schema/projection unit)
                                                    (schema/projection-from-database database)))}))
-                       (catch Exception _ nil))
-            problem (when compiled
+                       ;; DECLARED CASE: `expected` is often a description,
+                       ;; not a schema. Malli declares its schema-construction
+                       ;; refusals as `-exception` ex-info whose `:type` is a
+                       ;; `malli.core` keyword (malli core.cljc:203); that
+                       ;; answer is kept as data. Every other failure is not
+                       ;; "not a schema" and propagates whole.
+                       (catch clojure.lang.ExceptionInfo failure
+                         (let [data (ex-data failure)]
+                           (if (and (qualified-keyword? (:type data))
+                                    (= "malli.core" (namespace (:type data))))
+                             data
+                             (throw failure)))))
+            problem (when (m/schema? compiled)
                       (explain-problem
                        {:seon.error/problem {:schema compiled :value offending}
                         :seon.error/path [] :seon.error/argument (str member)}))]

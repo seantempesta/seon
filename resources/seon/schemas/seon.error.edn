@@ -271,6 +271,15 @@
              :dropped-fault-count [:int {:min 1}],
              :signature [:string {:min 64 :max 64 :seon.db/identity true}],
              :frame [:tuple :symbol :symbol :string :int],
+             :frames [:vector {:min 1 :description "A throwable's own first-party (seon.*/my.*) complete stack frames, outermost first."} :seon.error/frame],
+             :link
+             [:map
+              {:description "One throwable of a cause chain, as Throwable->map reads it: its class, message, ex-data and first-party frames."}
+              [:seon.error/throwable-class :seon.error/throwable-class]
+              [:seon.error/message {:optional true} :seon.error/message]
+              [:seon.error/data {:optional true} :seon.error/data]
+              [:seon.error/frames {:optional true} :seon.error/frames]],
+             :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable, outermost to root. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
              :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
              :regressions [:set :seon.db/ref],
              :issue :seon.db/ref,
@@ -304,6 +313,7 @@
   {:optional true}
   :seon.error/evidence-unavailable]
  [:seon.error/cause {:optional true} :seon.error/cause]
+ [:seon.error/chain {:optional true} :seon.error/chain]
  [:seon.error/fix {:optional true} :seon.error/fix]
  [:seon.error/basis {:optional true} :seon.error/basis]]
 

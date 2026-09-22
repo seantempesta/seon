@@ -1157,29 +1157,6 @@
       ;; request may have been transmitted) are all terminal
       :else :fail)))
 
-(defn- cause-chain
-  "Every throwable in `failure`'s cause chain as `class: message` strings.
-
-  THE JDK PUTS THE REAL CAUSE IN THE CAUSE. A body whose stream ends
-  early surfaces as `java.io.IOException: closed` with the actual
-  failure attached underneath
-  (`ResponseSubscribers.java:355-380`, openjdk 26.0.1 — `throw new
-  IOException(\"closed\", failed)`). Recording only `ex-message` is how
-  seven consecutive production failures said `closed` and named nothing:
-  the diagnosis was thrown away at the catch site. A diagnostic that
-  omits what it holds is a defect even while it 'works'.
-
-  Private and unschema'd on purpose: its argument is a host Throwable,
-  which is not a declarable value shape, and a `:seon.ai/throwable`
-  placeholder would be an invented schema for a host object."
-  [^Throwable failure]
-  (loop [failure failure chain []]
-    (if (nil? failure)
-      chain
-      (recur (.getCause failure)
-             (conj chain (str (.getName (class failure)) ": "
-                              (ex-message failure)))))))
-
 (defn- caused-by?
   [failure throwable-class]
   (boolean
@@ -1221,22 +1198,25 @@
   (let [received (count (:seon.ai/text snapshot))
         reasoning-received (count (:seon.ai/reasoning-partial snapshot))
         time-limit-fired? (caused-by? failure
-                                      java.net.http.HttpTimeoutException)
-        chain (cause-chain failure)]
-  {:seon.error/at (java.util.Date.)
+                                      java.net.http.HttpTimeoutException)]
+  (cond-> {:seon.error/at (java.util.Date.)
        :seon.error/layer :seon.ai/request
        :seon.error/operation 'seon.ai/truncation
        :seon.error/offending snapshot
        :seon.ai/interrupted-text-count received
        :seon.error/message "The provider stream ended before its terminal event; inspect the retained partial output and transport evidence."
-       :seon.error/data (cond-> {::cause-chain chain
-              ::text-received received
+       :seon.error/data (cond-> {::text-received received
               ::time-limit-fired? time-limit-fired?
               ::thread-interrupted? (.isInterrupted (Thread/currentThread))}
        (pos? reasoning-received)
        (assoc ::reasoning-received reasoning-received))
        :seon.error/member :seon.ai/text
-       :seon.error/expected "a terminal stream event"}))
+       :seon.error/expected "a terminal stream event"}
+    ;; THE JDK PUTS THE REAL CAUSE IN THE CAUSE: an early-ended body is
+    ;; `IOException: closed` with the actual failure underneath
+    ;; (`ResponseSubscribers.java:355-380`, openjdk 26.0.1). The diagnostic
+    ;; records that whole chain as `:seon.error/chain`.
+    failure (-> (assoc :seon.error/throwable failure) refusal/diagnostic))))
 
 (defn- truncated-completion
   "One completion value for a 2xx stream that ended before its terminal.
@@ -1421,7 +1401,9 @@
                          (output-observed? (:seon.error/data completion))})
                 completion))
             (catch Throwable failure
+              (refusal/diagnostic
               {:seon.error/at (java.util.Date.)
+       :seon.error/throwable failure
        :seon.error/layer :seon.ai/request
        :seon.error/operation 'seon.ai/send-request
        :seon.error/offending body
@@ -1429,7 +1411,6 @@
        :seon.error/data {::status status
                                  ::error-class :response
                                  ::http-status status
-                                 ::cause-chain (cause-chain failure)
                                  ::request-transmitted? true
                                  ::response-started? true
                                  ;; a 2xx body EXISTS, so the provider
@@ -1437,7 +1418,7 @@
                                  ;; even though we cannot read it
                                  ::output-observed? true}
        :seon.ai/unreadable-response-member "body"
-       :seon.error/expected "provider JSON with a textual assistant response"}))
+       :seon.error/expected "provider JSON with a textual assistant response"})))
           (let [body (str (read-body))]
             {:seon.error/at (java.util.Date.)
        :seon.error/layer :seon.ai/request
