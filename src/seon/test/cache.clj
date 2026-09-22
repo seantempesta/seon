@@ -217,7 +217,11 @@
             (not (source-file? path))))))
 
 (defn gitlink-digests
-  "Read Git commit identities; snapshot pins take precedence over the live index."
+  "Digest each submodule's Git pin; snapshot pins take precedence over the live index.
+  The pin is a 40-character commit id, and each digest here is consumed as a
+  64-character `:seon.fn.file/digest` of a directory input
+  (`seon.cluster.source/capture-paths`), so the pin is hashed into that shape:
+  a commit id is not a file digest, and a pin stored raw needs its own attribute."
   {:malli/schema [:=> [:cat :string] [:map-of :string :string]]}
   [root]
   (let [recorded (io/file root "dependency-pins.txt")
@@ -240,7 +244,7 @@
                           tokens (vec (enumeration-seq
                                        (java.util.StringTokenizer. (subs line 0 tab))))]
                       [(subs line (inc tab))
-                       (second tokens)]))))
+                       (sha-256 (.getBytes ^String (second tokens) "UTF-8"))]))))
           (str/split-lines text))))
 
 (defn toolchain-dependencies
