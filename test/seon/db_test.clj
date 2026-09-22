@@ -2157,7 +2157,7 @@
            decoded? (atom false)
            refusal (@#'db/read-declarations {:not :a-database} 'seon.db/pull)
            data (:seon.error/data refusal)]
-       (is (true? (:seon.db/invalid-read refusal)))
+       (is (= 'seon.db/pull (:seon.db.read/unreadable-declarations refusal)))
        (is (= :seon.db/installed-schema
               (:seon.error/diagnostic-member data)))
        (is (= 'seon.db/pull (:seon.error/diagnostic-operation data)))
@@ -2175,6 +2175,23 @@
                (constantly ::decoded)))
            "a real database still hands its declarations to the decoder")))))
 
+(deftest database-operations-preserve-refusals-at-their-declared-boundary
+  (test-support/with-database
+   (fn [connection]
+     (let [refusal (config/effective (db/db connection) "absent-kind-review-cluster")]
+       (is (= :seon.config/cluster (:seon.config/error-key refusal)))
+       (doseq [result [(db/q refusal '[:find ?e :where [?e :seon.agent/id]])
+                       (db/pull refusal [:db/id] 1)
+                       (db/datoms refusal :eavt)
+                       (db/history refusal)
+                       (db/as-of refusal 0)
+                       (db/db refusal)]]
+         (is (true? (:seon.db/invalid-read result)))
+         (is (= refusal (dissoc result :seon.db/invalid-read :seon.db/refused-read-operation))))
+       (let [result (db/transact! refusal {:tx-data []})]
+         (is (true? (:seon.db/transaction-refused result)))
+         (is (= refusal (dissoc result :seon.db/transaction-refused :seon.db.write.attempt/request-id))))))))
+
 (deftest an-unknown-read-operation-refuses-naming-the-attribute
   ;; CLASS: no-matching-clause (critical finding #19). `replay-read`'s `case`
   ;; had four arms and no default, so a fifth value threw
@@ -2187,7 +2204,7 @@
            unknown (replay database
                            {:seon.db/read-operation :seon.db/not-an-operation})
            data (:seon.error/data unknown)]
-       (is (true? (:seon.db/invalid-read unknown)))
+       (is (= :seon.db/not-an-operation (:seon.db.read/unknown-read-operation unknown)))
        (is (= :seon.db/read-operation (:seon.error/diagnostic-member data)))
        (is (= :seon.db/not-an-operation
               (:seon.error/diagnostic-offending data)))))))
@@ -2251,7 +2268,8 @@
                         projection 'seon.db/pull schema-key [:seon.ns/name]
                         {:seon.ns/name "my.message"})
                data (:seon.error/data refusal)]
-           (is (true? (:seon.db/invalid-read refusal))
+           (is (= (schema/pulled-schema-key schema-key [:seon.ns/name])
+                  (:seon.db.read/invalid-pulled-result refusal))
                "a wrong-typed expectation fails: the name is a symbol, not a string")
            (is (= {:seon.ns/name "my.message"}
                   (:seon.error/diagnostic-offending data)))))))))

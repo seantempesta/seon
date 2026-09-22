@@ -134,7 +134,7 @@
         attributes (ai/agent-setting-attributes database)
         refusal (some #(when (or (:seon.db/invalid-read %)
                                  (:seon.schema/expected-value %)
-                                 (:seon.config/missing-effective %)) %)
+                                 (:seon.config/error-key %)) %)
                       [cluster-name defaults overrides attributes])]
     (cond
       refusal refusal

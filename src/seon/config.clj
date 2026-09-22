@@ -873,7 +873,7 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
     [:or :seon.config/effective :seon.config/error
-     :seon.schema/validation-refusal :seon.db/error-result]]}
+     :seon.schema/validation-refusal :seon.db/invalid-read-error]]}
   [db cluster-name]
   (if-let [projection (or (db/carried-projection db)
                           (schema/handed-projection))]
@@ -884,16 +884,14 @@
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.db/error-result]
          :seon.boot/cluster-name :seon.schema/projection]
-    [:or :seon.config/effective :seon.config/error :seon.db/error-result]]}
+    [:or :seon.config/effective :seon.config/error :seon.db/invalid-read-error]]}
   [db cluster-name projection]
   (let [forms (:seon.schema.projection/forms projection)
         row (db/pull db '[*] [:seon.config/cluster cluster-name])]
     ;; A refused read is not an absent row. Reading the refusal's own keys as
     ;; the config row reports every dial missing and blames the facts; the
     ;; cause here is the read, so return the read's refusal unchanged.
-    (if (or (:seon.db/read-operation row)
-            (:seon.db.availability/connection row)
-            (:seon.schema/expected-value row))
+    (if (:seon.db/invalid-read row)
       row
       (let [config-effective (select-keys row (dial-attributes projection))
             missing (vec (sort (set/difference (required-dial-attributes projection)
@@ -901,12 +899,12 @@
         (if (and row (empty? missing))
           config-effective
           (let [available
-                (vec
-                 (sort
                   (db/q '[:find [?available ...]
                           :where
                           [_ :seon.config/cluster ?available]]
-                        db)))]
+                        db)]
+            (if (:seon.db/invalid-read available)
+              available
             (error/diagnostic
              {:seon.error/at (java.util.Date.)
              :seon.error/layer :seon.config/read
@@ -921,6 +919,6 @@
              :seon.error/diagnostic-cause :seon.config/missing-effective
              :seon.error/diagnostic-evidence {:seon.config/missing missing}
              :seon.config/missing-effective cluster-name
-             :seon.error/data {::missing missing ::available available}
+             :seon.error/data {::missing missing ::available (vec (sort available))}
              :seon.error/message
-             "Effective configuration requires a matching cluster row with every required dial."})))))))
+             "Effective configuration requires a matching cluster row with every required dial."}))))))))

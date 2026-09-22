@@ -21,4 +21,28 @@
  {:seon.db/component true,
   :seon.db/component-schema :seon.db.read.target/entity}
  :seon.db/ref]
+
+ :seon.db.read/unknown-read-operation :keyword
+ :seon.db.read/unknown-read-operation-error
+ [:and :seon.error/base :seon.db/invalid-read-error
+  [:map {:seon.db/attributes true}
+   [:seon.db.read/unknown-read-operation :seon.db.read/unknown-read-operation]]]
+
+ :seon.db.read/unreadable-declarations :qualified-symbol
+ :seon.db.read/unreadable-declarations-error
+ [:and :seon.error/base :seon.db/invalid-read-error
+  [:map {:seon.db/attributes true}
+   [:seon.db.read/unreadable-declarations :seon.db.read/unreadable-declarations]]]
+
+ :seon.db.read/disagreeing-pull-schema [:set :qualified-keyword]
+ :seon.db.read/disagreeing-pull-schema-error
+ [:and :seon.error/base :seon.db/invalid-read-error
+  [:map {:seon.db/attributes true}
+   [:seon.db.read/disagreeing-pull-schema :seon.db.read/disagreeing-pull-schema]]]
+
+ :seon.db.read/invalid-pulled-result :seon.schema/key
+ :seon.db.read/invalid-pulled-result-error
+ [:and :seon.error/base :seon.db/invalid-read-error
+  [:map {:seon.db/attributes true}
+   [:seon.db.read/invalid-pulled-result :seon.db.read/invalid-pulled-result]]]
 }

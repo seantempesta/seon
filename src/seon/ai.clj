@@ -325,13 +325,12 @@
 (defn agent-setting-attributes
   "The override keys, queried from the installed overlay schema's references."
   {:malli/schema [:=> [:cat :seon.db/db]
-                  [:or [:set :qualified-keyword] :seon.db/error-result :seon.schema/validation-refusal]]}
+                  [:or [:set :qualified-keyword] :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [database]
   (let [row (db/pull database '[(limit :seon.schema/references nil)]
                      [:seon.schema/key :seon.config/agent-overlay])]
     (cond
-      (and (map? row) (contains? row :seon.error/at) ; debt: seon.db/pull declares :seon.error/value
-           (contains? row :seon.error/layer) (contains? row :seon.error/operation)) row
+      (:seon.db/invalid-read row) row
       (seq (:seon.schema/references row))
       (set (:seon.schema/references row))
       :else
@@ -354,16 +353,15 @@
   "Declared setting overrides for one agent in a database value."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.agent/id]
-    [:or :seon.config/agent-overlay :seon.db/error-result :seon.schema/validation-refusal]]}
+    [:or :seon.config/agent-overlay :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [db agent-id]
   (let [attributes (agent-setting-attributes db)]
-    (if (and (map? attributes) (contains? attributes :seon.error/at) ; debt: seon.db/pull declares :seon.error/value
-           (contains? attributes :seon.error/layer) (contains? attributes :seon.error/operation))
+    (if (or (:seon.db/invalid-read attributes)
+            (:seon.schema/expected-value attributes))
       attributes
       (let [row (db/pull db [{:seon.agent/settings (vec attributes)}]
                          [:seon.agent/id agent-id])]
-        (if (and (map? row) (contains? row :seon.error/at) ; debt: seon.db/pull declares :seon.error/value
-           (contains? row :seon.error/layer) (contains? row :seon.error/operation))
+        (if (:seon.db/invalid-read row)
           row
           (select-keys (:seon.agent/settings row) attributes))))))
 

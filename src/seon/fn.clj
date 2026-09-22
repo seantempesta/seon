@@ -1412,7 +1412,7 @@
   Data rows may name a target by symbol or reference; keyword readers do not
   become invokers. The indexed walk and Datalog consumers share these rules."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
+                  [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error]]}
   [database]
   (db/q '[:find ?caller ?target :in $ %
           :where (declared-edge ?caller ?target)]
@@ -1424,7 +1424,7 @@
                        [:map-of :int :qualified-symbol] [:set :qualified-symbol]
                        [:map-of :qualified-symbol [:set :qualified-symbol]]
                        [:sequential :qualified-symbol]]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database identities tests incoming seeds]
   (loop [pending (vec seeds) seen #{}]
     (if-let [target (peek pending)]
@@ -1433,7 +1433,7 @@
         (let [calls (db/datoms database :avet :seon.fn/calls target)
               references (db/datoms database :avet :seon.fn/references target)
               subjects (db/datoms database :avet :seon.test/subject target)
-              refusal (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %) [calls references subjects])]
+              refusal (some #(when (:seon.db/invalid-read %) %) [calls references subjects])]
           (if refusal
             refusal
             (let [referrers (into (get incoming target #{})
@@ -1448,7 +1448,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:sequential :qualified-symbol] :boolean]
                   [:or [:vector :seon.test/sym]
-                   [:map-of :qualified-symbol [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
+                   [:map-of :qualified-symbol [:vector :seon.test/sym]] :seon.db/invalid-read-error]]}
   [database function-symbols union?]
   (let [identity-rows (db/q '[:find ?entity ?symbol
                              :where (or [?entity :seon.fn/sym ?symbol]
@@ -1463,7 +1463,7 @@
         handlers (db/q '[:find ?caller ?symbol
                          :where [?caller :seon.fn/sym]
                                 [?caller :seon.effect/capability ?symbol]] database)
-        refusal (some #(when (or (:seon.db/invalid-read %) (:seon.schema/expected-value %)) %)
+        refusal (some #(when (:seon.db/invalid-read %) %)
                       [identity-rows test-symbols declared file-references handlers])]
     (if refusal
       refusal
@@ -1480,8 +1480,7 @@
           (reduce (fn [result function-symbol]
                   (let [selected (gate-set-in database identities (set test-symbols)
                                               incoming [function-symbol])]
-                    (if (or (:seon.db/invalid-read selected)
-                            (:seon.schema/expected-value selected))
+                    (if (:seon.db/invalid-read selected)
                       (reduced selected)
                       (assoc result function-symbol selected))))
                 {} (distinct function-symbols)))))))
@@ -1492,9 +1491,9 @@
   {:malli/schema
    [:function
     [:=> [:cat :seon.fn/gate-request]
-     [:or [:vector :seon.test/sym] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]
+     [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]
     [:=> [:cat :seon.db/database-value [:sequential :seon.fn/sym]]
-     [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error :seon.schema/missing-projection-error :seon.schema/validation-refusal]]]}
+     [:or [:map-of :seon.fn/sym [:vector :seon.test/sym]] :seon.db/invalid-read-error]]]}
   ([{database :seon.db/db seeds :seon.fn/seeds}]
    (gate-sets-in database (vec seeds) true))
   ([database function-symbols]
@@ -1544,18 +1543,16 @@
   explicitly pending subject; unresolved file references select that file's
   tests. Use gate-sets when one operation asks about several identities."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error
-                   :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
   (let [result (gate-sets database [function-symbol])]
-    (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+    (if (:seon.db/invalid-read result)
       result (get result function-symbol))))
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error
-                   :seon.schema/missing-projection-error :seon.schema/validation-refusal]]}
+                  [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
   (gate-set database function-symbol))
 
@@ -1754,16 +1751,17 @@
   runtime is absent, so an empty result means \"no declaration names it\",
   not \"nothing reaches it\"."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
-                  [:vector :seon.fn/sym]]}
+                  [:or [:vector :seon.fn/sym] :seon.db/invalid-read-error]]}
   [database keyword]
-  (->> (db/q '[:find [?function-symbol ...]
+  (let [result (db/q '[:find [?function-symbol ...]
                :in $ ?keyword
                :where
                [?function :seon.fn/keywords ?keyword]
                [?function :seon.fn/sym ?function-symbol]]
-             database keyword)
-       sort
-       vec))
+             database keyword)]
+    (if (:seon.db/invalid-read result)
+      result
+      (vec (sort result)))))
 
 (defn arity-mismatches
   "Call sites whose source count no prepared arity of the callee admits.
@@ -3115,11 +3113,11 @@
    [:=> [:cat :seon.db/transaction-report]
     [:or :seon.reconcile/adopt-identities :seon.error/value]]}
   [{before :db-before after :db-after datoms :tx-data}]
-  (let [attributes (vec (set/union (set (db/identity-attributes before))
-                                  (set (db/identity-attributes after))))
-        entities (into #{} (map :e) datoms)
+  (let [entities (into #{} (map :e) datoms)
         identities (fn [database]
-                     (let [rows (db/pull-many database attributes (vec entities))]
+                     (let [rows (db/pull-many database
+                                             (db/identity-attributes database)
+                                             (vec entities))]
                        (if (:seon.error/at rows)
                          rows
                          (into #{} (mapcat #(dissoc % :db/id)) rows))))

@@ -57,7 +57,7 @@
                                     '[:find [?entity ...] :in $ ?attribute ?value
                                       :where [?entity ?attribute ?value]]
                                     attribute value)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))]
                 (when (seq entities)
@@ -86,7 +86,7 @@
          '[:find [?name ...] :in $ ?attribute ?target ?identity
            :where [?owner ?attribute ?target] [?owner ?identity ?name]]
          attribute target identity-attribute)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)))
 
@@ -112,12 +112,12 @@
         arities (let [result (db/q database
                        '[:find [?arity ...] :in $ ?entity
                          :where [?entity :seon.fn/arities ?arity]] entity)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
         declared (mapv #(dissoc (let [result (db/pull database
                                                  [:seon.fn.arity/min :seon.fn.arity/max] %)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
                                 :db/id) arities)
@@ -128,19 +128,19 @@
                  (let [stored caller
                        row (or (let [result (db/pull database [:db/id :seon.fn/form-span]
                                                  [:seon.fn/sym stored])]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
                                (let [result (db/pull database [:db/id :seon.fn/form-span]
                                                  [:seon.test/sym stored])]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)))
                        tuples (let [result (db/q database
                                      '[:find [?tuple ...] :in $ ?entity
                                        :where [?entity :seon.fn/call-arities ?tuple]]
                                      (:db/id row))]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
                        counts (keep (fn [[callee arity]]
@@ -186,7 +186,7 @@
                           {:seon.program/gating
                            (mapv symbol (let [result (function/gate-set
                                                   database subject)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)))})))))
 
@@ -202,12 +202,12 @@
                  [?function :seon.fn/sym ?name]]
                schema-key [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
                        :seon.fn.arity/guard-refs])]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
         datoms (if (get-in (db/schema-database database) [:schema schema-key])
                  (let [result (db/datoms database :aevt schema-key)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)) [])]
     (present-groups
@@ -216,7 +216,7 @@
       :seon.program/schema-references
       (set (names-through database :seon.schema/references schema-key :seon.schema/key))
       :seon.program/mentions (symbols (let [result (function/functions-using database schema-key)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)))
       :seon.program/data-in-use (when (seq datoms)
@@ -253,7 +253,7 @@
                                   [?schema :seon.schema/key ?key]
                                   [?schema ?property ?renderer]]
                                 property)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)))))
         [:seon.render/ai :seon.render/html]))
@@ -264,7 +264,7 @@
   (let [names (sort caller-symbols)
         stored (vec names)
         gates (let [result (function/gate-sets database stored)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
         detector 'seon.program/unresolved-callers]
@@ -316,7 +316,7 @@
                          (when (qualified-symbol? subject)
                            [subject]))
           gates (let [result (function/gate-sets database (vec gate-names))]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
           report
@@ -364,7 +364,7 @@
               (update row a (fnil conj #{}) v)
               (assoc row a v)))
           {} (let [result (db/datoms database :eavt entity)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))))
 
@@ -381,17 +381,17 @@
   (read-result
    request 'my.program/history
    #(let [view (if at (let [result (db/as-of database at)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)) database)
           past (let [result (db/history database)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
           {kind :seon.program/kind entities :seon.program/entities} (locate past subject)
           identity-declaration (let [result (db/pull database [:seon.program/source-attribute]
                                                 [:seon.schema/key kind])]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
           source-attribute (:seon.program/source-attribute identity-declaration)
@@ -400,17 +400,17 @@
                           :in $ [?entity ...] ?attribute
                           :where [?entity ?attribute ?source ?tx ?added]]
                         entities source-attribute)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
           entries
           (mapv (fn [[entity source tx added]]
                      (let [snapshot (let [result (db/as-of database (or at (if added tx (dec tx))))]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
                            provenance (let [result (db/pull database [:seon.db/user :seon.db/process] tx)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))]
                        (merge {:seon.db/tx tx :seon.db/added? added
@@ -465,7 +465,7 @@
   [{database :seon.db/db :as request}]
   (read-result request 'my.program/overrides
                #(let [result ((requiring-resolve 'seon.program/overrides) database)]
-                  (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+                  (if (:seon.db/invalid-read result)
                     (throw (ex-info (:seon.error/message result) result))
                     result))))
 
@@ -541,7 +541,7 @@
    {:seon.program/subject subject} operation
    #(let [connection (:seon.db/connection context)
           [report affected] (deletion-report (let [result (db/db connection)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)) subject)]
       (if (or (blocking? report) (some keyword? affected))
@@ -563,7 +563,7 @@
                       (mapv (fn [target]
                               [:db/retractEntity (:seon.program/identity (locate database target))])
                             (sort-by str subjects))))]])]
- (if (or (:seon.db.write.attempt/request-id result) (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/transaction-refused result)
 
  (throw (ex-info (:seon.error/message result) result)) result))]
           (native! (:seon.sci.eval/ctx context) native-form)
@@ -617,7 +617,7 @@
    {:seon.program/subject namespace-name} 'my.program/ns-unalias!
    #(let [connection (:seon.db/connection context)
           [report affected] (deletion-report (let [result (db/db connection)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result)) namespace-name)]
       (if (blocking? report)
@@ -636,11 +636,11 @@
                                            [?namespace :seon.ns/aliases ?alias]
                                            [?alias :seon.ns.alias/local ?local]]
                                          namespace-name alias-name)]
- (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/invalid-read result)
 
  (throw (ex-info (:seon.error/message result) result)) result))]
                       (mapv (fn [entity] [:db/retractEntity entity]) aliases)))]])]
- (if (or (:seon.db.write.attempt/request-id result) (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+ (if (:seon.db/transaction-refused result)
 
  (throw (ex-info (:seon.error/message result) result)) result))
               form (list 'clojure.core/ns-unalias (list 'quote namespace-name) (list 'quote alias-name))]

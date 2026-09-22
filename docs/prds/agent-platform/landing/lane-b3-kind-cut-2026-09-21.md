@@ -2018,3 +2018,163 @@ foreign/untracked paths are preserved.
 Documentation lint repeatedly reported seven stale dependency-gitlink citations
 in other documents/skills. No source publication is claimed for documentation
 edits, and this lane did not rewrite those foreign authorities to silence lint.
+
+
+## Independent review follow-up — producer guarantees (2026-09-22)
+
+Read `docs/research/agent-platform/kind-cut-diff-review-2026-09-22.md` end to end.
+This slice addresses findings 1, 2 and 4; it is not a claim that the remaining
+render/plan decisions, effect hang or final namespace matrix have passed.
+
+Database read boundaries now accrete `:seon.db/invalid-read true` and the
+qualified-symbol evidence `:seon.db/refused-read-operation` onto a forwarded
+flat refusal. Their output contracts name `:seon.db/invalid-read-error`.
+Transactions accrete the existing `:seon.db/transaction-refused` member and
+retain the existing write-attempt request identity, including failures before a
+live connection is available. No wrapper or error predicate was added.
+`seon.fn/functions-using` widens its formerly vector-only output to admit the
+read refusal instead of sorting its map entries. Gate-set readers, program
+overrides, AI setting reads and effective config declare the narrowed producer
+alternatives. The effective config available-clusters query is checked before sorting.
+
+Four read failures now retain separate declared evidence:
+`unknown-read-operation` (requested operation), `unreadable-declarations`
+(operation symbol), `disagreeing-pull-schema` (conflicting schema keys), and
+`invalid-pulled-result` (derived schema key), under `seon.db.read`. Existing
+assertions distinguish these outcomes again. A new canonical-fixture regression
+passes a real config refusal through q, pull, datoms, history, as-of, db and
+transact!, checking both the boundary member and preserved original fields.
+It has not run yet: the orchestrator's fresh fixture base is not confirmed.
+
+### Domain decisions amended by this slice
+
+| Site | Declared member | Why the branch remains |
+|---|---|---|
+| `my.program/locate:60` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/names-through:89` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/caller-data:115` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/caller-data:120` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/caller-data:131` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/caller-data:136` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/caller-data:143` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/tests-reaching:189` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/key-data:205` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/key-data:210` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/key-data:219` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/render-referrers:256` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/proposed-plan:267` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/breaks:319` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/entity-facts:367` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/history:384` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/history:388` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/history:394` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/history:403` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/history:409` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/history:413` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/overrides:468` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/retract-operation!:544` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/retract-operation!:566` | `:seon.db/transaction-refused` | Success continues reading, formatting or applying the program operation. |
+| `my.program/ns-unalias!:620` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/ns-unalias!:639` | `:seon.db/invalid-read` | Success continues reading, formatting or applying the program operation. |
+| `my.program/ns-unalias!:643` | `:seon.db/transaction-refused` | Success continues reading, formatting or applying the program operation. |
+| `seon.agent/effective-settings` | `:seon.config/error-key`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | Configuration and overlay refusals cannot become AI settings. |
+| `seon.config/effective-in` (row and available query) | `:seon.db/invalid-read` | Only successful reads derive settings or available cluster names. |
+| `seon.ai/agent-setting-attributes`, `agent-overlay` | `:seon.db/invalid-read`; declared schema refusal where applicable | Only successful rows contribute settings. |
+| `seon.fn/gate-set-in`, `gate-sets-in`, `tests-reaching`, `functions-using` | `:seon.db/invalid-read` | Only successful query collections are traversed/sorted. |
+| `seon.program/overrides` | `:seon.db/invalid-read` | Only successful historical datoms are projected. |
+
+### Exact probe and publication limits
+
+Read-only MCP on default (pid 15000), 39 ms:
+```clojure
+(let [connection (seon.cluster.boot/connection "default")
+      failure (seon.config/effective (seon.db/db connection) "absent-kind-review-cluster")
+      result (seon.db/pull failure [:db/id] 1)]
+  {:producer (select-keys failure [:seon.config/error-key :seon.config/missing-effective :seon.db/invalid-read])
+   :consumer (select-keys result [:seon.config/error-key :seon.db/invalid-read])})
+```
+Value:
+```clojure
+{:producer {:seon.config/error-key :seon.config/cluster
+            :seon.config/missing-effective "absent-kind-review-cluster"}
+ :consumer {:seon.config/error-key :seon.config/cluster}}
+```
+This falsifies the old guard's coverage. The later 5 ms probe still returned the
+old shape; publication had not adopted these changes.
+
+Hook `320c4291-2d43-4bf9-9461-bf2394ac910c` ran from
+08:40:34.414737Z to refusal at 08:40:46.805206Z (12.390 s). Its load phase
+exposed the initial invalid boolean-only error facet; corrected by the operation
+and request-identity evidence above. Local production and selected test namespace
+requires then exited 0. This was load evidence, not test execution.
+
+Explicit owned-path `bin/seon init --dev default --changed …` exited 1:
+`Bad entity attribute :seon.db.read/invalid-pulled-result at (resolve-datom db
+22776 :seon.db.read/invalid-pulled-result nil nil), not defined in current schema`;
+`:seon.cluster.source/publish-readback-failed` at 08:46:41–42Z. Source inspection
+found `seon.fn/report-identities` unioned before/after identity attributes and
+pulled both databases with that union. It now derives each selector from its
+own immutable database schema. This permits a newly installed identity attribute
+to be absent in the before database without making publication readback fail.
+
+Hook `2474571b-5b78-40d9-af81-be63d359c548` also refused publication readback.
+Before a reload could run, default changed to pid 21908, start-instant
+2026-09-22T08:50:41.673Z. At 08:54:03Z `bin/seon status` exited 1 with
+`count not supported on this type: Keyword`; MCP runtime_status and eval_clj
+returned `The MCP config read has no cluster projection state.` The reload form
+`(do (require 'seon.fn :reload) :seon.fn/reloaded-for-publication-readback)`
+was not executed. No restart or stop was performed by this lane.
+The orchestrator paused hooks in `bf37bed93`; no live-adoption timing or pass is
+claimed for this slice. The publication measurement script cannot exercise this
+unavailable adoption boundary yet; its clock row remains outstanding.
+
+The prescribed production require plus `my.program` exited 0 in the local JVM
+on 2026-09-22 (captured in `tmp/kind-review-load.log`, session 74714).
+No test JVM remains from that command. Canonical behavior tests, arming proof,
+publication adoption and the final namespace matrix remain pending.
+
+### Scratch publication and live producer probe
+
+`bin/seon --root tmp/kind-review-probe start kind-review` first refused
+`Source changed during publication; retry.` after a concurrent source edit.
+The root was stopped through `bin/seon --root tmp/kind-review-probe down`.
+The subsequent start, with this lane making no source edits during indexing,
+reached `:seon.boot/missing-layers []`, ready-ms **96964**, pid 22821,
+source commit `6ab2439a-70be-5ce6-b3b4-1819a68fa442`.
+A `jcmd 22821 Thread.print` sample at elapsed 54.43 s found the main thread
+awaiting the index transaction and `async-mixed-1` RUNNABLE in
+`seon.db/write-owned-values-error` → `owning-ancestors` during whole-program
+index validation. This is a measured slow phase, not an adoption time.
+The child exited with the launcher session. Restarting that same root in a held
+shell reached missing-layers [] in **5286 ms**, pid 23151.
+
+Read-only MCP on that root/cluster, 4 ms:
+```clojure
+(let [connection (seon.cluster.boot/connection "kind-review")
+      failure (seon.config/effective (seon.db/db connection) "absent-kind-review-cluster")
+      result (seon.db/pull failure [:db/id] 1)]
+  {:producer (select-keys failure [:seon.config/error-key])
+   :consumer (select-keys result [:seon.config/error-key :seon.db/invalid-read :seon.db/refused-read-operation])})
+```
+Returned:
+```clojure
+{:producer {:seon.config/error-key :seon.config/cluster}
+ :consumer {:seon.config/error-key :seon.config/cluster
+            :seon.db/invalid-read true
+            :seon.db/refused-read-operation seon.db/pull}}
+```
+This verifies the changed producer in a from-zero published runtime; it does
+not prove default adoption or the canonical test matrix. Dependency-error callers
+now supply operation symbols directly (review finding 14), including pull's
+public operation instead of its internal result keyword.
+
+An effect diagnostic using the real scratch connection, canonical fixture writer,
+`install-capability!`, request context and `effect/request!` returned
+`#:seon.effect-test{:value 7, :cluster nil, :virtual-thread? true}` in **318 ms**.
+This did not reproduce the reported hang. The in-process `seon.test/run` probe
+then refused selection without explicit cluster custody. With cluster identity
+and body custody supplied it recorded an error because a fixture branch is not
+the cluster branch. Corrected to supply result cluster identity without body
+custody, it recorded 0 pass / 0 fail / 1 error: the installed fixture base lacks
+`:seon.config.operator/export-bound-ms`. No fabricated base or cold gate was used.
+The effect hang is still unproved and unfixed; the fresh-base run must reach it.

@@ -56,11 +56,11 @@
       Example:
       (seon.program/overrides (seon.db/db connection))"
      {:malli/schema [:=> [:cat :seon.db/database-value]
-                     [:or [:vector :seon.fn/sym] :seon.db/error-result]]}
+                     [:or [:vector :seon.fn/sym] :seon.db/invalid-read-error]]}
      [database]
      ; seon.db requires this declaration owner; resolve its read functions late.
      (let [history ((requiring-resolve 'seon.db/history) database)]
-       (if (or (:seon.db/invalid-read history) (:seon.schema/expected-value history))
+       (if (:seon.db/invalid-read history)
          history
          (let [result
                ((requiring-resolve 'seon.db/q)
@@ -76,7 +76,7 @@
                   [$history ?member :seon.fn/file ?file]
                   [$ ?file :seon.fn.file/relative-root "src"]]
                 database history)]
-           (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result))
+           (if (:seon.db/invalid-read result)
              result
              (vec (sort result))))))))
 
