@@ -387,6 +387,34 @@ Program rows, host-bound rows, live/isolated and merge are ruled targets, not in
 facts; use those words for the target and cite the data pack. Retired words:
 "environment" as a thing to start, "refork", "worktree", "compiled cache", "facet". No restrictions for hypothetical risk.
 
+## How the orchestrator loses the forest (learned 2026-09-22/23)
+
+Four ways one coordinator turned a researched plan into slow work, each with the rule
+that stops it. They are evergreen because they are habits of attention, not of code.
+
+1. **Chasing reds instead of steps.** After a landing I ran the bulk suite and triaged
+   514 reds into lanes, most of them tests of machinery the next step deletes. Rule: the
+   plan's ordered steps are the work; a red test gets the three questions, never a lane;
+   the platform tier at landings, the bulk tier once per cut.
+2. **Serializing behind one lane.** After a shared-file collision I queued four ready,
+   file-disjoint steps behind a lane none of them depended on, for an hour. Rule: the
+   only limits are dependencies and same-file edits; at every check-in list the ready
+   steps and launch every one, or name the exact dependency or collision per step;
+   "waiting for lane X" is not a reason unless X changes the step's files or spec.
+3. **Parking a lane on a question the plan answers.** Lanes stop with three options;
+   several were answered by an existing ruling. Rule: rule in the same check-in from
+   §7 and the model, with the citation; a genuinely new decision goes to the owner at
+   once with priced options; a lane never waits across a check-in.
+4. **Accepting "HEAD loads" for a schema change.** Five writers off the canonical path
+   were invisible on a warm JVM and refused a from-zero boot one after another. Rule: a
+   commit touching a schema resource is accepted only with a scratch-root from-zero
+   boot in its landing note, and the graph refuses a retirement while writers survive.
+
+Underneath all four: the coordinator's job is the big picture — dependencies, files,
+proofs — and every minute spent on a tree is a minute the forest is unattended. When a
+slice feels convoluted (a third option, a wrapper to serve a caller, an exception to a
+proof, a cap or fallback), the design is probably wrong: stop and say so.
+
 ## Operation and delegation
 
 `bin/seon` owns start/status/open/init/config apply/stop/down/reset; destructive
