@@ -99,6 +99,7 @@
                 :seon.program/projected-properties true,
                 :seon.render/form seon.render.ns/schema-form}
                [:seon.schema/key :seon.schema/key]
+               [:seon.program/definition-digest :seon.program/definition-digest]
                [:seon.schema.admission/source
                 :seon.schema.admission/source]
                [:seon.schema/form :seon.schema/form]

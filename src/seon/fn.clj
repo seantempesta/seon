@@ -291,8 +291,8 @@
 
 (defn- namespace-row [contexts context entry]
   (let [namespace-name (::analyzer/name entry)
-        {:keys [aliases refers imports requires]} context]
-    (cond-> {:seon.ns/name namespace-name
+        {:keys [aliases refers imports requires]} context
+        row (cond-> {:seon.ns/name namespace-name
              :seon.fn/file [:seon.fn.file/relative-path (::analyzer/filename entry)]
              :seon.ns/source (exact-source contexts entry)}
       (::analyzer/doc entry) (assoc :seon.ns/doc (::analyzer/doc entry))
@@ -316,12 +316,24 @@
       (assoc :seon.ns/imports
              (into #{} (map (fn [[local target]]
                               {:seon.ns.import/local local
-                               :seon.ns.import/target-class target})) imports)))))
+                               :seon.ns.import/target-class target})) imports)))]
+    (assoc row :seon.program/definition-digest
+           (program/definition-digest row))))
 
 (defn- function-definition?
   [entry]
   (or (seq (::analyzer/arglist-strs entry))
       (= 'clojure.core/defmulti (::analyzer/defined-by->lint-as entry))))
+
+(defn- stored-namespace-context
+  [{:seon.ns/keys [requires aliases refers imports]}]
+  {:requires (set requires)
+   :aliases (into {} (map (juxt :seon.ns.alias/local
+                                :seon.ns.alias/target-ns)) aliases)
+   :refers (into {} (map (fn [{:seon.ns.refer/keys [local target-ns target-name]}]
+                            [local (symbol (str target-ns) (str target-name))])) refers)
+   :imports (into {} (map (juxt :seon.ns.import/local
+                                :seon.ns.import/target-class)) imports)})
 
 (defn- first-party-function-symbols
   [analysis]
@@ -604,8 +616,9 @@
         {:seon.fn/capability-rule :invalid-handler-symbol
          :seon.fn/sym qualified
          :seon.effect/capability capability :seon.fn/index-refused true})))
-    (cond
-      (::analyzer/test entry)
+    (let [row
+          (cond
+            (::analyzer/test entry)
       (cond-> {:seon.test/sym qualified
                :seon.test/ns [:seon.ns/name namespace-name]
                :seon.test/source source
@@ -639,7 +652,7 @@
         (test-subject metadata)
         (assoc :seon.test/subject (test-subject metadata)))
 
-      (function-definition? entry)
+            (function-definition? entry)
       (cond-> {:seon.fn/sym qualified
                :seon.fn/ns [:seon.ns/name namespace-name]
                :seon.fn/source source
@@ -705,7 +718,13 @@
         capability-declared?
         (update :seon.fn/calls (fnil conj #{}) capability))
 
-      :else nil)))
+            :else nil)]
+      (when row
+        (assoc row :seon.program/definition-digest
+               (program/definition-digest
+                row
+                (select-keys (get namespace-contexts namespace-name)
+                             [:requires :aliases :refers :imports])))))))
 
 (defn- runtime-require-specs
   [{:seon.ns/keys [requires aliases refers]}]
@@ -878,7 +897,7 @@
     ::analyzer/findings]))
 
 (defn- analyzed-form
-  [analysis function-rows declared-key? program-row]
+  [analysis function-rows declared-key? resolver-context program-row]
   (let [program-symbol (or (:seon.fn/sym program-row)
                            (:seon.test/sym program-row))
         first-party-functions
@@ -927,10 +946,12 @@
                      (into #{} (get call-arities program-symbol)))
               subject (assoc :seon.test/subject subject))))
         merged-row (when program-row
-                     (merge (dissoc program-row :seon.fn/calls :seon.fn/references
-                                    :seon.fn/invokes
-                                    :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
-                            program-facts))]
+                     (let [row (merge (dissoc program-row :seon.fn/calls :seon.fn/references
+                                              :seon.fn/invokes
+                                              :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
+                                      program-facts)]
+                       (assoc row :seon.program/definition-digest
+                              (program/definition-digest row resolver-context))))]
     [(if program-row
        {}
        (let [calls (into #{}
@@ -960,10 +981,18 @@
          (fn [{source :seon.cluster.eval/source
                namespace-ref :seon.cluster.eval/ns
                :as request}]
-           (let [namespace-row (db/pull database [:seon.ns/name] namespace-ref)]
+           (let [namespace-row
+                 (db/pull database
+                          [:seon.ns/name :seon.ns/requires
+                           {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
+                           {:seon.ns/refers [:seon.ns.refer/local :seon.ns.refer/target-ns
+                                            :seon.ns.refer/target-name]}
+                           {:seon.ns/imports [:seon.ns.import/local :seon.ns.import/target-class]}]
+                          namespace-ref)]
              (if-let [namespace-name (:seon.ns/name namespace-row)]
                (assoc request :namespace-name namespace-name
-                              :form-source source)
+                              :form-source source
+                              :resolver-context (stored-namespace-context namespace-row))
                {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
@@ -995,6 +1024,7 @@
                  (source-analysis analysis first-row last-row)
                  function-rows
                  declared-key?
+                 (:resolver-context request)
                  (some-> (:seon.program/row request)
                          (assoc :seon.program/analyzed-source-digest
                                 (:seon.fn.file/digest (text-context analyzed-source))))))

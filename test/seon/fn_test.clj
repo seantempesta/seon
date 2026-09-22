@@ -1907,6 +1907,52 @@
             (body connection file (seon.fn/rows {:seon.fn/roots [(.getPath root)]})))))
       (finally (test-support/delete-recursively! root)))))
 
+(deftest publication-writes-one-definition-digest-per-declaration-family
+  (let [root (fixture-root)
+        relative-path "sample/definition_digest.clj"
+        source (fn [token]
+                 (str "(ns sample.definition-digest (:require [clojure.test :refer [deftest is]]))\n"
+                      "(defn chosen [] " token ")\n"
+                      "(deftest chosen-test (is (= " token " (chosen))))\n"))
+        rows-for (fn [token]
+                   (write-source! root relative-path (source token))
+                   (seon.fn/rows {:seon.fn/roots [(.getPath root)]}))
+        first-rows (rows-for "1")
+        identical-rows (rows-for "1")
+        edited-rows (rows-for "2")
+        digest-for (fn [rows identity]
+                     (:seon.program/definition-digest
+                      (some #(when (= identity (program/row-identity %)) %) rows)))
+        function-identity [:seon.fn/sym 'sample.definition-digest/chosen]
+        first-digest (digest-for first-rows function-identity)]
+    (try
+      (is (= 64 (count first-digest)))
+      (is (every? (set "0123456789abcdef") first-digest))
+      (is (= first-digest (digest-for identical-rows function-identity)))
+      (is (not= first-digest (digest-for edited-rows function-identity)))
+      (test-support/with-database
+        (fn [connection]
+          (let [projection (db/carried-projection (db/db connection))
+                schema-row (first (schema/canonical-schema-rows
+                                   projection {:sample.definition-digest/value :string}))
+                rows (conj first-rows schema-row)]
+            (test-support/transacted!
+             connection (seon.fn/reconcile-tx (db/db connection) rows []))
+            (let [database (db/db connection)
+                  families [[:seon.fn/sym 'sample.definition-digest/chosen]
+                            [:seon.test/sym 'sample.definition-digest/chosen-test]
+                            [:seon.ns/name 'sample.definition-digest]
+                            [:seon.schema/key :sample.definition-digest/value]]
+                  digests (mapv #(db/pull database
+                                          [:seon.program/definition-digest] %)
+                                families)]
+              (is (= 4 (count (filter :seon.program/definition-digest digests))))
+              (is (every? #(let [digest (:seon.program/definition-digest %)]
+                             (and (= 64 (count digest))
+                                  (every? (set "0123456789abcdef") digest)))
+                          digests))))))
+      (finally (test-support/delete-recursively! root)))))
+
 (deftest indexed-declarations-carry-exact-file-bytes
   (with-provenance-file
     "sample/provenance.clj"

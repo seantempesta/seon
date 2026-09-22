@@ -11,7 +11,6 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.fn :as functions]
-            [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -644,26 +643,18 @@
                     database entities (set attributes)))))
 
 (defn- definition-digests
-  "Identify definition content independently of branch-local entities.
-  analyzed-source-digest identifies the analyzed input file or batch, so it
-  proves analysis but cannot identify an individual definition's change."
+  "Read the canonical declaration identity stored by the producer."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
                   [:map-of :qualified-symbol :seon.source/digest]]}
   [database symbols]
-  (let [rows (selection-read!
-              (db/q '[:find ?symbol ?attribute ?value
-                      :in $ [?symbol ...] [?attribute ...]
-                      :where (or [?entity :seon.fn/sym ?symbol]
-                                 [?entity :seon.test/sym ?symbol])
-                             [?entity ?attribute ?value]]
-                    database symbols
-                    [:seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references
-                     :seon.test/source :seon.test/subject :seon.test/platform
-                     :seon.test/fixture :seon.test/fixture-observation :seon.test/long
-                     :seon.schema.admission/source]))]
-    (into {} (map (fn [[symbol facts]]
-                    [symbol (id/digest 64 (vec (sort-by pr-str (map #(subvec % 1) facts))))]))
-          (group-by first rows))))
+  (into {}
+        (selection-read!
+         (db/q '[:find ?symbol ?digest
+                 :in $ [?symbol ...]
+                 :where (or [?entity :seon.fn/sym ?symbol]
+                            [?entity :seon.test/sym ?symbol])
+                        [?entity :seon.program/definition-digest ?digest]]
+               database symbols))))
 
 (defn- changed-definition-symbols
   "Read assertion and retraction identities in the same lineage, including namespace bindings."

@@ -4,6 +4,7 @@
             [seon.error.refusal :as error]
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
+            [seon.id :as id]
             [seon.schema :as schema]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
@@ -318,6 +319,38 @@
           (when-some [value (get row identity-attribute)]
             [identity-attribute value]))
         identity-attributes))
+
+(def ^:private definition-digest-excluded-attributes
+  #{:db/id
+    :seon.fn/file
+    :seon.fn/form-span
+    :seon.fn/calls
+    :seon.fn/references
+    :seon.fn/keywords
+    :seon.fn/writes
+    :seon.fn/call-arities
+    :seon.program/analyzed-source-digest
+    :seon.program/definition-digest
+    :seon.schema.admission/source})
+
+(defn definition-digest
+  "Digest one declaration's identity and effective meaning.
+
+   The digest includes authored definition, resolver context and effective
+   semantic metadata. Storage provenance, position and derived graph
+   observations are deliberately excluded."
+  {:malli/schema
+   [:function
+    [:=> [:cat :map] :seon.program/definition-digest]
+    [:=> [:cat :map [:maybe :map]] :seon.program/definition-digest]]}
+  ([row] (definition-digest row nil))
+  ([row resolver-context]
+   (let [parts
+         (cond-> {:seon.program/declaration
+                  (apply dissoc row definition-digest-excluded-attributes)}
+           resolver-context
+           (assoc :seon.program/resolver-context resolver-context))]
+     (id/digest 64 [(schema/canonical-data-string parts)]))))
 
 (defn- row-identities
   [row]
@@ -908,6 +941,16 @@
               (assoc :seon.schema/ns (:seon.schema/ns candidate))))
 
           :else candidate)
+        candidate
+        (if (and candidate
+                 (or (:seon.ns/name candidate)
+                     (:seon.fn/sym candidate)
+                     (:seon.schema/key candidate)
+                     (:seon.test/sym candidate))
+                 (nil? (:seon.program/definition-digest candidate)))
+          (assoc candidate :seon.program/definition-digest
+                 (definition-digest candidate))
+          candidate)
         row-shapes (shapes-in projection)
         row (canonical-row row-shapes candidate)]
     (when row
