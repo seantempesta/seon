@@ -1,5 +1,6 @@
 (ns seon.db-test
-  (:require [clojure.string :as str]
+  (:require [clojure.core.async :as async]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.core :as datahike]
@@ -11,7 +12,6 @@
             [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.message :as message]
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]
@@ -21,7 +21,6 @@
             [seon.id :as id]
             [seon.instrument :as instrument]
             [seon.program :as program]
-            [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schedule :as schedule]
             [seon.sci.admit :as admit]
@@ -1400,91 +1399,6 @@
                           :where [_ :seon.message/id ?id]]
                         (db/since before-t))))))))))
 
-(defn- seed-diff-messages!
-  [connection]
-  (test-support/transacted!
-               connection
-               [{:seon.agent/id "db-diff-alice"}
-                {:seon.agent/id "db-diff-bob"}
-                {:seon.message/id "db-diff-m1" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/from [:seon.agent/id "db-diff-alice"] :seon.message/content "hello"}
-                {:seon.message/id "db-diff-m2" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "removed"}]))
-
-(deftest ^{:seon.test/usage true} diff-replays-one-read-by-derived-identity
-  (test-support/with-database
-   (fn [connection]
-     (seed-diff-messages! connection)
-     (let [before (db/basis-t @connection)
-           at (:db/txInstant (db/pull @connection [:db/txInstant] before))]
-       (test-support/transacted!
-                    connection
-                    [[:db/add [:seon.message/id "db-diff-m1"]
-                      :seon.message/content "hello, edited"]
-                     [:db.fn/retractEntity
-                      [:seon.message/id "db-diff-m2"]]
-                     {:seon.message/id "db-diff-m3" :seon.message/to [:seon.agent/id "db-diff-bob"] :seon.message/content "added"}])
-       (binding [db/*conn* connection]
-         (let [result (db/diff before #'message/inbox "db-diff-bob")
-               current (db/basis-t @connection)]
-           (is (= before (:seon.db/basis-t result)))
-           (is (= current (:seon.db/current-basis-t result)))
-           (is (= ["db-diff-m3"]
-                  (mapv :my.message/id (:seon.db.diff/added result))))
-           (is (= ["db-diff-m2"]
-                  (mapv :my.message/id (:seon.db.diff/removed result))))
-           (is (= [{:seon.db.diff/identity "db-diff-m1"
-                    :seon.db.diff/changed-attributes [:my.message/content]
-                    :seon.db.diff/before
-                    {:my.message/id "db-diff-m1"
-                     :my.message/from "db-diff-alice"
-                     :my.message/at
-                     at
-                     :my.message/content "hello"}
-                    :seon.db.diff/after
-                    {:my.message/id "db-diff-m1"
-                     :my.message/from "db-diff-alice"
-                     :my.message/at
-                     at
-                     :my.message/content "hello, edited"}}]
-                  (:seon.db.diff/changed result)))
-           (is (= result (eval (:seon.db.diff/requery-id result)))
-               "the rendered requery form replays verbatim for an agent")
-           (let [rendered (db/render-diff-ai result)]
-             (is (str/includes? rendered "+1 -1 ~1"))
-             (is (str/includes? rendered "db-diff-m1"))
-             (is (str/includes? rendered ":my.message/content"))
-             (is (str/includes? rendered "approximately"))
-             (is (str/includes? rendered "requery by")))))))))
-
-(deftest diff-no-change-is-empty
-  (test-support/with-database
-   (fn [connection]
-     (seed-diff-messages! connection)
-     (binding [db/*conn* connection]
-       (let [basis (db/basis-t @connection)
-             result (db/diff basis #'message/inbox "db-diff-bob")]
-         (is (= [] (:seon.db.diff/added result)))
-         (is (= [] (:seon.db.diff/removed result)))
-         (is (= [] (:seon.db.diff/changed result))))))))
-
-(deftest diff-refuses-missing-identity-and-external-sinks
-  (test-support/with-database
-   (fn [connection]
-     (binding [db/*conn* connection]
-       (let [basis (db/basis-t @connection)
-             identity-refusal (db/diff basis #'config/effective "default")
-             database-refusal (db/diff basis #'db/render-diff-ai {})
-             impurity-refusal (db/diff basis #'render/render-ai {})]
-         (doseq [refusal [identity-refusal database-refusal
-                          impurity-refusal]]
-           (is (true? (:seon.db/diff-refused refusal)))
-           (is ((schema/projection-validator (schema/handed-projection) :seon.db/error-result) refusal)))
-         (is (= :seon.db/row-identity-absent (:seon.db/diff-refusal identity-refusal)))
-         (is (= :seon.db/database-input-absent (:seon.db/diff-refusal database-refusal)))
-         (is (= :seon.db/external-sink-reachable (:seon.db/diff-refusal impurity-refusal)))
-         (is (= #{:ai-visible-text}
-                (get-in impurity-refusal
-                        [:seon.error/offending]))))))))
-
 (deftest non-temporal-reads-return-one-flat-error-before-datahike
   (let [configuration
         {:store {:backend :memory :id (random-uuid)}
@@ -2264,15 +2178,49 @@
        (is (str/includes? (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/fix])
                           "missing declared key"))))))
 
-(deftest diff-refusal-preserves-its-declared-disposition
-  (let [projection (schema/handed-projection)]
-    (doseq [cause [:seon.db/function-not-indexed :seon.db/database-input-absent
-                   :seon.db/call-shape-absent :seon.db/ambiguous-call-shape
-                   :seon.db/function-threw :seon.db/row-identity-absent
-                   :seon.db/result-not-collections :seon.db/function-var-required
-                   :seon.db/external-sink-reachable]]
-      (let [refusal (#'db/diff-refusal "Cannot replay this read." :seon.fn/sym
-                                     :seon.fn/fn 'seon.db-test/probe cause {})]
-        (is (= cause (:seon.db/diff-refusal refusal)))
-        (is ((schema/projection-validator projection :seon.db/diff-refused-error) refusal))))
-    (is (not ((schema/projection-validator projection :seon.db/diff-refusal) ::unknown-disposition)))))
+(deftest shown-value-diff-round-trips-changed-paths
+  (doseq [[before after] [[{:a 1 :b 2} {:a 3}]
+                          [[1 2 3] [1 4]]
+                          [nil {:a [1 2]}]
+                          [{:a 1} {:a 1}]]]
+    (let [changes (db/diff {:seon.db.diff/before before
+                            :seon.db.diff/after after})]
+      (is (= after (db/apply-diff before changes)))
+      (is (= (= before after) (empty? changes))))))
+
+(deftest ^{:seon.test/long "Armed fixture creation, stored system opening and changed-read preview measured 7849 ms on 2026-09-22."
+           :seon.test/long-ms 10000}
+  system-turn-renders-a-changed-read-with-value-diff
+(test-support/with-database
+ (fn [connection]
+   (test-support/seed-cluster! connection "a2-diff")
+   (test-support/transacted!
+    connection
+    (agent/creation-tx {:seon.agent/id "a2-reader"
+                        :seon.ns/name 'my.agents.a2-reader
+                        :seon.cluster/name "a2-diff"}))
+   (test-support/transacted! connection
+    [{:seon.message/id "a2-read" :seon.message/to [:seon.agent/id "a2-reader"]
+      :seon.message/content "before"}])
+   (let [handle (test-support/cluster-handle
+                 {:seon.env/environment (test-support/environment "a2-diff" connection)
+                  :seon.db/connection connection :seon.cluster/name "a2-diff"
+                  :seon.db.process/id cluster/boot-process-identity
+                  :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
+         request {:seon.turn.loop/cluster handle :seon.agent/id "a2-reader"
+                  :seon.turn/write? true}]
+     (try
+       (let [opening (turn/system-turn request)]
+         (is (string? (:seon.turn/id opening)) (pr-str opening))
+         (test-support/transacted! connection
+          [[:db/add [:seon.message/id "a2-read"] :seon.message/content "after"]])
+         (let [preview (turn/system-turn (assoc request :seon.turn/write? false))
+               changed (filterv #(= :changed (:seon.turn/status %))
+                                 (:seon.turn/forms preview))]
+           (is (= 1 (count changed)) (pr-str preview))
+           (is (seq (:seon.turn/changes (first changed))))
+           (is (str/includes? (:seon.turn/text (first changed) "") "after"))
+           (select-keys (first changed) [:seon.cluster.eval/source :seon.turn/text :seon.turn/changes])))
+       (finally
+         (doseq [channel-key [:seon.cluster.wake/channel :seon.render/context-channel :seon.turn.loop/completion]]
+           (async/close! (get handle channel-key)))))))))

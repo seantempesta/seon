@@ -284,3 +284,40 @@ alive, no missing readiness layers, same 14 errored receipts. No default
 publication/reload/stop/reset was performed. Final status evidence:
 `tmp/a2-final-default-status.edn`. Owner summary:
 `tmp/orchestrator/a2-db-deletions-summary.txt`.
+
+
+## Resumed owner rulings — c3
+
+The subsequent owner ruling adds `resources/seon/schemas/seon.db.diff.edn`
+to this slice. Removed the replay/identity diff family, its renderer, all
+obsolete result/refusal declarations and four machinery tests. `rg` found
+one production `db/diff` caller: `src/seon/turn.clj`, calling the retained
+map arity. `value-changes` and `apply-diff` remain. New regressions cover
+value round trips and one changed system-turn read.
+
+Schema retirement was proven from zero with
+`bin/seon --root /Users/sean/src/seon/tmp/a2-db-root reset --force`
+in a detached HEAD (`6c578954d`) plus these four owned files, with the
+pinned reference-code linked. This isolates the previously observed foreign
+`test/seon/dev/hook_test.clj` publication boundary. Shared-tree namespace
+load also succeeded before the snapshot. Scratch pid 88805, start
+2026-09-22T19:57:42.678Z, ready **135793 ms**, source commit
+`6ab2de3e-cdee-5f58-a6e2-a84d1a4cc94b`; observed RSS 3841216 KiB at 56 s.
+Initial command setup refused an absent root directory, without starting
+a JVM; after creating that directory the from-zero command above succeeded.
+
+On that scratch JVM, `instrument/apply!` armed 1819 Vars. The canonical
+`with-database` fixture seeded an agent and message, saved a system opening,
+changed that message's content and previewed the next system turn. Exactly
+one read changed. Its text contained
+`{[:seon.message/_to 0 :seon.message/content] {:seon.db.diff/after "after"}}`.
+Repeat: **4 assertions, 0 failures, 0 errors, 7849.153 ms**; `diff` and
+`system-turn` positively armed. The regression declares 10000 ms for that
+measured fixture/opening/preview operation. This is JVM system-turn execution
+using real SCI on a fixture branch, not browser paint or default adoption.
+Exact form: `tmp/a2-system-turn-body.clj`; first envelope:
+`tmp/a2-c3-probe-result.json`; boot/load/stop: `tmp/a2-c3-{boot,load,stop}.log`.
+
+§8 comparison: source −380 net versus planned −330; declarations −31 net;
+test deltas recorded by the commit. No writer or codec region changed.
+Scratch `down --force` observed process exit; its held shell exited.
