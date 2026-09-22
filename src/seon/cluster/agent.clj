@@ -79,10 +79,12 @@
             [seon.error :as error]
             [seon.repl :as repl]
             [seon.schema :as schema]
+            [seon.program :as program]
             [seon.render.route :as route]
             [seon.flow :as seon.flow]
             [seon.schedule :as schedule]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.reader :as reader]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date LinkedList]))
 
@@ -150,6 +152,30 @@
       [[:db/add [:seon.ns/name namespace-name] :seon.ns/steward
         [:seon.agent/id agent-id]]])))
 
+(defn namespace-seed-call
+  "Read an absent agent namespace from its source at the transaction boundary."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
+                  :seon.store/transaction-data]}
+  [database namespace-name]
+  (if (db/q '[:find ?namespace . :in $ ?name
+              :where [?namespace :seon.ns/name ?name]]
+            database namespace-name)
+    []
+    (let [source (pr-str (list 'ns namespace-name
+                               '(:require [my.message] [my.turn] [seon.db]
+                                          [seon.bootstrap :refer [help dir doc]]
+                                          [clojure.test :refer [deftest is]])))
+          events (reader/read
+                  {:seon.sci.reader/text source
+                   :seon.config.eval.result/max-source (count source)})
+          _ (when (map? events)
+              (throw (ex-info (:seon.error/message events) events)))
+          event (first events)
+          _ (when-let [failure (:seon.sci.reader/error event)]
+              (throw (ex-info (:seon.error/message failure) failure)))]
+      [(program/declaration-row
+        (db/carried-projection database) event :contracted :agent)])))
+
 (defn creation-tx
   "Create one agent with its namespace in this database branch.
 
@@ -163,14 +189,11 @@
                   :seon.agent/creation-tx]}
   [{agent-id :seon.agent/id
     namespace-name :seon.ns/name}]
-  (let [namespace-tempid (str "namespace:" namespace-name)]
-    [{:db/id namespace-tempid
-      :seon.ns/name namespace-name
-      :seon.ns/requires
-      #{'my.message 'my.turn 'seon.db}}
+  (let [namespace-ref [:seon.ns/name namespace-name]]
+    [[:db.fn/call #'namespace-seed-call namespace-name]
      {:db/id (str "agent:" agent-id)
       :seon.agent/id agent-id
-      :seon.agent/namespace namespace-tempid
+      :seon.agent/namespace namespace-ref
       :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
       :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
       :seon.agent/runtime {:seon.runtime/agent (str "agent:" agent-id)}}

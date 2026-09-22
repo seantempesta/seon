@@ -872,29 +872,9 @@
     _opened-at :seon.turn/opened-tx}]
   (let [id (run-id agent-id)
         message-id (id/id (random-uuid) 8)
-        namespace-row
-        {:seon.ns/name namespace-name
-         :seon.ns/requires
-         #{'my.turn 'my.message 'clojure.test 'seon.bootstrap}
-         :seon.ns/refers
-         [{:seon.ns.refer/local 'help
-           :seon.ns.refer/target-ns 'seon.bootstrap
-           :seon.ns.refer/target-name 'help}
-          {:seon.ns.refer/local 'dir
-           :seon.ns.refer/target-ns 'seon.bootstrap
-           :seon.ns.refer/target-name 'dir}
-          {:seon.ns.refer/local 'doc
-           :seon.ns.refer/target-ns 'seon.bootstrap
-           :seon.ns.refer/target-name 'doc}
-          {:seon.ns.refer/local 'deftest
-           :seon.ns.refer/target-ns 'clojure.test
-           :seon.ns.refer/target-name 'deftest}
-          {:seon.ns.refer/local 'is
-           :seon.ns.refer/target-ns 'clojure.test
-           :seon.ns.refer/target-name 'is}]}
         message-row
         {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content (task-message)}]
-    (into [namespace-row message-row]
+    (into [message-row]
           (turn/generated-run-tx
            db
            {:seon.agent/id agent-id :seon.turn/id id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger [:seon.message/id message-id] :seon.turn/starting-ns [:seon.ns/name namespace-name]}))))

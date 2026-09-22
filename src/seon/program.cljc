@@ -941,6 +941,8 @@
               (assoc :seon.schema/ns (:seon.schema/ns candidate))))
 
           :else candidate)
+        row-shapes (shapes-in projection)
+        candidate (canonical-row row-shapes candidate)
         candidate
         (if (and candidate
                  (or (:seon.ns/name candidate)
@@ -951,8 +953,7 @@
           (assoc candidate :seon.program/definition-digest
                  (definition-digest candidate))
           candidate)
-        row-shapes (shapes-in projection)
-        row (canonical-row row-shapes candidate)]
+        row candidate]
     (when row
       (let [[identity-attribute _ :as program-identity] (row-identity row)
             source-attribute (:seon.program/source-attribute
