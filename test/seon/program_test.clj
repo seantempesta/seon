@@ -801,12 +801,15 @@
            (program/changed-attributes current desired)))))
 
 (deftest runtime-schema-declarations-project-namespaced-properties
-  (let [event (one-event
-               "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai seon.render.value/render-ai} [:seon.error/message :seon.error/message]])")
-        row (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)]
-    (is (= false (:seon.db/attributes row)))
-    (is (= 'seon.render.value/render-ai (:seon.render/ai row)))
-    (is (= :agent (:seon.schema.admission/source row)))))
+  (test-support/with-database
+    (fn [connection]
+      (let [event (one-event
+                   "(seon.schema/register! ::error [:map {:seon.db/attributes false :seon.render/ai seon.render.value/render-ai} [:seon.error/message :seon.error/message]])")
+            row (program/declaration-row (db/carried-projection (db/db connection))
+                                         event :contracted :agent)]
+        (is (= false (:seon.db/attributes row)))
+        (is (= 'seon.render.value/render-ai (:seon.render/ai row)))
+        (is (= :agent (:seon.schema.admission/source row)))))))
 
 (deftest arbitrary-qualified-deftest-is-not-a-test-declaration
   (let [source (str "(ns sample (:require [clojure.test :refer [deftest]] "

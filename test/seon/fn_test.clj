@@ -2237,11 +2237,11 @@
 (deftest writes-attribute-names-every-attribute-a-declaration-transacts
   (let [rows (attribute-rows)]
     (testing "the attributes inside a transact! call's own span, as keyword values"
-      (is (= #{:seon.agent/id :seon.ns/name}
+      (is (= #{:seon.agent/id :seon.ns/name :sample.attributes/undeclared}
              (:seon.fn/writes (get rows (quote sample.attributes/record-agent!))))))
-    (testing "an undeclared keyword has no :seon.schema/key row to name"
-      (is (not (contains? (:seon.fn/writes (get rows (quote sample.attributes/record-agent!)))
-                          :sample.attributes/undeclared))))
+    (testing "the analyzer retains an observed write even before its schema is declared"
+      (is (contains? (:seon.fn/writes (get rows (quote sample.attributes/record-agent!)))
+                     :sample.attributes/undeclared)))
     (testing "reading an attribute is not writing it"
       (is (nil? (:seon.fn/writes (get rows (quote sample.attributes/reads-only))))
           "the read names :seon.agent/id but transacts nothing")
@@ -2411,7 +2411,8 @@
             connection (seon.fn/reconcile-tx (db/db connection) desired (mapv program/row-identity rows)))
           (let [stored (db/pull (db/db connection) [:seon.fn/call-arities :seon.fn/writes]
                                 [:seon.fn/sym target])]
-            (is (= #{:seon.agent/id} (set (:seon.fn/writes stored))))
+            (is (= #{:seon.agent/id :sample.attributes/undeclared}
+                   (set (:seon.fn/writes stored))))
             (is (= (:seon.fn/call-arities after) (set (:seon.fn/call-arities stored))))))))))
 
 (deftest every-indexed-file-carries-the-root-the-indexer-walked
@@ -3020,3 +3021,61 @@
         (is (true? (:seon.fn/index-refused refusal)))
         (is (seq (:seon.fn/findings refusal))))
       (finally (test-support/delete-recursively! root)))))
+
+(deftest host-binding-is-a-declaration-fact-not-a-caller-closure
+  (let [root (fixture-root)
+        text (str "(ns sample.host-bound)\n"
+                  "(defn clock [] (System/currentTimeMillis))\n"
+                  "(defn constructor [] (java.util.Date.))\n"
+                  "(defn literal [] java.io.File)\n"
+                  "(defn allowed [] (String. \"ok\"))\n"
+                  "(defn throwable [] (Throwable. \"ok\"))\n"
+                  "(defn admitted-import [] (import 'java.lang.String))\n"
+                  "(defn refused-import [] (import 'java.util.Date))\n"
+                  "(defn implementation [] (reify Runnable (run [_] nil)))\n"
+                  "(defn caller [] (clock))\n"
+                  "(defn hinted [^java.io.File f] (.getName f))\n"
+                  "(defn quoted [] '(clojure.core/reify java.io.File))\n"
+                  "(defprotocol P (method [_]))\n"
+                  "(defrecord Record [])\n")]
+    (try
+      (write-source! root "sample/host_bound.clj" text)
+      (let [rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+            facts (into {} (keep (fn [row]
+                                  (when-let [sym (:seon.fn/sym row)]
+                                    [sym (:seon.fn/host-bound? row)]))) rows)]
+        (is (= {'sample.host-bound/clock true
+                'sample.host-bound/constructor true
+                'sample.host-bound/literal true
+                'sample.host-bound/allowed false
+                'sample.host-bound/throwable false
+                'sample.host-bound/admitted-import true
+                'sample.host-bound/refused-import true
+                'sample.host-bound/implementation true
+                'sample.host-bound/caller false
+                'sample.host-bound/hinted true
+                'sample.host-bound/quoted false
+                'sample.host-bound/method false
+                'sample.host-bound/->Record true
+                'sample.host-bound/map->Record true}
+               facts)))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest canonical-program-has-complete-host-binding-facts
+  (test-support/with-database
+    (fn [connection]
+      (let [database @connection
+            total (db/q '[:find (count ?e) . :where [?e :seon.fn/sym]] database)
+            census (into {} (db/q '[:find ?bound (count ?e)
+                                    :where [?e :seon.fn/sym]
+                                           [?e :seon.fn/host-bound? ?bound]] database))]
+        (is (pos? total))
+        (is (= total (reduce + (vals census))))
+        (is (pos? (get census true 0)))
+        (is (pos? (get census false 0)))
+        (is (true? (:seon.fn/host-bound?
+                    (db/pull database [:seon.fn/host-bound?]
+                             [:seon.fn/sym 'seon.id/sha-256]))))
+        (is (false? (:seon.fn/host-bound?
+                     (db/pull database [:seon.fn/host-bound?]
+                              [:seon.fn/sym 'seon.id/id]))))))))

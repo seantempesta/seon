@@ -25,6 +25,9 @@
           [:boolean
            {:description
             "Asserts clj-kondo's ::analyzer/macro fact at indexing; absent means the function is not a macro."}],
+          :host-bound?
+          [:boolean {:seon.db/index true
+                     :description "Derived per declaration from its defining form and its own analyzed references to classes or forms unavailable in SCI. Ordinary callers do not inherit this fact."}]
           :defined-by
           [:qualified-symbol
            {:seon.db/index true
@@ -142,6 +145,7 @@
            [:seon.fn/internal? {:optional true} :seon.fn/internal?]
            [:seon.fn/doc-order {:optional true} :seon.fn/doc-order]
            [:seon.fn/macro? {:optional true} :seon.fn/macro?]
+           [:seon.fn/host-bound? {:optional true} :seon.fn/host-bound?]
            [:seon.fn/defined-by {:optional true} :seon.fn/defined-by]
            [:seon.fn/spec {:optional true} :seon.fn/spec]
            [:seon.fn/calls {:optional true} :seon.fn/calls]

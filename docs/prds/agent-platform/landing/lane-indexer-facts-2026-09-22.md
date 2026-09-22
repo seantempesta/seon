@@ -1,7 +1,7 @@
 ---
 type: implementation-evidence
 date: 2026-09-22
-status: implementation and verification in progress
+status: two implementation slices; focused proof and landing record below
 ---
 
 # Indexer partition and host-bound facts
@@ -171,10 +171,10 @@ This lane does not edit that file. The current refused-head set excludes
 `defprotocol`; protocols remain supported. The historical 21-head census includes
 protocols and cannot be copied as an assertion of the current refusal rule.
 
-## Completion record
+## Landing record
 
-Commit ids, final host census, load proof, publication clock and resource cleanup
-are appended when measured. Until then neither slice is claimed complete.
+The partition slice was first committed as `904a1b205` in the isolated snapshot.
+Final shared-HEAD commit ids are recorded in `tmp/orchestrator/indexer-facts-summary.txt`.
 
 ### Partition load and publication clock
 
@@ -197,3 +197,113 @@ returned problem observation (data). `:db/ident` is database schema (program);
 `:seon.source/digest` is the publication input observation (data), distinct from
 stored declaration analysis digests. Their current declarations do not introduce
 additional stored entity roots requiring an invented map schema.
+
+### Host-bound slice and evidence
+
+The analyzer retains Java class usages, applies its existing declaration-span
+attribution, and exports resolved class names with locations and caller ownership.
+`fn.clj` stores true/false on every analyzed function row, both file indexing and
+runtime form analysis. The boolean is excluded from the authored definition digest.
+The tiny fixture covers constructors, static calls, class literals, unresolved type
+hints, admitted classes, imports, reify, generated type constructors, protocols,
+quoted forms, and an ordinary caller. Quoted macro names are not calls. The pack §3 explicitly classifies import calls as host-bound operations. An
+exact SCI probe importing `java.lang.String` succeeded (7 ms), but clj-kondo
+exports no Java-class fact for either quoted import form (13 ms). The import
+operation rule is retained, rather than adding another resolver. The same SCI
+options refused a `java.io.File` type hint (11 ms).
+
+Read-only MCP against the new scratch JVM exported one Java usage for
+`(System/currentTimeMillis)`, with `:from indexer-facts.probe` and
+`:from-var clock`, and no Java usage for its plain caller (15 ms). Another probe
+showed clj-kondo records host type hints but not primitive hints or quoted class
+symbols (105 ms). The old default JVM stayed at PID 51528 throughout these probes.
+
+From-zero host-schema boot: PID 89286, start `2026-09-22T19:59:55.529Z`, ready
+143854 ms, no missing readiness layers, published
+`6ab2decc-ae86-5bac-aa76-da98e0adf061`. Its canonical publication census is
+4447 functions: 854 host-bound, 3593 ordinary; host-bound heads are 613 defn-,
+228 defn, 6 defrecord and 7 deftype. Every function has a boolean. The larger
+body population than the pack's ~310 reflects resolved analyzer references,
+including type hints, rather than source regex estimates. These measured counts
+precede the final exclusion of quoted form names; they are
+not asserted as final-source constants. The canonical regression asserts full
+population coverage and independently checks the real `seon.id/sha-256` / `id`
+host/caller pair. The initial test mistakenly expected `digest` to be host-bound;
+inspection showed it only calls `id`, so that expectation was corrected.
+
+`host-cold-boot.log`, `host-census.edn`, `host-fixture-export-2.log` and
+`host-down.log` retain the boot, stored query, canonical export and confirmed exit.
+The first export correctly refused to overwrite an existing fixture; a new
+export path was used. That refusal is not a boot failure or a fixture pass.
+
+Full fresh-fixture run through the armed production runner: 98 tests / 590
+assertions / 8 failures / 27 errors (`fresh-regressions-3.log`,
+`fresh-results.edn`). No full-suite green is claimed. Three-question triage:
+
+- No obsolete mechanism is preserved to make a test pass.
+- Retired expectations: reader rows now carry definition digests; observed writes
+  include undeclared keywords; renderer admission needs the canonical projection's
+  function contracts. Those in-scope tests were updated. The census expectation
+  named the wrong host/caller and was corrected as described above.
+- Surviving foreign seams: `test/seon/test_support.clj` and runtime namespace
+  admission create namespace rows without the required definition digest;
+  `canonical-schema-rows` is called with a projection missing its new key;
+  prebuilt-manifest reconciliation removes a required issue-citation file; the
+  manifest path resolves declarations twice. Protected owners were not edited.
+  Four tests also exceeded their existing 5 s bounds (fixture observation,
+  prebuilt manifest, populated-branch refusal, reference selection). Those are
+  failures, not warming exemptions. Thread evidence is in
+  `fresh-regression-threads.txt`; the runner exited normally, with no signal sent.
+
+A resumed clock against the older head branch refused issue adoption with
+`:malli.core/invalid-schema` (nil schema); its head also honestly refused a read
+of the uninstalled host-bound attribute. The branch was not newly adopted merely
+because its JVM loaded new source. A subsequent from-zero clock on
+`tmp/indexer-facts-host-clock-root` completed: cold wall 164942 ms, fork 535 ms,
+first adoption 562 ms, unchanged 410 ms, non-core edit 7025 ms, core edit 25131 ms.
+Heap and storage rows remain with that clock's `storage.edn`; retention sweep
+again refused the undeclared retention setting. The script confirmed process
+94236 exited and restored its two measured docstring edits.
+
+**Rollout boundary — RESET NEEDED under orchestrator custody:** new analyzer
+facts require a complete publication on an older branch before the SCI consumer
+switch. An export from the older clock root contained 4218 unchanged function
+rows without the new fact, despite 229 re-analyzed rows having it. This is the
+existing incremental manifest's retained-analysis boundary, outside the assigned
+analyzer region. The fresh from-zero publication has all 4447 booleans. Do not
+interpret absence in an old publication as an affirmative ordinary-row fact.
+The separately owned consumer conversion is still one attribute read, after
+that complete publication. Default was neither reset nor stopped by this lane.
+
+### Final focused verification
+
+The production runner with 1699 armed contracts and the fresh canonical fixture
+ran seven selected regressions: both partition tests, both host-bound tests,
+observed write retention, exact re-index replacement, and schema-property
+projection using the real function contracts. **7 tests, 30 assertions, 0 failures,
+0 errors**, including the runner's existing duration checks
+(`focused-final-2.log`, `focused-final-results.edn`). The prior import experiment
+failed one assertion; the explicit pack §3 operation rule above resolves it.
+No production logic changed after this passing run; only explanatory prose.
+
+The two slices are path-limited commits. No SCI consumer, reverse walk, manifest
+implementation, agent owner, instrumentation, hook or protected fixture helper is
+part of either commit. Verification ran on the HEAD snapshot plus owned changes;
+foreign in-flight program-comparison hunks were excluded.
+
+### Final integration boundary
+
+The two isolated commits rebased cleanly onto shared HEAD `2920fa971` without
+incorporating another lane's uncommitted hunks. The rebased partition HEAD passed
+the exact required four-namespace load (`landed-commit-1-load.log`). The rebased
+host HEAD uses the same command (`landed-commit-2-load.log`); its result and final
+commit ids are in the summary. The first slice changes 55 files (379 additions,
+78 deletions including this note); the second changes seven owned files (analyzer,
+indexer analysis, fn schema, program digest exclusion, the two test namespaces,
+and this note). Exact final sizes are recorded in the summary.
+
+All owned runtime roots are disposable; clock/export logs and raw probes are
+retained under `tmp/indexer-facts/`. Confirmed process identities, exit results,
+root removal and final default observation are recorded in
+`tmp/orchestrator/indexer-facts-summary.txt`. No shared shell, runtime, or foreign
+session is stopped or resumed.

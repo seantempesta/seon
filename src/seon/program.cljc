@@ -364,6 +364,7 @@
     :seon.fn/keywords
     :seon.fn/writes
     :seon.fn/call-arities
+    :seon.fn/host-bound?
     :seon.program/analyzed-source-digest
     :seon.program/definition-digest
     :seon.schema.admission/source})

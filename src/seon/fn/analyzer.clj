@@ -29,6 +29,7 @@
    :analysis
    {:arglists true
     :var-usages true
+    :java-class-usages true
     :protocol-impls true
     :symbols true
     :keywords true
@@ -363,7 +364,8 @@
                                         :name (or (:name entry) (symbol (name target)))
                                         :reference true))))
                      (:symbols analysis))
-        usages (into (vec (:var-usages analysis)) quoted)
+        usages (into (into (vec (:var-usages analysis)) quoted)
+                     (:java-class-usages analysis))
         definitions (group-by :filename
                               (remove #(= 'clojure.core/declare (:defined-by->lint-as %))
                                       (:var-definitions analysis)))
@@ -423,6 +425,7 @@
      [::namespace-usages [:vector :map]]
      [::var-definitions [:vector :map]]
      [::var-usages [:vector :map]]
+     [::java-class-usages [:vector :map]]
      [::protocol-impls [:vector :map]]
      [::keywords [:vector :map]]
      [::findings [:vector :map]]]]}
@@ -472,8 +475,9 @@
                               stdin-source
                               (slurp filename))))
                        (distinct (map :filename (:var-usages raw-analysis))))
-        analysis (assoc raw-analysis :var-usages
-                        (attributed-usages (assoc raw-analysis :var-quotes quotes)))]
+        attributed (group-by #(if (:class %) :java-class-usages :var-usages)
+                             (attributed-usages (assoc raw-analysis :var-quotes quotes)))
+        analysis (merge raw-analysis attributed)]
     {::namespace-definitions
      (filterv jvm-entry?
               (normalized-entries analysis :namespace-definitions namespace-definition))
@@ -486,6 +490,12 @@
      ::var-usages
      (filterv jvm-entry?
               (normalized-entries analysis :var-usages var-usage))
+     ::java-class-usages
+     (filterv jvm-entry?
+              (normalized-entries analysis :java-class-usages
+                                  #(merge (location %)
+                                          (present-values % [:class :method-name :call :lang
+                                                             :from :from-var]))))
      ::protocol-impls
      (normalized-entries analysis :protocol-impls
                          #(merge (location %)

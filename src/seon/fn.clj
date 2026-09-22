@@ -8,6 +8,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn.analyzer :as analyzer]
+            [sci.impl.opts :as sci.opts]
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
             [seon.id :as id]
@@ -880,6 +881,40 @@
 
 (declare source-span)
 
+(defn- host-bound-callers
+  "Declarations whose own body uses an unadmitted class or a host-bound operation.
+   Import calls remain host-bound under the program declaration rule.
+   Kondo supplies resolved class names and declaration ownership in one pass;
+   this is membership in SCI's admitted classes, never another resolver."
+  {:malli/schema [:=> [:cat :map] [:set :qualified-symbol]]}
+  [analysis]
+  (into
+   (into #{}
+         (comp
+          (remove #(contains? sci.opts/default-classes (symbol (::analyzer/class %))))
+          (remove #(#{"java.lang.Throwable" "java.lang.Error"} (::analyzer/class %)))
+          (keep usage-caller))
+         (::analyzer/java-class-usages analysis))
+   (comp
+    (filter #(some? (::analyzer/arity %)))
+    (filter #(#{'clojure.core/reify 'clojure.core/proxy
+                'clojure.core/definterface 'clojure.core/import}
+              (usage-symbol %)))
+    (keep usage-caller))
+   (::analyzer/var-usages analysis)))
+
+(defn- host-bound-declaration?
+  "The defining form and its own body facts decide; callers inherit nothing."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol]] :boolean]}
+  [definition host-bound]
+  (boolean
+   (or (#{'clojure.core/reify 'clojure.core/proxy 'clojure.core/definterface
+          'clojure.core/deftype 'clojure.core/defrecord}
+        (::analyzer/defined-by definition))
+       (when (and (::analyzer/ns definition) (::analyzer/name definition))
+         (host-bound (symbol (str (::analyzer/ns definition))
+                             (str (::analyzer/name definition))))))))
+
 (defn- source-analysis
   "Keep only analyzer entries owned by one submitted form's row span."
   [analysis first-source-row last-source-row]
@@ -894,6 +929,7 @@
    analysis
    [::analyzer/var-definitions
     ::analyzer/var-usages
+    ::analyzer/java-class-usages
     ::analyzer/keywords
     ::analyzer/findings]))
 
@@ -908,6 +944,7 @@
         (call-targets-by-caller analysis first-party-functions)
         references (references-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
+        host-bound (host-bound-callers analysis)
         writes (writes-by-writer analysis)
         call-arities
         (call-arities-by-caller
@@ -926,6 +963,8 @@
                             (test-subject (::analyzer/meta definition)))
                 invokes (invocation-attributes (or (::analyzer/meta definition) {}))]
             (cond-> {}
+              (:seon.fn/sym program-row)
+              (assoc :seon.fn/host-bound? (host-bound-declaration? (or definition {}) host-bound))
               (seq invokes) (assoc :seon.fn/invokes invokes)
               (::analyzer/macro definition) (assoc :seon.fn/macro? true)
               (seq (get calls-by-caller program-symbol))
@@ -1124,6 +1163,7 @@
   [analysis first-party-functions contexts projection]
   (let [forms (:seon.schema.projection/forms projection)
         used-keywords (keywords-by-holder analysis)
+        host-bound (host-bound-callers analysis)
         invocations (into {}
                           (keep (fn [entry]
                                   (when-let [attributes (seq (invocation-attributes (or (::analyzer/meta entry) {})))]
@@ -1181,7 +1221,11 @@
                         (seq (get unresolved-by-file (::analyzer/filename entry)))
                         (assoc :seon.fn/unresolved-references
                                (get unresolved-by-file (::analyzer/filename entry)))))]
-         (update rows (::analyzer/filename entry) (fnil conj []) row)
+         (let [row (cond-> row
+                     (:seon.fn/sym row)
+                     (assoc :seon.fn/host-bound?
+                            (host-bound-declaration? entry host-bound)))]
+           (update rows (::analyzer/filename entry) (fnil conj []) row))
          rows))
      {}
      (concat (::analyzer/namespace-definitions analysis)
