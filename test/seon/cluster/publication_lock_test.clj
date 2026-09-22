@@ -77,3 +77,94 @@
         (is (= basis (:datahike/expected-basis-t second-result)))
         (is (= (db/basis-t (:db-after first-report))
                (:datahike/current-basis-t second-result)))))))
+
+(deftest ^{:seon.test/fixture-observation
+           "Two admitted publications contest the same guarded head update in one physical store."}
+  both-admitted-publications-contest-the-guarded-update-and-return-their-own-head
+  (#'source-test/with-store
+    (fn [opened]
+      (let [base (#'source-test/publish opened @#'source-test/digest-a)
+            expected (:seon.source/commit-id base)
+            arrived (CountDownLatch. 2)
+            release (CountDownLatch. 1)
+            progress (fn [phase]
+                       (when (= "publication branch head" phase)
+                         (.countDown arrived)
+                         (test-support/await-event! release "release both publishers")))
+            publish (fn [digest marker]
+                      (future
+                        (with-bindings {#'cluster/*source-progress!* progress}
+                          (#'source-test/publish opened digest 'seon.cluster.source-test/populate-from-data!
+                                                 {:seon.source/expected-commit-id expected
+                                                  :seon.source.test/marker marker}))))
+            first-publication (publish @#'source-test/digest-b "first")
+            second-publication (publish (apply str (repeat 64 "c")) "second")]
+        (try
+          ;; Both requests passed admission and finished scratch work against
+          ;; the same expected head before either reached force-branch!.
+          (test-support/await-event! arrived "both publishers reached the head update")
+          (.countDown release)
+          (let [results [(test-support/await-event! first-publication "first publisher returned")
+                         (test-support/await-event! second-publication "second publisher returned")]
+                winners (filterv :seon.source/built? results)
+                losers (filterv :seon.error/at results)
+                head (:seon.source/commit-id (source/current opened))]
+            (is (= 1 (count winners)) (pr-str results))
+            (is (= 1 (count losers)) (pr-str results))
+            (let [[winner] winners [loser] losers]
+              (is (= head (:seon.source/commit-id winner))
+                  "the winner returns the head it installed")
+              (is (not= expected head))
+              (is (= expected (:seon.source/expected-commit-id loser)))
+              (is (= head (:seon.source/commit-id loser)))
+              (is (= :stale-branch-head (get-in loser [:seon.error/data :type]))))
+            (is (empty? (#'source-test/scratch-branches opened))))
+          (finally
+            (.countDown release)
+            (test-support/await-event! first-publication "first publisher exited")
+            (test-support/await-event! second-publication "second publisher exited")))))))
+
+(deftest ^{:seon.test/fixture-observation
+           "An analysis derived from a moved head is refused before scratch work."}
+  publication-derived-from-a-moved-head-refuses-before-scratch-work
+  (#'source-test/with-store
+    (fn [opened]
+      (let [base (#'source-test/publish opened @#'source-test/digest-a)
+            moved (#'source-test/publish opened @#'source-test/digest-b
+                                         'seon.cluster.source-test/populate-from-data!
+                                         {:seon.source/expected-commit-id (:seon.source/commit-id base)
+                                          :seon.source.test/marker "moved"})
+            stale (#'source-test/publish opened (apply str (repeat 64 "c"))
+                                         'seon.cluster.source-test/populate-from-data!
+                                         {:seon.source/expected-commit-id (:seon.source/commit-id base)
+                                          :seon.source.test/marker "stale"})]
+        (is (= (:seon.source/commit-id base) (:seon.source/expected-commit-id stale)))
+        (is (= (:seon.source/commit-id moved) (:seon.source/commit-id stale)))
+        (is (= (:seon.source/commit-id moved) (:seon.source/commit-id (source/current opened))))
+        (is (empty? (#'source-test/scratch-branches opened)))))))
+
+(deftest ^{:seon.test/fixture-observation
+           "The development adoption record is guarded by the store's current head."}
+  adoption-record-refuses-when-the-published-head-moved
+  (#'source-test/with-store
+    (fn [opened]
+      (let [base (#'source-test/publish opened @#'source-test/digest-a)
+            moved (#'source-test/publish opened @#'source-test/digest-b
+                                         'seon.cluster.source-test/populate-from-data!
+                                         {:seon.source/expected-commit-id (:seon.source/commit-id base)
+                                          :seon.source.test/marker "moved"})
+            database (d/branch-as-db (:seon.store/connection-object opened) source/current-branch)
+            cluster-ref [:seon.cluster/name "absent-cluster"]
+            guard #'cluster/adoption-guard-tx]
+        (try
+          (is (= [] (guard database opened cluster-ref nil (:seon.source/commit-id moved))))
+          (let [refusal (try (guard database opened cluster-ref nil (:seon.source/commit-id base))
+                             (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+            (is (= (:seon.source/commit-id base) (:seon.source/expected-commit-id refusal)))
+            (is (= (:seon.source/commit-id moved) (:seon.source/commit-id refusal))))
+          (let [refusal (try (guard database opened cluster-ref (:seon.source/commit-id base)
+                                    (:seon.source/commit-id moved))
+                             (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+            (is (= (:seon.source/commit-id base) (:seon.source/prior-commit-id refusal))
+                "a record whose starting adoption was replaced refuses"))
+          (finally (d/release-materialized-db database)))))))

@@ -3241,6 +3241,9 @@
 
 (defn- commit-persistent-results!
   "Commit one completion through the source publication owner."
+  {:malli/schema [:=> [:cat :seon.store/store
+                       [:or :seon.source/test-recording-request :seon.test.runner/run-result]]
+                  :seon.source/test-recording-result]}
   [held-store run-result]
   (if (:seon.test.run/provenance run-result)
     (source/record-results! held-store run-result)
@@ -3386,8 +3389,14 @@
   [operator-root request]
   (try
     (let [result (record-persistent-results! operator-root request)]
-      (if (or (vector? result) (:seon.test.run/provenance result)
-              (:seon.source/refused-test-run result)) result
+      (cond
+        (or (vector? result) (:seon.test.run/provenance result)
+            (:seon.source/refused-test-run result)) result
+        ;; The stale-head refusal keeps its expected/actual heads.
+        (and (:seon.error/at result) (:seon.source/expected-commit-id result))
+        (assoc result :seon.source/refused-test-run
+               (get-in request [:seon.test.run/provenance :seon.test.run/id]))
+        :else
           (throw (ex-info "The recording authority returned no admission or result facts."
                           {:seon.test/recording-result result}))))
     (catch Exception failure

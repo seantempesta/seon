@@ -1717,6 +1717,11 @@
 
 (defn- full-source-refresh!
   "Capture, compare, classify and analyze selected rows on the current lineage."
+  {:malli/schema
+   [:=> [:cat :seon.boot/root :seon.store/store
+         [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
+          [:seon.source/changed-paths [:vector :string]]]]
+    :seon.source/publish-result]}
   [root store roots]
   (let [published (current-publication store nil)
         committed (when published
@@ -1791,6 +1796,7 @@
                                                 (if paths (count paths) (count (filter :seon.fn.file/relative-path analyzed)))
                                                 " inputs"))
                 result (source/publish!
+                        (cond->
                         {:seon.store/store store :seon.fn/root (:seon.fn/root roots)
                          :seon.source/digest digest :seon.source/populate `populate-source!
                          :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
@@ -1803,7 +1809,11 @@
                                   :seon.source/relative-file-digests inputs}
                            database (assoc :seon.source/previous-database database)
                            paths (assoc :seon.fn/changed-paths paths
-                                        :seon.source/change-classes classes))})]
+                                        :seon.source/change-classes classes))}
+                          ;; The analysis above derives from this head; the
+                          ;; publisher refuses if another publication moved it.
+                          published (assoc :seon.source/expected-commit-id
+                                           (:seon.source/commit-id published))))]
             (report-source-progress! "branch publication complete")
             result)
           (finally (when database (d/release-materialized-db database))))))))
@@ -2068,12 +2078,34 @@
                                  (keys (ns-interns loaded))))))
                 namespaces))))
 
+(defn- adoption-guard-tx
+  "Transaction data refusing an adoption record whose basis moved.
+
+  Runs inside the writer: the cluster's adopted commit must still be the one
+  this adoption started from, and `current-src` must still name the commit
+  being adopted. Otherwise a newer publication or adoption owns the cluster."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/store
+                       [:tuple [:= :seon.cluster/name] :seon.boot/cluster-name]
+                       [:maybe :seon.source/commit-id] :seon.source/commit-id]
+                  [:= []]]}
+  [database store cluster-ref prior-commit published-commit]
+  (let [adopted (:seon.source/commit-id (d/pull database [:seon.source/commit-id] cluster-ref))
+        head (:seon.source/commit-id (source/current store))]
+    (when-not (and (= prior-commit adopted) (= published-commit head))
+      (throw (ex-info "Development adoption basis moved before its record."
+                      {:seon.error/message "Development adoption basis moved before its record."
+                       :seon.source/expected-commit-id published-commit
+                       :seon.source/commit-id head
+                       :seon.source/prior-commit-id prior-commit
+                       :seon.source/adopted-commit-id adopted})))
+    []))
+
 (defn- development-source-refresh!
   {:malli/schema
    [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
           [:vector :string]
           [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
-    :seon.source/adoption-result]}
+    [:or :seon.source/adoption-result :seon.source/publication-error]]}
   [held-store instance published changed-paths _roots]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
@@ -2081,10 +2113,19 @@
         ctx (:seon.sci.eval/ctx instance)
         prior-commit (:seon.source/commit-id
                       (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
-    (if (and prior-commit (= prior-commit (:seon.source/commit-id published)))
+    (cond
+      (and prior-commit (= prior-commit (:seon.source/commit-id published)))
       (do (report-source-progress! "development cluster converged")
           {:seon.source/reloaded-namespaces []
            :seon.source/arming-identities #{}})
+      ;; A newer publication owns adoption; this one never starts writing.
+      (not= (:seon.source/commit-id published)
+            (:seon.source/commit-id (source/current held-store)))
+      (source/publication-error 'seon.cluster/refresh-source!
+                                {:branch source/current-branch
+                                 :expected-current-commit (:seon.source/commit-id published)
+                                 :current-commit (:seon.source/commit-id (source/current held-store))})
+      :else
       (let [previous-database (db/db connection)
         published-database (source/database held-store (:seon.source/commit-id published))]
        (try
@@ -2177,7 +2218,9 @@
       (report-source-progress! "development adoption record")
       (require-committed!
        (db/transact! connection
-                     {:tx-data [{:db/id cluster-ref
+                     {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
+                                 prior-commit (:seon.source/commit-id published)]
+                                {:db/id cluster-ref
                                  :seon.source/commit-id
                                  (:seon.source/commit-id published)}
                                 {:db/id :db/current-tx
@@ -2242,11 +2285,13 @@
             (let [published (full-source-refresh! root held-store roots)]
               (if (:seon.error/at published)
                 published
-                (merge published
-                     (if instance
-                       (development-source-refresh! held-store instance published changed-paths roots)
-                       {:seon.source/reloaded-namespaces []
-                        :seon.source/arming-identities #{}}))))))
+                (let [adoption (if instance
+                                 (development-source-refresh! held-store instance published changed-paths roots)
+                                 {:seon.source/reloaded-namespaces []
+                                  :seon.source/arming-identities #{}})]
+                  (if (:seon.error/at adoption)
+                    adoption
+                    (merge published adoption)))))))
          (finally
            (release-root-store! store-dir))))))
 
@@ -2273,8 +2318,10 @@
                         (finally (when database (d/release-materialized-db database))))]
             (let [result (refresh-source! root (vec (sort paths)) nil directory)]
               (when (:seon.error/at result)
-                (throw (ex-info (:seon.error/message result) result)))))
-          (let [published (source/current held)
+                (throw (ex-info (:seon.error/message result) result)))
+              ;; Export, manifest and provenance all name this refresh's own
+              ;; commit, never a reread of the mutable head.
+              (let [published (select-keys result [:seon.source/branch :seon.source/commit-id])
                 database (source/database held (:seon.source/commit-id published))
                 digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])
                 input-digest (db/q database '[:find ?digest .
@@ -2289,6 +2336,14 @@
               (report-source-progress! "publication export")
               (export/export! {:seon.store/store held
                                :seon.export/parent-dir (str (io/file destination "data"))})
+              ;; The export copies the live store; a publication that moved
+              ;; the head meanwhile makes the copy disagree with this manifest.
+              (let [head (:seon.source/commit-id (source/current held))]
+                (when-not (= head (:seon.source/commit-id published))
+                  (refused! "The source head moved during publication export."
+                            {:seon.source/branch source/current-branch
+                             :seon.source/expected-commit-id (:seon.source/commit-id published)
+                             :seon.source/commit-id head})))
               (let [manifest (seon.fn/database-manifest database directory
                                                         (:seon.fn/roots (publication-roots)) nil)
                     input-digests (test.cache/external-input-digests
@@ -2307,7 +2362,7 @@
                              :seon.test.run/basis-t (db/basis-t database)
                              :seon.test.run/branch source/current-branch}))
               destination
-              (finally (d/release-materialized-db database))))
+              (finally (d/release-materialized-db database))))))
           (finally (release-root-store! store-dir)))))
 
 ;;; ---------------------------------------------------------------------------

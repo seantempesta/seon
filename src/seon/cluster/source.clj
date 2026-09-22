@@ -279,26 +279,34 @@
                               :seon.store/branch scratch})
     (catch Throwable _ nil)))
 
+(defn publication-error
+  "The typed stale-head refusal, from Datahike's `:stale-branch-head` data."
+  {:malli/schema [:=> [:cat :qualified-symbol
+                       [:map [:branch :keyword] [:expected-current-commit :uuid]
+                        [:current-commit :uuid]]]
+                  :seon.source/publication-error]}
+  [operation data]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.source/publication
+   :seon.error/operation operation
+   :seon.error/message "The source head changed before publication."
+   :seon.error/expected (:expected-current-commit data)
+   :seon.error/offending (:current-commit data)
+   :seon.error/data data
+   :seon.source/branch (:branch data)
+   :seon.source/expected-commit-id (:expected-current-commit data)
+   :seon.source/commit-id (:current-commit data)})
+
 (defn- stale-publication-error
   "Translate Datahike's stale-head refusal once; unrelated failures propagate."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.source/publication-error]}
   [operation failure]
-  (let [data (some (fn [cause]
-                     (let [data (ex-data cause)]
-                       (when (= :stale-branch-head (:type data)) data)))
-                   (take-while some? (iterate ex-cause failure)))]
-    (if data
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.source/publication
-       :seon.error/operation operation
-       :seon.error/message "The source head changed before publication."
-       :seon.error/expected (:expected-current-commit data)
-       :seon.error/offending (:current-commit data)
-       :seon.error/data data
-       :seon.source/branch (:branch data)
-       :seon.source/expected-commit-id (:expected-current-commit data)
-       :seon.source/commit-id (:current-commit data)}
-      (throw failure))))
+  (if-let [data (some (fn [cause]
+                        (let [data (ex-data cause)]
+                          (when (= :stale-branch-head (:type data)) data)))
+                      (take-while some? (iterate ex-cause failure)))]
+    (publication-error operation data)
+    (throw failure)))
 
 (defn- record-results-at-head!
   {:malli/schema [:=> [:cat :seon.store/store :seon.source/test-recording-request]
@@ -424,6 +432,8 @@
     progress! :seon.source/progress!
     :or {progress! (constantly nil)}}]
   (let [published (current store)
+        moved? (and requested-commit published
+                    (not= requested-commit (:seon.source/commit-id published)))
         note-paths (when (and published changed-paths)
                      (filterv (requiring-resolve 'seon.issue/note-path?) changed-paths))
         committed (when published
@@ -441,8 +451,18 @@
                                     "The published source digest could not be read." digest))
                          (= source-digest digest)))
                        (finally (d/release-materialized-db committed))))]
-    (if (and unchanged? (not (seq note-paths)))
+    (cond
+      ;; The request was derived from `requested-commit`; another publisher
+      ;; moved the head since. Refuse before scratch work, with Datahike's
+      ;; own refusal shape; `force-branch!` remains the fence inside the permit.
+      moved?
+      (publication-error 'seon.cluster.source/publish!
+                         {:branch current-branch
+                          :expected-current-commit requested-commit
+                          :current-commit (:seon.source/commit-id published)})
+      (and unchanged? (not (seq note-paths)))
       (assoc published :seon.source/digest source-digest :seon.source/built? false)
+      :else
       (let [projection (schema/declaration-projection)
         input-digest (or test-input-digest
                          (publication-input-digest! (or directory (fs/source-directory))))
@@ -508,6 +528,7 @@
              "the source seal transaction was refused"
              {:seon.source/digest source-digest}))
             (progress! "publication branch head")
+            (let [installed
             (if expected-commit
               ;; The scratch commit is deliberately NOT a parent. Published
               ;; history follows the prior `current-src` commit, keeping the
@@ -525,8 +546,12 @@
                   (refuse! ::stale-publication
                            "another publisher created current-src first"
                            {:seon.source/branch current-branch
-                            :seon.source/commit-id scratch-commit}))))
-            (cond-> {:seon.source/built? true}
+                            :seon.source/commit-id scratch-commit}))
+                scratch-commit))]
+            (cond-> {:seon.source/built? true
+                     ;; This operation's own head, returned by the guarded
+                     ;; update; never a reread of the mutable branch.
+                     :seon.source/commit-id installed}
               (or (contains? population-result :seon.reconcile/adopt-identities)
                   (:seon.db/transaction-report issues))
               (assoc :seon.reconcile/adopt-identities
@@ -536,22 +561,14 @@
                                                  ::publish-readback-failed
                                                  "Issue report identities could not be read." {}))))
               (nil? expected-commit)
-              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection))))))))
+              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection)))))))))
             (finally
               (d/release connection))))]
-        (let [commit-id
-              (registry/branch-commit-id
-               {:seon.store/store store
-                :seon.store/branch current-branch})]
-          (when-not (uuid? commit-id)
-            (refuse! ::publish-readback-failed
-                     "the published source branch has no commit ID"
-                     {:seon.source/branch current-branch}))
+        (do
           (registry/retire-branch! {:seon.store/store store
                                     :seon.store/branch scratch})
           (cond-> (merge outcome
                           {:seon.source/branch current-branch
-                           :seon.source/commit-id commit-id
                            :seon.source/digest source-digest})
             expected-commit (assoc :seon.source/expected-commit-id expected-commit))))
         (catch Throwable failure

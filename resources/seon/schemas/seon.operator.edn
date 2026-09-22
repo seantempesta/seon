@@ -197,6 +197,7 @@
                 :clusters [:vector :seon.operator/observation],
                 :response
                 [:or
+                 :seon.source/publication-error
                  :seon.error/base
                  [:map
                   [:seon.boot/pid :seon.boot/pid]
