@@ -954,7 +954,8 @@
                    [:seon.cluster.eval/ns
                     :seon.cluster.eval/ns]
                    [:seon.program/row {:optional true} :seon.program/row]]]]
-    [:or [:vector [:tuple :map [:maybe :seon.program/row]]] :seon.error/value]]}
+    [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
+     :seon.error/value :seon.fn/namespace-unresolvable-error]]}
   [database requests]
   (let [resolved
         (mapv
@@ -969,7 +970,8 @@
                 {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
-                 :seon.error/kind ::namespace-unresolvable
+                 ::namespace-unresolvable true
+                 :seon.cluster.eval/source source
                  :seon.error/message
                  (str "Cannot analyze the form because its namespace reference "
                       (pr-str namespace-ref)
@@ -984,7 +986,7 @@
                  {:seon.fn/namespace-ref namespace-ref
                   :seon.fn/namespace-row namespace-row}}))))
          requests)
-        refusal (some #(when (:seon.error/kind %) %) resolved)]
+        refusal (some #(when (::namespace-unresolvable %) %) resolved)]
     (if refusal
       refusal
       (let [{analysis :seon.fn/analysis

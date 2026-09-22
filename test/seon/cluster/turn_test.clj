@@ -1765,10 +1765,10 @@
 
 
 (deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
-  (doseq [[reply-text error-kind hint]
-          [["{:a 1 :b}" :seon.sci.reader/unreadable "even number"]
+  (doseq [[reply-text hint]
+          [["{:a 1 :b}" "even number"]
            ["I explained the result without another form."
-            :seon.cluster.reply/no-forms "prose"]]]
+            "prose"]]]
     (with-cluster
       (fn [cluster]
         (let [connection (:seon.db/connection cluster)
@@ -1797,7 +1797,6 @@
             (is (= 1 (count evaluations))
                 "every rejected reply leaves one terminal evaluation")
             (is (= reply-text (:seon.cluster.eval/source evaluation)))
-            (is (= error-kind (:seon.error/kind evaluation)))
             (is (str/includes? (:seon.cluster.eval/error evaluation) hint))
             (is (str/includes? (:seon.eval/shown evaluation)
                                (:seon.cluster.eval/error evaluation)))
@@ -2010,10 +2009,20 @@
 
 (defn- failure
   "One model failure value carrying the evidence the leaf would record."
+  {:malli/schema [:=> [:cat :qualified-keyword :map] :seon.ai/completion]}
   [kind evidence]
-  {:seon.error/kind kind
-   :seon.error/message (str "probe failure: " (name kind))
-   :seon.error/data evidence})
+  (merge
+   {:seon.error/at now
+    :seon.error/layer :seon.ai/request
+    :seon.error/operation 'seon.ai/complete
+    :seon.error/message (str "probe failure: " (name kind))
+    :seon.error/data evidence}
+   (case kind
+     :seon.ai/no-credential {:seon.ai/missing-credential-variable "SEON_TEST_PROVIDER_KEY"}
+     :seon.ai/transport-failure {:seon.ai/transport-failure "https://provider.invalid"}
+     :seon.ai/timeout {:seon.ai/timeout 1000}
+     :seon.ai/provider-error {:seon.ai/provider-error (:seon.ai/http-status evidence)}
+     :seon.ai/unparseable-body {:seon.ai/unreadable-response-member "body"})))
 
 (def ^:private unpaid
   "A connection the JDK PROVED never left this machine — the one case
@@ -2158,7 +2167,10 @@
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
             truncation
-            {:seon.error/kind :seon.ai/stream-truncated
+            {:seon.error/at now
+             :seon.error/layer :seon.ai/request
+             :seon.error/operation 'seon.ai/truncation
+             :seon.ai/interrupted-text-count 12
              :seon.error/message
              "The provider stream ended after 12 characters."
              :seon.error/data
@@ -3311,7 +3323,10 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])
-            refusal {:seon.error/kind :seon.cluster.prompt/refused
+            refusal {:seon.error/at now
+                     :seon.error/layer :seon.cluster.prompt/acquisition
+                     :seon.error/operation 'seon.cluster.prompt/prompt
+                     :seon.cluster.prompt/refused :retained-context
                      :seon.error/message "The retained prompt could not be acquired."
                      :seon.error/data {}}]
         (turn/turn {:seon.turn.loop/cluster cluster
@@ -3330,10 +3345,13 @@
                 "the refused prompt settles as an error value")))
         (is (empty? @requests) "no provider call without a prompt")
         (is (empty? (attempt-rows @connection)) "and no attempt row")
-        (is (contains? (set (db/q '[:find [?kind ...] :where
-                                   [?e :seon.error/kind ?kind]]
+        (is (false? (contains? (:schema (db/db connection))
+                              (keyword "seon.error" "kind"))))
+        (is (contains? (set (db/q '[:find [?message ...] :where
+                                   [?fault :seon.error/occurrences ?e]
+                                   [?e :seon.error.occurrence/message ?message]]
                                  @connection))
-                       :seon.cluster.prompt/refused)
+                       (:seon.error/message refusal))
             "the actual acquisition refusal is durable")))))
 
 ;;; ---------------------------------------------------------------------------

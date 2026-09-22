@@ -476,6 +476,8 @@
   "One durable contribution row: evidence, not content. No stored output tag
   (a prompt capture is necessarily AI), no stored text (hash + position + the prompt blob
   reconstruct it). A FAILED contribution is presence of the error keys."
+  {:malli/schema [:=> [:cat :seon.context.capture/id :seon.context/contribution]
+                  :seon.context.contribution/contribution]}
   [capture-id record]
   (let [position (:seon.context.contribution/position record)
         failure (get record :seon.error/value)]
@@ -491,8 +493,7 @@
       (assoc :seon.context.contribution/evaluations
              (:seon.context.contribution/evaluations record))
       failure
-      (assoc :seon.error/kind (:seon.error/kind failure)
-             :seon.context.contribution/error (:seon.error/message failure)))))
+      (assoc :seon.context.contribution/error (:seon.error/message failure)))))
 
 (defn capture-tx
   "Transaction data for one context capture. PURE — the loop commits.
@@ -537,8 +538,7 @@
               (mapv (fn [record] (contribution-row capture-id record))
                     (:seon.context/contributions rendered)))
        failure
-       (assoc :seon.error/kind (:seon.error/kind failure)
-              :seon.error/message (:seon.error/message failure)))]))
+       (assoc :seon.error/message (:seon.error/message failure)))]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one digest seam

@@ -1,4 +1,10 @@
-#:seon.fn{:gate-request
+#:seon.fn{:namespace-unresolvable [:= true]
+          :namespace-unresolvable-error
+          [:and :seon.error/base
+           [:map
+            [:seon.fn/namespace-unresolvable :seon.fn/namespace-unresolvable]
+            [:seon.cluster.eval/source :seon.cluster.eval/source]]]
+          :gate-request
           [:map [:seon.db/db :seon.db/database-value]
            [:seon.fn/seeds [:set :qualified-symbol]]],
           :root [:string {:min 1}],

@@ -50,7 +50,7 @@
     (is (string? comment-only))
     (doseq [text [comment-only "I should inspect the orders."]]
       (let [failure (reply/sources text)]
-        (is (= :seon.cluster.reply/no-forms (:seon.error/kind failure)))
+        (is (true? (:seon.cluster.reply/no-forms failure)))
         (is (= "Your reply had no form; only comments/prose. Send a form."
                (:seon.error/message failure)))))))
 
@@ -175,7 +175,7 @@
     (let [text "I explained what I had done. The result was fifty-five."
           result (sources text)]
       (is (error? result))
-      (is (= :seon.cluster.reply/no-forms (:seon.error/kind result)))
+      (is (true? (:seon.cluster.reply/no-forms result)))
       (is (str/includes? (:seon.error/message result) "prose")
           "the refusal names what the reply carried instead of forms")))
 
@@ -336,8 +336,7 @@
     (is (= ["(+ 1 2)"]
            (sources "Here is the plan.\n(+ 1 2)\nThat is all."))))
   (testing "while prose with no form at all is still the loud refusal"
-    (is (= :seon.cluster.reply/no-forms
-           (:seon.error/kind (reply/sources "Only prose here."))))))
+    (is (true? (:seon.cluster.reply/no-forms (reply/sources "Only prose here."))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Refusals — flat values, never throws
@@ -370,14 +369,12 @@
   (testing "read-eval is refused by the reader, not by a blocklist"
     (let [refused (sources "#=(System/exit 1)")]
       (is (error? refused))
-      (is (contains? #{:seon.cluster.reply/refused-tag
-                       :seon.cluster.reply/unreadable}
-                     (:seon.error/kind refused)))))
+      (is (or (:seon.cluster.reply/refused-tag refused)
+              (:seon.cluster.reply/unreadable refused)))))
   (testing "an unknown reader tag is refused by name"
     (is (error? (sources "#foo/bar [1 2]"))))
   (testing "an empty reply has neither a form nor a prose note"
-    (is (= :seon.cluster.reply/no-forms
-           (:seon.error/kind (sources "   \n\n  "))))))
+    (is (true? (:seon.cluster.reply/no-forms (sources "   \n\n  "))))))
 
 ;;; A declared error class is recognised by its MARKER ATTRIBUTE — the one
 ;;; required key besides `:seon.error/message` — so a refusal that omits it
@@ -441,7 +438,7 @@
     (let [result (reply/sources text)]
       (is (error? result)
           (str "control markup must not become a plan form: " text))
-      (is (= :seon.cluster.reply/no-forms (:seon.error/kind result)))
+      (is (true? (:seon.cluster.reply/no-forms result)))
       (is (= text (:seon.cluster.reply/text (:seon.error/data result)))
           "the refusal carries the leaked text so the leak stays visible"))))
 

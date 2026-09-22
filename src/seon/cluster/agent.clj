@@ -210,7 +210,7 @@
   [request]
    (let [agent-data (db/pull (:seon.db/db request) identity-selector
                            [:seon.agent/id (:seon.agent/id request)])]
-     (if (:seon.error/kind agent-data)
+     (if (:seon.db/invalid-read agent-data)
        agent-data
        (when-let [agent-id (:seon.agent/id agent-data)]
          (let [namespace-name

@@ -57,7 +57,6 @@
            :seon.error/at (java.util.Date.)
            :seon.error/layer :seon.cluster.reply/source
            :seon.error/operation 'seon.cluster.reply/sources
-           :seon.error/kind kind
            :seon.error/message message
            :seon.error/data data
            :seon.error/diagnostic-layer :seon.cluster.reply/source

@@ -1,0 +1,405 @@
+---
+type: research
+status: incomplete
+created: 2026-09-21
+---
+
+# B3 kind/class cut — landing evidence
+
+**In progress: regression committed; Slice A settlement conversion verified below.**
+The complete kind/class cut still requires Slices B and C. No final green claim.
+
+## Commits and changed paths
+
+- `aba6d445e`: accepted fails-before regression, unchanged. The prescribed ten-
+  namespace HEAD load exited 0 immediately after this commit.
+- Slice A: `src/seon/turn.clj`, `src/seon/cluster/reply.clj`,
+  `src/seon/cluster/agent.clj`, `src/seon/context.clj`, `src/seon/fn.clj`,
+  `resources/seon/schemas/seon.fn.edn`, and the cluster turn/reply tests.
+  Evaluation and context facts no longer project the retired attribute. Reply
+  and phase errors no longer construct it. Settlement consumes declared writer
+  observations; the general `settlement-refused?` predicate and every caller
+  are removed together. Function analysis declares its namespace refusal with
+  the actual source as required evidence.
+
+## Live read-only probes
+
+Default was pid 56288, process start 2026-09-22T00:33:08.873Z, prepl 57524.
+MCP `runtime_status` and `eval_clj` were available. All forms below used explicit
+root `/Users/sean/src/seon`, cluster `default`, mode `jvm`, `read_only true`.
+No reset, restart, refork, paid provider call, or durable probe write occurred.
+
+```clojure
+(let [db (seon.db/db (seon.cluster.boot/connection "default"))
+      reply (seon.cluster.reply/sources "; prose only" 'user 100)]
+  {:kind-installed? (contains? (:schema db) :seon.error/kind)
+   :reply reply})
+```
+
+5 ms. `:kind-installed? false`; reply carries
+`:seon.cluster.reply/no-forms true`, `:seon.error/kind :seon.cluster.reply/no-forms`,
+and message `"Your reply had no form; only comments/prose. Send a form."`.
+
+```clojure
+(let [database (seon.db/db (seon.cluster.boot/connection "default"))
+      result (seon.db/pull database [:seon.error/kind] [:seon.agent/id "root"])]
+  {:result result
+   :unguarded-identity-continuation
+   (when-let [agent-id (:seon.agent/id result)] (str "Agent     " agent-id))})
+```
+
+4 ms. Result carries `:seon.db/invalid-read true` and reports the undeclared
+attribute at `(resolve-datom db 37201 :seon.error/kind nil nil)`.
+`:unguarded-identity-continuation nil`. This verifies why the whoami branch is a
+real domain decision: continuing to construct identity text loses the refusal.
+The accepted ruling is to read the declared `:seon.db/invalid-read` member.
+
+```clojure
+(let [database (seon.db/db (seon.cluster.boot/connection "default"))
+      before (seon.db/basis-t database)]
+  (try
+    (datahike.core/with database
+      [[:db/add -1 :seon.error/kind :seon.cluster.reply/no-forms]])
+    (catch clojure.lang.ExceptionInfo failure
+      {:basis-before before
+       :basis-after (seon.db/basis-t
+                      (seon.db/db (seon.cluster.boot/connection "default")))
+       :message (ex-message failure)
+       :data (ex-data failure)})))
+```
+
+3 ms. Basis before and after both 536870954. Message:
+`Bad entity attribute :seon.error/kind at [:db/add 37750 :seon.error/kind :seon.cluster.reply/no-forms], not defined in current schema`.
+Exception data includes `:error :transact/schema` and `:attribute :seon.error/kind`.
+This is the dependency's immutable transaction path, not a live committed turn.
+
+## Fails-before regression
+
+Command, production source unchanged:
+
+```sh
+bin/test-fast --paths test/seon/cluster/turn_test.clj -- seon.cluster.turn-test
+```
+
+HEAD at admission: `826fdbd6d4fbfaaaa9f3911571ccaa89e24036b4`.
+The new regression began at 2026-09-22T03:45:14.451244Z and ended at
+03:45:18.494329Z. It failed at `turn_test.clj:1853`:
+
+```text
+Bad entity attribute :seon.error/kind at [:db/add 37213 :seon.error/kind :seon.cluster.reply/no-forms], not defined in current schema
+expected: error text includes "no form"
+actual: error text contains the writer refusal above
+```
+
+The fallback created an evaluation, but recorded the writer refusal instead of
+the intended no-forms diagnostic. The new test correctly refuses that outcome.
+The canonical fixture also verified the retired attribute is absent from its
+installed schema. Other namespace tests reported contract and duration failures;
+this run is not green. It exited 1: **60 executed, 408 assertions, 88 failures,
+17 errors**, recorded run `876775d57511` (basis 536870926). The new no-forms
+regression contributed the specific failure shown above.
+
+## Publication timing
+
+| Edit | Edited | Converged | Seconds | Evidence |
+| --- | --- | --- | ---: | --- |
+| Add no-forms regression | 2026-09-22T03:43:53.735940Z | 2026-09-22T03:44:01.066099Z | 7.330159 | Publication `83f385e9-e3db-4801-b474-a935f740f592`, adopted commit `6ab1f97e-d8a9-5790-98c0-b0015a1df441` on default; hook SOURCE_EDIT / SOURCE_BATCH rows |
+
+| Settlement projection, reply and whoami | 2026-09-22T03:55:53.154550Z | 2026-09-22T03:56:21.723561Z | 28.569011 | `8462335d-0a23-4dd0-9dce-428090332992`, SOURCE_BATCH, adopted `6ab1fc5c-3f71-5005-9bb7-5f4a61909503` |
+| Phase and settlement consumers | 2026-09-22T03:58:53.306006Z | 2026-09-22T03:59:26.419480Z | 33.113474 | `104c345b-62b0-4bfe-a16e-54ed65685a97`, SOURCE_BATCH, adopted `6ab1fd10-810f-509b-9405-7eae2d920f77` |
+| Fault regression assertion | 2026-09-22T04:09:47.702409Z | 2026-09-22T04:09:53.848211Z | 6.145802 | `12471f1f-1644-4e70-87ba-a2babedddee9`, adopted `6ab1ff90-473d-5312-b2e8-651e59c7c701` |
+
+The two SOURCE_BATCH durations over ten seconds are findings, not acceptable
+latency claims. Hook feedback also refused an intermediate undeclared reader
+schema and a boolean-only error facet. Both were corrected before the final
+run: the reader event uses an explicit map, and namespace refusal requires its
+actual source. Publication `7673ad24-2a21-4472-a828-a4a68de53fd2` then converged
+in approximately 33.575 seconds (SOURCE_BATCH). Final tested source adoption:
+`1e5329be-df1b-4eb6-b681-53d4091d90ae`, commit
+`6ab1ffff-dd5c-5636-af4a-c31f55da03bf`. Adoption is not a live turn proof.
+
+## Domain decisions and contracts
+
+This table records retained Slice A decisions. Remaining sites are still under
+review; it is not yet the completed cut's exhaustive table.
+
+| Site / function | Producer | Declared distinguishing member | Why continuation differs |
+| --- | --- | --- | --- |
+| cluster.agent/whoami | db/pull | `:seon.db/invalid-read` | Refusal must not become identity text. |
+| turn/planned-sources; call-turn reply preparation | reply/sources | `:seon.cluster.reply/no-forms` | Preserve reader refusal for ordinary evaluation settlement. |
+| fn/analyze-forms; turn/gate-function-install; resume-turn analysis | namespace resolution / analyze-forms | `:seon.fn/namespace-unresolvable` | Analysis cannot index forms with an unresolved namespace; schema requires source evidence. |
+| turn/settle-batch!; settle! | phase-wrapped db/transact! | `:seon.turn.loop/phase-failed`, `:seon.db.write.attempt/request-id`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | Refusal requires a terminal refusal transaction instead of successful installation. |
+| turn/settle-batch-refusal! | db/transact! | Same three database members | Refusal of the fallback transaction must surface. |
+| turn/settle! preparation | phase / explicit failure argument | `:seon.turn.loop/phase-failed`; explicit failure input | Prepare fault recording instead of ordinary receipt data. |
+| turn/record-attempt!; call-turn freeze, capture, attempt recording, close | db/transact! | Same three database members | Do not advance provider/turn state without durable facts. |
+| turn/attempt-evidence | ai/complete | `:seon.ai/interrupted-text-count` | Preserve stream truncation evidence. |
+| turn/call-turn prompt rendering | prompt renderer through phase | `:seon.turn.loop/phase-failed`; prompt `missing-config`, `missing-cluster`, `refused`, `no-trigger`, `budget-exceeded`; render `refused-member`, `candidates`, `invalid-output`; render.unknown `reason`; render.transcript `refused-member`; render.web `refused-member`, `function-unavailable`; config `error-key`, `missing-effective`; db `invalid-read`; schema `expected-value`; turn `missing-opening-datom` | Capture refusal against its immutable database and settle it before provider work. All names are fully qualified in source. |
+| turn/call-turn prompt database | opening snapshot / database read | `:seon.turn/missing-opening-datom`, `:seon.db/invalid-read`, `:seon.schema/expected-value` | A refused snapshot cannot serve as capture database. |
+| turn/call-turn provider completion | ai/complete | AI members `unreadable-response-member`, `unanswered-reasoning-count`, `exhausted-finish-reason`, `interrupted-text-count`, `provider-error`, `timeout`, `transport-failure`, `extra-body-edn`, `protected-keys`, `missing-credential-variable` | Failure follows the existing attempt disposition; success freezes reply. |
+| turn/resume-turn fork, trigger, evaluation, problem | phase | `:seon.turn.loop/phase-failed` | Failed phase cannot provide successful fork/evaluation/problem inputs. |
+| turn/resume-turn settlement | settle-batch! | `:refused-outcome` | Use the already declared returned refusal path; no second classification. |
+| turn/generate-turn phase | phase | `:seon.turn.loop/phase-failed` | Required caller conversion for the changed phase producer; remaining legacy branch belongs to Slice B. |
+
+`analyze-forms` output is accreted with the new specific namespace refusal schema.
+The phase wrapper's polymorphic contract explicitly preserves any supplied
+callback value, including flat base errors, and declares its own thrown-failure
+translation. Added complete private contracts cover gate-function-install,
+settle-batch!, refusal-terminal-data, settle-batch-refusal!, attempt-evidence,
+record-attempt!, call-turn, resume-turn, generate-turn, and context/contribution-row.
+No new general error predicate or propagation mechanism was added.
+
+## Slice A tests and baseline failure classes
+
+Reply baseline command:
+`bin/test-fast --paths test/seon/cluster/turn_test.clj -- seon.cluster.reply-test`.
+Run `d38c9d20479b`: 18 tests, 124 assertions, zero failures/errors.
+
+Final Slice A command:
+
+```sh
+bin/test-fast --paths src/seon/turn.clj src/seon/cluster/reply.clj src/seon/cluster/agent.clj src/seon/context.clj src/seon/fn.clj resources/seon/schemas/seon.fn.edn test/seon/cluster/turn_test.clj test/seon/cluster/reply_test.clj -- seon.cluster.turn-test seon.cluster.reply-test
+```
+
+No-forms regression passed, 04:13:01.538872–04:13:05.444391Z. The existing
+prompt-refusal regression now also asserts that the fault's occurrence carries
+the actual diagnostic, with the retired attribute absent from fixture schema;
+it passed 04:12:58.376658–04:13:01.538686Z. Both use virtual providers, real SCI,
+armed contracts and the canonical fixture. Final execution tallies: turn 60 tests, 421 assertions, 84 failures, 16 errors;
+reply 18 tests, 124 assertions, zero failures/errors. Aggregate 78 tests,
+545 assertions, 84 failures, 16 errors; exit 1. Compared with baseline turn
+60/408/88/17 and reply 18/124/0/0. The recorder again refused the immutable
+`:seon.test/report-conflict` at moved assertion line 2646 in
+`a-refused-delivery-becomes-a-durable-error-fact`. These are observed execution
+tallies, not a successfully recorded run. Log: `tmp/b3-slice-a-final.log`.
+The launcher and owned test JVM exited before commit; its snapshot was removed.
+
+The final errors remain in legacy fixtures/installation, missing settlement
+ordinal, shown-value facets, generated huge-array failure, and contract shapes.
+Two error sites not present in the original error list are import-addition and
+refused-runtime-schema-registration; baseline assertions in those areas were
+already red. Their equivalence has not been proved; no green or no-regression
+claim is made for the namespace as a whole.
+
+The original 105 reports (88 failures, 17 errors) were recovered read-only from
+recorded run `876775d57511` on current-source, not inferred from later failures.
+Its error classes were: invalid old virtual AI errors missing base `at` (four);
+undeclared SCI/base error facets in shown-value (two); string function identity
+instead of symbol in fixture write (one) and tests-reaching (one); invalid turn
+output base (two); unowned fixture component (one); unavailable authored refer
+(one); generated-phase huge-array failure (one); missing shown text (one);
+refused terminal fixture seed (one); missing rendered-context on prompt capture
+(one); missing settlement ordinal (one). Assertions additionally include duration
+bounds, program/schema installation, aliases/refers/private context, assignment,
+read projections, and the accepted no-forms writer refusal. These baseline
+classes are not repaired merely to obtain a green namespace tally.
+
+An intermediate run completed 78 tests, 434 assertions, 68 failures, 32 errors;
+its no-forms regression passed. It is superseded by the final run because its
+intermediate schema/phase contract defects were fixed. Its recorder refused
+`:seon.test/report-conflict`: `complete-members` compares the full immutable
+report at runner.clj:2830, including line metadata, against the same captured
+failure identity. The failure report's moved source line conflicted. No recorder
+or other lane's session was changed. This run is not recorded green evidence.
+
+## Verification boundary and remaining work
+
+**RESTART NEEDED:** the orchestrator must restart default after Slice A and
+prove a no-forms reply settles live. This lane does not stop or reset default.
+Fixture success does not prove the parked live graph recovered.
+
+Slices B/C remain: other source kind sites, all remaining test/script/bin sites,
+class mechanism deletion, and per-callee debt guard review. The original full
+namespace matrix and exhaustive B3 commits 1–3 disposition remain outstanding.
+Foreign documents and every pre-existing untracked file are preserved. Earlier
+foreign test-selection edits were excluded from the baseline snapshot and have
+since landed independently.
+
+## Counts before / current
+
+Counts use matching lines, as `rg -c` does. Current counts are the Slice A working source. Multiple class properties in one EDN snapshot line count once.
+
+| Path | Kind before | Kind current | Class marker before | Class marker current | Debt before | Debt current |
+| --- | ---: | ---: | ---: | ---: | ---: | ---: |
+| `src/my/program.clj` | 0 | 0 | 0 | 0 | 27 | 27 |
+| `src/seon/agent.clj` | 11 | 11 | 0 | 0 | 0 | 0 |
+| `src/seon/artifact.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/call_preparation.clj` | 0 | 0 | 0 | 0 | 12 | 12 |
+| `src/seon/cluster/agent.clj` | 17 | 16 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/boot.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/export.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/message.clj` | 17 | 17 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/prompt.clj` | 10 | 10 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/registry.clj` | 6 | 6 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/reply.clj` | 1 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/source.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/store.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster/wake.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `src/seon/cluster.clj` | 23 | 23 | 0 | 0 | 0 | 0 |
+| `src/seon/context.clj` | 2 | 0 | 0 | 0 | 0 | 0 |
+| `src/seon/db.clj` | 24 | 24 | 0 | 0 | 0 | 0 |
+| `src/seon/edit/jvm.clj` | 6 | 6 | 0 | 0 | 0 | 0 |
+| `src/seon/effect.clj` | 0 | 0 | 0 | 0 | 2 | 2 |
+| `src/seon/eval/drive.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `src/seon/eval.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `src/seon/fn/analyzer.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/fn/schema_shape.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `src/seon/fn/signature.cljc` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/fn.clj` | 25 | 23 | 0 | 0 | 0 | 0 |
+| `src/seon/fs/jvm.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `src/seon/fs.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/issue/detect.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/issue/opening.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `src/seon/note.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `src/seon/plan.clj` | 0 | 0 | 0 | 0 | 38 | 38 |
+| `src/seon/print.cljc` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `src/seon/program.cljc` | 0 | 0 | 0 | 0 | 2 | 2 |
+| `src/seon/reconcile.cljc` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `src/seon/render/data.clj` | 0 | 0 | 0 | 0 | 5 | 5 |
+| `src/seon/render/transcript.clj` | 0 | 0 | 0 | 0 | 35 | 35 |
+| `src/seon/render/walk.clj` | 0 | 0 | 0 | 0 | 5 | 5 |
+| `src/seon/render/web.clj` | 0 | 0 | 0 | 0 | 20 | 20 |
+| `src/seon/render.clj` | 0 | 0 | 0 | 0 | 6 | 6 |
+| `src/seon/repl.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `src/seon/run.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `src/seon/schema/datahike.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `src/seon/schema/edn.clj` | 12 | 12 | 0 | 0 | 0 | 0 |
+| `src/seon/schema/internal.cljc` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `src/seon/schema.clj` | 29 | 29 | 0 | 0 | 0 | 0 |
+| `src/seon/sci/eval.clj` | 0 | 0 | 0 | 0 | 13 | 13 |
+| `src/seon/sci/kernel.clj` | 0 | 0 | 0 | 0 | 1 | 1 |
+| `src/seon/search.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `src/seon/test/accretion.clj` | 0 | 0 | 0 | 0 | 1 | 1 |
+| `src/seon/test/runner.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `src/seon/turn.clj` | 56 | 26 | 0 | 0 | 0 | 0 |
+| `test/seon/adoption_diagnostic_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/adoption_margin_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/agent_call_edges_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/agent_situation_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/bounded_boundary_census_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/classification_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/agent_arming_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/agent_identity_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/agent_namespace_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/agent_test.clj` | 10 | 10 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/armed_test.clj` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/evaluate_sources_test.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/instruction_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/mcp_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/message_assignment_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/message_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/problem_routing_test.clj` | 10 | 10 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/program_restart_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/prompt_test.clj` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/registry_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/reply_test.clj` | 6 | 0 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/resume_artifact_routing_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/source_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/status_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/store_transact_test.clj` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/turn_test.clj` | 35 | 30 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster/wake_test.clj` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `test/seon/cluster_test.clj` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `test/seon/concurrency_independence_test.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `test/seon/concurrency_streams_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/concurrency_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/contracts_fixture.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/contracts_install_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/contracts_plan_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/custody_stability_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/data_shapes_test.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `test/seon/db/declaration_population_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/db_test.clj` | 26 | 26 | 0 | 0 | 0 | 0 |
+| `test/seon/dev/changed_test_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/dev/dependency_cache_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/dev/edit_feedback_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/edit/jvm_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/fn/publication_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/fn_test.clj` | 25 | 25 | 0 | 0 | 0 | 0 |
+| `test/seon/fs/jvm_test.clj` | 9 | 9 | 0 | 0 | 0 | 0 |
+| `test/seon/help_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/help_trial_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/html_views_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/loop_proof_test.clj` | 12 | 12 | 0 | 0 | 0 | 0 |
+| `test/seon/mcp_test.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `test/seon/no_provider_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/owned_value_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/public_contract_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/read_evidence_test.clj` | 6 | 6 | 0 | 0 | 0 | 0 |
+| `test/seon/reconcile_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/refusal_grammar_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/registry_isolation_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/render/hiccup_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/render_coverage_test.clj` | 5 | 5 | 0 | 0 | 0 | 0 |
+| `test/seon/render_simplification_test.clj` | 8 | 8 | 0 | 0 | 0 | 0 |
+| `test/seon/render_source_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/repl_grammar_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/repl_parity_test.clj` | 6 | 6 | 0 | 0 | 0 | 0 |
+| `test/seon/repl_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/rereads_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/reset_edges_test.clj` | 8 | 8 | 0 | 0 | 0 | 0 |
+| `test/seon/returned_error_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/run4_install_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/run4_reader_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/run6_stall_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/schema/admission_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/schema/datahike_parity.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `test/seon/schema/datahike_test.clj` | 1 | 1 | 1 | 1 | 0 | 0 |
+| `test/seon/schema/declaration_population_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/schema/edn_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/schema/program_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/schema_test.clj` | 1 | 1 | 2 | 2 | 0 | 0 |
+| `test/seon/schema_usage_guard_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/sci/supplied_database_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/source_reconciliation_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/supplied_documentation_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/test_failure_facts_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/test_preparation_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/test_provenance_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/test_reaching_test.clj` | 10 | 10 | 0 | 0 | 0 | 0 |
+| `test/seon/test_runner_failure_fixture.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/test_runner_integration_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `test/seon/test_runner_test.clj` | 6 | 6 | 0 | 0 | 0 | 0 |
+| `test/seon/test_support.clj` | 7 | 7 | 0 | 0 | 0 | 0 |
+| `test/seon/test_support_test.clj` | 6 | 6 | 0 | 0 | 0 | 0 |
+| `test/seon/transact_feedback_test.clj` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `test/seon/transaction_result_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `test/seon/turn_continue_test.clj` | 2 | 2 | 0 | 0 | 0 | 0 |
+| `test/seon/turn_loop_test.clj` | 19 | 19 | 0 | 0 | 0 | 0 |
+| `test/seon/turn_test.clj` | 23 | 23 | 0 | 0 | 0 | 0 |
+| `test/seon/turn_work_test.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `script/seon/dev/changed_test.clj` | 3 | 3 | 0 | 0 | 0 | 0 |
+| `script/seon/dev/dependency_digest.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `script/seon/dev/issues.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `script/seon/dev/mcp.clj` | 1 | 1 | 0 | 0 | 0 | 0 |
+| `bin/seon-hook` | 4 | 4 | 0 | 0 | 0 | 0 |
+| `resources/seon/schemas/my.fs.edn` | 0 | 0 | 16 | 16 | 0 | 0 |
+| `resources/seon/schemas/my.message.edn` | 0 | 0 | 6 | 6 | 0 | 0 |
+| `resources/seon/schemas/my.note.edn` | 0 | 0 | 5 | 5 | 0 | 0 |
+| `resources/seon/schemas/my.turn.edn` | 0 | 0 | 3 | 3 | 0 | 0 |
+| `resources/seon/schemas/my.web.edn` | 0 | 0 | 11 | 11 | 0 | 0 |
+| `resources/seon/schemas/seon.agent.edn` | 0 | 0 | 6 | 6 | 0 | 0 |
+| `resources/seon/schemas/seon.artifact.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.boot.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.export.edn` | 0 | 0 | 5 | 5 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.prompt.edn` | 0 | 0 | 5 | 5 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.registry.edn` | 0 | 0 | 8 | 8 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.reply.edn` | 0 | 0 | 3 | 3 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.source.edn` | 0 | 0 | 7 | 7 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.store.edn` | 0 | 0 | 6 | 6 | 0 | 0 |
+| `resources/seon/schemas/seon.cluster.wake.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.db.edn` | 0 | 0 | 4 | 4 | 0 | 0 |
+| `resources/seon/schemas/seon.dev.mcp.artifact.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.dev.mcp.edn` | 0 | 0 | 3 | 3 | 0 | 0 |
+| `resources/seon/schemas/seon.eval.drive.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.fn.binding.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.fn.edn` | 0 | 0 | 13 | 13 | 0 | 0 |
+| `resources/seon/schemas/seon.message.edn` | 0 | 0 | 5 | 5 | 0 | 0 |
+| `resources/seon/schemas/seon.print.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.reconcile.edn` | 0 | 0 | 6 | 6 | 0 | 0 |
+| `resources/seon/schemas/seon.schema.datahike.edn` | 0 | 0 | 10 | 10 | 0 | 0 |
+| `resources/seon/schemas/seon.schema.edn` | 0 | 0 | 25 | 25 | 0 | 0 |
+| `resources/seon/schemas/seon.schema.edn.edn` | 0 | 0 | 8 | 8 | 0 | 0 |
+| `resources/seon/schemas/seon.schema.shape.edn` | 0 | 0 | 3 | 3 | 0 | 0 |
+| `resources/seon/schemas/seon.search.edn` | 0 | 0 | 2 | 2 | 0 | 0 |
+| `resources/seon/schemas/seon.turn.edn` | 0 | 0 | 1 | 1 | 0 | 0 |
+| `resources/seon/schemas/seon.turn.loop.edn` | 0 | 0 | 4 | 4 | 0 | 0 |
