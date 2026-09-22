@@ -45,3 +45,12 @@ Sighting 2026-09-22 21:05Z (lane validator-single-pass): overlay `d73e0a6c…` 6
 behind HEAD `f31074521`; `bin/test-fast --paths src/seon/db.clj
 test/seon/owned_value_test.clj -- seon.owned-value-test` (runs `5995c1bd98eb`,
 `3a17ec42b5a4`) errored in fixture setup with the same `:my.note/note` partition refusal.
+
+Sighting 2026-09-22 21:13Z and after `d8734f1e7` (lane three-way-comparison): with the
+overlay 78–90 commits behind, `bin/test-fast --paths ... -- seon.program-test` now
+refuses before running any test. The refusal is
+`seon.test.runner/record-snapshot!` "The recording authority returned no admission
+or result facts.", caused by "Test recording requires a published current-src"
+(`src/seon/cluster/source.clj`). Three runs took 29.4–36.5 s each. Until the base
+is prepared, focused proof needs an unrecorded JVM that calls
+`seon.test.arm/initialize-contracts!` directly.

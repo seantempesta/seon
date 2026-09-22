@@ -168,3 +168,95 @@ and the boot in `from-zero-boot-takes-minutes.md`.
 - RESET NEEDED: default predates `8a069b5e4` and this slice.
 - Retained: `tmp/three-way-comparison-wt` (the predecessor's archive copy, with a
   `.git` file). Its owner is uncertain, so it was not deleted.
+
+## Review follow-up (`d8734f1e7`)
+
+The review is `docs/research/agent-platform/review-three-way-comparison-2026-09-23.md`.
+Each finding was checked against `e4cd4ee97`:
+
+1. **P1, a missing digest declaration drops a family.** Confirmed: the old filter
+   dropped any family without a digest member, with no refusal. Fix: a new entity
+   property, `:seon.program/recomputed`, is declared on `:seon.fn.file/file` and
+   `:seon.lint/finding`. `seon.program/declaration-families` sorts every
+   row-schema family into compared, recomputed or unclassified. A family that
+   declares neither (or both) is unclassified, and `digest-map` then refuses with
+   `:seon.program/missing-evidence :seon.program/family-classification`, naming
+   the family. Regression: `a-family-declaring-neither-digest-nor-recomputation-is-unknown`.
+2. **P1, families come from the loaded files, not the branch.** Confirmed:
+   `identity-attributes` is read from packaged forms when the namespace loads.
+   Fix: `declaration-families` reads the supplied projection's forms and registry.
+   `digest-map` takes the database's carried projection. Regression:
+   `declaration-families-come-from-the-supplied-projection` uses a family that
+   exists only in the supplied projection and is absent from
+   `program/identity-attributes`.
+3. **P2, no declared typed outcome.** Confirmed. The contract is now
+   `[:or :seon.program/digest-map :seon.program/digest-map-refusal]`. The refusal
+   is `:seon.error/base` built through `seon.error.refusal/diagnostic`, plus a
+   `:seon.program/missing-evidence` enum: projection, family-classification,
+   read, read-bound or definition-digest. Tests validate the refusal shape against
+   the projection registry.
+4. **P2, map completeness.** Confirmed. New tests:
+   - `digest-map-is-exactly-the-stored-declarations-or-a-typed-refusal`: 450 rows
+     across three index pages, exact equality with the independently built map,
+     plus a missing-digest refusal and an exhausted-bound refusal.
+   - `three-way-classifies-every-base-branch-head-state`: all 64 states in
+     `{absent,a,b,c}^3`, including head-only add/delete and branch-edit/head-delete.
+     Each case lands in exactly one class, conflict digests appear iff the case
+     conflicts, and all-absent appears nowhere.
+
+   The fixture two-branch test still does not run (see the boundary below).
+5. **P2, transitive `:any`.** Confirmed. Compared identities are now
+   `:seon.program/declaration-identity`: an identity attribute plus a `:symbol`
+   or `:keyword` value. The value is still not typed per attribute; the shared
+   `:seon.program/identity` is unchanged.
+6. **P2, no admission bound.** Confirmed. `digest-map` now takes
+   `{:seon.program/max-datoms n}` and pages AEVT through `seon.db/index-page`,
+   200 datoms per page. It refuses `:seon.program/read-bound` once it has read
+   more than `n` datoms, never returning a partial map.
+
+**Proof: REPL JVM with armed contracts, not the recorded gate.** The tree was
+HEAD `1b21e03a7` (extracted with `git archive`) with my five files copied in. It
+ran `clojure -M:test tmp/probe.clj`, which calls
+`seon.test.arm/initialize-contracts!` (1,727 instrumented) and then
+`clojure.test/test-vars` on the five pure tests. Result: 5 tests, 141 passes,
+0 failures, 0 errors, 823 ms of test bodies. The earlier iteration's
+`:malli.core/invalid-schema` errors came from `digest-map`'s armed wrapper, which
+confirms the contract was checked. Timings in that JVM:
+
+- `example-projection` (three `projection-with-schema` calls): 75–120 ms.
+- `example-database`: 80 ms. Installing every storable attribute took 5,753 ms
+  and was narrowed to the compared families' attributes.
+- `digest-map`, near-empty value: 50–86 ms.
+- `digest-map` on 10,000 rows (50 pages per range): 190 ms cold, 117 ms warm.
+  The unpaged scan took 16 ms, so the admission bound costs about 100 ms.
+- `three-way` on 10k: 16 ms.
+
+**Schema change: incremental proof not claimed.** The new declarations compiled
+incrementally through `seon.schema/projection-with-schema` on the handed
+packaged projection. They were transacted only into an in-memory genesis store.
+They were not transacted on a branch of a live store:
+
+- Every canonical fixture branch refuses at base construction.
+- `bin/test-fast` now refuses before running any test with "Test recording
+  requires a published current-src" (runs at 21:13Z and at HEAD after
+  `d8734f1e7`, 36.49 s).
+- Default predates `8a069b5e4`.
+
+The change retires no attribute, so no 1.3e writer refusal applies.
+
+**Boundary.**
+
+- No recorded test run exists for `d8734f1e7`.
+- The fixture two-branch regression has never run.
+- HEAD load: `seon.program` and `seon.program-test` loaded and armed in the REPL
+  JVM from bytes identical to `d8734f1e7`'s paths, on HEAD `1b21e03a7`.
+- RESET NEEDED stands: default predates this slice.
+
+### Follow-up timings over 1 s
+
+| operation | wall | phases |
+|---|---|---|
+| test-fast `28437dc2e31b` | 53.55 s | snapshot 4 s · load about 32 s · arm 3.0 s · bodies about 14 s; the 14 errors are 11 stale-base errors plus 3 invalid-schema errors from the first iteration |
+| test-fast, admission refused (×3) | 29.4–36.5 s | refused at `record-snapshot!` before any test |
+| REPL probe JVMs (×5) | 28.3–29.6 s | arm 6.0–9.5 s; the rest is JVM start and load |
+| `example-database` installing every storable attribute (removed) | 5.75 s | armed `storable-attribute-in?` over every form |
