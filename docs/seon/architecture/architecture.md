@@ -58,7 +58,9 @@ The running JVM owns ordinary program operations. External supervision remains
 necessary to start a JVM, observe process exit, stop an unresponsive process and
 recover a disposable root. A reset destroys database history, turns, tasks and
 results as well as private in-memory objects; preserve evidence and reconstruction
-inputs first. Schema breakage is handled by an authorized reset, not migration.
+inputs first. A schema change never needs a reset: every branch adopts it in place as it
+opens (`seon.cluster/declaration-changes`), dropping the data behind a replaced or retired
+attribute rather than migrating it (README §7 "Schema change and reset").
 
 **Existing seams:** `src/seon/cluster/registry.clj:178` branch acquisition;
 `reference-code/datahike/src/datahike/writer.cljc` connection writer;
