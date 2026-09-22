@@ -25,3 +25,12 @@ a focused run seconds; a warm JVM (the REPL) is the obvious candidate.
 Sighting 2026-09-22 (same lane, follow-up): three namespaces including five
 `with-store` publication tests took 38.9 s of test time inside a 66.9 s run;
 each `with-store` copies the canonical store into a fresh physical store.
+
+Sighting 2026-09-23 (lane schema-changes-in-place): fourteen
+`bin/test-fast --paths … -- seon.schema-in-place-test` runs took 28.8–88.2 s
+wall for 8 tests whose test time is ≈20 s (run `d19c6cbc41a3`: projection
+acquired 21:26:50.5Z after a 4 s snapshot phase, contracts armed 21:26:52.5Z,
+first test 21:26:53.6Z, last 21:27:13.6Z; 53.5 s wall). Three runs refused at
+snapshot admission without executing anything, after 36–57 s, because the
+recording authority (default's current-src) was absent or its PREPL did not
+answer within 30 s while default was replaced.
