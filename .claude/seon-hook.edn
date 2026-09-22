@@ -43,8 +43,9 @@
  ;; half-landed config key was adopted into default before its schema and refused
  ;; the config apply; `bin/seon status` then threw inside the JVM. Re-enable at the
  ;; coordinated restart after these lanes land, and record the resume here.
+ ;; 2026-09-22 04:05 (orchestrator): RESUMED after the coordinated reset; no lane edits src.
  :current-source
- {:enabled false
+ {:enabled true
   :root "."
   :cluster "default"
   ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
