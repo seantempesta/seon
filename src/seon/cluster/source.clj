@@ -140,23 +140,64 @@
                    (distinct))
           (test.cache/input-paths directory))))
 
+(defn dependency-digests
+  "The digests of `deps.edn` and every gitlink pin in `directory`, in the
+  capture's own form: file bytes through `schema/sha-256`, a gitlink by its
+  recorded pin (`capture-paths`)."
+  {:malli/schema [:=> [:cat :string] :seon.source/relative-file-digests]}
+  [directory]
+  (let [manifest (io/file directory "deps.edn")]
+    (cond-> (test.cache/gitlink-digests directory)
+      (.isFile manifest)
+      (assoc "deps.edn" (schema/sha-256 [(Files/readAllBytes (.toPath manifest))])))))
+
+(defonce ^{:private true
+           :doc "The dependency inputs this JVM loaded: read once when the namespace
+  first loads at launch, and kept across reloads, because the classpath they
+  chose is fixed for the life of the process."}
+  launched-dependencies
+  ;; A process launched outside a checkout (no Git index, no recorded pins)
+  ;; loaded no checkout dependencies to compare.
+  (let [directory (fs/source-directory)]
+    (if (or (.exists (io/file directory ".git"))
+            (.isFile (io/file directory "dependency-pins.txt")))
+      (dependency-digests directory)
+      {})))
+
+(defn loaded-dependencies
+  "The `deps.edn` and gitlink digests the running JVM launched with."
+  {:malli/schema [:=> [:cat] :seon.source/relative-file-digests]}
+  []
+  launched-dependencies)
+
 (defn classify-paths
-  "Analyzer configuration invalidates every source; a loaded dependency change
-  needs a replacement JVM on the same store, never a reset."
-  {:malli/schema [:=> [:cat [:set :string] [:set :string]] [:enum :selected :all]]}
-  [changed gitlinks]
-  (let [dependencies (into #{} (filter #(or (= "deps.edn" %) (gitlinks %))) changed)]
+  "Analyzer configuration invalidates every source. A changed `deps.edn` or
+  gitlink refuses only when the running JVM loaded other bytes: `current`
+  holds the files' digests and `loaded` the ones the JVM launched with
+  (`loaded-dependencies`). A JVM started after the change loaded exactly those
+  files, so its publication of them proceeds."
+  {:malli/schema [:=> [:cat [:set :string] [:set :string]
+                       :seon.source/relative-file-digests :seon.source/relative-file-digests]
+                  [:enum :selected :all]]}
+  [changed gitlinks current loaded]
+  (let [dependencies (into #{}
+                           (filter #(and (or (= "deps.edn" %) (gitlinks %))
+                                         (not= (get current % ::absent) (get loaded % ::absent))))
+                           changed)]
     (when (seq dependencies)
       ;; The JVM's classpath is fixed at launch, so a changed manifest or
       ;; vendored pin cannot load into this process. The store, its branches
       ;; and every database fact are unaffected: `bin/seon down` then
-      ;; `bin/seon start` replaces the JVM on the same store.
+      ;; `bin/seon start` replaces the JVM on the same store, and that JVM's
+      ;; publication of these files proceeds.
       (refuse! ::restart-needed
                (str "JVM RESTART NEEDED: loaded dependencies changed ("
                     (str/join ", " (sort dependencies))
                     "). Run `bin/seon down` then `bin/seon start` on the same"
                     " store; the store and its database survive, no reset.")
-               {:seon.source/changed-paths (vec (sort dependencies))}))
+               {:seon.source/changed-paths (vec (sort dependencies))
+                ::loaded (select-keys loaded dependencies)
+                ::current (select-keys current dependencies)}))
     (if (some #(or (= ".clj-kondo" %) (str/starts-with? % ".clj-kondo/")) changed)
       :all
       :selected)))

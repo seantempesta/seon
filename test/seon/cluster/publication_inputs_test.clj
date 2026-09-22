@@ -132,13 +132,30 @@
        (is (empty? (functions/file-rows database ["missing-file.clj"] :seon.fn/file)))))))
 
 (deftest publication-classifies-configuration-and-loaded-dependencies
-  (is (= :selected (source/classify-paths #{"src/my/note.clj"} #{"reference-code/sci"})))
-  (is (= :all (source/classify-paths #{".clj-kondo/config.edn"} #{})))
-  (doseq [path ["deps.edn" "reference-code/sci"]]
-    (let [refusal (try (source/classify-paths #{path} #{"reference-code/sci"})
-                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
-      (is (= :seon.cluster.source/restart-needed (:seon.cluster.source/rule refusal)))
-      (is (= [path] (:seon.source/changed-paths refusal))))))
+  (let [pin (apply str (repeat 64 "a"))
+        manifest (apply str (repeat 64 "b"))
+        loaded {"deps.edn" manifest "reference-code/sci" pin}]
+    (is (= :selected (source/classify-paths #{"src/my/note.clj"} #{"reference-code/sci"}
+                                            {"src/my/note.clj" pin} loaded)))
+    (is (= :all (source/classify-paths #{".clj-kondo/config.edn"} #{} {} loaded)))
+    (is (= :selected (source/classify-paths #{"deps.edn" "reference-code/sci"} #{"reference-code/sci"}
+                                            loaded loaded))
+        "a JVM started after the change loaded these files and publishes them")
+    (doseq [[path current] {"deps.edn" (assoc loaded "deps.edn" (apply str (repeat 64 "c")))
+                            "reference-code/sci" (assoc loaded "reference-code/sci" (apply str (repeat 64 "d")))}]
+      (let [refusal (try (source/classify-paths #{path} #{"reference-code/sci"} current loaded)
+                         (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+        (is (= :seon.cluster.source/restart-needed (:seon.cluster.source/rule refusal))
+            "a running JVM whose dependency files changed underneath refuses")
+        (is (= [path] (:seon.source/changed-paths refusal)))))))
+
+(deftest the-running-jvm-reports-the-dependencies-it-launched-with
+  (let [loaded (source/loaded-dependencies)]
+    (is (identical? loaded (source/loaded-dependencies)) "read once, at launch")
+    (is (contains? loaded "deps.edn"))
+    (is (= (get loaded "deps.edn")
+           (get (source/dependency-digests (fs/source-directory)) "deps.edn"))
+        "this JVM's manifest is still the one on disk")))
 
 (defn- test-input-checkout!
   "A checkout whose inventory and pins are recorded, so no Git process runs."

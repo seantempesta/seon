@@ -1962,7 +1962,11 @@
             classification (cond
                              (nil? committed) :all
                              (empty? changed) :selected
-                             :else (source/classify-paths changed (set (keys (test.cache/gitlink-digests directory)))))
+                             ;; A changed directory input is a gitlink: capture digests
+                             ;; directories only through their recorded pins.
+                             :else (source/classify-paths
+                                    changed (into #{} (filter #(.isDirectory (io/file directory %))) changed)
+                                    observed (source/loaded-dependencies)))
             analysis-paths (if (= :all classification)
                              (into changed (if partial?
                                              (source/discover-paths directory (:seon.source/roots roots))
@@ -1979,11 +1983,20 @@
                                       :where [?file :seon.fn.file/relative-path ?path]
                                              [?file :seon.fn.file/digest ?digest]] committed)))
             inputs (merge (if partial? (merge (apply dissoc stored requested) observed) observed) additional)
+            published-input-digest (when committed
+                                     (db/q '[:find ?digest . :where [_ :seon.source/test-input-digest ?digest]]
+                                           committed))
+            _ (when (map? published-input-digest)
+                (refused! "The published test-input digest could not be read." published-input-digest))
+            test-inputs (source/snapshot-test-input-digest
+                         (cond-> {:seon.fn/root directory
+                                  :seon.cluster.source/roots input-roots
+                                  :seon.source/relative-file-digests inputs}
+                           partial? (assoc :seon.source/changed-paths (vec (into changed requested-paths)))
+                           published-input-digest (assoc :seon.cluster.source/published published-input-digest)))
             snapshot {:seon.source/relative-file-digests inputs
                       :seon.source/digest (id/digest 64 [(into (sorted-map) inputs)])
-                      :seon.source/test-input-digest
-                      (test.cache/test-input-digest directory
-                                                    (test.cache/input-digests directory))}
+                      :seon.source/test-input-digest (:seon.source/test-input-digest test-inputs)}
             digest (:seon.source/digest snapshot)]
       (let [database (when published (source/database store (:seon.source/commit-id published)))
             selected analysis-paths]
