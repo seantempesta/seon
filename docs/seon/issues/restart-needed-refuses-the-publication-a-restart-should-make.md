@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocking
 created: 2026-09-23
 tags: [issue, publication, boot, dependencies, platform]
@@ -40,3 +40,7 @@ publication made by the JVM that loaded those dependencies (the boot-time call,
 3- or 2-arity without a development cluster, from
 `seon.cluster.boot/stand-boot-layers!`) admits dependency changes; only a
 publication into a JVM that loaded an older classpath refuses.
+
+## Closed 2026-09-23 by a6fd07c8e
+
+A `deps.edn` or gitlink change now refuses only when the running JVM loaded different bytes than the files hold. The JVM records the digests once, when `seon.cluster.source` loads at launch. Drill: a running JVM whose `deps.edn` changed underneath refused with RESTART NEEDED in 963 ms; a new JVM started on the changed file published it (4,411 ms).
