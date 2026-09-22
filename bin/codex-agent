@@ -58,7 +58,7 @@ model=${LANE_MODEL:-gpt-6-astra}
 # which starved the owner's page. Three workers per lane gate.
 export SEON_TEST_WORKERS=${SEON_TEST_WORKERS:-3}
 effort=${LANE_EFFORT:-low}
-lane_rule="Another lane's in-flight breakage is never a reason to stop: iterate with bin/test-fast --paths <your files> -- <namespaces> (HEAD plus only your paths). Lanes never run bin/test gates; the orchestrator owns the cold gate and platform proof. When the shared tree cannot load, prove HEAD plus your diff from a git archive snapshot with the shared caches linked; never create a git worktree (owner 2026-09-23: "no more git worktrees"). Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
+lane_rule="Another lane's in-flight breakage is never a reason to stop: iterate with bin/test-fast --paths <your files> -- <namespaces> (HEAD plus only your paths). Lanes never run bin/test gates; the orchestrator owns the cold gate and platform proof. When the shared tree cannot load, prove HEAD plus your diff from a git archive snapshot with the shared caches linked; never create a git worktree (owner 2026-09-23: 'no more git worktrees'). Name the foreign boundary in your landing note; never resume, message, or edit another lane's session or files."
 
 usage() { sed -n '2,22p' "$0" | sed 's/^# \{0,1\}//'; exit 64; }
 
