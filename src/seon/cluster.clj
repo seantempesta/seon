@@ -1062,9 +1062,11 @@
   [database projection]
   (let [forms (:seon.schema.projection/forms projection)
         rows? (contains? (:schema database) :seon.schema/key)]
+    ;; Datahike's `:schema` also maps each attribute's entity id to its ident
+    ;; (`reference-code/datahike/src/datahike/db/transaction.cljc:120`), so the
+    ;; keys mix longs and keywords: select idents BEFORE sorting.
     (into []
           (comp
-           (filter qualified-keyword?)
            (remove #(contains? datahike.schema/implicit-schema-spec %))
            (remove #(contains? forms %))
            (remove (fn [attribute]
@@ -1074,7 +1076,7 @@
                                              :seon.schema.admission/source)))
                            (when rows?
                              (d/datoms database :avet :seon.schema/key attribute))))))
-          (sort (keys (:schema database))))))
+          (sort (filter qualified-keyword? (keys (:schema database)))))))
 
 (defn- declaration-changes
   "Transaction data adopting every declaration difference IN PLACE on this branch.
