@@ -2,6 +2,7 @@
  ; Provenance: owner ruling 2026-08-03. Ordinary/user roots retain history;
  ; isolated scratch and eval roots may explicitly choose false at creation.
  :seon.config.db/keep-history? true
+ :seon.config.db/snapshot-window-ms :seon.config/absent
 
  ; Unit: milliseconds waiting for one Datahike writer result.
  ; Provenance: AGENTS.md §2.3 and the 2026-09-17 fast-runner jstack showed an

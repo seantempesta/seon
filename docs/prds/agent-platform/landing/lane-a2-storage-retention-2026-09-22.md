@@ -74,3 +74,41 @@ Logs: `tmp/a2-storage-retention-root/start.log`,
 status found no exact-root JVM afterward. No adoption/bytes goal is claimed.
 The committed script is corrected to use the installed start-first operator;
 its later measurements remain pending a publishable HEAD.
+
+## Retention declaration (proposed; orchestrator ratification pending)
+
+c10 Seon commit: `1cc00a4a5`. Post-commit five-namespace require exits zero;
+MCP again observes default alive, same PID, 15 errored receipts.
+
+The optional `:seon.config.db/snapshot-window-ms` dial is absent in ordinary
+shipped defaults; `config/development.edn` proposes 0. Implicit collection
+refuses missing cluster policies rather than silently retaining every ancestor.
+Every configuration row in captured heads must declare a window; the largest
+window wins, anchored to the newest captured head timestamp. This immutable
+cutoff is supplied to Datahike; it is not a pre-check of Datahike's deletion
+selection. Subsequent writes are protected by the existing safe point and the
+mark's current branch heads. Idle time alone does not age snapshots out.
+Explicit cutoff arities remain available. No adoption hook or cleanup job added.
+
+Exact synthetic file-store diagnostic:
+`tmp/a2-storage-retention/retention-probe.clj`; output in the matching `.log`.
+It writes 1,000 string values three times with native `:db/noHistory true`,
+then uses `registry/retention-cutoff` and `collect!`. This uses the owning JVM
+functions and persistent-set storage; it is not full source publication or an
+armed canonical fixture proof.
+
+| phase | bytes | logical keys | current datoms | write ms |
+|---|---:|---:|---:|---:|
+| declared scratch config, before data | 14,668 | 10 | 20 | — |
+| write 1 | 510,095 | 11 | 1,021 | 79.344 |
+| write 2 | 759,786 | 12 | 1,022 | 42.703 |
+| write 3 | 1,009,529 | 13 | 1,023 | 34.823 |
+| sweep | 500,313 | 4 | 1,023 | — |
+
+Derived cutoff `#inst "2026-09-22T15:16:45.215Z"`; dry mark 39 ms,
+9 candidates, then actual sweep 9. Value attribute current/history counts
+both 1,000. Missing policy positively refused with
+`{:seon.config/error-key :seon.config.db/snapshot-window-ms,
+:seon.config/rule :seon.config/required-absent}`. Probe process exited zero.
+The full adoption clock remains blocked at the foreign static-analysis boundary
+above, so no proportional-live-datoms publication claim is made.

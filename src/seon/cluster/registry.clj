@@ -469,6 +469,37 @@
      :seon.cluster.registry/mark-duration-ms (elapsed-ms started-ns)
      :seon.cluster.registry/swept (if dry-run? 0 (count candidates))}))
 
+(defn retention-cutoff
+  "Derive a collection cutoff from captured branch heads and their config facts.
+  Each cluster configuration must opt in. The largest window governs the store;
+  the captured newest head anchors time, so idle wall time alone expires nothing."
+  {:malli/schema [:=> [:cat :seon.store/store] :inst]}
+  [store]
+  (let [connection (:seon.store/connection-object store)
+        heads (branch-heads store (roster store))
+        observations
+        (mapv
+         (fn [{commit-id :seon.source/commit-id}]
+           (let [record (head-record (konserve-store store) commit-id)
+                 database (d/commit-as-db connection commit-id)]
+             (try
+               [(or (get-in record [:meta :datahike/updated-at])
+                    (get-in record [:meta :datahike/created-at]))
+                (mapv #(d/pull database
+                                        [:seon.config/cluster :seon.config.db/snapshot-window-ms] %)
+                                (d/q '[:find [?e ...] :where [?e :seon.config/cluster]] database))]
+               (finally (d/release-materialized-db database)))))
+         heads)
+        policies (mapcat second observations)]
+    (when (or (empty? policies)
+              (some #(nil? (:seon.config.db/snapshot-window-ms %)) policies))
+      (throw (ex-info "Every cluster configuration must declare snapshot retention before implicit collection."
+                      {:seon.config/error-key :seon.config.db/snapshot-window-ms
+                       :seon.config/rule :seon.config/required-absent})))
+    (java.util.Date.
+     (- (apply max (map #(.getTime ^java.util.Date (first %)) observations))
+        (apply max (map :seon.config.db/snapshot-window-ms policies))))))
+
 (defn collect!
   "Collect or inventory this store's unreachable objects.
   One owner per store — the process, never a cluster (§0.6 condition
@@ -497,7 +528,7 @@
     [:=> [:cat :seon.store/store :inst [:map]]
      :seon.cluster.registry/inventory]]}
   ([store]
-   (collect! store (java.util.Date. 0)))
+   (collect! store (retention-cutoff store)))
   ([store remove-before]
    (:seon.cluster.registry/swept (collect! store remove-before {})))
   ([store remove-before options]

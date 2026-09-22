@@ -1,0 +1,3 @@
+{; Proposed 2026-09-22, lane a2-storage-retention; orchestrator ratifies.
+ ; Current branch heads survive; superseded commit/index ancestry is collectible.
+ :seon.config.db/snapshot-window-ms 0}

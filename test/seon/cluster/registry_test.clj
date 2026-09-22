@@ -395,6 +395,23 @@
           (is (= (sort-by str (registry/roster opened))
                  (mapv :seon.store/branch (:seon.cluster.registry/branches result)))))))))
 
+(deftest implicit-retention-requires-declared-cluster-windows
+  (with-source-store
+    (fn [opened]
+      (let [connection (:seon.store/connection-object opened)]
+        (is (= :seon.config/required-absent
+               (:seon.config/rule (refusal #(registry/retention-cutoff opened)))))
+        (test-support/apply-config! connection "retention-probe"
+                                    {:seon.config.db/snapshot-window-ms 0})
+        (let [head (registry/branch-commit-id {:seon.store/store opened
+                                              :seon.store/branch :db})
+              record (k/get (:store @connection) head nil {:sync? true})]
+          (is (= (get-in record [:meta :datahike/updated-at])
+                 (registry/retention-cutoff opened)))
+          (is (nat-int? (registry/collect! opened)))
+          (is (= head (registry/branch-commit-id {:seon.store/store opened
+                                                 :seon.store/branch :db}))))))))
+
 (deftest retiring-one-cluster-reclaims-only-its-own-tail
   (with-source-store
     (fn [opened]
@@ -445,7 +462,7 @@
               (finally
                 (d/release connection)))))
         (testing "collection is idempotent on a quiet store"
-          (is (zero? (registry/collect! opened))))
+          (is (zero? (registry/collect! opened (java.util.Date. 0)))))
         (testing "a sweep with no candidates still answers its inventory"
           (let [collected (registry/collect! opened (java.util.Date. 0) {})]
             (is (zero? (:seon.cluster.registry/swept collected)))
