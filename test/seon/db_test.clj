@@ -1477,7 +1477,10 @@
          (doseq [refusal [identity-refusal database-refusal
                           impurity-refusal]]
            (is (true? (:seon.db/diff-refused refusal)))
-           (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) refusal)))
+           (is ((schema/projection-validator (schema/handed-projection) :seon.db/error-result) refusal)))
+         (is (= :seon.db/row-identity-absent (:seon.db/diff-refusal identity-refusal)))
+         (is (= :seon.db/database-input-absent (:seon.db/diff-refusal database-refusal)))
+         (is (= :seon.db/external-sink-reachable (:seon.db/diff-refusal impurity-refusal)))
          (is (= #{:ai-visible-text}
                 (get-in impurity-refusal
                         [:seon.error/offending]))))))))
@@ -1559,7 +1562,7 @@
                       [:seon.agent/id 'identity-admission-present])]
        (testing "an uninstalled query attribute names registered candidates"
          (is (true? (:seon.db/invalid-read unknown-attribute)))
-         (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) unknown-attribute))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.db.read/error) unknown-attribute))
          (is (= 'seon.db/q
                 (get-in unknown-attribute
                         [:seon.error/operation])))
@@ -1666,7 +1669,9 @@
                        view)]
              (is (not (true? (:seon.db/invalid-read installed)))
                  "an installed attribute is never classified as uninstalled")
-             (is (true? (:seon.db/invalid-read uninstalled))))))))))
+             (is (true? (:seon.db/invalid-read uninstalled)))
+             (is (= :seon.error/unknown
+                    (get-in uninstalled [:seon.error/expected :seon.db/installed-declaration]))))))))))
 
 (deftest malformed-public-database-requests-name-the-public-operation
   (test-support/with-database
@@ -1687,7 +1692,7 @@
            (do (is (true? (:seon.db/invalid-request result)))
                (is (= :query (:seon.db/missing-request-member result))))
            (is (nil? (:seon.db/missing-request-member result))))
-         (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) result))
+         (is ((schema/projection-validator (schema/handed-projection) :seon.db.read/error) result))
          (is (= operation
                 (get-in result
                         [:seon.error/operation])))
@@ -2273,3 +2278,44 @@
        (is (= #{:seon.turn/turn} (set (get schemas :seon.turn/id))))
        (is (= #{:seon.test/test} (set (get schemas :seon.test/sym))))
        (is (= #{:seon.fn/fn} (set (get schemas :seon.fn/sym))))))))
+
+(deftest identity-less-unowned-values-retain-the-write-disposition
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/basis-t @connection)
+           result (db/transact! connection [{:seon.error/at #inst "2026-09-19T00:00:00Z"
+                                            :seon.error/layer :seon.agent/lifecycle
+                                            :seon.error/operation 'seon.agent/by-id}])]
+       (is (= :seon.db/unowned-entity (:seon.db/owned-value-refusal result)) (pr-str result))
+       (is ((schema/projection-validator (schema/handed-projection) :seon.db/error-result) result))
+       (is (= before (db/basis-t @connection)))))))
+
+(deftest a-declared-but-uninstalled-write-key-keeps-the-missing-key-hint
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection
+           projection (schema/handed-projection)
+           attribute :seon.message/content
+           drifted (assoc database :schema (dissoc (:schema database) attribute))
+           row {:seon.message/id "drifted-message" attribute "Uninstalled content"}
+           candidates (#'db/write-key-candidates projection row)
+           refusal (#'db/write-map-error drifted projection row [])]
+       (is (some? (get (:seon.schema.projection/forms projection) attribute)))
+       (is (= #{:seon.message/to} (set candidates)))
+       (is (= :seon.error/unknown (:seon.schema/form refusal)))
+       (is (= (vec candidates) (:seon.db/registered-candidates refusal)))
+       (is (str/includes? (get-in refusal [:seon.error/data :seon.error/problems 0 :seon.error/fix])
+                          "missing declared key"))))))
+
+(deftest diff-refusal-preserves-its-declared-disposition
+  (let [projection (schema/handed-projection)]
+    (doseq [cause [:seon.db/function-not-indexed :seon.db/database-input-absent
+                   :seon.db/call-shape-absent :seon.db/ambiguous-call-shape
+                   :seon.db/function-threw :seon.db/row-identity-absent
+                   :seon.db/result-not-collections :seon.db/function-var-required
+                   :seon.db/external-sink-reachable]]
+      (let [refusal (#'db/diff-refusal "Cannot replay this read." :seon.fn/sym
+                                     :seon.fn/fn 'seon.db-test/probe cause {})]
+        (is (= cause (:seon.db/diff-refusal refusal)))
+        (is ((schema/projection-validator projection :seon.db/diff-refused-error) refusal))))
+    (is (not ((schema/projection-validator projection :seon.db/diff-refusal) ::unknown-disposition)))))

@@ -2775,10 +2775,11 @@
      (reaches-external-sink ?called ?sink)]])
 
 (defn- diff-refusal
-  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value :seon.schema/value] :seon.error/base]}
+  {:malli/schema [:=> [:cat :string :seon.schema/value :seon.schema/value :seon.schema/value :seon.db/diff-refusal :seon.schema/value] :seon.db/diff-refused-error]}
   [message member expected offending cause evidence]
   (diagnostic
    {::diff-refused true
+    ::diff-refusal cause
     :seon.error/message message
     :seon.error/layer :agent-boundary
     :seon.error/operation 'seon.db/diff
@@ -3497,7 +3498,7 @@
                   (write-attribute-error database projection attribute value
                                          (conj path attribute) entity-form false)))
               row)]
-    (if (and failure (not (get forms (::attribute failure))))
+    (if (and failure (= :seon.error/unknown (:seon.schema/form failure)))
       (let [candidates (write-key-candidates projection row)]
         (if (= 1 (count candidates))
           (-> failure
@@ -3624,7 +3625,8 @@
                                 {::owned-refusal
                                  (assoc
                                   (diagnostic
-                                   {:seon.error/message (str "Complete component validation refused: " (name cause) "; bound "
+                                   {::owned-value-refusal cause
+                                    :seon.error/message (str "Complete component validation refused: " (name cause) "; bound "
                                          :seon.config.db/validation-node-limit "=" limit "; " (pr-str data) ".")
                                     :seon.error/data (merge {::validation-bound :seon.config.db/validation-node-limit
                                             ::validation-limit limit}

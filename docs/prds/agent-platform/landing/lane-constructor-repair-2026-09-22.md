@@ -1,10 +1,13 @@
 ---
 type: landing
-status: clean boundary group landed; remaining repair groups held by foreign hunks
+status: resumed repair landing; implementation and final verification below
 created: 2026-09-22
 ---
 
 # Constructor review repair
+
+The initial handoff below is historical. The resumed landing section records the
+current ownership, commits, and verification after the shared lanes exited.
 
 Scope: README §4 step 1.1, review F1/F2/F6–F12/F14, under §7's
 explicit named-schema and retained-observation rulings. F3–F5/F13 remain
@@ -152,3 +155,37 @@ is written and passed. Summary: `tmp/orchestrator/constructor-repair-summary.txt
 All owned test/load/cache-refresh shells exited. The owned worktree and archived
 HEAD copy are removed only after exact-path process-holder checks and after
 unlinking their dependency symlinks; logs and the owned patch are retained.
+
+## Resumed landing after shared files became free
+
+The owner's F8 ruling now explicitly authorizes both producer sites and names
+`:seon.cluster.source/phase`, a closed `[:enum :analysis :adoption]` in
+`resources/seon/schemas/seon.cluster.source.edn`. No ownership wait remains.
+
+Verified provenance corrects the incoming report: `434c01f4c` DID carry our
+prepared `seon.db.edn` declarations, `seon.schema.edn` render cause,
+`schema.clj` render fix/dead require, and `cluster/boot.clj` disposition plus
+new `seon.cluster.boot.edn`. Its commit message enumerates those hunks. These
+paths have no remaining diff, so they are not recommitted. The database bodies
+and tests, cluster assertions, four remaining requires, and empty merge are the
+only prepared dirty code. Unrelated dirty documents remain untouched.
+
+Fresh status: same default PID 38968, no missing readiness layers, 15 errored
+receipts and four stale Vars. Publication remains paused; no repair is claimed
+live. A fresh read-only JVM form with explicit default connection/projection:
+
+```clojure
+{:adoption (#'seon.cluster/source-change-phase
+             (ex-info "Source changed"
+                      {:seon.boot/offense {:seon.source/digest-before "c0"}}))
+ :phase-declared? (boolean
+                   (get (:seon.schema.projection/forms projection)
+                        :seon.cluster.source/phase))}
+;; => {:adoption nil :phase-declared? false}, 274 ms
+```
+
+Database finding group F1/F2/F7/F10 lands the already-probed bodies and restored
+assertions together. Its resource definitions were carried by `434c01f4c`.
+F6 and F9 boot production fixes also belong to `434c01f4c`; their prepared
+assertions land with the source-phase group in the one cluster test file.
+No test infrastructure owner is edited.
