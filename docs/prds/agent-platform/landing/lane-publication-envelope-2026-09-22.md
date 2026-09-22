@@ -229,5 +229,27 @@ scratch probe above. No suite or cold gate was run.
   HEAD load passed with exit 0 in the isolated checkout:
   `clojure -M -e "(require 'seon.cluster 'seon.cluster.source 'seon.fn)"`.
   Evidence: `tmp/publication-envelope-evidence/row6-head-load.log`.
-- Row 8 is the following path-limited code commit; its id and exact committed
-  HEAD load are recorded after creation below.
+- `dcc15e5b3` — row 8 reload/adoption changes and regressions. Exact committed
+  HEAD load passed with exit 0 in the isolated checkout using the same command;
+  evidence: `tmp/publication-envelope-evidence/row8-head-load.log`.
+
+The recorded test request predates the final producer-query correction. The
+final armed scratch probe, after publishing that correction, is the producer's
+behavior evidence; the final HEAD load is separate. Row 8 adds 34 net source
+lines to replace missing digest/referrer checks while deleting the retry; its
+tests remove obsolete retry assertions and add cycle, graph, digest and schema
+referrer cases. No source reduction is claimed for that row.
+
+## Cleanup and handoff
+
+All owned commands completed. Exact-root status returned no processes for all
+three scratch roots, and an OS census found no Java process with any owned root
+or snapshot argument. Three scratch stores and three worktrees were then
+removed without following symlinks. Their logs, clocks, thread captures and
+probe forms remain under `tmp/publication-envelope-evidence/`; the census and
+removed paths are in `cleanup.json`. The main repository's default was never
+reset/adopted by this lane, and hook publication remains paused.
+
+The remaining work is rows 2/7 and row 6 aggregate retirement after their held
+file seams are released, then the end-to-end adoption clock and a healthy cold
+boot. This landing does not satisfy the overall sub-second leaf-edit goal.
