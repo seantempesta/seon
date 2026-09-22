@@ -285,3 +285,25 @@ carried projection 469 ms, no transaction (that lane measured 3,240 → 333 ms);
 | guard probe JVM | 45.7 s | JVM + arming; `index!` of one identity 7.0 s — defect |
 | resume probe JVM | 41.6 s | first root seed 9.7 s — defect |
 | attempted armed test run (snap3) | 29.6 s | all 13 refused: fixture needs a `seon.test/run` handle |
+
+## P1-2 last site — commit `3c55bb0f6`
+
+`seon.issue/adopt!` has a fourth arity taking `:seon.source/expected-head`;
+its write is led by `registry/head-guard-tx`. Regression
+`seon.issue-head-guard-test/stale-issue-adoption-refuses-at-the-writer`
+(not executable at this HEAD, as above). Probe `issue-probe.clj` under armed
+contracts on a `publication-base!` scratch store: stale adoption threw
+`:stale-branch-head` (expected h1, current h2), basis unchanged, 706 ms;
+current-head adoption installed the issue, 8,209 ms. Base build 108.6 s,
+probe JVM 34.7 s.
+
+**Owed hunk in `cluster.clj`** (held by lane publication-work), in
+`development-source-refresh!`:
+
+```clojure
+-             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities)
++             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities
++              expected-head)
+```
+
+`expected-head` is already bound in that `let` (commit `40c9ebf5e`).
