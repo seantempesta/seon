@@ -2340,3 +2340,36 @@ The corrected command required it and compiled **534 authored Malli contracts**
 from the current packaged projection, exit 0, in
 `tmp/kind-review-contract-load.log`. This proves contract references resolve; it
 does not prove output behavior, arming against the fixture, or the namespace matrix.
+
+### Verification queue after review fixes
+
+Commits: `77d861534` producer read/write guarantees; `edfca0bb8` measured print
+bound; `a10774bdd` diagnostic assertions; `1b10844c4` malformed-request/storage
+observations; `1df3cb832` context and plan callers; `17f470cc6` render guarantee
+and reflow. Prescribed require after `17f470cc6` exited 0, captured in
+`tmp/kind-review-head-17f470cc6.log`. No owned JVM remains.
+
+The earlier scratch in-process effect requests have actual recorded ids:
+`ebb762a31ed3` (incorrect body custody, 0 pass / 0 fail / 1 error) and
+`417056bdd663` (corrected custody, stale fixture missing
+`:seon.config.operator/export-bound-ms`, 0 / 0 / 1). Neither reached the effect
+body. The selection-without-cluster request refused before a run was recorded.
+These are not hang reproductions or green evidence.
+
+The retired-key scan over `src test script bin` is empty (rg exit 1).
+The debt scan reports one each in `seon.render`, `seon.sci.kernel`, and
+`seon.call-preparation`, total 3. Fresh fixture-base confirmation is pending;
+no `bin/test`, base fabrication, cold gate, or namespace-matrix claim has been
+substituted for that missing input. **RESTART NEEDED** for default to adopt the
+new producer schemas; only the orchestrator performs it and proves live settling.
+
+A follow-through constructor check found `bootstrap/situation` also constructs
+`my.plan/agent-not-found-error`; it now supplies the same declared refused member
+`:seon.agent/id`. The publication readback owner `fn/report-identities` now reads
+`db/invalid-read` for both pull-many results and narrows its output to that
+producer's refusal, replacing its three old generic timestamp checks.
+
+Read-only `cache/newest-base` still selects
+`b771bf4fa00eea263a2b679e89aa58fce34471659c38a5c1e11c7c43786797e0`
+(36 commits behind the then-HEAD). This positively verifies that the fresh fixture
+input is unavailable; it is not an assumption based on silence.

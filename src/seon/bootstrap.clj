@@ -123,6 +123,7 @@
         :seon.error/diagnostic-layer :seon.bootstrap/opening
         :seon.error/diagnostic-operation 'seon.bootstrap/situation
         :seon.error/diagnostic-member :seon.agent/id
+        :my.plan/refused-member :seon.agent/id
         :seon.error/diagnostic-expected :seon.agent/entity
         :seon.error/diagnostic-offending agent-id
         :seon.error/diagnostic-cause :seon.agent/id

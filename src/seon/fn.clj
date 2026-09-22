@@ -3100,20 +3100,20 @@
   "Identities touched by a Datahike report, including retracted identities."
   {:malli/schema
    [:=> [:cat :seon.db/transaction-report]
-    [:or :seon.reconcile/adopt-identities :seon.error/value]]}
+    [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]}
   [{before :db-before after :db-after datoms :tx-data}]
   (let [entities (into #{} (map :e) datoms)
         identities (fn [database]
                      (let [rows (db/pull-many database
                                              (db/identity-attributes database)
                                              (vec entities))]
-                       (if (:seon.error/at rows)
+                       (if (:seon.db/invalid-read rows)
                          rows
                          (into #{} (mapcat #(dissoc % :db/id)) rows))))
         previous (identities before)
         current (identities after)]
-    (or (when (:seon.error/at previous) previous)
-        (when (:seon.error/at current) current)
+    (or (when (:seon.db/invalid-read previous) previous)
+        (when (:seon.db/invalid-read current) current)
         (into (set previous) current))))
 
 (defn published-index-rows
