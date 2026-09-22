@@ -160,6 +160,7 @@
      initial)))
 
 (defn- create-scenario-agents!
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :seon.db/transaction-report]}
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/config
@@ -175,7 +176,7 @@
         (test-support/transacted!
          connection
          {:tx-data (into [] creation-tx)})]
-    (is (not (:seon.error/kind result))
+    (is (some? (:db-after result))
         (str "agent creation was refused: " (pr-str result)))
     result))
 
@@ -199,6 +200,7 @@
             "the mailbox is paused before planned work can deliver a wake")))))
 
 (defn- seed-scenario-runs!
+  {:malli/schema [:=> [:cat :map [:sequential :map]] :seon.db/transaction-report]}
   [instance specs]
   (let [connection (:seon.boot/cluster-connection instance)
         database @connection
@@ -217,7 +219,7 @@
          {:tx-data (into [] run-tx)
           :tx-meta {:seon.db/process
                     [:seon.db.process/id process]}})]
-    (is (not (:seon.error/kind result))
+    (is (some? (:db-after result))
         (str "scenario run transaction was refused: " (pr-str result)))
     result))
 
@@ -308,7 +310,7 @@
 
 (def ^:private receipt-failure-attributes
   [:seon.cluster.eval/error
-   :seon.error/kind
+   :seon.error/message
    :seon.cluster.eval/interrupted-at])
 
 (defn- receipt-failures
@@ -596,14 +598,14 @@
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 2
                        :seon.cluster.eval/at interrupted-at
-                       :seon.error/kind :user-input}
+                       :seon.error/message "refused"}
                       {:seon.cluster.eval/id (pr-str [run-id 3])
                        :seon.cluster.eval/run [:seon.turn/id run-id]
                        :seon.cluster.eval/ordinal 3
                        :seon.cluster.eval/at interrupted-at
                        :seon.cluster.eval/interrupted-at interrupted-at}])
         (is (= #{[run-id 1 :seon.cluster.eval/error "failed"]
-                 [run-id 2 :seon.error/kind :user-input]
+                 [run-id 2 :seon.error/message "refused"]
                  [run-id 3 :seon.cluster.eval/interrupted-at interrupted-at]}
                (receipt-failures @connection [run-id])))))))
 

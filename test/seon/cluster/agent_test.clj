@@ -580,7 +580,7 @@
           (with-redefs [prompt/prompt
                         (fn [& _]
                           (throw (ex-info "Prompt rendering refused."
-                                          {:seon.error/kind :seon.cluster.prompt/refused
+                                          {
                                            :seon.cluster.prompt/refused
                                            :seon.cluster.prompt/missing-input
                                            :seon.error/message "Prompt rendering refused."})))
@@ -598,7 +598,7 @@
                 (is (empty? @requests))
                 (is (= 1 (db/q '[:find (count ?error) . :where
                                   [?error :seon.error/id]
-                                  [?error :seon.error/kind :seon.cluster.prompt/refused]]
+                                  [?error :seon.cluster.prompt/refused :seon.cluster.prompt/missing-input]]
                                 database)))
                 (is (seq (turn/unanswered-triggers database "prompt-refusal-cap"))
                     "a refused prompt has not observed the wake")
@@ -896,7 +896,7 @@
                                            (.getLocalPort server))]
                  (.countDown provider-entered)
                  (.read (.getInputStream client))
-                 {:seon.error/kind ::provider-released
+                 {
                   :seon.error/message "The local provider released."}))]
             (let [entry (arm-one! connection ctx routing agent-id)
                   fault-channel
@@ -935,8 +935,7 @@
                      fault-channel
                      ::provider-stop-core-fault
                      #(= run-id (:seon.turn/id %)))]
-                (is (= :seon.agent/turn-completion-backstop
-                       (:seon.error/kind (ex-data failure))))
+                (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
                 (is (= (+ turn-completion-backstop-ms 100)
                        (:seon.config.agent/turn-completion-backstop-ms
                         (ex-data failure))))
@@ -1001,8 +1000,7 @@
                    nil
                    (catch clojure.lang.ExceptionInfo caught caught)))
                ::missing-permit-refused)]
-          (is (= :seon.agent/turn-completion-backstop
-                 (:seon.error/kind (ex-data failure))))
+          (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
           (is (= :seon.agent/turn-start
                  (get-in (ex-data failure)
                          [:seon.error/data
@@ -1057,8 +1055,7 @@
               fault
               (test-support/await-event!
                fault-channel ::quiescent-transform-backstop)]
-          (is (= :seon.agent/turn-completion-backstop
-                 (:seon.error/kind (ex-data (::flow/ex fault)))))
+          (is (string? (:seon.agent/turn-completion-backstop (ex-data (::flow/ex fault)))))
           (is (= :seon.agent/turn-transform
                  (get-in (ex-data (::flow/ex fault))
                          [:seon.error/data
@@ -1118,10 +1115,9 @@
                                         [:seon.cluster.eval/id
                                          (turn/receipt-identity run-id 0)])]
                 (is (some? diagnostic))
-                (is (= :seon.turn.loop/phase-failed (:seon.error/kind diagnostic)))
+                (is (true? (:seon.turn.loop/phase-failed diagnostic)))
                 (is (some? evaluation))
-                (is (= :seon.turn.loop/phase-failed
-                       (:seon.error/kind (edn/read-string (:seon.eval/shown evaluation))))
+                (is (true? (:seon.turn.loop/phase-failed (edn/read-string (:seon.eval/shown evaluation))))
                     "turn PRD section 15 retains the shown refusal on the started evaluation")
                 (is (some? (:seon.turn/closed-tx
                             (db/pull database [:seon.turn/closed-tx]
@@ -1643,6 +1639,7 @@
   ordinary message, with the FULL production wiring: the routing
   listener plus the armer proc in its own graph — no agent is
   pre-armed; the armer does all arming."
+  {:malli/schema [:=> [:cat [:sequential :keyword]] :map]}
   [operations]
   (with-connection
     (fn [connection ctx]
@@ -1758,11 +1755,11 @@
                                                      :seon.test/fault
                                                      (some-> (async/poll! (:seon.agent/fault-channel @routing))
                                                              ::flow/ex ex-data
-                                                             (select-keys [:seon.error/kind :seon.error/message]))}
+                                                             (select-keys [:seon.error/message]))}
                                                     failure)))))
                   (throw
                    (ex-info "The routing watch closed before every agent armed."
-                            {:seon.error/kind ::routing-watch-closed})))
+                            {})))
                 (let [db
                       (await-database-state!
                        connection

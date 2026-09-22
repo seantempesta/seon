@@ -134,21 +134,18 @@
            ;; `seon.db/transact!`'s write admission (the turn entity schema
            ;; requires `:seon.turn/agent`), so an unchecked close left the
            ;; turn open and the later recording read that refusal as behaviour.
-           (is (nil? (:seon.error/kind
-                      (db/transact! connection
+           (is (some? (:db-after (db/transact! connection
                                     (turn/close-tx
                                      {:seon.turn/id "preview-run"
                                       :seon.turn/closed-tx "datomic.tx"})))))
-           (is (nil? (:seon.error/kind
-                      (db/transact! connection
+           (is (some? (:db-after (db/transact! connection
                                     (turn/open-tx
                                      {:seon.turn/id "active-during-add" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/opened-tx "datomic.tx"})))))
            (let [request {:seon.turn.loop/cluster cluster :seon.db/db database :seon.turn/id "saved-preview" :seon.turn/agent [:seon.agent/id "preview-batch-agent"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.preview-batch] :seon.turn/reply raw-source :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources outcomes}
                  prepared (turn/record-evaluated-tx request)
-                 _refusal (is (:seon.error/kind
+                 _refusal (is (:seon.db.write.attempt/request-id
                                (db/transact! connection (:seon.db/tx-data prepared))))
-                 _close (is (nil? (:seon.error/kind
-                                   (db/transact!
+                 _close (is (some? (:db-after (db/transact!
                                     connection
                                     (turn/close-tx
                                      {:seon.turn/id "active-during-add"
@@ -168,7 +165,7 @@
                                            :where [?run :seon.turn/id ?run-id]
                                            [?evaluation :seon.cluster.eval/run ?run]]
                                          @connection "saved-preview"))]
-             (is (nil? (:seon.error/kind committed)) (pr-str (select-keys committed [:seon.error/kind :seon.error/message :seon.turn/refused])))
+             (is (some? (:db-after committed)) (pr-str (select-keys committed [:seon.error/message :seon.turn/refused])))
              (is (= "saved-preview"
                     (:seon.turn/id
                      (db/pull (turn/opening-db @connection "saved-preview")

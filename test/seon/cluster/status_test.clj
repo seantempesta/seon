@@ -33,7 +33,7 @@
                     :seon.cluster.eval/run [:seon.turn/id "metrics-turn"]
                     :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at now
                     :seon.eval/shown "λ" :seon.eval/duration-ms 7}])]
-         (is (not (:seon.error/kind result)) (pr-str result)))
+         (is (some? (:db-after result)) (pr-str result)))
        (let [rows (status/agents {:seon.db/db @connection :seon.db/connection connection})
              row (first (filter #(= "metrics" (:seon.agent/id %)) rows))]
          (is (vector? rows) (pr-str rows))
@@ -42,8 +42,7 @@
          (is (= 7 (:seon.cluster.status/evaluation-ms row)))
          (is (= 17 (:seon.cluster.status/provider-tokens row)))
          (is (= 2 (:seon.cluster.status/storage-bytes row)))
-         (is (= :seon.cluster.status/unavailable
-                (get-in row [:seon.cluster.status/provider-cost-usd :seon.error/kind]))))
+         (is (string? (get-in row [:seon.cluster.status/provider-cost-usd :seon.cluster.status/unavailable-observation]))))
        (let [staged (blob/stage! connection "abc")
              digest (:seon.blob/digest staged)
              report (blob/with-publication!
@@ -59,7 +58,7 @@
                          :seon.eval/shown "x" :seon.eval/duration-ms 99}]))
              rows (status/agents {:seon.db/db @connection :seon.db/connection connection})
              row (first (filter #(= "metrics" (:seon.agent/id %)) rows))]
-         (is (not (:seon.error/kind report)) (pr-str report))
+         (is (some? (:db-after report)) (pr-str report))
          (is (= 1 (:seon.cluster.status/evaluations row)) "prior-session evaluation is excluded")
          (is (= 7 (:seon.cluster.status/evaluation-ms row)))
          (is (= 0.125 (:seon.cluster.status/provider-cost-usd row)))
@@ -98,6 +97,5 @@
      (let [observation (status/snapshot {:seon.db/db @connection
                                          :seon.db/connection connection})]
        (is (= "status-observation" (:seon.cluster/name observation)) (pr-str observation))
-       (is (= :seon.cluster.status/unavailable
-              (get-in observation [:seon.cluster.status/store-bytes :seon.error/kind])))
+       (is (string? (get-in observation [:seon.cluster.status/store-bytes :seon.cluster.status/unavailable-observation])))
        (is (pos-int? (:seon.cluster.status/platform-threads observation)))))))

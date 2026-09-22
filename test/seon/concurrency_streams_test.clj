@@ -77,7 +77,7 @@
          (let [results (mapv #(test-support/await-event!
                               % "unique namespace race settled")
                              tasks)
-               refusals (filterv :seon.error/kind results)
+               refusals (filterv :seon.db.write.attempt/request-id results)
                winners
                (db/q '[:find [?agent-id ...]
                        :where
@@ -87,8 +87,7 @@
                      @connection)]
            (testing "the Datahike writer serializes the unique collision"
              (is (= 1 (count refusals)))
-             (is (= :seon.db/rejected
-                    (:seon.error/kind (first refusals))))
+             (is (string? (:seon.db.write.attempt/request-id (first refusals))))
              (is (= 1 (count winners))))))))))
 
 (deftest message-flood-retains-every-source-vector-entry

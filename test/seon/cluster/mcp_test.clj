@@ -381,7 +381,7 @@
                oversight/flow-status
                (fn [database _]
                  (let [effective (config/effective database cluster-name)]
-                   (if (:seon.error/kind effective)
+                   (if (or (:seon.config/missing-effective effective) (:seon.config/error-key effective) (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
                      effective
                      {:seon.oversight/agents []
                       :seon.oversight/plumbing []})))]
@@ -390,7 +390,7 @@
                  (is (= {:seon.oversight/agents []
                          :seon.oversight/plumbing []}
                         (:seon.dev.mcp/flow result)))
-                 (is (not (contains? result :seon.error/kind)))))
+                 (is (= :observed (:seon.dev.mcp/health result)))))
              (finally
                (swap! running-instances dissoc cluster-name)))))))
     (is (zero? @fresh-stores)
@@ -463,6 +463,7 @@
         (swap! running-instances dissoc cluster-name)))))
 
 (defn- retrievable-artifacts-have-an-identified-no-history-root
+  {:malli/schema [:=> [:cat :seon.db/connection] :boolean]}
   [connection]
   (let [cluster-name "mcp-durable-artifact-test"
         effective config/defaults
@@ -509,8 +510,8 @@
                 [_ :seon.dev.mcp.artifact/digest ?digest]]
               (db/history (db/db connection)) content-digest))
             "explicit root retraction does not retain the digest in history")
-        (is (= :seon.dev.mcp/value-not-found
-               (:seon.error/kind
+        (is (= content-digest
+               (:seon.dev.mcp/value-not-found
                 (cluster/mcp-get-value
                  cluster-name content-digest [] 0)))
             "retraction ends the durable retrieval promise immediately"))

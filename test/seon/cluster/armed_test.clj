@@ -234,9 +234,7 @@
           (is (nil? (:seon.cluster.eval/error definition)))
           (is (= 42 (:seon.sci.admit/value shared-call))
               "the committed agent resolves its left-cluster definition")
-          (is (= :seon.sci.eval/evaluation-failed
-                 (:seon.error/kind
-                  (:seon.sci.admit/value isolated-call)))
+          (is (some? (:seon.sci.kernel/guard-observation (:seon.sci.admit/value isolated-call)))
               "the right cluster cannot see the left cluster's definition"))
         (finally
           (boot/stop! right)
@@ -352,12 +350,12 @@
         (with-redefs [turn/next-agent-work
                       (fn [& _]
                         (throw (ex-info "injected core fault"
-                                        {:seon.error/kind ::injected})))]
+                                        {})))]
           (async/offer! (:seon.cluster.wake/channel entry) ::fault)
           (let [fact (first (await-fact connection (comp seq errors)))]
             (testing "exactly one error fact, carrying what happened"
               (is (some? fact))
-              (is (= ::injected (:seon.error/kind fact)))
+              (is (= "injected core fault" (:seon.error/message fact)))
               (is (= "clojure.lang.ExceptionInfo"
                      (:seon.error/throwable-class fact)))
               (is (= :seon.agent/turn (:seon.error/proc fact)))
@@ -427,7 +425,7 @@
                   (flow/ping-proc graph :seon.agent/turn
                                   :timeout-ms 5000))))
           (is (empty? (filter #(= :seon.flow/fault-channel-overflow
-                                  (:seon.error/kind %))
+                                  (:seon.error/diagnostic-cause %))
                               (errors @connection)))
               "and no overflow fact was needed on the way"))))))
 
@@ -450,7 +448,7 @@
                    (compare-and-set! injected? false true))
             (throw
              (ex-info "first cluster proc fault"
-                      {:seon.error/kind ::first-cluster-proc-fault}))
+                      {}))
             (armer-step state transition)))
          ([state input message]
           (armer-step state input message)))
@@ -467,12 +465,11 @@
                  (fn [database]
                    (first
                     (filter
-                     #(= ::first-cluster-proc-fault
-                         (:seon.error/kind %))
+                     #(= "first cluster proc fault" (:seon.error/message %))
                      (errors database)))))]
             (is (true? @injected?)
                 "the fault was injected at the first resume transition")
-            (is (= ::first-cluster-proc-fault (:seon.error/kind fact)))
+            (is (= "first cluster proc fault" (:seon.error/message fact)))
             (is (= :seon.agent/armer (:seon.error/proc fact)))
             (is (= (:seon.db.process/id
                     (:seon.turn.loop/cluster instance))

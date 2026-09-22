@@ -37,6 +37,7 @@
            (str/ends-with? (.getName ^java.io.File file) ".cljc"))))
 
 (defn- source-files
+  {:malli/schema [:=> [:cat [:sequential :string]] [:sequential :string]]}
   [roots]
   (let [files
         (into []
@@ -51,8 +52,7 @@
     (when-not (seq files)
       (throw
        (ex-info "The bounded-boundary census found no source files."
-                {:seon.error/kind
-                 :seon.bounded-boundary-census/no-source-subjects
+                {
                  :seon.bounded-boundary-census/roots roots})))
     (sort files)))
 
@@ -239,6 +239,7 @@
                :else :defect)))))
 
 (defn- boundary-census
+  {:malli/schema [:=> [:cat [:sequential :string]] [:vector :map]]}
   [roots]
   (let [files (source-files roots)
         forms (mapv identity (mapcat source-forms files))
@@ -251,8 +252,7 @@
     (when-not (seq subjects)
       (throw
        (ex-info "The bounded-boundary census found no boundary subjects."
-                {:seon.error/kind
-                 :seon.bounded-boundary-census/no-boundary-subjects
+                {
                  :seon.bounded-boundary-census/files files})))
     subjects))
 
@@ -293,16 +293,14 @@
         absent-error
         (try (boundary-census [absent]) nil
              (catch clojure.lang.ExceptionInfo error error))]
-    (is (= :seon.bounded-boundary-census/no-source-subjects
-           (:seon.error/kind (ex-data absent-error))))
+    (is (= [absent] (:seon.bounded-boundary-census/roots (ex-data absent-error))))
     (with-source
       "(ns fixture.no-boundaries)\n(def answer 42)\n"
       (fn [root]
         (let [error
               (try (boundary-census [root]) nil
                    (catch clojure.lang.ExceptionInfo failure failure))]
-          (is (= :seon.bounded-boundary-census/no-boundary-subjects
-                 (:seon.error/kind (ex-data error)))))))))
+          (is (seq (:seon.bounded-boundary-census/files (ex-data error)))))))))
 
 (deftest synthetic-unbounded-forms-are-classified-as-defects
   (doseq [[label source expected-class]

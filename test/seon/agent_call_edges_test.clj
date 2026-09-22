@@ -56,10 +56,10 @@
                                            failure))))
                        (let [entries (evaluation/of-agent (db/db connection) agent-id)
                              failures (filterv :seon.cluster.eval/error entries)]
-                         (when (or (:seon.error/kind entries) (seq failures))
+                         (when (or (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries) (:seon.agent/no-such-agent entries)) (seq failures))
                            (throw (ex-info "Declaration evaluation failed"
                                            {:seon.test/evaluations
-                                            (if (:seon.error/kind entries) entries (mapv #(select-keys % [:seon.cluster.eval/source :seon.cluster.eval/error :seon.eval/shown]) failures))}))))
+                                            (if (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries) (:seon.agent/no-such-agent entries)) entries (mapv #(select-keys % [:seon.cluster.eval/source :seon.cluster.eval/error :seon.eval/shown]) failures))}))))
                        turn-id))
             calls (fn [attribute sym]
                     (into #{} (map :seon.fn/sym)
@@ -73,7 +73,7 @@
                            :seon.agent/namespace {:seon.ns/name namespace-name}
                            :seon.agent/settings {:seon.config/agent [:seon.agent/id agent-id]
                                                  :seon.config.ai/no-provider true}}])]
-            (when (:seon.error/kind created) (throw (ex-info "Probe agent refused" created))))
+            (when (:seon.db.write.attempt/request-id created) (throw (ex-info "Probe agent refused" created))))
           (agent/arm! request)
           (submit "(defn target {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
           (submit "(clojure.test/deftest target-test (clojure.test/is (= 3 (target 2))))")

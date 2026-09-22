@@ -61,7 +61,7 @@
          (env/supplied-agent-id
           (env/environment {:seon.boot/cluster-name "situation"
                             :seon.agent/id "situation"}))))
-  (is (= :seon.env/agent-id-absent
-         (:seon.error/kind
+  (is (= "situation"
+         (:seon.env/agent-environment
           (env/supplied-agent-id
            (env/environment {:seon.boot/cluster-name "situation"}))))))

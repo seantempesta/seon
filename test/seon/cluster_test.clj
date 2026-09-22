@@ -204,7 +204,7 @@
                        #(schema/call-with-forms
                          forms
                          (fn [] (changes stale (schema/handed-projection) "stale-fixture"))))]
-          (is (= :seon.boot/refused (:seon.error/kind refusal))
+          (is (true? (:seon.boot/refused refusal))
               "a facet the current declaration no longer carries refuses")
           (is (= attribute (:seon.boot/attribute (:seon.boot/offense refusal))))
           (is (= :db.unique/identity
@@ -302,7 +302,7 @@
             offense (:seon.boot/offense refusal)]
         (is (= :db.type/string declared)
             "the bridge derives the subject attribute as a string")
-        (is (= :seon.boot/refused (:seon.error/kind refusal))
+        (is (true? (:seon.boot/refused refusal))
             "a value-type change still refuses to reopen the branch")
         (is (= :db/valueType (:seon.boot/property offense))
             "naming the property Datahike will not apply")
@@ -349,7 +349,7 @@
         progress (ns-resolve 'seon.cluster '*source-progress!*)
         analysis-failure (analysis-source-change-failure)
         adoption-failure (ex-info "Source changed during development adoption."
-                                  {:seon.error/kind :seon.boot/refused
+                                  {
                                    :seon.boot/offense
                                    {:seon.source/commit-id "c0"
                                     :seon.error/diagnostic-cause
@@ -363,14 +363,14 @@
                          {:seon.source/commit-id "converged"})))]
     (is (some? analysis-failure)
         "the captured span read genuinely refuses instead of returning source")
-    (is (= [:seon.fn/index-refused :seon.fn/source-changed-during-analysis]
-           [(:seon.error/kind (ex-data analysis-failure))
+    (is (= [true :seon.fn/source-changed-during-analysis]
+           [(:seon.fn/index-refused (ex-data analysis-failure))
             (:seon.error/diagnostic-cause (ex-data analysis-failure))])
         "carrying the declared analysis-time source-change cause")
     (is (= [:analysis :adoption nil]
            [(phase-of analysis-failure)
             (phase-of adoption-failure)
-            (phase-of (ex-info "unrelated" {:seon.error/kind :seon.fn/index-refused}))])
+            (phase-of (ex-info "unrelated" {}))])
         "one predicate names the phase for both seams and refuses to widen")
     (with-bindings {progress (fn [phase] (swap! reported conj phase))}
       (is (= {:seon.source/commit-id "converged"}
@@ -386,7 +386,7 @@
           "the adoption compare keeps its own single retry")
       (let [surviving (test-support/refusal-data
                        #(retrying (fn [] (throw analysis-failure))))]
-        (is (= :seon.boot/refused (:seon.error/kind surviving))
+        (is (true? (:seon.boot/refused surviving))
             "a second change refuses rather than rebuilding")
         (is (= :analysis (get-in surviving [:seon.boot/offense :seon.source/change-phase]))
             "naming the phase that changed under the retry")
@@ -410,7 +410,7 @@
             refusal (test-support/refusal-data
                      #(#'cluster/transact-initialization! connection [row]))
             offense (:seon.boot/offense refusal)]
-        (is (= :seon.boot/refused (:seon.error/kind refusal))
+        (is (true? (:seon.boot/refused refusal))
             (pr-str refusal))
         (is (not (str/includes? (str (:seon.error/message refusal))
                                 "lookup refs do not resolve"))

@@ -28,6 +28,7 @@
 
 (defn- await-commit!
   "Wait on Datahike's commit event, with a loud test-only backstop."
+  {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :seon.db/database-value] :seon.schema/value] [:=> [:cat] :seon.schema/value]] :seon.db/database-value]}
   [connection predicate publish!]
   (let [result (promise)
         listener-key (random-uuid)
@@ -42,7 +43,7 @@
       (let [observed (deref result 20000 ::timeout)]
         (when (= ::timeout observed)
           (throw (ex-info "The scratch cluster did not commit the expected fact."
-                          {:seon.error/kind ::commit-timeout
+                          {
                            ::receipts
                            (mapv #(db/pull @connection
                                           [:seon.cluster.eval/ordinal
@@ -248,8 +249,7 @@
                  (semantic-result
                   (authored-result @connection "restart-a" 14)))
               "a computed require changes lint and eval state for the next form")
-          (is (= :seon.turn.loop/lint-rejected
-                 (:seon.error/kind
+          (is (true? (:seon.turn.loop/lint-rejected
                   (semantic-result
                    (authored-result @connection "restart-a" 15))))
               "the invalid ordinal is one flat value, not a plan-wide abort")

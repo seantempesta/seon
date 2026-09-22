@@ -55,7 +55,7 @@
                       (db/transact!
                        right
                        [{:seon.message/id "connection-isolation" :seon.message/to [:seon.agent/id "recipient"] :seon.message/content "only the right recipient"}])]
-                  (is (not (:seon.error/kind result)))
+                  (is (some? (:db-after result)))
                   (is (some? (support/await-event! right-mailbox "right message wake")))
                   ;; Datahike has synchronously delivered the committed report.
                   ;; The positive right wake proves this was an observed event.
@@ -77,7 +77,8 @@
       (support/await-event! event (str "closed source turn " run-id))
       (finally (d/unlisten connection listener)))))
 
-(defn- create-agent! [instance agent-id]
+(defn- create-agent! {:malli/schema [:=> [:cat :map :seon.agent/id] :map]}
+  [instance agent-id]
   (let [handle (:seon.turn.loop/cluster instance)
         connection (:seon.db/connection handle)]
     (schema/call-with-projection-state
@@ -89,7 +90,7 @@
                {:seon.agent/id agent-id
                :seon.cluster/name (:seon.cluster/name handle)
                :seon.ns/name (symbol (str "my.agents.concurrency." agent-id))}))]
-         (when (:seon.error/kind created)
+         (when (:seon.db.write.attempt/request-id created)
            (throw (ex-info "Agent creation refused" created)))
          (agent/arm! {:seon.turn.loop/cluster handle
                       :seon.agent/routing

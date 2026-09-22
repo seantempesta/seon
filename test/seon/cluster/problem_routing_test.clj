@@ -80,13 +80,14 @@
   declares — the namespaces it started and ended in, its print options and
   its complete arm record — exactly as the evaluator returns them. A partial
   stand-in is a shape the declared contract forbids."
+  {:malli/schema [:=> [:cat :string] :map]}
   [message]
   {:seon.sci.admit/value
-   {:seon.error/kind :seon.sci.eval/evaluation-failed
+   {
     :seon.error/message message
     :seon.error/data {}}
    :seon.eval/shown
-   (pr-str {:seon.error/kind :seon.sci.eval/evaluation-failed
+   (pr-str {
             :seon.error/message message
             :seon.error/data {}})
    :seon.cluster.eval/error message
@@ -137,9 +138,9 @@
                     (receipt-row
                      0
                      {:seon.eval/shown
-                      (pr-str {:seon.error/kind :probe/self-owned-red})
+                      (pr-str {})
                       :seon.cluster.eval/error "self-owned red"
-                      :seon.error/kind :probe/self-owned-red})
+                      })
                     :seon.cluster.eval/ns)])
      (let [problem
            (problems/form-problem
@@ -201,18 +202,18 @@
                   [(receipt-row 1 {})
                     (receipt-row 2 {:seon.eval/shown "2"})
                     (receipt-row 3 {:seon.eval/shown
-                                    (pr-str {:seon.error/kind :probe/red})
+                                    (pr-str {})
                                     :seon.cluster.eval/error "red 3"
-                                    :seon.error/kind :probe/red})
+                                    })
                     (receipt-row 4 {:seon.eval/shown
-                                    (pr-str {:seon.error/kind :probe/red})
+                                    (pr-str {})
                                     :seon.cluster.eval/error "red 4"
-                                    :seon.error/kind :probe/red})
+                                    })
                     (receipt-row 5 {:seon.eval/shown "5"})
                     (receipt-row 6 {:seon.eval/shown
-                                    (pr-str {:seon.error/kind :probe/red})
+                                    (pr-str {})
                                     :seon.cluster.eval/error "red 6"
-                                    :seon.error/kind :probe/red})])
+                                    })])
      (assign! connection 3)
      (assign! connection 5)
      (assign! connection 6)

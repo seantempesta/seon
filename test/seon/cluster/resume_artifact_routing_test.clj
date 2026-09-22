@@ -14,11 +14,11 @@
 
 (def ^:private failed
   {:seon.sci.admit/value
-   {:seon.error/kind :seon.sci.eval/evaluation-failed
+   {
     :seon.error/message "Unable to resolve symbol: prefix-def"
     :seon.error/data {}}
    :seon.eval/shown
-   (pr-str {:seon.error/kind :seon.sci.eval/evaluation-failed
+   (pr-str {
             :seon.error/message "Unable to resolve symbol: prefix-def"
             :seon.error/data {}})
    :seon.cluster.eval/error "Unable to resolve symbol: prefix-def"
@@ -74,8 +74,8 @@
                                :seon.cluster.eval/error
                                (:seon.cluster.eval/error failed)]
                               [:db/add [:seon.cluster.eval/id "resume-receipt-1"]
-                               :seon.error/kind
-                               :seon.sci.eval/evaluation-failed]])
+                               :seon.cluster.eval/error
+                               (:seon.cluster.eval/error failed)]])
      (let [delivery
            (message/delivery
             @connection

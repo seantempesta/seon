@@ -153,13 +153,11 @@
                            :seon.ns/name 'my.agents.alice}
             resumed-request (assoc first-request
                                    :seon.ns/name 'my.agents.replacement)]
-        (is (nil? (:seon.error/kind
-                   (cluster/ensure-entity!
+        (is (string? (:seon.agent/id (cluster/ensure-entity!
                     connection cluster/boot-process-identity first-request))))
         (let [before (db/pull @connection '[*]
                              [:seon.agent/id "alice"])]
-          (is (nil? (:seon.error/kind
-                     (cluster/ensure-entity!
+          (is (string? (:seon.agent/id (cluster/ensure-entity!
                       connection cluster/boot-process-identity
                       resumed-request))))
           (is (= before

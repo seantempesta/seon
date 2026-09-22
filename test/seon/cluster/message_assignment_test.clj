@@ -11,6 +11,7 @@
 (def ^:private now (Date. 1785283200000))
 
 (defn- with-assignment-database
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/connection] :seon.schema/value]] :seon.schema/value]}
   [body]
   (test-support/with-database
    (fn [connection]
@@ -24,7 +25,7 @@
                                [:seon.turn/id "red-run"]
                                :seon.cluster.eval/ordinal 0
                                :seon.cluster.eval/at now
-                               :seon.error/kind :seon.sci.eval/evaluation-failed
+
                                :seon.cluster.eval/error
                                "Unable to resolve symbol: missing-dependency"
                                :seon.cluster.eval/source "(missing-dependency)"}])

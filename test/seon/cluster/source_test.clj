@@ -234,8 +234,7 @@
                       (test-support/await-event!
                        second-refresh "second source refresh completed or refused")
                       holder (:seon.operator.lock/holder second-result)]
-                  (is (= :seon.cluster/source-refresh-acquisition-timeout
-                         (:seon.error/kind second-result)))
+                  (is (some? (:seon.operator.lock/holder second-result)))
                   (is (= "bootstrap configuration"
                          (:seon.operator.lock/phase holder)))
                   (is (<= acquisition-bound-ms
@@ -258,14 +257,14 @@
       (let [result
             (with-redefs [db/transact!
                           (fn [& _]
-                            {:seon.error/kind :seon.db/invalid-transaction
+                            {:seon.db.write.attempt/request-id "source-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
                              :seon.error/message "injected refusal"})]
               (refusal #(publish opened digest-a)))]
         (is (= :seon.cluster.source/scratch-schema-refused
                (:seon.cluster.source/rule result)))
-        (is (= :seon.db/invalid-transaction
+        (is (= "injected refusal"
                (get-in result
-                       [:seon.source/transaction-result :seon.error/kind])))
+                       [:seon.source/transaction-result :seon.error/message])))
         (is (= #{:db :current-src} (set (registry/roster opened))))
         (is (empty? (scratch-branches opened)))))))
 
@@ -348,7 +347,7 @@
                                          :seon.fn/doc "incomplete"}])]
               (is (some? (:db/id existing)) "the sparse write updates a complete fixture row")
               (is (some? (:db-after updated)) (pr-str updated))
-              (is (= :seon.db/invalid-write (:seon.error/kind refused))
+              (is (string? (:seon.db.write.attempt/request-id refused))
                   "an incomplete create still refuses under whole-entity validation")
               (is (= basis (db/basis-t (db/db connection))) "refusal commits nothing")
               (let [report (db/transact! connection rows)]

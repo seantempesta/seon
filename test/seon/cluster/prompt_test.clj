@@ -28,6 +28,7 @@
          :seon.config.eval.result/max-nodes 4096))
 
 (defn- record-evaluation!
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx :seon.turn/id :string] :seon.db/transaction-report]}
   [connection ctx run-id source]
   (let [handle (support/cluster-handle
                 {:seon.db/connection connection
@@ -48,7 +49,7 @@
         (let [result (blob/with-publication!
                       connection (:seon.blob/staged-writes prepared)
                       #(db/transact! connection (:seon.db/tx-data prepared)))]
-          (when (:seon.error/kind result)
+          (when (:seon.db.write.attempt/request-id result)
             (throw (ex-info (str "Fixture evaluation was not recorded: " (pr-str result)) result)))
           result))
       (finally
@@ -148,7 +149,7 @@
      (let [before (:seon.cluster.prompt/text
                    (prompt/prompt (db/db connection) (request connection ctx)))]
        (let [result (db/transact! connection [[:db/add [:seon.turn/id "walk-run"] :seon.turn/closed-tx "datomic.tx"]])]
-         (is (not (:seon.error/kind result)) (pr-str result)))
+         (is (some? (:db-after result)) (pr-str result)))
        (record-evaluation! connection ctx "second-history" "(str \"SECOND-EVALUATION\")")
        (let [after (:seon.cluster.prompt/text
                     (prompt/prompt (db/db connection) (request connection ctx)))]
@@ -183,8 +184,8 @@
            rendered (prompt/prompt (db/db connection)
                                    (assoc (request connection ctx)
                                           :seon.turn/id "plan-wake"))]
-       (is (not (:seon.error/kind result)) (pr-str result))
-       (is (not (:seon.error/kind rendered)) (pr-str rendered))
+       (is (some? (:db-after result)) (pr-str result))
+       (is (string? (:seon.cluster.prompt/text rendered)) (pr-str rendered))
        (is (str/includes? (:seon.cluster.prompt/text rendered)
                           "inspect this walk"))))))
 
@@ -352,10 +353,11 @@
 (defn- recorded-usage-tx
   "Facts one settled attempt already commits: the exact prompt characters
   on the run's capture, and the provider's own count on the attempt."
+  {:malli/schema [:=> [:cat :string :int :int :int] :seon.db/tx-data]}
   [model ordinal characters provider-tokens]
   (let [run-id (str "usage-run-" ordinal)]
     [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "walker"] :seon.turn/opened-tx "datomic.tx"
-      :seon.turn/attempts [(str run-id "-attempt")]} 
+      :seon.turn/attempts [(str run-id "-attempt")]}
      {:seon.context.capture/id (str run-id "-context-1")
       :seon.context.capture/run [:seon.turn/id run-id]
       :seon.context.capture/basis-t 1
@@ -435,7 +437,7 @@
        (doseq [ordinal [1 2 3]]
          (let [result (db/transact! connection
                                     (recorded-usage-tx model ordinal 32000 10000))]
-           (is (not (:seon.error/kind result)) (pr-str result))))
+           (is (some? (:db-after result)) (pr-str result))))
        (testing "the calibration is fitted to those committed facts"
          (let [calibration (prompt/model-calibration (db/db connection) model)]
            (is (= :seon.ai.tokens/observed
@@ -503,7 +505,7 @@
               :seon.context.capture/basis-t (db/basis-t (db/db connection))
               :seon.context.capture/prompt composed}])
            (let [replayed (prompt/prompt (db/db connection) (request connection ctx))]
-             (is (nil? (:seon.error/kind replayed))
+             (is (string? (:seon.cluster.prompt/text replayed))
                  (str "a replay of its own capture is not a mismatch: "
                       (pr-str replayed)))
              (is (= composed (:seon.cluster.prompt/text replayed))))
@@ -513,6 +515,5 @@
               [{:seon.context.capture/id "replayed-capture"
                 :seon.context.capture/prompt (str composed " drifted")}])
              (let [drifted (prompt/prompt (db/db connection) (request connection ctx))]
-               (is (= :seon.cluster.prompt/capture-mismatch
-                      (:seon.error/kind drifted)))
+               (is (string? (:seon.schema/expected-value drifted)))
                (is (= "walk-run" (:seon.turn/id drifted)))))))))))

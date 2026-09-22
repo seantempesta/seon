@@ -135,8 +135,7 @@
      {:db/ident :example/other :db/valueType :db.type/long
       :db/cardinality :db.cardinality/one}]}
    (fn [connection]
-     (is (not (:seon.error/kind
-               (db/transact! connection
+     (is (some? (:db-after (db/transact! connection
                              [{:seon.agent/id "agent-a"}
                               {:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
                               [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
@@ -148,7 +147,7 @@
            {:keys [key faults armer render search]} (route-probe! connection mailbox)
            write! (fn [tx]
                     (let [result (db/transact! connection tx)]
-                      (is (nil? (:seon.error/kind result)) (pr-str result))
+                      (is (some? (:db-after result)) (pr-str result))
                       result))]
        (try
          (write! [{:seon.runtime/agent [:seon.agent/id "agent-a"]
@@ -416,9 +415,7 @@
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
     (fn [connection]
-      (is (= ::wake/unindexed-listened-attribute
-             (:seon.error/kind
-              (wake/declarations-refusal (db/db connection))))
+      (is (contains? (:seon.cluster.wake/attributes (wake/declarations-refusal (db/db connection))) ::unindexed-notice)
           "the derivation names the attribute the index does not hold")
       (is (contains? (wake/unindexed-listened-attributes (db/db connection))
                      ::unindexed-notice))
@@ -426,8 +423,7 @@
                                        (async/chan (async/sliding-buffer 1)))
                          (catch clojure.lang.ExceptionInfo failure
                            (ex-data failure)))]
-        (is (= ::wake/unindexed-listened-attribute
-               (:seon.error/kind refusal))
+        (is (contains? (:seon.cluster.wake/attributes refusal) ::unindexed-notice)
             "and registration refuses rather than routing into silence")))))
 
 (deftest a-fault-wakes-the-steward-of-the-failing-functions-namespace
@@ -445,7 +441,7 @@
             recording (error/recording
                        (db/db connection)
                        {:seon.error/source
-                        {:seon.error/kind :seon.instrument/contract-violated
+                        {
                          :seon.error/message "the function violated its contract"
                          :seon.error/data {:seon.instrument/fn 'my.agents.agent-a/broken
                                            :seon.instrument/arm :input}}
@@ -614,8 +610,7 @@
             (is (map? (test-support/await-event!
                        committed "saturated-route transaction")))
             (let [fault (test-support/await-event! faults "route fault")]
-              (is (= :seon.cluster.wake/undeliverable-wake
-                     (:seon.error/kind (ex-data fault)))
+              (is (string? (:seon.cluster.wake/undeliverable-wake (ex-data fault)))
                   "one classifier, one kind — no second fault path")
               (is (= :seon.cluster.wake/mailbox
                      (:seon.cluster.wake/route (ex-data fault)))
@@ -639,8 +634,7 @@
                        committed "closed-render transaction"))
                 "the writer still returned")
             (let [fault (test-support/await-event! faults "render fault")]
-              (is (= :seon.cluster.wake/undeliverable-wake
-                     (:seon.error/kind (ex-data fault))))
+              (is (string? (:seon.cluster.wake/undeliverable-wake (ex-data fault))))
               (is (= :seon.cluster.wake/render
                      (:seon.cluster.wake/route (ex-data fault))))))
           (finally

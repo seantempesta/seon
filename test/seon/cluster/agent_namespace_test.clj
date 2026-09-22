@@ -78,7 +78,7 @@
               {:seon.agent/id "bob"
                :seon.cluster/name "test"
                :seon.ns/name 'my.agents.shared}))]
-        (is (nil? (:seon.error/kind result))
+        (is (some? (:db-after result))
             "a second agent on one namespace is admitted")
         (is (= #{"alice" "bob"}
                (set (db/q '[:find [?agent-id ...]

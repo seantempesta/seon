@@ -61,7 +61,7 @@
          100
          (prop/for-all [depth (gen/choose 0 6)
                         rule gen/keyword]
-           (let [buried (wrap (ex-info "refused" {:seon.error/kind ::refused
+           (let [buried (wrap (ex-info "refused" {
                                                   :rule rule})
                               depth)]
              (= rule (:rule (error/refusal buried)))))
@@ -95,9 +95,14 @@
 
 (defn refusing-call
   "A transaction function that refuses, exactly as N2's transitions do."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :nil]}
   [_db request]
   (throw (ex-info "transition refused"
-                  {:seon.error/kind :seon.turn/refused
+                  {
+    :seon.error/message "transition refused"
+    :seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.turn/transition
+    :seon.error/operation 'seon.cluster.store-transact-test/refusing-call
                    :seon.turn/rule :seon.turn/ineligible
                    :seon.turn/request request})))
 
@@ -108,7 +113,7 @@
                                      [{:seon.agent/id "agent-a"}])]
         (is (map? outcome))
         (is (contains? outcome :db-after) "the report, not a wrapper")
-        (is (nil? (:seon.error/kind outcome)))))))
+        (is (some? (:db-after outcome)))))))
 
 (deftest our-own-refusal-comes-back-by-name
   (with-connection
@@ -116,8 +121,8 @@
       (let [outcome (db/transact!
                      connection
                      [[:db.fn/call #'refusing-call {:probe true}]])]
-        (is (= :seon.turn/refused (:seon.error/kind outcome))
-            "the transition's own kind, verbatim")
+        (is (= :seon.turn/ineligible (:seon.turn/rule outcome))
+            "the transition's declared rule, verbatim")
         (is (= :seon.turn/ineligible
                (:seon.turn/rule outcome))
             "and its own rule — what makes a fence test honest")
@@ -129,7 +134,7 @@
       (let [outcome (db/transact! connection
                                      [{:seon.cluster.eval/ordinal
                                        "not-an-int"}])]
-        (is (= :seon.db/rejected (:seon.error/kind outcome)))
+        (is (string? (:seon.db.write.attempt/request-id outcome)))
         (is (= :transact/schema (:error (:seon.error/data outcome)))
             "datahike's own classification, by value")))))
 
@@ -177,7 +182,7 @@
   (with-mixed-connection
     (fn [connection]
       (let [outcome (db/transact! connection [{::mixed-value true}])]
-        (is (= :user-input (:seon.error/kind outcome)))
+        (is (string? (:seon.db.write.attempt/request-id outcome)))
         (is (empty? (db/q '[:find ?value
                            :where [_ ::mixed-value ?value]]
                          @connection))))))
@@ -192,7 +197,7 @@
                 nil
                 (catch clojure.lang.ExceptionInfo error
                   (ex-data error)))]
-          (is (= :user-input (:seon.error/kind failure)))
+          (is (some? (::schema.datahike/rule failure)))
           (is (contains? #{::schema.datahike/malformed-edn
                            ::schema.datahike/schema-invalid}
                          (::schema.datahike/rule failure))))))))

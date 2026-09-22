@@ -19,6 +19,17 @@ No final green or live default settlement claim is made.
 
 ### Final settlement verification, 2026-09-22 07:00 UTC
 
+The next runtime matrix requests both completed all selected namespaces:
+`b3-matrix-1` ran 74 tests / 357 assertions / 45 failures / 19 errors;
+`b3-matrix-2` ran 92 tests / 648 assertions / 108 failures / 27 errors.
+Both requests were refused at result recording. Their failures include
+string-valued symbol fixtures, missing declaration facts/facets, installed
+arming membership changes, event/duration bounds, and the canonical projection
+mismatch described below. The program-restart test also printed
+`SEON FAULT COMMITTER LOSS: pid=:seon.flow/fault-committer op=:step failure=java.lang.ClassCastException`.
+That diagnostic reports only the exception class, not its throw site; this
+lane does not attribute its cause from that line.
+
 The four-namespace turn request completed `seon.cluster.turn-test` (60 tests,
 33 reported failures, 58 errors), `seon.turn-test` (34 tests, 9 failures,
 16 errors), and `seon.turn-loop-test` (26 tests, 7 failures, 9 errors).
@@ -62,6 +73,42 @@ missing evidence is green.
   observations; the general `settlement-refused?` predicate and every caller
   are removed together. Function analysis declares its namespace refusal with
   the actual source as required evidence.
+
+### Other pre-existing debt spellings
+
+The requested `;; debt:` scan has seven survivors listed above. A broader
+`debt:` scan also finds these 22 pre-existing comments. They were already
+single-semicolon or `PRD 1.3 debt:` comments before this lane; this cut did not
+rename comments to evade the requested scan. Their callees still declare the
+generic `:seon.error/value` path, directly or via `:seon.db/error-result`.
+They remain part of the B3 commits 1–3 contract work, alongside the seven
+requested-scan survivors. This is not a claim that every existing generic
+base-member decision throughout the repository has been retired.
+
+| Site | Existing callee boundary |
+|---|---|
+| `src/seon/ai.clj:333` | seon.db/pull declares :seon.error/value |
+| `src/seon/ai.clj:360` | seon.db/pull declares :seon.error/value |
+| `src/seon/ai.clj:365` | seon.db/pull declares :seon.error/value |
+| `src/seon/config.clj:691` | seon.db/pull and transact! declare seon.db/error-result with :seon.error/value. |
+| `src/seon/config.clj:833` | seon.db/pull and transact! declare seon.db/error-result with :seon.error/value. |
+| `src/seon/issue/detect.clj:98` | seon.db/q and basis-t declare generic errors. |
+| `src/seon/issue/detect.clj:117` | seon.db/q and basis-t declare generic errors. |
+| `src/seon/issue/detect.clj:140` | seon.db/q and basis-t declare generic errors. |
+| `src/seon/issue/detect.clj:164` | seon.db/q and basis-t declare generic errors. |
+| `src/seon/issue/detect.clj:207` | seon.db/q and basis-t declare generic errors. |
+| `src/seon/issue/detect.clj:259` | seon.db/q and basis-t declare generic errors. |
+| `src/seon/issue.clj:535` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:667` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:764` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:769` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:827` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:1354` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:1421` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/issue.clj:1472` | database and detector reads still declare generic seon.db/error-result. |
+| `src/seon/maintenance.clj:623` | seon.db/history's :seon.db/error-result includes :seon.error/value. |
+| `src/seon/schedule.clj:650` | maintenance/result-entity-response still includes :seon.error/value. |
+| `src/seon/shell/jvm.clj:43` | seon.fs.jvm/stat still declares :seon.error/value. |
 
 ## Live read-only probes
 
@@ -113,6 +160,86 @@ The accepted ruling is to read the declared `:seon.db/invalid-read` member.
 `Bad entity attribute :seon.error/kind at [:db/add 37750 :seon.error/kind :seon.cluster.reply/no-forms], not defined in current schema`.
 Exception data includes `:error :transact/schema` and `:attribute :seon.error/kind`.
 This is the dependency's immutable transaction path, not a live committed turn.
+
+### Final read-only probes
+
+The following JVM MCP forms used the same explicit root, `default` cluster,
+`read_only true`, and a 10,000 ms request bound.
+
+```clojure
+(let [database (seon.db/db (seon.cluster.boot/connection "default"))
+      reply (seon.cluster.reply/sources "; prose only" 'user 100)]
+  (pr-str {:retired-attribute-installed?
+           (contains? (:schema database) (keyword "seon.error" "kind"))
+           :no-forms (:seon.cluster.reply/no-forms reply)
+           :message (:seon.error/message reply)
+           :reply-keys (set (keys reply))
+           :generated-read-schema?
+           (contains? (:seon.schema.projection/forms
+                        (seon.db/carried-projection database))
+                      :seon.turn/generated-read-depends-on-turns-error)}))
+```
+
+15 ms; returned string:
+
+```clojure
+{:retired-attribute-installed? false,
+ :no-forms true,
+ :message "Your reply had no form; only comments/prose. Send a form.",
+ :reply-keys #{:seon.error/operation :seon.error/message :seon.error/layer
+               :seon.cluster.reply/no-forms :seon.error/data
+               :seon.cluster.reply/text :seon.error/at},
+ :generated-read-schema? true}
+```
+
+This verifies the adopted constructor and installed schema on default. It
+does not exercise a live turn or change default's parked process state.
+
+```clojure
+(let [result (#'seon.turn/phase
+               (fn [] (throw (ex-info "phase probe"
+                             {:seon.test/observation "ordinary exception data"}))))]
+  (pr-str {:at? (inst? (:seon.error/at result))
+           :layer (:seon.error/layer result)
+           :operation (:seon.error/operation result)
+           :failed? (:seon.turn.loop/phase-failed result)
+           :message (:seon.error/message result)
+           :observation (:seon.test/observation result)}))
+```
+
+12 ms; returned string:
+
+```clojure
+{:at? true, :layer :seon.turn/phase, :operation seon.turn/phase,
+ :failed? true, :message "phase probe",
+ :observation "ordinary exception data"}
+```
+
+```clojure
+(let [database (seon.db/db (seon.cluster.boot/connection "default"))
+      projection (seon.db/carried-projection database)]
+  (try
+    (let [candidate (seon.schema/projection-with-schema
+                      projection :seon.schema.datahike-test/refused
+                      [:maybe :string] {:seon.schema.admission/source :core})]
+      (pr-str (seon.schema.datahike/malli->datahike-attr-in
+                candidate :seon.schema.datahike-test/refused)))
+    (catch clojure.lang.ExceptionInfo failure (pr-str (ex-data failure)))))
+```
+
+5 ms; returned string:
+
+```clojure
+#:seon.schema{:error :seon.schema/nilable-value-schema,
+             :key :seon.schema.datahike-test/refused,
+             :definition [:maybe :string],
+             :nilable-value-schema :seon.schema.datahike-test/refused}
+```
+
+This probes rejection of nilable storage, not permission to add a nilable
+production boundary. An earlier three-argument call to `projection-with-schema`
+was incorrect and failed in 8 ms; its caught arity data also encountered the
+MCP artifact projection's undeclared-facet refusal. It proves no schema behavior.
 
 ## Fails-before regression
 

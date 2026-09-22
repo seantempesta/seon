@@ -327,7 +327,7 @@
        (is (m/validate :seon.db/transaction-result result options)
            (pr-str (m/explain :seon.db/transaction-result result options)))
        (is (m/validate :seon.error/value refusal options))
-       (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+       (is (string? (:seon.db.write.attempt/request-id refusal)))
        (is (= [] transaction-findings))
        (is (not (instance? Throwable refusal)))))))
 
@@ -460,7 +460,7 @@
              (db/q '[:find ?declaration .
                      :where [_ ::ai-declaration ?declaration]]
                    @connection)]
-         (is (= :seon.db/invalid-read (:seon.error/kind result)))
+         (is (true? (:seon.db/invalid-read result)))
          (is (= rule
                 (get-in result
                         [:seon.error/data
@@ -1073,7 +1073,7 @@
               [{:seon.agent/id "db-shared-second"
                 :seon.agent/namespace
                 [:seon.ns/name 'my.agents.db-shared]}]))]
-       (is (nil? (:seon.error/kind accepted))
+       (is (some? (:db-after accepted))
            "a second agent assigned the same namespace commits")
        (is (nil? (get-in (:schema @connection)
                          [:seon.agent/namespace :db/unique]))
@@ -1226,8 +1226,6 @@
                    (test-support/await-event!
                     outcome "the declared database write bound to fire")
                    data (:seon.error/data refusal)]
-               (is (= :seon.db/write-bound-exceeded
-                      (:seon.error/kind refusal)))
                (is (true? (:seon.db/transaction-outcome-unknown refusal)))
                (is (= write-time-limit-ms
                       (:seon.config.db/write-time-limit-ms data)))
@@ -1357,8 +1355,7 @@
              (is (contains? report :db-after)
                  (str "the realized answer is the committed report: "
                       (pr-str report)))
-             (is (not= :seon.db/write-bound-exceeded
-                       (:seon.error/kind report))
+             (is (not (true? (:seon.db/transaction-outcome-unknown report)))
                  "the declared write bound never stands in for the completion event")
              (is (= :error (:seon.test/level logged)))
              (is (= listener-key
@@ -1549,7 +1546,7 @@
      ;; `:find` with no bindings reaches the read and `seon.db`'s own typed
      ;; refusal is what an agent gets.
      (let [result (db/q @connection '[:find])]
-       (is (= :seon.db/invalid-read (:seon.error/kind result)))
+       (is (true? (:seon.db/invalid-read result)))
        (is (string? (:seon.error/message result)))
        (is (map? (:seon.error/data result))))
      ;; AN ENTITY IDENTIFIER IS NOT A BARE STRING, and the declared contract
@@ -1581,7 +1578,7 @@
            (db/entity @connection
                       [:seon.agent/id 'identity-admission-present])]
        (testing "an uninstalled query attribute names registered candidates"
-         (is (= :seon.db/invalid-read (:seon.error/kind unknown-attribute)))
+         (is (true? (:seon.db/invalid-read unknown-attribute)))
          (is (= diagnostic-fields
                 (set (keys (:seon.error/data unknown-attribute)))))
          (is (= 'seon.db/q
@@ -1599,7 +1596,7 @@
          (doseq [[operation result]
                  [['seon.db/pull wrong-pull]
                   ['seon.db/entity wrong-entity]]]
-           (is (= :seon.db/invalid-read (:seon.error/kind result)))
+           (is (true? (:seon.db/invalid-read result)))
            (is (= operation
                   (get-in result
                           [:seon.error/data
@@ -1638,7 +1635,7 @@
        (let [before (db/basis-t (db/db connection))
              refusal (db/transact! connection [row])
              problem (first (get-in refusal [:seon.error/data :seon.error/problems]))]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+         (is (string? (:seon.db.write.attempt/request-id refusal)))
          (is (= attribute (:seon.db/attribute refusal)))
          (is (= (str "the required key " attribute
                      " with an integer or a string or a tuple with 2 entries or a map")
@@ -1661,7 +1658,7 @@
                  uninstalled)]
        (is (every? #(not (contains? (:schema database) %)) uninstalled))
        (doseq [[attribute result] (map vector uninstalled results)]
-         (is (= :seon.db/invalid-read (:seon.error/kind result)))
+         (is (true? (:seon.db/invalid-read result)))
          (is (= attribute
                 (get-in result
                         [:seon.error/data :seon.db/dependency-data :attribute]))))
@@ -1692,9 +1689,9 @@
                  (db/q '[:find ?entity
                          :where [?entity :seon.agent/idd _]]
                        view)]
-             (is (not= :seon.db/invalid-read (:seon.error/kind installed))
+             (is (not (true? (:seon.db/invalid-read installed)))
                  "an installed attribute is never classified as uninstalled")
-             (is (= :seon.db/invalid-read (:seon.error/kind uninstalled)))
+             (is (true? (:seon.db/invalid-read uninstalled)))
              (is (= :seon.db/attribute-not-installed
                     (get-in uninstalled
                             [:seon.error/data
@@ -1714,9 +1711,7 @@
              '[?entity :seon.agent/id "root"
                ?transaction true :extra]]]]
        (doseq [[result operation member] cases]
-         (is (contains? #{:seon.db/invalid-read
-                          :seon.db/invalid-request}
-                        (:seon.error/kind result)))
+         (is (or (:seon.db/invalid-read result) (:seon.schema/expected-value result)))
          (is (= diagnostic-fields
                 (set (keys (:seon.error/data result)))))
          (is (= operation
@@ -1782,9 +1777,9 @@
                    (:datahike/connection-id
                     (db/connection-identity connection))))
                 data (:seon.error/data refused)]
-            (is (nil? (:seon.error/kind explicit))
+            (is (some? (:db-after explicit))
                 "the writing cluster's own connection still commits")
-            (is (nil? (:seon.error/kind elided))
+            (is (some? (:db-after elided))
                 "the elided arity still commits through the writing custody")
             (is (schema/valid-candidate-value? (schema/handed-projection)
                                               :seon.db.write/validation-refusal refused))
@@ -1847,7 +1842,7 @@
                              [:db/add -1 :seon.schedule/expression "0 4 * * *"]]]]
          (let [basis (:max-tx (db/db connection))
                refusal (db/transact! connection transaction)]
-           (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+           (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
            (is (= basis (:max-tx (db/db connection))))
            (is (= {:seon.schedule/id "f2-invalid"}
                   (get-in refusal [:seon.error/data :seon.db/entity])))
@@ -1862,7 +1857,7 @@
                       connection
                       [[:db/retract [:seon.schedule/id "f2-existing"]
                         :seon.schedule/zone-id "UTC"]])]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)))
+         (is (string? (:seon.db.write.attempt/request-id refusal)))
          (is (= basis (:max-tx (db/db connection)))))
        (let [basis (db/basis-t (db/db connection))
              refusal (db/transact!
@@ -1873,7 +1868,7 @@
                             :seon.schedule/zone-id ""]
                            [:db/add [:seon.schedule/id "f2-existing"]
                             :seon.schedule/zone-id "UTC"]])]])]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal))
              "expanded invalid assertions refuse even when a later operation repairs the row")
          (is (= :seon.schedule/zone-id (:seon.db/attribute refusal)))
          (is (= basis (db/basis-t (db/db connection))) "the expanded transaction is atomic"))
@@ -1913,7 +1908,7 @@
                {:seon.test/sym (quote seon.source.test/incomplete-test)}]]]
        (let [basis (db/basis-t (db/db connection))
              refusal (db/transact! connection [entity])]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= :seon.program/analyzed-source-digest (:seon.db/attribute refusal))
              "the refusal names the missing required key")
          (is (= :seon.error/unknown (:seon.db/offending refusal)))
@@ -1956,7 +1951,7 @@
            (let [basis (db/basis-t (db/db connection))
                  refusal (db/transact! connection [[:db/retractEntity target]])
                  entity (get-in refusal [:seon.error/data :seon.db/entity])]
-             (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+             (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
              (is (= attribute (:seon.db/attribute refusal)))
              (is (some #{expected} (vals entity)) (pr-str refusal))
              (is (= basis (db/basis-t (db/db connection)))))))))))
@@ -1999,7 +1994,7 @@
                     [:db/add arity :seon.fn.arity/argument-count 2]]
              basis (:max-tx @connection)
              refusal (db/transact! connection edits)]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= [{:seon.fn/caller caller :seon.fn/callee callee
                   :seon.fn/call-arity 1
                   :seon.fn/declared-arities [{:seon.fn.arity/min 2 :seon.fn.arity/max 2}]
@@ -2027,7 +2022,7 @@
            expected [{:seon.schema/key schema-key
                       :seon.render/property :seon.render/ai
                       :seon.render/function renderer}]]
-       (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+       (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
        (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations])))
        (is (= basis (:max-tx @connection)))
        (test-support/transacted!
@@ -2040,7 +2035,7 @@
                 :seon.fn/private? false)
          row])
        (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym renderer]]])]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations]))))
        (test-support/transacted!
         connection
@@ -2162,7 +2157,7 @@
            decoded? (atom false)
            refusal (@#'db/read-declarations {:not :a-database} 'seon.db/pull)
            data (:seon.error/data refusal)]
-       (is (= :seon.db/unreadable-declarations (:seon.error/kind refusal)))
+       (is (true? (:seon.db/invalid-read refusal)))
        (is (= :seon.db/installed-schema
               (:seon.error/diagnostic-member data)))
        (is (= 'seon.db/pull (:seon.error/diagnostic-operation data)))
@@ -2192,7 +2187,7 @@
            unknown (replay database
                            {:seon.db/read-operation :seon.db/not-an-operation})
            data (:seon.error/data unknown)]
-       (is (= :seon.db/unknown-read-operation (:seon.error/kind unknown)))
+       (is (true? (:seon.db/invalid-read unknown)))
        (is (= :seon.db/read-operation (:seon.error/diagnostic-member data)))
        (is (= :seon.db/not-an-operation
               (:seon.error/diagnostic-offending data)))))))
@@ -2256,7 +2251,7 @@
                         projection 'seon.db/pull schema-key [:seon.ns/name]
                         {:seon.ns/name "my.message"})
                data (:seon.error/data refusal)]
-           (is (= :seon.db/invalid-pulled-result (:seon.error/kind refusal))
+           (is (true? (:seon.db/invalid-read refusal))
                "a wrong-typed expectation fails: the name is a symbol, not a string")
            (is (= {:seon.ns/name "my.message"}
                   (:seon.error/diagnostic-offending data)))))))))

@@ -185,7 +185,7 @@
         (is (nil? (:seon.cluster.eval/error argless)))))))
 
 (deftest message-terminal-formatter-preserves-database-errors
-  (let [failure {:seon.error/kind ::read-failed
+  (let [failure {
                  :seon.error/message "message read failed"}]
     (is (= failure (message/format-ai failure)))))
 
@@ -363,6 +363,7 @@
          ::recipients recipients}))))
 
 (defn- model-command
+  {:malli/schema [:=> [:cat :map :map :int] [:tuple :map :map]]}
   [{::keys [messages] :as model} command command-index]
   (let [{::keys [message-id to content sender trigger run-id ordinal
                  chain-limit recipients] :as data}
@@ -373,7 +374,7 @@
                      {::id message-id ::to to ::content content
                       ::depth 0})
            (update ::message-order conj message-id))
-       {::error-kinds []}]
+       {::refusals []}]
       (let [depth (if trigger (inc (model-depth messages trigger)) 1)
             refused-kind (cond
                            (not (pos-int? chain-limit))
@@ -390,13 +391,13 @@
                                     ::depth (if trigger depth 0)}
                              trigger (assoc ::parent trigger))))
                        deliverable)
-            unknown-count (if refused-kind
-                            0
-                            (count (remove ::known? recipients)))
-            error-kinds (if refused-kind
-                          [refused-kind]
-                          (vec (repeat unknown-count
-                                       :seon.message/unknown-recipient)))
+            refusals (if refused-kind
+                       [(if (= :seon.message/no-limit refused-kind)
+                          {:seon.message/no-limit true}
+                          {:seon.message/chain-limit chain-limit})]
+                       (mapv (fn [recipient]
+                               {:seon.message/unknown-recipient (::to recipient)})
+                             (remove ::known? recipients)))
             next-model (reduce
                         (fn [current row]
                           (-> current
@@ -407,7 +408,7 @@
         [next-model
          {::data data
           ::rows rows
-          ::error-kinds error-kinds}]))))
+          ::refusals refusals}]))))
 
 (defn- actual-messages
   [db]
@@ -441,6 +442,7 @@
               db))))
 
 (defn- execute-command!
+  {:malli/schema [:=> [:cat :seon.db/connection :map :map :int] [:tuple :map :boolean]]}
   [connection model command command-index]
   (let [[next-model expected] (model-command model command command-index)]
     (if (= :human (::command command))
@@ -471,8 +473,8 @@
                :seon.message/delivery-request request))
           (= (mapv ::id (::rows expected))
              (mapv :seon.message/id rows))
-          (= (::error-kinds expected)
-             (mapv :seon.error/kind (:seon.error/values delivery)))
+          (= (::refusals expected)
+             (mapv #(select-keys % [:seon.message/no-limit :seon.message/chain-limit :seon.message/unknown-recipient]) (:seon.error/values delivery)))
           (every? #(schema/valid-candidate-value? (schema/handed-projection) :seon.error/value %)
                   (:seon.error/values delivery))
           (= (::messages next-model) (actual-messages @connection))
@@ -638,13 +640,13 @@
                            (inc delivered))
                     {:outcome :refused
                      :delivered delivered
-                     :kinds (mapv :seon.error/kind
+                     :limits (mapv :seon.message/chain-limit
                                   (:seon.error/values delivery))}))))]
         (is (= :refused (:outcome outcome))
             "an unattended agent-to-agent conversation stops itself")
         (is (= limit (:delivered outcome))
             "and it stops at exactly the configured number of hops")
-        (is (= [:seon.message/chain-limit] (:kinds outcome))))))
+        (is (= [limit] (:limits outcome))))))
 
   (testing "and a human message in the middle buys a full budget again"
     (with-database
@@ -830,10 +832,10 @@
                              :seon.config.eval.result/max-string 3)
                       (inbound-request "nobody" "hello")]
             results (mapv #(message/inbound-tx @connection %) requests)]
-        (is (= [:seon.message/blank-content
-                :seon.message/content-too-large
-                :seon.message/unknown-recipient]
-               (mapv :seon.error/kind results)))
+        (is (= [true 9 "nobody"]
+               [(:seon.message/blank-content (first results))
+                (:seon.message/content-too-large (second results))
+                (:seon.message/unknown-recipient (nth results 2))]))
         (is (every? #(schema/valid-candidate-value? (schema/handed-projection)
                       :seon.error/value %)
                     results))

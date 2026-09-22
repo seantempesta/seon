@@ -132,7 +132,7 @@
                        {:seon.agent/id "late-worker"
                         :seon.cluster/name "late-arming"
                         :seon.ns/name 'my.agents.late-worker})]
-          (is (nil? (:seon.error/kind created)) (pr-str created))
+          (is (string? (:seon.agent/id created)) (pr-str created))
           (await-armed! routing "late-worker")
           (is (some? (agent/armed routing "late-worker"))
               "the armer armed an agent created while the cluster ran")
@@ -190,7 +190,7 @@
                                     :seon.issue/budget 3
                                     :seon.ns/name 'my.agents.issue-wake
                                     :seon.config.ai/no-provider true})]
-         (is (nil? (:seon.error/kind started)) (pr-str started))
+         (is (string? (get-in started [:seon.issue/agent :seon.agent/id])) (pr-str started))
          (let [wakes (turn/unanswered-wakes (db/db connection) agent-id {})]
            (is (= 1 (count wakes)) (pr-str wakes))
            (is (= :seon.issue/agent (:seon.wake/attribute (first wakes)))

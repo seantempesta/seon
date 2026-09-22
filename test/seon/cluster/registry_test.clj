@@ -324,7 +324,7 @@
         (let [before (registry/branch-commit-id
                       {:seon.store/store opened :seon.store/branch branch})
               failure (ex-info "injected refork failure"
-                               {:seon.error/kind ::injected})]
+                               {})]
           (with-redefs [d/force-branch! (fn [& _] (throw failure))]
             (is (identical?
                  failure

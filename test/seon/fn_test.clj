@@ -63,8 +63,7 @@
               :seon.fn/private? false
               :seon.fn/spec "[:=> [:cat :int] :int]"
               :seon.schema.admission/source :agent})]
-        (is (= :seon.fn/namespace-unresolvable
-               (:seon.error/kind result)))
+        (is (true? (:seon.fn/namespace-unresolvable result)))
         (is (= namespace-ref
                (get-in result
                        [:seon.error/data
@@ -609,9 +608,9 @@
                    :seon.cluster.eval/ordinal 0
                    :seon.eval/shown ":defined"
                    :seon.program/row indexed}))]
-            (is (nil? (:seon.error/kind settlement))
+            (is (some? (:db-after settlement))
                 (pr-str (select-keys settlement
-                                     [:seon.error/kind :seon.error/message
+                                     [:seon.error/message
                                       :seon.error/data]))))
           (let [edge-facts
                 (fn [identity-attribute identity-value]
@@ -832,7 +831,7 @@
             (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
             nil
             (catch clojure.lang.ExceptionInfo error error))]
-      (is (= :seon.fn/index-refused (:seon.error/kind (ex-data failure))))
+      (is (true? (:seon.fn/index-refused (ex-data failure))))
       (is (some #(= :unresolved-symbol (::analyzer/type %))
                 (::seon.fn/findings (ex-data failure))))
       (is (every? #(= :error (::analyzer/level %))
@@ -897,8 +896,7 @@
                   (seon.fn/build-manifest request)
                   nil
                   (catch clojure.lang.ExceptionInfo error error)))]
-          (is (= :seon.fn/index-refused
-                 (:seon.error/kind (ex-data failure)))))))
+          (is (true? (:seon.fn/index-refused (ex-data failure)))))))
     (testing "an elevated non-load finding remains visible as a warning"
       (with-redefs
         [analyzer/analyze
@@ -1143,9 +1141,9 @@
           (is (contains? (set (:seon.fn/calls test-row)) 'prebuilt/value)))))
     (let [failure (test-support/refusal-data
                    #(#'seon.fn/require-committed!
-                     {:seon.error/kind :seon.db/invalid-transaction}
+                     {:seon.db/transaction-refused true}
                      :seon.fn/population))]
-      (is (= :seon.db/invalid-transaction (:seon.error/kind failure)))
+      (is (true? (:seon.db/transaction-refused failure)))
       (is (= :seon.fn/population (:seon.fn/index-phase failure))))))
 
 (deftest publication-refusals-preserve-the-entity-key-and-value
@@ -1158,7 +1156,7 @@
                      (#'seon.fn/require-committed! refusal :seon.fn/population)
                      nil
                      (catch Exception failure failure))]
-       (is (= :seon.db/invalid-write (:seon.error/kind (ex-data failure))))
+       (is (string? (:seon.db.write.attempt/request-id (ex-data failure))))
        (is (= refusal (dissoc (ex-data failure)
                              :seon.fn/index-phase :seon.fn/index-refused)))
        (is (str/includes? (ex-message failure) "publication-refusal"))
@@ -1172,14 +1170,10 @@
            entity-ref [:seon.fn/sym (:seon.fn/sym row)]]
        (test-support/transacted! connection [row])
        (let [before (db/db connection)]
-         (is (= :seon.db/invalid-write
-                (:seon.error/kind
-                 (db/transact! connection
+         (is (string? (:seon.db.write.attempt/request-id (db/transact! connection
                                [[:db/retract entity-ref :seon.schema.admission/source :agent]]))))
          (is (= (:max-tx before) (:max-tx (db/db connection))))
-         (is (= :seon.db/invalid-write
-                (:seon.error/kind
-                 (db/transact! connection [{:seon.fn/sym 'seon.fn/new-bare-row}]))))
+         (is (string? (:seon.db.write.attempt/request-id (db/transact! connection [{:seon.fn/sym 'seon.fn/new-bare-row}]))))
          (is (= (:max-tx before) (:max-tx (db/db connection)))))
        (test-support/transacted!
         connection (seon.fn/reconcile-tx (db/db connection) [] [entity-ref]))
@@ -1193,14 +1187,14 @@
              "  (:require [clojure.test :refer [deftest is]]\n"
              "            [seon.error :as-alias error]))\n"
              "(defn refuse [reason]\n"
-             "  {:seon.error/kind :sample.keys/refused\n"
+             "  {:sample.keys/refused true\n"
              "   ::error/message reason\n"
              "   ::local true})\n"
              "(defn built [n] (keyword \"seon.error\" (str \"kind\" n)))\n"
              "(defn destructured [{:sample.keys/keys [depth] :keys [plain]}]\n"
              "  [depth plain])\n"
              "(deftest refusal-test\n"
-             "  (is (= :sample.keys/refused (:seon.error/kind (refuse \"why\")))))\n")]
+             "  (is (true? (:sample.keys/refused (refuse \"why\")))))\n")]
     (write-source! root "sample/keys.clj" source)
     (write-source! root "seon/error.clj" "(ns seon.error)\n(def message :m)\n")
     (let [rows (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
@@ -1209,7 +1203,7 @@
                  (:seon.fn/keywords (get by-id program-identity)))]
       (testing "literal qualified keywords land on the declaration that reads them"
         (is (= #{:sample.keys/local :sample.keys/refused
-                 :seon.error/kind :seon.error/message}
+                 :seon.error/message}
                (used [:seon.fn/sym (quote sample.keys/refuse)]))
             "::kw, ::alias/kw, and :fully/qualified resolve to one honest form"))
       (testing "unqualified keywords stay out; qualified ones are kept verbatim"
@@ -1222,7 +1216,7 @@
         (is (nil? (used [:seon.fn/sym (quote sample.keys/built)]))
             "the honest boundary: only literal keyword usage is a fact"))
       (testing "test rows carry their own keyword usage"
-        (is (= #{:sample.keys/refused :seon.error/kind}
+        (is (= #{:sample.keys/refused}
                (used [:seon.test/sym (quote sample.keys/refusal-test)]))
             "a test's keywords are the ones it reads, never its subject's"))
       (testing "the indexed facts answer the motivating query"
@@ -1252,7 +1246,7 @@
             (is (= [(quote sample.keys/refuse)]
                    (filterv #(str/starts-with? % "sample.keys/")
                             (seon.fn/functions-using @connection
-                                                     :seon.error/kind)))
+                                                     :sample.keys/refused)))
                 "a test reading the keyword is never a function consumer")
             (is (= [] (seon.fn/functions-using @connection
                                                :sample.keys/never-written)))))))))
@@ -1675,7 +1669,7 @@
                                          :seon.fn/roots [(.getPath root)]})
                         nil
                         (catch clojure.lang.ExceptionInfo error error))]
-          (is (= :seon.fn/index-refused (:seon.error/kind (ex-data failure))))
+          (is (true? (:seon.fn/index-refused (ex-data failure))))
           (is (some #(= (.getCanonicalPath (io/file root "broken/core.clj"))
                         (:seon.fn.analyzer/filename %))
                     (:seon.fn/findings (ex-data failure))))
@@ -1935,7 +1929,7 @@
             (is (= (:seon.fn/file row)
                    (:seon.fn/file (program/declaration-row (seon.schema/handed-projection) row :all :core))))))
         (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) rows []))]
-          (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))
+          (is (:db-after report) (pr-str (select-keys report [:seon.error/message])))
           (when (:db-after report)
             (doseq [row declarations]
               (is (= (relative-file file)
@@ -2144,7 +2138,7 @@
                                     (program/shapes-in (seon.schema/build-projection declared)) emitted)]
                                   []))]
                      (is (:db-after report)
-                         (pr-str (select-keys report [:seon.error/kind
+                         (pr-str (select-keys report [:seon.error/message
                                                       :seon.error/message])))
                      (is (= "carried"
                             (::declared-after
@@ -2164,7 +2158,7 @@
         (is (= :unused-binding (:seon.lint/type finding)))
         (is (= [:seon.fn/sym (quote sample.lint/chosen)] (:seon.lint/fn finding)))
         (let [report (db/transact! connection (seon.fn/reconcile-tx (db/db connection) rows []))]
-          (is (:db-after report) (pr-str (select-keys report [:seon.error/kind :seon.error/message])))
+          (is (:db-after report) (pr-str (select-keys report [:seon.error/message])))
           (when (:db-after report)
             (is (= {:seon.lint/fn {:seon.fn/sym (quote sample.lint/chosen)}}
                    (db/pull (:db-after report) [{:seon.lint/fn [:seon.fn/sym]}]
@@ -2316,7 +2310,7 @@
              refusal (db/transact! connection
                                    [[:db/add [:seon.fn/sym caller]
                                      :seon.fn/call-arities ['my.message/inbox 2]]])]
-         (is (= :seon.db/invalid-write (:seon.error/kind refusal)) (pr-str refusal))
+         (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= [{:seon.fn/caller caller
                   :seon.fn/callee 'my.message/inbox
                   :seon.fn/call-arity 2
@@ -2360,7 +2354,7 @@
                          connection
                          [{:seon.fn/sym caller
                            :seon.fn/call-arities #{[callee refused]}}])]
-            (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+            (is (string? (:seon.db.write.attempt/request-id refusal))
                 (pr-str refusal))
             (is (= [{:seon.fn/caller caller
                      :seon.fn/callee callee
@@ -2570,7 +2564,7 @@
     (doseq [[reader data] [["exact-source" refusal]
                            ["exact-form-span" span-refusal]]]
       (testing reader
-        (is (= :seon.fn/index-refused (:seon.error/kind data))
+        (is (true? (:seon.fn/index-refused data))
             (pr-str data))
         (is (= :seon.fn/source-changed-during-analysis
                (:seon.error/diagnostic-cause data)))
@@ -2885,7 +2879,7 @@
                         connection
                         (seon.fn/reconcile-tx (db/db connection) rows []))]
             (is (:db-after report)
-                (pr-str (select-keys report [:seon.error/kind
+                (pr-str (select-keys report [:seon.error/message
                                              :seon.error/message]))))
           (let [bad (symbol ":clj-kondo/unknown-namespace" "visitFile")
                 row (assoc (test-support/program-fn-row
@@ -2894,7 +2888,7 @@
                             "(defn refused [] true)")
                            :seon.fn/calls #{bad})
                 refusal (db/transact! connection [row])]
-            (is (= :seon.db/invalid-write (:seon.error/kind refusal))
+            (is (string? (:seon.db.write.attempt/request-id refusal))
                 (pr-str refusal))
             (is (= :seon.fn/calls
                    (get-in refusal
@@ -3009,6 +3003,6 @@
             refusal (try (seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]})
                          nil (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
         (is (some #(= :syntax (::analyzer/type %)) (::analyzer/findings analysis)))
-        (is (= :seon.fn/index-refused (:seon.error/kind refusal)))
+        (is (true? (:seon.fn/index-refused refusal)))
         (is (seq (:seon.fn/findings refusal))))
       (finally (test-support/delete-recursively! root)))))

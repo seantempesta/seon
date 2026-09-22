@@ -59,6 +59,7 @@
 
 (defn- clone-directory!
   "Copy one immutable test base into a private mutable root."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :string]}
   [source target]
   (let [source (.getCanonicalFile (io/file source))
         target (.getCanonicalFile (io/file target))
@@ -79,8 +80,7 @@
         (when-not (zero? exit)
           (throw
            (ex-info "The shared published test base could not be cloned."
-                    {:seon.error/kind ::published-base-clone-failed
-                     ::source (.getPath source)
+                    {::source (.getPath source)
                      ::target (.getPath target)
                      ::exit exit
                      ::output output})))
@@ -286,10 +286,12 @@
    exception message and not its data, so every refusal in base construction
    read identically and the diagnosing agent had to reconstruct which one
    fired."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
   [result]
-  (when (:seon.error/kind result)
-    (throw (ex-info (str "Fixture setup was refused by "
-                         (:seon.error/kind result) ": "
+  (when (or (:seon.db.write.attempt/request-id result)
+            (:seon.db/invalid-read result) (:seon.schema/expected-value result)
+            (:seon.config/error-key result) (:seon.test.run/unavailable result))
+    (throw (ex-info (str "Fixture setup was refused: "
                          (:seon.error/message result))
                     result)))
   result)
@@ -325,7 +327,6 @@
   [connection tx-data]
   (let [report (db/transact! connection tx-data)]
     (when-not (and (map? report)
-                   (nil? (:seon.error/kind report))
                    (some? (:db-after report)))
       (throw
        (ex-info
@@ -448,6 +449,11 @@
 
    The one- and two-argument arities own a private state atom; the
    one-argument arity keys nothing and behaves exactly as before."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.instrument/callable] :seon.schema/value]
+    [:=> [:cat :seon.instrument/callable :seon.instrument/callable] :seon.schema/value]
+    [:=> [:cat :seon.call-preparation/state :seon.instrument/callable :seon.instrument/callable] :seon.schema/value]]}
   ([construct] (retrying-base (atom {::retired []}) (constantly nil) construct))
   ([key-fn construct] (retrying-base (atom {::retired []}) key-fn construct))
   ([state key-fn construct]
@@ -474,7 +480,8 @@
                            (catch Throwable failure
                              (.printStackTrace failure)
                              (error/diagnostic
-                              {:seon.error/kind ::database-base-unavailable
+                              {:seon.test.run/unavailable true
+                               :seon.test.run/provenance-failure (str "Canonical fixture base construction failed: " (ex-message failure))
                                :seon.error/at (java.util.Date.)
                                :seon.error/layer :seon.test/fixture
                                :seon.error/operation 'seon.test-support/create-base
@@ -491,7 +498,7 @@
                                (or (ex-message failure) :seon.error/unknown)
                                :seon.error/diagnostic-evidence
                                (or (ex-data failure) :seon.error/unknown)})))]
-                     (if (or (:seon.error/kind result) (:seon.error/at result))
+                     (if (:seon.test.run/unavailable result)
                        (do (swap! state
                                   (fn [current]
                                     (cond-> current
@@ -517,7 +524,7 @@
                  closing (into []
                                (comp (filter closable?)
                                      (map (comp deref ::completion))
-                                     (remove :seon.error/kind))
+                                     (remove :seon.test.run/unavailable))
                                (::retired before))]
              (when (seq closing)
                (doto (Thread. ^Runnable #(run! close-base! closing)

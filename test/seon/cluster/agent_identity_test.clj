@@ -55,7 +55,7 @@
                     :eid [:seon.agent/id agent-id]})
           unit {:seon.db/db database-error
                 :seon.agent/id agent-id}]
-      (is (:seon.error/kind database-error))
+      (is (or (:seon.db/invalid-read database-error) (:seon.schema/expected-value database-error)))
       (is (= database-error (agent/render-identity-html unit))))))
 
 (deftest identity-map-and-omitted-arguments-use-the-same-function

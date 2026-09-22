@@ -13,7 +13,7 @@
         refusal (#'eval/acquisition-refusal
                  {:seon.fn/sym "adoption.probe/broken"}
                  (ex-info "The declared namespace is unavailable."
-                          {:seon.error/kind ::missing-namespace
+                          {
                            :seon.schema/projection projection}))
         offense {:seon.schema/projection projection
                  :seon.sci.eval/acquisition-refusals [refusal]}
@@ -23,7 +23,6 @@
         byte-count (alength (.getBytes shown "UTF-8"))]
     (is (str/includes? shown "adoption.probe/broken"))
     (is (str/includes? shown "The declared namespace is unavailable."))
-    (is (str/includes? shown "missing-namespace"))
     (is (not (str/includes? shown "function-contracts")))
     (is (< byte-count 2048) (str "diagnostic bytes=" byte-count))
     (println "adoption diagnostic bytes=" byte-count)))
@@ -38,7 +37,7 @@
                                    {:seon.boot/refused true
                                     :seon.error/message "Cannot install adoption.probe/broken."
                                     :seon.boot/offense
-                                    {:seon.error/kind ::missing-namespace
+                                    {
                                      :seon.error/message "Namespace adoption.probe is unavailable."}})))
             failure (try
                       (#'operator/prepl-value!

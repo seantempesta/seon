@@ -47,7 +47,7 @@
                          (test-support/await-event! continue-construction ::continue-construction some?)
                          (#'test-support/create-base nil)))))
             projection (db/carried-projection (db/db connection))]
-        (is (= :seon.test-support/database-base-unavailable (:seon.error/kind @base)))
+        (is (true? (:seon.test.run/unavailable @base)))
         (is (false? (realized? base)))
         (let [caller (doto
                        (Thread.
@@ -71,8 +71,8 @@
             (finally (reset! continue-construction true))))
         (let [constructed @base]
           (try
-            (is (nil? (:seon.error/kind constructed))
-                (pr-str (select-keys constructed [:seon.error/kind :seon.error/message])))
+            (is (some? (:seon.test-support/connection constructed))
+                (pr-str (select-keys constructed [:seon.error/message])))
             (when-let [base-connection (::test-support/connection constructed)]
               (is (pos? (db/q '[:find (count ?e) . :where [?e :seon.fn/sym]]
                               (db/db base-connection))))
@@ -94,7 +94,7 @@
                    (fn [_] (reset! body-ran true)))
                   (catch clojure.lang.ExceptionInfo error (ex-data error)))]
     (is (false? @body-ran))
-    (is (= :seon.db/invalid-write (:seon.error/kind failure)))
+    (is (string? (:seon.db.write.attempt/request-id failure)))
     (is (= [0 :my.plan.item/title] (:seon.db/path failure)))
     (is (= 42 (:seon.db/offending failure))))
   (test-support/with-database
@@ -128,7 +128,7 @@
        (is (false? @reached-downstream?)
            "a refused fixture write never returns to its seeding fixture")
        (is (some? failure))
-       (is (= :seon.db/invalid-write (:seon.error/kind (ex-data failure))))
+       (is (string? (:seon.db.write.attempt/request-id (ex-data failure))))
        (is (= [0 :seon.agent/not-an-installed-attribute]
               (:seon.db/path (ex-data failure))))
        (is (str/includes? (ex-message failure)
@@ -225,7 +225,7 @@
                          {::path (get-in configuration [:store :path])
                           ::id (get-in configuration [:store :id])
                           ::private-root (::test-support/private-root base)
-                          ::result-error (:seon.error/kind result)
+                          ::result-error (:seon.db.write.attempt/request-id result)
                           ::subjects (db/q '[:find (count ?f) . :where [?f :seon.fn/sym]]
                                            @connection)
                           ::own (db/q '[:find ?n . :in $ ?n :where [_ :seon.ns/name ?n]]
