@@ -285,3 +285,22 @@ settle batch / mid-turn adoption) and fixes the owner. Base preparation is also
 blocked until `operator-client-defects` lands (its dirty schema resource makes the
 publication guard refuse: "Snapshot resources differ from the hosting JVM's source
 tree"). Default is restarted after both land.
+
+## 2026-09-22 06:10 local — two more owners fixed; checkpoint chain running
+
+- `operator-client-defects` (`acd0d73e5`): sole-instance `stop`/`down` flushes its reply
+  and exits 0; the client awaits `ProcessHandle.onExit`; every boot reply is validated
+  as plain EDN at the producer; `:seon.operator/process-exit?` added to the reply
+  schema and the B1b command table; two drills; run `88ca15dd3638` 10/122/0/0. Rule
+  slip: the lane used a temporary worktree (lanes never create worktrees); the next
+  specs say so explicitly again.
+- `settle-missing-eval` (`e02604e44`, `d9609b1a0`): `seon.db/stamp-receipt` put the
+  evaluation lookup ref in transaction METADATA, which Datahike resolves before the
+  transaction data that creates the receipt (introduced by `e23b8105a`); provenance now
+  follows receipt creation (`src/seon/db.clj:3370`); regression
+  `settlement_receipt_provenance_test` fails-before (`825dd0e49dda`) / passes-after
+  (`601a4a37ef39`). The lane also reports `seon.cluster.turn-test`/`seon.turn-test` at
+  HEAD as broadly red (94 failures / 35 errors, "unrelated shared-HEAD breakage") and a
+  separate Malli defect at 10:25:52Z — both for the cold gate to name.
+- Chain running: `bin/seon start` → `--prepare-head-base` → `bin/test` bare
+  (`tmp/cold-gate-2026-09-22c.log`).
