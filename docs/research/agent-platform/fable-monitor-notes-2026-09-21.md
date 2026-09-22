@@ -176,3 +176,23 @@ sole instance ends the process and a following `start` launches cold. Recovery u
   channel overflow are in the same brief.
 - B1b: `stop` of the sole instance leaves a zombie JVM that refuses `start` (recorded
   above); fix queued for a lane after the current three land.
+
+## 2026-09-22 02:55 local — loop no longer parks; hook publication PAUSED; two B1b client defects
+
+- `turn-parks-on-boot` landed (`0e0e8b6ba`, `feafab1b3`): `:seon.turn/rule` was wrongly
+  marked `:seon.wake/context-inert`, and `seon.fn`'s diagnostic named
+  `:seon.cluster.eval/source` instead of `:seon.fn/source`, so five error-observation
+  reads looked like turn activity; `wake/deliver!` now admits the keyword listener
+  keys it actually receives. Default restarted (pid 21908): 75 s after boot the parked
+  count is unchanged at 2 (both pre-fix lines). First boot today whose loop stayed
+  alive. The opening regression is still blocked by the stale fixture base.
+- Hook publication paused (`.claude/seon-hook.edn` `:current-source {:enabled false}`,
+  rule 15): with three lanes editing `src`, lane `base-export-timeout`'s uncommitted
+  `:seon.config.operator/export-bound-ms 600000` in `config/default.edn` was adopted
+  before its schema declaration and default's config apply refused it
+  (`seon.log` 08:50:58Z). Re-enable at the coordinated restart after the three lanes land.
+- B1b client defects: (1) `bin/seon down` fails to read its own reply:
+  `java.lang.RuntimeException: No dispatch macro for: '` — the `:down` reply carries a
+  `#'var` (or similar reader-tagged value) that `edn/read-string` cannot read
+  (`script/seon/operator.clj:113`); the reply must be data. (2) `stop` of the sole
+  instance leaves a zombie JVM (recorded 00:05). Both go to one lane once a slot frees.
