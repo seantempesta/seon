@@ -224,3 +224,15 @@ sole instance ends the process and a following `start` launches cold. Recovery u
 - Fixture preparation still fails against pid 21908, whose config apply was refused by
   the half-landed key and whose projection state is missing; it will pass after the
   reset. Astra hit "model at capacity" once; the lane was resumed on Sol.
+
+## 2026-09-22 04:20 local — coordinated reset done; kind-cut complete; checkpoint running
+
+- `kind-cut` finished through `3f1b50ba9`: review blockers fixed (producer guards),
+  print bound measured, and the effect hang fixed in the Datahike fork (a non-map in
+  the diagnostic evidence made the writer's error path throw and strand the caller's
+  callback; fork commit `6dd49e5e`, pushed to `seantempesta/datahike`, pin bumped).
+- `bin/seon reset --force`: store 248 G → 87 M; default pid 28358 ready in 161.8 s
+  from zero; hook publication resumed (`.claude/seon-hook.edn`); fixture base prepared
+  in 136 s (`tmp/prepare-head-base-2026-09-22e.log`). Cold gate running
+  (`tmp/cold-gate-2026-09-22.log`). Lane `operator-client-defects` (sol low) on the two
+  B1b client defects.
