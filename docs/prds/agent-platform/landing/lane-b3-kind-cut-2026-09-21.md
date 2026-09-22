@@ -91,6 +91,14 @@ Scratch-root cleanup: exact PID absent, operator down completed, `lsof +D` retur
 no holders; deleted only owned `tmp/kind-cut-pub` without following symlinks.
 Foreign dirty and untracked paths were preserved. No contract was widened.
 
+Correction commit **62c5f0eab**: three paths, 84 insertions, 3 deletions.
+Prescribed post-commit HEAD load exited **0**:
+`clojure -M -e "(require 'seon.turn 'seon.cluster 'seon.fn 'seon.db 'seon.error 'seon.cluster.reply 'seon.schema 'seon.cluster.message 'seon.cluster.agent 'seon.agent)"`.
+Final `rg -c ':seon.error/kind|:seon.error/class true' src test script bin`
+printed nothing. Final focused duration failure was **15291.538292 ms / 5000 ms**.
+Only default's JVM remained after the owned probes. Disposable follow-up logs were
+removed after their exact results were copied here; shared hook envelopes remain.
+
 ## Commits and changed paths
 
 - `f7f5c36ef`: class metadata retirement and native schema parity (39 paths),
