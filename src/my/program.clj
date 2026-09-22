@@ -527,8 +527,7 @@
           (assoc :seon.error/message
                  "Namespace removal requires the schema owner's declaration-and-attribute retraction; its turn.clj seam is held."
                  :seon.error/data
-                 (merge (:seon.error/data (refusal operation report affected))
-                        {})))
+                 (:seon.error/data (refusal operation report affected))))
         (let [transaction
               (let [result (db/transact!
                 connection

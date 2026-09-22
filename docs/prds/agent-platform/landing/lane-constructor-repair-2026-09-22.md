@@ -224,3 +224,13 @@ The pure diff-disposition, source-retry, render-contract and boot-disposition
 regressions and all await tests have completion events without fail/error events.
 The database fixture tests still did not reach their assertions. The repeated
 upstream read failures are unchanged db_test.clj:633, outside this repair.
+
+`320c73adc` lands F8 and the retained F6/F9 assertions: 7 files,
+95 insertions / 25 deletions including this note. Its prescribed archive-load
+log is `tmp/constructor-repair/head-320c73adc-load.log`.
+The database archive load `e2e3b7473` exited 0.
+
+The final cleanup group removes F12's remaining four unused require edges
+(`render`, `test`, `config`, `sci/eval`) and F14's empty merge. The schema require
+was already carried by `434c01f4c`; issue and turn were in `59e9642b1`.
+All remaining source diffs were checked: these are only the prepared owned hunks.

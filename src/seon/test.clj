@@ -1,6 +1,6 @@
 (ns seon.test
   "Agent-facing test execution over the one JVM test runner."
-  (:require [seon.error.refusal]
+  (:require
             [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]

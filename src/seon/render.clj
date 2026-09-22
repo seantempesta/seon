@@ -11,7 +11,7 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require [seon.error.refusal]
+  (:require
             [clojure.string]
             [datahike.db :as datahike.db]
             [malli.core :as m]

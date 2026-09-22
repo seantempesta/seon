@@ -96,7 +96,7 @@
   `interrupted-at` — and rows 6 and 7 of the crash walk stay
   indistinguishable, which is honest: the form's effect MAY have
   happened. Nothing re-executes."
-  (:require [seon.error.refusal]
+  (:require
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.main :as main]

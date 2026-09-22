@@ -11,7 +11,7 @@
   inherits the shipped decision; it does not retract a defaulted optional
   attribute. `:seon.config/absent` is the one explicit retraction form, is
   refused for required attributes, and never becomes nil or a datom."
-  (:require [seon.error.refusal]
+  (:require
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
