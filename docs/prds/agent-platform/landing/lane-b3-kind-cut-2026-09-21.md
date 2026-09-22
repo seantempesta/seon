@@ -2204,3 +2204,24 @@ All owned measurement children exited. The scratch operator was stopped with
 `bin/seon --root tmp/kind-review-probe down` (exit 0), its held shell exited,
 and the root was deleted after checking the retained process identities had
 exited and that the path was not a symlink. No owned JVM remains from those probes.
+
+### Review follow-up: diagnostic evidence (findings 7–9)
+
+`cluster/report-source-progress!` now emits a complete flat base error when its
+PrintWriter observer closes, carrying the actual phase in declared
+`:seon.cluster/source-observer-closed`. The adoption-margin assertion checks that
+member and the existing progress value. Adoption diagnostic fixtures carry the
+already-declared `:seon.fn/namespace-unresolvable` plus their source, and assert
+that the distinction survives both diagnostic printers. The recorder fixture
+now preserves nonempty `:seon.source/refused-test-run` evidence; the separate
+bare-refusal case has a complete declared error and again expects its own `bare`
+message. These restore the assertions' subjects rather than matching a generic
+fallback message. No new branch or general error predicate was introduced.
+
+The preceding context/source load exited 0 (`tmp/kind-review-context-load.log`).
+The prescribed require after `77d861534` exited 0
+(`tmp/kind-review-head-77d861534.log`); these loads ran in the shared tree,
+including this lane's uncommitted changes, and are not isolated HEAD snapshots.
+Hook publication remains explicitly paused by the orchestrator; no adoption
+clock is available. Canonical namespace requests remain pending fresh-base
+confirmation, which has not arrived as of the 09:28Z MCP observation.

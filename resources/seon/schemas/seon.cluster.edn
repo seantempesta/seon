@@ -33,6 +33,13 @@
   :seon.db/component-schema :seon.failure/entity}
  :seon.db/ref]
 
+ :seon.cluster/source-observer-closed :string
+
+ :seon.cluster/source-observer-closed-error
+ [:and :seon.error/base
+  [:map {:seon.db/attributes true}
+   [:seon.cluster/source-observer-closed :seon.cluster/source-observer-closed]]]
+
  :seon.cluster/graph-operation
  [:qualified-symbol {:seon.db/index true}]
 }

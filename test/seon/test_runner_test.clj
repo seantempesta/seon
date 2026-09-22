@@ -1492,7 +1492,7 @@
          {
           :seon.operator/cause "record-results! refused completion"
           :seon.operator/exception-data
-          {}
+          {:seon.source/refused-test-run "123456789abc"}
           :seon.operator/form "(try (require 'seon.cluster.source)"
           :seon.operator/events [{:tag :ret :exception true}]})
         failure (#'runner/recording-failure
@@ -1501,7 +1501,7 @@
     (testing "the refusal value keeps the raiser's message and data"
       (is (= "record-results! refused completion"
              (:seon.operator/cause (:seon.error/data failure))))
-      (is (= {}
+      (is (= {:seon.source/refused-test-run "123456789abc"}
              (:seon.operator/exception-data
               (:seon.error/data failure)))))
     (testing "the printed gate line names the cluster's cause"
@@ -1510,12 +1510,15 @@
       (is (str/includes? notice ":seon.operator/exception-data") notice)
       (is (not (str/includes? notice ":seon.operator/events"))
           "the raw prepl events stay out of the one-line notice"))
-    (testing "a recorder without committed references names the missing evidence"
+    (testing "a declared recorder refusal retains its own message"
       (let [bare (#'runner/recording-failure
-                  (fn [] {
+                  (fn [] {:seon.error/at (java.util.Date.)
+                          :seon.error/layer :seon.source/recording
+                          :seon.error/operation 'seon.cluster.source/record-results!
+                          :seon.source/refused-test-run "123456789abc"
                           :seon.error/message "bare"}))]
         (is (= (str "bin/test: persistent results NOT recorded: "
-                    "The recorder returned no committed result references.")
+                    "bare")
                (#'runner/recording-failure-notice "persistent results" bare)))))))
 
 (defn- synthetic-results

@@ -111,8 +111,14 @@
   ;; publications doing work after their lifecycle caller has timed out.
   (when (and (instance? java.io.PrintWriter *out*)
              (.checkError ^java.io.PrintWriter *out*))
-    (throw (ex-info (str "Source publication observer closed in phase " phase ".")
-                    {:seon.source/progress phase})))
+    (let [message (str "Source publication observer closed in phase " phase ".")]
+      (throw (ex-info message
+                      {:seon.error/at (Date.)
+                       :seon.error/layer :seon.cluster/publication
+                       :seon.error/operation 'seon.cluster/report-source-progress!
+                       :seon.error/message message
+                       :seon.cluster/source-observer-closed phase
+                       :seon.source/progress phase}))))
   nil)
 
 (defn- report-analysis-warnings!

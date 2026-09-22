@@ -15,4 +15,5 @@
                       (#'cluster/report-source-progress! "schema declarations")
                       nil
                       (catch clojure.lang.ExceptionInfo error (ex-data error))))]
-      (is (= "schema declarations" (:seon.source/progress failure))))))
+      (is (= "schema declarations" (:seon.source/progress failure)))
+      (is (= "schema declarations" (:seon.cluster/source-observer-closed failure))))))

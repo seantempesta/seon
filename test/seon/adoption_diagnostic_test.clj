@@ -13,7 +13,8 @@
         refusal (#'eval/acquisition-refusal
                  {:seon.fn/sym "adoption.probe/broken"}
                  (ex-info "The declared namespace is unavailable."
-                          {
+                          {:seon.fn/namespace-unresolvable true
+                           :seon.cluster.eval/source "(ns adoption.probe)"
                            :seon.schema/projection projection}))
         offense {:seon.schema/projection projection
                  :seon.sci.eval/acquisition-refusals [refusal]}
@@ -23,6 +24,7 @@
         byte-count (alength (.getBytes shown "UTF-8"))]
     (is (str/includes? shown "adoption.probe/broken"))
     (is (str/includes? shown "The declared namespace is unavailable."))
+    (is (str/includes? shown ":seon.fn/namespace-unresolvable true"))
     (is (not (str/includes? shown "function-contracts")))
     (is (< byte-count 2048) (str "diagnostic bytes=" byte-count))
     (println "adoption diagnostic bytes=" byte-count)))
@@ -37,7 +39,8 @@
                                    {:seon.boot/refused true
                                     :seon.error/message "Cannot install adoption.probe/broken."
                                     :seon.boot/offense
-                                    {
+                                    {:seon.fn/namespace-unresolvable true
+                                     :seon.cluster.eval/source "(ns adoption.probe)"
                                      :seon.error/message "Namespace adoption.probe is unavailable."}})))
             failure (try
                       (#'operator/prepl-value!
@@ -49,6 +52,7 @@
             byte-count (alength (.getBytes shown "UTF-8"))]
         (is (str/includes? shown "adoption.probe/broken"))
         (is (str/includes? shown "Namespace adoption.probe is unavailable."))
+        (is (str/includes? shown ":seon.fn/namespace-unresolvable true"))
         (is (not (str/includes? shown "seon.operator/events")))
         (is (< byte-count 1024))
         (println "operator refusal bytes=" byte-count))
