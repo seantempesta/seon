@@ -163,16 +163,27 @@
   (let [digest (digest-declarations! (MessageDigest/getInstance "SHA-256") root)]
     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
 
+(def runtime-properties
+  "The runtime identity a compiled dependency class is valid under."
+  ["java.runtime.version" "java.vendor" "java.vm.name" "os.arch"])
+
 (defn configuration-digest
-  "`dependency-set-digest`'s inputs plus this runtime's identity.
+  "`dependency-set-digest`'s inputs plus a runtime's identity.
 
   The development class cache keys on this one: it stores COMPILED bytecode,
   which is only valid under the runtime that produced it. A consumer whose
   artifact outlives its producing process keys on `dependency-set-digest`
   instead — the two are not interchangeable, and a cache keyed on the wrong
-  one is read across a boundary its producer never promised."
-  [root]
-  (let [digest (digest-declarations! (MessageDigest/getInstance "SHA-256") root)]
-    (doseq [property ["java.runtime.version" "java.vendor" "java.vm.name" "os.arch"]]
-      (digest-bytes! digest (System/getProperty property)))
-    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
+  one is read across a boundary its producer never promised.
+
+  The one-argument arity digests THIS runtime. The operator runs on babashka
+  and launches another JVM, so it supplies that JVM's `runtime-properties`
+  values, read from the JVM itself (`java -XshowSettings:properties`)."
+  ([root]
+   (configuration-digest root (into {} (map (juxt identity #(System/getProperty %)))
+                                    runtime-properties)))
+  ([root properties]
+   (let [digest (digest-declarations! (MessageDigest/getInstance "SHA-256") root)]
+     (doseq [property runtime-properties]
+       (digest-bytes! digest (get properties property)))
+     (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest))))))

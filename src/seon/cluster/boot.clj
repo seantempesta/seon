@@ -94,6 +94,22 @@
            dials (config/effective (db/db connection) cluster-name)]
        (publish! (cluster/serve! instance dials))))))
 
+(defn- changed-source-paths
+  "Discovered inputs whose bytes differ from the published program's digests.
+  An input the published program names but the files no longer discover is
+  outside this check (measured 459 ms by lane resume-in-seconds)."
+  {:malli/schema [:=> [:cat :seon.store/store] [:vector :string]]}
+  [store]
+  (let [directory (fs/source-directory)
+        paths (source/discover-paths directory cluster/source-roots)
+        files (source/path-digests directory paths)
+        database (source/database store (:seon.source/commit-id (source/current store)))]
+    (try
+      (let [stored (source/stored-path-digests database paths)]
+        (into [] (comp (distinct) (remove #(= (get files %) (get stored %))))
+              (sort (concat (keys files) (keys stored)))))
+      (finally (d/release-materialized-db database)))))
+
 (defn- stand-boot-layers!
   "Stand the ordered boot layers above the REPL.
 
@@ -116,8 +132,17 @@
         _ (cluster/write-advertisement!
            (cluster/cluster-paths (:seon.boot/root config) cluster-name)
            (:seon.boot/advertisement instance))
-        _ (when-not (source/current store)
-            (cluster/refresh-source! (:seon.boot/root config)))
+        ;; A resume publishes exactly the inputs whose bytes differ from the
+        ;; published program (files edited while the JVM was down), and nothing
+        ;; when none differ; a first start publishes everything. A refused
+        ;; publication refuses the boot: stale program rows never run silently.
+        _ (let [published (if (source/current store)
+                            (let [changed (changed-source-paths store)]
+                              (when (seq changed)
+                                (cluster/refresh-source! (:seon.boot/root config) changed)))
+                            (cluster/refresh-source! (:seon.boot/root config)))]
+            (when (:seon.error/at published)
+              (throw (ex-info (:seon.error/message published) published))))
         store-id (get-in @(:seon.store/connection-object store)
                          [:config :store :id])
         cluster-branch (registry/cluster-branch cluster-name)

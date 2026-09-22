@@ -4,6 +4,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
+            [seon.dev.dependency-digest :as dependency-digest]
             [seon.error.refusal :as refusal])
   (:import [java.net Socket ServerSocket InetSocketAddress SocketTimeoutException]
            [java.io PushbackReader]
@@ -323,24 +324,173 @@
               (System/exit 1))))
         @(promise)))))
 
+(declare command!)
+
+;;; The dependency class cache on the start classpath (owner 2026-09-23: "link
+;;; the caches"). `dev_cache.clj` builds immutable, content-keyed directories
+;;; under the MAIN checkout's `target/dev-dependency-classes/<digest>`; this
+;;; reads that cache for every launched source (the checkout itself, a nuke
+;;; archive, a scratch snapshot) and never builds one: a miss starts from
+;;; source and says so, with the command that fills the cache.
+
+(def ^:private dependency-cache-root "target/dev-dependency-classes")
+(def ^:private dependency-cache-selection "target/dev-dependency-cache-current.edn")
+(def ^:private dependency-cache-manifest "META-INF/seon-dev-cache.edn")
+(def ^:private dependency-cache-version 4)
+(def ^:private runtime-probe-bound-ms
+  "Measured 2026-09-23: `java -XshowSettings:properties -version` 28 ms."
+  10000)
+
+(defn- child-java
+  "The `java` the `clojure` launcher will run under `environment`."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] :string]}
+  [environment]
+  (or (get environment "JAVA_CMD")
+      (some-> (fs/which "java") str)
+      (some-> (get environment "JAVA_HOME") (io/file "bin" "java") str)
+      (fail! "No java executable for the child JVM." {:seon.operator/environment-keys
+                                                      (vec (sort (keys environment)))})))
+
+(defn- child-runtime-properties
+  "The child JVM's own values of the runtime properties its compiled classes key on."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :string]]}
+  [environment]
+  (let [java (child-java environment)
+        text (command! [java "-XshowSettings:properties" "-version"] "." runtime-probe-bound-ms)
+        wanted (set dependency-digest/runtime-properties)
+        properties (into {}
+                         (keep (fn [line]
+                                 (let [line (str/trim line)
+                                       at (str/index-of line " = ")]
+                                   (when at
+                                     (let [key (subs line 0 at)]
+                                       (when (wanted key) [key (subs line (+ at 3))]))))))
+                         (str/split-lines text))]
+    (when-not (= wanted (set (keys properties)))
+      (fail! "The child JVM did not state its runtime identity."
+             {:seon.operator/java java :seon.operator/expected (vec (sort wanted))
+              :seon.operator/stated properties}))
+    properties))
+
+(defn- read-edn-file
+  "The EDN value of `file`, or nothing when it does not exist."
+  {:malli/schema [:=> [:cat [:fn #(instance? java.io.File %)]] [:maybe :map]]}
+  [^java.io.File file]
+  (when (.isFile file) (edn/read-string (slurp file))))
+
+(defn- cache-candidates
+  "Immutable cache directories under `repository`, the selected one first."
+  {:malli/schema [:=> [:cat :string] [:vector [:fn #(instance? java.io.File %)]]]}
+  [repository]
+  (let [root (io/file repository dependency-cache-root)
+        selected (some-> (read-edn-file (io/file repository dependency-cache-selection))
+                         :seon.dev-cache/path io/file)]
+    (into [] (distinct)
+          (concat (when selected [selected])
+                  (sort-by #(.getName ^java.io.File %)
+                           (filter #(.isDirectory ^java.io.File %)
+                                   (or (.listFiles root) [])))))))
+
+(defn- loader-class
+  {:malli/schema [:=> [:cat [:fn #(instance? java.io.File %)] :symbol]
+                  [:fn #(instance? java.io.File %)]]}
+  [directory namespace-name]
+  (io/file directory (str (str/replace (munge (str namespace-name)) "." "/") "__init.class")))
+
+(defn dependency-classes
+  "The dependency class directory `source`'s start classpath reuses, or its named miss.
+
+  A directory is reused when its manifest names this cache version, its own
+  digest, the configuration digest of `source` (its `deps.edn`, its pins and
+  the child JVM's runtime identity) and every loader class it lists exists."
+  {:malli/schema [:=> [:cat :string :string [:map-of :string :string]] :map]}
+  [repository source environment]
+  (let [started (System/nanoTime)
+        properties (child-runtime-properties environment)
+        expected (try (dependency-digest/configuration-digest source properties)
+                      (catch clojure.lang.ExceptionInfo refusal
+                        (if (= 'seon.dev.dependency-digest/dependency-pins
+                               (:seon.error/operation (ex-data refusal)))
+                          ::pins-unavailable
+                          (throw refusal))))
+        hit (when (string? expected)
+              (some (fn [directory]
+                      (let [manifest (read-edn-file (io/file directory dependency-cache-manifest))]
+                        (when (and (= dependency-cache-version (:seon.dev-cache/version manifest))
+                                   (= (.getName ^java.io.File directory) (:seon.dev-cache/cache-digest manifest))
+                                   (= expected (:seon.dev-cache/input-digest manifest))
+                                   (every? #(.isFile ^java.io.File (loader-class directory %))
+                                           (:seon.dev-cache/namespaces manifest)))
+                          {:seon.dev-cache/status :hit
+                           :seon.dev-cache/path (.getCanonicalPath ^java.io.File directory)
+                           :seon.dev-cache/digest (:seon.dev-cache/cache-digest manifest)
+                           :seon.dev-cache/namespaces (count (:seon.dev-cache/namespaces manifest))})))
+                    (cache-candidates repository)))]
+    (assoc (or hit
+               {:seon.dev-cache/status :miss
+                :seon.dev-cache/reason (if (string? expected) :no-matching-cache :pins-unavailable)
+                :seon.dev-cache/input-digest expected
+                :seon.dev-cache/fill (str "cd " repository " && clojure -T:dev-cache ensure-cache")})
+           :seon.dev-cache/selection-ms (quot (- (System/nanoTime) started) 1000000))))
+
+(defn- start-classpath
+  "The `-Scp` argument prepending a hit's classes to `source`'s own classpath, or nothing."
+  {:malli/schema [:=> [:cat :string :map] [:maybe :string]]}
+  [source classes]
+  (when (= :hit (:seon.dev-cache/status classes))
+    (str (:seon.dev-cache/path classes) java.io.File/pathSeparator
+         (str/trim (command! ["clojure" "-Spath" "-M:dev:test"] source runtime-probe-bound-ms)))))
+
+(defn- record-cache-reference!
+  "Record the child JVM's use of a cache directory, so `dev-cache/reap` keeps it
+  while that exact process lives. Taken under the cache's reference lock."
+  {:malli/schema [:=> [:cat :string :map :map] :nil]}
+  [repository classes coordinates]
+  (when (= :hit (:seon.dev-cache/status classes))
+    (let [pid (:seon.boot/pid coordinates)
+          target (io/file repository "target/dev-dependency-cache-processes" (str pid ".edn"))
+          candidate (io/file (.getParentFile target) (str pid ".edn." (random-uuid)))]
+      (.mkdirs (.getParentFile target))
+      (with-open [lock-file (java.io.RandomAccessFile.
+                             (io/file repository "target/dev-dependency-cache-references.lock") "rw")
+                  channel (.getChannel lock-file)]
+        ;; Closing the channel releases the lock (babashka exposes no FileLock methods).
+        (.lock channel)
+        (spit candidate (str (pr-str {:seon.boot/pid pid
+                                      :seon.boot/start-instant (:seon.boot/start-instant coordinates)
+                                      :seon.operator.process-record/cache-path
+                                      (:seon.dev-cache/path classes)})
+                             "\n"))
+        (fs/move candidate target {:replace-existing true :atomic-move true}))))
+  nil)
+
 (defn- launch-child!
   "Launch one JVM whose program is the checkout at `source` and return its
-  terminal boot value with the coordinates it advertised."
-  [request source]
+  terminal boot value with the coordinates it advertised. A nuke passes
+  `reuse-classes?` false: it rebuilds reading no prior derived state."
+  [request source reuse-classes?]
   (let [root (:seon.operator/managed-root request)
         name (:seon.boot/cluster-name request)
         log (io/file root "data/clusters" name "logs/seon.log")
         bound (operator-silence-backstop-ms (:seon.config/manifest request))]
     (io/make-parents log)
     (with-open [callback (ServerSocket. 0 1 (java.net.InetAddress/getLoopbackAddress))]
-      (let [argv ["clojure" (str "-J-Dseon.operator.root=" root)
-                  (str "-J-Dseon.repository.root=" source)
-                  "-M:dev:test" "-e" (launch-form request (.getLocalPort callback))]
+      (let [environment (child-environment root)
+            classes (if reuse-classes?
+                      (dependency-classes (repository-root) source environment)
+                      {:seon.dev-cache/status :skipped
+                       :seon.dev-cache/reason :nuke-reads-no-derived-state})
+            classpath (start-classpath source classes)
+            argv (cond-> ["clojure"]
+                   classpath (into ["-Scp" classpath])
+                   true (into [(str "-J-Dseon.operator.root=" root)
+                               (str "-J-Dseon.repository.root=" source)
+                               "-M:dev:test" "-e" (launch-form request (.getLocalPort callback))]))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)
                       (.redirectOutput (java.lang.ProcessBuilder$Redirect/appendTo log)))
-            _ (.putAll (.environment builder) (child-environment root))
+            _ (.putAll (.environment builder) environment)
             child (.start builder)
             exited (.thenApply (.onExit child) (reify Function (apply [_ _] ::exited)))
             accepted (CompletableFuture/supplyAsync (reify Supplier (get [_] (.accept callback))))
@@ -350,7 +500,10 @@
         (with-open [socket event reader (java.io.BufferedReader. (io/reader socket))]
           (.setSoTimeout socket bound)
           (let [coordinates (edn/read-string (.readLine reader))
-                _ (binding [*out* *err*] (println "REPL" (pr-str coordinates) "log" (str log)))
+                _ (record-cache-reference! (repository-root) classes coordinates)
+                _ (binding [*out* *err*]
+                    (println "REPL" (pr-str coordinates) "log" (str log))
+                    (println "DEPENDENCY-CLASSES" (pr-str classes)))
                 ;; Cold indexing has the publication's declared bound, independently of socket silence.
                 boot-bound (operator-boot-bound-ms {})
                 _ (.setSoTimeout socket boot-bound)
@@ -367,10 +520,11 @@
                               (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
                         (tree-seq coll? seq value))
               (.get (.onExit child) bound TimeUnit/MILLISECONDS))
-            {:seon.operator/value value :seon.boot/advertisement coordinates}))))))
+            {:seon.operator/value (assoc value :seon.dev-cache/dependency-classes classes)
+             :seon.boot/advertisement coordinates}))))))
 
 (defn launch! [request]
-  (:seon.operator/value (launch-child! request (repository-root))))
+  (:seon.operator/value (launch-child! request (repository-root) true)))
 
 ;;; Nuclear rebuild (plan §7 "Schema change and reset", owner 2026-09-23):
 ;;; delete the store and rebuild from COMMITTED inputs only, so no in-flight
@@ -491,7 +645,7 @@
         outcome (try
                   (launch-child! (assoc request :seon.operator/command :start
                                         :seon.boot/cluster-name "default" :seon.store/destroy? true)
-                                 source)
+                                 source false)
                   (catch Exception cause
                     {:seon.operator/value
                      (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
@@ -532,23 +686,41 @@
    "target/test-published-bases" "target/test-classpaths"
    ".clj-kondo/.cache" ".cpcache"])
 
+(defn- linked-component
+  "The first component of `relative` under `root` that is a symbolic link, or nothing."
+  [root relative]
+  (loop [path (fs/path root) [part & more] (fs/components relative)]
+    (when part
+      (let [next-path (fs/path path part)]
+        (if (fs/sym-link? next-path)
+          (str (fs/relativize (fs/path root) next-path))
+          (recur next-path more))))))
+
 (defn- wipe-derived-state!
-  "Delete every derived path under `root` (never following links) and each
-  cluster's advertisement file; return what existed and was deleted."
+  "Delete every derived path owned by `root`, never following a link, and each
+  cluster's advertisement file. A path reached through a linked component is a
+  cache SHARED with another root: the link and its target are both kept
+  (owner 2026-09-23: nuking a root wipes that root's derived state; nuking the
+  repository's own root wipes the shared caches, which are its own)."
   [root]
-  (into (into []
-              (keep (fn [relative]
-                      (let [file (io/file root relative)]
-                        (when (fs/exists? file {:nofollow-links true})
-                          (fs/delete-tree file)
-                          relative))))
-              nuke-derived-paths)
-        (keep (fn [directory]
-                (let [file (io/file directory "prepl.edn")]
-                  (when (.isFile file)
-                    (fs/delete file)
-                    (str "data/clusters/" (.getName directory) "/prepl.edn")))))
-        (or (.listFiles (io/file root "data/clusters")) [])))
+  (let [deleted (volatile! []) unlinked (volatile! #{})]
+    (doseq [relative nuke-derived-paths
+            :let [file (io/file root relative)
+                  linked (linked-component root relative)]]
+      (cond
+        linked (vswap! unlinked conj linked)
+        (fs/exists? file {:nofollow-links true})
+        (do (fs/delete-tree file) (vswap! deleted conj relative))))
+    (doseq [directory (or (.listFiles (io/file root "data/clusters")) [])
+            :let [file (io/file directory "prepl.edn")]
+            :when (.isFile file)]
+      (fs/delete file)
+      (vswap! deleted conj (str "data/clusters/" (.getName directory) "/prepl.edn")))
+    {:seon.operator/root root
+     :seon.operator/repository-root? (= (.getCanonicalPath (io/file root))
+                                        (.getCanonicalPath (io/file (repository-root))))
+     :seon.operator/deleted @deleted
+     :seon.operator/kept-shared (vec (sort @unlinked))}))
 
 (def ^:private nuke-fallback-boots
   "Distinct older programs a nuke boots after HEAD fails twice (plan §7, B)."
@@ -709,13 +881,15 @@
             :export (if (= 1 (count positionals))
                       (assoc request :seon.operator/destination (.getCanonicalPath (io/file (first positionals))))
                       (fail! "Use export PATH." request))
-            (:status :down :reset :nuke)
+            (:status :down :nuke)
             (do (when (seq positionals) (fail! "Command takes no cluster name." request))
                 (when (and (#{:reset :nuke} command) (not (:seon.operator/force? request)))
                   (fail! (str (if (= :reset command) "Reset" "Nuclear rebuild") " requires --force.")
                          request)) request)
-            (:start :init :open :stop :logs)
+            (:start :init :open :stop :logs :reset)
             (do (when (< 1 (count positionals)) (fail! "Command takes at most one cluster name." request))
+                (when (and (= :reset command) (not (:seon.operator/force? request)))
+                  (fail! "Reset requires --force." request))
                 (cond-> request
                   (or (seq positionals) (#{:start :logs} command))
                   (assoc :seon.boot/cluster-name (valid-name (or (first positionals) "default")))))
@@ -725,7 +899,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
                    (request! request))]
       (cond
         (:seon.operator/help result) (println (:seon.operator/help result))
