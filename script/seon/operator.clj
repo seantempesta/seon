@@ -418,10 +418,12 @@
       (finally (.delete tar)))))
 
 (defn committed-source!
-  "The HEAD program as a directory of committed bytes, built once per commit."
-  [root]
+  "A commit's program (HEAD by default) as a directory of committed bytes,
+  built once per commit."
+  ([root] (committed-source! root "HEAD"))
+  ([root revision]
   (let [repository (repository-root)
-        sha (str/trim (command! ["git" "rev-parse" "HEAD"] repository 30000))
+        sha (str/trim (command! ["git" "rev-parse" "--verify" (str revision "^{commit}")] repository 30000))
         parent (io/file root "data/source")
         target (io/file parent sha)]
     (if (.isDirectory target)
@@ -436,7 +438,8 @@
                           head (when (.isDirectory checkout)
                                  (str/trim (command! ["git" "rev-parse" "HEAD"] checkout 30000)))
                           clean? (and (= head pin)
-                                      (str/blank? (command! ["git" "status" "--porcelain"] checkout 30000)))
+                                      (str/blank? (command! ["git" "status" "--porcelain" "--untracked-files=no"]
+                                                           checkout 30000)))
                           placed (io/file staging path)]
                       (fs/delete-tree placed)
                       (if clean?
@@ -445,10 +448,14 @@
                             {:path path :pin pin :placed :linked})
                         (do (extract-archive! checkout pin placed)
                             {:path path :pin pin :placed :archived :checkout-head head}))))
-                  (gitlinks repository sha))]
+                  (gitlinks repository sha))
+            ;; An archived pin has no build products yet (e.g. http-kit's
+            ;; compiled Java); tools.deps prepares them in the snapshot.
+            _ (when (some #(= :archived (:placed %)) submodules)
+                (command! ["clojure" "-X:deps" "prep" ":aliases" "[:dev :test]"] staging 300000))]
         (fs/move staging target {:atomic-move true})
         {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
-         :seon.operator/source-built? true :seon.operator/submodules submodules}))))
+         :seon.operator/source-built? true :seon.operator/submodules submodules})))))
 
 (defn- elapsed-ms [began] (quot (- (System/nanoTime) began) 1000000))
 
@@ -487,7 +494,9 @@
   JVM with a deleted store: readiness, or no JVM and every attempt's cause."
   [request]
   (let [began (System/nanoTime)
-        source (committed-source! (:seon.operator/managed-root request))
+        ;; A drill may name another committed revision; the CLI always builds HEAD.
+        source (committed-source! (:seon.operator/managed-root request)
+                                  (get request :seon.source/revision "HEAD"))
         source-ms (elapsed-ms began)
         attempts (loop [attempts []]
                    (let [result (nuke-attempt! request (:seon.operator/source-root source))
