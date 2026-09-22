@@ -33,6 +33,7 @@
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
             [datahike.gc-guard :as gc-guard]
+            [datahike.schema]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
             [seon.cluster.export :as export]
@@ -951,27 +952,12 @@
 
 (declare require-committed!)
 
-(defn- incompatible-declaration-message
-  [cluster-name attribute
-   {:seon.boot/keys [property installed-value declared-value]}]
-  (let [target-name (or cluster-name "NAME")
-        subject (if cluster-name
-                  (str "Cluster `" cluster-name "`")
-                  "This branch")]
-    (str subject " cannot reopen in place: `" attribute "` changed "
-         property " from " (pr-str installed-value)
-         " to " (pr-str declared-value)
-         ", which Datahike does not apply to an installed attribute. "
-         "`bin/seon init " target-name " --force` destroys and reforks it from "
-         "`current-src`; use export/import instead to preserve its data.")))
-
 (defn- accretive-property-change?
-  "Does Datahike apply this one property change to an INSTALLED attribute?
+  "Does Datahike apply this one property change to an INSTALLED attribute, data kept?
 
   The rule is the dependency's own acceptance rule,
   `datahike.schema/find-invalid-schema-updates`
-  (`reference-code/datahike/src/datahike/schema.cljc:257`), narrowed to the
-  changes an upsert of the current declaration can actually EXPRESS:
+  (`reference-code/datahike/src/datahike/schema.cljc:257`):
 
   - `:db/index` — an index may be added monotonically to an existing
     attribute; the transactor atomically backfills AVET before publishing the
@@ -979,26 +965,37 @@
     (`reference-code/datahike/src/datahike/schema.cljc:277`, enforced again per
     datom at `reference-code/datahike/src/datahike/db/transaction.cljc:105`).
   - `:db/doc`, `:db/noHistory`, `:db/isComponent` — always updatable
-    (`reference-code/datahike/src/datahike/schema.cljc:285`).
+    (`reference-code/datahike/src/datahike/schema.cljc:285`), dropping included:
+    Datahike retracts such a property from an installed attribute without a
+    current-data check (`reference-code/datahike/src/datahike/db/transaction.cljc:306`),
+    so `declaration-changes` retracts a dropped one before transacting the
+    declaration (an upsert alone cannot retract it — 2026-09-16,
+    `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
   - `:db/cardinality` — one may widen to many unless the installed attribute
     carries a `:db/unique` constraint
     (`reference-code/datahike/src/datahike/schema.cljc:264`).
+  - `:db/unique` — a cardinality-one attribute that is already unique may
+    switch between `:db.unique/value` and `:db.unique/identity`; ADDING or
+    dropping uniqueness is not an update Datahike applies
+    (`reference-code/datahike/src/datahike/schema.cljc:270`).
 
-  A DROP is never accretive here, even where Datahike would accept the update:
-  transacting the current declaration cannot retract a property the branch still
-  carries, so reading a drop as compatible would leave the stale property
-  installed (2026-09-16,
-  `docs/seon/issues/adoption-misses-a-dropped-uniqueness-on-an-installed-attribute.md`).
-  Every other property — `:db/valueType`, `:db/unique`, `:db/tupleType`… —
-  answers false and the refusal names it."
-  [property installed-value declared-value installed]
-  (case property
-    :db/index (and (nil? installed-value) (true? declared-value))
-    (:db/doc :db/noHistory :db/isComponent) (some? declared-value)
-    :db/cardinality (and (= :db.cardinality/one installed-value)
-                         (= :db.cardinality/many declared-value)
-                         (nil? (:db/unique installed)))
-    false))
+  Every other difference — `:db/valueType`, `:db/tupleType`, a dropped
+  `:db/unique` or `:db/index`… — answers false, and `declaration-changes`
+  replaces the attribute with its data dropped."
+  {:malli/schema [:=> [:cat :map :map :keyword] :boolean]}
+  [installed declaration property]
+  (let [installed-value (get installed property)
+        declared-value (get declaration property)]
+    (case property
+      :db/index (and (nil? installed-value) (true? declared-value))
+      (:db/doc :db/noHistory :db/isComponent) true
+      :db/cardinality (and (= :db.cardinality/one installed-value)
+                           (= :db.cardinality/many declared-value)
+                           (nil? (:db/unique installed)))
+      :db/unique (and (some? installed-value)
+                      (some? declared-value)
+                      (= :db.cardinality/one (:db/cardinality installed)))
+      false)))
 
 (defn- declaration-property-changes
   "Every storage property where the installed attribute and the declaration differ.
@@ -1014,64 +1011,125 @@
   for that attribute plus its `:db/ident`
   (`reference-code/datahike/src/datahike/db/transaction.cljc:90`), so the two
   maps are comparable once `:db/ident` is dropped."
+  {:malli/schema [:=> [:cat :map :map] [:vector :keyword]]}
   [installed declaration]
   (let [installed (dissoc installed :db/ident)
         declaration (dissoc declaration :db/ident)]
-    (into
-     []
-     (keep
-      (fn [property]
-        (let [installed-value (get installed property)
-              declared-value (get declaration property)]
-          (when-not (= installed-value declared-value)
-            {:seon.boot/property property
-             :seon.boot/installed-value installed-value
-             :seon.boot/declared-value declared-value}))))
-     (sort (into #{} (concat (keys installed) (keys declaration)))))))
+    (into []
+          (remove #(= (get installed %) (get declaration %)))
+          (sort (into #{} (concat (keys installed) (keys declaration)))))))
+
+(defn- attribute-retraction
+  "Transaction data removing one installed attribute and every CURRENT datom of it.
+
+  Datahike refuses to retract an attribute that still carries current datoms
+  (`reject-schema-removal-with-current-data`,
+  `reference-code/datahike/src/datahike/db/transaction.cljc:137`, which reads
+  only the current AEVT index), and applies the operations of one transaction
+  in order, so the data retractions come first and the attribute entity last.
+  Each datom is retracted by its native `[e a v]` — never `retractEntity` on
+  the entity carrying it, which would delete that entity's other attributes.
+  A component value is owned by its datom, so it is retracted as an entity
+  and cascades (Datahike's retractEntity also removes the referring datom).
+  Work is one AEVT range read of this attribute."
+  {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
+                  :seon.store/transaction-data]}
+  [database attribute]
+  (let [component? (true? (get-in (:schema database) [attribute :db/isComponent]))]
+    (conj
+     (into []
+           (map (fn [datom]
+                  (if component?
+                    [:db/retractEntity (:v datom)]
+                    [:db/retract (:e datom) attribute (:v datom)])))
+           (d/datoms database :aevt attribute))
+     [:db/retractEntity attribute])))
+
+(defn- retired-attributes
+  "Installed attributes no declaration in `projection` or the branch still names.
+
+  The projection's forms are the declaration authority: a key it still
+  registers — as an attribute or as any other form, like the source seal's own
+  attributes `seon.cluster.source` installs from registered forms — is not
+  retired. Datahike's own implicit attributes are not Seon declarations
+  (`datahike.schema/implicit-schema-spec`,
+  `reference-code/datahike/src/datahike/schema.cljc:89`). An attribute whose
+  `:seon.schema/key` row on this branch was admitted by an agent rather than
+  the packaged population belongs to that agent's program and the turn's schema
+  change owns it, so the packaged population never retires it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  [:vector :qualified-keyword]]}
+  [database projection]
+  (let [forms (:seon.schema.projection/forms projection)
+        rows? (contains? (:schema database) :seon.schema/key)]
+    (into []
+          (comp
+           (filter qualified-keyword?)
+           (remove #(contains? datahike.schema/implicit-schema-spec %))
+           (remove #(contains? forms %))
+           (remove (fn [attribute]
+                     (some (fn [row]
+                             (some #(not= :core (:v %))
+                                   (d/datoms database :eavt (:e row)
+                                             :seon.schema.admission/source)))
+                           (when rows?
+                             (d/datoms database :avet :seon.schema/key attribute))))))
+          (sort (keys (:schema database))))))
 
 (defn- declaration-changes
-  "Missing declarations plus the accretive updates, refusing the rest.
+  "Transaction data adopting every declaration difference IN PLACE on this branch.
 
-  An attribute already installed on the branch is compared property by property
-  rather than by whole-map equality: a change every differing property is
-  accretive under `accretive-property-change?` is ADOPTED IN PLACE by
-  transacting the declaration, which is how adding `:db/index` to a live
-  attribute reaches Datahike's atomic AVET backfill instead of forcing a
-  destructive refork of an existing cluster. A property Datahike would not apply
-  refuses, naming that property and both of its values."
-  [db projection cluster-name]
-  (into
-   []
-   (keep
-    (fn [{attribute :db/ident :as declaration}]
-      (if-let [installed (get (:schema db) attribute)]
-        (let [changes (declaration-property-changes installed declaration)]
-          (when (seq changes)
-            (if-let [refusal
-                     (first
-                      (remove
-                       (fn [{:seon.boot/keys [property installed-value
-                                              declared-value]}]
-                         (accretive-property-change?
-                          property installed-value declared-value installed))
-                       changes))]
-              (refused!
-               (incompatible-declaration-message
-                cluster-name attribute refusal)
-               (cond->
-                (merge
-                 {:seon.boot/attribute attribute
-                  :seon.boot/installed installed
-                  :seon.boot/current declaration
-                  :seon.boot/changes changes}
-                 refusal)
-                 cluster-name
-                 (assoc :seon.boot/cluster-name cluster-name)))
-              declaration)))
-        declaration)))
-   (schema.datahike/malli->datahike-schema-in
-    projection
-    (schema/canonical-database-attributes projection))))
+  Owner ruling 2026-09-23: \"A schema change should not require a from scratch
+  boot. Period.\" Each installed attribute is compared property by property:
+
+  - missing: its declaration is transacted;
+  - every differing property accretive under `accretive-property-change?`:
+    a dropped property is retracted from the attribute entity and the
+    declaration is transacted, keeping the data — which is how adding
+    `:db/index` reaches Datahike's atomic AVET backfill;
+  - any other difference (`:db/valueType`, `:db/unique`, `:db/tupleType`, a
+    dropped property): the attribute is REPLACED — its current datoms and its
+    attribute entity are retracted (`attribute-retraction`) and the new
+    declaration is transacted after them in the same transaction;
+  - retired (`retired-attributes`): its current datoms and attribute entity
+    are retracted.
+
+  The data behind a replaced or retired attribute is dropped by design. What
+  must survive is enforced by the one transaction owner, not here: a program
+  row that still writes a retired attribute refuses the transaction naming the
+  writer (`seon.db/removed-definition-error`, plan 1.3e), and an entity left
+  without a required value or ref refuses through final owning-value
+  validation. Work is proportional to the changed attributes' datoms."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection]
+                  :seon.store/transaction-data]}
+  [database projection]
+  (let [installed-schema (:schema database)
+        changed
+        (into []
+              (mapcat
+               (fn [{attribute :db/ident :as declaration}]
+                 (if-let [installed (get installed-schema attribute)]
+                   (let [changes (declaration-property-changes installed declaration)]
+                     (cond
+                       (empty? changes) []
+                       (every? #(accretive-property-change? installed declaration %)
+                               changes)
+                       ;; a dropped property is retracted; an upsert cannot drop it
+                       (conj (into []
+                                   (comp
+                                    (remove #(contains? declaration %))
+                                    (map #(vector :db/retract attribute % (get installed %))))
+                                   changes)
+                             declaration)
+                       :else
+                       (conj (attribute-retraction database attribute) declaration)))
+                   [declaration])))
+              (schema.datahike/malli->datahike-schema-in
+               projection
+               (schema/canonical-database-attributes projection)))]
+    (into changed
+          (mapcat #(attribute-retraction database %))
+          (retired-attributes database projection))))
 
 (defn- missing-process-rows
   "Return required process rows absent from `db`, or its read refusal."
@@ -1296,31 +1354,16 @@
           (recur waiting)))))
   nil)
 
-(defn require-admissible-branch!
-  "Refuse incompatible installed declarations before acquiring the branch projection.
-   Config reconciliation checks its own declared function names against the
-   program graph; no historical activation roster is required."
-  [database cluster-name]
-  (let [forms (schema.edn/packaged-forms)
-        projection (or (schema/handed-projection) (schema/declaration-projection forms))]
-    (schema/call-with-forms
-     forms
-     (fn []
-       (schema/call-with-projection
-        projection
-        (fn []
-          (declaration-changes database projection cluster-name))))))
-  nil)
-
 (defn accrete-schema-population!
   "Install the current additive schema population on one branch.
 
   Registration and database installation are separate in Datahike's
   `:write` schema mode. Every opened branch therefore passes through this
-  choke point before any domain transaction. Missing declarations and
-  canonical rows accrete; an incompatible declaration refuses loudly and
-  names refork or export/import as the resolutions. A converged reopen issues
-  no transaction.
+  choke point before any domain transaction. Every declaration difference
+  adopts in place (`declaration-changes`): missing and accretive declarations
+  are transacted, a non-accretive change replaces the attribute and a retired
+  attribute is retracted, each with its current data. A converged reopen
+  issues no transaction.
 
   The population HANDS its transactions the projection its declarations come
   from — the same projection write admission validates against — so a caller
@@ -1347,7 +1390,7 @@
         projection
         (fn []
           (let [declarations
-                (declaration-changes (db/db connection) projection cluster-name)]
+                (declaration-changes (db/db connection) projection)]
             (when (seq declarations)
               (require-committed!
                (db/transact! connection {:tx-data declarations})
@@ -2062,7 +2105,7 @@
                (db/transact! connection
                              {:tx-data [[:db.fn/call
                                          (fn [database]
-                                           (declaration-changes database published-projection cluster-name))]]})
+                                           (declaration-changes database published-projection))]]})
                {:seon.boot/population :seon.schema/declarations})))
         _ (when (seq program-identities)
             (report-source-progress! "development changed program rows")
