@@ -24,13 +24,22 @@ measure() {
     "$REPO/docs/prds/steward-platform/research/measure-storage-retention-2026-09-22.clj" \
     "$ROOT" "$1" >> "$ROOT/storage.edn"
 }
+reload_clock() {
+  bb --config "$WT/bb.edn" --deps-root "$WT" \
+    "$REPO/docs/prds/agent-platform/research/measure-publication-reloads-2026-09-22.clj" \
+    "$ROOT" "$1"
+}
 run() {
   local name=$1; shift
+  if [[ "$name" == adopt-* ]]; then reload_clock capture > /dev/null; fi
   local began=$EPOCHREALTIME
   { time "$@"; } > "$ROOT/$name.log" 2>&1
   echo "exit=0 elapsed-ms=$(( (EPOCHREALTIME - began) * 1000 ))" >> "$ROOT/$name.log"
   tail -1 "$ROOT/$name.log" | sed "s/^/$name: /"
   measure "$name"
+  if [[ "$name" == adopt-* ]]; then
+    reload_clock report > "$ROOT/$name-reloads.edn"
+  fi
 }
 zmodload zsh/datetime
 # Cold start, paid once: publish from zero, create the first cluster, start the JVM.
@@ -48,6 +57,7 @@ run adopt-noncore bin/seon --root "$ROOT" init --dev head --changed src/my/note.
 perl -0pi -e 's/^  "/  "(measured edit) /m' src/seon/id.clj
 run adopt-core bin/seon --root "$ROOT" init --dev head --changed src/seon/id.clj
 measure sweep
+reload_clock compile > "$ROOT/seon-id-compile.edn"
 bin/seon --root "$ROOT" down
 git -C "$WT" checkout -- src/my/note.clj src/seon/id.clj
 echo "phases:"; grep -h "elapsed-ms" "$ROOT"/adopt-*.log | sed -E 's/.*completed-phase "([^"]*)".*elapsed-ms ([0-9]+).*/\2\t\1/' | sort -rn | head -20
