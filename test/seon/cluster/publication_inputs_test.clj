@@ -273,3 +273,31 @@
             "the rebuilt entry is reused")
         (is (pos? (::analyzer/examined (::analyzer/cache again)))))
       (finally (support/delete-recursively! (.getPath root))))))
+
+(deftest the-checkout-cache-refuses-a-scratch-copy-however-its-root-is-spelled
+  ;; Publication hands the checkout cache as `<root>/.clj-kondo/.cache`
+  ;; (seon.fn/analyzed-files); an entry written from a scratch file inside the
+  ;; checkout must not answer for its namespace there.
+  (let [root (.getCanonicalFile (io/file "tmp/publication-inputs" (str (random-uuid))))
+        suffix (str/replace (str (random-uuid)) "-" "")
+        callee-ns (str "kondo-scratch-" suffix ".callee")
+        callee (io/file root (str "kondo_scratch_" suffix "/callee.clj"))
+        caller (io/file root (str "kondo_scratch_" suffix "/caller.clj"))
+        cache-root (.getPath (io/file (.getCanonicalPath (io/file ".")) ".clj-kondo" ".cache"))
+        analyze (fn [files]
+                  (analyzer/analyze {::analyzer/paths (mapv #(.getPath ^java.io.File %) files)
+                                     ::analyzer/cache-root cache-root}))]
+    (try
+      (io/make-parents callee)
+      (spit callee (str "(ns " callee-ns ")\n(defn f [x] x)\n"))
+      (spit caller (str "(ns kondo-scratch-" suffix ".caller (:require [" callee-ns " :as callee]))\n"
+                        "(defn g [] (callee/f 1))\n"))
+      (analyze [callee])
+      (let [stale (::analyzer/stale (::analyzer/cache (analyze [caller])))]
+        (is (= [[(symbol callee-ns) ::analyzer/foreign]]
+               (mapv (juxt ::analyzer/namespace ::analyzer/reason) stale)))
+        (is (not-any? ::analyzer/source stale) "a scratch copy is never rebuilt into the checkout cache"))
+      (finally
+        (doseq [language ["clj" "cljc" "cljs"]]
+          (io/delete-file (io/file cache-root "v1" language (str callee-ns ".transit.json")) true))
+        (support/delete-recursively! (.getPath root))))))

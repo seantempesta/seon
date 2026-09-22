@@ -337,10 +337,14 @@
                         :config analysis-config}
                        options)
         cached? (not (false? (:cache options)))
-        shared? (= cache-directory (:cache-dir options))
         root (when cached?
-               (.getPath ^java.io.File
+               (.getCanonicalPath ^java.io.File
                 (kondo.core/resolve-cache-dir (:config-dir options) true (:cache-dir options))))
+        ;; The checkout's own cache, however the caller spelled it: publication
+        ;; hands `<root>/.clj-kondo/.cache` explicitly (`seon.fn/analyzed-files`).
+        shared? (and root
+                     (= root (.getCanonicalPath ^java.io.File
+                              (kondo.core/resolve-cache-dir config-directory true cache-directory))))
         check (fn [result]
                 (if root
                   (kondo.cache/with-thread-lock

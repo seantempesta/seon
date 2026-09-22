@@ -2396,7 +2396,7 @@
         _ (when (seq issue-identities)
             (report-source-progress! "development changed issues")
             (require-committed!
-             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities)
+             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities expected-head)
              {:seon.boot/population :seon.issue/rows}))
         database (db/db connection)
         projection (schema/projection-from-database database)

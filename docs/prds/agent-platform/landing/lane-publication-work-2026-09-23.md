@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed; cluster.clj caller patch pending its holder
+status: landed; cache counts on the publication result pending fn.clj and seon.source.edn
 created: 2026-09-23
 tags: [agent-platform, publication, clj-kondo, cache, seconds-not-minutes]
 ---
@@ -135,5 +135,85 @@ the working tree's `bin/test-fast` is deleted by realities-commit-5.
   (reference-code and `.clj-kondo/.cache` linked), armed run of the 7 tests: 30 assertions,
   0 failures, 0 errors, 738 ms test time, 21.5 s JVM wall; `seon.cluster`, `seon.cluster.source`
   and `seon.fn.analyzer` load.
+
+## Follow-up (same lane, after acceptance)
+
+### Restart refusal no longer loops (issue `restart-needed-refuses-the-publication-a-restart-should-make`)
+
+`classify-paths` now takes the changed paths' current digests and
+`seon.cluster.source/loaded-dependencies`, the `deps.edn` and gitlink digests this
+JVM read when `seon.cluster.source` first loaded at launch (a `defonce`; a process
+outside a checkout reports `{}`). A changed dependency refuses only when current ≠
+loaded. So the publication a freshly started JVM makes of the files it loaded goes
+ahead, and a running JVM whose files changed underneath it refuses.
+
+Drill, `lane-publication-work-restart-drill-2026-09-23.clj`, on the private root below:
+
+- `running`: `deps.edn` was appended to under the JVM, then `refresh-source! root ["deps.edn"]`
+  was published. It refused `::restart-needed`, "JVM RESTART NEEDED: loaded dependencies
+  changed (deps.edn)…", in 963 ms. JVM wall 18.2 s.
+- `restarted`: a new JVM launched on the changed file and published the same request.
+  It returned `:seon.source/built? true` in 4,411 ms. JVM wall 21.3 s. `deps.edn` was then
+  restored, and the restore matched HEAD.
+
+### Call site landed in `src/seon/cluster.clj`
+
+The diff above landed with the new `classify-paths` arguments. The owed publication-lock
+hunk also landed: `development-source-refresh!` passes `expected-head` to
+`seon.issue/adopt!` (4-arity from `3c55bb0f6`).
+
+### Shared-cache recognition
+
+Publication always hands the analyzer an explicit `<root>/.clj-kondo/.cache`
+(`seon.fn/analyzed-files`). The first cut compared that string with the default one,
+so publication never treated its cache as the checkout's own, and a snapshot rebuilt a
+main-tree entry (`src/seon/render/web.clj`, run 3). The analyzer now compares canonical
+cache roots. Regression `the-checkout-cache-refuses-a-scratch-copy-however-its-root-is-spelled`
+fails with the previous analyzer (stale `[]`) and passes with this one.
+
+### End-to-end leaf publication on a held store
+
+- Root: `tmp/publication-work/snap/tmp/leaf-root`, a `git archive` of `72fa85fc3` plus this
+  lane's files. Built from nothing once in-process with `(cluster/refresh-source! root [] nil dir)`:
+  **63,688 ms**. Of that, analysis took 15,022 ms (kondo 10,199 ms, 299 entries examined,
+  0 stale), and `source/publish!` took 48,104 ms, of which 9 transactions took 35,876 ms.
+  98,131 population entities. This is over 10 s and belongs with the from-zero cost note.
+- Script: `lane-publication-work-leaf-2026-09-23.clj`. Contracts were not armed, and the
+  machine load average was about 11.
+- Leaf `src/seon/eval.clj`, one private defn appended per edit. Run 3 totals were 4,766,
+  4,492 and 5,445 ms; run 1 totals were 4,676, 4,446 and 4,698 ms.
+- Unchanged leaf publication: 312–333 ms. The unchanged full publication was 925 ms in run 1.
+
+Phase breakdown of run 3, edit 1 (4,492 ms), against the reload lane's 2,886 ms leaf:
+
+| phase | this lane | reload lane |
+|---|---|---|
+| store acquisition | 41 | — |
+| source build: capture, classify, test-input digest, analysis | 2,064. `analyze-rows` 1,385 (kondo 11; `file-rows` 4 calls 1,272; capability contracts 473). Test-input digest reused, 0 ms; git gitlinks 0 ms | analysis 908 |
+| program rows to reconciliation | 147 | indexing 520 |
+| reconciliation (2 transactions) | 2,119 (`transact!` 2,048) | 576 |
+| seal and branch head | 118 | — |
+
+Cache hits and misses per leaf: kondo examined 4 entries, 0 stale, 0 rebuilt. The
+test-input digest scored 1 hit and 0 reads.
+
+The whole-repository work this lane owned is gone from the leaf. What remains is
+`seon.db/carried-projection` (173–178 calls, 1.3–1.6 s, inside `file-rows` and the
+transactions) and the reconciliation transaction. Both are outside this lane.
+
+This store logs datahike's "Index lacks precomputed subtree counts (old database format)".
+That may explain slower transactions than the reload lane's, which was not verified.
+
+A five-input publication on the same root took 56,893 ms, 43,845 ms of it in the
+reconciliation transaction, with 5,634 `carried-projection` calls. Filed as
+`docs/seon/issues/a-five-file-publication-spends-44-seconds-in-its-reconciliation-transaction.md`.
+
+### Remaining change (not this lane's files)
+
+Carrying `::analyzer/cache` and the test-input counts into `:seon.source/publish-result`
+needs two changes:
+
+- `seon.fn/analyze-rows` (`src/seon/fn.clj`, receipts lane) returns the analyzer's `::cache`.
+- The result key is declared in `resources/seon/schemas/seon.source.edn`.
 
 RESET NEEDED: no.
