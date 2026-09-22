@@ -1,0 +1,38 @@
+---
+type: research
+created: 2026-09-23
+status: live schedule (orchestrator); the loop launches a row when its files are free in tmp/orchestrator/file-ownership.md
+---
+
+# Fix schedule — every known fix, most important first (owner 2026-09-23: "Schedule all fixes"; "Prioritize the most important ones first")
+
+Priority: **P0** the platform is down or every lane is blocked → **P1** wrong answers / lost data / swallowed failures → **P2** whole-program or minutes-long work the seconds law forbids → **P3** plan steps that follow. Inside a tier: most time or most lanes unblocked first. "Files" are exclusive while running (AGENTS.md "Lanes never cross streams").
+
+| # | P | fix | source | files | waits on | state |
+|---|---|---|---|---|---|---|
+| 1 | P0 | default healthy on HEAD + nuke total (never refuses, rebuilds from committed inputs, full cause) | owner rulings; nuke failure 21:13Z | cluster/boot.clj, script/seon/**, bin/seon | — | RUNNING nuke-is-total |
+| 2 | P0 | 1.3d commit 5: delete test machinery (workers, slots, published base, prepare-head-base, test-fast JVM path); tests run in process on a branch; platform host keeps the one request | lane-realities §3; stale-base class blocks every lane's armed tests | bin/test*, src/seon/test/**, test/seon/test/**, test_support | commit 4 (landed 678009fcd) | RUNNING realities-commit-5 |
+| 3 | P0 | F0: errors keep their whole cause (`:seon.error/chain`, frame from root) | swallowed-errors census F0 | src/seon/error/**, seon.error*.edn | — | RUNNING error-cause-chain |
+| 4 | P1 | `db.clj:2012` `query-call-valid?` answers true when validation throws; `owned_value_test` regression for the tx-entity root fix (bb3a0c6c4) | census A; projection-writer report | src/seon/db.clj, test/seon/owned_value_test.clj | — | LAUNCH NOW |
+| 5 | P1 | deletion-caller-edge review P1s: re-analysis loses a new replacement target; a supplied file row taken as proof of reconciliation; whole-schema traversal per analysis (P2) | review-validator-deletion-oversight §B | src/seon/fn.clj | reload-per-declaration releases fn.clj | WAITING |
+| 6 | P1 | publication-lock P1-2 writer-side head guard (patch ready, passed 7/44) then issue/adopt! | review-publication-lock P1-2 | fn.clj, seon.fn.edn, cluster.clj, cluster/registry.clj, seon.source.edn, publication_lock_test, issue.clj | fn.clj + cluster.clj released | WAITING |
+| 7 | P1 | a schema change adding a producer does not re-analyse its invokers (test selection can miss tests); `fn/source-rows` drops declared targets | deletion-caller-edge report | src/seon/fn.clj | fn.clj released | WAITING |
+| 8 | P1 | commit-4 Astra findings | review-realities-commit-4 (running) | realities-commit-5's files | review | PENDING REVIEW |
+| 9 | P1 | development adoption leaves the loaded program at the boot commit (isolated acquisition refused 423 rows) | issue development-adoption-leaves-the-loaded-program-at-the-boot-commit | cluster.clj reload path, sci/eval.clj | reload-per-declaration commit B; sci-program-revisions | WAITING |
+| 10 | P1 | census conversions after F0: R-HELPER (17 helpers), R-MSG (one rewrite-clj script), R-LOG (one sed), R-DISCARD (hand, per owner), R-PRED (ruled: catch only the declared parser exception), R-OFFER/CAUSE/EXDATA/TIMEOUT | swallowed-errors census | per file holder | #3 | WAITING |
+| 11 | P1 | remove the last first-boot projection stamp read: `transact!` takes the projection from source.clj / cluster.clj accrete + populate / fn.clj index! | projection-writer report | db.clj, cluster/source.clj, cluster.clj, fn.clj | holders of cluster.clj, fn.clj | WAITING |
+| 12 | P2 | SCI context rebuilt on every commit (1.2 s + 3.6 GB per data-only commit); base-ctx unmemoized; host-bound switch | runtime audit row 2; tests audit | src/seon/sci/eval.clj | — | RUNNING sci-program-revisions |
+| 13 | P2 | schema changes adopt in place (drop data, retract, reinstall); converged reopen by identity; stricter-than-Datahike refusals | owner rulings | cluster.clj, cluster/registry.clj | — | RUNNING schema-changes-in-place |
+| 14 | P2 | resume in seconds: class cache on start classpath, arm only running namespaces, unchanged program transacts nothing; shared content-keyed caches | owner "resume", "link the caches", "never redo valid cached work" | measurement now; start classpath after #1 | #1 releases script/ | RUNNING resume-in-seconds |
+| 15 | P2 | reset = fresh branch (4.3 s vs ≈190 s) | owner ruling | script/seon/**, bin/seon | #1 | WAITING |
+| 16 | P2 | leaf publication's whole-repository work: 626 ms kondo cache walk, 190 ms re-digest of 3,415 inputs, gitlink reads; stale kondo entry on content change; deps.edn/gitlink change says RESET NEEDED but needs only a restart | runtime audit; issue publication-analysis-reads-a-stale-kondo-cache-entry | src/seon/cluster/source.clj, kondo cache owner | — | LAUNCH NOW |
+| 17 | P2 | reload per declaration commit B + re-measure (leaf 6.3 s, core 24.8 s) | README 1.2b | fn.clj, fn/analyzer.clj, seon.fn.edn | — | RUNNING reload-per-declaration |
+| 18 | P2 | `/agent/root/debug` takes 44,252 ms; page GET 330–1,100 ms re-checking every stored read | runtime audit row 5 | render/web.clj, turn.clj read evidence | oversight releases web.clj; A2 c1 (cut 2) | WAITING |
+| 19 | P2 | MCP `read_only` results write a ~1 MB transaction each and re-arm pages | runtime audit row 3 | MCP owner | OWNER RULING on durability | ASK OWNER |
+| 20 | P2 | `assert-capability-contracts!` 3.2 s: a collection-bound edge clause costs 550 ms per read vs 1.3 ms direct index | issue a-collection-bound-edge-clause-costs-half-a-second-per-read | owner TBD (grep) | — | TRIAGE |
+| 21 | P2 | store GC never runs on default (146 MB → 4.3 GB) | runtime audit | orchestrator runs the ruled explicit sweep | #1 | WAITING |
+| 22 | P2 | 15.9 GB of old published test bases | tests audit | orchestrator sweep (no live holder) | #2 deletes bases | WAITING |
+| 23 | P2 | oversight review round 2 (contracts, :any, web.clj catches) | review §C | oversight.clj, render/web.clj, seon.oversight.edn | — | RUNNING oversight |
+| 24 | P3 | three-way / projection / validator / deletion / publication-lock residual review follow-ups not above | reviews | per holder | — | folded into rows above |
+| 25 | P3 | 1.4 projection sweep (alone in src) | lane-projection-as-a-read-sweep | most of src | every src holder releases | WAITING |
+| 26 | P3 | commit 3 candidate half; commits 5–6 (merge, write-back); hooks on when reload numbers allow | README §4 / lane-realities §3 | per spec | #2, #17 | WAITING |
