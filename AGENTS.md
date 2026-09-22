@@ -93,6 +93,14 @@ seconds is a defect: name it in the report, file or extend its issue note in the
 beat. "Known cost", "expected for a scratch boot" and "priming" are not explanations;
 the orchestrator rejects a report that carries a slow operation without its number.
 
+**Never redo valid cached work (owner, 2026-09-23: "we should never redo work that we
+have cached if the cache is still valid"; "link the caches so this doesn't happen").**
+Every derived result is keyed by its inputs' content (file digest, deps digest, commit id,
+`:cache-context`) and stored once, in the dependency's own cache where one exists. Every
+root, snapshot, scratch store and test run links that shared cache instead of starting
+empty. A valid key means reuse, never recomputation; an invalid key recomputes only what
+the changed inputs reach. Misses are counted where they happen, never hidden.
+
 **Derive state; do not remember it.** A stored observation is not current derived
 state. Carry derived values with their immutable authority. A check must report its
 subject's absence as unknown or failure, never health. Conversation memory is never
