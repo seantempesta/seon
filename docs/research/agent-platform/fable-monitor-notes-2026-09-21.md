@@ -375,3 +375,17 @@ the four hand-written unions with a registry-derived complete schema; each produ
 declares its explicit union (or is typed on the base if it is an error-handling owner);
 the wrapper check at `instrument.clj:774` validates against the arity's declared union,
 never against base shape; rename `facet` → declared error schema.
+
+## 2026-09-22 10:30 local — step 1.1 landed
+
+`constructor-slice` (`20ee7864b`, `e569532dd`, `9bf22ecd9`, evidence `92a97636c`): one
+constructor `seon.error.refusal/diagnostic` (`at`/`layer`/`operation`/`message?`/
+`throwable?`), facade deleted, every `diagnostic-*` key retired with its callers (scan
+empty across src/script/bin/test), HEAD loads per commit, live probe 4.6 in 167 ms, four
+regressions green. Its broader focused runs are red; those reds are judged by README §6's
+three questions, not chased. Opus read-only diff review running
+(`constructor-slice-diff-review-2026-09-22.md`); platform tier running
+(`tmp/platform-gate-2026-09-22-after-1.1.log`). Next lane launched: the error-schema
+lane (resumed `error-facets` under the explicit-union ruling: each producer declares its
+exact union, wrapper validates against the arity's union, `facet` renamed out of
+src/test/resources). Then `turn-shapes` (hang), then step 1.2.
