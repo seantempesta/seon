@@ -246,3 +246,15 @@ since other notes cite it; it now points to the twenty-second note of the same c
 `a-three-file-changed-path-publication-takes-a-minute.md`. The 1.68 s wake is
 over 1 s and under 10 s; its split between the note transaction, the wake and
 the render pass was not measured.
+
+### Follow-up commits
+
+- `b44585c0b`: the three findings, the schema resource and the issue rows.
+- `8a43e596a`: the thirty-second test-JVM note is kept, since other notes
+  cite it.
+
+HEAD `8a43e596a` loads in a fresh JVM from a `git archive` copy:
+`(require 'seon.oversight 'seon.render.web 'seon.cluster)` printed
+`:loaded 17 true`, meaning 17 contracted Vars and the resource present on the
+classpath. Wall time 17.5 s, all of it JVM start and load (see the test-JVM
+note). RESET NEEDED: no.
