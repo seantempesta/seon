@@ -147,6 +147,7 @@ any R-PRED site.
 |---|---|---|---|
 | bin/test-fast run fabefc553bf8 | 44.9 s (DEFECT >10 s) | snapshot 5 s; JVM start+program load to projection acquired ~31 s; arm 3.1 s; tier 1.4 s; tests 0.5 s | published base d73e0a6c (106 commits behind), hit |
 | HEAD-snapshot load of error/refusal/ai/effect/schedule | 14.9 s load, 16 s wall (DEFECT >10 s) | source load of the program namespaces, no AOT | classpath cache miss (fresh snapshot dir) |
+| HEAD `ed2e1a6b6` load, fresh JVM | 20 s (DEFECT >10 s) | cold source load | classpath cache miss (fresh snapshot dir) |
 | adoption proof (default JVM) | 1.15 s | rows 80 ms; branch 24 ms; transact 864 ms; projection 152 ms | - |
 | `bin/test` snapshot attempts x3 | 1-2 s each, failed | refused at snapshot phase | - |
 
@@ -154,5 +155,16 @@ Existing issue class for the focused-JVM start: `docs/seon/issues/a-focused-test
 Under the ledger rule the orchestrator folds these rows into it. A 4-row declaration
 transaction at 864 ms is not over the bound but is disproportionate. It is recorded
 here for the publication-path owner.
+
+## Commit and HEAD load
+
+- `ed2e1a6b6` landed the six lane paths with `git commit --only`.
+- In a fresh JVM (`clojure -M:test`), a git-archive snapshot of HEAD
+  `ed2e1a6b6` with `reference-code` linked required `seon.cluster.boot`,
+  `seon.error.refusal-test` and `seon.ai` and printed `:head-loaded` (20 s
+  wall; DEFECT >10 s, cold source load, same class as above).
+- `rdiag-probe.clj` reran on that HEAD with the same two-link and root-frame
+  results (load 14.1 s).
+- The snapshot is deleted.
 
 RESET NEEDED: no.
