@@ -1175,17 +1175,59 @@
                    (set attributes)])))
         (::analyzer/var-definitions analysis)))
 
+(defn- invoked-attributes
+  "Every attribute an analyzed definition declares it invokes."
+  {:malli/schema [:=> [:cat :map] [:set :qualified-keyword]]}
+  [analysis]
+  (into #{} (mapcat val) (invocations-by-definition analysis)))
+
+(defn- population-targets
+  "Declared targets of `attributes` in `projection`'s declaration population.
+
+  One walk of the population, and none when no attribute is invoked."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:set :qualified-keyword]]
+                  [:map-of :qualified-keyword [:set :qualified-symbol]]]}
+  [projection attributes]
+  (if (empty? attributes)
+    {}
+    (declared-function-targets attributes (vals (:seon.schema.projection/forms projection))
+                               qualified-symbol?)))
+
+(defn- program-targets
+  "The population's declared targets that name a function of the program.
+
+  The program is `functions` (the analyzed batch and what it already knows)
+  plus every definition `database` holds: an invoker's targets live in the
+  whole declaration population, never only in the files analyzed with it."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/database-value]
+                       [:map-of :qualified-keyword [:set :qualified-symbol]]
+                       [:set :qualified-symbol]]
+                  [:map-of :qualified-keyword [:set :qualified-symbol]]]}
+  [database targets functions]
+  (let [candidates (vec (remove functions (into #{} (mapcat val) targets)))
+        known (if (and database (seq candidates))
+                (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+                        :where [_ :seon.fn/sym ?symbol]]
+                      database candidates)
+                [])
+        _ (when (map? known)
+            (throw (ex-info (:seon.error/message known) known)))
+        program (into functions known)]
+    (into {} (keep (fn [[attribute symbols]]
+                     (when-let [kept (seq (filter program symbols))]
+                       [attribute (set kept)])))
+          targets)))
+
 (defn- analysis-rows-by-file
-  "Rows by file, with source-observed writes independent of schema membership."
-  [analysis first-party-functions contexts projection]
-  (let [forms (:seon.schema.projection/forms projection)
-        used-keywords (keywords-by-holder analysis)
+  "Rows by file, with source-observed writes independent of schema membership.
+
+  `schema-targets` are the declaration population's targets of the invoked
+  attributes, already restricted to program functions (`program-targets`)."
+  [analysis first-party-functions contexts schema-targets]
+  (let [used-keywords (keywords-by-holder analysis)
         host-bound (host-bound-callers analysis)
         invocations (invocations-by-definition analysis)
         invoked-attributes (into #{} (mapcat val) invocations)
-        schema-targets (declared-function-targets
-                        invoked-attributes (vals forms)
-                        first-party-functions)
         declared-calls
         (reduce-kv
          (fn [calls filename context]
@@ -1267,10 +1309,15 @@
         [first-row last-row] (first spans)
         functions (into (first-party-function-symbols analysis)
                         (map :seon.fn/sym) function-rows)
+        submitted (source-analysis analysis first-row last-row)
         rows (analysis-rows-by-file
-              (source-analysis analysis first-row last-row)
+              submitted
               functions {"<stdin>" (text-context text)}
-              (db/carried-projection database))]
+              (program-targets database
+                               (population-targets
+                                (db/carried-projection database)
+                                (invoked-attributes submitted))
+                               functions))]
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
@@ -2197,7 +2244,13 @@
                   (containing-root directory (or roots source-roots) file)
                   (get contexts canonical-path)
                   (get (analysis-rows-by-file analysis first-party-functions
-                                              contexts projection)
+                                              contexts
+                                              (program-targets
+                                               nil
+                                               (population-targets
+                                                projection
+                                                (invoked-attributes analysis))
+                                               first-party-functions))
                        canonical-path
                        [])
                   findings)))))
@@ -2233,10 +2286,18 @@
                    [:=> [:cat :map :seon.fn/roots :string [:vector :string]
                          [:or :nil :seon.db/database-value] [:or :nil :string]
                          [:maybe [:map-of :string :string]]]
+                    [:vector :seon.fn.file/artifact]]
+                   [:=> [:cat :map :seon.fn/roots :string [:vector :string]
+                         [:or :nil :seon.db/database-value] [:or :nil :string]
+                         [:maybe [:map-of :string :string]] [:set :qualified-symbol]]
                     [:vector :seon.fn.file/artifact]]]}
   ([projection roots directory paths database cache-root]
    (analyzed-artifacts projection roots directory paths database cache-root nil))
   ([projection roots directory paths database cache-root captured]
+   (analyzed-artifacts projection roots directory paths database cache-root captured #{}))
+  ;; `seed` names the functions an earlier batch of the SAME population
+  ;; defines: definitions the previous database does not hold yet.
+  ([projection roots directory paths database cache-root captured seed]
   (if (empty? paths)
     []
     (let [forms (:seon.schema.projection/forms projection)
@@ -2253,23 +2314,23 @@
                                (:children (kondo.utils/parse-string-all (:text %))))
                          (vals contexts))
           schema-values (keep forms (into #{} (mapcat val) (keywords-by-holder analysis)))
-          ;; An invoker's declared targets live in the WHOLE declaration
-          ;; population, not in its own file: ask the database for them too,
-          ;; or a partial analysis keeps only the targets its batch defines.
-          declared-targets (mapcat val (declared-function-targets
-                                        (into #{} (mapcat val) (invocations-by-definition analysis))
-                                        (vals forms) qualified-symbol?))
-          mentioned (into (set declared-targets) (filter qualified-symbol?)
+          mentioned (into #{} (filter qualified-symbol?)
                           (mapcat #(tree-seq coll? seq %) (concat values schema-values)))
           known (when database
                   (db/q '[:find [?symbol ...] :in $ [?symbol ...]
                           :where [_ :seon.fn/sym ?symbol]]
                         database (vec (into mentioned (keep usage-symbol (::analyzer/var-usages analysis))))))
           _ (when (:seon.error/at known) (throw (ex-info (:seon.error/message known) known)))
-          functions (into (set known) (first-party-function-symbols analysis))
+          functions (-> (set known)
+                        (into (first-party-function-symbols analysis))
+                        (into seed))
           _ (assert-clean-analysis! analysis functions)
           findings (group-by ::analyzer/filename (publication-findings analysis functions))
-          rows (analysis-rows-by-file analysis functions contexts projection)
+          rows (analysis-rows-by-file analysis functions contexts
+                                      (program-targets
+                                       database
+                                       (population-targets projection (invoked-attributes analysis))
+                                       functions))
           row-shapes (program/shapes-in projection)]
       (mapv (fn [file]
               (let [path (.getCanonicalPath ^java.io.File file)]
@@ -2357,6 +2418,72 @@
       (throw (ex-info "Publication could not read the removed definitions' callers." paths)))
     (vec (sort (remove selected paths)))))
 
+(defn- invoker-paths
+  "Files of stored invokers whose declared targets differ between populations.
+
+  An invoker's edges derive from the declaration population, so a schema
+  change that adds, retargets or removes a target under an invoked attribute
+  changes the invoker's edges although its own file did not change."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       :seon.schema/projection]
+                  [:vector :string]]}
+  [database before after]
+  (if (identical? (:seon.schema.projection/forms before)
+                  (:seon.schema.projection/forms after))
+    []
+    (let [attributes (db/q '[:find [?attribute ...] :where [_ :seon.fn/invokes ?attribute]]
+                           database)
+          _ (when (map? attributes)
+              (throw (ex-info "Publication could not read the stored invocation attributes." attributes)))
+          attributes (set attributes)
+          old (population-targets before attributes)
+          new (population-targets after attributes)
+          changed (filterv #(not= (get old %) (get new %)) attributes)
+          paths (if (seq changed)
+                  (db/q '[:find [?path ...]
+                          :in $ [?attribute ...]
+                          :where
+                          [?invoker :seon.fn/invokes ?attribute]
+                          [?invoker :seon.fn/file ?file]
+                          [?file :seon.fn.file/relative-path ?path]]
+                        database changed)
+                  [])]
+      (when (map? paths)
+        (throw (ex-info "Publication could not read the changed invokers' files." paths)))
+      (vec paths))))
+
+(defn- dependent-paths
+  "Unselected files whose stored edges the selected change invalidates.
+
+  The callers of `removed` definitions and the invokers of attributes whose
+  declared targets changed between the `before` and `after` populations.
+  Analysis re-analyzes exactly these; `index!` re-derives them and reconciles
+  exactly these, so a supplied file row alone never widens a reconciliation."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       :seon.schema/projection [:set :qualified-symbol] [:set :string]]
+                  [:vector :string]]}
+  [database before after removed selected]
+  (->> (concat (removed-definition-caller-paths database removed selected)
+               (invoker-paths database before after))
+       (remove selected)
+       distinct
+       sort
+       vec))
+
+(defn- analysis-projection
+  "The declaration world one analysis of `selected` reads; `index!` asks the same."
+  {:malli/schema [:=> [:cat :seon.fn/index-request [:or :nil :seon.schema/projection]
+                       [:or :nil [:set :string]]]
+                  :seon.schema/projection]}
+  [request prior-projection selected]
+  (let [schema-change? (or (nil? prior-projection)
+                           (some #(str/starts-with? % "resources/seon/schemas/") selected))]
+    (or (:seon.schema/projection request)
+        (when-not schema-change? prior-projection)
+        (schema/build-projection (if schema-change?
+                                   (declaration-forms request)
+                                   (:seon.schema.projection/forms prior-projection))))))
+
 (defn- analyzed-files
   "Analyze selected files; the database supplies invalidation and removed declarations."
   {:malli/schema [:=> [:cat :seon.fn/index-request] [:vector :seon.fn.file/artifact]]}
@@ -2374,13 +2501,7 @@
                                (filter #(containing-root directory roots %))) (sort selected))
                 (source-files directory roots))
         prior-projection (when database (db/carried-projection database))
-        schema-change? (or (nil? database)
-                           (some #(str/starts-with? % "resources/seon/schemas/") selected))
-        forms (if schema-change? (declaration-forms request)
-                  (:seon.schema.projection/forms prior-projection))
-        projection (or (:seon.schema/projection request)
-                       (when-not schema-change? prior-projection)
-                       (schema/build-projection forms))
+        projection (analysis-projection request prior-projection (some-> selected set))
         cache-root (or (::analyzer/cache-root request)
                        (str (io/file directory analyzer/config-directory ".cache")))
         previous (if (and database selected)
@@ -2392,19 +2513,21 @@
                      (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
         removed (set/difference (into #{} (keep :seon.fn/sym) previous)
                                (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))
-        ;; A removed definition's edges live on its CALLERS, and a caller's
-        ;; edges derive from more than its own file (an invoker's declared
-        ;; targets come from the whole declaration population). Recompute the
-        ;; stored callers outside the selection so the deletion guard judges
+        ;; A removed definition's edges live on its CALLERS, and an invoker's
+        ;; edges derive from the whole declaration population. Recompute the
+        ;; dependent files outside the selection so the deletion guard judges
         ;; their current edges: a caller whose source still names the removed
-        ;; definition keeps the edge and the guard refuses by name.
-        callers (if (and database selected (seq removed))
-                  (removed-definition-caller-paths database removed (set selected))
-                  [])]
+        ;; definition keeps the edge and the guard refuses by name. The batch
+        ;; above seeds their first-party set, so a replacement it introduces
+        ;; (absent from the previous database) keeps its new edge.
+        dependents (if (and database selected)
+                     (dependent-paths database prior-projection projection removed (set selected))
+                     [])]
     (assert-capability-contracts!
      (into artifacts
            (analyzed-artifacts projection roots directory
-                               (mapv #(fs/absolute-path directory %) callers) database cache-root nil))
+                               (mapv #(fs/absolute-path directory %) dependents) database cache-root nil
+                               (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts)))
      database removed)))
 
 (defn analyze-rows
@@ -3335,14 +3458,32 @@
            :seon.fn.manifest/declaration-digests schema-digests)))
 
 (defn- reconciled-paths
-  "Selected paths plus every file whose rows the request supplies.
+  "Selected paths plus the dependent files this population must reconcile.
 
-  Analysis may add unselected files (the callers of a removed definition);
-  a file whose rows are supplied is reconciled exactly like a selected one."
+  Derived here, at the reconciliation authority, from the previous database,
+  the selection and the supplied rows' definitions (`dependent-paths`), never
+  from which file rows happen to be supplied. A dependent file the rows do
+  not cover refuses by name instead of keeping its stale edges."
   {:malli/schema [:=> [:cat :seon.fn/index-request] [:or :nil [:set :string]]]}
-  [request]
-  (when-let [paths (:seon.fn/changed-paths request)]
-    (into (set paths) (keep :seon.fn.file/relative-path) (:seon.program/rows request))))
+  [{database :seon.source/previous-database supplied :seon.program/rows :as request}]
+  (when-let [paths (some-> (:seon.fn/changed-paths request) set)]
+    (let [identities (file-identities database (vec paths) :seon.fn/file)
+          removed (set/difference (into #{} (keep (fn [[attribute value]]
+                                                    (when (= :seon.fn/sym attribute) value)))
+                                        identities)
+                                  (into #{} (keep :seon.fn/sym) supplied))
+          prior (db/carried-projection database)
+          dependents (dependent-paths database prior (analysis-projection request prior paths)
+                                      removed paths)
+          covered (into #{} (keep :seon.fn.file/relative-path) supplied)
+          missing (vec (remove covered dependents))]
+      (when (seq missing)
+        (throw (ex-info (str "Program population omits the analysis of dependent files: "
+                             (pr-str missing))
+                        {:seon.fn/index-refused true
+                         :seon.fn/dependent-paths dependents
+                         :seon.fn/missing-paths missing})))
+      (into paths dependents))))
 
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
@@ -3406,10 +3547,12 @@
        (throw (ex-info "Program indexing requires a fresh source scratch branch."
                        {::existing-program-entity existing :seon.fn/index-refused true})))
      (if previous-database
-       (let [previous-identities
+       (let [reconciled (when-not (:seon.reconcile/adopt-identities request)
+                          (reconciled-paths request))
+             previous-identities
              (if-let [identities (:seon.reconcile/adopt-identities request)]
                (vec identities)
-               (if-let [paths (reconciled-paths request)]
+               (if-let [paths reconciled]
                (let [surviving (into #{} (map program/row-identity) (:seon.program/rows request))]
                  (into (vec (map #(vector :seon.schema/key %) (changed-schema-keys request)))
                        (remove surviving)
@@ -3462,7 +3605,7 @@
              changed-identities (require-committed! (report-identities report)
                                                      :seon.fn/population)
              caller-paths (when (and (not source-database) (:seon.fn/changed-paths request))
-                            (set/difference (caller-files report) (reconciled-paths request)))
+                            (set/difference (caller-files report) reconciled))
              findings-report
              (when (seq caller-paths)
                (report-index-progress! progress! (str "analysis callers: " (count caller-paths) " files"))
