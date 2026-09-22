@@ -211,10 +211,9 @@
             (refuse! ::source-absent "The published source commit is unavailable." published))
           (try
             (let [identities (fn/report-identities
-                              {:db-before before :db-after after
-                               :tx-data (vec (d/datoms (d/since (d/history after) (db/basis-t before))
-                                                      :eavt))
-                               :tempids {} :tx-meta {}})]
+                              before after
+                              (vec (d/datoms (d/since (d/history after) (db/basis-t before))
+                                             :eavt)))]
               (when (:seon.error/at identities)
                 (refuse! ::publish-readback-failed "Publication changes could not be read." identities))
               identities)

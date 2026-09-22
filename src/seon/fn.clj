@@ -3091,11 +3091,18 @@
                    database rows previous-identities))
 
 (defn report-identities
-  "Identities touched by a Datahike report, including retracted identities."
+  "Identities touched by a writer report or datoms between two database values.
+  The explicit arity also accepts composed report datoms and retained history."
   {:malli/schema
-   [:=> [:cat :seon.db/transaction-report]
-    [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]}
-  [{before :db-before after :db-after datoms :tx-data}]
+   [:function
+    [:=> [:cat :seon.db/transaction-report]
+     [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]
+    [:=> [:cat :seon.db/database-value :seon.db/database-value
+          [:vector :seon.db/transaction-report-datom]]
+     [:or :seon.reconcile/adopt-identities :seon.db/invalid-read-error]]]}
+  ([{before :db-before after :db-after datoms :tx-data}]
+   (report-identities before after datoms))
+  ([before after datoms]
   (let [entities (into #{} (map :e) datoms)
         identities (fn [database]
                      (let [rows (db/pull-many database
@@ -3108,7 +3115,7 @@
         current (identities after)]
     (or (when (:seon.db/invalid-read previous) previous)
         (when (:seon.db/invalid-read current) current)
-        (into (set previous) current))))
+        (into (set previous) current)))))
 
 (defn published-index-rows
   "Read compiled rows with portable program refs and complete owned components."

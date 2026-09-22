@@ -36,15 +36,13 @@
          (is (contains? identities [:seon.fn/sym changed-symbol]))
          (is (empty? (seon.fn/published-index-rows (:db-after removed)
                                                   [[:seon.fn/sym changed-symbol]])))
-         (let [history-report {:db-before (:db-before report)
-                               :db-after (:db-after removed)
-                               :tx-data (vec (d/datoms
-                                              (d/since (d/history (:db-after removed))
-                                                       (db/basis-t (:db-before report))) :eavt))
-                               :tempids {}}]
+         (let [history-datoms (vec (d/datoms
+                                    (d/since (d/history (:db-after removed))
+                                             (db/basis-t (:db-before report))) :eavt))]
            (is (= #{[:seon.fn/sym changed-symbol]}
                   (into #{} (filter #(= :seon.fn/sym (first %)))
-                        (seon.fn/report-identities history-report)))
+                        (seon.fn/report-identities (:db-before report) (:db-after removed)
+                                                   history-datoms)))
                "catch-up history includes retractions across both transactions")))))))
 
 (deftest ^{:seon.test/long "The first canonical fixture acquisition plus namespace-file analysis measured 12.0 s; fixture projection acquisition remains owned by the test-system lane."
