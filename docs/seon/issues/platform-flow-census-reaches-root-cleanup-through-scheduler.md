@@ -64,3 +64,11 @@ not populate a published root. This is not a full platform green, nor a verified
 claim that the ten source tests were already broken before B1b. Their declaration
 and selection policy remain the orchestrator's integration decision; B1b did not
 change their metadata or weaken the guard.
+
+## Root checkpoint after B1b replacement
+
+The actual `bin/test --platform` invocation selected92 eligible members and exited1
+before execution on six source-publication tests. The earlier ten-name probe had
+a different long-test eligibility scope. Exact names and live-runtime verification
+are in [the integration note](../../prds/agent-platform/landing/b1b-integration-2026-09-21.md).
+The guard remains intact; no platform green is claimed.

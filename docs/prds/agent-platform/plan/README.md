@@ -363,8 +363,9 @@ symlink, not a second instruction authority. Testing and REPL guidance use §6's
 cut-level verification policy; helper details live in the skill rather than being
 duplicated in the root file. The dropped-rule review is complete; restored evergreen
 rules remain in the root because agents may not load the specialized skills.
-At B1b integration, delete its temporary breakage-exception sentence from root
-`AGENTS.md`; until then the exception remains scoped to that unfinished integration.
+The development root now runs the new operator; the temporary breakage exception
+has been removed from root `AGENTS.md`. Remaining platform-admission and app-connection
+verification limits are recorded in the B1b integration landing note.
 Each later cut updates the affected instructions with its implementation; B4's
 runner instructions activate only when that runner and its callers actually land.
 Running lanes receive the changed guidance explicitly; new lanes read it at launch.

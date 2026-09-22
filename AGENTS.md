@@ -39,8 +39,8 @@ During the refactor, [plan §6](docs/prds/agent-platform/plan/README.md#6-implem
 owns verification cadence: focused installed REPL/test requests within a cut;
 platform and affected integration once at its completion. No suite per edit or
 commit. A deleted mechanism's tests leave with it; replacement behavior tests land
-by the cut's end. Normally HEAD loads and the named REPL probe answers; B1b has the
-owner's explicit temporary boot/MCP/REPL breakage exception. Report its limits.
+by the cut's end. HEAD loads and the named REPL probe answers. Report the exact
+verification boundary; unavailable evidence is not a pass.
 The [testing skill](.agents/skills/clojure-testing/SKILL.md) distinguishes installed
 commands and enforcement from B4 targets. Never pretend a planned API is installed.
 Gate inputs are DECLARED (`seon.test.cache/input-roots`): a documentation edit never
