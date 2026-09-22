@@ -489,3 +489,12 @@ The concurrently edited production wrapper was read only. Unrelated sibling-file
 changes were excluded by staging only this assertion against HEAD. Changed files
 are the two test files and this note; no production or plan file was edited.
 The post-commit prescribed HEAD-load evidence is `tmp/b3-followup-head-load.log`.
+
+Implementation commit `2add67c85` passed the prescribed twelve-namespace require,
+exit 0, from a plain archive of that commit with the existing dependency checkout
+linked. This excluded all concurrent source edits. An initial archive setup omitted
+the dependency link and failed classpath construction; after linking dependencies,
+the actual namespace load passed. No worktree or default operation was used.
+The load shell exited; its owned archive was removed after checking process arguments
+and unlinking the dependency symlink. The env test shell also exited. This final
+note changes no executable input. The sibling namespace was not separately run.
