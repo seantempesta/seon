@@ -438,3 +438,32 @@ Changed Clojure files parse, `git diff --check` passes, and the protected discov
 owner and its caller lines have no diff. No input/output validation was relaxed
 in response to a red test. The two unrelated dirty documents remain outside every
 commit. The plan rewrite was committed by its owner, not staged by this lane.
+
+### Final committed HEAD and cleanup
+
+`9bf22ecd9` commits the constructor, facade retirement, all remaining caller and
+reader changes, the await request resource and the remaining test conversions.
+Its clean archived HEAD passed the prescribed require, exit **0**:
+`tmp/b3-head-constructor-load.log`. Thus each of the three implementation commits
+has a successful HEAD load, independent of uncommitted source.
+
+The three implementation commits touch **100 distinct files**, exactly the list
+above: 2,273 inserted lines and 4,249 removed lines, net **1,976 lines removed**
+(including the landing note as it stood in the third commit).
+
+| File | Lines before → after | Bytes before → after |
+|---|---:|---:|
+| Constructor/reader leaf | 132 → 85 | 7,875 → 4,607 |
+| Error owner | 2,658 → 2,638 | 145,973 → 145,085 |
+| Constructor/reader tests | 90 → 153 | 4,582 → 8,181 |
+| Error tests | 1,437 → 1,251 | 81,851 → 70,693 |
+
+All owned test/load shells have exited. The three plain archive directories were
+removed only after their JVM exits and a process-argument holder check; dependency
+symlinks were unlinked before removal, leaving their targets intact. Run logs and
+probe evidence remain in `tmp/`. No uncertain shared test snapshot was swept.
+Final MCP readiness still reports the same default process, no missing layers,
+all procs replying and 15 errored receipts. No lifecycle or adoption action occurred.
+
+The final evidence-only commit changes no executable input. Its post-commit load
+log is `tmp/b3-head-evidence-load.log`; the final response reports its exit status.
