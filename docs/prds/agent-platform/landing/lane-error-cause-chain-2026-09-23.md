@@ -167,4 +167,95 @@ here for the publication-path owner.
   results (load 14.1 s).
 - The snapshot is deleted.
 
+## Follow-up: F0 callers, hook, and census R-PRED
+
+**F0 callers:**
+
+- `4bc446114`: `test/seon/ai_test.clj`, granted. Three assertions now read
+  `:seon.error/chain`. Armed in-process run on a HEAD snapshot: 3 tests,
+  17 passes, 0 failures.
+- `a11f6271d`: `bin/seon-hook`, granted. `throwable-message` is retired. The
+  five catches now use `failure-cause`, which gives the root message (or the
+  root's class) and the whole `seon.error.refusal/chain`. The chain goes into the
+  reconstruction map as `:seon.hook.reconstruction/chain` and into each log line.
+  clj-kondo is clean, and a bb run returns both links.
+
+**R-PRED** (granted files only; ruling: catch only the dependency's declared "not
+parseable" exception):
+
+- `4997f3623`: EDN readers catch only clojure.edn's `RuntimeException`
+  (`reference-code/clojure/src/jvm/clojure/lang/EdnReader.java:130`, `:174-177`,
+  pin `b18d3adc5`). A JVM probe showed that EOF, bad tags, duplicate keys, bad
+  numbers and `#object` all throw RuntimeException subclasses. The sites:
+  `blob.clj` store-faithful-edn (`pr-str` also moved out of the try),
+  `bootstrap.clj` calls-symbol? and contains-history-query?, `issue.clj`
+  qualified-token, `program.cljc` edn-round-trip-symbol? (the CLJS side catches
+  ExceptionInfo), `render/data.clj` parse-cursor, and `render/lint.clj`
+  reads-as-collection? (its StackOverflowError catch is removed).
+- `ab389420b`:
+  - `schedule.clj` valid-cron?: cron-utils 9.2.1 `IllegalArgumentException`.
+    The jar is not vendored; the class was observed at the REPL for "bad",
+    "* * *", "" and "99 * * * *".
+  - `schedule.clj` valid-timezone?: JDK `DateTimeException` (observed:
+    ZoneRulesException and DateTimeException). Both predicates now return a
+    boolean for non-strings, where before they returned nil.
+  - `edit.clj` location-sexpr: asks rewrite-clj `sexpr-able?`
+    (`reference-code/rewrite-clj/src/rewrite_clj/node/protocols.cljc:34`,
+    `reader_macro.cljc:20`, pin `60782e501`), so nothing is caught.
+  - `schema.clj` malli-form?: clojure.edn RuntimeException, Malli `malli.core`
+    `-exception` (`core.cljc:203`), and the owner's own declared
+    `:seon.schema/unresolved-predicate`. Without that last one,
+    `schema-test/canonical-definition-keeps-admitted-predicate-symbols` errored.
+  - `schema.clj` pull-selector?: requires a sequential selector and catches only
+    datalog-parser 0.2.37's `{:error :parser/pull}` ex-info (`pull.cljc:233`,
+    reached via `reference-code/datahike/src/datahike/pull_api.cljc:58`, pin
+    `fbd1ad2d1`).
+  - `schema.clj` function-accepts-in?, function-returns-in? and
+    function-accepts-and-returns-in?: nothing is parsed, so the try is deleted.
+- `72fa85fc3`:
+  - `cluster/process.clj` live? and the hook's process-alive?: nothing is
+    parsed, so the try is deleted.
+  - `cluster/store.clj` complete-store?: the try is deleted. konserve writes by
+    ATOMIC_MOVE of a `.new` file (`reference-code/konserve/src/konserve/filestore.clj:307`,
+    `:901`, pin `8cd9144f4`), so a read failure is damage.
+  - `schema/datahike.clj` reader-round-trips? catches only the EDN
+    RuntimeException. The new `declared-storable?` replaces three
+    `(catch ExceptionInfo _ false)` sites and is false only for
+    `malli->datahike-attr-in`'s own refusals naming the attribute under `::attr`.
+- `render/web.clj` needed nothing: its R-PRED sites (`:167`, `:2932`) were
+  already narrowed by `9c0ecae86`.
+- Not granted, left for holders: `db.clj:3752` agent-provenance? (writer-cost),
+  `test/accretion.clj:39`/`:51` (realities-commit-5), `turn.clj:3092`
+  (schema-changes-in-place), `script/seon/dev/docstring.clj:164`
+  (nuke-is-total).
+
+**Proof:**
+
+- Armed in-process runs on two git-archive snapshots (HEAD vs HEAD plus the R-PRED
+  files; `reference-code` and the published bases linked). The script is
+  `tmp/error-cause-chain/armed-ns-run.clj`. It covered 11 namespaces: blob,
+  bootstrap, edit, issue, program, schedule, schema, render.data, render.lint,
+  schema.datahike and cluster.store.
+- Baseline: 166 tests, with 85 failing or erroring tests that are identical in
+  both trees (the fixture harness needs `seon.test/run`).
+- Changed tree: the same 85, plus one new error, which is now fixed as described
+  above. A `seon.schema-test` rerun matches the baseline exactly (39 tests, 378
+  passes).
+- HEAD `72fa85fc3` loads in a fresh JVM (23 s wall; DEFECT >10 s, cold source
+  load).
+- This is not a recorded test run: `bin/test` is being rewritten by
+  realities-commit-5.
+
+**Timings:**
+
+| operation | wall |
+|---|---|
+| baseline armed run, 11 namespaces | 194 s (tests 156 s) |
+| changed-tree armed run | 156 s (tests 131 s) |
+| schema-test rerun | 47 s |
+| each fresh HEAD-snapshot JVM | 20-33 s |
+
+All of these are over 10 s, the same cold-JVM class. The 131-156 s of test time
+is dominated by the fixture-harness errors.
+
 RESET NEEDED: no.
