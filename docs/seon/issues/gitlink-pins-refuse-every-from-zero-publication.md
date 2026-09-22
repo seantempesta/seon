@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocking
 created: 2026-09-23
 tags: [issue, publication, boot, nuke, platform]
@@ -38,3 +38,7 @@ it was restored from `bc8a1fa68` before that commit.
 `src/seon/test/cache.clj` (the realities / 1.3d lane). Either hash the pin again or
 declare the directory-input digest separately from the file digest; the declared
 64-character file digest is the producer's schema and stays.
+
+## Closed 2026-09-23 by f8af5d92e
+
+`gitlink-digests` again hashes each pin into the declared 64-character `:seon.fn.file/digest`. The regression `test/seon/test/gitlink_digest_test.clj` fails with the 678009fcd line (2 fail) and passes with the fix (4 pass), on a git archive of HEAD. The cause: the commit-4 scratch proof copied frozen files without `cache.clj`, so the committed line was never booted. The lane now checks that its frozen proof source equals every committed path. That run took ~72 s wall per JVM, a defect covered by the focused-test-JVM issue.
