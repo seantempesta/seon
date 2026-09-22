@@ -48,11 +48,14 @@
       :init (operator-boot-bound-ms manifest)
       (operator-silence-backstop-ms manifest))))
 
-(defn diagnostic [message evidence cause]
+(defn diagnostic
+  {:malli/schema [:=> [:cat :string :map :seon.operator/disposition] :seon.operator/operation-error]}
+  [message evidence cause]
   {:seon.error/at (java.util.Date.)
     :seon.error/layer :seon.operator/operation
     :seon.error/operation 'seon.operator/request!
     :seon.error/message message
+    :seon.operator/disposition cause
     :seon.error/member :seon.operator/request
     :seon.error/expected :completed-operation
     :seon.error/offending evidence

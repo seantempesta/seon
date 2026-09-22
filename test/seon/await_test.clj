@@ -71,6 +71,8 @@
               request))]
         (is (<= 20 (:seon.await/elapsed-ms result)))
         (is (= 20 (:seon.await/config-value result)))
+        (is (nil? (:seon.await/closed-operation result))
+            "expiry is not a channel closing before completion")
         (is (= label
                (get-in result
                        [:seon.error/data

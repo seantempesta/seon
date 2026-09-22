@@ -7,7 +7,6 @@
             [seon.ai :as ai]
             [seon.cluster.message :as message]
             [seon.db :as db]
-            [seon.error.refusal :as error]
             [seon.id :as id]
             [seon.repl :as repl]
             [malli.core :as m]

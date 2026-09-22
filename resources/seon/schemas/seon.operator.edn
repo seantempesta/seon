@@ -1,4 +1,9 @@
-#:seon.operator{:census
+#:seon.operator{:disposition [:enum :refused :client-failed :argv-failed],
+                :operation-error
+                [:and :seon.error/base
+                 [:map {:seon.db/attributes true}
+                  [:seon.operator/disposition :seon.operator/disposition]]],
+                :census
                 [:map
                  [:seon.operator/advertisements
                   :seon.operator/advertisements]

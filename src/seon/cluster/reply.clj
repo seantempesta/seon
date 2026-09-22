@@ -46,11 +46,11 @@
 (defn- refused
   "Build the reply refusal with its base observation and authored evidence."
   {:malli/schema
-   [:=> [:cat :qualified-keyword :map :string :map]
+   [:=> [:cat :map :string :map]
     [:or :seon.cluster.reply/no-forms-error
      :seon.cluster.reply/unreadable-error
      :seon.cluster.reply/refused-tag-error]]}
-  [kind marker message data]
+  [marker message data]
   (merge marker
           {::text (::text data)
            :seon.error/at (java.util.Date.)
@@ -350,7 +350,7 @@
   ([text namespace-name max-source]
    (let [admission-events (parsed-events text namespace-name max-source)]
      (if (some? (:seon.sci.reader/source-bound admission-events))
-       (refused ::unreadable {::unreadable text}
+       (refused {::unreadable text}
                 (:seon.error/message admission-events)
                 (merge {::text text}
                        (:seon.error/data admission-events)))
@@ -371,13 +371,13 @@
              (let [message (:seon.error/message events)
                    tag (:seon.sci.reader/refused-token events)]
                (if tag
-                 (refused ::refused-tag
+                 (refused
                           (cond-> {} tag (assoc ::refused-tag tag))
                           message {::text text})
                  (if-let [{recovered-source :source line :line}
                           (comment-prose-failure source events recovered-lines)]
                    (recur recovered-source (conj recovered-lines line))
-                   (refused ::unreadable {::unreadable text} message
+                   (refused {::unreadable text} message
                             {::text text}))))
              :else
              (let [without-markers (strip-prompt-markers source events)]
@@ -386,7 +386,7 @@
                  (let [forms (plan-sources source events)]
                    (if (seq forms)
                      (vec forms)
-                     (refused ::no-forms {::no-forms true}
+                     (refused {::no-forms true}
                               (if (empty? text)
                                 "Your reply began with a response; send a form."
                                 "Your reply had no form; only comments/prose. Send a form.")

@@ -4,7 +4,7 @@
   Open means no closed-tx. Boot closes unfinished work; execution never
   resumes across a JVM restart. The agent graph advances open, call,
   evaluations, and close from database facts and rewakes only for more work."
-  (:require [seon.error.refusal]
+  (:require
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
