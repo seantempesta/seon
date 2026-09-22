@@ -936,9 +936,10 @@
       (is (= 12 (get-in truncation [:seon.error/data :seon.ai/text-received])))
       (is (= false (get-in truncation
                            [:seon.error/data :seon.ai/thread-interrupted?])))
-      (is (= ["java.io.IOException: closed"
-              "java.io.IOException: connection reset by peer"]
-             (get-in truncation [:seon.error/data :seon.ai/cause-chain]))
+      (is (= [["java.io.IOException" "closed"]
+              ["java.io.IOException" "connection reset by peer"]]
+             (mapv (juxt :seon.error/throwable-class :seon.error/message)
+                   (:seon.error/chain truncation)))
           "the JDK's real cause is recorded, not just the word closed")
       (is (= 'seon.ai/truncation (:seon.error/operation truncation))
           "The observation names the function that read the ended stream."))))
@@ -948,9 +949,10 @@
     (is ((schema/projection-validator (schema/handed-projection) :seon.ai/stream-truncated-error) completion)
         "an early close is distinguished from a body that could not be parsed")
     (is (zero? (get-in completion [:seon.error/data :seon.ai/text-received])))
-    (is (= ["java.io.IOException: closed"
-            "java.io.IOException: connection reset by peer"]
-           (get-in completion [:seon.error/data :seon.ai/cause-chain])))
+    (is (= [["java.io.IOException" "closed"]
+            ["java.io.IOException" "connection reset by peer"]]
+           (mapv (juxt :seon.error/throwable-class :seon.error/message)
+                 (:seon.error/chain completion))))
     (is (not (str/includes? (:seon.error/message completion) "readable JSON"))
         "nothing blames the body for a transport that ended")))
 
@@ -1208,7 +1210,7 @@
         (is ((schema/projection-validator (schema/handed-projection) :seon.ai/stream-truncated-error) truncation))
         (is (pos? (get-in truncation
                           [:seon.error/data :seon.ai/text-received])))
-        (is (seq (get-in truncation [:seon.error/data :seon.ai/cause-chain]))
+        (is (seq (:seon.error/chain truncation))
             "the transport's own account of the ending is recorded"))
       (finally (.stop server 0)))))
 
