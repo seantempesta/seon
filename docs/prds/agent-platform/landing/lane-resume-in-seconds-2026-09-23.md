@@ -19,7 +19,7 @@ patches are under `tmp/ris-evidence/handoff/`.
 | commit | paths | what |
 |---|---|---|
 | `65bf137c4` | `src/seon/cluster/agent.clj`, `test/seon/cluster/release_context_test.clj` | `release-context!` attempts all three steps (connection release, branch unlink, context-state removal). It rethrows the first cause whole, with the later causes as suppressed (review P1-4). |
-| `dc89f1d8a` | `test/seon/cluster/release_context_test.clj` | The test's contract uses `:seon.error/throwable` in place of an anonymous `[:fn …]`, which from-zero publication refused (P0 from the orchestrator). |
+| `dc89f1d8a` | `test/seon/cluster/release_context_test.clj` | The test's contract uses `:seon.error/throwable` in place of an anonymous `[:fn …]`, which from-zero publication refused (P0 from the orchestrator). Proof: a from-zero publication and boot of a `git archive dc89f1d8a` that contains every committed path (`reference-code` linked, pins recorded from HEAD's tree), root `tmp/ris-head-root`, exited 0 with ready-ms 109,181 and wall 135,588 ms (over 10 s, the from-zero-boot issue class). |
 
 Proof for `65bf137c4`: the regression's scenarios were run live in the scratch JVM
 (`tmp/ris-evidence/release-probe.clj`) against both versions of `release-context!`.
@@ -250,6 +250,7 @@ The cause is written into
 | operation | wall ms | note |
 |---|---|---|
 | from-zero `start` of the working tree (setup attempt) | ~53,000 | exit 1: foreign schema hunk; **defect: 30 MB refusal, "expected a string, got a string"** |
+| from-zero `start`, archive `dc89f1d8a` (P0 proof) | **135,588** (ready 109,181) | **>10 s defect**; exit 0 |
 | from-zero `start`, archive `bc8a1fa68` (setup, once) | **118,457** (ready 93,723) | **>10 s defect**; the from-zero-boot issue class |
 | resume b1 (clean snapshot) | 36,584 (ready 15,091) | before |
 | resume b2 / b3 (instrumented) | 46,355 / 35,310 | b2 config apply took 15,697 ms once and did not recur (unexplained, load 11) |
