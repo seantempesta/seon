@@ -236,3 +236,23 @@ sole instance ends the process and a following `start` launches cold. Recovery u
   in 136 s (`tmp/prepare-head-base-2026-09-22e.log`). Cold gate running
   (`tmp/cold-gate-2026-09-22.log`). Lane `operator-client-defects` (sol low) on the two
   B1b client defects.
+
+## 2026-09-22 04:40 local — LIVE PROOF: the agent loop runs and no-forms replies settle
+
+On the fresh default (pid 28358, reset store) the root agent ran real provider turns
+on the Juniper messages: eight errored evaluations are durable facts
+(`seon.problems/errored-receipts`), including three "Your reply had no form; only
+comments/prose" settlements (turns `2bda1f1428b3`, `c7d30b1fa12a`, `add1da07b0d6`),
+plus ordinary agent mistakes ("Unable to resolve symbol", "cannot read uninstalled
+attribute :example/amount"). No new refusal in `seon.log` after the reset (the two
+lines at 08:50:58Z are the pre-reset half-landed config key); the parked count is
+unchanged. The class the kind cut exists for is closed live.
+
+Watch: the store grew 87 MB → 796 MB in the first five minutes with hook publication
+on and one lane editing; that is A2's retention/index-leaf seam (each publication
+rewrites 6.3 MB leaves), not a loop. Re-measure at the next check; pause publication
+again if it passes a few GB.
+
+Cold gate at `09e8ba533` refused selection: "requested external inputs differ from the
+published database" with no differing key named; lane `gate-input-mismatch` (sol
+medium) owns the diagnosis, the fix at the owner, and the evidence-naming refusal.
