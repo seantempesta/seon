@@ -1,6 +1,6 @@
 ---
 type: landing
-status: repair in progress; shared-file commits held
+status: clean boundary group landed; remaining repair groups held by foreign hunks
 created: 2026-09-22
 ---
 
@@ -59,10 +59,10 @@ In the forms below `disk-fn` is the local source-body reader in the saved probe;
 | F6 | `((disk-fn 'seon.schema "src/seon/schema.clj" 'render-contract-refusal!) {:seon.schema/key :seon.agent/id :seon.render/property :seon.render/ai :seon.render/function 'probe/render} {:seon.schema/render-contract nil :seon.schema/render-input nil :seon.schema/render-contract-cause :seon.schema/render-function-has-no-declared-contract})` said input nil did not accept the shape. Retain the closed two-value cause on the owning `:seon.schema/validation-refusal` in `seon.schema.edn`; branch the message. The owned cluster test checks both causes, messages, and the named schema. | Pending shared source/resource |
 | F7 | For `failure {:seon.db/attribute :seon.agent/id :seon.schema/form :seon.error/unknown}`, `(not (get (:seon.schema.projection/forms projection) (:seon.db/attribute failure)))` is false but `(= :seon.error/unknown (:seon.schema/form failure))` is true. Use the declared form check. Restore the temporal uninstalled-declaration assertion and add a write regression using a canonical immutable database with `:seon.message/content` removed from its schema and a row containing id/content. The current body returns unknown plus candidate `:seon.message/to` (166 ms bundle). | Pending database group |
 | F8 | `((disk-fn 'seon.cluster "src/seon/cluster.clj" 'source-change-phase) (ex-info "changed" {:seon.boot/offense {:seon.source/digest-before "c0"}}))` returns `:adoption`; the pre-constructor live Var returns nil. **The constructor cut changed behavior:** digest-change publication refusals now receive one retry. Add the missing `(is (= 2 @attempts))` after the adoption case. Phase-member producer edits are pending clarification of the explicitly restricted file/region ownership (analysis producer is `src/seon/fn.clj`, digest producer is outside `source-change-phase`). | Assertion pending cluster-test group |
-| F9 | `(mapv #(seon.cluster.boot/diagnostic "probe" {} %) [:refused :boot-failed :client-failed :argv-failed])` showed old retained causes; the disk constructor discarded them. Add the owning closed dispositions to new `seon.cluster.boot.edn` and existing `seon.operator.edn`; the actual boot callers also include non-edn-response and operation-failed. The disk operator diagnostic now preserves refused/client-failed/argv-failed. Delete reply's unused first argument and convert all four calls; local `(refused {:seon.cluster.reply/no-forms true} "probe" {:seon.cluster.reply/text ""})` preserves the marker. Boot assertions cover its four actual dispositions and named schema. | Operator/reply group; boot held |
+| F9 | `(mapv #(seon.cluster.boot/diagnostic "probe" {} %) [:refused :boot-failed :client-failed :argv-failed])` showed old retained causes; the disk constructor discarded them. Add the owning closed dispositions to new `seon.cluster.boot.edn` and existing `seon.operator.edn`; the actual boot callers also include non-edn-response and operation-failed. The disk operator diagnostic now preserves refused/client-failed/argv-failed. Delete reply's unused first argument and convert all four calls; local `(refused {:seon.cluster.reply/no-forms true} "probe" {:seon.cluster.reply/text ""})` preserves the marker. Boot assertions cover its four actual dispositions and named schema. | `59e9642b1`; boot held |
 | F10 | `(count (filter #(clojure.string/includes? % ":seon.error/base)") (clojure.string/split-lines (slurp "test/seon/db_test.clj"))))` found three weakened assertions. Replace them with the requested `:seon.db/error-result` / `:seon.db.read/error` checks and retain specific member/cause checks. No production union was widened to satisfy these assertions. | Pending database group |
-| F11 | `((disk-fn 'seon.await "src/seon/await.clj" 'diagnostic) {:seon.await/bound {:seon.await/config-attribute :seon.config.eval/time-limit-ms :seon.await/config-value 1} :seon.await/diagnostic {:seon.error/layer :runtime :seon.error/operation 'probe/await}} {:seon.await/elapsed-ms 1.0})` has elapsed time and no closed-operation. Restore explicit nil assertion for both future and promise expiry. | Boundary cleanup group |
-| F12 | Read-only form counted one `seon.error.refusal` occurrence in each of the seven named files; source search found no uses. Remove exactly those requires. | Issue/turn in boundary cleanup; other five held |
+| F11 | `((disk-fn 'seon.await "src/seon/await.clj" 'diagnostic) {:seon.await/bound {:seon.await/config-attribute :seon.config.eval/time-limit-ms :seon.await/config-value 1} :seon.await/diagnostic {:seon.error/layer :runtime :seon.error/operation 'probe/await}} {:seon.await/elapsed-ms 1.0})` has elapsed time and no closed-operation. Restore explicit nil assertion for both future and promise expiry. | `59e9642b1` |
+| F12 | Read-only form counted one `seon.error.refusal` occurrence in each of the seven named files; source search found no uses. Remove exactly those requires. | Issue/turn: `59e9642b1`; other five held |
 | F14 | `(= {:probe 1} (merge {:probe 1} {}))` is true. Remove the empty merge at the namespace-removal refusal. | Pending shared program source |
 
 ## Verification and foreign boundaries
@@ -93,3 +93,62 @@ Shared-file rule: before any commit, inspect `git diff -- src/seon/cluster.clj
 src/seon/cluster/boot.clj`. Both currently contain search-deletion hunks; neither
 will be committed by this lane while those remain. Other shared files likewise
 retain their foreign hunks. The two deliberately dirty documents are untouched.
+
+## Landed cleanup and final diagnostic evidence
+
+`59e9642b1` lands the operator disposition schema/caller, reply arity conversion,
+F11 expiry assertion, and F12's issue/turn require removals, with this note:
+7 files, 114 insertions, 10 deletions (including the initial note).
+Its clean archived HEAD passed exactly
+`clojure -M -e "(require 'seon.db 'seon.schema 'seon.cluster 'seon.cluster.boot)"`,
+exit 0: `tmp/constructor-repair/head-59e9642b1-load.log`.
+
+The isolated HEAD-plus-owned-hunks diagnostic completed with **5 tests,
+53 passing assertions, 0 failures, 0 errors**. It initialized the ordinary
+contract owner, then ran selected existing/new assertions for F1, F6, F8,
+F9 boot, and F11. Only the owned cluster forms were evaluated, bypassing the
+unrelated `error/properties` test caller; no fixture implementation was replaced.
+This is in-process diagnostic evidence, not admission/recording success.
+Exact driver: `tmp/constructor-repair/in-process.clj`; log:
+`tmp/constructor-repair/in-process-isolated-2.log`. An earlier attempt accidentally
+ran from the shared cwd and hit the foreign effect caller; only the run with
+explicit workdir `tmp/constructor-repair-wt` is the isolated evidence.
+
+Seven further assertions passed in 163 ms on the running JVM using the local
+source bodies: F1 preserved cause, F2 unowned-entity, F7 unknown form and missing
+key candidate, F6 missing-contract cause, F9 boot disposition and reply marker.
+Exact form: `tmp/constructor-repair/repl-assertions.clj`; fuller observation
+bundle: `tmp/constructor-repair/repl-detail.json`. They are read-only algorithm
+probes over the real immutable database, not transaction/adoption proof.
+
+Changed owned hunks pass `git diff --check`. Lint initially reported two
+unresolved Vars: the dependency constructor `parser.type/->Variable` and the
+unchanged cluster test's removed `error/properties`. Dependency cache refresh is
+recorded separately; the removed error Var remains a foreign test-load boundary.
+
+The remaining coherent groups cannot be committed while their schema/source
+files contain foreign hunks. In particular the uncommitted database source and
+assertions must land with the owned additions in `seon.db.edn`; that resource
+also has the error-schema and search-deletion lanes' union changes. Similarly
+`schema.clj` and `seon.schema.edn` have search-deletion hunks; `my/program.clj`
+has an error-schema observation conversion. Boot still has search proc-removal
+hunks. No such foreign hunk was staged or committed by this lane.
+
+The isolated arming receipt reported 1,690 registered/instrumented Vars,
+1,684 program-armable Vars, 108 program namespaces, mode `:panic`.
+Dependency cache refresh completed with the publication classpath and exit 0;
+`parser.type/->Variable` still receives the static warning, but the actual
+`datalog.parser.type/->Variable` resolves and returns a Variable for `?probe`
+at the JVM REPL (1 ms). An initial probe guessed the wrong namespace and failed;
+the source require supplied the corrected namespace. No correct reference was
+rewritten. `error/properties` is still the unrelated removed-Var caller.
+
+Final ownership check still shows foreign hunks in both cluster files and the
+shared domain resources. Under the assignment's stop boundary, the remaining
+coherent groups stay uncommitted. F8's phase-producer edits have not been made:
+the pending ownership question concerns `src/seon/fn.clj` and the digest producer
+outside the assigned `source-change-phase` region. The retry assertion itself
+is written and passed. Summary: `tmp/orchestrator/constructor-repair-summary.txt`.
+All owned test/load/cache-refresh shells exited. The owned worktree and archived
+HEAD copy are removed only after exact-path process-holder checks and after
+unlinking their dependency symlinks; logs and the owned patch are retained.
