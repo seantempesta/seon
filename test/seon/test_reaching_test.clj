@@ -68,9 +68,7 @@
         (is (:db/id (db/pull database [:db/id] [:seon.fn/sym "my.note/add!"])))
         (is (vector? actual))
         (is (= (set (functions/tests-reaching database "my.note/add!")) (set actual)))
-        (is (= :seon.test/unknown
-               (:seon.error/kind
-                (sut/reaching {:seon.db/db database
+        (is (string? (:seon.test/unknown (sut/reaching {:seon.db/db database
                                :seon.test/changed ['absent.function/no-row]}))))))))
 
 (defn- with-indexed-tests [connection namespace-name sources assertion]
@@ -235,7 +233,7 @@
                            [{:seon.cluster.eval/source source
                              :seon.cluster.eval/ns [:seon.ns/name namespace-name]
                              :seon.program/row (:seon.program/row evaluation)}])
-                row (when-not (:seon.error/kind analysis) (second (first analysis)))]
+                row (when (vector? analysis) (second (first analysis)))]
             (is (map? row) (pr-str evaluation))
             (when row
               (is (:db-after (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)]))))))
@@ -267,7 +265,7 @@
         (is (nil? (#'runner/sci-base-namespace-sizes unrealized)))
         (is (not (realized? unrealized)))
         (let [observation (#'runner/sci-base-namespace-sizes failed)]
-          (is (= :seon.test.runner/fixture-base-unavailable (:seon.error/kind observation)))
+          (is (string? (:seon.test.runner/fixture-base-unavailable observation)))
           (is (= "failed fixture acquisition" (:seon.error/message observation))))
         (let [sizes (#'runner/sci-base-namespace-sizes acquired)]
           (is (seq sizes))
@@ -394,7 +392,7 @@
                                   (mapv #(vector :db.fn/retractAttribute % :seon.source/digest) seals))]
         (is (seq seals))
         (is (:db-after removed) (pr-str removed))
-        (is (:seon.error/kind (runner/provenance (db/db connection))))
+        (is (:seon.test.run/unavailable (runner/provenance (db/db connection))))
         (let [result (sut/check {:seon.db/connection connection
                                  :seon.test/changed []
                                  :seon.test/paths []})]
@@ -492,7 +490,7 @@
                                  :seon.test.run/provenance (runner/provenance database)
                                  :seon.test/remaining-ms 10000
                                  :seon.test/declared-root working})]
-            (is (= :seon.test/destructive-in-process (:seon.error/kind result)) (pr-str result))
+            (is (seq (:seon.test/destructive-path result)) (pr-str result))
             (is (= test-symbol (:seon.test/sym result)))
             (is (= destructive-owner (:seon.fn/sym result)))
             (is (= (:seon.fn/destroys (db/pull database [:seon.fn/destroys]
@@ -583,11 +581,11 @@
             after (db/db connection)
             derived (sut/destroyers after)]
         (is (:db-after removed) (pr-str removed))
-        (is (= :seon.test/unknown (:seon.error/kind derived)) (pr-str derived))
+        (is (string? (:seon.test/unknown derived)) (pr-str derived))
         (is (.contains (:seon.error/message derived "") ":seon.fn/destroys") (pr-str derived))
-        (is (= :seon.test/unknown (:seon.error/kind (sut/host after "seon.id-test/anything")))
+        (is (string? (:seon.test/unknown (sut/host after "seon.id-test/anything")))
             "an unanswerable declaration never answers in-process")
-        (is (:seon.error/kind (#'sut/destructive-refusal
+        (is (:seon.test/destructive-path (#'sut/destructive-refusal
                                after
                                (.getCanonicalPath (clojure.java.io/file (System/getProperty "user.dir")))
                                "seon.id-test/does-not-matter"))
@@ -613,7 +611,7 @@
           (is (nil? (:db/id (db/pull database [:db/id] [:seon.test/sym test-symbol])))
               "the probe is deliberately not indexed")
           (let [report (sut/host database test-symbol)]
-            (is (= :seon.test/unknown (:seon.error/kind report)) (pr-str report))
+            (is (string? (:seon.test/unknown report)) (pr-str report))
             (is (nil? (:seon.test/host report))
                 "an unknown call graph never reads as in-process")
             (is (.contains (sut/host-text database test-symbol) "unknown")))
@@ -622,7 +620,7 @@
                                  :seon.test.run/provenance (runner/provenance database)
                                  :seon.test/remaining-ms 10000
                                  :seon.test/declared-root working})]
-            (is (= :seon.test/unknown (:seon.error/kind result)) (pr-str result))
+            (is (string? (:seon.test/unknown result)) (pr-str result))
             (is (not (.exists marker)) "an unknown host executed nothing"))
           (finally
             (support/delete-recursively! marker)

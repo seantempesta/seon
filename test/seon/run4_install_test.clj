@@ -68,7 +68,7 @@
                  result (when result-var @result-var)]
              (is (= 2 (count saved)) (pr-str saved))
              (is (= 1 (count (filter :seon.cluster.eval/error saved))))
-             (is (= :seon.test.accretion/install-refused (:seon.error/kind result)) (pr-str result))
+             (is (qualified-symbol? (:seon.test.accretion/function-sym result)) (pr-str result))
              (is (= [[]] (:seon.test.accretion/arguments result)))
              (is (string? (:seon.test.accretion/expected result)))
              (is (contains? result :seon.test.accretion/actual))

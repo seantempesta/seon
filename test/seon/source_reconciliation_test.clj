@@ -29,7 +29,7 @@
               :seon.fn/source "(defn value [] :agent)"
               :seon.schema.admission/source :agent}]
             setup (db/transact! connection before)
-            _ (is (not (:seon.error/kind setup)) (pr-str setup))
+            _ (is (some? (:db-after setup)) (pr-str setup))
             kept-id (:db/id (db/pull @connection [:db/id] kept))
             removed-id (:db/id (db/pull @connection [:db/id] removed))
             old-arity (:db/id (first (:seon.fn/arities
@@ -55,7 +55,7 @@
                                  {:tx-data [[:db.fn/call seon.fn/reconcile-tx
                                              desired [namespace-ref kept removed]]]})
             after @connection]
-        (is (not (:seon.error/kind report)) (pr-str report))
+        (is (some? (:db-after report)) (pr-str report))
         (is (= kept-id (:db/id (db/pull after [:db/id] kept))))
         (is (= {:db/id removed-id :seon.fn/sym (second removed)}
                (db/pull after '[*] removed)))
@@ -77,6 +77,6 @@
                                   {:tx-data [[:db/add kept :seon.fn/doc "concurrent"]
                                              [:db.fn/call seon.fn/reconcile-tx
                                               desired [namespace-ref kept removed]]]})]
-          (is (not (:seon.error/kind result)))
+          (is (some? (:db-after result)))
           (is (nil? (:seon.fn/doc (db/pull @connection '[*] kept)))
               "the writer removes an earlier same-transaction stale attribute"))))))

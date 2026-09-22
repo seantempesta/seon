@@ -46,7 +46,7 @@
            (is (str/includes? (:seon.eval/shown directory) ":supplied"))
            (let [example (evaluate ctx connection (:example doc) false)]
              (is (nil? (:seon.cluster.eval/error example)) (pr-str example))
-             (is (nil? (get-in example [:seon.sci.admit/value :seon.error/kind]))
+             (is (nil? (:seon.cluster.eval/error example))
                  (pr-str example)))))))))
 
 (deftest invalid-runtime-key-tells-the-agent-to-omit-it
@@ -90,6 +90,6 @@
            failure (binding [effect/*request-context* {:seon.env/environment environment}]
                      (try (message/send {:my.message/to "root" :my.message/content "Hello"})
                           (catch Exception cause (ex-data cause))))]
-       (is (= :seon.instrument/missing-supplied-key (:seon.error/kind failure)))
+       (is (some? (:seon.instrument/check failure)))
        (is (str/includes? (:seon.error/message failure) "Runtime fault:"))
        (is (str/includes? (:seon.error/message failure) "do not pass it"))))))

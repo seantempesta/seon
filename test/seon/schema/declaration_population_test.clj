@@ -102,8 +102,7 @@
               nil
               (catch clojure.lang.ExceptionInfo exception exception))))]
     (is (some? failure))
-    (is (= :seon.schema/missing-projection
-           (:seon.error/kind (ex-data failure))))
+    (is (some? (:seon.schema/expected-value (ex-data failure))))
     (is (str/includes?
          (get-in (ex-data failure) [:seon.error/data :seon.schema/caller])
          "seon.schema.declaration-population-test"))

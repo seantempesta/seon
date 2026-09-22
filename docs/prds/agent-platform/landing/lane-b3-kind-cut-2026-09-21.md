@@ -19,6 +19,19 @@ No final green or live default settlement claim is made.
 
 ### Final settlement verification, 2026-09-22 07:00 UTC
 
+The schema/test-evidence batch completed **82 tests / 659 assertions /
+93 failures / 73 errors**. The recording authority refused the result.
+
+`seon.test-runner-integration-test` is an explicit execution exception, not an
+unreported green. Its namespace is designated orchestrator integration, and
+its tests invoke concurrent launcher/JVM processes and `bin/test` gates
+(`test/seon/test_runner_integration_test.clj`, notably
+`concurrent-bin-test-invocations-both-reach-their-tallies` and
+`selected-paths-overlay-head-for-preparation-and-every-worker`). Executing that
+namespace would violate this lane's explicit one-JVM and no-`bin/test`
+instructions. Its kind callers are converted; process-drill execution remains
+with the orchestrator. The final matrix records load verification separately.
+
 The rendering/read-evidence batch completed **183 tests / 683 assertions /
 89 failures / 25 errors**. Result recording was refused. Its observed failures
 remain evidence in the namespace matrix; no recorded green is claimed.

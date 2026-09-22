@@ -84,7 +84,7 @@
       (is (= "fixture-readiness/readiness" (::runner/exchange-id event)))
       (is (nat-int? (::runner/fixture-preparation-ms event)))
       (is (realized? base) "Readiness must not leave acquisition to the first test.")
-      (is (nil? (:seon.error/kind @base)))
+      (is (some? (:seon.test-support/connection @base)))
       (test-support/with-database
         (fn [connection]
           (is (some? (:seon.test-support/connection @base)))

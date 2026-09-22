@@ -92,7 +92,7 @@
                                       [[:db/add [:seon.test/sym symbol] :seon.test/pass-count 1]
                                        [:db/add [:seon.test/sym symbol] :seon.test/error-count 1]])))
           (is (false? (seon-test/verified? @connection symbol digest))))
-        (let [refused {:seon.error/kind :seon.db/invalid-query
+        (let [refused {:seon.db/invalid-read true :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/q
                        :seon.error/message "injected query refusal"}]
           (with-redefs [db/q (fn [& _] refused)]
             (is (= refused (seon-test/verified? @connection symbol digest)))))))))

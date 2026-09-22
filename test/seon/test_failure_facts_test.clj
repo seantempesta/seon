@@ -13,7 +13,8 @@
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
-(defn- with-probe [connection check]
+(defn- with-probe {:malli/schema [:=> [:cat :seon.db/connection [:=> [:cat :qualified-symbol :seon.schema/value :seon.schema/value] :seon.schema/value]] :seon.schema/value]}
+  [connection check]
   (support/seed-cluster! connection "default")
   (support/transacted!
    connection
@@ -45,7 +46,7 @@
                    :seon.fn/file [:seon.fn.file/relative-path path]
                    :seon.test/source "(deftest probe (is (= 1 2)) (is (= :a :b)))"}])]
         (is (:db-after tx) (pr-str tx))
-        (when (:seon.error/kind tx)
+        (when (:seon.db.write.attempt/request-id tx)
           (throw (ex-info "The failure fixture transaction was refused." tx))))
       (check test-symbol test-var mode)
       (finally (remove-ns namespace-name)))))
@@ -300,7 +301,7 @@
                          {:db/id "b" :seon.fn/sym b :seon.fn/source "old"}
                          {:seon.test/sym s :seon.fn/calls ["a"]}])))
         (runner/commit-results! connection (completion (db/db connection) s 1))
-        (is (= :seon.test/unknown (:seon.error/kind (sut/changed-since-green (db/db connection) s))))
+        (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
         (runner/commit-results! connection (completion (db/db connection) s 0))
         (support/transacted! connection [[:db/add [:seon.fn/sym a] :seon.fn/source "intermediate"]])
         (runner/commit-results! connection (completion (db/db connection) s 0))
@@ -348,7 +349,7 @@
         (is (= digest (:seon.test/reach-digest (first result))))
         (is (string? (:seon.test/reach-unknown (first result))))
         (is (= 1 (:seon.test/pass-count (first result))))
-        (is (= :seon.test/unknown (:seon.error/kind (sut/changed-since-green (db/db connection) s))))
+        (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
         (let [known (runner/commit-results! connection (completion (db/db connection) s 0))]
           (is (vector? known))
           (is (nil? (:seon.test/reach-unknown (first known)))))))))

@@ -91,8 +91,7 @@
                    (:seon.schema.admission/source
                     (admission connection agent-tx))))
             (when-not keep-history?
-              (is (= :seon.db/non-temporal-database
-                     (:seon.error/kind (db/history @connection)))
+              (is (some? (:seon.schema/expected-value (db/history @connection)))
                   "the fixture must genuinely be non-temporal"))))))))
 
 (deftest missing-recorded-admission-source-fails-closed

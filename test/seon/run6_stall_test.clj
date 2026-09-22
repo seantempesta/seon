@@ -9,9 +9,10 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
-(defn- transact! [connection data]
+(defn- transact! {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] :seon.db/transaction-report]}
+  [connection data]
   (let [result (db/transact! connection data)]
-    (when (:seon.error/kind result)
+    (when (:seon.db.write.attempt/request-id result)
       (throw (ex-info (:seon.error/message result) result)))
     result))
 
@@ -36,7 +37,11 @@
                                               :seon.turn/opened-tx "datomic.tx"
                                               :seon.turn.work/situation :call})
                               (assoc (error/normalize
-                                      {:seon.error/source {:seon.error/kind :seon.ai/unparseable-body
+                                      {:seon.error/source {
+    :seon.ai/unreadable-response-member "body"
+    :seon.error/at #inst "2026-09-15T14:46:11Z"
+    :seon.error/layer :seon.ai/completion
+    :seon.error/operation 'seon.ai/complete
                                                            :seon.error/message "Malformed JSON"}
                                        :seon.error/id "run6-fault"
                                        :seon.error/at #inst "2026-09-15T14:46:11Z"

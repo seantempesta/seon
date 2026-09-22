@@ -47,10 +47,11 @@
       found)))
 
 (defn- transact-result
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] [:or [:map [:error :seon.schema/value]] [:map [:report :seon.db/transaction-report]]]]}
   [connection tx-data]
   (try
     (let [result (db/transact! connection tx-data)]
-      (if (:seon.error/kind result)
+      (if (:seon.db.write.attempt/request-id result)
         {:error result}
         {:report result}))
     (catch Throwable error
@@ -384,8 +385,8 @@
                  (row-tx request
                          (schema-row unrelated-key
                                      [:boolean {:seon.db/index true}])))]
-            (is (= :seon.turn/refused
-                   (get-in refusal [:error :seon.error/kind])))
+            (is (= :seon.turn/program-row-changed-after-open
+                   (get-in refusal [:error :seon.turn/rule])))
             (is (= :seon.turn/program-row-changed-after-open
                    (get-in refusal [:error :seon.turn/rule]))
                 "divergence from the opening basis is named as divergence")

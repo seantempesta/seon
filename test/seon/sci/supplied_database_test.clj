@@ -42,7 +42,6 @@
        (doseq [[sym [omitted explicit]] (map vector functions (when (vector? values) values))]
          (is (= explicit omitted) (str sym))
          (is (not (and (map? omitted)
-                       (or (:seon.error/kind omitted)
-                           (:seon.error/at omitted))))
+                       (or (:seon.db/invalid-read omitted) (:seon.schema/expected-value omitted))))
              (str sym)))
        (is (seq (:seon.help/lines (ffirst values))))))))

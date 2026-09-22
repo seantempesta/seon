@@ -22,16 +22,14 @@
            sources (into {} (map (fn [[id source]] [id source])) captured)
            delimiter (run-in ctx (get sources "efb0cb76b2f4") 2000)
            comments (run-in ctx (get sources "9d7af271393f") 2000)]
-       (is (= :seon.sci.reader/unreadable
-              (get-in delimiter [:seon.sci.admit/value :seon.error/kind])))
+       (is (qualified-keyword? (get-in delimiter [:seon.sci.admit/value :seon.sci.reader/unreadable-member])))
        (is (str/includes? (:seon.cluster.eval/error delimiter)
                           "Unmatched delimiter"))
        (is (str/includes? (:seon.cluster.eval/error delimiter)
                           "). ... Admitted definitions are durable"))
        (is (str/includes? (:seon.cluster.eval/error delimiter)
                           "reads each reply from scratch; nothing is buffered between turns"))
-       (is (= :seon.cluster.reply/no-forms
-              (get-in comments [:seon.sci.admit/value :seon.error/kind])))
+       (is (true? (get-in comments [:seon.sci.admit/value :seon.cluster.reply/no-forms])))
        (is (= "Your reply had no form; only comments/prose. Send a form."
               (:seon.cluster.eval/error comments)))
        (is (= 2 (:seon.sci.admit/value (run-in ctx "(+ 1 1)" 2000))))))))

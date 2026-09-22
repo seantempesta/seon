@@ -75,7 +75,7 @@
                  :seon.cluster.eval/result-edn "2"
                  :seon.eval.drive/value 2
                  :seon.cluster.eval/error ""
-                 :seon.error/kind :seon.eval.drive/absent
+
                  :seon.cluster.eval/at (java.util.Date.)}
         terminal {:seon.eval.drive/outcome :completed
                   :seon.eval.drive/run-ids [run-id]}]
