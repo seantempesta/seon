@@ -205,8 +205,7 @@
                                                 [:seon.agent/id "juniper"])))]
                  (support/await-event! completion ::idle-permit)
                  (support/transacted! connection [[:db/add settings :seon.config.agent/turn-completion-backstop-ms 100]])
-                 (is (nil? (:seon.error/kind
-                            (db/transact! connection
+                 (is (some? (:db-after (db/transact! connection
                                           (turn/open-tx
                                            {:seon.turn/id "running-fixture/withheld"
                                             :seon.turn/agent [:seon.agent/id "juniper"]
@@ -217,7 +216,7 @@
                      (async/offer! (:seon.cluster.wake/channel entry) :seon.agent/wake)
                      (let [fault (support/await-event! faults ::evaluation-limit-fault)
                            data (ex-data (::async.flow/ex fault))]
-                       (is (= :seon.agent/turn-completion-backstop (:seon.error/kind data)))
+                       (is (string? (:seon.agent/turn-completion-backstop data)))
                        (is (= "running-fixture/withheld" (:seon.turn/id data)))
                        (is (= 100 (:seon.config.agent/turn-completion-backstop-ms data)))
                        (is (< (/ (- (System/nanoTime) start) 1e6) 2000))))
@@ -304,13 +303,11 @@
                              :seon.ai/prompt "Probe terminal refusal."))]
        (try
          (assert (nil? (System/getenv "SEON_LOOP_PROOF_UNSET_CREDENTIAL")))
-         (is (nil? (:seon.error/kind
-                    (db/transact! connection [{:seon.agent/id "root"}]))))
-         (is (nil? (:seon.error/kind
-                    (db/transact! connection
+         (is (some? (:db-after (db/transact! connection [{:seon.agent/id "root"}]))))
+         (is (some? (:db-after (db/transact! connection
                                   (turn/open-tx {:seon.turn/id "refusal-proof" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"})))))
          (let [failure (ai/complete (seon.schema/handed-projection) target)
-               _ (is (= :seon.ai/no-credential (:seon.error/kind failure)))
+               _ (is (string? (:seon.ai/missing-credential-variable failure)))
                result (turn/settle! {:seon.turn.loop/cluster handle
                                      :seon.turn.loop/now (java.util.Date.)
                                      :seon.agent/id "root"
@@ -320,9 +317,9 @@
            (is (some? (:seon.turn/closed-tx
                        (db/pull @connection [:seon.turn/closed-tx]
                                 [:seon.turn/id "refusal-proof"]))))
-           (is (= #{[:seon.ai/no-credential]}
-                  (db/q '[:find ?kind :where [?e :seon.error/id]
-                           [?e :seon.error/kind ?kind]] @connection))))
+           (is (= #{["SEON_LOOP_PROOF_UNSET_CREDENTIAL"]}
+                  (db/q '[:find ?variable :where [?e :seon.error/id]
+                           [?e :seon.ai/missing-credential-variable ?variable]] @connection))))
          (finally
            (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
                         :seon.turn.loop/completion]]
@@ -352,7 +349,7 @@
               :seon.agent/namespace {:seon.ns/name 'my.agents.other}}
              {:seon.agent/id "unobserved"
               :seon.agent/namespace {:seon.ns/name 'my.agents.unobserved}}])
-           _ (is (nil? (:seon.error/kind configured)) (pr-str configured))
+           _ (is (some? (:db-after configured)) (pr-str configured))
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
@@ -642,7 +639,7 @@
                ;; The preceding wake consumed the fixture's initial message.
                ;; Show that outside event before measuring turns with no new event.
                (let [settled (turn/system-turn request)
-                     _ (is (nil? (:seon.error/kind settled)) (pr-str settled))
+                     _ (is (vector? (:seon.turn/forms settled)) (pr-str settled))
                      sources #{"(seon.agent/settings)" (repl/source-text runtime-read)}
                      observed #(filter (fn [entry]
                                          (and (= :system (:seon.cluster.eval/author entry))
@@ -658,7 +655,7 @@
                              "(seon.db/q '[:find (pull ?e [*]) :where [?e :my.plan.item/id]])"
                              "(+ 10 20)"))
                    (let [refresh (turn/system-turn request)]
-                     (is (nil? (:seon.error/kind refresh)) (pr-str refresh))
+                     (is (vector? (:seon.turn/forms refresh)) (pr-str refresh))
                      (is (seq (:seon.turn/forms refresh)))
                      (is (every? #(= :unchanged (:seon.turn/status %)) (:seon.turn/forms refresh)))
                      (is (nil? (:seon.turn/id refresh)))))
@@ -695,7 +692,7 @@
                      written (db/transact! connection
                                            [[:db/add plan-eid :my.plan/objective
                                              "Verify one changed plan read."]])
-                     _ (is (nil? (:seon.error/kind written)) (pr-str written))
+                     _ (is (some? (:db-after written)) (pr-str written))
                      system (turn/system-turn request)
                      changed (filter #(= :changed (:seon.turn/status %)) (:seon.turn/forms system))]
                  (is (string? (:seon.turn/id system)) (pr-str system))
@@ -732,8 +729,7 @@
                              :seon.test/answer-t
                              (turn/latest-answering-turn-t @connection "juniper")}))))
              (testing "the ordinary wake path refreshes reads before its reply"
-               (let [_ (is (nil? (:seon.error/kind
-                                 (config/apply! {:seon.db/connection connection
+               (let [_ (is (boolean? (:seon.reconcile/converged? (config/apply! {:seon.db/connection connection
                                                  :seon.boot/cluster-name "loop-proof"
                                                  :seon.config/manifest
                                                  {:seon.config.ai/no-provider :seon.config/absent}}))))
@@ -803,7 +799,7 @@
                                                  :seon.sci.eval/evaluation])]
                      (is (some? result) (pr-str preview))
                      (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
-                     (is (nil? (:seon.error/kind result)) (pr-str result))))))
+                     (is (string? (:seon.eval/shown result)) (pr-str result))))))
              (testing "boot closes durable intent and never reexecutes it"
                (let [id (turn/next-id @connection "loop-proof" "other")
                      source "(seon.db/transact! [{:seon.agent/id \"must-not-execute\"}])"

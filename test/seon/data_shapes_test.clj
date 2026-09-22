@@ -212,8 +212,8 @@
                                (turn/open-tx {:seon.turn/id "reasoning-turn"
                                               :seon.turn/agent [:seon.agent/id "reasoning-agent"]
                                               :seon.turn/opened-tx "datomic.tx"}))]
-       (is (not (:seon.error/kind created)) (pr-str created))
-       (is (not (:seon.error/kind opened)) (pr-str opened)))
+       (is (some? (:db-after created)) (pr-str created))
+       (is (some? (:db-after opened)) (pr-str opened)))
      (doseq [[ordinal retain?] [[0 false] [1 true]]]
        (let [changed (db/transact! connection
                                    [{:seon.config/agent [:seon.agent/id "reasoning-agent"]
@@ -229,7 +229,7 @@
          :seon.ai.attempt/ordinal ordinal
          :seon.ai/reasoning-content "A bounded provider trace."}
         (java.util.Date.))]
-         (is (not (:seon.error/kind changed)) (pr-str changed))
+         (is (some? (:db-after changed)) (pr-str changed))
          (is (= retain? (:seon.config.ai/retain-reasoning settings)))
          (is (nil? recorded) (pr-str recorded))))
      (let [rows (db/q '[:find [(pull ?attempt [*]) ...]
@@ -388,8 +388,8 @@
                                [:seon.listen/attribute :seon.listen/value
                                 {:seon.listen/entity [:seon.agent/id]}]}]
                             [:seon.runtime/agent [:seon.agent/id "listener"]])]
-       (is (not (:seon.error/kind created)) (pr-str created))
-       (is (not (:seon.error/kind changed)) (pr-str changed))
+       (is (some? (:db-after created)) (pr-str created))
+       (is (some? (:db-after changed)) (pr-str changed))
        (is (= [{:seon.listen/attribute :seon.message/content
                 :seon.listen/entity {:seon.agent/id "listener"}
                 :seon.listen/value "ready"}]

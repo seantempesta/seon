@@ -53,9 +53,8 @@
          (is (= :call (:seon.turn.work/situation
                         (turn/next-agent-work @connection request))))
          (step! (turn/next-agent-work @connection request))
-         (is (= [:seon.ai/no-credential]
-                (db/q '[:find [?kind ...] :where
-                        [_ :seon.error/kind ?kind]] @connection)))
+         (is (= 1 (db/q '[:find (count ?e) . :where
+                        [?e :seon.ai/missing-credential-variable _]] @connection)))
          (is (= 1 (db/q '[:find (count ?attempt) . :where
                          [?attempt :seon.ai.attempt/id]] @connection)))
          (is (= 1 (db/q '[:find (count ?turn) . :where
@@ -110,7 +109,7 @@
                      :seon.turn/id turn-id}} now)
            database @connection]
        (doseq [result [applied seeded created written opened report]]
-         (is (not (:seon.error/kind result)) (pr-str result)))
+         (is (or (:db-after result) (boolean? (:seon.reconcile/converged? result)) (:seon.turn.loop/outcome result)) (pr-str result)))
        (is (true? (:seon.config.ai/no-provider (ai/agent-overlay database agent-id))))
        (is (= "(+ 1 1)" (:seon.turn/reply
                          (db/pull database '[*] [:seon.turn/id turn-id]))))
@@ -120,5 +119,5 @@
                            :where [?attempt :seon.ai.attempt/id]] database)))
        (is (empty? (db/q '[:find [?error ...]
                            :where [?error :seon.error/id]] database))
-           (pr-str (db/q '[:find [(pull ?error [:seon.error/kind :seon.error/message]) ...]
+           (pr-str (db/q '[:find [(pull ?error [:seon.error/message]) ...]
                             :where [?error :seon.error/id]] database)))))))

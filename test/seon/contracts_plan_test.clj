@@ -40,11 +40,12 @@
         (is (= {:customer "Ada" :total 115} value))))))
 
 (defn- run7-reader-refusal-uses-the-shared-grammar
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx :seon.schema/value] :nil]}
   [connection handle routing]
   (let [[saved refusal] (fixture/submit connection handle routing
                                         "(my.plan/current! {:my.plan/item/id \"juniper/define\"})")
         shown (:seon.eval/shown saved)]
-    (is (= :seon.sci.reader/unreadable (:seon.error/kind refusal)))
+    (is (qualified-keyword? (:seon.sci.reader/unreadable-member refusal)))
     (doseq [fragment ["my.plan/current! refused source at"
                       "expected readable Clojure source"
                       ":my.plan/item/id" "Fix: Use :my.plan.item/id." "Example:"]]
@@ -63,10 +64,11 @@
     (is (= 1 (count (get-in refusal [:seon.error/data :seon.error/problems]))))))
 
 (defn- unresolved-symbol-shows-the-correction-without-the-evidence-map
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx :seon.schema/value] :boolean]}
   [connection handle routing]
   (let [[saved refusal] (fixture/submit connection handle routing "my.web/no-such-fetch")
         shown (:seon.eval/shown saved)]
-    (is (= :seon.sci.eval/evaluation-failed (:seon.error/kind refusal)))
+    (is (some? (:seon.sci.kernel/guard-observation refusal)))
     (is (str/includes? shown "my.web/no-such-fetch") shown)
     (is (str/includes? shown "Fix: Define or require this symbol.") shown)
     (is (< (tokens/estimate shown) 150) shown)

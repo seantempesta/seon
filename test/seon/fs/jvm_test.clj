@@ -122,7 +122,7 @@
                    :my.fs/max-bytes 64
                    :my.fs/encoding :bytes}
                   settings)]
-        (is (nil? (:seon.error/kind tail))
+        (is (vector? (:my.fs/bytes tail))
             "a tail window of an over-ceiling file is an ordinary read")
         (is (= 4096 (:my.fs/bytes-read tail)))
         (is (= (mapv #(bit-and 0xff %)
@@ -144,7 +144,7 @@
             "the window digests exactly what it returned")
         (let [refusal ((handler 'read-complete)
                        {:my.fs/path "large.bin"} settings)]
-          (is (= :my.fs/read-limit (:seon.error/kind refusal))
+          (is (string? (:my.fs/read-limit refusal))
               "only a read that demands the WHOLE file refuses for its size")
           (is (= "large.bin" (get-in refusal [:seon.error/data :my.fs/path]))
               "the refusal names the path")
@@ -173,8 +173,7 @@
             byte-result ((handler 'read)
                          (assoc request :my.fs/encoding :bytes)
                          (policy root))]
-        (is (= :my.fs/invalid-utf8-window
-               (:seon.error/kind text-result)))
+        (is (string? (:my.fs/invalid-utf8-window text-result)))
         (is (= [(bit-and 0xff (nth octets 1))]
                (:my.fs/bytes byte-result)))))))
 
@@ -195,7 +194,7 @@
               #((handler 'read)
                 {:my.fs/path "moving.txt" :my.fs/encoding :bytes}
                 (policy root)))]
-        (is (= :my.fs/changed-during-read (:seon.error/kind result)))))))
+        (is (string? (:my.fs/changed-during-read result)))))))
 
 (deftest no-operation-follows-a-final-intermediate-or-broken-link
   (with-temp-tree
@@ -221,12 +220,9 @@
                            {:my.fs/path "broken-link" :my.fs/encoding :bytes}
                            {:my.fs/path "intermediate/sentinel.txt"
                             :my.fs/encoding :bytes}]]
-            (is (= :my.fs/path-refused
-                   (:seon.error/kind ((handler 'read) request config)))))
+            (is (string? (:my.fs/path-refused ((handler 'read) request config)))))
           (doseq [path ["final-link" "broken-link" "intermediate/new.txt"]]
-            (is (= :my.fs/path-refused
-                   (:seon.error/kind
-                    ((handler 'write)
+            (is (string? (:my.fs/path-refused ((handler 'write)
                      {:my.fs/path path
                       :my.fs/content {:my.fs/text "changed"}
                       :my.fs/precondition {:my.fs/expected-absence? true}}
@@ -313,7 +309,7 @@
                            (throw
                             (ex-info
                              "simulated interruption"
-                             {:seon.error/kind :my.fs/write-failed
+                             {:my.fs/write-failed true :seon.error/at (java.util.Date.) :seon.error/layer :my.fs/invocation :seon.error/operation 'my.fs/write
                               :seon.error/message
                               "The staged write was interrupted."
                               :seon.error/data {:my.fs/path "target.txt"}}))))
@@ -324,7 +320,7 @@
                      :my.fs/precondition
                      {:my.fs/expected-digest (sha-256 before)}}
                     (policy root)))]
-            (is (= :my.fs/write-failed (:seon.error/kind result)))
+            (is (true? (:my.fs/write-failed result)))
             (is (= "before"
                    (String. (Files/readAllBytes path)
                             StandardCharsets/UTF_8)))
@@ -361,8 +357,7 @@
         (.countDown start)
         (let [results [@left @right]]
           (is (= 1 (count (filter :my.fs/changed? results))))
-          (is (= 1 (count (filter #(= :my.fs/stale-digest
-                                     (:seon.error/kind %))
+          (is (= 1 (count (filter #(string? (:my.fs/stale-digest %))
                                  results))))
           (is (contains? #{"left" "right"}
                          (String. (Files/readAllBytes path)

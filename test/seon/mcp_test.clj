@@ -74,7 +74,7 @@
                        (edn/read-string (:val (first terminal))))]
            (is (= 1 (count terminal)))
            (is (true? (:exception (first terminal))))
-           (is (= :seon.dev.mcp/jvm-exception (:seon.error/kind result)))
+           (is (symbol? (:seon.error/exception-class result)))
            (is (not (contains? result :trace))))
          (let [visits (atom 0) emits (atom 0)
                visit @#'value/value-node emit print/emit-both]
@@ -82,8 +82,7 @@
              {#'value/value-node (fn [& args] (swap! visits inc) (apply visit args))
               #'print/emit-both (fn [& args] (swap! emits inc) (apply emit args))}
              (fn []
-               (is (= :seon.render.value/missing-root-identity
-                      (:seon.error/kind (value/prepare request))))
+               (is (string? (:seon.render.value/root-description (value/prepare request))))
                (is (= [0 0] [@visits @emits]))
                (let [prepared (value/prepare
                                (assoc request :seon.render.value/root [::root]))]
@@ -96,7 +95,7 @@
                failing (assoc request :seon.render.value/root [::root]
                               :seon.render/value
                               {:seon.render/ai 'seon.error/render-ai
-                               :seon.error/kind ::probe :seon.error/message "probe"})]
+                                :seon.error/message "probe"})]
            (with-redefs [kernel/invoke
                          (fn [invocation]
                            (if (= "seon.error/render-ai" (:seon.fn/sym invocation))
@@ -106,8 +105,7 @@
              (let [prepared (value/prepare failing)
                    shown (edn/read-string (:seon.render.value/text prepared))
                    failures (filter #(and (map? %)
-                                          (= :seon.render.value/projection-failed
-                                             (:seon.error/kind %)))
+                                          (= "declared producer failure" (:seon.error/message %)))
                                     (tree-seq coll? seq shown))]
                (is (= ["seon.error/render-ai"] @calls))
                (is (= 1 (count failures)))
@@ -123,5 +121,5 @@
                (is (= 1 (count terminal)))
                (is (not (:exception (first terminal))))
                (is (= 1 @calls))
-               (is (= :seon.dev.mcp/projection-failed (:seon.error/kind result))))))
+               (is (string? (:seon.dev.mcp/projection-offending-class result))))))
          (finally (swap! running-instances dissoc cluster-name)))))))

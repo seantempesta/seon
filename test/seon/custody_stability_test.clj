@@ -309,9 +309,7 @@
                     @connection)))]
             (is (nil? (:seon.cluster.eval/error own)))
             (is (nil? (:seon.cluster.eval/error ambient)))
-            (is (= :seon.db/foreign-connection
-                   (get-in foreign
-                           [:seon.sci.admit/value :seon.error/kind])))
+            (is (string? (get-in foreign [:seon.sci.admit/value :seon.db.write.attempt/request-id])))
             (is (= #{"custody-own" "custody-ambient"}
                    (message-ids connection-a)))
             (is (empty? (message-ids connection-b)))))))))

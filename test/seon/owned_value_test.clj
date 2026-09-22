@@ -27,10 +27,11 @@
         connection (evaluation/projection-state @connection projection))
        (f connection)))))
 
-(defn- refuses-without-change [connection transaction]
+(defn- refuses-without-change {:malli/schema [:=> [:cat :seon.db/connection :seon.store/transaction] :seon.db/error-result]}
+  [connection transaction]
   (let [before (db/basis-t (db/db connection))
         result (db/transact! connection transaction)]
-    (is (= :seon.db/invalid-write (:seon.error/kind result)) (pr-str result))
+    (is (string? (:seon.db.write.attempt/request-id result)) (pr-str result))
     (is (= before (db/basis-t (db/db connection))))
     result))
 

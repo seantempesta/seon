@@ -53,7 +53,7 @@
                shown (when saved (repl/render-ai saved))]
            (is (some? saved) (pr-str {:opening opening :committed @committed}))
            (is (empty? (keep :seon.cluster.eval/error (evaluation/of-agent @connection "help"))))
-           (is (nil? (:seon.error/kind opening)) (pr-str opening))
+           (is (vector? (:seon.turn/forms opening)) (pr-str opening))
            (is (nil? (:seon.turn/id opening))
                "a second real system pass committed while this pass evaluated")
            (is (string? (:seon.turn/id @committed)))
@@ -121,7 +121,7 @@
              (is (:db-after written) (pr-str written))
              (is (every? #(false? (db/read-evidence-current?
                                    @connection (:seon.cluster.eval/read-evidence %))) initial))
-             (is (not (:seon.error/kind (turn/system-turn request))))
+             (is (vector? (:seon.turn/forms (turn/system-turn request))))
              (let [latest (into {} (map (juxt :seon.cluster.eval/source :seon.eval/shown))
                                 (evaluation/of-agent @connection "help"))]
                (doseq [[entry text] (map vector initial

@@ -81,8 +81,7 @@
               :my.edit/new-window "(defn target [] :new)\n"}]]
         (write-text! path before)
         (doseq [request requests]
-          (is (= :my.edit/stale-source
-                 (:seon.error/kind ((handler) request (policy root)))))
+          (is (string? (:my.edit/stale-source ((handler) request (policy root)))))
           (is (= before (read-text path))))))))
 
 (deftest handler-reuses-the-conditional-atomic-writer
@@ -134,6 +133,5 @@
         (deliver start true)
         (let [results (mapv deref runs)]
           (is (= 1 (count (filter :my.edit/changed? results))))
-          (is (= 1 (count (filter #(= :my.edit/stale-source
-                                      (:seon.error/kind %))
+          (is (= 1 (count (filter #(string? (:my.edit/stale-source %))
                                  results)))))))))

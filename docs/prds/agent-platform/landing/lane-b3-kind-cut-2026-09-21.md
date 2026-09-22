@@ -19,6 +19,13 @@ No final green or live default settlement claim is made.
 
 ### Final settlement verification, 2026-09-22 07:00 UTC
 
+The contract/publication/value batch `1f6499b44492` completed and recorded
+**62 tests / 622 assertions / 43 failures / 13 errors**. Observed failures
+include missing fixture program rows, renderer selection/text differences,
+string-valued symbol lookups, missing required cluster members,
+`NoSuchFileException` for the publication fixture's source file, and duration
+bounds. Recording a red run is evidence of execution, not a green gate.
+
 The next runtime matrix requests both completed all selected namespaces:
 `b3-matrix-1` ran 74 tests / 357 assertions / 45 failures / 19 errors;
 `b3-matrix-2` ran 92 tests / 648 assertions / 108 failures / 27 errors.

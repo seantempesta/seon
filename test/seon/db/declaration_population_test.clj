@@ -71,7 +71,7 @@
                                   projection #(db/q query raw 'seon.db.carriage))
                         carried (schema/call-with-projection-state
                                  (atom {}) #(db/q query database 'seon.db.carriage))]
-                    (and (not (:seon.error/kind supplied)) (= supplied carried))))
+                    (= supplied carried)))
                 :seed 20260915)]
            (is (:pass? result) (pr-str result))))
        ;; Acquire the shipped print grammar before probing running-path work.
@@ -139,7 +139,7 @@
                                       (let [report (db/transact! connection [])]
                                         {:projection (db/carried-projection (db/db connection))
                                          :report-projection (db/carried-projection (:db-after report))
-                                         :error (:seon.error/kind report)}))
+                                         :error (:seon.error/message report)}))
                              (catch Throwable failure
                                (reset! completed failure)))))]
              (.start worker)

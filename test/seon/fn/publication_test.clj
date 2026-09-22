@@ -61,7 +61,7 @@
                            :seon.fn/previous-manifest empty-manifest
                            :seon.fn/changed-paths #{"src/alpha.clj" "src/stranger.clj"}
                            :seon.source/previous-database (db/db connection)})]
-           (is (nil? (:seon.error/kind installed)) (pr-str installed))
+           (is (boolean? (:seon.reconcile/converged? installed)) (pr-str installed))
            (is (every? #(some? (:db/id (db/pull (db/db connection) '[:db/id] [:seon.fn/sym %])))
                        '[pub.alpha/f pub.alpha/g pub.stranger/h]))
            (let [prior (db/db connection)
@@ -83,7 +83,7 @@
                               {:seon.db/connection connection :seon.fn/manifest after
                                :seon.fn/previous-manifest before :seon.fn/changed-paths #{"src/alpha.clj"}
                                :seon.source/previous-database prior}))]
-               (is (nil? (:seon.error/kind result)) (pr-str result))
+               (is (boolean? (:seon.reconcile/converged? result)) (pr-str result))
                (is (= #{'pub.alpha/f} (into #{} (keep :seon.fn/sym) @observed)))
                (let [changed-entities (into #{} (map :e) (mapcat :tx-data @reports))
                      unchanged (db/pull prior '[*] [:seon.fn/sym 'pub.alpha/g])
@@ -127,7 +127,7 @@
                            :seon.fn/previous-manifest (assoc before :seon.fn.manifest/artifacts [])
                            :seon.fn/changed-paths #{path}
                            :seon.source/previous-database (db/db connection)})]
-           (is (nil? (:seon.error/kind installed)) (pr-str installed))
+           (is (boolean? (:seon.reconcile/converged? installed)) (pr-str installed))
            (let [prior (db/db connection)]
              (write-source! root path (str declaration "{:not x :maybe options :and x :or options})"))
              (let [after (functions/build-manifest
@@ -143,7 +143,7 @@
                    arity (first (:seon.fn/arities
                                  (db/pull database '[{:seon.fn/arities [*]}]
                                           [:seon.fn/sym 'pub.shapes/f])))]
-               (is (nil? (:seon.error/kind result)) (pr-str result))
+               (is (boolean? (:seon.reconcile/converged? result)) (pr-str result))
                (is (.contains ^String (:seon.fn/source
                                        (db/pull database '[:seon.fn/source]
                                                 [:seon.fn/sym 'pub.shapes/f]))
