@@ -35,7 +35,7 @@
     (doseq [path ["deps.edn" "bin/test" "bin/test-fast"
                   "config/default.edn"
                   "resources/seon/schemas/seon.db.edn"
-                  "script/seon/fresh_operator.clj"
+                  "script/seon/operator.clj"
                   "reference-code/sci"
                   "reference-code/malli/src/malli/core.cljc"]]
       (is (true? (cache/widening-path? path)) path))))

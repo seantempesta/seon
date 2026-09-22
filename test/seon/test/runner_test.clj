@@ -513,8 +513,8 @@
         (is (= :seon.test.host/in-process (:seon.test/host report)) (pr-str report))
         (is (nil? (#'runner/verify-platform-tier-carries-no-destructive-drill!
                    manifest platform-vars)))
-        (doseq [test-symbol '[seon.dev.fresh-operator-reset-test/source-syntax-refuses-before-lock-or-destruction
-                             seon.dev.fresh-operator-reset-test/managed-root-cleanup-loads-no-program-and-never-follows-symlinks]]
+        (doseq [test-symbol '[seon.cluster.boot-test/start-during-reset
+                             seon.cluster.boot-test/same-lock-through-reset-boot]]
           (let [test-var (requiring-resolve test-symbol)
                 refusal (try
                           (#'runner/verify-platform-tier-carries-no-destructive-drill!
@@ -523,7 +523,8 @@
             (is (nil? (get declarations test-symbol)))
             (is (= [{:seon.test/sym test-symbol
                      :seon.test.runner/destructive-path
-                     [test-symbol 'seon.cluster.process/cleanup-root-under-lock!]}]
+                     [test-symbol 'seon.cluster.boot-test/with-published-root!
+                      'seon.test-support/populate-published-operator-root!]}]
                    (:seon.test.runner/destructive-platform-tests refusal))
                 "Scratch custody does not exempt a declared destroyer from the first tier.")))
         (println "Canonical platform destroyer check:" (count platform-vars) "tests admitted")))))
@@ -545,7 +546,7 @@
                  {:seon.fn/source-path "test/seon/test_support.clj"
                   :seon.fn.file/first-party-functions []})
         operator (program-fn/build-artifact
-                  {:seon.fn/source-path "src/seon/operator.clj"
+                  {:seon.fn/source-path "src/seon/cluster/boot.clj"
                    :seon.fn.file/first-party-functions []})
         known (vec (keep :seon.fn/sym (concat (:seon.fn.file/rows support)
                                               (:seon.fn.file/rows operator))))]

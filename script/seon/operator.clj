@@ -280,8 +280,9 @@
               (fail! "Child exited or closed its boot channel before readiness."
                      {:seon.operator/event value :seon.operator/log (str log)
                       :seon.boot/advertisement coordinates}))
-            (when (= :seon.cluster.store/held-elsewhere
-                     (get-in value [:seon.error/data :seon.cluster.store/rule]))
+            (when (some #(and (map? %)
+                              (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
+                        (tree-seq coll? seq value))
               (.get (.onExit child) bound TimeUnit/MILLISECONDS))
             value))))))
 

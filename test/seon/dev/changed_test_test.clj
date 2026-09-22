@@ -169,7 +169,7 @@
          (pr-str
           '(do
              (require 'seon.dev.state 'babashka.fs)
-             (let [directory (str (babashka.fs/create-temp-dir {:base-dir "tmp" :prefix "b1b-tooling-"}))
+             (let [directory (str (babashka.fs/create-temp-dir {:dir "tmp" :prefix "b1b-tooling-"}))
                    config {:seon.dev.config/process-dir (str (babashka.fs/absolutize directory))}
                    acquired (promise) release (promise)
                    owner (future (seon.dev.state/with-lock config :changed-test 5000
@@ -185,7 +185,8 @@
                    (deliver release true)
                    (prn [busy (deref owner 5000 :timeout)
                          (seon.dev.state/with-lock config :changed-test 5000 (constantly :acquired))]))
-                 (finally (deliver release true) (deref owner 5000 :timeout)
-                          (babashka.fs/delete-tree directory)))))))]
+                 (finally (deliver release true)
+                          (try (deref owner 5000 :timeout)
+                               (finally (babashka.fs/delete-tree directory)))))))))]
     (is (zero? exit) err)
     (is (= [true :released :acquired] (edn/read-string out)))))

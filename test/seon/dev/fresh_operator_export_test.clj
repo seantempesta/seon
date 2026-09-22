@@ -4,6 +4,8 @@
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
             [seon.cluster.registry :as registry]
+            [seon.cluster.process :as process]
+            [seon.operator :as client]
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.test-support :as test-support]))
@@ -23,31 +25,30 @@
   (let [command (into [(str (io/file project-root "bin" "seon"))
                        "--root" (.getCanonicalPath (io/file root))]
                       arguments)
-        process (.start
-                 (doto (ProcessBuilder. ^java.util.List command)
-                   (.directory project-root)
-                   (.redirectErrorStream true)))
-        output (future (slurp (.getInputStream process)))
-        _ (.waitFor process)]
+        result (process/run-process!
+                {:seon.operator.subprocess/argv command
+                 :seon.operator.subprocess/directory (str project-root)
+                 :seon.operator.subprocess/merge-error? true
+                 :seon.operator.subprocess/deadline-ms (client/operator-boot-bound-ms {})})]
     {:seon.dev.fresh-operator-export-test/completed? true
-     :seon.dev.fresh-operator-export-test/exit
-     (.exitValue process)
-     :seon.dev.fresh-operator-export-test/output
-     @output}))
+     :seon.dev.fresh-operator-export-test/exit (:seon.operator.subprocess/exit result)
+     :seon.dev.fresh-operator-export-test/output (:seon.operator.subprocess/output result)}))
 
 (deftest ^{:seon.test/fixture-observation "The exported physical store must be independently openable and queryable after the operator export command."} ^{:seon.test/long
-           "200.542 s pool: real start JVM, export JVM, store copy/reidentify, reopen, and query proof."}
+           "One real cold start followed by connected export, store copy/reidentify, reopen and query proof."
+             :seon.test/long-ms 360000}
   export-verb-produces-an-openable-queryable-store
   (let [root (fresh-root)
         cluster-name "export-verb"
         destination (io/file root "exported")
         exported-store (io/file destination "store")]
     (try
-      (test-support/populate-published-operator-root! root)
+      (test-support/populate-published-operator-root!
+       root {:seon.test/fixture-observation "CLI export must produce a physically independent store that can reopen."})
       (let [cold-destination (io/file root "cold-export")
             cold (run-seon root "export" (.getPath cold-destination))]
         (is (= 1 (::exit cold)) (::output cold))
-        (is (str/includes? (::output cold) "bin/seon start")
+        (is (str/includes? (::output cold) "No live exact-root JVM")
             (::output cold))
         (is (false? (.exists cold-destination))))
       (let [started (run-seon root "start" cluster-name)]
@@ -55,7 +56,7 @@
         (is (= 0 (::exit started)) (::output started)))
       (let [extra (run-seon root "export" (.getPath destination) "extra")]
         (is (= 1 (::exit extra)) (::output extra))
-        (is (str/includes? (::output extra) "export DESTINATION-PATH")
+        (is (str/includes? (::output extra) "Use export PATH")
             (::output extra)))
       (let [outcome (run-seon root "export" (.getPath destination))]
         (is (true? (::completed? outcome)) (::output outcome))
@@ -66,7 +67,7 @@
       (let [occupied (run-seon root "export" (.getPath destination))]
         (is (= 1 (::exit occupied)) (::output occupied))
         (is (str/includes? (::output occupied)
-                           "must not exist or must be an empty directory")
+                           "an export never overwrites one")
             (::output occupied)))
       (let [exported (store/open-store!
                       {:seon.store/dir (.getPath exported-store)})]

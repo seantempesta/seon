@@ -12,6 +12,7 @@
             [seon.cluster.store :as store]
             [seon.fs :as fs]
             [seon.id :as id]
+            [seon.instrument :as instrument]
             [seon.operator :as client]
             [seon.operator.runtime :as runtime]
             [seon.test-support :as support])
@@ -61,7 +62,7 @@
        :seon.probe/value (when-not (str/blank? out) (edn/read-string out))
        :seon.probe/err err}))))
 
-(defn- with-root! [published? body]
+(defn- with-root! [body]
   (let [root (.getCanonicalPath (io/file "tmp" (str "b1b-" (id/id))))
         sentinel (io/file (str root "-sentinel"))
         children (atom #{})
@@ -69,9 +70,6 @@
     (.mkdirs (io/file root))
     (spit sentinel "outside")
     (try
-      (when published? (support/populate-published-operator-root!
-                        root {:seon.test/fixture-observation
-                              "Store exclusion, retained lock inode and destructive reset require a private physical store, not a branch."}))
       (Files/createSymbolicLink (.toPath (io/file root "external-link"))
                                (.toPath sentinel)
                                (make-array java.nio.file.attribute.FileAttribute 0))
@@ -98,6 +96,14 @@
                             {:seon.probe/root root :seon.probe/cleanup-errors (mapv ex-message @failures)}
                             (or @primary-failure (first @failures))))))))))
 
+(defn- with-published-root! [body]
+  (with-root!
+    (fn [root children sentinel]
+      (support/populate-published-operator-root!
+       root {:seon.test/fixture-observation
+             "Store exclusion, retained lock inode and destructive reset require a private physical store, not a branch."})
+      (body root children sentinel))))
+
 (defn- request [root command]
   {:seon.operator/managed-root root :seon.operator/command command})
 
@@ -117,7 +123,6 @@
            :seon.test/long-ms 300000}
   cold-start
   (with-root!
-    false
     (fn [root children _]
       (let [launch (cli! root children ["start"])
             early (await! (:seon.probe/early launch) :early-repl)]
@@ -187,8 +192,7 @@
 (deftest ^{:seon.test/long "Two real cold JVM starts compete while the winner retains its acquired store before advertisement."
            :seon.test/long-ms 180000}
   concurrent-start
-  (with-root!
-    true
+  (with-published-root!
     (fn [root children _]
       (with-controlled-child!
         root children "start" "default"
@@ -211,8 +215,7 @@
 (deftest ^{:seon.test/long "Two canonical hosted instances, ordered release and injected branch-release refusal."
            :seon.test/long-ms 120000}
   stop-instance
-  (with-root!
-    true
+  (with-published-root!
     (fn [root _ _]
       (let [name (str "a-" (id/id)) sibling (str "b-" (id/id))
             config {:seon.boot/root (str root "/data/clusters")}
@@ -236,8 +239,7 @@
 (deftest ^{:seon.test/long "Real owned JVM receives SIGSTOP; down must prove exit without a REPL reply."
            :seon.test/long-ms 120000}
   down-unresponsive
-  (with-root!
-    true
+  (with-published-root!
     (fn [root children _]
       (started! root children)
       (let [identity (select-keys (client/advertisement root nil) [:seon.boot/pid :seon.boot/start-instant])]
@@ -271,8 +273,7 @@
 (deftest ^{:seon.test/long "Destructive replacement republishes the complete program from an empty store."
            :seon.test/long-ms 360000}
   reset-one-jvm
-  (with-root!
-    true
+  (with-published-root!
     (fn [root children sentinel]
       (started! root children)
       (let [old (client/advertisement root nil)
@@ -291,10 +292,12 @@
                                  (.toPath sentinel) (make-array java.nio.file.attribute.FileAttribute 0))
         (is (:seon.error/at (client/request! (request root :reset))))
         (is (.exists marker))
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (client/parse-argv ["--root" (str root "/missing") "reset" "--force"])))
-        (is (thrown? clojure.lang.ExceptionInfo
-                     (client/parse-argv ["--root" root "reset" "--force" "--config" "missing.edn"])))
+        (let [invalid-root (completed! (cli! (str root "/missing") children ["reset" "--force"]) event-ms)
+              invalid-config (completed! (cli! root children ["reset" "--force" "--config" "missing.edn"]) event-ms)]
+          (is (= 1 (:seon.probe/exit invalid-root)))
+          (is (str/includes? (str (:seon.probe/err invalid-root)) "existing isolated operator-root"))
+          (is (= 1 (:seon.probe/exit invalid-config)))
+          (is (str/includes? (str (:seon.probe/err invalid-config)) "--config is supported only by start")))
         (is (client/matching-handle old))
         (is (= "old data" (slurp marker)))
         (let [result (completed! (cli! root children ["reset" "--force"]))
@@ -316,8 +319,9 @@
 (deftest ^{:seon.test/long "Winner retains real destructive acquisition through indexing; two real cold competitors refuse."
            :seon.test/long-ms 360000}
   start-during-reset
-  (with-root!
-    true
+  (is (every? (instrument/instrumented) [#'boot/start! #'process/current-identity])
+      "The in-process winner starts under the installed boot and process contracts.")
+  (with-published-root!
     (fn [root children _]
       (let [deleting (promise) allow-delete (promise)
             serving (promise) allow-ready (promise)
@@ -354,8 +358,7 @@
 (deftest ^{:seon.test/long "Captured old process exits before another owner wins the replacement gap."
            :seon.test/long-ms 240000}
   reset-loses-replacement-race
-  (with-root!
-    true
+  (with-published-root!
     (fn [root children _]
       (started! root children)
       (let [captured (client/selected-processes root)]
@@ -379,8 +382,7 @@
 (deftest ^{:seon.test/long "Foreign-process exclusion before destructive deletion and after complete boot, then actual exit releases the retained inode."
            :seon.test/long-ms 360000}
   same-lock-through-reset-boot
-  (with-root!
-    true
+  (with-published-root!
     (fn [root children _]
       (let [marker (io/file root "data/store/delete-entry-sentinel")
             lock-file (io/file root "data/store.lock")]
@@ -397,6 +399,7 @@
               (.setSoTimeout socket (int cold-ms))
               (let [identity (edn/read-string (.readLine reader))
                     _ (swap! children conj (select-keys identity [:seon.boot/pid :seon.boot/start-instant]))
+                    _ (println "B1b controlled child" (pr-str identity))
                     entry (edn/read-string (.readLine reader))
                     inode (Files/getAttribute (.toPath lock-file) "unix:ino" (make-array LinkOption 0))]
                 (is (= :delete-entry (:seon.probe/event entry)))
@@ -415,14 +418,17 @@
                 (let [handle (client/matching-handle identity)]
                   (.destroyForcibly handle)
                   (.get (.onExit handle) event-ms TimeUnit/MILLISECONDS))
-                (completed! launch event-ms)
+                (.get (.onExit (:seon.probe/process launch)) event-ms TimeUnit/MILLISECONDS)
+                (await! (:seon.probe/out launch) :controlled-child-stdout)
+                (await! (:seon.probe/err launch) :controlled-child-stderr)
                 (is (= inode (Files/getAttribute (.toPath lock-file) "unix:ino" (make-array LinkOption 0))))
                 (let [form `(with-open [channel# (java.nio.channels.FileChannel/open
                                                   (.toPath (clojure.java.io/file ~(str lock-file)))
                                                   (into-array java.nio.file.OpenOption
                                                               [java.nio.file.StandardOpenOption/WRITE]))]
                               (if-let [lock# (.tryLock channel#)]
-                                (with-open [lock# lock#] (prn :acquired))
+                                (prn :acquired)
                                 (prn :locked)))
                       acquired (completed! (launch-process! children ["bb" "-e" (pr-str form)]) event-ms)]
+                  (is (zero? (:seon.probe/exit acquired)) (:seon.probe/err acquired))
                   (is (= :acquired (:seon.probe/value acquired))))))))))))

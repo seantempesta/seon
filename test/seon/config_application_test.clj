@@ -118,7 +118,7 @@
         (mapcat :seon.fn.file/rows)
         (:seon.fn.manifest/artifacts
          (seon.fn/build-manifest
-          {:seon.fn/roots ["src" "script/seon/fresh_operator.clj"]}))))
+          {:seon.fn/roots ["src" "script/seon/operator.clj"]}))))
 
 (deftest every-config-entry-has-an-honest-application-contract
   (test-support/with-database

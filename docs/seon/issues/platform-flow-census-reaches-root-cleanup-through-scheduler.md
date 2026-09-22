@@ -45,3 +45,22 @@ the declaration with the existing destructive-reach rule, then run the complete
 platform tier without weakening isolation or claiming an unexecuted tier green.
 The preparation assignment expressly forbids changing selection or tiers, so
 this issue is outside that slice.
+
+## B1b observation, 2026-09-21
+
+The same platform-declaration/destructive-reach admission class now appears on
+source-publication fixtures. Canonical `seon.test/run` of
+`seon.test.runner-test/the-canonical-platform-tier-preserves-file-local-uncertainty`
+recorded run `807cd921066f`: 6 pass, 0 fail, 1 error, basis 536871056,
+completion 536871058. The guard names ten tests in `seon.cluster.source-test`,
+`seon.cluster.source-lineage-test`, and `seon.cluster.source-evidence-test` reaching
+`seon.test-support/populate-published-operator-root!`. The complete named refusal
+is retained in [B1b raw results](../../prds/agent-platform/landing/b1b-results-2026-09-21.txt).
+
+A separate direct call positively finds B1b `cold-start` in the declared platform
+set and admits it, while refusing B1b `start-during-reset` with its exact path
+through `with-published-root!` to that destructive helper. The cold helper does
+not populate a published root. This is not a full platform green, nor a verified
+claim that the ten source tests were already broken before B1b. Their declaration
+and selection policy remain the orchestrator's integration decision; B1b did not
+change their metadata or weaken the guard.

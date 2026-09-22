@@ -1,18 +1,10 @@
 (ns seon.cluster.cohost-boot-test
   "Two sovereign clusters in ONE JVM, with instrumentation live.
 
-  The class this kills: a value read back out of the database violates the
-  contract its own producer declares, and nothing observes it because the
-  only boot that ever runs instrumented is the SECOND one. `bin/seon start`
-  on a fresh JVM applies instrumentation AFTER `start!` returns
-  (`script/seon/fresh_operator.clj:1389`); adding a cluster to a running JVM
-  refreshes instrumentation BEFORE `start!`
-  (`script/seon/fresh_operator.clj:1430`), under the FIRST cluster's
-  projection state. So the co-hosted second boot is the first boot in the
-  system's life to have its own contracts checked, and
-  the former activation check refused there while booting cleanly in
-  its own root
-  ([issue](../../../docs/seon/issues/a-cohosted-second-cluster-cannot-boot.md)).
+  This regression observes a second boot while the first cluster's contracts
+  are already armed. Fresh source boot arms during stand-boot-layers!, whereas
+  a cohosted start enters the same sequence under the existing wrappers
+  (`src/seon/cluster/boot.clj`). Both paths must produce valid layer values.
 
   This namespace reproduces that exact ordering — cluster A boots, the
   operator's instrumentation is applied under A's projection state, cluster B

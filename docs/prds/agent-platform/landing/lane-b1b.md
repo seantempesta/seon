@@ -1,179 +1,206 @@
 ---
 type: report
-status: implementation in progress
+status: implementation complete; integration pending
 created: 2026-09-21
 tags: [agent-platform, boot, operator]
 ---
 
-# B1b implementation evidence
+# B1b implementation and verification
 
-The rewrite is in progress. Five of eight canonical destructive drills have positive iteration results below;
-remaining drills and default replacement/platform gate are **pending**.
-The owner authorized temporary boot/tool breakage between commits. Default has
-not been stopped or replaced by this lane; the orchestrator owns that checkpoint.
+Eight named boot/reset drills have positive canonical `seon.test/run` iteration
+results. **Default replacement, the cold integration gate, and the installed MCP
+connection reload remain pending and orchestrator-owned.** Default was never
+stopped or replaced by this lane. The platform-guard regression is red on ten
+source-publication tests; its exact refusal is recorded below, not attributed to
+baseline without a comparison. An additional export test request was explicitly
+fixture-excluded, and a `bin/test-check` smoke reached the installed request owner
+but exceeded its explicitly supplied 5000 ms bound. Neither is claimed green.
 
-## Changes and scope
+Read end to end: the [implementation brief](../../../research/agent-platform/b1b-implementation-brief-2026-09-21.md),
+[integrated B1b specification](../plan/lane-b1b-operator-and-boot-rewrite.md), and
+[Fable review of 076827cc9](../../../research/agent-platform/b1b-fable-review-076827cc9-2026-09-21.md).
+The assignment's temporary between-commit load/tool breakage exception was used;
+this report separates early listener evidence, complete boot, and recorded drills.
 
-`26143d5f2` adds destructive store admission after acquiring the existing sibling
-FileLock, before database probing or deletion. The lock inode is retained.
-Filesystem measurements moved to `seon.fs`; collection and log rotation moved to
+## Landed shape
+
+Implementation checkpoints: `26143d5f2` (store admission), `076827cc9`
+(operator/boot replacement), and `f49187619` (contracts, bounds, drill harness and
+review fixes), followed by this final verification slice.
+
+The BB client discovers exact `(pid, start-instant)` identities, delegates connected
+commands to the hosting JVM, and retains the captured set for down/reset. Positive
+PID reuse makes an advertisement stale; unavailable OS identity refuses. A delayed
+down never rediscovers and signals a replacement. Cold launch opens the REPL before
+loading the program or acquiring its store. A store-lock loser exits and the client
+awaits its actual `onExit`; a later boot failure leaves the listener and acquired
+layers usable. Readiness includes the actual served URL and wanted port.
+
+Store destruction occurs after acquiring the existing sibling FileLock and before
+probing/deleting store content. Boot retains a root-store reference across source
+publication and uses that same holder through ready. Failed release keeps the lock
+and listener. Forced single-instance stop checks every sibling key, including
+reservations, under the instance monitor and uses `Runtime.halt` only for a proven
+singleton; this avoids waiting on a shutdown hook that needs that monitor.
+Advertisements use atomic EDN replacement.
+
+Filesystem measurement moved to `seon.fs`; collection and log rotation moved to
 `seon.maintenance`; bounded tooling subprocess execution moved to
-`seon.cluster.process`. Publication, registry, schema/projection, search and SCI
-acquisition semantics remain the installed owners.
+`seon.cluster.process`. Existing publication, registry, schema/projection,
+coherence, search, SCI and test selection owners remain installed. This does not
+implement A1/B2/B3/B4. `bin/test-check` still calls `seon.test/check-request`.
 
-The tooling-only changed-test report lock now refuses busy requests immediately.
-Its former lifecycle queue/holder files were removed; existing subprocess execution
-and reaping bounds remain. It has a process-local reservation before opening the
-kernel lock, preventing a same-process second descriptor close from dropping the
-held fcntl lock. This is tooling resource exclusion, not boot/reset lifecycle state.
-A narrow concurrent-request regression remains pending.
+The changed-test tooling lock now refuses busy requests immediately, replacing
+its lifecycle queue/holder files. A same-process reservation precedes opening the
+kernel lock, so closing a second descriptor cannot release a held fcntl lock.
+Closing the acquired FileChannel releases the lock. The existing subprocess and
+reaping bounds remain. This exclusion protects one tooling report, not boot/reset.
 
-## Early evidence (not completed boot)
+## Canonical iteration evidence
 
-`bin/seon help` and BB client namespace loading return successfully without launching
-a JVM. Pure argv validation refuses reset without force, invalid cluster paths,
-a cluster argument to down, and unknown commands.
+[Raw outcomes and exact program/input digests](b1b-results-2026-09-21.txt) are
+retained with the [reproducible runner](b1b-drill.clj). The runner connects to an
+explicit existing scratch host, arms through `seon.test.arm/arm-contracts!`, carries
+the real database projection and calls `seon.test/run`. It does not launch or
+replace its host. Physical fixtures use the canonical published-store helper with
+an explicit observation explaining why a database branch cannot prove OS lock
+exclusion; no hand-rostered schemas or mock stores are used. Source tests' canonical
+manifest base is produced by `seon.cluster/publication-base!`.
 
-First owned scratch child pid 36477/start `2026-09-21T22:35:32.815Z` reported
-prepl 53899 before program loading, but the initially chosen `user` accept Var
-failed because Clojure's server requires its namespace. Replaced with core
-`io-prepl`'s supported `:valf` argument. Exact-root `down --force` reaped that child.
+| Drill | Run | Pass/fail/error | Measured ms | Basis / completion |
+|---|---|---|---:|---|
+| 1 cold-start | `59ec4d92c3c4` | 13/0/0 | 144131 | 536871009 / 536871011 |
+| 2 concurrent-start | `f0f948403d29` | 12/0/0 | 51596 | 536871003 / 536871005 |
+| 3 stop-instance | `26284d8b6c6c` | 6/0/0 | approximately 80000 | 536870988 / 536870990 |
+| 4 down-unresponsive | `95dcf27dd30b` | 13/0/0 | 55858 | 536871052 / 536871054 |
+| 5 reset-one-jvm | `b54213d0cab0` | 21/0/0 | 158108 | 536871062 / 536871064 |
+| 6 start-during-reset | `0b9e7d0a1484` | 11/0/0 | 166166 | 536871050 / 536871052 |
+| 7 reset-loses-replacement-race | `09dc5e02d391` | 12/0/0 | 58111 | 536871021 / 536871023 |
+| 8 same-lock-through-reset-boot | `ab51b53f1450` | 18/0/0 | 153453 | 536871046 / 536871048 |
 
-The retained second scratch child is pid 36681/start
-`2026-09-21T22:37:46.670Z`, prepl 53938, root `tmp/b1b-initial-root`.
-The real transport evaluation `(+ 1 1)` returned `2` before full program loading
-and after a later source-analysis refusal. The later refusal retained its listener,
-partial instance and store holder. That early observation alone did not prove full boot; subsequent complete evidence appears below.
+These are separate iterations as source evolved, not a single final-snapshot cold
+gate. Drill 2's helper later gained an actual-loser-exit assertion, exercised in
+7 and 8. Drill 5's later invalid-root/config checks initially called the internal
+parser with public CLI syntax; final inspection caught that false-positive risk.
+They now execute the real CLI and assert the specific refusal plus unchanged old
+identity/data. Its final retry `b54213d0cab0` passes all 21 assertions, as listed above. The older
+`47ba19ff0306` run (15/0/0, 136271 ms) is retained in raw evidence.
 
-Canonical source analysis exposed retired claim/lifecycle references in tests.
-After conversion it exposed duplicate lint identity `4217c301d9de`: two warnings
-at `src/seon/cluster/process.clj:96:1` for redundant declarations of
-`matching-process-handle` and `process-start-instant`. Removing the useless declare
-unblocks the input; the underlying identity class is filed separately as
-[lint-identities-collide-for-multiple-findings-at-one-location](../../../seon/issues/lint-identities-collide-for-multiple-findings-at-one-location.md).
+Drill 1 proves early REPL, complete zero-store publication, HTTP 200, one database
+fact, JVM/SCI evaluation, and usable REPL after injected web failure. At 55 s its
+thread sample identified `seon.fn/index!`'s canonical transaction and writer-side
+owning-ancestor validation in `seon.db/write-owned-values-error`.
 
-Exact diagnostic duplicate rows (identical identity, differing message):
+Drill 2 uses the SAME cluster name for winner and contenders, pauses before the
+advertisement, and proves real typed foreign-lock refusal before and after the
+advertisement without changing it. Drill 3 covers siblings, stale instance stop,
+and failed branch release retaining the fence. Drill 4 additionally proves stale
+advertisement omission, unknown identity refusal and forced-stop refusal with a
+sibling reservation before SIGSTOP/down.
 
-```clojure
-{:seon.lint/id "4217c301d9de"
- :seon.lint/file [:seon.fn.file/relative-path "src/seon/cluster/process.clj"]
- :seon.lint/type :redundant-declare :seon.lint/level :warning
- :seon.lint/message "Redundant declare: matching-process-handle"
- :seon.lint/row 96 :seon.lint/col 1 :seon.schema.admission/source :core}
-{:seon.lint/id "4217c301d9de"
- :seon.lint/file [:seon.fn.file/relative-path "src/seon/cluster/process.clj"]
- :seon.lint/type :redundant-declare :seon.lint/level :warning
- :seon.lint/message "Redundant declare: process-start-instant"
- :seon.lint/row 96 :seon.lint/col 1 :seon.schema.admission/source :core}
-```
+Drill 5 positively observes the actual returned old branch before reset and its
+absence afterward, old data deletion, unchanged sibling lock inode and preserved
+outside symlink sentinel. Drill 6 runs its winner IN the test JVM, positively
+asserts entering instrumented boot/process Vars, and proves foreign exclusion at
+two controlled pauses while the winner remains paused. Drill 7 covers captured-old
+identity versus replacement and the destructive loser leaving winner data intact.
+Drill 8 uses a controlled real child, checks the SAME FileLock and FileChannel
+before deletion and after full ready, proves foreign exclusion at both points,
+then KILL/onExit releases that same inode and a fresh process acquires it.
 
-## Size snapshot (2026-09-21, intermediate)
+Ordinary events use the canonical 20 s backstop. The declared boot dial is
+`:seon.config.operator/boot-bound-ms` = 300000 ms, based on measured 144131 ms
+zero-store boot. Drill bounds are 300000, 180000, 120000, 120000, 360000, 360000,
+240000 and 360000 ms respectively, covering their measured constituent cold boots,
+publication and competing subjects. These authorized cold costs do not justify
+minute-scale ordinary work. All child cleanup attempts run even after one failure;
+unknown exit/release retains the root instead of deleting an occupied store.
 
-Actual `wc -l`: `bin/seon` 26; `script/seon/operator.clj` 368;
-`src/seon/cluster/boot.clj` 437; total 831 against the approximately 900 target.
-Boot exceeds its individual 420 target by 17 lines because the installed projection,
-coherence, search and acquisition sequence is preserved until its owning cuts.
-Final counts, exact path inventory and additions/deletions will follow the drills.
+Focused results: tooling busy exclusion `8ed74a43d301` (2/0/0), log rotation
+`e5071486067d` (3/0/0), physical collection `80bde33b0825` (8/0/0). Later requests
+correctly reused the latter two unchanged. CLI help loads without a JVM.
 
-## First completed scratch boot
+## Failures that improved the proof
 
-Publication produced `6ab1b46f-7eba-5cd7-b6d5-8bc9b09eb4f4`. Reloading the
-new cluster/boot owners and replacing the partial instance IN THE SAME scratch JVM
-produced readiness with `:seon.boot/missing-layers []`, one root agent,
-`:seon.boot/ready-ms 9154`, prepl 54258, wanted web port 7994, actual URL
-`http://127.0.0.1:54263`. HTTP GET `/` returned 200. This is a moved boot-path proof,
-not one of the eight recorded drills and not a default replacement.
+- Initial listener accept in `user` failed because core server requires a
+  namespace; using supported `io-prepl :valf` fixed it. Reaped child 36477.
+- Stop run `d332313c3d02` refused missing expensive-fixture observation; the
+  canonical helper now receives its real OS-exclusion reason.
+- Concurrent run `0ab03f6db5e8` (11/1/0, 47610 ms) exposed a published fixture
+  predating the new required config dial. Re-exported the canonical publication.
+- Race run `ce4456281356` (11/1/0, 54341 ms) caught a still-live losing child.
+  The client now finds the actual nested typed lock refusal and awaits its child.
+- Continuity run `50d0d3a90fab` (15/0/1, 142282 ms) parsed diagnostic stdout as
+  EDN. The controlled subject now waits for actual exit and both stream EOFs;
+  the fresh lock probe also positively asserts exit zero.
+- A preliminary drill 6 run had needlessly reloaded process/maintenance Vars,
+  removing entering wrappers. It was not used as the final armed proof; the
+  final run asserts that precondition and passes.
+- The busy check exposed BB's unavailable FileLock close/release methods;
+  FileChannel scope now owns release. An intermediate recorder refusal reproduced
+  [immutable report line collisions](../../../seon/issues/moving-a-failing-assertion-conflicts-with-its-immutable-report.md),
+  which remains an existing B4 issue rather than hidden work in this slice.
+- Publication exposed redundant declarations with colliding lint identities;
+  removed the redundant declarations and retained the existing
+  [lint identity issue](../../../seon/issues/lint-identities-collide-for-multiple-findings-at-one-location.md).
 
-The existing long-lived MCP process returned transport failure with `error:null`
-for explicit scratch-root JVM and SCI requests. Tool restoration remains pending;
-raw operator PREPL remains usable. No successful MCP reconnection is claimed.
+## Review disposition and integration boundary
 
-## Review and canonical iteration update (2026-09-21)
+Fable #1: removed blanket 900000 ms waits and measured distinct paths. Its 9154 ms
+reference was repaired IN-PROCESS boot, not cold JVM plus zero-store publication.
+#2: hook config no longer owns operator timing; the declared operator fact does.
+#3: unavailable endpoint diagnostics name the live exact-root identities.
+#4: neither existing error owner exposes the suggested predicate, so the installed
+three-key refusal check remains. #5 conflated drill 6's in-process winner with
+drill 8's intentionally controlled child; the spec already describes both correctly.
 
-Read the implementation brief, integrated B1b specification and Fable's review of
-`076827cc9` end to end. Fable #2 and #3 are addressed: the operator now reads its
-boot allowance from the declared `:seon.config.operator/boot-bound-ms` fact, and
-missing-endpoint diagnostics distinguish a live exact-root JVM and name its
-identities. #4 preserves the installed three-key recovery refusal check: neither
-`seon.error` nor `seon.error.refusal` supplies an error predicate to reuse. #5
-conflates two drills: `start-during-reset` (6) already has its winner in the test
-JVM; `same-lock-through-reset-boot` (8) intentionally uses a controlled child.
-The specification therefore needs no correction on that point.
+The owned host pid 36681/start `2026-09-21T22:37:46.670Z` reached full readiness
+in 9154 ms after repair, later serving prepl 54258 and URL
+`http://127.0.0.1:54263` (wanted 7994). The freshly loaded BB MCP bridge proves JVM,
+explicit database custody and SCI evaluation. The old long-lived installed MCP
+server returned transport failure `error:null`; its connection reload is still
+pending. Fresh bridge success does not prove the installed connection reloaded.
 
-For #1, the blanket 900000 ms declarations are removed. Ordinary event waits use
-the canonical 20 s backstop. The measured three-boot stop drill took approximately
-80 s (a live thread sample identified installed Lucene rebuild/fsync), with a
-120 s declaration; real cold child plus SIGSTOP/down took approximately 55 s,
-with a 120 s declaration. The concurrent-start drill allows 180 s for three cold
-process admissions; the replacement-gap drill allows 240 s for two boots and a
-cold losing contender. The 9.154 s earlier measurement was repaired in-process
-boot, **not** cold JVM plus zero-store publication. Cold-index drills temporarily
-retain the previously authorized 600 s publication allowance plus their bounded
-child operations (660–720 s total), pending their first complete measurement.
-This is an explicitly uncalibrated inherited allowance, not a claimed measurement.
+Canonical platform-guard run `807cd921066f` recorded 6/0/1: ten source-publication
+tests reach the destructive fixture helper. Full names and diagnostic are in raw
+results and the [existing admission-class issue](../../../seon/issues/platform-flow-census-reaches-root-cleanup-through-scheduler.md).
+A separate owning-function probe positively confirms B1b cold-start is declared
+and admitted, while start-during-reset refuses with the exact destructive path.
+No platform green or baseline attribution is claimed. The orchestrator owns that
+policy decision and final cut gate. The export regression remains fixture-excluded;
+actual connected export/publication-base operations succeeded during setup.
+`bin/test-check` reached its installed owner but its 5000 ms request bound fired.
 
-Two canonical `seon.test/run` iterations have recorded positive results:
+The root orchestrator owns activation of AGENTS/testing guidance before the next
+lane. This lane preserved unrelated working-edge/review documents and did not
+push, create a worktree, or operate default.
 
-| Drill | Run | Assertions | Recorded basis / completion |
-|---|---|---|---|
-| stop-instance (3) | `26284d8b6c6c` | 6 pass, 0 fail, 0 error | 536870988 / 536870990 |
-| down-unresponsive (4) | `50588a6cf18d` | 8 pass, 0 fail, 0 error | 536870990 / 536870992 |
+## Size and ownership
 
-Both used program digest
-`5758c1601fc571362e39ec2c2c5a77d6a8217c000026c8fbaa25e210af2b3d33`
-and input digest
-`4ce09a3c2a1dfe6fcfe3ea8a0940aa62b37c0f9fa86f4a43804272c4a8f5376f`.
-An earlier stop iteration (`d332313c3d02`) recorded one error because the physical
-fixture lacked its required observation explaining why a database branch could
-not establish store-lock behavior. The fixture now supplies that observation to
-the existing canonical helper; no alternate fixture or schema population was used.
-Later helper/bound refinements still require final-source verification.
+Actual line counts at final source: `bin/seon` 26, BB client 387, boot 447: **860**
+against approximately 900 total. Boot exceeds its individual 420 target by 27
+lines because the installed projection/coherence/search/acquisition sequence must
+remain until its owning cuts; the shell is 54 below 80 and client 13 below 400.
+Moved maintenance is 1016, process 315, filesystem owner 409; tooling state 72;
+real drill namespace 434 and test-only child 60. These moved owners are reported
+separately, not hidden in the new-three-file budget. The mechanically generated
+[per-file line inventory](b1b-file-counts-2026-09-21.md) lists every implementation
+path in the lane commits plus this final owned source/test slice against launch
+HEAD `995155f1e`, including removed files.
 
-The freshly loaded BB MCP bridge proved JVM evaluation, explicit cluster database
-custody and SCI evaluation (shown `2`, outcome `ok`). The existing long-lived MCP
-server still needs its connection reload; fresh bridge success does not establish
-that reload. Default replacement and the cut-level platform gate remain pending
-and orchestrator-owned.
+## Cleanup and final load
 
-Concurrent-start (drill 2) passed canonically as run `f0f948403d29`: 12 pass,
-0 fail, 0 error, measured 51596 ms, basis 536871003 / completion 536871005.
-Program digest `3321673ecf0997960de01f0a8a47bdc5ea38ea785a5436d8f5a3316e33b80db7`;
-input digest unchanged from the preceding rows. Exact child identities:
-45154 / `2026-09-21T23:21:03.087Z` (winner),
-45269 / `2026-09-21T23:21:16.580Z`, and
-45296 / `2026-09-21T23:21:36.598Z` (losers), all reaped.
-The earlier attempt `0ab03f6db5e8` measured 47610 ms with 11 pass / 1 fail:
-the exported fixture predated the newly declared operator boot dial, so the
-winner refused its absent database attribute. Re-exporting through the existing
-canonical export owner supplied the current schema; no schema hand roster was
-introduced. Both attempts positively observed typed foreign store-lock refusal.
+The final owned host load required boot, maintenance, process, filesystem, runner
+and MCP namespaces successfully without starting another JVM. `bin/seon --root
+tmp/b1b-initial-root down` returned the captured identity 36681 /
+`2026-09-21T22:37:46.670Z` after actual exit. Its realized canonical fixture base
+`tmp/fixture-bases/base-9162618621084851715` was removed by its shutdown owner.
+A process-table check then found only the untouched default JVM (25658); all
+drill subjects were gone. Removed the owned initial root and four physical export
+bases. No foreign run root or fixture base was swept.
 
-Cold-start (drill 1) passed canonically as run `59ec4d92c3c4`: 13 pass,
-0 fail, 0 error, measured **144131 ms**, basis 536871009 / completion 536871011.
-Program digest `e3ba645753f6520992db75af35342733e7f2d0366877b5d390a1da34432754e8`;
-input digest unchanged. Exact child 45377 / `2026-09-21T23:23:52.269Z` was reaped.
-This is a complete empty-store child boot plus HTTP 200, explicit database custody,
-JVM and SCI evaluations and injected later web failure with surviving REPL.
-At 55 s, the child was in `seon.fn/index!`'s canonical transaction; its writer
-was validating owning ancestors through `seon.db/write-owned-values-error`.
-The measured complete path now replaces the provisional allowance above:
-operator boot bound **300000 ms**, cold drill **300000 ms**, destructive
-reset/continuity drills **360000 ms** including their extra cold contenders.
-The approximate doubling is explicit, not a performance claim about later cuts.
-
-Reset-one-jvm (drill 5) passed as run `47ba19ff0306`: 15 pass, 0 fail,
-0 error, **136271 ms**, basis 536871013 / completion 536871015, program digest
-`13f0d1bb7ef2776debdea11d4a990c09f9f9f030a39a80b9c2400efc537db7b1`.
-Old child45612 / `2026-09-21T23:27:52.416Z` exited before replacement
-45644 / `2026-09-21T23:28:13.320Z`; both were reaped. The old named branch
-was positively present before reset and absent afterward; lock inode remained,
-inside marker vanished, outside symlink sentinel survived. Invalid argv assertions
-added afterward remain pending final verification.
-
-The next source checkpoint also adds complete contracts to moved subprocess and
-maintenance collection helpers, removes retired claim/census/lock schema rows and
-old census-only assertions, and updates the REPL custody owner in AGENTS/skill
-examples. Client loading and canonical publication/adoption passed; the new
-contracts required named EDN-readable predicates, not anonymous function objects.
-Remaining drill outcomes, tooling busy test, moved-helper focused checks and
-final per-file counts remain pending.
+Final `clj-kondo` over the eleven pending source/test files reported zero errors
+and 46 warnings (shadowed names, unused bindings/requires/private Vars and a
+redundant `do`); this is not a warning-free lint claim. BB required the client,
+tooling state and MCP namespaces successfully after the final description edit.
+`git diff --check` passed.

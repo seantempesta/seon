@@ -3411,7 +3411,7 @@
     (try
       (let [{live? :seon.operator/live-process?
              value :seon.operator/value}
-            ;; `seon.fresh-operator` lives under `script/`: a deliberate late
+            ;; `seon.operator` lives under `script/`: a deliberate late
             ;; dependency of the operator drill, never a load-cycle dodge.
             ((requiring-resolve 'seon.operator/live-root-value!)
              operator-root (persistent-results-form (str completion-file)))]

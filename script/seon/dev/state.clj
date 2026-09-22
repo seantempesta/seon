@@ -66,6 +66,7 @@
       (with-open [channel (FileChannel/open path (into-array OpenOption
                                               [StandardOpenOption/CREATE StandardOpenOption/WRITE]))]
         (if-let [lock (.tryLock channel)]
-          (with-open [lock lock] (transition))
+          ;; Closing the acquired channel releases its lock; BB exposes the channel.
+          (transition)
           (busy!)))
       (finally (swap! held-locks disj key)))))
