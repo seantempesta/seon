@@ -16,8 +16,8 @@ This directory contains the integrated plan and implementation specifications.
 Each spec states its design directly: the data flow, dependency source, ordered
 changes, probes and acceptance conditions. Research and review history are outside
 this directory. These are implementation instructions, not claims that the code
-has already changed. The [shared instructions](../../../../AGENTS.md) are active; their activation
-diff receives Fable review before the next implementation lane launches.
+has already changed. The [shared instructions](../../../../AGENTS.md) are active and Fable-reviewed;
+evergreen traps remain in the root instructions.
 
 ## 1. What becomes simpler
 
@@ -361,13 +361,14 @@ work.** The orchestrator owns root `AGENTS.md` and the rewritten testing skill;
 installed commands are distinguished from future targets. `CLAUDE.md` remains its
 symlink, not a second instruction authority. Testing and REPL guidance use §6's
 cut-level verification policy; helper details live in the skill rather than being
-duplicated in the root file. Fable's dropped-rule review remains due before the
-next implementation lane launches.
+duplicated in the root file. The dropped-rule review is complete; restored evergreen
+rules remain in the root because agents may not load the specialized skills.
+At B1b integration, delete its temporary breakage-exception sentence from root
+`AGENTS.md`; until then the exception remains scoped to that unfinished integration.
 Each later cut updates the affected instructions with its implementation; B4's
 runner instructions activate only when that runner and its callers actually land.
 Running lanes receive the changed guidance explicitly; new lanes read it at launch.
-Fable reviews the activation diff for dropped binding rules before the next lane
-launches. The testing skill labels each rule as enforced by the installed fixture
+The testing skill labels each rule as enforced by the installed fixture
 or runner, partially enforced, or an author responsibility, citing the actual seam.
 Explicitly cover duration failure, refused fixture writes through `transacted!`,
 arming drift, and hand-written fixture maps. Do not claim that validating a map's
