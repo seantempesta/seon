@@ -120,3 +120,43 @@ and still lists `:seon.search/index`. The after-proof is limited to the successf
 from-source and archived-HEAD loads plus the executed focused tests described above.
 A rebuilt graph or fresh orchestrator boot is required to observe proc absence at
 runtime.
+
+## Follow-up: missed configured supplier
+
+Commit `62487dbc3` closes the retirement miss from `434c01f4c`. The default
+configuration still declared `:seon.search/handle` with supplier
+`seon.search/supplied-handle`, so a from-zero population could pass schema loading
+and then refuse the dangling call-preparation row. The supplier row was deleted;
+there is no replacement for a resource that no longer exists.
+
+The exact required sweep now returns zero:
+
+```sh
+rg seon.search config/ resources/ src/ script/ bin/ test/ .claude/
+```
+
+The same correction removes the retired search-test assertion, generalizes the
+historical predicate incident text, and regenerates the Datahike parity population
+from the canonical packaged forms. Commit delta: four files, two insertions and ten
+deletions.
+
+The working tree and an archive of committed `62487dbc3` both loaded
+`seon.cluster`, `seon.cluster.boot`, `seon.schema.admission`, and `seon.db` with exit
+zero. The archive path was `/tmp/seon-search-config-proof.6RvcDh`.
+
+The requested isolated reset command was executed three times against only
+`tmp/search-config-root`:
+
+```sh
+bin/seon --root tmp/search-config-root reset --force
+```
+
+The plain archive attempt refused because boot requires Git metadata. A committed
+Git snapshot and the shared tree both proceeded through source population and then
+refused while seeding `my.agents.root`: its namespace value lacked the newly required
+`:seon.program/definition-digest`. Repeating on `d26fa4bf1` plus only the supplier-row
+deletion reached the same later schema-retirement boundary. Each failed JVM exited;
+`status` reported no live exact-root JVM. This is not a healthy-boot pass and no
+readiness time is claimed. The failing owner is the held schema-retirement slice in
+`src/seon/cluster.clj`/`src/seon/fn.clj`/`src/seon/db.clj`, which this lane did not
+edit. `default` was never addressed.
