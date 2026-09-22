@@ -33,6 +33,22 @@ reader. The law, in order of preference:
 3. only when a concept is genuinely ours, coin once, record it here with
    sources on BOTH sides of the boundary, and use it everywhere.
 
+## Ruled 2026-09-22 — one JVM, many realities (owner)
+
+| term | is | source of the name | never |
+|---|---|---|---|
+| **cluster** | a Datahike branch plus the agents working on it; the cluster row holds the pointer we advance | Seon, recorded once ([architecture](clusters-branches-contexts.md)) | an "environment" to start |
+| **branch** | `datahike.api/branch!`: a roster pointer to a commit; no copy | `reference-code/datahike/src/datahike/versioning.cljc` `branch!` | "worktree", "fork of the database" |
+| **context** | the SCI world acquired from a database value's program rows; `sci/fork` for a child | `reference-code/sci/src/sci/core.cljc` `fork` | "environment", "refork" |
+| **program rows** | the declared program partition on a branch: functions, tests, schemas, namespaces, render pairs, contracts, analysis facts | Seon ([program rows data pack](../../research/agent-platform/program-rows-data-pack-2026-09-22.md)) | a hand list; a stamped kind |
+| **data** | every other row: turns, evaluations, messages, errors, tasks, results — disposable, never merged | Seon | "state" |
+| **loaded namespaces** | `require`'s output: the JVM's compiled Vars, derived from the files exactly as the program rows are by the indexer | Clojure (`clojure.core/require`, `loaded-libs`) | "compiled cache", "the runtime" |
+| **reload** | `(require ns :reload)` of the changed namespaces and their dependents, in dependency order from `:seon.ns/requires` | Clojure | a system to restart |
+| **host-bound row** | a declaration SCI cannot interpret (refused form head or an unresolvable host reference in its own body), a computed per-declaration fact | SCI (`sci.impl.analyzer`), [host-bound data pack](../../research/agent-platform/host-bound-rows-data-pack-2026-09-22.md) | a namespace roster |
+| **live** / **isolated** | an agent's mode = which branch its custody points at: the cluster's branch, or a branch off its head | Seon | "sandbox" |
+| **merge** | program rows from a branch onto a cluster head via an intermediate branch, the gate (reaching tests + contracts), then a named accept; Datahike's `merge!` records the lineage | `versioning.cljc` `merge!` | "sync", "promote" |
+| **unlink** | `registry/retire-branch!`: the branch leaves the roster; the retention sweep (`collect!`) reclaims it later | Seon over Datahike's roster and GC | a per-branch cleanup |
+
 Never assume you understand a row from its name alone: follow its links and
 read that slice of code before building against it — that is how we avoid
 rebuilding what a core library already built. Rows marked **[TARGET]** describe a ruled integration not yet proven complete
