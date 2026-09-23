@@ -430,7 +430,9 @@
                {:seon.dev-cache/status :miss
                 :seon.dev-cache/reason (if (string? expected) :no-matching-cache :pins-unavailable)
                 :seon.dev-cache/input-digest expected
-                :seon.dev-cache/fill (str "cd " repository " && clojure -T:dev-cache ensure-cache")})
+                ;; Filled from `source` itself: an archive's `target` links the
+                ;; checkout's (`share-caches!`), so the fill lands in the one cache.
+                :seon.dev-cache/fill (str "cd " source " && clojure -T:dev-cache ensure-cache")})
            :seon.dev-cache/selection-ms (quot (- (System/nanoTime) started) 1000000))))
 
 (defn- start-classpath
@@ -592,9 +594,60 @@
              {:seon.operator/repository repository :seon.operator/enclosing-repository top}))
     repository))
 
+(defn- leading-fields
+  "The first `n` space-separated fields of `line` and the rest of it."
+  {:malli/schema [:=> [:cat :string [:int {:min 1}]] [:vector :string]]}
+  [line n]
+  (loop [fields [] at 0]
+    (let [space (str/index-of line " " at)]
+      (if (and space (< (count fields) n))
+        (recur (conj fields (subs line at space)) (inc space))
+        (conj fields (subs line at))))))
+
+(defn- checkout-pins
+  "Each gitlink of the repository's index as {path pin}, and the paths whose
+  checkout is not that pin with unmodified tracked bytes. One `git status`
+  answers for every submodule (porcelain v2 `S<c><m><u>`: `c` names a checkout
+  commit other than the index pin, `m` modified tracked content); untracked
+  build products are ignored, as a clean checkout carries them."
+  {:malli/schema [:=> [:cat :string]
+                  [:map [:seon.operator/index-pins [:map-of :string :string]]
+                   [:seon.operator/unclean [:set :string]]]]}
+  [repository]
+  (let [staged (command! ["git" "ls-files" "--stage" "--" "reference-code"] repository 30000)
+        status (command! ["git" "status" "--porcelain=v2" "--untracked-files=no"
+                          "--ignore-submodules=untracked" "--" "reference-code"]
+                         repository 30000)]
+    {:seon.operator/index-pins
+     (into {} (keep (fn [line]
+                      (let [tab (str/index-of line "\t")]
+                        (when (and tab (str/starts-with? line "160000 "))
+                          [(subs line (inc tab)) (subs line 7 47)]))))
+           (str/split-lines staged))
+     :seon.operator/unclean
+     (into #{} (keep (fn [line]
+                       (let [[kind _ submodule _ _ _ _ _ path] (leading-fields line 8)]
+                         (when (and (= "1" kind) (str/starts-with? submodule "S")
+                                    (or (= \C (nth submodule 1)) (= \M (nth submodule 2))))
+                           path))))
+           (str/split-lines status))}))
+
+(defn- prepares-build-products?
+  "Whether the dependency at `directory` declares tools.deps preparation."
+  {:malli/schema [:=> [:cat :string] :boolean]}
+  [directory]
+  (let [manifest (io/file directory "deps.edn")]
+    (boolean (and (.isFile manifest)
+                  (contains? (edn/read-string (slurp manifest)) :deps/prep-lib)))))
+
 (defn committed-source!
   "A commit's program (HEAD by default) as a directory of committed bytes,
-  built once per commit."
+  built once per commit. Each gitlink is the checked-out submodule when it is
+  at the commit's pin with unmodified tracked bytes, else an archive of the pin;
+  tools.deps prepares an archived pin only when it declares `:deps/prep-lib`."
+  {:malli/schema [:function
+                  [:=> [:cat :string] :map]
+                  [:=> [:cat :string :string] :map]]}
   ([root] (committed-source! root "HEAD"))
   ([root revision]
   (let [repository (committed-repository)
@@ -606,15 +659,15 @@
        :seon.operator/source-built? false}
       (let [staging (io/file parent (str sha ".staging-" (.pid (java.lang.ProcessHandle/current))))
             _ (fs/delete-tree staging)
+            ;; The submodule census runs beside the tree's extraction.
+            census (future (checkout-pins repository))
             _ (extract-archive! repository sha staging)
+            {:seon.operator/keys [index-pins unclean]} @census
             submodules
             (mapv (fn [{:keys [path pin]}]
                     (let [checkout (io/file repository path)
-                          head (when (.isDirectory checkout)
-                                 (str/trim (command! ["git" "rev-parse" "HEAD"] checkout 30000)))
-                          clean? (and (= head pin)
-                                      (str/blank? (command! ["git" "status" "--porcelain" "--untracked-files=no"]
-                                                           checkout 30000)))
+                          clean? (and (.isDirectory checkout) (= pin (get index-pins path))
+                                      (not (contains? unclean path)))
                           placed (io/file staging path)]
                       (fs/delete-tree placed)
                       (if clean?
@@ -622,11 +675,13 @@
                             (fs/create-sym-link placed (.getCanonicalFile checkout))
                             {:path path :pin pin :placed :linked})
                         (do (extract-archive! checkout pin placed)
-                            {:path path :pin pin :placed :archived :checkout-head head}))))
+                            {:path path :pin pin :placed :archived
+                             :index-pin (get index-pins path)
+                             :prepared? (prepares-build-products? (str placed))}))))
                   (gitlinks repository sha))
-            ;; An archived pin has no build products yet (e.g. http-kit's
-            ;; compiled Java); tools.deps prepares them in the snapshot.
-            _ (when (some #(= :archived (:placed %)) submodules)
+            ;; An archived pin that declares preparation has no build products
+            ;; yet (e.g. http-kit's compiled Java); tools.deps prepares them.
+            _ (when (some :prepared? submodules)
                 (command! ["clojure" "-X:deps" "prep" ":aliases" "[:dev :test]"] staging 300000))]
         (fs/move staging target {:atomic-move true})
         {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
@@ -812,11 +867,195 @@
               :seon.operator/failed-attempts failures
               :seon.operator/attempt-phases (:seon.operator/phases final)}))))
 
+;;; Move to HEAD (owner 2026-09-23: "isn't a nuke more disruptive?" / "Then
+;;; load head. Don't keep a broken system running."). The nuke's committed
+;;; archive is the program; the store and every cache stay. The replacement
+;;; JVM resumes: boot compares the files with the published program and
+;;; publishes only the paths that differ (`seon.cluster.boot`
+;;; `changed-source-paths`), then `default` adopts that publication. A JVM
+;;; whose program is an archive does not see the working tree, so hook
+;;; publication is off until the root starts from the checkout again.
+
+(def ^:private shared-cache-paths
+  "Derived caches an archive shares with the operator's checkout by link:
+  `target` (the dependency class cache, its locks and process references,
+  `dev_cache.clj:13-19`) and `.clj-kondo/.cache` (the analyzer cache,
+  `seon.fn.analyzer` `cache-directory`). Per-file analysis lives in the store."
+  ["target" ".clj-kondo/.cache"])
+
+(defn- pins-text
+  "`git ls-files --stage -- reference-code` output for `gitlinks`, the bytes
+  `seon.dev.dependency-digest/dependency-pins` keys a snapshot on."
+  {:malli/schema [:=> [:cat [:vector [:map [:path :string] [:pin :string]]]] :string]}
+  [gitlink-pins]
+  (apply str (map (fn [{:keys [path pin]}] (str "160000 " pin " 0\t" path "\n"))
+                  (sort-by :path gitlink-pins))))
+
+(defn- share-caches!
+  "Link `source`'s derived cache paths to `repository`'s and record the
+  commit's pins (`dependency-pins.txt`) so the class cache key is computable
+  in a directory that is not a Git work tree. A real directory in a link's
+  place (a JVM that ran from this archive before) is replaced; its bytes were
+  that JVM's private cache."
+  {:malli/schema [:=> [:cat :string :string [:vector [:map [:path :string] [:pin :string]]]] :map]}
+  [repository source gitlink-pins]
+  (let [pins (io/file source dependency-digest/dependency-pins-file)
+        linked
+        (mapv (fn [relative]
+                (let [link (fs/path source relative)
+                      shared (fs/path repository relative)]
+                  (fs/create-dirs shared)
+                  (cond
+                    (and (fs/sym-link? link)
+                         (= (str (fs/real-path shared)) (str (fs/read-link link))))
+                    {:path relative :placed :kept}
+                    :else
+                    (let [replaced? (fs/exists? link {:nofollow-links true})]
+                      (when replaced? (fs/delete-tree link))
+                      (fs/create-dirs (fs/parent link))
+                      (fs/create-sym-link link (fs/real-path shared))
+                      {:path relative :placed (if replaced? :replaced :linked)}))))
+              shared-cache-paths)]
+    (when-not (.isFile pins)
+      (spit pins (pins-text gitlink-pins)))
+    {:seon.operator/linked linked
+     :seon.operator/pins (str pins)}))
+
+(defn- named-source
+  "The program directory a process's arguments name (`-Dseon.repository.root=`), or nothing."
+  {:malli/schema [:=> [:cat [:sequential :string]] [:maybe :string]]}
+  [arguments]
+  (some (fn [arg]
+          (some #(when (str/starts-with? arg %)
+                   (.getCanonicalPath (io/file (subs arg (count %)))))
+                ["-Dseon.repository.root=" "-J-Dseon.repository.root="]))
+        arguments))
+
+(defn- program-source
+  "Where a live JVM's program comes from and whether hook publication reaches it."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [identity]
+  (let [source (when-let [handle (matching-handle identity true)]
+                 (let [args (.arguments (.info handle))]
+                   (when (.isPresent args) (named-source (vec (.get args))))))
+        checkout (.getCanonicalPath (io/file (repository-root)))
+        archive? (and source (not= checkout (.getCanonicalPath (io/file source))))]
+    (cond-> {:seon.operator/source-root source
+             :seon.operator/hook-publication (if archive? :off :on)}
+      archive?
+      (assoc :seon.operator/hook-publication-reason
+             (str "This JVM's program is the committed archive " source
+                  "; working-tree edits are not published into it. Start the root from the"
+                  " checkout (`bin/seon down && bin/seon start`) to publish edits again.")))))
+
+(defn- held-sources
+  "Canonical program directories every live process on this machine names."
+  {:malli/schema [:=> [:cat] [:set :string]]}
+  []
+  (with-open [stream (java.lang.ProcessHandle/allProcesses)]
+    (into #{}
+          (keep (fn [handle]
+                  (let [args (.arguments (.info handle))]
+                    (when (.isPresent args) (named-source (vec (.get args)))))))
+          (iterator-seq (.iterator stream)))))
+
+(defn- prune-archives!
+  "Delete this root's committed archives other than `kept` that no live
+  process names as its program; deletion never follows a link."
+  {:malli/schema [:=> [:cat :string :string] :map]}
+  [root kept]
+  (let [held (held-sources)
+        archives (filter #(and (.isDirectory ^java.io.File %)
+                               (not (str/includes? (.getName ^java.io.File %) ".staging-")))
+                         (or (.listFiles (io/file root "data/source")) []))
+        {pruned true retained false}
+        (group-by #(and (not= kept (.getCanonicalPath ^java.io.File %))
+                        (not (contains? held (.getCanonicalPath ^java.io.File %))))
+                  archives)]
+    (doseq [archive pruned] (fs/delete-tree archive))
+    {:seon.operator/pruned (mapv #(.getName ^java.io.File %) pruned)
+     :seon.operator/retained (mapv #(.getName ^java.io.File %) retained)}))
+
+(defn move-to-head!
+  "Replace the root's JVM with one whose program is committed HEAD (a drill
+  may name `:seon.source/revision`), keeping the store and every cache.
+
+  The archive is built and its caches linked before anything stops. Then the
+  root's JVMs stop within their bound, the replacement resumes on the same
+  store (publishing only the files that differ from the published program)
+  and `default` adopts that publication. A replacement that does not reach
+  readiness, or whose adoption refuses, is terminated by exact identity and
+  the full cause returned: a broken program never keeps running."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [request]
+  (let [began (System/nanoTime)
+        root (:seon.operator/managed-root request)
+        repository (committed-repository)
+        source (committed-source! root (get request :seon.source/revision "HEAD"))
+        source-root (:seon.operator/source-root source)
+        shared (share-caches! repository source-root (gitlinks repository (:seon.source/git-sha source)))
+        ;; tools.deps computes the archive's classpath once, into its own
+        ;; `.cpcache`, while the old JVM still serves.
+        _ (command! ["clojure" "-Spath" "-M:dev:test"] source-root runtime-probe-bound-ms)
+        source-ms (elapsed-ms began)
+        began-down (System/nanoTime)
+        stopped (down! request (selected-processes root))
+        down-ms (elapsed-ms began-down)
+        began-launch (System/nanoTime)
+        outcome (try
+                  (launch-child! (assoc request :seon.operator/command :start
+                                        :seon.boot/cluster-name "default")
+                                 source-root true)
+                  (catch Exception cause
+                    {:seon.operator/value
+                     (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
+        launch-ms (elapsed-ms began-launch)
+        value (:seon.operator/value outcome)
+        missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
+        ready? (and (not (:seon.error/message value)) (vector? missing) (empty? missing))
+        began-adopt (System/nanoTime)
+        adoption (when ready?
+                   (try (connected! {:seon.operator/managed-root root
+                                     :seon.operator/command :init
+                                     :seon.operator/development-cluster "default"})
+                        (catch Exception cause
+                          (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause))))
+        adopt-ms (elapsed-ms began-adopt)
+        adopted? (and ready? (not (:seon.error/message adoption)))
+        pruned (when adopted? (prune-archives! root source-root))
+        phases {:seon.operator/source-ms source-ms :seon.operator/down-ms down-ms
+                :seon.operator/launch-ms launch-ms
+                :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
+                :seon.operator/adopt-ms adopt-ms
+                :seon.operator/total-ms (elapsed-ms began)}
+        report {:seon.operator/source (assoc source :seon.operator/shared-caches shared)
+                :seon.operator/stopped-processes (:seon.operator/stopped-processes stopped)
+                :seon.operator/phases phases}]
+    (if adopted?
+      (merge value report
+             {:seon.operator/adoption adoption :seon.operator/archives pruned}
+             (program-source (:seon.boot/advertisement outcome)))
+      (let [terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))]
+        (assoc (diagnostic (str "The JVM from " (:seon.source/git-sha source)
+                                (if ready? " refused to adopt its publication" " did not reach readiness")
+                                "; it was terminated and no JVM of this root runs. The store and caches are kept.")
+                           (merge report {:seon.operator/value value
+                                          :seon.operator/adoption adoption
+                                          :seon.boot/advertisement (:seon.boot/advertisement outcome)
+                                          :seon.operator/terminated terminated})
+                           :client-failed)
+               :seon.operator/process-exit? true)))))
+
 (defn request! [request]
   (try
     (case (:seon.operator/command request)
-      :start (if (seq (selected-processes (:seon.operator/managed-root request)))
-               (connected! request) (launch! request))
+      :start (cond
+               (:seon.operator/head? request) (move-to-head! request)
+               (seq (selected-processes (:seon.operator/managed-root request))) (connected! request)
+               :else (launch! request))
+      :status (let [result (connected! request)]
+                (cond-> result
+                  (:seon.boot/pid result) (merge (program-source result))))
       :stop (if (:seon.operator/force? request) (force-stop! request) (connected! request))
       :down (down! request (selected-processes (:seon.operator/managed-root request)))
       ;; reset = the running JVM unlinks the branch and forks a fresh one,
@@ -856,6 +1095,9 @@
         (case arg
           "--force" (recur (next args) (assoc request :seon.operator/force? true) positionals)
           "--verbose" (recur (next args) (assoc request :seon.operator/verbose? true) positionals)
+          "--head" (if (= :start command)
+                     (recur (next args) (assoc request :seon.operator/head? true) positionals)
+                     (fail! "--head is supported only by start." request))
           "--dev" (recur (nnext args) (assoc request :seon.operator/development-cluster (valid-name (second args))) positionals)
           "--config" (let [_ (when-not (= :start command)
                                         (fail! "--config is supported only by start." request))
@@ -890,6 +1132,11 @@
             (do (when (< 1 (count positionals)) (fail! "Command takes at most one cluster name." request))
                 (when (and (= :reset command) (not (:seon.operator/force? request)))
                   (fail! "Reset requires --force." request))
+                ;; The replaced JVM hosts `default`; --head restarts only it.
+                (when (and (:seon.operator/head? request) (seq positionals)
+                           (not= "default" (first positionals)))
+                  (fail! "start --head replaces the root's JVM and starts default; it takes no other cluster name."
+                         request))
                 (cond-> request
                   (or (seq positionals) (#{:start :logs} command))
                   (assoc :seon.boot/cluster-name (valid-name (or (first positionals) "default")))))
@@ -899,7 +1146,7 @@
   (try
     (let [request (parse-argv args)
           result (if (= :help (:seon.operator/command request))
-                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
+                   {:seon.operator/help "seon [--root PATH] start [NAME] [--config PATH] | start --head | init [NAME --force | --dev NAME] [--changed PATH...] | status [--verbose] | open [NAME] | stop [NAME] | down [--force] | reset [NAME] --force | nuke --force | logs [NAME] | config apply [NAME] PATH | export PATH"}
                    (request! request))]
       (cond
         (:seon.operator/help result) (println (:seon.operator/help result))
@@ -911,6 +1158,9 @@
             (.destroyForcibly child) (fail! "OS opener did not exit." result))
           (when-not (zero? (.exitValue child)) (fail! "OS opener failed." result)))
         :else (prn result))
+      (when (= :off (:seon.operator/hook-publication result))
+        (binding [*out* *err*]
+          (println "HOOK-PUBLICATION off:" (:seon.operator/hook-publication-reason result))))
       (shutdown-agents)
       ;; 3: stable and ready, but on an older program because HEAD failed.
       (System/exit (cond (:seon.error/message result) 1
