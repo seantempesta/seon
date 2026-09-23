@@ -17,7 +17,7 @@ not layout or adoption.
 
 The canonical route data and compiled Reitit router live in
 `src/seon/render/route.clj:5` and `:32`; handler binding lives in
-`bind-handlers` and `handler` (`src/seon/render/web.clj:3577`, `:3599`).
+`bind-handlers` and `handler` (`src/seon/render/web.clj:3630`, `:3652`).
 Read that table instead of carrying another route list. A route name
 or retained manual context handler does not authorize preserving an
 obsolete behavior from before §14.
@@ -65,7 +65,7 @@ append evaluations.
 
 The debug page uses the turn ledger and the acquired session component;
 entity inspection shares that session component (`debug-response`,
-`src/seon/render/web.clj:3255`). Debug text wraps in CSS; AI bytes do not
+`src/seon/render/web.clj:3276`). Debug text wraps in CSS; AI bytes do not
 acquire display-width breaks (`prepare`, `src/seon/render/value.clj:486`).
 Compaction wipes evaluations and regenerates
 the opening. Do not preserve manual Add/remove/curation controls

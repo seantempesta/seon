@@ -165,11 +165,12 @@ tests unable to identify the real owner.
 
 The current JVM renderer has canonical namespace pages, root and agent aliases,
 and namespace/agent debug variants in the one Reitit route table
-(`src/seon/render/route.clj:5-31`). A namespace page resolves through its
-owning agent (`canonical-namespace-response`,
-`src/seon/render/web.clj:3372-3387`); the debug variant is `debug-response`
-(`:3255`). Both page kinds acquire through one walk request
-(`walk-request`, `src/seon/render/web.clj:3165-3182`) over
+(`src/seon/render/route.clj:5-31`). A namespace page renders its first
+assigned agent's page, and an unowned namespace renders the agentless
+inspection with an explicit create control; a GET never writes
+(`canonical-namespace-response`, `src/seon/render/web.clj:3395-3411`). The
+debug variant is `debug-response` (`:3276`). Both page kinds acquire through one walk request
+(`walk-request`, `src/seon/render/web.clj:3186-3203`) over
 `seon.render.walk/neighborhood` (`src/seon/render/walk.clj:751`). Do not
 describe context rendering, namespace pages, or debug pages as tabled.
 
@@ -177,8 +178,8 @@ The generalized agent-authored canvas/control API and guarded `/call` route
 remain **[TARGET]**: the live route table has neither. Current interaction is
 the fixed inbound-message and context-action POST routes
 (`src/seon/render/route.clj:17-22`; `inbound`, `src/seon/render/web.clj:3038`;
-`context-response`, `:3415`) plus browser-local Datastar signals such as
-`showEverything` (`:3267`, `:3345`). Agent-owned `::renders` remains
+`context-response`, `:3489`) plus browser-local Datastar signals such as
+`showEverything` (`:3288`, `:3366`). Agent-owned `::renders` remains
 **[TARGET]**; current delivery already uses revisioned packages with delta and
 keyframe bytes, while the agent graph contains mailbox, turn, and schedule
 (`src/seon/cluster/agent.clj:535-581`).

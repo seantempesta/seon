@@ -105,11 +105,11 @@ restore old `seon.ui.*` CLJS namespaces or quarry-era block call signatures.
 Design within the live web UI shapes:
 
 - namespace pages place walk units in one ranked layout
-  (`page-response`, `src/seon/render/web.clj:3184-3209`;
+  (`page-response`, `src/seon/render/web.clj:3205-3230`;
   `.seon-rank-layout`, `resources/public/css/input.css:1301`);
 - debug pages carry a local `showEverything` signal and a grid of panes
-  (`debug-response`, `src/seon/render/web.clj:3255`, signals at `:3267`,
-  `:3345`; `.seon-debug`, `resources/public/css/input.css:1349`); and
+  (`debug-response`, `src/seon/render/web.clj:3276`, signals at `:3288`,
+  `:3366`; `.seon-debug`, `resources/public/css/input.css:1349`); and
 - the exact live URLs come from the one route table
   (`src/seon/render/route.clj:5-31`).
 
@@ -136,7 +136,7 @@ The following remain **[TARGET]**:
 - generalized `my.canvas` controls and `/call`: neither appears in the exact
   live route table (`src/seon/render/route.clj:5-31`), while current input is
   the fixed message bar and context-action POSTs (`message-bar-html`,
-  `src/seon/render/web.clj:268`; `context-response`, `:3415`) plus
+  `src/seon/render/web.clj:268`; `context-response`, `:3489`) plus
   browser-local Datastar signals;
 - agent-owned `::renders`: the live blueprint contains only mailbox, turn and
   schedule (`graph-definition`, `src/seon/cluster/agent.clj:535-581`).
