@@ -39,7 +39,18 @@ This draft synthesizes eight research notes (evidence at the end) and the owner'
    are ordered so a name is introduced before it is used, evaluated through the one REPL entrance,
    and their values printed by the value renderer. Text an agent has already seen is never
    re-rendered.
-6. **Standard Clojure first.** `defn` + docstring + metadata, `deftest`, Malli schemas in EDN.
+6. **The system is defined within itself; outcomes are data, not agent whims** (owner,
+   2026-09-23). Any agent may do anything inside its own SCI context and branch — a hundred
+   scratch functions and queries are fine. What counts is only the value it submits, which
+   must satisfy the task's declared output schema, plus the definitions that value names.
+   Everything else is discarded with the branch. Requirements are stated in the same language
+   as everything else (Malli schemas and tests), never as permissions on agent behaviour.
+   When the submission is missing or invalid — no reply to a user's question, wrong syntax,
+   an output that fails its schema — the refusal explains the correct form as data and the
+   agent is prompted again, bounded by the task's budget (exhaustion is loud and resumable).
+   Mistakes are allowed; context grows by demonstrated need, because each refusal pulls in the
+   docs and must-reads of what was refused.
+7. **Standard Clojure first.** `defn` + docstring + metadata, `deftest`, Malli schemas in EDN.
    Agents already know how to write these; we add two metadata keys, nothing else.
 
 ## 2. Producers and the edges they emit
@@ -122,7 +133,8 @@ link keys are new, and `seon.task` replaces issue, plan-step and error-work life
                         [:seon.task/instructions {:optional true} :string] ; case-specific only
                         [:seon.task/subject {:optional true} :seon.db/ref]  ; e.g. the error
                         [:seon.task/done-when [:set :qualified-symbol]]     ; tests that must pass
-                        [:seon.task/parent {:optional true} :seon.db/ref]]} ; cross-namespace child
+                        [:seon.task/output :qualified-keyword]    ; schema the submission must satisfy
+                        [:seon.task/parent {:optional true} :seon.db/ref]]} ; the task that created it
 
 ;; context is a vector of comment + form, the same grammar the REPL reads
 :seon.context/forms [:vector [:map [:seon.repl/comment :string] [:seon.repl/form :any]]]
