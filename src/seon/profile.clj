@@ -253,12 +253,15 @@
   {:malli/schema [:=> [:cat :seon.profile/observation] :string]}
   [{sym :seon.profile/sym calls :seon.profile/calls total :seon.profile/total-ms
     longest :seon.profile/max-ms throws :seon.profile/throws scope :seon.profile/scope}]
-  (str sym " total " total " ms, max " longest " ms, x" calls
+  (str sym " inclusive total " total " ms, max " longest " ms, x" calls
        (when (pos? throws) (str ", " throws " threw"))
        (when (= :seon.profile/context scope) " [SCI]")))
 
 (defn summary
   "`top` as one line per definition, for status surfaces an agent reads.
+
+  Every time is inclusive: a caller's line contains its callees', so nested
+  definitions repeat down a call chain; no self time is derived.
 
   Over-second lines are bounded by `limit` too; the count says how many
   definitions exceeded one second in all."

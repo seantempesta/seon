@@ -141,7 +141,7 @@
              (mapv #(select-keys % [:seon.profile/sym :seon.profile/calls :seon.profile/max-ms])
                    (:seon.profile/over-second report))))
       (is (= {:seon.profile/over-second-count 1
-              :seon.profile/over-second-lines ["probe/slow total 1500 ms, max 1500 ms, x1"]}
+              :seon.profile/over-second-lines ["probe/slow inclusive total 1500 ms, max 1500 ms, x1"]}
              (select-keys (profile/summary [fast slow idle] 1)
                           [:seon.profile/over-second-count :seon.profile/over-second-lines]))))))
 
