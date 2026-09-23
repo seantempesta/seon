@@ -3,6 +3,7 @@
   from program facts, and the cluster-local cache's basis boundary."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [seon.plan :as plan]
             [sci.core :as sci]
             [seon.call-preparation :as cp]
@@ -349,6 +350,105 @@
                 (cp/plan call-state next-database next-snapshot
                          'sample/target))
              "so the compiled plan survives unchanged"))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The snapshot is a function of what it reads (schedule #24s)
+;;; ---------------------------------------------------------------------------
+
+(def ^:private program-members
+  [:seon.call-preparation/supplied-defaults
+   :seon.call-preparation/prepared-symbols
+   :seon.call-preparation/validators
+   :seon.schema.shape/supplied-map-entries
+   :seon.schema.shape/required-map-entries])
+
+(defn- unrelated-row
+  "One ordinary fact no snapshot query reads."
+  [label]
+  {:seon.issue/id (str "call-preparation-unrelated-" label)
+   :seon.issue/title "an unrelated commit"
+   :seon.issue/status :open
+   :seon.issue/severity :cleanup
+   :seon.issue/problem "none; the snapshot must not re-derive for it"})
+
+(defn- alternate-row
+  "A second supplied-default row reusing the shipped database row's schema
+  and supplier: a real change to an attribute the snapshot reads."
+  [database]
+  (let [row (db/q '[:find (pull ?row [{:seon.call-preparation/schema [:db/id]}
+                                     {:seon.call-preparation/supplier [:db/id]}]) .
+                    :where [?row :seon.call-preparation/key :seon.db/db]]
+                  database)]
+    {:seon.call-preparation/key :test/alternate-database
+     :seon.call-preparation/schema (get-in row [:seon.call-preparation/schema :db/id])
+     :seon.call-preparation/supplier (get-in row [:seon.call-preparation/supplier :db/id])}))
+
+(defn- held?
+  "True when every program member of `later` is the object `earlier` holds."
+  [earlier later]
+  (every? #(identical? (get earlier %) (get later %)) program-members))
+
+(deftest an-unrelated-commit-reads-the-held-snapshot
+  (testing "a commit touching no attribute the derivation reads keys the same
+            snapshot; only the database value's own basis is new"
+    (test-support/with-database
+     (fn [connection]
+       (test-support/transacted! connection database-rows)
+       (let [fixed-projection (projection)
+             before (cp/snapshot @connection fixed-projection)]
+         (test-support/transacted! connection [(unrelated-row "held")])
+         (let [after-database @connection
+               after (cp/snapshot after-database fixed-projection)]
+           (is (held? before after) "no member was derived again")
+           (is (= (db/basis-t after-database)
+                  (:seon.call-preparation/checked-through-t after)))
+           (is (> (long (:seon.call-preparation/checked-through-t after))
+                  (long (:seon.call-preparation/checked-through-t before)))))
+         (testing "and a row change derives the new program"
+           (test-support/transacted! connection [(alternate-row @connection)])
+           (let [changed (cp/snapshot @connection fixed-projection)]
+             (is (not (held? before changed)))
+             (is (contains? (:seon.call-preparation/supplied-defaults changed)
+                            :test/alternate-database)))))))))
+
+(deftest a-new-branch-at-a-derived-commit-reads-the-held-snapshot
+  (testing "a sibling branch at the same commit is the same program: its first
+            snapshot is the commit tier's, never a derivation"
+    (let [[fixed-projection commit earlier]
+          (test-support/with-database
+           (fn [connection]
+             (let [fixed-projection (projection)]
+               [fixed-projection
+                (:datahike/commit-id (:meta @connection))
+                (cp/snapshot @connection fixed-projection)])))]
+      (test-support/with-database
+       (fn [connection]
+         (is (= commit (:datahike/commit-id (:meta @connection)))
+             "both fixture branches start at the executing handle's commit")
+         (is (held? earlier (cp/snapshot @connection fixed-projection))))))))
+
+(deftest a-report-changing-no-read-attribute-reads-its-committed-parent
+  (testing "the writer's speculative value derives nothing when the report's
+            datoms name no attribute the snapshot reads"
+    (test-support/with-database
+     (fn [connection]
+       (test-support/transacted! connection database-rows)
+       (let [fixed-projection (projection)
+             committed (cp/snapshot @connection fixed-projection)
+             report (d/with @connection [(unrelated-row "report")])
+             speculative (cp/report-snapshot report fixed-projection)]
+         (is (held? committed speculative))
+         (is (= (db/basis-t (:db-after report))
+                (:seon.call-preparation/checked-through-t speculative)))
+         (is (= (dissoc (cp/snapshot (:db-after report) fixed-projection)
+                        :seon.call-preparation/validators)
+                (dissoc speculative :seon.call-preparation/validators))
+             "the held members equal a derivation at the report value")
+         (testing "and a report writing a row derives at its report value"
+           (let [row-report (d/with @connection [(alternate-row @connection)])
+                 derived (cp/report-snapshot row-report fixed-projection)]
+             (is (contains? (:seon.call-preparation/supplied-defaults derived)
+                            :test/alternate-database)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Per-cluster plan isolation
@@ -818,4 +918,7 @@
        (is ((seon.schema/projection-validator (projection) :seon.call-preparation/unavailable-error) missing))
        (is (= 'sample/target (:seon.call-preparation/target-symbol missing)))
        (is ((seon.schema/projection-validator (projection) :seon.call-preparation/unresolved-supplier-error) cause))
-       (is (= 'sample/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))))))
+       (is (= 'sample/absent-supplier (:seon.call-preparation/unresolved-symbol cause)))
+       (is (symbol? (:seon.error/exception-class cause))
+           "the failed resolution's Throwable rides the refusal, never dropped")
+       (is (instance? Throwable (:seon.error/offending cause)))))))

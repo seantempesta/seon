@@ -33,8 +33,11 @@
   state. Full arities and the cached all-default shape retain precedence;
   other shorter calls require a unique placement under the declared slot
   schemas before any missing value is supplied."
-  (:require [clojure.test.check.generators :as gen]
+  (:require [clojure.core.cache.wrapped :as cache]
+            [clojure.test.check.generators :as gen]
+            [datahike.api :as d]
             [datahike.core :as datahike]
+            [datahike.db]
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.db :as db]
@@ -281,37 +284,32 @@
 
           :else nil)))))
 
-(def ^:private current-row-transaction-query
-  '[:find (max ?tx) . :in $ [?attribute ...] :where [_ ?attribute _ ?tx]])
-
-(def ^:private historical-row-transaction-query
-  '[:find (max ?tx) . :in $ [?attribute ...] :where [_ ?attribute _ ?tx _]])
-
 (defn- newest-row-transaction
   "The newest transaction that asserted OR retracted any row fact.
 
   Derived, never a stored counter. The history view is what makes a
   RETRACTION move this basis; a store kept without history answers from
-  its current value, which still moves on every assertion."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-keyword]] :seon.db/basis-t]}
+  its current value, which still moves on every assertion.
+
+  One AEVT range per row attribute, so the work is proportional to the row
+  facts. The former variable-attribute `(max ?tx)` query over the history
+  view scanned far beyond them: 220-274 ms on default's program
+  (2026-09-23), for an answer these ranges give in ~3 ms."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-keyword]]
+                  [:or :seon.db/basis-t :seon.db/error-result]]}
   [database attributes]
-  ;; This basis keeps the process-local snapshot cache coherent. It is not a
+  ;; This basis keeps the process-local plan cache coherent. It is not a
   ;; semantic read performed by the prepared call: the surrounding snapshot
   ;; queries already retain the precise row, schema, and supplier attributes
-  ;; whose change can affect preparation. A temporal view plus a variable
-  ;; attribute max-tx query necessarily reports `:all`; retaining that internal
-  ;; observation made every unrelated result-settlement transaction invalidate
-  ;; the evaluated form that preparation had merely admitted.
+  ;; whose change can affect preparation, so it is kept out of the sink.
   (binding [db/*read-evidence-sink* nil]
     (let [history (db/history database)
-          historical (when-not (or (:seon.db/invalid-read history) (:seon.schema/expected-value history))
-
-                       (db/q history historical-row-transaction-query
-                             attributes))
-          current (db/q database current-row-transaction-query attributes)]
-      (long (or (when (number? historical) historical)
-                (when (number? current) current)
-                0)))))
+          source (if (or (:seon.db/invalid-read history) (:seon.schema/expected-value history))
+                   database
+                   history)
+          ranges (mapv #(db/datoms source :aevt %) attributes)]
+      (or (first (filter :seon.db/invalid-read ranges))
+          (transduce (comp cat (map :tx)) max 0 ranges)))))
 
 (defn- by-fingerprint
   [supplied-defaults]
@@ -420,18 +418,24 @@
                       (map first))
                 (concat entries named)))))))
 
-(defn snapshot
-  "Derive the complete supplied-default snapshot from one database value.
+(def ^:private error-fingerprints-query
+  '[:find [?fingerprint ...] :in $ [?key ...]
+    :where [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/shape ?shape]
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]])
+
+(defn- derive-snapshot
+  "The snapshot's program-derived members, from one database value.
 
   Every row is proved against the program graph here; incoherent rows
-  become refusals and are NOT installed. The returned value carries its
-  own two transactions: `checked-through-t` is the database value this was
-  derived from, and `basis-t` is the newest transaction touching any row
-  fact — the third element of every plan cache key. It also carries the
-  hot-path gate: the set of identities that could be prepared at all."
+  become refusals and are NOT installed. `basis-t` is the newest
+  transaction touching any row fact — the third element of every plan
+  cache key. It also carries the hot-path gate: the set of identities that
+  could be prepared at all. `checked-through-t` names one database value,
+  not the program, so `snapshot` adds it after the memo."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.schema/projection]
-    [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
+    [:or :map :seon.db/error-result]]}
   [database projection]
   (let [rows (db/q database row-query)]
     (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
@@ -441,11 +445,7 @@
             (db/q database schema-fingerprint-query :seon.env/environment)
             error-fingerprints
             ;; debt: seon.db supplied-database-value and supplied-connection still declare :seon.error/value.
-            (set (db/q database
-                       '[:find [?fingerprint ...] :in $ [?key ...]
-                         :where [?schema :seon.schema/key ?key]
-                         [?schema :seon.schema/shape ?shape]
-                         [?shape :seon.schema.shape/fingerprint ?fingerprint]]
+            (set (db/q database error-fingerprints-query
                        (conj (@error-declared-schema-keys projection) :seon.error/value)))
             candidates
             (mapv (fn [[default-key schema-key fingerprint supplier]]
@@ -497,23 +497,164 @@
                   admitted)
             named-facts (named-entry-facts database fingerprint-index)
             prepared (prepared-symbols database fingerprint-index
-                                       (:seon.schema.shape/supplied-map-entries named-facts))]
-        (if (or (:seon.db/invalid-read prepared) (:seon.schema/expected-value prepared))
+                                       (:seon.schema.shape/supplied-map-entries named-facts))
+            basis (newest-row-transaction database (row-attributes))]
+        (cond
+          (or (:seon.db/invalid-read prepared) (:seon.schema/expected-value prepared))
           prepared
+
+          (:seon.db/invalid-read basis)
+          basis
+
+          :else
           (merge named-facts
-        {:seon.schema/projection projection
-         :seon.call-preparation/supplied-defaults admitted
-         :seon.call-preparation/prepared-symbols prepared
-         :seon.call-preparation/validators
-         (into {}
-               (comp (remove second)
-                     (map (fn [[candidate _ valid?]]
-                            [(:seon.call-preparation/key candidate) valid?])))
-               compiled)
-         :seon.call-preparation/refusals (into [] (keep second) compiled)
-         :seon.call-preparation/basis-t
-         (newest-row-transaction database (row-attributes))
-         :seon.call-preparation/checked-through-t (db/basis-t database)}))))))
+                 {:seon.call-preparation/supplied-defaults admitted
+                  :seon.call-preparation/prepared-symbols prepared
+                  :seon.call-preparation/validators
+                  (into {}
+                        (comp (remove second)
+                              (map (fn [[candidate _ valid?]]
+                                     [(:seon.call-preparation/key candidate) valid?])))
+                        compiled)
+                  :seon.call-preparation/refusals (into [] (keep second) compiled)
+                  :seon.call-preparation/basis-t basis}))))))
+
+;;; ---------------------------------------------------------------------------
+;;; The snapshot memo — keyed by what the derivation reads
+;;; ---------------------------------------------------------------------------
+
+(def ^:private snapshot-queries
+  ;; Every query `derive-snapshot` issues. The read set below is derived from
+  ;; these forms by Datahike itself, so a query added here widens the key.
+  [row-query supplier-shape-query supplier-return-arms-query
+   schema-fingerprint-query error-fingerprints-query
+   prepared-positional-query prepared-entry-query prepared-named-entry-query])
+
+(def ^:private snapshot-read-attributes
+  ;; `datahike.query/query-attribute-dependencies` (query.cljc:2923) is the
+  ;; projection Datahike's own query cache compares, pure over the query form.
+  ;; The row attributes add the basis ranges. `:all` from any query means no
+  ;; revision can prove the key, and the revision tier is not used.
+  (delay
+    (reduce (fn [attributes query]
+              (let [dependencies (d/query-attribute-dependencies query)]
+                (if (or (= :all attributes) (= :all dependencies))
+                  :all
+                  (into attributes dependencies))))
+            (set (row-attributes))
+            snapshot-queries)))
+
+(def snapshot-cache-policy
+  "Bound the snapshots one projection retains independently of the number of commits."
+  {::snapshot-cache-size 16
+   ::snapshot-cache-reason
+   "Retain eight recent program populations under each of their two keys (a committed value's read-attribute revisions and its commit) for the branches and test forks sharing one projection; an older population derives again."})
+
+(defn- snapshot-memo
+  "The snapshot memo held by `projection` itself, or nil without a holder.
+
+  The same core.cache wrapped LRU `seon.db`'s projection memo uses, retained
+  by the projection's own runtime holder (`schema/projection-cache-value`):
+  compiled validators belong to the projection they were compiled in, and
+  equal programs share one projection object through `db/carried-projection`,
+  so no second key for the projection is needed and none outlives it."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:or :nil [:fn seon.call-preparation/state?]]]}
+  [projection]
+  (let [memo (schema/projection-cache-value
+              projection ::snapshot-memo
+              #(cache/lru-cache-factory {} :threshold (::snapshot-cache-size snapshot-cache-policy)))]
+    (when (state? memo) memo)))
+
+(defn- snapshot-revision-key
+  "The part of Datahike's cache-context the derivation depends on.
+
+  Datahike advances one attribute revision per changed attribute and the
+  conservative revision on a schema or unknown change
+  (`datahike.query/advance-query-cache-context`, query.cljc:2568); its own
+  query cache compares exactly these members within one connection
+  generation (`source-context-unchanged?`, query.cljc:2963). A commit
+  touching none of the read attributes keys the same snapshot."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :seon.schema/value]]}
+  [database]
+  (let [context (:cache-context database)]
+    [::revisions
+     (:datahike.cache/connection-id context)
+     (:datahike.cache/generation context)
+     (:datahike.cache/conservative-revision context)
+     (select-keys (:datahike.cache/attribute-revisions context) @snapshot-read-attributes)]))
+
+(defn- memoized-snapshot
+  "The derived members for a committed value, through the two-tier memo.
+
+  A revision miss (a new connection or branch) tries the commit, which
+  names one value in every connection (`datahike/writing.cljc:363`), and
+  only then derives. The delay is stored before it is forced, so concurrent
+  misses share one derivation. A refusal is returned, never retained."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       [:fn seon.call-preparation/state?] :map]
+                  [:or :map :seon.db/error-result]]}
+  [database projection memo committed]
+  (let [commit-key [::commit (:datahike.value/commit-id committed)]
+        derivation (fn [_] (delay (derive-snapshot database projection)))
+        derived
+        (if (= :all @snapshot-read-attributes)
+          @(cache/lookup-or-miss memo commit-key derivation)
+          @(cache/lookup-or-miss
+            memo (snapshot-revision-key database)
+            (fn [_] (delay @(cache/lookup-or-miss memo commit-key derivation)))))]
+    (when (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
+      (cache/evict memo commit-key)
+      (cache/evict memo (snapshot-revision-key database)))
+    derived))
+
+(defn snapshot
+  "The complete supplied-default snapshot at one database value.
+
+  A function of the program rows it reads, memoized by their identity: a
+  committed value keys by Datahike's revisions of the attributes the
+  derivation's queries read (`snapshot-read-attributes`), then by its
+  commit, in the memo its projection holds. An unrelated commit, or a new
+  branch at an already-derived commit, reads the held members. A
+  speculative, as-of or history value has no committed identity and
+  derives (`report-snapshot` answers the writer's report value).
+  `checked-through-t` is the basis of `database` itself."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.schema/projection]
+    [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
+  [database projection]
+  (let [committed (datahike.db/committed-value-identity database)
+        memo (when committed (snapshot-memo projection))
+        derived (if memo
+                  (memoized-snapshot database projection memo committed)
+                  (derive-snapshot database projection))]
+    (if (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
+      derived
+      (assoc derived
+             :seon.schema/projection projection
+             :seon.call-preparation/checked-through-t (db/basis-t database)))))
+
+(defn report-snapshot
+  "The snapshot at a transaction report's `:db-after`.
+
+  It is read from the report's `:db-before` when the report changed no
+  attribute the derivation reads. A writer-side gate holds a speculative `:db-after` with no committed
+  identity, so `snapshot` would derive the whole program there (174-188 ms
+  on default, 2026-09-23). The report's final datoms name every attribute
+  it changed; when none is in `snapshot-read-attributes`, the program
+  members equal the committed `:db-before`'s, whose memo answers. Only
+  `checked-through-t` is `:db-after`'s own."
+  {:malli/schema
+   [:=> [:cat :seon.db/transaction-report :seon.schema/projection]
+    [:or :seon.call-preparation/snapshot :seon.db/error-result]]}
+  [{before :db-before after :db-after tx-data :tx-data} projection]
+  (let [attributes @snapshot-read-attributes]
+    (if (or (= :all attributes)
+            (some (comp attributes :a) tx-data))
+      (snapshot after projection)
+      (let [held (snapshot before projection)]
+        (if (or (:seon.db/invalid-read held) (:seon.schema/expected-value held))
+          held
+          (assoc held :seon.call-preparation/checked-through-t (db/basis-t after)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Basis comparison — the correctness boundary; the listener is the optimizer
@@ -590,17 +731,27 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- contract-transaction
+  "The newest transaction among the function entity's own current facts, or
+  nil when no function has this identity.
+
+  Two index ranges: the identity's AVET entry, then the entity's EAVT
+  datoms, so the work is proportional to one function. The former
+  `[?function _ _ ?tx]` Datalog pattern, variable in its attribute, cost
+  254-800 ms per call on default's program (2026-09-23) for the same answer."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+                  [:or :nil :seon.db/basis-t :seon.db/error-result]]}
   [database sym]
   ;; Like the supplied-default basis, this is cache coherence rather than a
   ;; semantic read. The plan's queries capture the actual contract attributes.
   (binding [db/*read-evidence-sink* nil]
-    (db/q database
-          '[:find (max ?tx) .
-            :in $ ?sym
-            :where
-            [?function :seon.fn/sym ?sym]
-            [?function _ _ ?tx]]
-          sym)))
+    (let [identity-datoms (db/datoms database :avet :seon.fn/sym sym)]
+      (if (:seon.db/invalid-read identity-datoms)
+        identity-datoms
+        (when-let [function (:e (first identity-datoms))]
+          (let [facts (db/datoms database :eavt function)]
+            (if (:seon.db/invalid-read facts)
+              facts
+              (transduce (map :tx) max 0 facts))))))))
 
 (def ^:private arity-query
   '[:find ?order ?min ?count ?max
@@ -1100,19 +1251,28 @@
   [current environment slot sym]
   (let [default-key (:seon.call-preparation/key slot)
         symbol-name (:seon.call-preparation/supplier-symbol slot)
+        ;; A namespace that fails to load is the declared unresolved case;
+        ;; its Throwable rides the refusal whole (class, message, ex-data,
+        ;; cause chain) as the supplier-threw case already carries its own.
         resolved (try (requiring-resolve symbol-name)
-                      (catch Throwable _ nil))]
+                      (catch Throwable cause cause))]
     (if-not (var? resolved)
       (unavailable sym slot
-                   {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.call-preparation/call
-  :seon.error/operation 'seon.call-preparation/supply
-  :seon.error/message (str "No callable is installed for "
-                                     symbol-name ".")
-  :seon.call-preparation/unresolved-symbol symbol-name
-  :seon.error/data {:seon.call-preparation/supplier-symbol
-                                 symbol-name}
-  :seon.error/expected "an installed callable Var"})
+                   (cond-> {:seon.error/at (java.util.Date.)
+                            :seon.error/layer :seon.call-preparation/call
+                            :seon.error/operation 'seon.call-preparation/supply
+                            :seon.error/message
+                            (str "No callable is installed for " symbol-name "."
+                                 (when (instance? Throwable resolved)
+                                   (str " Resolving it threw " (.getName (class resolved))
+                                        ": " (ex-message resolved))))
+                            :seon.call-preparation/unresolved-symbol symbol-name
+                            :seon.error/data {:seon.call-preparation/supplier-symbol
+                                              symbol-name}
+                            :seon.error/expected "an installed callable Var"}
+                     (instance? Throwable resolved)
+                     (assoc :seon.error/exception-class (symbol (.getName (class resolved)))
+                            :seon.error/offending resolved)))
       (let [produced (try (resolved environment)
                           (catch Throwable cause
                             {:seon.error/at (java.util.Date.)
