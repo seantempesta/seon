@@ -941,7 +941,7 @@
     ::analyzer/findings]))
 
 (defn- analyzed-form
-  [analysis function-rows resolver-context program-row]
+  [analysis function-rows program-row]
   (let [program-symbol (or (:seon.fn/sym program-row)
                            (:seon.test/sym program-row))
         first-party-functions
@@ -992,13 +992,14 @@
               (assoc :seon.fn/call-arities
                      (into #{} (get call-arities program-symbol)))
               subject (assoc :seon.test/subject subject))))
+        ;; The row keeps the digest its constructor derived under the
+        ;; evaluation's own namespace; the database's namespace here can
+        ;; predate this reply's `ns` form.
         merged-row (when program-row
-                     (let [row (merge (dissoc program-row :seon.fn/calls :seon.fn/references
-                                              :seon.fn/invokes
-                                              :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
-                                      program-facts)]
-                       (assoc row :seon.program/definition-digest
-                              (program/definition-digest row resolver-context))))]
+                     (merge (dissoc program-row :seon.fn/calls :seon.fn/references
+                                    :seon.fn/invokes
+                                    :seon.fn/keywords :seon.fn/writes :seon.fn/call-arities)
+                            program-facts))]
     ;; A declaration row owns its edges; a form without one carries no
     ;; analysis facts (receipts assert no program attribute).
     [{} merged-row]))
@@ -1027,17 +1028,10 @@
                namespace-ref :seon.cluster.eval/ns
                :as request}]
            (let [namespace-row
-                 (db/pull database
-                          [:seon.ns/name :seon.ns/requires
-                           {:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}
-                           {:seon.ns/refers [:seon.ns.refer/local :seon.ns.refer/target-ns
-                                            :seon.ns.refer/target-name]}
-                           {:seon.ns/imports [:seon.ns.import/local :seon.ns.import/target-class]}]
-                          namespace-ref)]
+                 (db/pull database [:seon.ns/name] namespace-ref)]
              (if-let [namespace-name (:seon.ns/name namespace-row)]
                (assoc request :namespace-name namespace-name
-                              :form-source source
-                              :resolver-context (stored-namespace-context namespace-row))
+                              :form-source source)
                {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
@@ -1063,7 +1057,6 @@
                 (analyzed-form
                  (source-analysis analysis first-row last-row)
                  function-rows
-                 (:resolver-context request)
                  (some-> (:seon.program/row request)
                          (assoc :seon.program/analyzed-source-digest
                                 (:seon.fn.file/digest (text-context analyzed-source))))))
@@ -1316,10 +1309,15 @@
                                (population-targets
                                 (db/carried-projection database)
                                 (invoked-attributes submitted))
-                               functions))]
+                               functions))
+        ;; The analysis `ns` form is widened by interpreter refers; identity
+        ;; uses the namespace's own facts, as the indexer does.
+        resolver-context (stored-namespace-context namespace-row)]
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
+           (map #(assoc % :seon.program/definition-digest
+                        (program/definition-digest % resolver-context)))
            (map #(program/declaration-row
                   (db/carried-projection database)
                   (program/canonical-row

@@ -367,6 +367,8 @@
     :seon.fn/keywords
     :seon.fn/writes
     :seon.fn/call-arities
+    ;; Derived from `:seon.fn/spec` and `:seon.fn/arglists`, which it hashes.
+    :seon.fn/arities
     :seon.fn/host-bound?
     :seon.program/analyzed-source-digest
     :seon.program/definition-digest
