@@ -1305,8 +1305,14 @@
                     (identical? value (.get ^java.lang.ref.WeakReference (.-reference ^ValueKey other))))))))
   (hashCode [_] hash))
 
+(defn projection-value-key?
+  "True for the projection memo's weak value-tier key."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? ValueKey value))
+
 (defn- value-key
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:fn #(instance? ValueKey %)]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:fn seon.db/projection-value-key?]]}
   [database]
   (ValueKey. (System/identityHashCode database) (java.lang.ref.WeakReference. database)))
 
