@@ -262,6 +262,21 @@ advances the cluster pointer (**[TARGET]** D1). Write-back to the files is the s
 gate. Filesystem lanes (Codex, Claude) index into one shared candidate branch of
 default and are live agents there; Seon agents doing every update is the goal.
 
+## Simple made easy — the Clojure mindset (owner, 2026-09-23: "Install the simple made easy and other hickey clojure mindset")
+
+Rich Hickey's words are the review vocabulary here; paraphrased, with today's evidence.
+
+- **Simple is not easy.** Simple = one fold: one role, one concept, one reason to change. Easy = near at hand, familiar. Complexity is *complecting*: braiding independent things so neither can be understood, changed or fail alone. It is objective — count the braids. Every design and every review names the braids it adds or removes; "it was the easiest place to put it" is how a braid starts.
+- **Design is taking things apart.** Before adding, ask what two concerns this code ties together and separate them. Seen 2026-09-23: a REPL eval that also invalidates web page caches and opens a profiling window (`cluster.clj:260-318`, a ThreadLocal hand-off between two calls); publication that analyzes, reads every schema resource from disk, reloads and writes rows in separate steps that can half-happen (`schema/edn.clj:397`, `cluster.clj:2860`); error reporting that renders through the projection it is reporting broken.
+- **Values, not places.** State complects value with time. A value never changes; an identity is a succession of values; time is the order of those values. Datahike already is this (commit ids, `as-of`, `history`, branches) — use it instead of atoms, mirrors and caches that remember a place. A derived thing is a function of a value (see "No stamps").
+- **Information is data.** Use plain maps of namespaced keys and the dependency's own data; never hide information behind a bespoke object, protocol or accessor layer. A function of data composes; a mechanism does not.
+- **Grow by accretion, never by breakage.** Add optional keys, new names for new semantics; relax requirements, never tighten them in place (Spec-ulation). A slice that makes a running system's existing values invalid is breakage (seen 2026-09-23: a required `:seon.flow/executor` refused every adoption into the running instance; the fix was an optional member).
+- **Queues decomplect who from when.** Flow graphs and channels separate the producer from the consumer's timing; a hidden call-order dependency between two functions is the braid a queue or an explicit argument removes.
+- **Situated programs fail.** A long-running system meets partial failure constantly; the simple answer is that each part fails ALONE and LOUDLY, and never damages its neighbours. A failure that silently corrupts durable state (2026-09-23: a commit reported success while nothing reached disk under heap exhaustion) or blinds diagnosis is the worst braid there is.
+- **Hammock first.** State the problem, what is known and unknown, and read the dependency's source before writing code. A lane that refutes the stated cause did its job.
+
+Reviewer's check, every diff: which concerns does this code braid, and which does it un-braid? What is each part's one role? Could any part fail alone?
+
 ## Five design laws
 
 ### Values carry their world
