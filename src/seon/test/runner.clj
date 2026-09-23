@@ -1,6 +1,7 @@
 (ns seon.test.runner
   "Capture test Var results in this JVM and commit them as per-member facts."
   (:require [seon.error.refusal]
+            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -919,7 +920,16 @@
         (into {} (keep (fn [[s entry]] (when (set? (::reach-refs entry))
                                        [s (::reach-refs entry)]))) entries))))
 
-(defn program-digest
+(defn- program-digest-read-attributes
+  "Every attribute the digest reads: the source seal and the program rows' own
+  attributes (`program/program-attributes`), with the identities that select them."
+  {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
+  [projection]
+  (-> (program/program-attributes projection)
+      (into program/identity-attributes)
+      (conj :seon.source/digest)))
+
+(defn- derive-program-digest
   "Identify the tested program from its source seal and current program facts.
   An unchanged publication keeps its exact snapshot digest. Admitted changes
   extend that identity with canonical program facts; result-only writes do not.
@@ -939,9 +949,16 @@
             (throw (ex-info "The tested program has no source snapshot identity." {})))
         before (db/as-of database basis)
         changed (db/since (db/history database) basis)
+        ;; Only a program attribute's datom can change a program fact: a result
+        ;; write since the seal is no work here.
         changed-entities (if (= basis (db/basis-t database))
                            []
-                           (db/q '[:find [?entity ...] :where [?entity]] changed))
+                           (db/q '[:find [?entity ...] :in $ [?attribute ...]
+                                   :where [?entity ?attribute]]
+                                 changed
+                                 (vec (program-digest-read-attributes
+                                       (or (db/carried-projection database)
+                                           (schema/handed-projection))))))
         _ (when (and (map? changed-entities) (:seon.error/at changed-entities))
             (throw (ex-info "Cannot identify changes since the source identity." changed-entities)))
         entities (if (seq changed-entities)
@@ -977,6 +994,65 @@
       :seon.test.run/provenance-failure (or (ex-message failure) (.getName (class failure)))
       :seon.error/data (or (ex-data failure) {})
       :seon.error/message (str "Test provenance unavailable: " (ex-message failure))})))
+
+(def program-digest-cache-policy
+  "Bound the program digests one projection retains independently of the number of commits."
+  {::program-digest-cache-size 16
+   ::program-digest-cache-reason
+   "Retain eight recent tested programs under each of their two keys (the program attributes' revisions and the commit) for the cluster branch and the member branches a request forks; an older program derives again."})
+
+(defn- program-digest-revision-key
+  "The part of Datahike's cache-context the digest depends on.
+
+  Datahike advances one attribute revision per changed attribute and the
+  conservative revision on a schema or unknown change
+  (`datahike.query/advance-query-cache-context`); a result write touches no
+  program attribute and keeps this key, so the admission and recording
+  commits of one request read the digest their selection derived."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] [:vector :seon.schema/value]]}
+  [database projection]
+  (let [context (:cache-context database)]
+    [::revisions
+     (:datahike.cache/connection-id context)
+     (:datahike.cache/generation context)
+     (:datahike.cache/conservative-revision context)
+     (select-keys (:datahike.cache/attribute-revisions context)
+                  (schema/projection-cache-value
+                   projection ::program-digest-read-attributes
+                   #(program-digest-read-attributes projection)))]))
+
+(defn program-digest
+  "The tested program's digest at `database`: a function of its source seal
+  and program rows ([[derive-program-digest]]), memoized by their identity.
+
+  A committed value keys by Datahike's revisions of the attributes the digest
+  reads, then by its commit (a member branch at an already-derived commit), in
+  the memo the value's projection holds (`schema/projection-cache-value`), the
+  holder `seon.call-preparation` uses. A speculative, as-of or history value
+  derives. A refusal is returned, never retained."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :seon.test.run/program-digest :seon.test.run/unavailable-error]]}
+  [database]
+  (let [committed (db/committed-value-identity database)
+        projection (when (:datahike.value/commit-id committed)
+                     (db/carried-projection database))
+        memo (when projection
+               (schema/projection-cache-value
+                projection ::program-digest-memo
+                #(cache/lru-cache-factory
+                  {} :threshold (::program-digest-cache-size program-digest-cache-policy))))]
+    (if-not (instance? clojure.lang.IAtom memo)
+      (derive-program-digest database)
+      (let [commit-key [::commit (:datahike.value/commit-id committed)]
+            revision-key (program-digest-revision-key database projection)
+            derivation (fn [_] (delay (derive-program-digest database)))
+            digest @(cache/lookup-or-miss
+                     memo revision-key
+                     (fn [_] (delay @(cache/lookup-or-miss memo commit-key derivation))))]
+        (when (map? digest)
+          (cache/evict memo commit-key)
+          (cache/evict memo revision-key))
+        digest))))
 
 (defn provenance
   "Capture immutable test custody before execution.
