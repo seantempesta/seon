@@ -3,13 +3,20 @@
   (:require [clojure.core.server :as server]))
 
 (defn io-prepl
-  "Print PREPL events, then perform a requested process exit after the flush."
+  "Print PREPL events, retaining no evaluation result in *1/*2/*3/*e, then
+  perform a requested process exit after the flush."
   [& {:keys [cluster-name]}]
   (let [out *out*
         lock (Object.)]
     (server/prepl
      *in*
      (fn [event]
+       ;; Our functions name what they return (`seon.sci.admit/result-handle`,
+       ;; blob digests), so no session keeps a result: `prepl` has just
+       ;; `set!` *1/*2/*3 or *e on this thread (clojure/core/server.clj:236-238,
+       ;; 251, 257) and these clear its `with-bindings` frame again.
+       (when (= :ret (:tag event))
+         (set! *1 nil) (set! *2 nil) (set! *3 nil) (set! *e nil))
        (binding [*out* out *flush-on-newline* true *print-readably* true]
          (locking lock
            (prn

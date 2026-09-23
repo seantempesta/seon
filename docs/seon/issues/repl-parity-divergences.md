@@ -27,7 +27,9 @@ The proven divergence families, each a row to promote as it is fixed:
 
 - sequence/list printing and elision faces (every seq prints as a
   vector; markers are not Clojure's `...`);
-- missing REPL history and error bindings (`*1 *2 *3 *e`);
+- REPL history and error bindings (`*1 *2 *3 *e`) are retired, not a
+  divergence to fix (owner, 2026-09-23: every output already has a named
+  reference, `seon.sci.admit/result-handle`); parity rows C1-C5 await deletion;
 - absent `clojure.repl` helpers (`source`, `apropos`, `find-doc`,
   `pst`);
 - error-face and location differences from `clojure.main`'s triage;
