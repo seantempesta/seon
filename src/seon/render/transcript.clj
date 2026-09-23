@@ -367,23 +367,18 @@
          vec))))
 
 (defn- floor-text
+  "One history value as the value renderer's text, the one clipping spot.
+  Without an SCI context the renderer skips declared pairs and prints the
+  value structurally (`seon.render.value/value-node*`)."
+  {:malli/schema [:=> [:cat :seon.render/unit [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A transcript history value is an arbitrary Clojure value; the value renderer owns its presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or :string :seon.render.value/missing-root-identity-error]]}
   [unit value]
   ;; Transcript values are immutable history entries. Give the shared value
   ;; floor an explicit, content-stable block identity when this internal
   ;; projection is not itself running as a retained render call.
-  ;;
-  ;; THE FLOOR IS A RENDER CALL AND A RENDER CALL NEEDS ITS SCI CONTEXT. A
-  ;; derivation reached without one — an attribute-declared producer receives
-  ;; the attribute value and the call-prepared database, and nothing else —
-  ;; prints the value with the reader's own printer rather than throwing an
-  ;; instrumentation violation into a transcript that was only reporting
-  ;; the history it was only reporting.
-  (if (:seon.sci.eval/ctx unit)
-    (value/render-ai
-     (cond-> (assoc unit :seon.render/value value)
-       (nil? (:seon.render.call/id unit))
-       (assoc :seon.render.call/id [::history-value value])))
-    (pr-str value)))
+  (value/render-ai
+   (cond-> (assoc unit :seon.render/value value)
+     (nil? (:seon.render.call/id unit))
+     (assoc :seon.render.call/id [::history-value value]))))
 
 (defn- message-text
   [unit entry _detail]
@@ -1751,12 +1746,14 @@
   (for [saved evaluations]
     [:pre (repl/render-emission-html (::emission saved))]))
 
-(defn- reply-intent [reply]
-  (when-let [line (some #(let [line (str/trim %)]
-                          (when (str/starts-with? line ";")
-                            (str/trim (apply str (drop-while (fn [c] (= c \;)) line)))))
-                       (str/split-lines (or reply "")))]
-    (if (> (count line) 90) (str (subs line 0 90) "…") line)))
+(defn- reply-intent
+  "The reply's first comment line, whole: HTML never clips."
+  {:malli/schema [:=> [:cat [:or :nil :string]] [:or :nil :string]]}
+  [reply]
+  (some #(let [line (str/trim %)]
+           (when (str/starts-with? line ";")
+             (str/trim (apply str (drop-while (fn [c] (= c \;)) line)))))
+        (str/split-lines (or reply ""))))
 
 (defn- results-summary [counts]
     (if (empty? counts) "no forms"
