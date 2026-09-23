@@ -1,6 +1,7 @@
 ---
 type: issue
-status: open
+status: closed
+closed: 2026-09-23 (ce8783a3b: the llm-providers skill names deepseek-flash as default and lists the current provider and model rows)
 severity: cleanup
 created: 2026-09-16
 tags: [issue, docs, ai]
