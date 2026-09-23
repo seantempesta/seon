@@ -311,9 +311,161 @@ of affected files and positive adoption evidence; a new analyzer alone does not
 repair stored facts. The observed initializer exposure is not proof of the final
 regression, graph completeness, isolated execution, or browser behavior.
 
+## Follow-up: test-first before the callee exists
+
+Owner ruling: D1 §2e (`eb709fcb8`), `:gate` by default including test-first.
+**A missing var in a known namespace is already retained as a symbolic call edge.**
+The unconditional claim “the test can therefore be defined first” does not follow:
+file publication blocks the unresolved call, and the shared entry must admit a
+pending test declaration before attempting to compile its unresolved body.
+This is an admission distinction, not a second missing-edge producer.
+
+### Measured analysis and owner probe
+
+At follow-up checkout `84f12b6fbb644d6fca61ac5014a7d0be4760d4d7`, analyzed this tiny
+input (not a test run), using native clj-kondo 2026.07.24, `--cache false`:
+
+```clojure
+(ns future.example (:require [clojure.test :refer [deftest is]]))
+(deftest qualified-test (is (= 1 (future.example/f))))
+(deftest bare-test (is (= 1 (f))))
+(deftest unknown-ns-test (is (= 1 (absent.example/f))))
+```
+
+Exact command, input, output and timing are under
+`tmp/astra-def-body-index/test-first/` (`forms.clj`, `analysis.edn`, `time.txt`):
+
+```sh
+clj-kondo --lint - --filename future/example.clj --cache false --config '{:output {:format :edn} :analysis {:var-usages true :var-definitions true}}' < tmp/astra-def-body-index/test-first/forms.clj
+```
+
+Wall **0.01 s**, maximum RSS **38,600,704 bytes**. Findings: `:unresolved-var`
+for `future.example/f`, `:unresolved-symbol` for bare `f`, and
+`:unresolved-namespace` for `absent.example/f`. All three deftests have `:test true`
+and `:arglist-strs ["[]"]`, so they qualify as callers.
+
+| Target expression | Actual kondo output for f | Seon graph result |
+|---|---|---|
+| `(future.example/f)` | `:from future.example :from-var qualified-test :to future.example :name f :arity 0` | **kept** as `future.example/qualified-test → future.example/f` |
+| `(f)` | same from namespace, owner bare-test, `:to :clj-kondo/unknown-namespace :name f :arity 0` | **dropped**, because target identity is unknown |
+| `(absent.example/f)` with no namespace binding | no f var-usage; unresolved-namespace finding | **no edge to keep**; refuse the unresolved namespace |
+
+Dependency source: `namespace.clj:793–800` retains a resolved namespace and var
+name without requiring a var definition. `linters.clj:702–730` records the
+unresolved-var finding **and** calls `analysis/reg-usage!`; a missing `called-fn`
+does not suppress analysis. Bare unknown names use `namespace.clj:927–929`'s
+unknown-namespace sentinel. An unresolved namespace takes
+`analyzer.clj:3577–3584`'s finding/children path rather than emitting a resolved
+call target. All are under `reference-code/clj-kondo/src/clj_kondo/impl/` at the
+revision already recorded above.
+
+Seon `usage-symbol` (`src/seon/fn.clj:355–368`) only rejects the unknown-namespace
+sentinel or missing name; it does **not** require a current callee row.
+`call-targets-by-caller:406–421` restricts the **caller**, not the callee, on its
+two-argument path. Both `analysis-rows-by-file:1242` and `analyzed-form:955` use
+that path. Test rows store its result at `var-row:644–648` and
+`analyzed-form:981–984`. The optional resolvable-targets filter is not supplied by
+these callers. There is no “drop unresolved-but-qualified calls” fix to add here.
+
+A read-only JVM probe supplied the saved kondo maps to the existing pure owners
+(`first-party-function-symbols`, `call-targets-by-caller`, `blocking-findings`,
+`analyzed-form`), converting kondo key names to the adapter's namespaced keys.
+The full exact request and tool envelope are saved in `test-first/probe.json`.
+It took **11 ms**, and returned:
+
+```clojure
+;; Selected fields; other edges include clojure.core/= and clojure.test/is.
+{:qualified-test-facts
+ {:seon.test/sym future.example/qualified-test
+  :seon.fn/calls #{clojure.core/= future.example/f}
+  :seon.fn/call-arities #{[clojure.core/= 2] [future.example/f 0]}}
+ :blocking [:unresolved-var :unresolved-symbol :unresolved-namespace]}
+```
+
+This probes derivation, not a persisted row or a successful declaration. The
+minimal test identity input was never submitted to the writer. Default had been
+replaced by pid **27531**, running archive
+`33957320955a9fff65db3fa067ba3d4d40555e85`; hook publication was off. The probe
+therefore exercised those loaded owners, not unadopted checkout changes. Status
+reported no missing readiness layers but 16 error signatures, 34 errored receipts
+and one unknown failed-test observation. No recovery was attempted. Although the
+request was `read_only true`, the MCP renderer reported `windowed? true` and stored
+its result blob `d2f1f31fc17fc47e1417647ded75cb9b465fb42577ba290bd61df442ca5003d2`
+(6,344 bytes). That existing transport side effect is disclosed; no program/branch
+mutation or test execution was requested.
+
+### Why file publication refuses, and why the reverse read needs no new detector
+
+`assert-clean-analysis!`, `fn.clj:1145`, runs before row construction at **2313**
+and **2328**. `load-refusal-finding-types:1094–1100` includes unresolved-var.
+The attempted external-target exemption (`external-usage-spans:1114`,
+`admitted-external-finding?:1122`) compares the usage's entire call span to the
+finding's symbol span. Kondo explicitly changes a call finding to name coordinates
+at `linters.clj:538–543`. Here the usage spans row 2 columns **34–52**, while the
+finding spans **35–51**. They do not match, and the owner probe confirms the
+qualified missing call remains blocking. Therefore **this standalone test file is
+refused before its row is persisted**. Do not fix this by downgrading every external
+unresolved-var finding: that would also admit unrelated misspellings.
+
+The agent row derivation `analyze-forms:1011` itself has no `assert-clean-analysis!`
+call; settlement uses it at `src/seon/turn.clj:935–955`. This proves that derivation
+can keep the edge, not that an earlier evaluator admits the test. Compiling an
+ordinary test body still requires the target var to resolve; SCI's analyzer resolves
+call heads at `reference-code/sci/src/sci/impl/analyzer.cljc:1985`. Entry evaluation,
+writer admission and final merge are separate proof obligations.
+
+`gate-set-in`, `fn.clj:1531–1554`, already starts from a symbol and seeks AVET
+`:seon.fn/calls`, `:seon.fn/references` and `:seon.test/subject` at **1543–1545**.
+It does not require a row for the seed. Its caller identity map includes tests at
+**1564–1566**. Thus **if T is stored**, the existing walk can find T before f
+exists as well as after it exists. Preserve this behavior for D1's captured
+pre-definition basis; joining the seed to a current fn row would break test-first.
+
+### Smallest completion and regression, alongside the def-body slice
+
+Keep the existing symbolic edge producer unchanged for a missing var in a known
+namespace; add its regression to the same indexer slice. Require a resolved namespace
+(or resolved alias) and explicit qualification for a future target. Do not map every
+unknown bare name to the current namespace, infer aliases from spelling, manufacture
+a stub function, or add a second test-first detector.
+
+D1's shared entrance must allow **an analyzed test source declaration** with a
+qualified future target to be stored on the experimental branch before compiling
+or executing that body. Use the existing test row/source/call attributes. Classify
+this case from the test owner, resolved target and kondo finding, using name-span
+coordinates where a finding must be joined; retain its missing-target diagnostic.
+This permission is specific to a pending test declaration, not ordinary function
+admission or completed publication. Defer executable acquisition until its targets
+exist; an attempted earlier run reports unresolved dependencies, never green.
+After f's schema and all other entry checks pass, test-first reads the captured
+branch basis through the existing `gate-sets`; evaluation of f and execution of T
+then use the normal owners. Merge still requires resolved program dependencies and
+passing tests. This is a **B1 → D1 admission seam**, not proof that changing the
+indexer alone makes test-first operational. It adds no missing-function body and
+needs no second stored pending flag: missing targets derive from rows and edges.
+
+Regression: on the canonical branch, with the namespace present and f absent,
+submit T containing `(future.example/f)` through the shared test-declaration
+entrance; assert T is durable with `:seon.fn/calls` containing that exact symbol,
+f still has no definition, and `gate-sets` already returns T. Capture that basis,
+then submit a contracted f under shipped `:gate`/test-first policy: the test-first
+check passes from that earlier basis, and selection for f includes T. Run T only
+after f is available. Negative cases retain refusal for an unknown namespace,
+an unqualified unresolved name and an ordinary function with an unresolved callee;
+a test introduced only in the same candidate batch is not prior-basis evidence.
+Exercise both source-row construction and agent-row construction; no hand-written
+edge or `:seon.test/subject` may substitute for the call in this regression.
+
+Cost remains O(changed definitions + usages/findings); a name-span map, if needed,
+is built once per changed analysis. The existing reverse index read has cost
+proportional to reached edges, without a whole-program analyzer pass. No new test
+or production code was written or run in this follow-up. Successful strict-entry
+submission, persistence and execution remain implementation proofs, not results
+of this diagnosis.
+
 ## Exact paragraph for B1 after independent review
 
 Append to **“Graph fidelity before selective test execution”**, after its existing
 paragraph on unresolved dispatch and before §6:
 
-> Preserve dependency owners for every `def` and `defonce`, including nonliteral initializers and memoized or container-held functions: clj-kondo already supplies `:from`/`:from-var`, and the indexer must retain the declaration row instead of requiring inferred arglists before keeping its calls/references. Keep callable proof separate from dependency ownership; do not invent arities, mark nonliteral values constant, or replay effectful initializers to discover their shape. File and agent declaration construction use the same rule. Truly ownerless usages retain the existing declared file/namespace-source owner; reaching its unresolved dependency widens to the complete eligible test set or refuses coverage, never only that file’s tests, and targetless unresolved analysis cannot certify a narrow selection. B1 converts `gate-sets-in` and `test-reach-rules` together, with B4/D1 using that shared result, and coordinates nonliteral declaration acquisition with B2 before claiming isolated execution. Prove through canonical publication that a test in another file reaching F only through `(def g (memoize (fn [] (F))))` is selected when F changes; cover reference-valued wrappers, defonce, map-held callbacks and ownerless initialization without hand-authored edges. Work is O(changed definitions + changed usages), with existing caches and exact replacement; the manual def-body KEEP exceptions retire only after stored graph and adoption proof.
+> Preserve dependency owners for every `def` and `defonce`, including nonliteral initializers and memoized or container-held functions: clj-kondo already supplies `:from`/`:from-var`, and the indexer must retain the declaration row instead of requiring inferred arglists before keeping its calls/references. Keep callable proof separate from dependency ownership; do not invent arities, mark nonliteral values constant, or replay effectful initializers to discover their shape. File and agent declaration construction use the same rule. Truly ownerless usages retain the existing declared file/namespace-source owner; reaching its unresolved dependency widens to the complete eligible test set or refuses coverage, never only that file’s tests, and targetless unresolved analysis cannot certify a narrow selection. B1 converts `gate-sets-in` and `test-reach-rules` together, with B4/D1 using that shared result, and coordinates nonliteral declaration acquisition with B2 before claiming isolated execution. Prove through canonical publication that a test in another file reaching F only through `(def g (memoize (fn [] (F))))` is selected when F changes; cover reference-valued wrappers, defonce, map-held callbacks and ownerless initialization without hand-authored edges. Work is O(changed definitions + changed usages), with existing caches and exact replacement; the manual def-body KEEP exceptions retire only after stored graph and adoption proof. Test-first uses the same symbolic graph: qualified calls to a not-yet-defined var in a resolved namespace already survive row derivation, and `gate-sets` must keep finding their test owners before the callee row exists. Preserve that behavior with a regression defining test T calling ns/f on the branch first, asserting its durable call edge and prior-basis reach, then defining contracted ns/f under `:gate`, asserting test-first passes and T is selected. B1 and D1 must admit the analyzed pending test declaration without prematurely compiling its unresolved body; current file publication refuses that unresolved-var finding. Keep the missing-target diagnostic, defer execution until resolution, and retain unconditional merge checks. Do not invent stub functions, guess targets for unknown bare names, globally suppress unresolved-var findings, or add another edge producer or test-first detector.
