@@ -3930,9 +3930,14 @@
      (when (some? user)
        (if (and (sequential? user) (= :seon.agent/id (first user)))
          true
-         (when-let [eid (try (db.utils/entid database user)
-                             (catch Throwable _ nil))]
-           (seq (d/datoms database :eavt eid :seon.agent/id))))))))
+         ;; A user that is not an entity id Datahike can parse names no agent.
+         ;; Its declared unparseable cases (lookup-ref arity, a non-unique
+         ;; lookup attribute, any other shape) answer the supplied error code
+         ;; instead of raising (`datahike/db/utils.cljc:109-139`); every other
+         ;; failure propagates.
+         (let [eid (db.utils/entid database user ::unparseable-user)]
+           (when (number? eid)
+             (seq (d/datoms database :eavt eid :seon.agent/id)))))))))
 
 (defn- write-observation
   "Carry the actual refused request and immutable pre-write basis as data.

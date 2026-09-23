@@ -2276,3 +2276,13 @@
            (doc! on-page :seon.ns/doc "A datom on the page changed."))
          (is (false? (db/read-evidence-current? @connection evidence))
              "a changed datom on the page makes it stale"))))))
+
+(deftest a-write-user-datahike-cannot-parse-names-no-agent
+  (test-support/with-database
+   (fn [connection]
+     (let [provenance? @#'seon.db/agent-provenance?
+           database (db/db connection)]
+       (doseq [user [[:seon.fn/doc "not unique"] [:a 1 2] "a-string" {:map 1} :no-such-ident]]
+         (is (false? (provenance? database {:tx-meta {:seon.db/user user}}))
+             (str "Datahike's declared unparseable entity id answers no agent: " (pr-str user))))
+       (is (true? (provenance? database {:tx-meta {:seon.db/user [:seon.agent/id "any"]}})))))))
