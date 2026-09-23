@@ -40,6 +40,7 @@
             [datahike.db]
             [malli.core :as m]
             [malli.registry :as mr]
+            [malli.instrument :as mi]
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal :as error]
@@ -1505,16 +1506,21 @@
   {:malli/schema
    [:=> [:cat :map :seon.schema/value :seon.schema/arguments] :seon.schema/value]}
   [ctx callee arguments]
+  ;; The per-call pass-through reads a map member, derefs the connection and
+  ;; compares one basis. Their armed wrappers validated the ctx, database,
+  ;; projection and whole snapshot on every call (~87 us of ~93 us per call,
+  ;; 2026-09-23), so this path calls their definitions directly, as
+  ;; `seon.instrument` does on its own hot path; their other callers stay armed.
   (let [call-state (get ctx carrier)
-        environment (env/of ctx)
+        environment ((mi/-f->original env/of) ctx)
         projection (:seon.schema/projection ctx)
         connection (when (and call-state environment projection)
                      (:seon.db/connection environment))
-        database (when connection (db/db connection))]
+        database (when connection ((mi/-f->original db/db) connection))]
     (if-not (and database (not (or (:seon.db/invalid-read database) (:seon.schema/expected-value database))
 ))
       arguments
-      (let [current (current-snapshot call-state database projection)]
+      (let [current ((mi/-f->original current-snapshot) call-state database projection)]
         (if (or (:seon.db/invalid-read current) (:seon.schema/expected-value current))
 
           arguments
