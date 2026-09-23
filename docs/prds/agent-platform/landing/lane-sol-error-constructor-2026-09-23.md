@@ -23,11 +23,20 @@ E0 is split at existing owner boundaries because complete regression changes exc
 | Slice | Sites | Src + / − / net | Test + / − / net | Kondo | Packaged contracts | Proving namespaces |
 |---|---:|---|---|---|---|---|
 | E0a | 4 | 20 / 44 / −24 | 60 / 31 / +29 | 0 errors, 74 existing warnings; 150 ms | `[]`, 110.274 ms | `seon.error.refusal-test`, `seon.error-test`, `seon.schema-test`, `seon.refusal-grammar-test` |
+| E0b | 4 | 12 / 20 / −8 | 19 / 0 / +19 | 0 errors/warnings; 23 ms | `[]`, 27.582 ms | `seon.blob-error-test` (also retain `seon.blob-test` corruption coverage) |
 
 E0a hand work: exact reviewed additive arity; extend both-entry whole-value/cause/domain tests, arm both entries under one projection in the producing-contract case, assert argument order/identity and original ex-info cause, and exercise actual `prepare` with overriding source evidence and its exact declared schema. The preview removed only `refusal-prose`, its obsolete test block, and converted its two renderer fixtures. Retained error-owner O/X literals preserve evaluation order and unsupported contexts. Existing cause-policy repairs are outside this mechanical cut. The +5 net E0a lines are regression evidence; source shrinks 24 lines. Later caller cuts repay this test growth before integration.
 
 Initial E0 selected census: 365.874 ms; preview admitted eight sites and four files, net −50 before helper/regressions. The required pre-residue lint found eight four-argument calls before the arity was added; final E0a lint has zero errors. No operation initiated by this lane exceeded one second so far. Cache hit/miss counters are not exposed by these static tools; the checker reuses an equal packaged projection through its existing candidate input.
 
-| E0b | 4 | 12 / 20 / −8 | 19 / 0 / +19 | 0 errors/warnings; 23 ms | `[]`, 27.582 ms | `seon.blob-error-test` (also retain `seon.blob-test` corruption coverage) |
 
 E0a commit `bab838388`. E0b re-censused the clean blob file (97.739 ms), applied only its four admitted sites, and added the actual stalled-input producer's whole-value assertion under its unchanged `:seon.blob/input-stalled-error` declaration. The unsupported `stage-file!` literal stays unchanged. Source shrinks eight lines; the 19 regression lines explain the temporary net growth. E0 total: source −32, tests +48; 111 src/test additions. New assertions are authored, not executed; orchestrator still owes armed runtime/cost/coverage and all five E0 proving namespaces.
+
+
+## Sequential single-file slices
+
+Every row has zero lint errors and packaged findings `[]`. All tests remain orchestrator proof obligations. No producer contract was changed in these slices. Script/status/roster/lint/contract evidence is in `tmp/error-constructor/<slice>-*`.
+
+| Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
+|---|---:|---|---|---:|---|---|
+| E1: `src/my/background.clj` | 1 | 3 / 5 / -2; 0 | 0 / 11 | 21.237083 | `my.background-test` | None |
