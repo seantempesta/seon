@@ -1,3 +1,9 @@
+---
+type: reference
+status: active
+tags: [reference, flow]
+---
+
 # Architecture decisions
 
 Read this when proposing runtime machinery or reviewing why a simpler-looking
@@ -5,7 +11,7 @@ alternative was rejected.
 
 ## Contents
 
-- [Use the ruling ledger](#use-the-ruling-ledger)
+- [Where the rulings live](#where-the-rulings-live)
 - [Agents are flows, not a central loop](#agents-are-flows-not-a-central-loop)
 - [Refuse mixed at construction](#refuse-mixed-at-construction)
 - [Nothing re-fires](#nothing-re-fires)
@@ -15,16 +21,18 @@ alternative was rejected.
 - [One mechanism](#one-mechanism)
 - [Namespace UI is built; canvas remains target](#namespace-ui-is-built-canvas-remains-target)
 
-## Use the ruling ledger
+## Where the rulings live
 
-The authoritative ruling index is
-`docs/archive/prds/sci-execution-runtime/plan/README.md`. Follow its numbered rulings
-and current ladder rather than copying old implementation shapes from
-the Git-history quarry (`AGENTS.md:247-254`).
+The repository laws are `AGENTS.md`; the current plan's decisions are
+[plan §7](../../../../docs/prds/agent-platform/plan/README.md#7-decisions-and-proof-gates).
+The earlier numbered ruling ledger was deleted on 2026-09-21 (commit
+`215447c46`); read it with
+`git show 215447c46^:docs/prds/sci-execution-runtime/plan/README.md` only as
+history. Earlier implementations are evidence, not a shape to copy
+(`AGENTS.md:19`).
 
-This reference explains the reasons that recur in flow work. Check the ledger
-for exact wording and later supersessions before treating any summary as the
-latest ruling.
+This reference explains the reasons that recur in flow work. Check the laws
+and the plan before treating any summary here as the latest ruling.
 
 ## Agents are flows, not a central loop
 
@@ -33,19 +41,19 @@ agents and choose the next unit of work. That recreates a JavaScript event
 loop inside the JVM and adds a second scheduling authority beside
 core.async.flow and the database.
 
-The ruled replacement is one independently parked graph per agent, created
-from one blueprint. Database facts say which agents and work exist; each graph
-derives its own eligible episode when woken.
-
-Plan ruling: the 2026-07-28 agents-are-flows ruling at
-`docs/archive/prds/sci-execution-runtime/plan/README.md:475-500`.
+The law: each agent owns a flow graph and no central scheduler or dispatcher
+is added (`AGENTS.md:162-163`). Database facts say which agents and work
+exist; each graph derives its own eligible episode when woken.
 
 Current proof:
 
-- three-proc blueprint at `src/seon/cluster/agent.clj:286-318`;
-- derive-all armer at `src/seon/cluster/agent.clj:435-484`; and
-- measured parked-proc cost in
-  `docs/archive/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`.
+- the one blueprint, `graph-definition`, with its mailbox, turn and schedule
+  procs (`src/seon/cluster/agent.clj:535-581`);
+- the derive-all armer, `armer-step` (`src/seon/cluster/agent.clj:1234`); and
+- the measured parked-proc cost, about 8.5 KB and one virtual thread per idle
+  graph
+  (`git show 215447c46^:docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`,
+  lines 20-42).
 
 This replaced the central-loop model, not merely its namespace.
 
@@ -57,51 +65,45 @@ cached platform thread
 It does not divide CPU from I/O.
 
 Seon therefore refuses missing or `:mixed` workloads in `var-process`
-(`src/seon/flow.clj:83-115`). Construction-time refusal is stronger than a
-warning or production metric: an unclassified proc cannot enter a graph.
+(`src/seon/flow.clj:132-184`). Construction-time refusal is stronger than a
+warning or production metric: an unclassified proc cannot enter a graph. The
+law is `AGENTS.md:162`.
 
-Plan rulings: workload derivation at
-`docs/archive/prds/sci-execution-runtime/plan/README.md:256-269` and the
-agents-are-flows propagation decision at
-`docs/archive/prds/sci-execution-runtime/plan/README.md:490-500`.
-
-This replaced the old willingness to accept core.async's fail-closed default
-and discover the thread cost under scale.
+This replaced the old willingness to accept core.async's default and discover
+the thread cost under scale.
 
 ## Nothing re-fires
 
 Recovery does not replay an interrupted effect, form-source suffix, or turn.
-Reopening the database marks dangling receipts interrupted, rebuilds graphs,
-and lets the agent adapt from durable facts.
+At boot every open turn closes and its unfinished evaluations and effects are
+stamped interrupted, then graphs are rebuilt and the agent adapts from
+durable facts.
 
-Read `src/seon/turn.clj:1681-1705` and the boot recovery position at
-`src/seon/cluster.clj:2075-2101`. The database records what settled; absence or
-an interrupted receipt is evidence for the next agent decision, not authority
-for an automatic retry.
-
-Plan ruling 23:
-`docs/archive/prds/sci-execution-runtime/plan/README.md:889-899`.
+Read `recover-call` (`src/seon/turn.clj:1650-1672`), its caller
+`recover-runs!` (`src/seon/cluster.clj:2725`), and the boot position: recovery
+runs before config application and before any agent arms
+(`src/seon/cluster/boot.clj:59-69`). The database records what settled; an
+interrupted receipt is evidence for the next agent decision, not authority for
+an automatic retry. The law is `AGENTS.md:168-170`.
 
 This replaced replay/retry machinery whose exactly-once claim could not be
 proved across external effects.
 
 ## Channels carry only losable in-flight values
 
-The transport law divides values by recovery need:
+The transport law divides values by recovery need (`AGENTS.md:164-166`):
 
 - anything recovery or another process may need is a database fact;
 - in-flight values may ride channels at full size when loss is free;
 - buffers encode whether old values may be superseded, producers must
   backpressure, or observation may drop.
 
-Current examples are the sliding agent wake at
-`src/seon/cluster/agent.clj:286-318`, render/stream inputs at
-`src/seon/cluster.clj:1119-1148`, and counted-dropping fault observation at
-`src/seon/flow.clj:633-701`.
-
-Plan ruling: the channel-versus-database boundary commissioned by the
-agents-are-flows decision at
-`docs/archive/prds/sci-execution-runtime/plan/README.md:475-500`.
+Current examples are the sliding-one agent wake channel
+(`src/seon/cluster/agent.clj:124-128`), the cluster's sliding-one armer,
+stream, render and pages channels (`src/seon/cluster.clj:3322-3345`), and
+counted-dropping fault observation (`src/seon/flow.clj:966-1003`). The fault
+tap is the one example the error policy rejects (`AGENTS.md:285-289`); see
+[wakes and faults](wakes-and-faults.md#fault-fan-out).
 
 This replaced both extremes: committing high-churn partial presentation state
 as durable history and routing recovery-critical work only through ephemeral
@@ -109,17 +111,16 @@ channels.
 
 ## Presence, not kinds
 
-An entity is its attributes and connections. Agent identity is discovered by
-the presence of its unique identity attribute; graph custody is discovered by
-presence in the armed map. There is no `:type`, `:kind`, active-set row, or
-status flag.
+An entity is its attributes and relations, not a stamped kind
+(`AGENTS.md:330-331`). Agent identity is discovered by the presence of its
+unique identity attribute; graph custody is discovered by presence in the
+armed routing map. There is no `:type`, `:kind`, active-set row, or status
+flag.
 
-Current derivation is explicit in the routing map and armer at
-`src/seon/cluster/agent.clj:270-335,472-484`. The data-model ruling is maintained in
-`docs/seon/architecture/data-model.md`.
-
-Plan ruling: presence-not-kinds decision 2 at
-`docs/archive/prds/sci-execution-runtime/plan/README.md:451-467`.
+The derivation is explicit in the routing map (`routing`,
+`src/seon/cluster/agent.clj:586`) and the armer (`armer-step`, `:1234`). The
+data-model rules are maintained in
+[the data guide](../../../../docs/seon/architecture/data-modeling-guide.md).
 
 This replaced object-style taxonomies and stored lifecycle flags that could
 disagree with the database or live process.
@@ -132,23 +133,23 @@ facts and expensive values that are themselves durable domain truth.
 
 Current examples:
 
-- armer derives missing graph custody from agents minus armed agents;
+- the armer derives missing graph custody from agents minus armed agents;
 - turn passes derive work after a payload-free wake; and
-- the renderer derives revisioned packages from the current database value and
-  suppresses equal bytes (`src/seon/render/web.clj:553-600,631-735`).
-
-Plan ruling 19 derives reactivity from render input and display-fact presence:
-`docs/archive/prds/sci-execution-runtime/plan/README.md:961-981`.
+- the renderer derives revisioned packages from the current database value; an
+  unchanged page produces no new revision (`next-package`,
+  `src/seon/render/web.clj:1885-1911`), and each tab receives the smaller
+  contiguous delta or the repair keyframe (`package-patches`, `:1913-1923`).
 
 This replaced stored counters, status flags, notification queues, and render
 snapshots that required reconciliation.
 
 ## One mechanism
 
-When a surviving owner exists, strengthen it in place:
+When a surviving owner exists, strengthen it in place (`AGENTS.md:317-325`):
 
-- wake selection belongs behind the one cluster `listen!` router;
-- work admission belongs in `seon.flow/submit!!`;
+- wake selection belongs behind the one cluster wake router;
+- work admission belongs in the work launcher (`seon.flow/submit!!`,
+  `seon.flow/submit!`);
 - core faults belong in one fan-out and committer;
 - rendering belongs in the one cluster render pipeline until agent-owned
   derivation is deliberately converted; and
@@ -157,34 +158,31 @@ When a surviving owner exists, strengthen it in place:
 Do not add `-v2`, compatibility namespaces, parallel registries, second feeds,
 or side-channel delivery. Delete the superseded path in the same conversion.
 
-Plan law L17:
-`docs/archive/prds/sci-execution-runtime/plan/README.md:1615-1616`.
-
-This replaced “temporary” duplication that preserved both models and made
+This replaced "temporary" duplication that preserved both models and made
 tests unable to identify the real owner.
 
 ## Namespace UI is built; canvas remains target
 
 The current JVM renderer has canonical namespace pages, root and agent aliases,
 and namespace/agent debug variants in the one Reitit route table
-(`src/seon/render/route.clj:5-34`). Namespace routes resolve through the owning
-agent, while the debug response shows the AI and HTML projections together
-(`src/seon/render/web.clj:1041-1102,1176-1220`). Both projections use the same
-deterministic walk membership and ordering seam
-(`src/seon/render/web.clj:300-350,988-1009`;
-`src/seon/render/walk.clj:693-876`). Do not describe context rendering,
-namespace pages, or debug pages as tabled.
+(`src/seon/render/route.clj:5-31`). A namespace page resolves through its
+owning agent (`canonical-namespace-response`,
+`src/seon/render/web.clj:3372-3387`); the debug variant is `debug-response`
+(`:3255`). Both page kinds acquire through one walk request
+(`walk-request`, `src/seon/render/web.clj:3165-3182`) over
+`seon.render.walk/neighborhood` (`src/seon/render/walk.clj:751`). Do not
+describe context rendering, namespace pages, or debug pages as tabled.
 
 The generalized agent-authored canvas/control API and guarded `/call` route
-remain **[TARGET]**: the live route table has neither, and current interaction
-is the fixed inbound-message route plus a browser-local checkbox
-(`src/seon/render/route.clj:5-27`;
-`src/seon/render/web.clj:1027-1037,1104-1110`). Agent-owned `::renders` remains
+remain **[TARGET]**: the live route table has neither. Current interaction is
+the fixed inbound-message and context-action POST routes
+(`src/seon/render/route.clj:17-22`; `inbound`, `src/seon/render/web.clj:3038`;
+`context-response`, `:3415`) plus browser-local Datastar signals such as
+`showEverything` (`:3267`, `:3345`). Agent-owned `::renders` remains
 **[TARGET]**; current delivery already uses revisioned packages with delta and
 keyframe bytes, while the agent graph contains mailbox, turn, and schedule
-(`src/seon/render/web.clj:553-600,930-1026`;
-`src/seon/cluster/agent.clj:286-318`).
+(`src/seon/cluster/agent.clj:535-581`).
 
 These built and target boundaries apply the simpler facts/channels/derived-
-render model without restoring the deleted CLJS mechanisms
-(`AGENTS.md:20-52`).
+render model without restoring the deleted CLJS mechanisms: fresh Seon is
+CLJ-only and one JVM runs the system (`AGENTS.md:150`).

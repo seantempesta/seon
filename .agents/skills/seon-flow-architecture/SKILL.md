@@ -14,20 +14,20 @@ boundary before adding a mechanism.
 
 `seon.flow/var-process` requires a step Var, explicit `:io` or
 `:compute` workload, and an environment in its arguments
-(`src/seon/flow.clj:123`). Using a Var keeps behavior live under
+(`src/seon/flow.clj:132-184`). Using a Var keeps behavior live under
 redefinition; topology changes rebuild the graph.
 
 Core.async's step function arities are describe, init, transition,
 and transform. The transition hook owns cleanup at stop
-(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:168`).
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:234-243`).
 Acquire process-local resources in that lifecycle and release them
 through its existing completion path.
 
 The dependency documents that `:io` should not do extended computation
-and `:compute` must not block (`flow.clj:198` at the same path).
+and `:compute` must not block (`flow.clj:200-202` at the same path).
 Its default I/O executor uses virtual threads when available; default
 compute and mixed executors are cached platform pools
-(`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:82`).
+(`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96`).
 A bounded compute guarantee therefore requires the graph's actual
 supplied executor, not just the workload keyword.
 
@@ -51,17 +51,27 @@ transport rules, not a reason to place authoritative work in a channel.
 Every execution surface also carries a declared bound; a timeout names
 the event that failed to arrive.
 
-## Agent context ownership — target
+## Agent context ownership
 
-Each agent owns its own graph and one persistent SCI context forked once
-from the cluster base. The context receives accepted base diffs before
-later turns, retaining private defs/atoms and actual result objects.
-Do not construct a new fork every turn or restore `:seon.def` rows.
+Installed: each turn forks the current base context (`fork-for-turn`,
+`src/seon/sci/eval.clj:2287-2318`). When the agent's previous context is held,
+`regenerate-agent-context!` (`:2224-2285`) forks the new base and carries the
+agent's own private Vars over it as actual objects; inherited program bindings
+are replaced. Base contexts are memoized by program identity in a four-entry
+LRU (`program-cache-policy`, `:2321-2328`). The law is that a context is
+reacquired from its branch head at turn start and cached by commit id, and
+private defs, atoms and result objects stay in memory (`AGENTS.md:169`,
+`:211-212`). Do not restore `:seon.def` rows or rebuild a private layer from
+the database.
+
+**[TARGET]** (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0,
+lines 88-90): the fork is the context. The binding snapshot, the regeneration
+diff and the kernel mirrors carried on a context leave; private objects are
+carried by not being replaced.
 
 SCI exposes reusable `init`, `fork`, and `intern` operations
-(`reference-code/sci/src/sci/core.cljc:330`, `:345`, `:260`).
-These are the dependency mechanisms to reuse. Their existence does not
-prove the Seon context-diff integration has landed.
+(`reference-code/sci/src/sci/core.cljc:331`, `:345`, `:260`).
+These are the dependency mechanisms to reuse.
 
 Private objects remain with the agent's live context and disappear on
 JVM restart. Program functions, schemas, and tests persist as facts.
@@ -69,27 +79,29 @@ The result object map is process-local; stored shown text records what
 the agent saw. Never transport those objects through an EDN restoration
 path.
 
-## One turn mechanism — target
+## One turn mechanism
 
-Opening is system turn 0: ordinary submitted source, reply present,
-no provider attempt. Before each agent turn, inspect the latest evaluation
-of every distinct read form. Changed read evidence since its `:t`
-appends a system turn; unchanged evidence does not. Include generated
-and agent-written reads, never writes or effects.
+Opening is system turn 0: ordinary submitted source, reply present, no
+provider attempt. Before each agent turn, the system turn projects the declared
+opening and every distinct retained read form; unchanged reads contribute no
+evaluation (`system-turn`, `src/seon/turn.clj:2055`). Include generated and
+agent-written reads, never writes or effects (`AGENTS.md:373-375`).
 
-Datahike evidence capture and validity already live in
-`src/seon/db.clj:468` and `:561`. Extend the one mechanism in place
-rather than introducing a central dispatcher, block-specific refresh
-handlers, or another cache.
+Datahike evidence capture and validity live in `seon.db/read-evidence`
+(`src/seon/db.clj:912`) and `seon.db/read-evidence-current?` (`:1113`).
+Extend the one mechanism in place rather than introducing a central
+dispatcher, block-specific refresh handlers, or another cache.
 
-The turn has three writes: open; store reply/attempts/forms; store
-outcomes and close. The writer refuses a second open turn.
-At boot open turns close and unfinished evaluations become interrupted;
-no interrupted execution resumes.
+The turn has three writes: open (`open-call`, `src/seon/turn.clj:393`); store
+the reply and its ordered evaluations (`plan-call`, `:611`); close
+(`close-tx`, `:430`). Opening while the agent already has an open turn is a
+no-op inside the writer, and an open turn refuses a second reply. At boot open
+turns close and unfinished evaluations become interrupted
+(`recover-call`, `:1650`); no interrupted execution resumes.
 
 The prompt is stored evaluations rendered through their entity pair.
 Old shown text remains unchanged. Compaction wipes evaluations and
-regenerates the opening through the same system-turn algorithm.
+regenerates the opening (`compact!`, `src/seon/turn.clj:2268`).
 The [runtime diagrams](../../../docs/seon/architecture/agent-runtime.md)
 show both additive sequences.
 

@@ -1,64 +1,70 @@
+---
+type: reference
+status: active
+tags: [reference, flow]
+---
+
 # Degraded start and scratch-JVM recovery
 
 Use this runbook when a scratch cluster fails during startup, especially while
-other lanes are changing the shared tree. Do not restart or mutate another
-lane's cluster to obtain a cleaner signal.
+other lanes are changing the shared tree. Do not restart, stop or mutate
+another lane's cluster to obtain a cleaner signal; lanes never stop, refork or
+reset `default` (`AGENTS.md:405-406`). A boot longer than ten seconds needs the
+owner's explicit authorization (`AGENTS.md:83-84`).
 
 ## 1. Separate launch failure from degraded boot
 
-`seon.cluster/start!` opens and advertises `io-prepl` first. Every later boot
-layer republishes the instance as it stands; a later failure throws with that
-value under `:seon.boot/instance`, while the REPL, advertisement, and registry
-entry survive (`src/seon/cluster.clj:1388-1485`).
+`seon.cluster.boot/start!` opens the `io-prepl` listener first, then publishes
+the instance into `seon.operator.runtime/running-instances` after every layer
+it stands (`src/seon/cluster/boot.clj:288-341`). A later failure throws with
+the value that stood under `:seon.boot/instance`; the REPL, the registry entry
+and (once the store stands) the advertisement survive. Only a failure before
+the first publication, or a store held elsewhere, unwinds the listener and the
+registry entry (`:332-337`).
 
-Start diagnosis with the exception's `:seon.boot/instance`. If another
-`io-prepl` in that JVM is reachable, the same value is in the private registry:
+Start diagnosis with the exception's `:seon.boot/instance`. If an `io-prepl`
+in that JVM is reachable, ask the owning function for the same answer:
 
 ```clojure
-(let [instance
-      (get @@#'seon.cluster/running-instances "scratch-name")]
-  (select-keys
-   instance
-   [:seon.boot/advertisement
-    :seon.store/store
-    :seon.boot/cluster-connection
-    :seon.boot/config-result
-    :seon.agent/routing
-    :seon.render.web/served
-    :seon.boot/ready-ms]))
+(seon.cluster.boot/readiness
+ (get @seon.operator.runtime/running-instances "scratch-name"))
 ```
 
-The double deref is intentional: `#'.../running-instances` is a Var whose
-value is the registry atom
-(`src/seon/cluster.clj:185-211`;
-`docs/archive/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
-§6).
+`readiness` (`src/seon/cluster/boot.clj:343-358`) returns the advertisement,
+`:seon.boot/missing-layers` (each required layer absent from the instance), the
+agent count, `seon.problems/problems` and `:seon.boot/ready-ms`. The registry
+atom is `resources/seon/operator/runtime.clj:11`.
 
-Read absence from the bottom upward:
+Read the missing layers in boot order
+(`stand-boot-layers!`, `src/seon/cluster/boot.clj:146-246`, then
+`stand-cluster-runtime!`, `:48-128`):
 
-| Last evidence present | Failure boundary |
+| First missing layer | Failure boundary |
 |---|---|
-| no advertisement | namespace/JVM launch or layer-0 REPL failed; layer 0 unwinds completely |
-| advertisement, no `:seon.store/store` | REPL stands; process-root store acquisition failed |
-| store, no `:seon.boot/cluster-connection` | ancestor, branch creation, or branch open failed |
-| connection, no `:seon.boot/config-result` | coherent-program validation, schema accretion, recovery, or config application failed; use the exception cause to select among them |
-| config result, no `:seon.sci.eval/ctx` | cluster/root-agent fact convergence, cold program acquisition, or base-context construction failed |
-| SCI ctx, no routing/served value | work-launcher install, agent arm, or web serve failed |
-| `:seon.boot/ready-ms` | the complete boot sequence returned |
+| `:seon.boot/prepl-server` | launch or layer-0 REPL failed; nothing was published |
+| `:seon.store/store` | process-root store acquisition failed |
+| `:seon.store/branch` | source publication, reachability permit, or cluster branch creation failed |
+| `:seon.boot/cluster-connection` | branch open failed |
+| `:seon.source/commit-id` | the source commit could not be read from the base or the cluster row |
+| `:seon.boot/config-result` | coherent-program validation, schema accretion, run recovery, or config application failed; use the exception cause to select among them |
+| `:seon.sci.eval/ctx` | cluster/root-agent convergence, host arming, base-context fork, or work-launcher start failed |
+| `:seon.flow/work-launcher` | environment construction after the context failed |
+| `:seon.flow/graph` | `arm-agents!` failed |
+| `:seon.render.web/served` | web serve failed |
 
-This table follows the actual publish points and order at
-`src/seon/cluster.clj:1289-1386,1388-1485`; the program-only base context is
-built at `src/seon/sci/eval.clj:1369-1392`. Do not
-infer a higher layer from a pid or open socket alone.
+`:seon.boot/ready-ms` is published only after the whole sequence returns
+(`src/seon/cluster/boot.clj:329-331`). Do not infer a higher layer from a pid
+or open socket alone.
 
 ## 2. Inspect the advertisement before touching lifecycle
 
-The per-cluster advertisement is
-`<bootstrap-root>/<cluster-name>/prepl.edn`
-(`src/seon/cluster.clj:135-152`). JVM process identity is only
-`(pid, start-instant)` (`src/seon/cluster/process.clj:2-28`); the advertisement
-adds cluster name and the bound REPL endpoint, and the final boot layer adds the web
-URL (`src/seon/cluster.clj:1371-1386,1434-1452`).
+The per-cluster advertisement is `<bootstrap-root>/<cluster-name>/prepl.edn`
+(`cluster-paths`, `src/seon/cluster.clj:732-749`); the operator reads
+`<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:106-119`).
+Boot writes it once the store stands (`src/seon/cluster/boot.clj:164-167`),
+and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:2974`). JVM
+process identity is only `(pid, start-instant)`
+(`src/seon/cluster/process.clj:1-7`).
 
 For the shared default root, use:
 
@@ -66,76 +72,56 @@ For the shared default root, use:
 bin/seon status
 ```
 
-`bin/seon` accepts `--root PATH` and enters `seon.fresh-operator` with that
-canonical operator root (`bin/seon:4-18`; the old `bin/seon-fresh`
-compatibility alias is deleted). Process records, advertisements,
-discovered JVMs, roster reads, and anchor selection are root-scoped
-(`script/seon/fresh_operator.clj:96-120,789-866,1041-1113,1593-1627`).
-Cross-root JVMs are excluded before probing and therefore cannot become an
-anchor for `start` (`script/seon/fresh_operator.clj:808-866,1139-1148`).
+`bin/seon` accepts `--root PATH`, which must name an existing directory, and
+runs `seon.operator` with that operator root (`bin/seon:7-26`). Advertisement
+discovery, the exact-root process scan and every lifecycle command are
+root-scoped (`script/seon/operator.clj:106-131`). The process scan matches the
+exact `-Dseon.operator.root=<root>` JVM argument, never a command substring
+(`:121-131`).
 
-The fresh status path reconciles observations, checks `(pid, start-instant)`
-liveness, and separately reports detached operator JVMs with no live
-advertisement (`script/seon/fresh_operator.clj:604-619,789-866,1927-2016`).
-Therefore the
-scratch cluster did not survive only when:
-
-1. its row is absent or stale;
-2. no other row names that cluster; and
-3. the status footer reports `orphan seon JVMs: none`.
-
-A file's mere presence is not proof of a live cluster. Seon's own
-`read-advertisement` rejects stale process identity for this reason
-(`src/seon/cluster.clj:1679-1703`).
+A file's mere presence is not proof of a live cluster: an advertisement counts
+only when its `(pid, start-instant)` matches a live process
+(`matching-handle`, `script/seon/operator.clj:93-104`;
+`seon.cluster/read-advertisement`, `src/seon/cluster.clj:3539`). A JVM that the
+scan finds but whose endpoint is unreadable makes `status` fail with "An
+exact-root JVM is alive but its endpoint is unavailable."
+(`script/seon/operator.clj:211-218`). The scratch cluster did not survive only
+when status names no live advertisement for it and no such exact-root JVM
+remains.
 
 ## 3. Avoid the stale-JVM trap
 
-`bin/seon start <name>` does **not** promise a new JVM. When the operator finds
-any live advertisement under its root, it evaluates `seon.cluster/start!` in
-that already-running JVM; only an empty root launches
-`clojure -M:dev` in a new process
-(`script/seon/fresh_operator.clj:381-424,433-473,495-522`).
+`bin/seon start <name>` does **not** promise a new JVM. When the operator
+finds any live process under its root, it asks that JVM to start the cluster;
+only a root with no live process launches `clojure -M:dev:test` in a new
+process (`request!`, `script/seon/operator.clj:1281-1285`; `launch-child!`,
+`:501-568`, called by `launch!` `:570`).
 
 A long-lived JVM can therefore still hold old Var roots even when the checkout
 is correct. A failure in a newly added cluster does not prove the current file
 still fails. For boot-sensitive proof, use a lane-owned operator root with no
-live advertisements. The verified filesystem shape is a directory under
-repository-local `tmp/` whose code/config entries are symlinks to the current
-checkout and whose `data/` is its own
-(`docs/archive/prds/sci-execution-runtime/research/checkpoint-audit-2026-07-29.md`
-“Isolation and apparatus”; the existing
-`tmp/seam-reaudit4-operator-root` demonstrates the layout).
-
-One current-source setup is:
+live process, after the owner authorizes the boot's duration:
 
 ```bash
 operator_root="$PWD/tmp/my-lane-operator-root"
 mkdir -p "$operator_root"
-for path in bb.edn bin config deps.edn reference-code resources script src test
-do
-  ln -s "$PWD/$path" "$operator_root/$path"
-done
-
 bin/seon --root "$operator_root" start scratch-name
 ```
 
-`bin/seon --root` requires an existing root and forwards it as the fresh
-operator's explicit root (`bin/seon:7-18`;
-`script/seon/fresh_operator.clj:44-52`). An operator root with no reachable
-anchor selects the new-JVM branch (`script/seon/fresh_operator.clj:1593-1688`).
-Use the same `--root` option with `status`, `logs scratch-name`, and
-`stop scratch-name` so discovery and cleanup stay inside that root. A
-custom-root cluster is intentionally invisible to the default MCP discovery
-path
-(`docs/archive/prds/sci-execution-runtime/research/repl-workflows-2026-07-29.md`
-§1).
+The launched JVM runs the checkout's code (`.directory` is the repository
+root, `script/seon/operator.clj:524`); the operator root holds only its
+`data/` tree, logs and an optional `.env` (`:279-294`, `:505-507`). Use the
+same `--root` option with `status`, `logs scratch-name` and
+`stop scratch-name` so discovery and cleanup stay inside that root. MCP
+discovery defaults to the project root and lists another root only when it is
+passed explicitly (`script/seon/dev/mcp.clj:87-94`).
 
 ## 4. Fall back to an isolated in-memory JVM
 
-If shared-tree churn prevents boot from reaching the mechanism under
-test, stop claiming live-cluster proof. When the question is pure Datahike
-planning or another cluster-independent transformation, use a separate
-`clojure -M:dev` JVM and an immutable in-memory value:
+If shared-tree churn prevents boot from reaching the mechanism under test, stop
+claiming live-cluster proof. When the question is pure Datahike planning or
+another cluster-independent transformation, use a separate `clojure -M:dev`
+JVM and an immutable in-memory value:
 
 ```clojure
 (require '[datahike.db :as db]
@@ -146,8 +132,7 @@ planning or another cluster-independent transformation, use a separate
 ```
 
 This is the retained planner falsifier and property fixture
-(`test/seon/datahike_fork_test.clj:12-49`). It proves the pure mechanism without
-claiming store, facts, flow, web, or boot integration. If the named exit
-requires one of those layers, record the exact failed boundary and wait for the
-protected lane; an in-memory fallback is not a substitute for the later live
-gate.
+(`test/seon/datahike_fork_test.clj:16-54`). It proves the pure mechanism
+without claiming store, facts, flow, web, or boot integration. If the named
+exit requires one of those layers, record the exact failed boundary and report
+it; an in-memory fallback is not a substitute for the later live gate.

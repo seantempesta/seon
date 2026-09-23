@@ -13,23 +13,24 @@ cluster. Use [the turn PRD](../../../docs/prds/context-generation/plan/agent-rec
 
 Declare each namespaced dial once in its owning schema family.
 Config composites derive from those leaves
-(`src/seon/schema/edn.clj:67`).
+(`derive-config-forms`, `src/seon/schema/edn.clj:62`).
 `seon.config/default-decisions` validates the shipped decisions
-(`src/seon/config.clj:330`).
+(`src/seon/config.clj:418`, through `validate-default-decisions` `:378`).
 
-`compile-manifest` combines defaults, a sparse overlay, and an explicit
-typed environment map in that order. Required absence refuses; the
-absence marker is removed from the effective map
-(`src/seon/config.clj:358`). This explicit input is not permission
+`compile-manifest` (`src/seon/config.clj:521`) combines defaults, a sparse
+overlay, and an explicit typed environment map in that order. Required
+absence refuses; the absence marker is removed from the effective map
+(`compile-settings`, `:468-519`). This explicit input is not permission
 for running consumers to fetch process environment state.
 
 ## Apply and inspect
 
-Use `bin/seon config apply [CLUSTER] PATH`; its parser and live
-operation are `script/seon/fresh_operator.clj:395` and `:2161`.
-`seon.config/apply!` compiles and reconciles the selected document
-(`src/seon/config.clj:504`); `effective` reads from the database
-(`:533`).
+Use `bin/seon config apply [CLUSTER] PATH`; its parser is
+`script/seon/operator.clj:1319-1320`, `:1345-1352`, and the live operation is
+the `:config-apply` branch of `seon.cluster.boot/request!`
+(`src/seon/cluster/boot.clj:513-518`). `seon.config/apply!` compiles and
+reconciles the selected document (`src/seon/config.clj:725`); `effective`
+reads from the database (`:754`).
 
 Verify both the resulting datoms and the consumer behavior. An applied
 row does not by itself rebuild a graph, executor, or server. For each
@@ -37,10 +38,11 @@ dial, follow its actual read site to determine whether it is acquired
 at boot, graph arming, a turn, or a request. Do not copy a momentary
 acquisition table whose referenced mechanisms are being deleted.
 
-## Context and result contract — target
+## Context and result contract
 
-Each agent keeps one live SCI context receiving base diffs across turns.
-Defs, atoms, and result objects stay in memory. The evaluation stores
+Each turn forks the agent's SCI context from the cluster base and carries its
+private layer over (`fork-for-turn`, `src/seon/sci/eval.clj:2287`); defs,
+atoms, and result objects stay in memory (`AGENTS.md:169`). The evaluation stores
 shown text produced under the render profile once, plus out and error.
 Do not restore a def-blob threshold, result serializer, or separate
 result storage cap as a config requirement.

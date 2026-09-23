@@ -1,18 +1,19 @@
 ---
 name: clojurescript
-description: "Mine the deleted Seon CLJS pod through Git history (AGENTS.md:247-254). Load this only when intentionally reconstructing a deleted pod behavior or deciding what lesson—not implementation—to carry into the JVM. Do not load it for current runtime, eval, UI, async, or agent work: fresh Seon is CLJ-only and the pod/self-host engine is deleted."
+description: "Mine the deleted Seon CLJS pod through Git history (AGENTS.md:19). Load this only when intentionally reconstructing a deleted pod behavior or deciding what lesson—not implementation—to carry into the JVM. Do not load it for current runtime, eval, UI, async, or agent work: fresh Seon is CLJ-only and the pod/self-host engine is deleted."
 ---
 
 # Historical CLJS pod quarry
 
-The CLJS build is off and the pod is deleted. Current Seon is CLJ/JVM only
-(`docs/archive/prds/sci-execution-runtime/plan/README.md:345-351`). Current agent
+The CLJS build is off and the pod is deleted. Current Seon is CLJ/JVM only:
+one JVM runs the CLJ system (`AGENTS.md:150`). Current agent
 evaluation belongs to `src/seon/sci/eval.clj`; current web rendering belongs to
 `src/seon/render/web.clj`.
 
 Use this skill only to understand a deleted behavior through `git show` or
 `git log` before designing a fresh replacement. The old source trees are not
-present in the working tree (`AGENTS.md:247-254`). Never:
+present in the working tree; earlier implementations are evidence, not
+baggage (`AGENTS.md:19`). Never:
 
 - add `.cljs` to fresh `src/`;
 - restore shadow-cljs, Bun, `cljs.js`, bootstrap compile state, or the pod;
@@ -50,9 +51,9 @@ understanding.
 
 Read these only as quarry:
 
-The retained research record is
-`docs/archive/prds/pre-2026-09/agent-fsm/research/cljs-async-await-2026-06-28.md`. Use Git
-history when the question requires deleted source, for example
+The research record was deleted with the retired programs; read it with
+`git show 215447c46^:docs/prds/archive/agent-fsm/research/cljs-async-await-2026-06-28.md`.
+Use Git history when the question requires deleted source, for example
 `git log --all -- path/to/deleted/file` followed by `git show REV:path`.
 
 ## How to carry a lesson forward

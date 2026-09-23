@@ -18,15 +18,16 @@ show the additive context and since-query diff.
 - The reply reader turns model text into ordered source forms and reader
   evidence. It preserves source and namespace, attaches preceding prose
   to its form, and retains trailing prose only in the raw reply.
-  Current owner: `src/seon/cluster/reply.clj:360`.
-- An agent turn uses its own persistent SCI context. This is the §14
-  target, not a property proved by a host REPL expression. SCI itself
-  provides reusable contexts, isolated forks, and interning:
-  `reference-code/sci/src/sci/core.cljc:330`, `:345`, `:260`.
+  Current owner: `seon.cluster.reply/sources` (`src/seon/cluster/reply.clj:301`).
+- An agent turn evaluates in its own SCI context, forked per turn from the
+  cluster base with its private layer carried over (see below); a host REPL
+  expression proves nothing about it. SCI itself provides reusable contexts,
+  isolated forks, and interning:
+  `reference-code/sci/src/sci/core.cljc:331`, `:345`, `:260`.
 - MCP JVM mode evaluates on the host prepl, not through a turn.
   Read the complete returned envelope and report that surface explicitly.
-  Clojure's prepl owner is
-  `reference-code/clojure/src/clj/clojure/core/server.clj:228`.
+  Clojure's prepl owners are `prepl` and `io-prepl`
+  (`reference-code/clojure/src/clj/clojure/core/server.clj:194`, `:275`).
 - A raw JVM REPL has Clojure's ordinary reader and evaluation behavior:
   `reference-code/clojure/src/clj/clojure/main.clj:368`.
 
@@ -35,13 +36,15 @@ with its default root/cluster selection. The tool still requires the
 `code` argument. Do not send a provider request for a loop proof:
 PRD §12 requires virtual replies through the ordinary proc.
 
-## Persistent context, private layer, and handles — target
+## Context, private layer, and handles
 
-Derive the program-only base from one database value with `base-ctx`
-(`src/seon/sci/eval.clj:1956`). Before a later turn, `fork-for-turn`
-(`:1924`) regenerates the fork and reapplies the private layer in memory,
-preserving its context handle, owned Vars, atoms and result objects
-(`regenerate-agent-context!`, `:1861`). SCI's generation-based isolation
+Installed: `base-ctx` derives the program-only base from one database value,
+memoized by program identity (`src/seon/sci/eval.clj:2475`). Each turn,
+`fork-for-turn` (`:2287`) forks the current base and, when the agent's previous
+context is held, carries the private layer in memory, preserving its context
+handle, owned Vars, atoms and result objects (`regenerate-agent-context!`,
+`:2224`). **[TARGET]** B2 makes the fork the context, with no regeneration
+diff (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0). SCI's generation-based isolation
 is supplied by `reference-code/sci/src/sci/core.cljc:345`. Private objects
 never enter the base or another agent; a JVM restart loses them.
 Do not teach a serialization/restoration ladder.
@@ -49,30 +52,31 @@ Do not teach a serialization/restoration ladder.
 Accepted functions, schemas, and tests persist as program facts.
 A `defn` without a Malli contract is refused at installation. A plain
 `def` gets the temporary-state note specified in PRD §12.
-The note generator currently lives at `src/seon/repl.clj:52`; its
-presence does not prove the turn/private-state target has landed.
+The note generator is `def-note` (`src/seon/repl.clj:118`).
 
 Results bind actual objects in an evaluation-id map.
 `seon.id/evaluation` derives ids from branch, turn, and ordinal;
 `seon.id/symbol-in` builds `result/e<id>` handles
-(`src/seon/id.clj:49`, `:42`). The evaluation stores shown text
+(`src/seon/id.clj:55`, `:47`). The evaluation stores shown text
 from the value renderer, plus out and error, not the result object.
 
-## History and inspection — target
+## History and inspection
 
 System turns store opening and refreshed read evaluations. Before an agent
 turn, every distinct read form's latest evidence is checked against changes
-since its evaluation `:t`. Generated and agent-written reads participate;
+since its evaluation `:t` (installed: `system-turn`,
+`src/seon/turn.clj:2055`). Generated and agent-written reads participate;
 writes and effects never rerun. Compaction wipes evaluations and regenerates
 the opening.
 
 The evaluation schema declares its AI/HTML pair; the walk renders
 evaluations in order through that pair. `seon.repl/text` is the one
-REPL grammar (`src/seon/repl.clj:246`); render functions currently enter
-at `:315` and `:323`. Do not infer stored-shown-text support from those
-entry points alone.
+REPL grammar (`src/seon/repl.clj:256`); the render pair enters at
+`render-ai` and `render-html` (`:447`, `:480`), and saved shown text renders
+unchanged through `value-text` (`:142-146`).
 
-`my.turn/evals` and `my.turn/eval` are the §15 inspection target:
+**[TARGET]** `my.turn/evals` and `my.turn/eval` (PRD §15; `src/my/turn.clj`
+defines neither):
 maps of source, shown text, `:t`, error, and full read evidence.
 A missing live object is reported as gone while saved text remains.
 The debug prompt preview adds the would-be system turn without writing.
@@ -81,17 +85,20 @@ The debug prompt preview adds the would-be system turn without writing.
 
 Call a JVM private function through its Var, for example
 `(#'some.namespace/private-fn request)`. The real dependency probe
-uses this form at `test/seon/datahike_fork_test.clj:31`.
+uses this form at `test/seon/datahike_fork_test.clj:37`.
 
 A file edit is not a live proof. Reload or adopt the changed definition,
 rerun the same form against the same inputs, and name the mechanism
 exercised. Re-evaluating a contracted Var replaces its wrapper;
 `seon.instrument/apply!` documents re-arming with the supplied projection
-at `src/seon/instrument.clj:685`.
+(`src/seon/instrument.clj:839-846`). Without
+`:seon.instrument/changed-identities` it collects and re-arms the complete
+loaded program; name the changed identities when you have them.
 
 For the selected development cluster, the complete JVM form is below.
 Choose the namespace to reload; the database supplies both the projection
-and instrumentation mode (`src/seon/schema.clj:930`, `src/seon/config.clj:533`).
+and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3412`;
+`effective`, `src/seon/config.clj:754`).
 
 ```clojure
 (let [connection (seon.cluster.boot/connection "default")

@@ -17,10 +17,11 @@ a query instead — with its ruling and its Datahike grounding.
 ## One declaration, derived storage
 
 The classpath resources under `resources/seon/schemas/` form one
-population. Duplicate keys refuse; `packaged-forms` returns the
-declarations (`src/seon/schema/edn.clj:316`, `:393`).
-The schema bridge consumes a supplied projection and derives Datahike
-attribute declarations (`src/seon/schema/datahike.clj:232`).
+population. Duplicate keys refuse within and across resources
+(`src/seon/schema/edn.clj:216-228`, `:307-330`); `packaged-forms` returns the
+declarations (`:415`). The schema bridge consumes a supplied projection and
+derives Datahike attribute declarations (`malli->datahike-attr-in`,
+`src/seon/schema/datahike.clj:141-180`).
 
 | Intent | Declaration | Derived behavior |
 |---|---|---|
@@ -29,11 +30,12 @@ attribute declarations (`src/seon/schema/datahike.clj:232`).
 | Owned child | `[:seon.db/ref {:seon.db/component true}]` | Component ownership |
 | Many members | `[:set :seon.db/ref]` | Cardinality-many, unordered |
 | Optional value | Optional map entry, omitted when absent | No stored nil |
-| Relation to a NAME that must outlive the target | `[:set :qualified-symbol]` — a VALUE edge, not a ref | Cardinality-many symbols; retracting the named entity touches no edge (`reference-code/datahike/src/datahike/db/transaction.cljc:998-1015` sweeps incoming REF datoms only) |
+| Relation to a NAME that must outlive the target | `[:set :qualified-symbol]` — a VALUE edge, not a ref | Cardinality-many symbols; retracting the named entity touches no edge (`reference-code/datahike/src/datahike/db/transaction.cljc:999-1016` sweeps incoming REF datoms only) |
 | "We looked" — an analysis actually ran | A required positive fact naming what it read (file digest, evaluation) | Presence is `analyzed?`; an empty result is then ordinary absence of edges |
 
-The bridge's type, cardinality, and property owners are
-`src/seon/schema/datahike.clj:123`, `:205`, and `:232`.
+The bridge derives type and cardinality in one fold, `compiled-storage`
+(`src/seon/schema/datahike.clj:77-139`), and properties in
+`malli->datahike-attr-in` (`:141-180`).
 
 ## The one question that decides a ref: statement or token?
 
@@ -62,10 +64,9 @@ that produced it.
 The tell for a misfiled token is machinery that exists only to survive a
 rename or a republish: a `:seon.fn/reference-to` annotation whose whole job is
 telling a reader how to recover the name from a ref
-(`resources/seon/schemas/seon.fn.edn:4`), a preservation pass that strips and
-re-resolves refs across a publication
-(`src/seon/cluster/source.clj:471-477`), a sibling attribute storing the same
-name as a value beside the ref. Every one of those is a name-observation
+(`resources/seon/schemas/seon.fn.edn:17`, read by `src/seon/fn.clj:1467`), a
+preservation pass that strips and re-resolves refs across a publication, a
+sibling attribute storing the same name as a value beside the ref. Every one of those is a name-observation
 wearing a ref.
 
 **A function with live callers is not deletable until the callers are fixed**
@@ -80,7 +81,7 @@ deletion, and a complete republish.
 
 The second rule in the table is the other half of the same reading. `#{}`
 stores nothing — `explode` emits one
-datom per member (`transaction.cljc:739-770`, `:718-737`), so "found
+datom per member (`db/transaction.cljc:740-771`, `:719-738`), so "found
 nothing" and "never ran" are the same bytes unless the looking is its own
 datom. If a reader will ever need to distinguish them, declare the event.
 Grounding:
@@ -94,21 +95,24 @@ Choose a tuple for one fixed ordered observation, such as callee and argument
 count; its complete value is the index key, not each member
 (`reference-code/datahike/src/datahike/index/persistent_set.cljc:31-132`).
 Choose components when children belong to one parent's value. Datahike's
-cascade does not enforce exclusive ownership (`db/transaction.cljc:831-836`);
+cascade does not enforce exclusive ownership (`db/transaction.cljc:832-836`);
 shared fingerprint-identified shapes stay behind ordinary refs. The existing
 shape model owns child/entry occurrence rows but their `/schema` refs lead
-to shared shapes (`resources/seon/schemas/seon.schema.shape.edn:8-11`,
+to shared shapes (`resources/seon/schemas/seon.schema.shape.edn:10-13`,
 `resources/seon/schemas/seon.schema.shape.child.edn:3-4`). Preserve that
 distinction when merging another representation into it.
 
 Validate complete owning values, including owners discovered from before and
-after a child-only edit or unlink. Wildcard pull is not a completeness proof:
-it caps each many-valued attribute at 1,000 and recursion can yield id-only
-maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`, `:315-351`).
+after a child-only edit or unlink. Pull is not a completeness proof: a
+supplied `:limit` truncates a many-valued attribute silently and recursion can
+yield id-only maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`,
+`:315-351`).
 Obtain the complete value under the declared work bound or refuse.
 Every owned relation declares `:seon.db/component-schema`; the final writer
-validates those typed values as well as the root (`src/seon/db.clj:3071`).
-The config schema declares `:seon.config.db/validation-node-limit`, carried by
+validates those typed values as well as the root (`write-owned-values-error`,
+`src/seon/db.clj:3333`). The config schema declares
+`:seon.config.db/validation-node-limit`
+(`resources/seon/schemas/seon.config.db.edn:1`), carried by
 projection acquisition and shared across writers; there is no per-constructor
 escape. A nonempty identity-less row without an owner refuses.
 
@@ -116,13 +120,13 @@ An event fact proves exactly the observation its writer completed. A definition
 analysis digest does not prove test reach ran; a maintenance request's existence
 does not prove every sub-operation ran. Do not require nonempty datoms for a
 legitimate empty result. The event's positive provenance permits interpreting
-absent membership as empty (`db/transaction.cljc:718-770`). A digest records
+absent membership as empty (`db/transaction.cljc:719-771`). A digest records
 content identity, not the number of times identical content was observed:
-idempotent assertions are omitted from effective tx-data (`:587-625`).
+idempotent assertions are omitted from effective tx-data (`:588-626`).
 
 Use history for retained changes, and a positive transition fact for current
 state when its writer actually supplies one. `:db/noHistory` deliberately
-removes the former guarantee (`db/transaction.cljc:440-484`). An imported
+removes the former guarantee (`db/transaction.cljc:441-485`). An imported
 observation time is not its import transaction time. The
 [modeling study](../../../docs/prds/steward-platform/research/datahike-modeling-study-2026-09-17.md)
 records live counterexamples: terminal issue status without resolved-tx,
@@ -135,7 +139,8 @@ whole owned concerns. Derived concerns are queries, not stored mirrors.
 
 An entity map's `:seon.db/attributes` property contributes its entry
 attributes to storage derivation; it does not stamp a kind on an entity.
-The decomposition owner is `src/seon/schema/datahike.clj:319`.
+The decomposition owner is `compiled-attribute-selection`
+(`src/seon/schema/datahike.clj:214-246`).
 
 ## Contracts and honest generators
 
@@ -145,21 +150,22 @@ Malli input/output contracts. Adding optional data is accretion;
 requiring more or promising less changes the contract.
 
 Stored nilable shapes refuse at
-`src/seon/schema/datahike.clj:170`. Clearing is a retraction;
+`src/seon/schema/datahike.clj:131` (message `:162`). Clearing is a retraction;
 omission from an upsert is not a clear operation.
 Do not generalize allowances for in-memory polymorphic results to
 stored attributes.
 
 Authored incomplete contracts and predicate requirements are checked at
-`src/seon/schema/internal.cljc:119`. Malli generator overrides are
-selected at `reference-code/malli/src/malli/generator.cljc:466`;
-mapping an output occurs at `:474`. Neither proves the generated
+`assert-complete-schema!` (`src/seon/schema/internal.cljc:291`). Malli
+generator overrides are selected at
+`reference-code/malli/src/malli/generator.cljc:466`; mapping an output occurs
+at `:489` (`-create-from-fmap`). Neither proves the generated
 value satisfies the target schema. Use fixed seeds, generate and
 validate against the same projection, and exercise meaningful domain
 partitions. The clojure-testing skill owns the fixture and assertion.
 
 Config composites already derive from leaf declarations
-(`src/seon/schema/edn.clj:66`). A new dial belongs in its owning
+(`derive-config-forms`, `src/seon/schema/edn.clj:62`). A new dial belongs in its owning
 schema family, not a manually maintained second composite.
 
 ## Record and render contract — target
@@ -180,10 +186,11 @@ agent-written evaluations. “System” derives from reply presence and
 no provider attempt. Do not add an author-kind stamp or a parallel
 generated-form family.
 
-## Results and identity — target
+## Results and identity
 
-The agent retains a context handle; `fork-for-turn` regenerates from the current
-base and reapplies its private layer (`src/seon/sci/eval.clj:1912-1944`).
+Installed: the agent retains a context handle; `fork-for-turn`
+(`src/seon/sci/eval.clj:2287`) forks the current base and
+`regenerate-agent-context!` (`:2224-2285`) carries its private layer over it.
 Its private defs, atoms, and result objects remain in memory.
 Shown text is stored because it records what was seen, not because
 it can restore the object. The profile is applied once at evaluation
@@ -194,11 +201,12 @@ Use `seon.id/evaluation` for branch/turn/ordinal identity and
 (`src/seon/id.clj:55`, `:47`). Do not add a random-id generator.
 
 Read evidence is a dependency observation, not a copied result:
-`src/seon/db.clj:805`. Every distinct read form's latest evidence
+`src/seon/db.clj:912`. Every distinct read form's latest evidence
 feeds the since-query diff; changed reads append, writes/effects never
 rerun. Compaction retracts evaluations and regenerates the opening.
 Program identity tombstones are RETIRED by owner ruling 2026-09-16
 (program-facts PRD §1f G1/G3): deletion is `[:db/retractEntity …]` and the
-past is a temporal query. The edge publication deletes the tombstone validator and external stub minting.
+past is a temporal query; `src/` carries no tombstone mechanism.
 The final report refuses identity removal or rename when surviving symbol
-observers still name it; repairs are judged in the same final database.
+observers still name it; repairs are judged in the same final database
+(`removed-definition-error`, `src/seon/db.clj:3872`; `deletion-error`, `:3932`).

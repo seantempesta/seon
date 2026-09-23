@@ -15,11 +15,11 @@ than a remembered commit.
 ## Explicit values and transaction authority
 
 Use `seon.db`. Its query and pull owners accept explicit immutable
-database values or agent-supplied defaults (`src/seon/db.clj:1697`,
-`:1892`). Its transaction owner accepts an explicit connection or the
-agent's connection and returns errors as values (`src/seon/db.clj:3605`).
-A host JVM probe should supply explicit custody
-(`seon.db/call-with-custody`, `src/seon/db.clj:283`).
+database values or agent-supplied defaults (`q`, `src/seon/db.clj:2206`;
+`pull`, `:2439`). Its transaction owner accepts an explicit connection or the
+agent's connection and returns errors as values (`transact!`,
+`src/seon/db.clj:4546`). A host JVM probe should supply explicit custody
+(`seon.db/call-with-custody`, `src/seon/db.clj:373`).
 
 Datahike accepts a transaction map with `:tx-data` and optional
 `:tx-meta`, or a raw vector/sequence. A map lacking `:tx-data`
@@ -38,36 +38,39 @@ versus optional — are consolidated with their rulings in
 ## Deletion is retraction, and it reaches the neighbours
 
 `[:db/retractEntity e]` and `[:db.fn/retractEntity e]` are the same
-operation (`db/transaction.cljc:1080`, `:1082` → `retract-entity`,
-`:998`). It retracts three sets of datoms, and the second surprises
+operation (`db/transaction.cljc:1098`, `:1100` → `retract-entity`,
+`:999`). It retracts three sets of datoms, and the second surprises
 people:
 
-1. **the entity's own datoms** — `(dbi/search db [e])` (`:1001`);
+1. **the entity's own datoms** — `(dbi/search db [e])` (`:1002`);
 2. **every incoming ref datom** — for each attribute in
    `(dbi/-attrs-by db :db.type/ref)` it scans `(dbi/search db [nil a e])`
-   and retracts what it finds (`:1002-1013`, retracted at `:1014`).
+   and retracts what it finds (`:1003-1014`, retracted at `:1015`).
    Another entity's statement *about* this one disappears with it,
    silently;
 3. **component children, recursively** — `retract-components` emits a
    `[:db.fn/retractEntity <value>]` for every retracted datom whose
-   attribute is `:db/isComponent` (`:831-836`, spliced at `:1015`).
+   attribute is `:db/isComponent` (`:832-836`, spliced at `:1016`).
 
 The narrower operations do not do (2): `[:db.fn/retractAttribute e a]`
 retracts that entity's datoms for `a` and cascades components of `a`
-only (`:1073-1078`); `[:db/retract e a v]` / `[:db/retract e a]` retract
-matching datoms with no cascade and no incoming-ref sweep (`:1060-1071`).
+only (`:1091-1096`); `[:db/retract e a v]` / `[:db/retract e a]` retract
+matching datoms with no cascade and no incoming-ref sweep (`:1078-1089`).
 
 **Optional versus required IS the refuse/sweep dial.** Nobody declared a
 deletion policy property; required-ness already is one. Every swept datom is
-written through `transact-retract-datom` (`db/transaction.cljc:813-819`), so
+written through `transact-retract-datom` (`db/transaction.cljc:814-820`), so
 it lands in the report's `:tx-data`. Seon wires a final-report validator into
-every admitted `transact!` (`src/seon/db.clj:3424`); Datahike calls it once and throws
-`:transaction/validation-rejected` on any non-nil return, aborting the whole
-transaction (`db/transaction.cljc:1206-1216`, invoked at `:1276`).
+every admitted `transact!`: `transact-call` puts `write-report-validator` under
+`:tx-meta :datahike/validate-report` (`src/seon/db.clj:4304-4307`). Datahike
+calls it once and throws `:transaction/validation-rejected` on any non-nil
+return, aborting the whole transaction (`validate-report`,
+`db/transaction.cljc:1224-1234`, invoked at `:1295`).
 `write-report-error` computes `affected` as the distinct `:e` over attempted
-**and** effective tx-data (`src/seon/db.clj:3226`) — which therefore includes
-every entity the sweep touched — and re-validates each one's whole resulting
-row against the schemas its identities select (`write-entity-error`, `:3052`).
+**and** effective tx-data (`src/seon/db.clj:4014-4021`) — which therefore
+includes every entity the sweep touched — and re-validates each one's whole
+resulting row against the schemas its identities select
+(`write-entity-error`, `:3286`).
 So:
 
 - the swept ref is **required** in the referrer's entity schema → the referrer
@@ -76,14 +79,16 @@ So:
   deletion sweeps silently**.
 
 `write-entity-error` skips an entity retracted to nothing — coordinated deletion
-is valid. Final owning-value validation (`src/seon/db.clj:3071`) discovers roots
+is valid. Final owning-value validation (`write-owned-values-error`,
+`src/seon/db.clj:3333`) discovers roots
 from before and after, expands complete EAVT children, and validates each owned
 child through its relation's `:seon.db/component-schema`. Identity-less unowned
 rows, missing children, cycles, multiple owners and exhausted
 `:seon.config.db/validation-node-limit` refuse. No component identity is invented.
-The projection carries the declared bootstrap bound (`src/seon/schema.clj:317`);
-the final callback reads asserted configuration from the report's final database
-(`src/seon/db.clj:3500`).
+The projection carries the declared bootstrap bound (`with-compiled-cache`,
+`src/seon/schema.clj:374-381`); the final callback reads asserted configuration
+from the report's final database (`write-report-validator`,
+`src/seon/db.clj:4095-4109`).
 
 State the lifecycle consequence in the attribute's docstring: **cascade**
 (component), **sweep** (optional ref), **refuse** (required ref in a validated
@@ -97,7 +102,7 @@ Make decisions inside `:db.fn/call` when earlier operations suffice; enforce
 final invariants in the final-report validator when later repairs must count.
 
 **Retraction preserves temporal evidence only with `keep-history?` and without
-`:db/noHistory`.** `with-datom` tests both (`db/transaction.cljc:440-484`).
+`:db/noHistory`.** `with-datom` tests both (`db/transaction.cljc:441-485`).
 A retained retraction removes current entries and inserts the old assertion
 and the negative datom into temporal EAVT/AEVT and, if indexed, AVET.
 Those insertions can deduplicate existing evidence; they are not a promise of
@@ -106,8 +111,8 @@ updates and retained nodes even after the current entity disappears.
 
 **Purge changes temporal indexes in the resulting database; it is not an
 all-snapshots erasure guarantee.** The purge operations require history
-(`db/transaction.cljc:1084-1130`) and route through
-`transact-purge-datom` (`:820-829`). Older retained commits/branches can still
+(`db/transaction.cljc:1102-1148`) and route through
+`transact-purge-datom` (`:821-830`). Older retained commits/branches can still
 reach the old index nodes. `gc.cljc:22-81` marks current AND temporal roots of
 retained commits; GC does not prune datoms from a retained head's history.
 Specify branch/commit retention separately from temporal retention. A reset
@@ -115,8 +120,8 @@ does not preserve a historical query route to the discarded store.
 
 **A ref to a retracted entity is legal, and that is the trap.**
 `validate-val` checks the value's *type* against the installed schema and
-nothing else (`db/transaction.cljc:33-52`, called from `transact-add` at
-`:788`); it never asks whether the target has datoms. So:
+nothing else (`db/transaction.cljc:34-53`, called from `transact-add` at
+`:789`); it never asks whether the target has datoms. So:
 
 - the entity id survives with no datoms attached;
 - a wildcard pull of the referring entity shows `{:db/id n}` — a link to
@@ -126,7 +131,7 @@ nothing else (`db/transaction.cljc:33-52`, called from `transact-add` at
 - re-asserting the unique identity without supplying the old numeric eid can
   mint a **new** entity id:
   `upsert-eid` resolves an identity through
-  `(:e (first (dbi/datoms db :avet [a v])))` (`:641`, `:660`), and once
+  `(:e (first (dbi/datoms db :avet [a v])))` (`:642`, `:661`), and once
   the identity datom is retracted that AVET entry is gone. The old ref
   does not follow the identity value to its new owner. An explicit old eid
   can instead reuse that number; numeric `entid` is not an existence check
@@ -142,8 +147,8 @@ where a genuine entity relation exists.
 
 A cardinality-many attribute with no members has **no datoms**. `explode`
 emits one `[:db/add e a v]` per member of
-`(maybe-wrap-multival db a-ident vs)` (`db/transaction.cljc:739-770`,
-`:718-737`), and an empty collection yields nothing — there is no
+`(maybe-wrap-multival db a-ident vs)` (`db/transaction.cljc:740-771`,
+`:719-738`), and an empty collection yields nothing — there is no
 empty-set datom in Datahike by construction.
 
 Therefore `{:a/id 1 :a/calls #{}}` and `{:a/id 1}` are byte-identical
@@ -152,8 +157,8 @@ the same database state unless **the looking is its own positive fact**.
 Do not encode an event in the cardinality of a collection, and do not
 repair it with a submission-time-only check: the whole-entity write
 validator rebuilds the row from the resulting datoms
-(`seon.db/write-entity-value`, `src/seon/db.clj:3002`;
-`write-entity-error`, `:3052`), where the empty collection is already
+(`seon.db/write-entity-value`, `src/seon/db.clj:3263`;
+`write-entity-error`, `:3286`), where the empty collection is already
 gone, so a submission-only check is a pre-read the authority re-decides.
 
 ## Three dependency behaviours that report nothing when they fire
@@ -161,38 +166,40 @@ gone, so a submission-only check is a pre-read the authority re-decides.
 **A heterogeneous tuple whose members are ALL the wrong type stores.**
 `check-tuple` refuses only when the per-member validity results DIFFER:
 `(not (apply = (map s/valid? (:db/tupleTypes attr-schema) v)))`
-(`db/transaction.cljc:1037`). All-invalid is `(= false false)`, which passes.
-Only the member COUNT is genuinely enforced (`:1033`). So a regression over a
+(`db/transaction.cljc:1038`). All-invalid is `(= false false)`, which passes.
+Only the member COUNT is genuinely enforced (`:1034`). So a regression over a
 tuple attribute asserts the STORED MEMBER TYPES, never merely that the
 transaction succeeded. (The dependency also supports homogeneous
-`:db/tupleType`, `:1020-1031`; Seon's current tuple bridge emits
-`:db/tupleTypes`, `src/seon/schema/datahike.clj:267`.) Also
+`:db/tupleType`, `:1021-1032`; Seon's current tuple bridge emits
+`:db/tupleTypes`, `src/seon/schema/datahike.clj:174`.) Also
 `maybe-wrap-multival` treats any non-map collection under a cardinality-many
-attribute as the member sequence (`:718-736`), so a cardinality-many tuple
+attribute as the member sequence (`db/transaction.cljc:719-737`), so a cardinality-many tuple
 attribute handed a bare tuple vector instead of a set explodes into scalar
 datoms.
 
-**Pull truncates a cardinality-many result at 1,000 members with no signal.**
-`+default-limit+` is 1000 (`pull_api.cljc:16`), `limit` defaults to it
-(`:315`) and the transducer is `(take limit)` (`:323`) — no marker, no
-elision, no refusal; the caller sees a shorter collection. The cap is per
-entity/attribute, not across the population: an aggregate reach count does
-not prove any individual row was cut. Explicit `:limit nil` disables this
-take (`:323`), but does not remove query-work bounds. That is the project's
-named failure class living inside the dependency: a pull
-owner that does not report the cut as an elision naming the bound is reading
-absence of signal as health.
+**An explicit pull `:limit` truncates a cardinality-many result with no
+signal.** At the pinned fork `+default-limit+` is nil (`pull_api.cljc:16`,
+pinned by Seon commit `59e86fd8b`), `limit` defaults to it (`:315`) and the
+transducer is `(if limit (take limit) identity)` (`:323`): a default pull
+returns every member, and a supplied `:limit n` cuts with no marker, no
+elision and no refusal. The cut is per entity/attribute, not across the
+population. Before that pin the fork defaulted to 1,000; do not carry that
+number into current reasoning. A pull owner that passes a limit and does not
+report the cut as an elision naming the bound is reading absence of signal as
+health.
 
 **An attribute whose form the bridge cannot map is not stored at all.**
-`form->datahike-value-type-in` (`src/seon/schema/datahike.clj:123-185`) admits
-`:seon.db/ref`, a scalar `:=` literal, an all-keyword `:enum`, an `:or` (one
-type, else the EDN-string codec), and the heads in `malli-type->datahike-type`
-(`:55-68`) — string, re, int, double, float, keyword, qualified-keyword,
-boolean, inst, uuid, symbol, qualified-symbol, tuple. **There is no `:map`
-case**, so a `:map`-typed attribute throws `::value-type-unavailable`,
-`storable-attribute-in?` (`:299`) answers false, and the attribute has NO
-datoms — `:seon.maintenance.result/value`
-(`resources/seon/schemas/seon.maintenance.result.edn:236`) is the live
+The bridge's fold, `compiled-storage` (`src/seon/schema/datahike.clj:77-139`),
+admits `:seon.db/ref`, a scalar `:=` literal (`literal->datahike-value-type`,
+`:35-50`), an all-keyword `:enum`, an `:or` (one type, else the EDN-string
+codec unless `:seon.db/value-type` names one), a tuple of storable members,
+`inst?`, and the heads in `malli-type->datahike-type` (`:16-29`) — string,
+re, int, double, float, keyword, qualified-keyword, boolean, inst, uuid,
+symbol, qualified-symbol, tuple. `:maybe` refuses. **There is no `:map`
+case**, so `malli->datahike-attr-in` (`:141-180`) throws for a `:map`-typed
+attribute, `storable-attribute-in?` (`:254-260`) answers false, and the
+attribute has NO datoms — `:seon.maintenance.result/value`
+(`resources/seon/schemas/seon.maintenance.result.edn:52`) is the live
 instance. A non-keyword `:enum` fails the same way
 (`:seon.cluster.wake/offer-result`,
 `resources/seon/schemas/seon.cluster.wake.edn:10`). Before reasoning about a
@@ -207,8 +214,8 @@ it, and one Malli key cannot describe all three.
 
 | Where | Spelling | Source |
 |---|---|---|
-| Transaction data | entity id (int); tempid; lookup ref `[:attr v]`; keyword resolved through `:db/ident`; **a nested entity map** | `db/transaction.cljc:946` (`entity-map->op-vec`), `:739-770` (`explode`), `:641` (`upsert-eid`) |
-| Datom | always the entity id | `db/transaction.cljc:786-790` — `transact-add` never rewrites `v` beyond `entid-strict` |
+| Transaction data | entity id (int); tempid; lookup ref `[:attr v]`; keyword resolved through `:db/ident`; **a nested entity map** | `db/transaction.cljc:947` (`entity-map->op-vec`), `:740-771` (`explode`), `:642` (`upsert-eid`) |
+| Datom | always the entity id | `db/transaction.cljc:787-791` — `transact-add` never rewrites `v` beyond `entid-strict` |
 | Pull result, no sub-selector | `{:db/id n}`, or `{:db/id n :db/ident k}` when the target has a `:db/ident` | `pull_api.cljc:353-357`, `db-ident-and-id` at `:298-302` |
 | Pull result, sub-selector | the nested map that selector describes | `pull_api.cljc:335-339` (`subpattern-frame`, `:204`) |
 | Pull result, **component** ref, no selector | the **full** nested entity map, unasked | `pull_api.cljc:346-351` (`expand-frame`, `:291`) |
@@ -217,9 +224,9 @@ it, and one Malli key cannot describe all three.
 
 **A map under a ref attribute in transaction data is a nested entity that
 links.** `explode` sees a map value under a ref attribute and emits
-`(assoc v (dbu/reverse-ref a-ident) eid)` (`db/transaction.cljc:758`) —
+`(assoc v (dbu/reverse-ref a-ident) eid)` (`db/transaction.cljc:759`) —
 the nested map with a reverse ref added. That map re-enters
-`entity-map->op-vec` (`:946`), a numeric `:db/id` resolves to itself, and
+`entity-map->op-vec` (`:947`), a numeric `:db/id` resolves to itself, and
 the reverse ref becomes one `[:db/add e a n]`. So `{:db/id n}` pulled out
 of the database is a legal thing to transact back in: it asserts the link
 and nothing else.
@@ -227,8 +234,9 @@ and nothing else.
 **Deriving a pulled form from an entity schema plus a selector has five gaps
 the selector grammar opens, and the derivation must handle or refuse each.**
 `:as` renames the result key (`pull_api.cljc:316`); `:default` fabricates a
-key for an attribute that has no datom (`:361-365`); `:limit` silently
-truncates and defaults to 1,000 (`:16`, `:315`, `:323`); a reverse attribute
+key for an attribute that has no datom (`:361-365`); a supplied `:limit`
+silently truncates, and the pinned default is no limit (`:16`, `:315`,
+`:323`); a reverse attribute
 `:a/_b` produces a key no entity schema declares and is single-valued exactly
 when the forward attribute is a component (`multi? (if forward? … (not
 component?))`, `:328-329`); and recursion returns `{:db/id n}` for an
@@ -238,7 +246,7 @@ already-seen entity (`:238-243`). An unexpanded ref is `{:db/id n}` or
 For unsupported selectors, return a typed refusal. A bounded presentation
 may carry an honest elision; a whole-entity validator must obtain the complete
 value or refuse. Do not infer that all limits or recursion are illegal in
-Datahike: `:limit nil` disables its default cap, and recursion has an explicit
+Datahike: the pinned default pull has no cap, and recursion has an explicit
 id-only cycle result. Their contract derivation must reflect those semantics.
 
 The consequence for contracts: an entity schema describes the **stored**
@@ -248,43 +256,47 @@ widening and not a second hand-written pulled schema. The inventory of
 the twelve hand-written descriptions this class has already cost is
 [the pulled-shape study](../../../docs/prds/steward-platform/research/entity-schema-vs-pulled-shape-2026-09-16.md).
 Seon's existing normalizer back to transaction shape is
-`seon.render.value/transacted` (`src/seon/render/value.clj:16`), which
+`seon.render.value/transacted` (`src/seon/render/value.clj:30`), which
 uses the installed value type and cardinality as authority.
 
 ## Decisions that must hold at write time — `:db.fn/call`
 
-`[:db.fn/call f & args]` calls `(apply f db args)` with the
-**mid-transaction database** and splices the returned transaction data
-into the same transaction (`db/transaction.cljc:1153-1154`). It sees earlier
+`[:db.fn/call f & args]` calls `f` with the **mid-transaction database**
+(carrying the revision context of the effective datoms so far,
+`in-transaction-db`, `db/transaction.cljc:1055-1062`) and splices the returned
+transaction data into the same transaction (`:1171-1172`). It sees earlier
 operations, not later repairs. It can inspect an empty collection passed as
 an explicit argument; it cannot recover one already erased by entity-map
 expansion. Tempid conflict resolution can restart transaction processing
-(`:844-855`), so keep transaction functions pure; invocation is not an
+(`retry-with-tempid`, `:845-856`), so keep transaction functions pure; invocation is not an
 exactly-once effect guarantee.
 
 The fork's final-report validator is the other authority: it sees completed
 `:db-after`, effective `:tx-data`, and attempted datoms including idempotent
-assertions (`:1206-1276`). Nil accepts; even false rejects. Its callback is
+assertions (`:1224-1295`). Nil accepts; even false rejects. Its callback is
 removed from stored metadata. Use it for invariants allowing same-transaction
-repairs. Raw import through `transact-entities-directly` (`:1330`) is a
+repairs. Raw import through `transact-entities-directly` (`:1356`) is a
 different path and must not be mistaken for this admitted transaction path.
 
 **A throw inside it aborts the whole transaction, not just that
 operation.** The reducer does not catch it; the writer's `try` around
 `(apply op-fn old args)` catches the throwable, delivers it to the
-callback and sets the result to `:error`
-(`reference-code/datahike/src/datahike/writer.cljc:147-160`). The error
+callback and sets the result to `:error`; an `Error` (not an `Exception`)
+closes the queues and rethrows, stopping the writer
+(`reference-code/datahike/src/datahike/writer.cljc:139-171`). The error
 branch neither enqueues a report nor advances the database — it
-`(recur old)` (`:201-218`) — so no datom from that transaction is
+`(recur old)` (`:203-204`) — so no datom from that transaction is
 committed, including operations processed before the throw. External
 side effects a transaction function performed are not database writes and
 are not undone.
 
 Return transaction data from a transaction function, never a refusal map:
 Datahike expects transaction data there. Seon's refusals are built with
-`seon.error/diagnostic` and thrown, and `seon.db/transact!`
-(`src/seon/db.clj:3605`, extraction at `:3441-3450`) reads the throwable chain back into a flat
-`:seon.error` value. Evidence and the final-report validation seam are in
+`seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:90`) and thrown,
+and `seon.db/transact!` (`src/seon/db.clj:4546`) reads the throwable back into
+a flat `:seon.error` value in `transact-call`'s catch, through
+`seon.error.refusal/refusal` (`src/seon/db.clj:4365-4384`;
+`src/seon/error/refusal.clj:115`). Evidence and the final-report validation seam are in
 [the write-admission study](../../../docs/prds/steward-platform/research/write-admission-2026-09-17.md).
 
 ## Schema and references
@@ -303,8 +315,8 @@ automatically indexed, as are BOTH kinds of unique attribute
 An absent literal `:db/index` on a unique declaration does not mean no index.
 
 `:db.unique/identity` participates in entity-map upsert;
-`:db.unique/value` only enforces uniqueness (`db/transaction.cljc:641-713`,
-`:26-32`). Both work as lookup attributes (`db/utils.cljc:109-148`).
+`:db.unique/value` only enforces uniqueness (`db/transaction.cljc:642-714`,
+`:27-33`). Both work as lookup attributes (`db/utils.cljc:109-148`).
 Retract-then-assert resolves against the mid-transaction AVET state; assert
 before retract may conflict. Neither property promises permanent ownership
 of a key after its identity datom disappears.
@@ -316,14 +328,14 @@ for a fixed ordered observation, a cardinality-many attribute for membership,
 and an owned child with an ordinal for independently described ordered items.
 Do not put refs inside tuples expecting ref resolution or incoming sweep:
 those operations dispatch on the attribute's ref type
-(`db/transaction.cljc:786-790`, `:998-1015`).
+(`db/transaction.cljc:787-791`, `:999-1016`).
 
 ### Branches, storage, and collection
 
 Same-store `branch!` reuses stored index roots (`versioning.cljc:224-284`);
-`fork-database` copies store keys into another store (`:550-724`). Those are
+`fork-database` copies store keys into another store (`:554-728`). Those are
 different costs. `merge!` records supplied parents and applies supplied
-transaction data; it does not invent a semantic merge (`:726-744`).
+transaction data; it does not invent a semantic merge (`merge!`, `:738`).
 
 Datahike writes nodes/schema/commit before the mutable branch head
 (`writing.cljc:498-546`). Konserve ordered `multi-assoc` preserves sequence
@@ -333,7 +345,7 @@ branch roster and reachable commit/index roots, plus the explicit reachable
 extension (`gc.cljc:22-81`, `:144-167`). Merely holding an old database value
 does not register a GC root. The sweep removes unmarked store objects older
 than the writer safe point, not history datoms still reachable from the head
-(`reference-code/konserve/src/konserve/gc.cljc:22-30`).
+(`reference-code/konserve/src/konserve/gc.cljc:25-33`).
 
 ### Query semantics versus planner estimates
 
@@ -349,26 +361,27 @@ records population-sensitive failures. Do not teach its observed 405/1,005
 sizes as hard-coded limits or duplicate derived plan state to hide it.
 
 Query the installed declarations before using an attribute.
-The schema population refuses duplicates (`src/seon/schema/edn.clj:316`)
-and exposes canonical forms (`packaged-forms`, `:393`).
-The bridge derives ref type (`src/seon/schema/datahike.clj:123`),
-cardinality (`:205`), the child form of a collection (`:224`), and
-identity, components, indexes and history properties
-(`malli->datahike-attr-in`, `:232`). `storable-attribute-in?` (`:299`)
-answers whether the bridge maps an attribute at all.
+The schema population refuses duplicates within a resource and across
+resources (`src/seon/schema/edn.clj:216-228`, `merge-schema-resources` `:307-330`)
+and exposes canonical forms (`packaged-forms`, `:415`).
+The bridge's one fold, `compiled-storage` (`src/seon/schema/datahike.clj:77-139`),
+derives value type, cardinality and a collection's child, and
+`malli->datahike-attr-in` (`:141-180`) adds identity, components, indexes and
+history properties. `storable-attribute-in?` (`:254-260`) answers whether the
+bridge maps an attribute at all.
 
 Identity is a natural key. Join through a ref to query a target
 attribute. Cardinality-many is a set. Upsert omission leaves existing
 facts unchanged; use an explicit retraction to clear them. Stored
-nilable forms refuse (`src/seon/schema/datahike.clj:170`).
+nilable forms refuse (`src/seon/schema/datahike.clj:131`, `:162`).
 
 A **component** is part of its parent's value, not an independent entity:
 pull expands it without being asked (`pull_api.cljc:346-351`) and
-`retractEntity` destroys it with the parent (`db/transaction.cljc:831-836`).
+`retractEntity` destroys it with the parent (`db/transaction.cljc:832-836`).
 Validate its complete owning value against the parent's schema; do not invent
 identity attributes on component rows to make a selector see them. Child-only
 edits and removed component links require discovering affected owners from
-before AND after, not just the changed eid. Wildcard pull's default cap and
+before AND after, not just the changed eid. A supplied pull `:limit` and
 id-only cycle results cannot establish completeness (`pull_api.cljc:238-243`,
 `:315-351`). Component flags prescribe traversal/cascade; `retract-components`
 does not enforce exclusive ownership. Shared shapes need ordinary refs to
@@ -381,13 +394,13 @@ model's ownership invariant, not on Datahike enforcing one parent.
 `:seon.test.failure/test`
 (`resources/seon/schemas/seon.test.failure.edn:3`) is a plain ref back up an
 edge already declared as `:seon.test/failures`
-(`resources/seon/schemas/seon.test.edn:40`, a component vector) — one fact in
+(`resources/seon/schemas/seon.test.edn:44`, a component vector) — one fact in
 two encodings, which the next writer can put out of step. Do not add one.
 
 For fixture operations use `seon.test-support/with-database`, which
-supplies a branch of the canonical populated base
-(`test/seon/test_support.clj:1027`), and write through
-`transacted!` (`:308`) so a refused write fails the test instead of
+runs the body on an isolated branch of the executing test's database
+(`test/seon/test_support.clj:705-724`), and write through
+`transacted!` (`:285`) so a refused write fails the test instead of
 reading as absence. Do not build a small hand-rostered schema to
 impersonate production.
 
@@ -397,7 +410,7 @@ impersonate production.
 connection's `:listeners` atom (`reference-code/datahike/src/datahike/core.cljc:200-211`);
 `unlisten!` removes it (`:213-218`). After a successful `transact` the writer
 calls every registered callback with the WHOLE transaction report
-(`reference-code/datahike/src/datahike/writer.cljc:391-408`). Consequences:
+(`reference-code/datahike/src/datahike/writer.cljc:390-414`). Consequences:
 
 - **it is `(when (map? tx-report) …)`** — a failed transaction notifies
   nobody, so a listener that never fires is not evidence of no write;
@@ -405,24 +418,24 @@ calls every registered callback with the WHOLE transaction report
   the same store delivers nothing here.
 - **it has no replay.** Register before deriving current work, and recover
   from facts after disconnect/restart (`core.cljc:200-218`).
-- **commits may batch transactions.** `writer.cljc:234-273` substitutes the
+- **commits may batch transactions.** `writer.cljc:220-259` substitutes the
   batch's committed database into each report's `:db-after`; per-transaction
   `:tx-data` stays separate. Do not use that report's after-value as if it
   were the final-validator's exact transaction boundary, or assume one commit
-  id per transaction. Promise delivery precedes the callback loop (`:395`,
-  `:408`); each callback has an independent exception catch (`:376-384`).
+  id per transaction. Promise delivery precedes the callback loop (`:399`,
+  `:413`); each callback has an independent exception catch (`:379-388`).
   Await the listener's event to prove delivery; a returned transaction report
   alone does not establish it. Seon's callback reports failures and never parks.
 
 The report is the matchable surface: `:db-before`, `:db-after`, `:tx-data`
 (every effective datom as `[e a v tx added]`, accumulated at
-`db/transaction.cljc:615`) and `:tx-meta`. Transaction metadata is not a
+`db/transaction.cljc:616`) and `:tx-meta`. Transaction metadata is not a
 side channel — `flush-tx-meta` turns each `:tx-meta` entry into
-`[:db/add <tx-eid> attr value <tx-eid>]` (`db/transaction.cljc:903-922`).
+`[:db/add <tx-eid> attr value <tx-eid>]` (`db/transaction.cljc:904-923`).
 Those operations enter transaction processing when keep-history is enabled
-(`:1251-1254`); then metadata arrives as ordinary datoms ON the transaction
+(`:1269-1272`); then metadata arrives as ordinary datoms ON the transaction
 entity inside `:tx-data`. An undeclared meta attribute refuses
-(`:919-920`). Under that retention setting,
+(`:920-921`). Under that retention setting,
 matching entity id, attribute, value and transaction metadata — in any
 combination — is one predicate over the datoms of one report, needing no
 stored pattern entity.
@@ -430,7 +443,7 @@ stored pattern entity.
 ## Temporal values and read evidence
 
 `seon.db/history`, `as-of`, and `since` preserve explicit and
-agent-default forms (`src/seon/db.clj:2204`, `:2217`, `:2231`).
+agent-default forms (`src/seon/db.clj:2806`, `:2819`, `:2833`).
 Datahike's `as-of` predicate includes the time point;
 `since` excludes it (`reference-code/datahike/src/datahike/db.cljc:142-152`).
 Because deletion is retraction, these are how the past is read: a
@@ -439,17 +452,22 @@ was deleted", and only a temporal query can.
 
 `seon.db/read-evidence` retains dependency plans and revisions
 without database values or read payloads by default
-(`src/seon/db.clj:805`). Read-result retention is explicit for
+(`src/seon/db.clj:912`). Read-result retention is explicit for
 process-local semantic replay. `read-evidence-current?` compares
 revisions and may replay supported reads to compare their results
-(`:971`). Query execution captures evidence through the dependency's
-evidence-carrying path (`seon.db/q`, `:1697`).
+(`:1113`). Query execution captures evidence through the dependency's
+evidence-carrying path (`seon.db/q`, `:2206`).
 
 These are the existing mechanisms to inspect before adding a refresh
-index or cache. Their presence does not prove the whole-history
-since-query target is implemented.
+index or cache.
 
-## Since-query diff — target
+## Since-query diff
+
+The installed owner is `seon.turn/system-turn` (`src/seon/turn.clj:2055`)
+through `system-plan` (`:1953-1993`): a distinct read form whose latest
+read-only evaluation still satisfies `read-evidence-current?` is
+`:unchanged`; otherwise it is `:changed` and carries
+`seon.db/read-evidence-changes` (`src/seon/db.clj:1059`) since its read basis.
 
 For every distinct read form in the agent's history, use its latest
 evaluation's read evidence and `:t`. If a named dependency changed
@@ -466,7 +484,7 @@ System turns store ordinary evaluations; previous shown text never
 changes. Compaction retracts evaluations and the next system turn
 regenerates the opening. A system turn alone does not answer wakes;
 `seon.turn/latest-answering-turn-t` selects an accepted ordinary reply
-(`src/seon/turn.clj:3011-3037`, including the virtual-reply case).
+(`src/seon/turn.clj:2925-2950`, including the virtual-reply case).
 
 ## Result lifetime — target
 

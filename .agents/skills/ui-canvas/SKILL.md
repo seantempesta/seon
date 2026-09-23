@@ -26,7 +26,7 @@ data shape and effect boundary before naming executable calls.
 Revisioned packages are already implemented, not a future canvas
 feature: `join-package` reuses retained serialized output and the
 socket writer waits for drain or close
-(`src/seon/render/web.clj:1937`, `:2875`).
+(`join-package`, `src/seon/render/web.clj:1857`; `write-package!`, `:2777`).
 Reuse that delivery path. Stable block ids come from
 `src/seon/render/block.clj:61`.
 

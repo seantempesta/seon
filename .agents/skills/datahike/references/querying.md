@@ -1,8 +1,17 @@
+---
+type: reference
+status: active
+tags: [reference, datahike]
+---
+
 # Advanced Querying
 
-Loaded when you need Datalog patterns beyond the SKILL.md basics. Fresh Seon
-uses co-located `datahike.api` directly; every example passes one explicit
-immutable database value to `d/q`. Reads are synchronous.
+Loaded when you need Datalog patterns beyond the SKILL.md basics. The examples
+show Datahike's query grammar with `d/q` over one explicit immutable database
+value; reads are synchronous. In Seon code the query owner is `seon.db/q`
+(`src/seon/db.clj:2206`), which accepts the same grammar; direct `datahike.api`
+calls survive only inside `seon.db`, the store/registry and classified
+branch-custody owners, and system-side listeners (`AGENTS.md:377-380`).
 
 ## Contents
 
@@ -48,7 +57,8 @@ example: use `:with` whenever duplicate projected values must remain distinct.
 
 Seon's maintained Datahike accepts a query map with `:query`, `:args`,
 `:order-by`, `:offset`, and `:limit`
-(`reference-code/datahike/src/datahike/query.cljc:98-121,3475-3560`):
+(`normalize-q-input`, `reference-code/datahike/src/datahike/query.cljc:97-120`;
+`parse-order-by` through `apply-order-by`, `:3536-3621`):
 
 ```clojure
 (d/q {:query '[:find ?name ?score
@@ -149,8 +159,8 @@ without faulting data in:
 (d/q '[:find (count ?e) . :where [?e :my.kb.source/id]] db)
 ```
 
-Use `d/datoms` or `d/seek-datoms` only for a measured index-level debugging or
-implementation need. Do not recreate the retired `seon.db` pod facade.
+Use index access only for a measured index-level debugging or implementation
+need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2669`).
 
 ## Performance tips
 
@@ -165,8 +175,7 @@ implementation need. Do not recreate the retired `seon.db` pod facade.
   dereferencing a connection. It is a correctness and performance win.
 - **Don't `memoize` on a db value** — `=` on a DB compares the EAVT index and
   can fault index nodes from durable storage on a cache hit
-  (`reference-code/datahike/src/datahike/db.cljc:703-715`;
-  `docs/archive/prds/pre-2026-09/agent-fsm/research/datahike-primer.md` §5).
+  (`equiv-db`, `reference-code/datahike/src/datahike/db.cljc:755-767`).
   Measure before caching.
 - **Use `d/history` only when historical additions and retractions are the
   query subject.**
