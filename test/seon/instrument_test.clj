@@ -25,6 +25,7 @@
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.cluster :as cluster]
+            [seon.fault :as fault]
             [seon.dev.docstring :as docstring]
             [seon.dev.markdown :as markdown]
             [seon.db :as db]
@@ -184,7 +185,7 @@
                              (fn [value & _] (swap! calls inc) value))
            committed (atom [])
            recorder (fn [value]
-                      (let [outcome (#'cluster/commit-fault!
+                      (let [outcome (fault/record!
                                      connection "host-error-wrapper" "host-wrapper-test" caps value)]
                         (swap! committed conj [(:seon.error/source value) outcome])
                         outcome))]
@@ -333,7 +334,7 @@
              caps (config/result-caps (config/effective database "sci-wrapper"))
              recorded (atom [])
              recorder (fn [value]
-                        (let [outcome (#'cluster/commit-fault!
+                        (let [outcome (fault/record!
                                        connection "sci-wrapper" "sci-wrapper-test" caps value)]
                           (swap! recorded conj [(:seon.error/source value) outcome])
                           outcome))
@@ -412,7 +413,7 @@
            caps (config/result-caps (config/effective database "sci-fork-recorder"))
            recorded (atom [])
            recorder (fn [value]
-                      (let [outcome (#'cluster/commit-fault!
+                      (let [outcome (fault/record!
                                      connection "sci-fork-recorder" "sci-fork-test" caps value)]
                         (swap! recorded conj [(:seon.error/source value) outcome])
                         outcome))
@@ -1150,7 +1151,7 @@
                    :seon.error/operation 'seon.instrument-test/stored-error
                    :seon.error/message "Stored error data"
                    :seon.agent/error-agent-id "stored-error-agent"}
-           [error outcome] (cluster/commit-fault!
+           [error outcome] (fault/record!
                             connection "stored-error-data" "stored-error-test" caps
                             {:seon.error/source source :seon.error/declared-schema :seon.agent/error})
            database (db/db connection)

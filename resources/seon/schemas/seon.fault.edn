@@ -1,0 +1,28 @@
+#:seon.fault{:recording
+             [:tuple
+              {:description "What `seon.fault/record!` observed: the recorded fact (or the pre-fact message), the write outcome, whether the signature was already stored, and the occurrence lookup ref."}
+              :map
+              [:or [:= :seon.flow/committed] :map :seon.error/throwable]
+              :boolean
+              [:or :nil [:tuple [:= :seon.error.occurrence/id] :seon.error.occurrence/id]]],
+             :policy [:enum :record :panic],
+             :committed? :boolean,
+             :outcome :map,
+             :context
+             [:map
+              {:description "The named open context of one core fault at its owning boundary."}
+              [:seon.error/layer :seon.error/layer]
+              [:seon.error/operation :seon.error/operation]
+              [:seon.db.process/id :seon.db.process/id]
+              [:seon.agent/id {:optional true} :seon.agent/id]
+              [:seon.error/declared-schema {:optional true} :seon.error/declared-schema]],
+             :recorded
+             [:map
+              {:description "The receipt of one core fault recorded once per propagation; a panic carries it in its ex-data."}
+              [:seon.boot/cluster-name :seon.boot/cluster-name]
+              [:seon.error/layer :seon.error/layer]
+              [:seon.error/operation :seon.error/operation]
+              [:seon.fault/committed? :seon.fault/committed?]
+              [:seon.fault/policy :seon.fault/policy]
+              [:seon.error/signature {:optional true} :seon.error/signature]
+              [:seon.error.occurrence/id {:optional true} :seon.error.occurrence/id]]}

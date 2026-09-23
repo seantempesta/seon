@@ -25,8 +25,7 @@
             [seon.cluster.instruction :as instruction]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.wake :as wake]
-            [seon.error :as error]
-            [seon.error.refusal :as refusal]
+            [seon.fault :as fault]
             [seon.turn :as turn]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
@@ -2157,7 +2156,7 @@
                      namespace-name)))
         (reload-order namespaces requires)))
 
-(declare commit-fault! process-identity)
+(declare process-identity)
 
 (def ^:private adoption-identity-attribute?
   "Declaration identity attributes the adoption record names.
@@ -3283,134 +3282,6 @@
           (web/stop! served)
           (throw cause))))))
 
-(defn- tagged-run
-  "The tagged agent's open turn, or nil.
-  Attribution is STRUCTURAL: an agent graph's fault arrives tagged with
-  its agent (structural provenance from the error-channel join), so
-  attribution is that agent's one open turn — exact under concurrency,
-  where the serial-era global query stopped being. That global query
-  (`attributed-run`) is deleted at F2 §3.3."
-  [db agent-id]
-  (db/q '[:find ?id .
-         :in $ ?agent-id
-         :where
-         [?agent :seon.agent/id ?agent-id]
-         [?run :seon.turn/agent ?agent]
-         (not [?run :seon.turn/closed-tx])
-         [?run :seon.turn/id ?id]]
-       db agent-id))
-
-(defn- previously-reported-fault-signature?
-  [database signature]
-  (some?
-   (db/q '[:find ?error .
-           :in $ ?signature
-           :where [?error :seon.error/signature ?signature]]
-         database signature)))
-
-(defn commit-fault!
-  "Commit one escaped Throwable as one durable fact per delivery.
-
-  TOTAL, never throws. Returns `[fact outcome previously-reported?]`, deriving
-  `fact` and its content signature before the transaction attempt. Every
-  delivery reaches the writer; `previously-reported?` lets the Flow committer
-  suppress only stderr/panic output for a signature already seen in facts.
-  `outcome` is `:seon.flow/committed` or the transaction failure value.
-
-  Everything it needs is read fresh: the dials from the config
-  singleton, the attribution from the database value at the fault's
-  own basis. A fault from an agent graph carries its agent as a
-  structural tag (F1 §6) and attributes through `tagged-run`. An
-  UNTAGGED fault — the cluster graph's own, from the armer or the
-  render proc — attributes to NO run, and that is correct rather than
-  missing: it is not a run's fault. The serial-era fallback query is
-  gone (F2 §3.3). It goes through
-  `db/transact!`, which never throws. The signature query and Flow's
-  process-local signature set bound notification only; recurrence remains the
-  query-derived count of committed facts."
-  [connection cluster-name process caps observation]
-  (try
-    (let [db (db/db connection)
-          dials (config/effective db cluster-name)
-          source-fault (:seon.error/source observation)
-          agent-id (:seon.agent/id source-fault)
-          run-id (when agent-id (tagged-run db agent-id))
-          dropped-count (::flow/dropped-fault-count source-fault)
-          threshold (:seon.config.eval.result/blob-threshold dials)
-          request
-          (cond-> {:seon.schema/projection (db/carried-projection db)
-                   :seon.error/source source-fault
-                   :seon.error/declared-schema (:seon.error/declared-schema observation)
-                   :seon.error/id (str (random-uuid))
-                   :seon.error/at (java.util.Date.)
-                   :seon.error/process process
-                   :seon.sci.admit/caps caps
-                   :seon.error/basis-t (db/basis-t db)
-                   :seon.config.error/recurrence-limit
-                   (:seon.config.error/recurrence-limit dials)
-                   ;; THE FAULT FAMILY'S OWN BOUND rides the request the
-                   ;; committer builds, so `error/prepare` AND
-                   ;; `error/commit-tx` — both of which declare it required —
-                   ;; read the one dial this cluster's effective config
-                   ;; carries. Handing it to only one of the two is how every
-                   ;; core fault became unrecordable: `commit-tx` refused its
-                   ;; contract and the operator printed the refusal about
-                   ;; itself instead of the fault.
-                   :seon.config.error/max-evidence-bytes
-                   (:seon.config.error/max-evidence-bytes dials)}
-            (:seon.config.error/escalate-to dials)
-            (assoc :seon.config.error/escalate-to
-                   (:seon.config.error/escalate-to dials))
-            run-id (assoc :seon.turn/id run-id)
-            agent-id (assoc :seon.agent/id agent-id))
-          ;; The fault family's own bound decides how much evidence the
-          ;; durable fact keeps; the blob threshold decides where the
-          ;; complete evidence lives. Two decisions, two declared keys, ONE
-          ;; request — `prepare` and `commit-tx` see the same value.
-          prepared (error/prepare request)
-          staged (when (or (let [size (:seon.error/data-size
-                                       (:seon.error/fact prepared))]
-                             ;; AN UNSERIALIZABLE EVIDENCE MEASURED NOTHING,
-                             ;; so the fact carries no size; the content
-                             ;; comparison below is what decides staging then.
-                             (and (int? size) (> size threshold)))
-                           (not= (:seon.error/data-content prepared)
-                                 (:seon.error/data-edn (:seon.error/fact prepared))))
-                   (blob/stage! connection (:seon.error/data-content prepared)))
-          prepared-fact (cond-> (:seon.error/fact prepared)
-                          staged (assoc :seon.error/data-blob (:seon.blob/digest staged))
-                          (pos-int? dropped-count)
-                          (assoc :seon.error/dropped-fault-count dropped-count
-                                 :seon.error/dropped-fault-digest
-                                 (::flow/dropped-fault-digest source-fault)))
-          recording (error/recording db (assoc request :seon.error/fact prepared-fact))
-          transaction-data (:seon.db/tx-data recording)
-          fact (:seon.error/fact recording)
-          signature (:seon.error/signature fact)
-          previously-reported?
-          (previously-reported-fault-signature? db signature)]
-      (try
-        (let [result (blob/with-publication!
-                      connection (if staged [staged] [])
-                      #(db/transact! connection transaction-data))]
-          [fact (if (db/database-value? (:db-after result))
-                  ::flow/committed
-                  result)
-           previously-reported?])
-        (catch Throwable failure
-          [fact failure previously-reported?])))
-    (catch Throwable failure
-      ;; `error/commit-tx` is total. This last-resort shape is only for a
-      ;; failure before its fact exists, so no content signature is available
-      ;; for Flow to collapse honestly.
-      (let [fault (:seon.error/source observation)
-            cause (if (instance? Throwable fault) fault (::flow.core/ex fault))
-            message (or (:seon.error/message fault)
-                        (when (instance? Throwable cause)
-                          (str (.getName (class cause)) ": " (ex-message cause)))
-                        (str fault))]
-        [{:seon.error/message message} failure false]))))
-
 (defn- single-line-fault-text
   [value]
   (-> (str value)
@@ -3616,14 +3487,14 @@
                      :record))
                :seon.flow/commit-fault!
                (fn [fault]
-                 (commit-fault! connection cluster-name process
+                 (fault/record! connection cluster-name process
                                 (:seon.sci.admit/caps handle) fault))
                :seon.flow/commit-drop!
                (fn [dropped]
                  ;; The buffer converts overflow into a bounded synthetic
                  ;; fault. This callback runs on the committer proc, never
                  ;; on the thread that faulted.
-                 (commit-fault! connection cluster-name process
+                 (fault/record! connection cluster-name process
                                 (:seon.sci.admit/caps handle) dropped))
                :seon.flow/panic!
                (fn [reported]

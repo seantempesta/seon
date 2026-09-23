@@ -15,6 +15,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.fault :as fault]
             [seon.error.refusal :as refusal]
             [seon.flow :as flow]
             [seon.fs :as fs]
@@ -74,7 +75,7 @@
            _ (cluster/seed-root-agent! connection cluster-name process)
            boot-dials (config/effective (db/db connection) cluster-name)
            arm-request {:seon.flow/commit-fault!
-                        #(cluster/commit-fault! connection cluster-name process
+                        #(fault/record! connection cluster-name process
                                         (config/result-caps boot-dials) %)
                         ;; This cluster's adoption record names the JVM's
                         ;; loaded program at every acquisition (`sci.eval/loaded-source`).
@@ -352,7 +353,7 @@
              caps :seon.sci.admit/caps mode :seon.config/on-core-error
              agent-id :seon.agent/id} environment
             [fact outcome]
-            (cluster/commit-fault!
+            (fault/record!
              connection cluster-name (cluster/process-identity (process/current-identity)) caps
              {:seon.error/source (cond-> {:clojure.core.async.flow/ex throwable}
                                    agent-id (assoc :seon.agent/id agent-id))
@@ -540,6 +541,18 @@
                    :seon.operator/reader-error (ex-message cause)}
                   :non-edn-response cause))))
 
+(defn- request-world
+  "The world a failed request records in: the environment the failure carries,
+  else the named (or sole) live instance's. None means no database to record
+  in, which panics in both modes."
+  {:malli/schema [:=> [:cat [:maybe :string] :seon.error/throwable] :seon.env/environment]}
+  [name failure]
+  (or (carried-environment failure)
+      (let [instances (filterv map? (if name [(get @running-instances name)] (vals @running-instances)))]
+        (when (= 1 (count instances)) (env/of (:seon.sci.eval/ctx (first instances)))))
+      (throw (ex-info "SEON CORE FAULT (panic): no live cluster database to record this failure in."
+                      {:seon.boot/cluster-name (or name :absent)} failure))))
+
 (defn request!
   "One data request. Verify root and process identity before connected effects."
   {:malli/schema [:=> [:cat :seon.operator/request] :seon.operator/response]}
@@ -656,9 +669,19 @@
                 dev (assoc :seon.boot/cluster-name dev)))))
         (refuse! "Unknown operator command." request)))
     (catch Throwable cause
-      (diagnostic (ex-message cause)
-                  (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
-                  :operation-failed cause)))))
+      (let [response (diagnostic (ex-message cause)
+                                 (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
+                                 :operation-failed cause)]
+        ;; A request this boundary refused is its declared case; every other
+        ;; failure is a core fault, recorded in the requested cluster.
+        (if (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
+          response
+          (assoc response :seon.fault/recorded
+                 (fault/fault! (request-world name cause) cause
+                               {:seon.error/layer :seon.operator/operation
+                                :seon.error/operation `request!
+                                :seon.db.process/id
+                                (cluster/process-identity (process/current-identity))}))))))))
 
 (defn banner
   "Render observed readiness without treating missing layers as ready."

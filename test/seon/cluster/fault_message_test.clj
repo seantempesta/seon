@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.config :as config]
+            [seon.fault :as fault]
             [seon.flow :as flow]
             [seon.test-support :as support]))
 
@@ -19,8 +20,10 @@
                                (ex-message (if (instance? Throwable fault)
                                              fault (::async.flow/ex fault))))
                    [fact outcome reported?]
-                   (#'cluster/commit-fault! connection "absent-fault-cluster"
-                    "fault-message-test" (config/result-caps config/defaults) fault)
+                   (fault/record! connection "absent-fault-cluster"
+                    "fault-message-test" (config/result-caps config/defaults)
+                    {:seon.error/source fault
+                     :seon.error/declared-schema :seon.flow/exception-error})
                    output (java.io.StringWriter.)]]
        (is (not= ::flow/committed outcome))
        (is (false? reported?))
