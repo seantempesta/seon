@@ -10,7 +10,8 @@
   clipping spot. [[select]] then chooses the NEWEST units the token budget can
   hold and names what it dropped in one elision value; [[compose]] joins them.
   Nothing here re-fits a string another renderer has already produced."
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
@@ -348,14 +349,12 @@
                                [?c :seon.context.capture/prompt ?text]]
                       database turn-id)]
     (when (and (string? capture) (not= capture text))
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.cluster.prompt/capture
-       :seon.error/operation 'seon.cluster.prompt/capture-mismatch
-       :seon.schema/expected-value capture
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.prompt/capture 'seon.cluster.prompt/capture-mismatch
+       {:seon.schema/expected-value capture
        :seon.schema/refused-value text
        :seon.error/message
        "Saved evaluations do not reconstruct the captured provider prompt."
-       :seon.turn/id turn-id})))
+       :seon.turn/id turn-id}))))
 
 (defn- acquire-context-report
   "`settings` is the ONE resolution `prompt` already made (2.1): the turn

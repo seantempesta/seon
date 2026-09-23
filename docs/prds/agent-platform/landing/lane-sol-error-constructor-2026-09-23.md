@@ -49,3 +49,4 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 | E8: `src/seon/call_preparation.clj` | 5 | 15 / 25 / -10; 0 | 3 / 40 | 24.954542 | `seon.call-preparation-test` | One X literal retained; supply catch still carries its original Throwable as offending evidence |
 | E9: `src/seon/cluster/agent.clj` | 2 | 8 / 11 / -3; 0 | 18 / 42 | 27.579083 | `seon.cluster.agent-test` | None |
 | E10: `src/seon/cluster/process.clj` | 4 | 12 / 20 / -8; 0 | 2 / 16 | 21.845958 | `seon.cluster.boot-test` | None; platform loadability and affected integration remain orchestrator proof |
+| E11: `src/seon/cluster/prompt.clj` | 1 | 5 / 6 / -1; 0 | 0 / 19 | 23.590542 | `seon.cluster.prompt-test` | One O literal retained to preserve header evaluation order |
