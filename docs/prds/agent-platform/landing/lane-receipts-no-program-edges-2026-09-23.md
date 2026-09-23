@@ -249,3 +249,28 @@ with a classpath-cache miss for the fresh snapshot directory.
 
 RESET NEEDED: no. Default was restored to its published code; it adopts this
 commit at the orchestrator's next checkpoint.
+
+## Follow-up (granted `test/seon/turn_test.clj`)
+
+- `test/seon/turn_test.clj`: the two receipt-edge assertions in
+  `settlement-keeps-unresolved-call-and-require-names-as-values` now assert that
+  the receipt carries no `:seon.fn/calls`. The declaration-row assertion reads
+  the pulled edge set as a set; the pull returns a vector. A `namespace-row`
+  helper digests the fixture namespace seeds (8 sites; three pull-expectation
+  maps were left as plain name maps). Ten bare agent seeds gain the required
+  `:seon.agent/branch`, set by one script. Test run with lane `seon.turn` (same
+  redef runner, `:test-ns seon.turn-test`): 15 pass, 0 fail, 20.2 s. Before the
+  set fix it was 14 pass, 1 fail (24.5 s).
+- `seon.cluster.turn-test/agent-evaluations` now reads only turns of agents on
+  the fixture cluster's branch (`(registry/cluster-branch "turn-test")`, the
+  value `agent-row` writes). The regression uses it: 6 pass (95.3 s under load
+  average 16, **DEFECT >10 s**).
+- `mixed-plan-publishes-only-the-contracted-function` still fails, now with 0
+  scoped evaluations. `tmp/receipts-no-program-edges/mixed-body.clj` shows why,
+  with HEAD and lane `seon.turn` behaving identically (45 s and 129 s): the call
+  turn evaluates only the `durable` defn (ordinal 0) and closes, so the two
+  following forms never run within the test's two passes. The failure predates
+  this slice. It belongs to the owner of the per-declaration batch boundary; its
+  string symbol lookup is a separate retired assumption.
+- Issue filed:
+  `docs/seon/issues/turn-integration-fixture-and-two-ordinary-passes-take-forty-seconds.md`.

@@ -90,16 +90,23 @@
   (#'admit/semantic-value (edn/read-string result-edn)))
 
 (defn- agent-evaluations
-  "Read agent-authored evaluations in turn and ordinal order, excluding system reads."
+  "Read this fixture's agent-authored evaluations in turn and ordinal order,
+  excluding system reads.
+
+  The fixture branches a live cluster whose own agents keep their history, so
+  only turns of agents on the fixture cluster's branch (`agent-row`) count."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
   [database]
   (let [rows (db/q '[:find ?turn-t ?ordinal (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}])
+                     :in $ ?branch
                      :where
-                     [?evaluation :seon.cluster.eval/author :agent]
+                     [?agent :seon.agent/branch ?branch]
+                     [?turn :seon.turn/agent ?agent]
                      [?evaluation :seon.cluster.eval/run ?turn]
+                     [?evaluation :seon.cluster.eval/author :agent]
                      [?turn :seon.turn/id _ ?turn-t]
                      [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
-                   database)]
+                   database (registry/cluster-branch "turn-test"))]
     (when (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
       (throw (ex-info "The evaluation observation was refused." rows)))
     (mapv #(nth % 2) (sort-by #(subvec % 0 2) rows))))
@@ -517,14 +524,7 @@
                               "(seon.run/complete \"read\")")})]
           (drive-agent! cluster "agent-a" 2))
         (let [after @connection
-              ;; The fixture branches a live cluster; read only this agent's forms.
-              evaluations (db/q '[:find [(pull ?evaluation [*]) ...]
-                                  :where
-                                  [?agent :seon.agent/id "agent-a"]
-                                  [?turn :seon.turn/agent ?agent]
-                                  [?evaluation :seon.cluster.eval/run ?turn]
-                                  [?evaluation :seon.cluster.eval/author :agent]]
-                                after)]
+              evaluations (agent-evaluations after)]
           (is (= 2 (count evaluations)))
           (is (every? #(and (nil? (:seon.cluster.eval/error %))
                             (nil? (:seon.cluster.eval/interrupted-at %)))
