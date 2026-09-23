@@ -80,13 +80,11 @@
                        "use a registered predicate schema or a quoted symbol "
                        "naming an admitted predicate.")]
       (throw (ex-info message
-                      (assoc {:seon.error/at (java.util.Date.)
-                               :seon.error/layer :seon.test.accretion/contract
-                               :seon.error/operation `data-contract!
-                               :seon.error/message message
+                      (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.test.accretion/contract `data-contract!
+                              {:seon.error/message message
                                :seon.error/member :seon.fn/spec
                                :seon.error/expected "a data-only function contract"
-                               :seon.error/offending contract}
+                               :seon.error/offending contract})
                              :seon.error/offending contract)))))
   contract)
 
@@ -345,14 +343,12 @@
     :seon.test.accretion/install-refused-error]}
   [report]
   (let [message "Fix the contract or the function and re-evaluate the defn."]
-    (merge {:seon.error/at (java.util.Date.)
-             :seon.error/layer :seon.test.accretion/install
-             :seon.error/operation `install-refusal
-             :seon.error/message message
+    (merge (seon.error.refusal/diagnostic (java.util.Date.) :seon.test.accretion/install `install-refusal
+            {:seon.error/message message
              :seon.error/member :seon.test.accretion/install?
              :seon.error/expected true
              :seon.error/offending false
-             :seon.error/data {:seon.fn/sym (:seon.fn/sym report)}}
+             :seon.error/data {:seon.fn/sym (:seon.fn/sym report)}})
            (assoc (dissoc report :seon.fn/sym)
                   :seon.test.accretion/function-sym (:seon.fn/sym report))
            (select-keys (get-in report [:seon.test.accretion/auto-check
