@@ -363,10 +363,8 @@
 
       (not= requested-fire-id derived-fire-id)
       (throw (ex-info "The scheduled fire identity is not nominal-derived."
-                      {:seon.error/at (Date.)
-                        :seon.error/layer :seon.schedule/execution
-                        :seon.error/operation 'seon.schedule/fire-call
-                        :seon.error/message "Scheduled execution requires the nominal-derived fire identity."
+                      (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/fire-call
+                       {:seon.error/message "Scheduled execution requires the nominal-derived fire identity."
                         :seon.error/offending {
                        :seon.schedule.fire/id requested-fire-id
                        :seon.schedule.fire/derived-id derived-fire-id }
@@ -374,20 +372,18 @@
                        :seon.schedule.fire/id requested-fire-id
                        :seon.schedule.fire/derived-id derived-fire-id }
                         :seon.schedule/unexpected-fire-id requested-fire-id
-                        :seon.error/expected "the nominal-derived fire identity"}))
+                        :seon.error/expected "the nominal-derived fire identity"})))
 
       (nil? declaration)
       (throw (ex-info "The scheduled task declaration is incomplete."
-                      {:seon.error/at (Date.)
-                        :seon.error/layer :seon.schedule/execution
-                        :seon.error/operation 'seon.schedule/fire-call
-                        :seon.error/message "Scheduled execution requires a complete task declaration."
+                      (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/fire-call
+                       {:seon.error/message "Scheduled execution requires a complete task declaration."
                         :seon.error/offending {
                        :seon.schedule.task/id task-id }
                         :seon.error/data {
                        :seon.schedule.task/id task-id }
                         :seon.schedule/incomplete-task-id task-id
-                        :seon.error/expected "a complete task declaration"}))
+                        :seon.error/expected "a complete task declaration"})))
 
       :else
       (let [[task-eid declared-owner function-eid declared-function owner-eid]
@@ -396,10 +392,8 @@
                        (= function declared-function))
           (throw
            (ex-info "The scheduled task owner or function changed."
-                    {:seon.error/at (Date.)
-                        :seon.error/layer :seon.schedule/execution
-                        :seon.error/operation 'seon.schedule/fire-call
-                        :seon.error/message "Scheduled execution requires the declared task owner and function."
+                    (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/fire-call
+                     {:seon.error/message "Scheduled execution requires the declared task owner and function."
                         :seon.error/offending {
                      :seon.schedule.task/id task-id
                      :seon.agent/id agent-id
@@ -409,7 +403,7 @@
                      :seon.agent/id agent-id
                      :seon.fn/sym function }
                         :seon.schedule/changed-task-id task-id
-                        :seon.error/expected "the declared task owner and function"})))
+                        :seon.error/expected "the declared task owner and function"}))))
         (let [fire-tempid (str "schedule-fire/" derived-fire-id)
               request-tempid (str fire-tempid "/request")]
           [{:db/id fire-tempid
@@ -464,16 +458,14 @@
     (cond
       (nil? receipt)
       (throw (ex-info "The maintenance receipt does not exist."
-                      {:seon.error/at (Date.)
-                        :seon.error/layer :seon.schedule/execution
-                        :seon.error/operation 'seon.schedule/settle-call
-                        :seon.error/message "Scheduled execution requires an existing maintenance receipt."
+                      (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/settle-call
+                       {:seon.error/message "Scheduled execution requires an existing maintenance receipt."
                         :seon.error/offending {
                        :seon.maintenance.receipt/id claimed-receipt-id }
                         :seon.error/data {
                        :seon.maintenance.receipt/id claimed-receipt-id }
                         :seon.schedule/missing-receipt-id claimed-receipt-id
-                        :seon.error/expected "an existing maintenance receipt"}))
+                        :seon.error/expected "an existing maintenance receipt"})))
 
       (seq (:seon.maintenance.receipt/terminal-attributes receipt))
       []
@@ -497,16 +489,14 @@
 
       :else
       (throw (ex-info "The maintenance terminal arm is invalid."
-                      {:seon.error/at (Date.)
-                        :seon.error/layer :seon.schedule/execution
-                        :seon.error/operation 'seon.schedule/settle-call
-                        :seon.error/message "Scheduled execution requires a result or error settlement arm."
+                      (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/settle-call
+                       {:seon.error/message "Scheduled execution requires a result or error settlement arm."
                         :seon.error/offending {
                        :seon.maintenance.settlement/arm arm }
                         :seon.error/data {
                        :seon.maintenance.settlement/arm arm }
                         :seon.schedule/invalid-terminal-member :seon.maintenance.settlement/arm
-                        :seon.error/expected "a result or error settlement arm"})))))
+                        :seon.error/expected "a result or error settlement arm"}))))))
 
 (defn recover-tx
   "Interrupt unfinished maintenance executions during cluster boot.
@@ -640,24 +630,19 @@
         (cond-> {:seon.maintenance.settlement/result result}
           declaration (assoc :seon.error/declared-schema declaration)))
       {:seon.error/declared-schema :seon.schedule/unresolved-handler-error
-       :seon.maintenance.settlement/result {:seon.error/at (Date.)
-                        :seon.error/layer :seon.schedule/execution
-                        :seon.error/operation 'seon.schedule/invoke-handler
-                        :seon.error/message "Scheduled execution requires a resolving handler Var."
+       :seon.maintenance.settlement/result (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/invoke-handler
+                                            {:seon.error/message "Scheduled execution requires a resolving handler Var."
                         :seon.error/offending {
                          :seon.fn/sym function }
                         :seon.error/data {
                          :seon.fn/sym function }
                         :seon.schedule/unresolved-handler-symbol function
-                        :seon.error/expected "a resolving handler Var"}})
+                        :seon.error/expected "a resolving handler Var"})})
     (catch Throwable failure
       {:seon.error/declared-schema :seon.schedule/handler-failed-error
        :seon.maintenance.settlement/result
-       (cond-> (refusal/diagnostic
-        {:seon.error/at (Date.)
-         :seon.error/layer :seon.schedule/execution
-         :seon.error/operation 'seon.schedule/invoke-handler
-         :seon.error/message (or (ex-message failure) "The scheduled handler failed.")
+       (cond-> (seon.error.refusal/diagnostic (Date.) :seon.schedule/execution 'seon.schedule/invoke-handler
+                {:seon.error/message (or (ex-message failure) "The scheduled handler failed.")
          :seon.schedule/failed-handler-symbol function
          :seon.error/throwable failure})
          (ex-data failure) (assoc :seon.schedule/handler-exception-data (ex-data failure)))})))
