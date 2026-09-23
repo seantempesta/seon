@@ -50,7 +50,7 @@
 (defn- markers [connection]
   (set (db/q '[:find [?marker ...]
               :where [_ :seon.export.test/marker ?marker]]
-            @connection)))
+            (db/db connection))))
 
 (defn- refusal
   [thunk]

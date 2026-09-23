@@ -46,7 +46,7 @@
 (defn- markers [store]
   (set (db/q '[:find [?marker ...]
               :where [_ :seon.store.test/marker ?marker]]
-            @(:seon.store/connection-object store))))
+            (db/db (:seon.store/connection-object store)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivations
@@ -316,7 +316,7 @@
               (is (= #{["current-reads-work"]}
                      (db/q '[:find ?marker
                             :where [_ :seon.store.test/marker ?marker]]
-                          @connection)))
+                          (db/db connection))))
               (let [failure (db/history @connection)]
                 (is ((seon.schema/projection-validator
                       (seon.schema/handed-projection) :seon.config/error) failure))
@@ -352,7 +352,7 @@
                                [?entity :seon.store.test/marker ?marker]
                                [?entity :seon.store.test/measurement
                                 ?measurement]]
-                             @connection))]
+                             (db/db connection)))]
               (is (contains? outcome :db-after))
               (is (= {"entity-map" 7
                       "datom-vector" 8}
