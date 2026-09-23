@@ -421,6 +421,7 @@ src + script + resources ≈ −830, tests ≈ −900.
 | R6 | operator and boot wire: D6, D9, bounded `operator.clj:1437` | `script/seon/operator.clj`, `boot.clj` | +15 / −5 | `bin/seon init` on a misplaced schema attribute prints the attribute message first; a reply holding a Var reads as EDN (D5) |
 | R7 | interrupt on timeout (owner decision): thread named `seon.repl/<request-id>`, `.interrupt` via `Thread/getAllStackTraces`; SCI's interrupt hook in SCI mode | `repl.clj`, `mcp.clj` | +20 | a `Thread/sleep`-blocked form ends with `InterruptedException` at the bound; a CPU loop reports "interrupt requested; outcome unknown" |
 | R8 | rewrite `.agents/skills/repl/SKILL.md` MCP section, every claim `file:line` | skill | docs | — |
+| R9 | **outside agents take the inside path**, specified in [D1 §2e](lane-d1-isolation-merge-writeback.md#2e-outside-agents-take-the-same-path) slice O1: MCP `submit` over `seon.cluster.agent/submit-source!` and an agent tool over existing agent creation; the handle is retained per `[branch agent]`; the SCI arm of `eval_clj` that evaluates without settling is deleted (`mcp.clj:482-528`) | `mcp.clj`, `repl.clj` | +≈50 / −≈80 | a lane agent's contracted `defn` persists on its branch and resolves on the next call; `eval_clj` defines nothing |
 
 Order R1 → R2 → R3 → R4/R5 → R6 → R7 → R8. Closes on landing:
 `mcp-exception-projection-is-opaque-after-the-kind-removal.md`,

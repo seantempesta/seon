@@ -219,7 +219,7 @@ README §2 acceptance: 1–5 and 7 partial, 6 (real tasks), 8 (export) and 9 (de
 
 **What is left, in order** (two tracks always moving, file-disjoint, per §7 "Priority to namespace agents"):
 1. **Stability / platform:** M4 — the one error route (#0) and flow N1 (re-apply patch on the gate), N2, N3; error shown text first (B3 §5 E1–E7, running) and validation failures as data (A1-1, A1-8b); the development REPL (B1 §3b R1–R8); the save gate (running) then hook re-enable; fixture reds (running); 1.2b remainder and ≤700 ms adoption; 1.3f remainder; 1.3d c6; the cut-1 end proof; cut 2 remainder (B4 c4–6, B1, A2 rows above).
-2. **Namespace agents:** nsa s1's loop regression green → s5 on the existing turn loop (s4 landed); then B3's task family S3–S7 in place, C1 slices 2–6, D1 gate retirement and export, the §2 loop demonstration.
+2. **Namespace agents:** nsa s1's loop regression green → s5 on the existing turn loop (s4 landed); then B3's task family S3–S7 in place, C1 slices 2–6, D1 gate retirement and export, the §2 loop demonstration. **Outside agents on the same path** ([D1 §2e](lane-d1-isolation-merge-writeback.md#2e-outside-agents-take-the-same-path)): O0 (`:as-alias` is not a require; it currently refuses every interpreted acquisition) → O1 MCP `submit` over `submit-source!` with O2 → O3 merge widening → O4 write-back → O5/O6. Until O1 lands, lanes edit files, with syntax lint only.
 3. **After the first namespace agents:** the projection sweep (1.4 c2–5, 1.4b, A1-4–6, A1-9–11), then cut 4 (B2), then the deep shrink toward 10k (#24ar shape decision).
 
 B1b may be the first implementation assignment, alone on `default`. Its early boot
@@ -303,7 +303,6 @@ suite is green. When a landing exposes breakage (a parked proc, a filling store)
 orchestrator repairs it at the owner as its own bounded slice and returns to the
 step; the 2026-09-21/22 night showed the cost of doing otherwise: five full gates,
 514 reds, and three lanes on tests of code the next steps delete.
-
 
 Before a Clojure change, read the listed dependency source and probe the owning seam.
 Use the canonical database population, explicit projection/environment, real SCI and
