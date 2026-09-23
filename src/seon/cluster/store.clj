@@ -570,10 +570,16 @@
       (d/connect configuration))))
 
 (defn release-branch!
-  "Release one proof branch connection before its roster branch is retired."
+  "Release one proof branch connection before its roster branch is retired.
+
+  Datahike keeps a released Connection's metadata (`connections.cljc:124-127`),
+  where `seon.db/carry-connection-projection-state!` put the cluster's state; a
+  final release drops it, so a retained Connection object carries no world."
   {:malli/schema [:=> [:cat :seon.store/connection-object] :nil]}
   [connection]
   (d/release connection)
+  (when (= :released @(:wrapped-atom connection))
+    (alter-meta! (:wrapped-atom connection) dissoc :seon.sci.eval/projection-state))
   nil)
 
 (defn- listener-failed!

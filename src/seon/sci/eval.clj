@@ -99,6 +99,7 @@
             [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [datahike.api :as d]
+            [datahike.store :as ds]
             [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -185,6 +186,20 @@
 ;;; The base context
 ;;; ---------------------------------------------------------------------------
 
+(defn- copy-host-var
+  "Copy a loaded JVM Var into SCI at its root.
+
+  SCI's `copy-var*` copies `@host-var` (`reference-code/sci/src/sci/core.cljc:137`),
+  which for a dynamic Var bound on this thread is the binding: a base context
+  derived under an evaluation would keep that evaluation's `seon.db/*read-database*`,
+  and the memoized base would pin its branch's node cache."
+  {:malli/schema [:=> [:cat [:fn clojure.core/var?] [:fn clojure.core/some?]] [:fn clojure.core/some?]]}
+  [^clojure.lang.Var host-var sci-namespace]
+  (let [copied (sci/copy-var* host-var sci-namespace)]
+    (when (.getThreadBinding host-var)
+      (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
+    copied))
+
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
@@ -199,7 +214,7 @@
                     (into {}
                           (map (fn [qualified]
                                  [(symbol (name qualified))
-                                  (sci/copy-var*
+                                  (copy-host-var
                                    (or (when-let [host (find-ns (symbol (namespace qualified)))]
                                          (ns-resolve host (symbol (name qualified))))
                                        (throw (ex-info
@@ -830,7 +845,7 @@
       (let [sci-namespace (sci/create-ns (symbol (namespace function-symbol)))]
         (sci/add-namespace! ctx (symbol (namespace function-symbol))
                             {(symbol (name function-symbol))
-                             (sci/copy-var* host-var sci-namespace)})
+                             (copy-host-var host-var sci-namespace)})
         (kernel/mark-installed! ctx function-symbol)
         true))))
 
@@ -1461,7 +1476,7 @@
                (map
                 (fn [[local-name host-var]]
                   [local-name
-                   (sci/copy-var* host-var sci-namespace)]))
+                   (copy-host-var host-var sci-namespace)]))
                host-bindings))
         ;; These are already the current compiled host Vars. Record that fact
         ;; at the same seam that installs them so lazy invocation can never
@@ -1479,7 +1494,7 @@
      ctx namespace-name
      (into {}
            (map (fn [[local-name host-var]]
-                  [local-name (sci/copy-var* host-var sci-namespace)]))
+                  [local-name (copy-host-var host-var sci-namespace)]))
            intern-map))))
 
 (def ^:private program-documentation-selector
@@ -2439,9 +2454,13 @@
              acquired (acquire-program! {:seon.sci.eval/ctx ctx
                                  :seon.db/db database
                                  :seon.schema/projection projection})]
-         (swap! (::kernel/program-snapshot ctx) assoc
-                :seon.db/db database ::acquisition acquired
-                :seon.test/class-loader (clojure.lang.RT/baseLoader))
+         ;; The base is memoized across branches and holds no database value:
+         ;; one would pin its connection's node cache. `copy-base-ctx` supplies
+         ;; each caller's database and loaded program.
+         (swap! (::kernel/program-snapshot ctx)
+                #(-> (dissoc % ::loaded-database)
+                     (assoc ::acquisition acquired
+                            :seon.test/class-loader (clojure.lang.RT/baseLoader))))
          (assoc ctx ::acquisition acquired))))))
 
 (defn- base-ctx-key
@@ -2464,13 +2483,17 @@
 
 (defn- copy-base-ctx
   "A fresh context over a memoized base: SCI's generation-aware fork plus owned
-  copies of the kernel atoms, acquired at the supplied value."
-  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :seon.sci.eval/ctx]}
-  [cached database]
+  copies of the kernel atoms, acquired at the supplied value against the
+  caller's loaded program (the base's key names its commit)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map] :seon.sci.eval/ctx]}
+  [cached database arm-request]
   (assoc (sci/fork cached)
          ::kernel/installed-functions (atom @(::kernel/installed-functions cached))
          ::kernel/program-snapshot
-         (atom (assoc @(::kernel/program-snapshot cached) :seon.db/db database))))
+         (atom (assoc @(::kernel/program-snapshot cached)
+                      :seon.db/db database
+                      ::loaded-database (or (::loaded-database arm-request)
+                                            (loaded-program database))))))
 
 (defn base-ctx
   "Derive the program-only SCI context from one database value.
@@ -2499,8 +2522,8 @@
                ;; cell so the next call derives again, and surface the cause.
                (cache/evict base-context-cache cache-key)
                (throw failure)))
-        database))
-     (derive-base-ctx database arm-request))))
+        database arm-request))
+     (copy-base-ctx (derive-base-ctx database arm-request) database arm-request))))
 
 (defn- loaded-basis
   "The revision of the adoption record's attribute in the loaded source.
@@ -2570,6 +2593,16 @@
   (cache/lru-cache-factory
    {} :threshold (::program-identity-cache-size program-cache-policy)))
 
+(defn- connection-identity
+  "The store and branch a connection writes: Datahike's own connection key
+  (`[store-identity branch]`, `reference-code/datahike/src/datahike/store.cljc`
+  `store-identity`, upstream `connector.cljc` `conn-id`). Data, so a key built
+  from it holds no Connection, database or node cache."
+  {:malli/schema [:=> [:cat :seon.db/connection] [:tuple :uuid :keyword]]}
+  [connection]
+  (let [{:keys [store branch]} (:config @connection)]
+    [(ds/store-identity store) branch]))
+
 (defn- record-refusals-once!
   "Record one program's acquisition refusals once per recording target.
 
@@ -2582,21 +2615,26 @@
   (let [program (some-> (program-identity database)
                         (program-basis (acquisition-attributes
                                         (db/carried-projection database))))
-        target (or (:seon.db/connection (::custody ctx)) commit-fault!)]
+        ;; The target's identity, never the Connection object: a released
+        ;; Connection keeps its metadata and so its whole world reachable.
+        target (if-let [connection (:seon.db/connection (::custody ctx))]
+                 (connection-identity connection)
+                 commit-fault!)]
     (if (and (or (seq (::acquisition-refusals acquired)) (seq (::agent-mistakes acquired)))
              program target)
       (let [cache-key [program target]
             cell (cache/lookup-or-miss
                   refusal-recording-cache cache-key
-                  (fn [_] (delay (record-acquisition-refusals!
-                                  ctx database acquired commit-fault!))))]
+                  (fn [_] (delay (select-keys
+                                  (record-acquisition-refusals!
+                                   ctx database acquired commit-fault!)
+                                  [::acquisition-refusals-recorded?
+                                   ::acquisition-recording-error]))))]
         (merge acquired
-               (select-keys (try @cell
-                                 (catch Throwable failure
-                                   (cache/evict refusal-recording-cache cache-key)
-                                   (throw failure)))
-                            [::acquisition-refusals-recorded?
-                             ::acquisition-recording-error])))
+               (try @cell
+                    (catch Throwable failure
+                      (cache/evict refusal-recording-cache cache-key)
+                      (throw failure)))))
       (record-acquisition-refusals! ctx database acquired commit-fault!))))
 
 (defn acquire!
