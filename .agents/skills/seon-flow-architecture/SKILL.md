@@ -88,7 +88,7 @@ evaluation (`system-turn`, `src/seon/turn.clj:2055`). Include generated and
 agent-written reads, never writes or effects (`AGENTS.md:373-375`).
 
 Datahike evidence capture and validity live in `seon.db/read-evidence`
-(`src/seon/db.clj:912`) and `seon.db/read-evidence-current?` (`:1113`).
+(`src/seon/db.clj:914`) and `seon.db/read-evidence-current?` (`:1115`).
 Extend the one mechanism in place rather than introducing a central
 dispatcher, block-specific refresh handlers, or another cache.
 

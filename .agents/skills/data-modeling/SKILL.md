@@ -110,7 +110,7 @@ yield id-only maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`
 Obtain the complete value under the declared work bound or refuse.
 Every owned relation declares `:seon.db/component-schema`; the final writer
 validates those typed values as well as the root (`write-owned-values-error`,
-`src/seon/db.clj:3333`). The config schema declares
+`src/seon/db.clj:3335`). The config schema declares
 `:seon.config.db/validation-node-limit`
 (`resources/seon/schemas/seon.config.db.edn:1`), carried by
 projection acquisition and shared across writers; there is no per-constructor
@@ -201,7 +201,7 @@ Use `seon.id/evaluation` for branch/turn/ordinal identity and
 (`src/seon/id.clj:55`, `:47`). Do not add a random-id generator.
 
 Read evidence is a dependency observation, not a copied result:
-`src/seon/db.clj:912`. Every distinct read form's latest evidence
+`src/seon/db.clj:914`. Every distinct read form's latest evidence
 feeds the since-query diff; changed reads append, writes/effects never
 rerun. Compaction retracts evaluations and regenerates the opening.
 Program identity tombstones are RETIRED by owner ruling 2026-09-16
@@ -209,4 +209,4 @@ Program identity tombstones are RETIRED by owner ruling 2026-09-16
 past is a temporal query; `src/` carries no tombstone mechanism.
 The final report refuses identity removal or rename when surviving symbol
 observers still name it; repairs are judged in the same final database
-(`removed-definition-error`, `src/seon/db.clj:3872`; `deletion-error`, `:3932`).
+(`removed-definition-error`, `src/seon/db.clj:3879`; `deletion-error`, `:3939`).

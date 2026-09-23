@@ -17,7 +17,7 @@ A computation receives its environment, immutable database value,
 schema projection, and render profile. Capture one database value for
 one pure derivation; don't reread a connection at each leaf. The public
 database functions accept explicit inputs and return boundary errors
-(`q`, `src/seon/db.clj:2206`; `pull`, `:2439`; `transact!`, `:4546`).
+(`q`, `src/seon/db.clj:2208`; `pull`, `:2441`; `transact!`, `:4553`).
 
 Use `seon.db` for first-party database work. Agent elision is an
 evaluation service, not permission for a JVM caller to omit custody.
@@ -61,7 +61,7 @@ Open/closed work, unanswered wakes, history, and routed faults are queries
 over facts. A component holds an owned concern; it is not a copied query
 result. Read dependencies already have an owner:
 `seon.db/read-evidence` retains plans and revisions without database
-values or result payloads by default (`src/seon/db.clj:912`).
+values or result payloads by default (`src/seon/db.clj:914`).
 
 The §15 target deliberately stores shown text: an observation of what
 the value renderer produced at evaluation time, not derived current

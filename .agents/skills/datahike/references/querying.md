@@ -9,7 +9,7 @@ tags: [reference, datahike]
 Loaded when you need Datalog patterns beyond the SKILL.md basics. The examples
 show Datahike's query grammar with `d/q` over one explicit immutable database
 value; reads are synchronous. In Seon code the query owner is `seon.db/q`
-(`src/seon/db.clj:2206`), which accepts the same grammar; direct `datahike.api`
+(`src/seon/db.clj:2208`), which accepts the same grammar; direct `datahike.api`
 calls survive only inside `seon.db`, the store/registry and classified
 branch-custody owners, and system-side listeners (`AGENTS.md:377-380`).
 
@@ -160,7 +160,7 @@ without faulting data in:
 ```
 
 Use index access only for a measured index-level debugging or implementation
-need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2669`).
+need; in Seon code that is `seon.db/datoms` (`src/seon/db.clj:2671`).
 
 ## Performance tips
 
