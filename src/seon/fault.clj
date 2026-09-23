@@ -10,8 +10,7 @@
             [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
-            [seon.error :as error]
-            [seon.flow :as-alias flow]))
+            [seon.error :as error]))
 
 (defn- tagged-run
   "The tagged agent's open turn, or nil.
@@ -70,7 +69,7 @@
           source-fault (:seon.error/source observation)
           agent-id (:seon.agent/id source-fault)
           run-id (when agent-id (tagged-run db agent-id))
-          dropped-count (::flow/dropped-fault-count source-fault)
+          dropped-count (:seon.flow/dropped-fault-count source-fault)
           threshold (:seon.config.eval.result/blob-threshold dials)
           request
           (cond-> {:seon.schema/projection (db/carried-projection db)
@@ -117,7 +116,7 @@
                           (pos-int? dropped-count)
                           (assoc :seon.error/dropped-fault-count dropped-count
                                  :seon.error/dropped-fault-digest
-                                 (::flow/dropped-fault-digest source-fault)))
+                                 (:seon.flow/dropped-fault-digest source-fault)))
           recording (error/recording db (assoc request :seon.error/fact prepared-fact))
           transaction-data (:seon.db/tx-data recording)
           fact (:seon.error/fact recording)
@@ -129,7 +128,7 @@
                       connection (if staged [staged] [])
                       #(db/transact! connection transaction-data))]
           [fact (if (db/database-value? (:db-after result))
-                  ::flow/committed
+                  :seon.flow/committed
                   result)
            previously-reported? (:seon.error.occurrence/ref recording)])
         (catch Throwable failure
@@ -196,7 +195,7 @@
                   (or (:seon.error/declared-schema context)
                       (when throwable? (:seon.error/declared-schema (meta (ex-data failure))))
                       :seon.flow/exception-error)})
-        committed? (= ::flow/committed outcome)
+        committed? (= :seon.flow/committed outcome)
         [mode read-failure]
         (when committed?
           (try [(:seon.config/on-core-error (config/effective (db/db connection) cluster-name))]
