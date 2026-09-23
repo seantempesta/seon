@@ -66,3 +66,26 @@
           (is (not (present? "gate-red")) "the reset candidate carried no earlier red change")))
       (finally
         (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))
+
+(deftest ^{:seon.test/long "One nested seon.test/run on the target's new commit; seon.test.runner/program-digest re-derives per new commit (10.7 s measured 2026-09-23, cache audit item 6)."
+           :seon.test/long-ms 60000}
+  a-host-bound-change-adopts-first-then-reports-its-reaching-tests
+  (let [target (support/execution-handle nil)
+        database (db/db (:seon.db/connection target))
+        host 'seon.cluster.source/dependency-digests
+        interpretable 'seon.cluster.save-gate-test/writing]
+    (testing "classification reads the per-declaration fact"
+      (is (true? (:seon.fn/host-bound? (db/pull database [:seon.fn/host-bound?] [:seon.fn/sym host]))))
+      (is (false? (:seon.fn/host-bound? (db/pull database [:seon.fn/host-bound?] [:seon.fn/sym interpretable]))))
+      (is (= [host] (cluster/host-bound-declarations
+                     [database] #{[:seon.fn/sym host] [:seon.fn/sym interpretable]}))))
+    (testing "the change is adopted before its red reaching test is answered"
+      (let [before (db/commit-id database)
+            write! (writing "gate-host-red" "(= 1 2)")
+            identities #{[:seon.test/sym 'seon.cluster.save-gate-test/gate-host-red]}
+            answer (cluster/adopt-then-test! target identities [host] #(write! target))]
+        (is (false? (:seon.test/passed? answer)) (:seon.source/tally answer))
+        (is (= [host] (:seon.source/host-bound answer)))
+        (is (not= before (db/commit-id (db/db (:seon.db/connection target)))) "adopted first")
+        (is (pos? (:seon.test/fail-count (first (:seon.test/results (:seon.source/gate-run answer))) 0))
+            "the reaching test's failure comes back")))))

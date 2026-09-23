@@ -79,6 +79,8 @@
                     gate (:seon.source/gate result)]
                 (println (or (:seon.source/tally gate) (:seon.error/message result) (pr-str result)))
                 (when gate (println "phase ms:" (pr-str (:seon.source/phase-ms gate))))
+                (when-let [host-bound (:seon.source/host-bound gate)]
+                  (println "host-bound, adopted before testing:" (pr-str host-bound)))
                 (doseq [line (get-in result [:seon.profile/explanation :seon.profile/lines])]
                   (println line))
                 (System/exit (if (true? (:seon.test/passed? gate)) 0 1))))

@@ -161,3 +161,83 @@ aggregation semantics are real: the gate tests the union of every published chan
 since default's adopted commit, so another lane's pending host edit blocks every save.
 
 RESET NEEDED: no.
+
+# Follow-up (orchestrator ruling: option 1; adoption reorder)
+
+## What changed
+
+- `save-gate!` reads the per-declaration fact through `host-bound-declarations`: a
+  changed `:seon.fn/sym` whose `:seon.fn/host-bound?` is true, or that has no such fact,
+  in default's rows or the published rows. If there are none, the candidate is tested
+  first (as built). If there are any, `adopt-then-test!` adopts into default first, then
+  `reaching-run` answers the same reaching tests on default, and red comes back at once
+  with `:seon.source/host-bound`, the tally, `:seon.source/phase-ms` and the request's
+  `explain-slow`. `reaching-run` is the one selection/run helper both paths use. The
+  hook reports `red after adoption (host-bound …)`, and `bin/test-check` prints the
+  host-bound list.
+- `development-source-refresh!` reorder, with no new mechanism: the reload set, requires,
+  arming identities, definition digests and instrumentation projection now come from
+  `published-database`, and the config from the pre-adoption cluster value. Reload,
+  verify and arm run FIRST. `adopt-rows!` (which now takes the identities; see
+  `published-changes`) and the adoption record are then written back to back. Observed
+  on default after the change: rows at tx 536871601 / 536871608 / 536871610 and the
+  record at 536871602 / 536871609 / 536871611, in the same second each time. Before,
+  the note `docs/seon/issues/development-adoption-writes-program-rows-seconds-before-its-record.md`
+  measured 0.5–23 s. The pair is still two transactions: `seon.fn/index!`
+  (`src/seon/fn.clj:3508`) has no request member for appending tx-data, so making it one
+  transaction needs a one-member change in fn.clj, which is outside this lane. No
+  regression for this ordering: it would need a development adoption (a reload of
+  default's namespaces) inside a test member, which the no-redefs-in-default rule forbids.
+- New regression `a-host-bound-change-adopts-first-then-reports-its-reaching-tests`:
+  the classification reads the fact (`dependency-digests` true, `writing` false), and
+  `adopt-then-test!` adopts before answering the red reaching test.
+
+## (a) run 161760c0ba45: found, not silent
+
+Recorded failure 47528 (`seon.test.failure/message`): the green case's inner run
+`cd75254b223d` had an error: `Cannot interpret seon.cluster.reload-measure/-main:
+Host-bound declaration … must change through the loaded source files.` The gate returned
+`:seon.test/passed? false` with that tally, so it did not advance. The report was exact,
+not silent. Run 4ea5109c5a35 (after this follow-up) failed the same way, and so did its
+new host-bound member, at the outer member's own acquisition.
+
+## (b) `deleted-identities` in SCI: cause is in `src/seon/sci/eval.clj` (not edited)
+
+Probe (eval_clj on default, isolated handle):
+- The cluster ctx's `::loaded-database` commit is `6ab34d95…` (about boot), while default's
+  adoption record names `6ab35bfd…`. For `seon.cluster.source/dependency-digests`, the
+  loaded digest is `3faf7e12…` and default's row is `7e2bee2d…`. The snapshot does not
+  follow adoption: `acquire!` returns early through `acquired-database?`
+  (sci/eval.clj:2615) and keeps the stale `::loaded-database`. So every declaration
+  adopted since boot reads as overridden (`overridden-row?`, sci/eval.clj:1007) on every
+  branch of default, and any host-bound one, or a host-bound caller in the affected
+  closure (`reload-measure/-main`), refuses. That is the cause of (a).
+- Once a host-namespace row is interpreted, SCI has no aliases for that namespace:
+  `(ns-aliases 'seon.cluster.source)` → nil and `(resolve 'seon.program/identity-attributes)`
+  → nil in the forked ctx, while the DB `:seon.ns/aliases` row lists 15 aliases,
+  including `program`. The host namespace's ns-row bindings are not installed
+  (`install-row!`, sci/eval.clj:940, installs a namespace only when its row is
+  installed). So `:seon.fn/host-bound? false` on a function of a compiled host
+  namespace still cannot interpret. Once the loaded-database defect is fixed, that
+  function is no longer overridden and the question disappears for unchanged rows. For
+  a changed row, the gate would still need the namespace's aliases in SCI, or the
+  indexer's fact to be true.
+- Also seen: a concurrent lane's probe `resolution exploded` (`seon.test.one-request-test/probe`)
+  surfaced inside my gate's `seon.test/run` at 04:55:25Z, so a redefinition over
+  default's Vars was live at that moment.
+
+## Fresh verification results (after this follow-up)
+
+| command | result | ms |
+|---|---|---|
+| `bin/test-check default --gate --changed-path src/seon/cluster/source.clj` (restoring the HEAD docstring of `dependency-digests`) | host path: host-bound `[dependency-digests publish! publication-input-digest! publication-error record-results-at-head!]` adopted (adopt 423 ms), then red `Test run admission refused inconsistent evidence.` (tests 17,405 ms; `program-digest` 20,006 ms inclusive); exit 1 | 22,702 |
+| same, unchanged | `unchanged: no changed declaration, no test selected`, publish 39 ms; exit 0 | 327 |
+| `bin/test-check default --policy named --ns seon.cluster.save-gate-test --include-long --time-limit-ms 400000` | run 4ea5109c5a35: red; both members error on the stale loaded program (b) | 113,590 |
+
+The gate names four more `source.clj` functions as changed on every save of that file
+(`publish!`, `publication-input-digest!`, `publication-error`, `record-results-at-head!`),
+and they widen the reaching set. Their definitions did not change, so the publication
+report's identity set for that file needs a check (indexer; not diagnosed here).
+Per the ruling, the union of all published changes no longer blocks a save: each save
+adopts. The admission refusal above is `seon.test`'s own (a reached member holds
+unfinished evidence).

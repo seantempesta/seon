@@ -1670,6 +1670,13 @@
                                        timeout-ms)]
       (cond
         (:seon.error/message result) (str "refused: " (pr-str result))
+        (and (false? (get-in result [:seon.source/gate :seon.test/passed?]))
+             (get-in result [:seon.source/gate :seon.source/host-bound]))
+        (str "red after adoption (host-bound "
+             (pr-str (get-in result [:seon.source/gate :seon.source/host-bound]))
+             " change only where the files compile): "
+             (get-in result [:seon.source/gate :seon.source/tally])
+             " " (pr-str (get-in result [:seon.source/gate :seon.source/phase-ms])))
         (false? (get-in result [:seon.source/gate :seon.test/passed?]))
         (str "refused by the save gate; default unchanged: "
              (get-in result [:seon.source/gate :seon.source/tally])
