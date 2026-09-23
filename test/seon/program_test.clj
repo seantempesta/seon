@@ -111,9 +111,9 @@
   "An in-memory genesis value installing the compared families' and `rows`'
    attributes and holding `rows`. A value without declaration rows reads the projection its
    construction boundary supplied (`seon.db/carried-projection`)."
-  [projection rows]
+  [projection rows & [history?]]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write :keep-history? false}
+                       :schema-flexibility :write :keep-history? (boolean history?)}
         storable? (requiring-resolve 'seon.schema.datahike/storable-attribute-in?)
         declarations (requiring-resolve 'seon.schema.datahike/malli->datahike-schema-in)]
     (d/create-database configuration)
@@ -195,6 +195,49 @@
         (is (= :seon.program/read-bound (:seon.program/missing-evidence result)))
         (is (m/validate :seon.program/digest-map-refusal result
                     {:registry (:seon.schema.projection/registry projection)}))))))
+
+(deftest changed-identities-scope-the-digest-maps-to-one-change
+  (let [projection (schema/handed-projection)
+        f #(symbol "scoped" (name %))
+        row (fn [s digest] {:seon.fn/sym (f s) :seon.program/definition-digest digest})
+        base (example-database projection
+                               (mapv #(row % digest-a) [:same :edit :head :gone :revert :conflict])
+                               true)
+        with (fn [database & transactions]
+               (reduce #(vary-meta (:db-after (d/with %1 %2)) assoc :seon.schema/projection projection)
+                       database transactions))
+        bound {:seon.program/max-datoms 100}
+        scoped (fn [branch head]
+                  (let [scope (into (program/changed-identities base branch bound)
+                                    (program/changed-identities base head bound))]
+                    (mapv #(program/digest-map % (assoc bound :seon.program/identities scope))
+                          [base branch head])))
+        branch (with base [(row :edit digest-b) (row :conflict digest-b) (row :new digest-a)
+                           [:db/retractEntity [:seon.fn/sym (f :gone)]]])
+        head (with base [(row :head digest-b) (row :conflict digest-c)]
+                   [(row :revert digest-b)] [(row :revert digest-a)])
+        maps (scoped branch head)
+        refusal #(:seon.program/missing-evidence (program/changed-identities base % bound))]
+    (is (= {:seon.program/unchanged #{[:seon.fn/sym (f :revert)]}
+            :seon.program/changed-on-branch #{[:seon.fn/sym (f :edit)]}
+            :seon.program/changed-on-head #{[:seon.fn/sym (f :head)]}
+            :seon.program/added #{[:seon.fn/sym (f :new)]}
+            :seon.program/retracted #{[:seon.fn/sym (f :gone)]}
+            :seon.program/conflict #{[:seon.fn/sym (f :conflict)]}}
+           (dissoc (apply program/three-way maps) :seon.program/conflict-digests)))
+    (is (not-any? #(contains? % [:seon.fn/sym (f :same)]) maps) "Unchanged rows are never read")
+    (is (= :seon.program/scope
+           (refusal (with base [{:seon.ns/name 'scoped :seon.program/definition-digest digest-b}]))))
+    (is (= :seon.program/read-bound
+           (:seon.program/missing-evidence
+            (program/changed-identities base branch {:seon.program/max-datoms 1}))))
+    (is (= :seon.program/definition-digest
+           (:seon.program/missing-evidence
+            (second (scoped (with base [[:db/retract [:seon.fn/sym (f :edit)]
+                                          :seon.program/definition-digest digest-a]])
+                             head)))))
+    (let [result (refusal (example-database projection [(row :same digest-a)]))]
+      (is (= :seon.program/history result)))))
 
 (deftest three-way-classifies-every-base-branch-head-state
   (let [states [:seon.program/absent digest-a digest-b digest-c]

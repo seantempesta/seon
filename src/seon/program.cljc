@@ -452,12 +452,14 @@
   and lint rows, derived from bytes and analysis) are not compared. Incomplete
   evidence answers a typed refusal, never a partial map: an unclassified
   family, an unreadable index page, a compared declaration without its digest,
-  or more than `:seon.program/max-datoms` index datoms."
+  or more than `:seon.program/max-datoms` index datoms. Supplied
+  `:seon.program/identities` (`changed-identities`) read only those."
      {:malli/schema
       [:=> [:cat :seon.db/database-value
-            [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+            [:map [:seon.program/max-datoms :seon.program/max-datoms]
+             [:seon.program/identities {:optional true} :seon.program/identity-set]]]
        [:or :seon.program/digest-map :seon.program/digest-map-refusal]]}
-     [database {:seon.program/keys [max-datoms]}]
+     [database {:seon.program/keys [max-datoms identities]}]
      (let [projection (try ((requiring-resolve 'seon.db/carried-projection) database)
                            (catch clojure.lang.ExceptionInfo failure
                              (digest-map-refusal
@@ -488,7 +490,7 @@
                        (digest-map-refusal
                         :seon.program/read "A program index page could not be read."
                         {:seon.error/member attribute
-                         :seon.error/cause page})
+                         :seon.error/offending page})
 
                        :else
                        (let [datoms (into datoms (:datahike.index-page/datoms page))]
@@ -517,6 +519,28 @@
               (cond-> {:seon.error/expected-key :seon.program/partition}
                 (seq outside)
                 (assoc :seon.program/unclassified-families (set outside))))
+
+             ;; Two queries: one join plans a scan (982 ms / 1,000 vs 26 + 22 ms).
+             identities
+             (let [q (requiring-resolve 'seon.db/q)
+                   rows (q '[:find ?a ?v ?e :in $ [[?a ?v] ...] :where [?e ?a ?v]]
+                           database (vec identities))
+                   stored (if (:seon.error/at rows) rows
+                            (into {} (q '[:find ?e ?d :in $ [?e ...] :where
+                                          [(get-else $ ?e :seon.program/definition-digest "") ?d]]
+                                        database (mapv peek rows))))
+                   missing (when-not (:seon.error/at stored)
+                             (into #{} (keep (fn [[a v e]] (when (= "" (stored e)) [a v]))) rows))]
+               (cond
+                 (:seon.error/at stored)
+                 (digest-map-refusal :seon.program/read "A program declaration could not be read."
+                                     {:seon.error/offending stored})
+                 (seq missing)
+                 (digest-map-refusal :seon.program/definition-digest
+                                     "Program declarations are missing their stored definition digest."
+                                     {:seon.error/expected-key :seon.program/definition-digest
+                                      :seon.program/undigested-declarations missing})
+                 :else (into {} (map (fn [[a v e]] [[a v] (stored e)])) rows)))
 
              :else
              (let [ranges
@@ -547,6 +571,49 @@
                      (into {} (map (fn [datom]
                                      [[(:a datom) (:v datom)] (get digests (:e datom))]))
                            identities)))))))))))
+
+#?(:clj
+   (defn changed-identities
+     "Declarations whose digest `database` asserted or retracted after `base`,
+  deleted ones named by history: `digest-map`'s scoping identities. Only
+  functions and tests may change; another or no family, missing history and
+  more than `:seon.program/max-datoms` changed entities refuse by name.
+  Datahike indexes no transaction prefix: this walks the digest's history."
+     {:malli/schema
+      [:=> [:cat :seon.db/database-value :seon.db/database-value
+            [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
+       [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
+     [base database {:seon.program/keys [max-datoms]}]
+     (let [[q history since carried basis-t]
+           (map requiring-resolve '[seon.db/q seon.db/history seon.db/since
+                                    seon.db/carried-projection seon.db/basis-t])
+           refuse #(digest-map-refusal %1 %2 (assoc %3 :seon.error/operation
+                                                    'seon.program/changed-identities))
+           past (history database)
+           entities (if (:seon.error/at past) past
+                      (q '[:find [?e ...] :where [?e :seon.program/definition-digest]]
+                         (since past (basis-t base))))
+           rows (if (:seon.error/at entities) entities
+                  (q '[:find ?e ?a ?v :in $ [?e ...] [?a ...] :where [?e ?a ?v]]
+                     past entities (vec (:seon.program/compared-families
+                                         (declaration-families (carried database))))))
+           identities (when-not (:seon.error/at rows) (into #{} (map (comp vec rest)) rows))
+           outside (into #{} (remove (comp #{:seon.fn/sym :seon.test/sym} first)) identities)]
+       (cond
+         (:seon.error/at rows)
+         (refuse :seon.program/history "The changes since the base need readable history."
+                 {:seon.error/offending rows})
+         (< max-datoms (count entities))
+         (refuse :seon.program/read-bound "The changes since the base exceed their datom bound."
+                 {:seon.program/max-datoms max-datoms})
+         (not= (set entities) (set (map first rows)))
+         (refuse :seon.program/family-classification
+                 "A changed digest belongs to no compared declaration family."
+                 {:seon.error/expected-key :seon.program/declaration-identity})
+         (seq outside)
+         (refuse :seon.program/scope "Only function and test declarations may change here."
+                 {:seon.error/offending outside})
+         :else identities))))
 
 (defn three-way
   "Classify branch and head declaration identities relative to base.

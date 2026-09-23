@@ -45,7 +45,8 @@
  :seon.program/missing-evidence
  [:enum {:description "Which evidence a digest map could not establish."}
   :seon.program/projection :seon.program/family-classification
-  :seon.program/read :seon.program/read-bound :seon.program/definition-digest]
+  :seon.program/read :seon.program/read-bound :seon.program/definition-digest
+  :seon.program/history :seon.program/scope]
  :seon.program/undigested-declarations
  [:set {:min 1} :seon.program/declaration-identity]
  :seon.program/digest-map-refusal
