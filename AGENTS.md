@@ -74,6 +74,14 @@ slice that adds more than about a hundred lines is presumed the wrong design: st
 writing it and report the smaller alternative — the dependency seam, the deletion, the one
 call-site conversion. Net line count is not the test; added machinery is.
 
+**The codebase shrinks (owner, 2026-09-23: "one of the big goals was to shrink the codebase
+by getting rid of redundant code. I don't want us to fall back and create all that crap
+again").** Every landing note reports its net src and test lines; a slice that grows src
+names what it deletes next or why nothing can go. Before writing a mechanism, search for
+the one that already exists — in the dependency or in Seon — and delete ours in its favour.
+Plan target: src ≤ 55,000 lines (README §5); measured 2026-09-23 against the plan baseline
+`f6216bd26`: src 90,086 → 84,928, test 98,862 → 91,854.
+
 **Algorithmic analysis and principal-engineering common sense in every design (owner,
 2026-09-23).** Every design and spec states, before code: what each operation's cost is
 proportional to (inputs changed, the whole program, the store, the call count), the
