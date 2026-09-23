@@ -226,7 +226,7 @@
             "the failed export's temporary tree is removed")))))
 
 ;;; ---------------------------------------------------------------------------
-;;; reidentify!
+;;; reidentify-at!
 ;;; ---------------------------------------------------------------------------
 
 (deftest reidentify-is-idempotent-on-a-store-that-already-fits-its-path
@@ -235,8 +235,8 @@
       (let [parent (str root "/export")
             path (export/export! {:seon.store/store store
                                   :seon.export/parent-dir parent})]
-        (is (= path (export/reidentify! path)))
-        (is (= path (export/reidentify! path)) "twice changes nothing")
+        (is (= path (export/reidentify-at! path path nil true)))
+        (is (= path (export/reidentify-at! path path nil true)) "twice changes nothing")
         (let [exported (store/open-store! {:seon.store/dir path})]
           (try
             (let [connection (:seon.store/connection-object exported)
@@ -261,7 +261,7 @@
           (.mkdirs (io/file empty-dir))
           (is (= :seon.cluster.export/no-branch-head
                  (:seon.cluster.export/rule
-                  (refusal #(export/reidentify! empty-dir)))))))
+                  (refusal #(export/reidentify-at! empty-dir empty-dir nil true)))))))
       (testing "a store killed mid-genesis is never carried into an export"
         (let [dir (str root "/half/store")]
           (.mkdirs (.getParentFile (io/file dir)))
@@ -274,6 +274,6 @@
             (k/dissoc konserve :branches {:sync? true}))
           (is (= :seon.cluster.export/genesis-incomplete
                  (:seon.cluster.export/rule
-                  (refusal #(export/reidentify! dir)))))))
+                  (refusal #(export/reidentify-at! dir dir nil true)))))))
       (finally
         (test-support/delete-recursively! root)))))

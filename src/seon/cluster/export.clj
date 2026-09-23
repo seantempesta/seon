@@ -24,7 +24,7 @@
     every later flag-free connect fails a different way. A one-time
     fork problem must not become a permanent config asymmetry.
   - EVERY BRANCH HEAD AND REACHABLE COMMIT CARRIES ITS OWN STORED CONFIG, so
-    `reidentify!` rewrites the whole reachable commit graph, not only `:db`.
+    `reidentify-at!` rewrites the whole reachable commit graph, not only `:db`.
     A future branch may fork an exact commit ID rather than a branch head;
     leaving that immutable record stamped with the source identity makes the
     newly created branch refuse on first open. Probed live
@@ -52,12 +52,12 @@
 
   - mid clone: a partial `.store.<uuid>.tmp`. Never named `store`,
     never opened, discarded by the next export;
-  - after the clone, before `reidentify!`: a temp directory carrying
+  - after the clone, before `reidentify-at!`: a temp directory carrying
     the SOURCE's store id. Same answer — the name is the fence;
-  - mid `reidentify!` (some branch heads rewritten, some not): still
+  - mid `reidentify-at!` (some branch heads rewritten, some not): still
     only the temp name; a partially re-identified store is never
     reachable under `store`;
-  - after the atomic move: a complete, openable export. `reidentify!`
+  - after the atomic move: a complete, openable export. `reidentify-at!`
     is idempotent on a store already carrying its own path-derived id,
     so a re-run over the finished export is a no-op."
   (:require [clojure.java.io :as io]
@@ -235,7 +235,7 @@
 ;;; Contracts
 ;;; ---------------------------------------------------------------------------
 
-(defn- reidentify-at!
+(defn reidentify-at!
   "Stamp the store in `store-dir` with the identity `identity-dir` derives.
   The two differ for exactly one caller: `export!` stamps the FINAL
   identity onto the directory while it still has its temp name, so the
@@ -294,31 +294,12 @@
                      (conj visited record-key)))))))
     identity-path))
 
-(defn reidentify!
-  "Rewrite a copied store's stored identity to match its own path.
-  One `k/get` / `k/assoc` pair per reachable branch head and commit record,
-  setting `[:config :store :id]` to the path-derived id
-  `seon.cluster.store/datahike-configuration` would present and
-  `[:config :store :path]` to the canonical path — measured at 13.8 ms
-  for a 15,000-datom store (§2.3). Runs BEFORE any `d/connect` and
-  before the directory takes its final name. Returns the canonical
-  store directory.
-  IDEMPOTENT: a store already carrying its own path-derived id is
-  rewritten to the same values.
-  Refuses `::no-branch-head` (`:db` absent — the directory is not a
-  store) and `::genesis-incomplete` (`:branches` absent — the
-  first-create kill window, which B1 repairs by recreate and which an
-  export must never carry forward)."
-  {:malli/schema [:=> [:cat :seon.store/dir] :seon.store/dir]}
-  [store-dir]
-  (reidentify-at! store-dir store-dir nil true))
-
 (defn export!
   "Copy an open store to `<parent-dir>/store` as an independent store.
   Clone the source directory into `<parent-dir>/.store.<uuid>.tmp`
   (`/bin/cp -cR` on macOS, `cp --reflink=auto -a` on Linux — copy-on-
   write where the filesystem provides it, a byte copy where it does
-  not), `reidentify!` the temp, then move it atomically onto
+  not), `reidentify-at!` the temp, then move it atomically onto
   `<parent-dir>/store`. Returns that canonical path; the result opens
   through `seon.cluster.store/open-store!` with its own flock, its own
   store id, and every branch of the source intact.
