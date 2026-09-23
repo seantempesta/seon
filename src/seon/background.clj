@@ -48,16 +48,14 @@
                (= 2 (count result-ref))
                (= :seon.effect/id (first result-ref))
                (string? (second result-ref)))
-    {:seon.error/at (java.util.Date.)
-      :seon.error/layer :my.background/poll
-      :seon.error/operation 'seon.background/poll
-      :seon.error/message "poll needs a :seon.effect/id lookup ref."
+    (seon.error.refusal/diagnostic (java.util.Date.) :my.background/poll 'seon.background/poll
+     {:seon.error/message "poll needs a :seon.effect/id lookup ref."
       :seon.error/fix "Supply [:seon.effect/id <id>]."
       :seon.error/data {:my.background/result result-ref}
       :my.background/result-observation (pr-str result-ref)
       :seon.error/member :my.background/result
       :seon.error/expected "a :seon.effect/id lookup ref"
-      :seon.error/offending result-ref}
+      :seon.error/offending result-ref})
     (if-let [receipt
              (db/pull (db/db db/*conn*)
                       [:seon.effect/id
@@ -80,15 +78,13 @@
         (:seon.effect/interrupted-at receipt)
         (assoc :seon.effect/interrupted-at
                (:seon.effect/interrupted-at receipt)))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.background/poll
-        :seon.error/operation 'seon.background/poll
-        :seon.error/message "The background effect receipt does not exist."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.background/poll 'seon.background/poll
+       {:seon.error/message "The background effect receipt does not exist."
         :seon.error/fix "Use the lookup ref returned by background."
         :seon.error/data {:my.background/result result-ref}
         :my.background/missing-result-ref result-ref
         :seon.error/member :my.background/result
-        :seon.error/expected "an existing background effect receipt"})))
+        :seon.error/expected "an existing background effect receipt"}))))
 
 (defn await
   "Wait for a background request or return its finished result.
