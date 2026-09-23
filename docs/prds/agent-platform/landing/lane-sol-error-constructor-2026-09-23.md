@@ -78,21 +78,33 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 
 | Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
 |---|---:|---|---|---:|---|---|
-| E13: `src/seon/cluster/status.clj` | 1 | 5 / 6 / -1; +0 | 1 / 50 | 64.458709 | `seon.cluster.status-test` | None |
-| E14: `src/seon/cluster/wake.clj` | 4 | 14 / 21 / -7; +0 | 2 / 20 | 29.618417 | `seon.cluster.wake-test` | None; listened/arming declarations and queries unchanged |
-| E15: `src/seon/config.clj` | 2 | 7 / 11 / -4; +9 | 8 / 46 | 34.138 | `seon.config-test` | Removed generated blank require line; strengthened both conditional-evidence cases to whole values, replacing stale message expectation; 16 X literals retained |
-| E16: `src/seon/context.clj` | 1 | 5 / 6 / -1; +0 | 1 / 20 | 26.494667 | `seon.context-test` | None; subsequent assoc remains outside construction |
-| E17: `src/seon/db.clj` | 4 | 11 / 20 / -9; +0 | 17 / 129 | 64.850583 | `seon.db-test` | K/X literals and raw Throwable map retained; existing diagnostic flattened |
-| E18: `src/seon/edit.clj` | 10 | 28 / 50 / -22; +0 | 0 / 22 | 24.876458 | `seon.edit-test` | None; existing catches and evidence expressions preserved |
-| E19: `src/seon/effect.clj` | 14 | 41 / 70 / -29; +0 | 3 / 29 | 25.0675 | `seon.effect-test` | None; unsupported expression retained |
-| E20: `src/seon/env.clj` | 10 | 30 / 50 / -20; +0 | 0 / 17 | 23.766875 | `seon.env-test` | None; complete member evidence and ex-info boundaries preserved |
-| E21: `src/seon/flow.clj` | 4 | 14 / 21 / -7; +0 | 6 / 41 | 26.661375 | `seon.flow-test` | None; four unsupported expression contexts retained; no graph change |
-| E22: `src/seon/issue/opening.clj` | 2 | 6 / 9 / -3; +0 | 0 / 15 | 26.119667 | `seon.issue-test` | None; dirty issue.clj untouched |
-| E23: `src/seon/maintenance.clj` | 6 | 18 / 30 / -12; +0 | 5 / 30 | 28.147708 | `seon.maintenance-test` | None; raw Throwable and unsupported context retained; ex-info cause preserved |
-| E24: `src/seon/plan.clj` | 2 | 8 / 11 / -3; +0 | 0 / 50 | 29.055334 | `seon.plan-test` | None; 22 unsupported expression contexts retained |
-| E25: `src/seon/render.clj` | 5 | 16 / 26 / -10; +0 | 4 / 50 | 28.856417 | `seon.render-simplification-test` | Removed generated blank require line; O/X literals retained to preserve evaluation order |
-| E26: `src/seon/render/data.clj` | 1 | 5 / 6 / -1; +0 | 1 / 15 | 23.361084 | `seon.render.data-test` | None; surrounding assoc and unsupported context retained |
-| E27: `src/seon/render/hiccup.clj` | 4 | 12 / 20 / -8; +0 | 3 / 17 | 24.18825 | `seon.render.hiccup-test` | None; all four admitted sites converted |
-| E28: `src/seon/render/transcript.clj` | 3 | 9 / 15 / -6; +0 | 9 / 85 | 31.097458 | `seon.render.transcript-test` | None; complete selection and runtime evidence retained |
-| E29: `src/seon/render/value.clj` | 2 | 6 / 10 / -4; +0 | 2 / 29 | 24.629458 | `seon.render.value-test` | None; explicitly held value_test.clj untouched; existing window catch policy retained |
-| E30: `src/seon/render/walk.clj` | 1 | 3 / 5 / -2; +0 | 2 / 31 | 24.987875 | `seon.render.walk-test` | None; two reordered headers and unsupported context retained |
+| E13 (`8156322b6`): `src/seon/cluster/status.clj` | 1 | 5 / 6 / -1; +0 | 1 / 50 | 64.458709 | `seon.cluster.status-test` | None |
+| E14 (`39218a345`): `src/seon/cluster/wake.clj` | 4 | 14 / 21 / -7; +0 | 2 / 20 | 29.618417 | `seon.cluster.wake-test` | None; listened/arming declarations and queries unchanged |
+| E15 (`e36e71795`): `src/seon/config.clj` | 2 | 7 / 11 / -4; +9 | 8 / 46 | 34.138 | `seon.config-test` | Removed generated blank require line; strengthened both conditional-evidence cases to whole values, replacing stale message expectation; 16 X literals retained |
+| E16 (`c07e89393`): `src/seon/context.clj` | 1 | 5 / 6 / -1; +0 | 1 / 20 | 26.494667 | `seon.context-test` | None; subsequent assoc remains outside construction |
+| E17 (`7ef868d59`): `src/seon/db.clj` | 4 | 11 / 20 / -9; +0 | 17 / 129 | 64.850583 | `seon.db-test` | K/X literals and raw Throwable map retained; existing diagnostic flattened |
+| E18 (`12ee273af`): `src/seon/edit.clj` | 10 | 28 / 50 / -22; +0 | 0 / 22 | 24.876458 | `seon.edit-test` | None; existing catches and evidence expressions preserved |
+| E19 (`8eb40dfda`): `src/seon/effect.clj` | 14 | 41 / 70 / -29; +0 | 3 / 29 | 25.0675 | `seon.effect-test` | None; unsupported expression retained |
+| E20 (`517b6e43f`): `src/seon/env.clj` | 10 | 30 / 50 / -20; +0 | 0 / 17 | 23.766875 | `seon.env-test` | None; complete member evidence and ex-info boundaries preserved |
+| E21 (`0c63cd3f3`): `src/seon/flow.clj` | 4 | 14 / 21 / -7; +0 | 6 / 41 | 26.661375 | `seon.flow-test` | None; four unsupported expression contexts retained; no graph change |
+| E22 (`8c1581b00`): `src/seon/issue/opening.clj` | 2 | 6 / 9 / -3; +0 | 0 / 15 | 26.119667 | `seon.issue-test` | None; dirty issue.clj untouched |
+| E23 (`0ef0f9a60`): `src/seon/maintenance.clj` | 6 | 18 / 30 / -12; +0 | 5 / 30 | 28.147708 | `seon.maintenance-test` | None; raw Throwable and unsupported context retained; ex-info cause preserved |
+| E24 (`d5a489534`): `src/seon/plan.clj` | 2 | 8 / 11 / -3; +0 | 0 / 50 | 29.055334 | `seon.plan-test` | None; 22 unsupported expression contexts retained |
+| E25 (`dd24e4e81`): `src/seon/render.clj` | 5 | 16 / 26 / -10; +0 | 4 / 50 | 28.856417 | `seon.render-simplification-test` | Removed generated blank require line; O/X literals retained to preserve evaluation order |
+| E26 (`c511ae0ff`): `src/seon/render/data.clj` | 1 | 5 / 6 / -1; +0 | 1 / 15 | 23.361084 | `seon.render.data-test` | None; surrounding assoc and unsupported context retained |
+| E27 (`2070c7c75`): `src/seon/render/hiccup.clj` | 4 | 12 / 20 / -8; +0 | 3 / 17 | 24.18825 | `seon.render.hiccup-test` | None; all four admitted sites converted |
+| E28 (`7802dfce7`): `src/seon/render/transcript.clj` | 3 | 9 / 15 / -6; +0 | 9 / 85 | 31.097458 | `seon.render.transcript-test` | None; complete selection and runtime evidence retained |
+| E29 (`a0fb1d5b8`): `src/seon/render/value.clj` | 2 | 6 / 10 / -4; +0 | 2 / 29 | 24.629458 | `seon.render.value-test` | None; explicitly held value_test.clj untouched; existing window catch policy retained |
+| E30 (`eece20496`): `src/seon/render/walk.clj` | 1 | 3 / 5 / -2; +0 | 2 / 31 | 24.987875 | `seon.render.walk-test` | None; two reordered headers and unsupported context retained |
+
+### E13–E30 stopping receipt
+
+Stopped after E30 at **289 added / 399 removed** lines across these eighteen slice commits (259 src/test additions and 30 landing-note additions). **76 sites** converted. Source +238/−387 = **−149**; tests +21/−12 = **+9**; combined src/test **−140**. This documentation receipt is separate from the stopped production cut. E31, `src/seon/render/web.clj`, is next; it was not edited. Every source path in the continuation table and `test/seon/config_test.clj` is clean and released. The held value test and all unrelated dirty files remain untouched.
+
+All eighteen packaged-contract checks returned `:findings []`; all touched-file lint runs reported zero errors. These checks compile contracts from absolute checkout paths against the packaged projection; they do not load the edited owners, demonstrate adoption, or execute the proving namespaces in the table. No tests, adoption, process restart, cold gate, push, or foreign-session action was performed. The triage's two unattributed reds and unfinished-test boundary remain orchestrator proof obligations. Dirty cluster/fn/instrument/issue/test owners and dependency forks remain the foreign shared-tree boundary; no repair or runtime-proof claim is made for them.
+
+Hand work: E15 removed the script-generated blank require line and strengthened two existing conditional-evidence cases in `test/seon/config_test.clj` to full-value assertions, replacing one stale message expectation. E25 removed the same generated blank require line. Retained O/X/K/T literals are listed per slice in the raw residue files; no unsupported site was manually admitted. Existing catch-policy defects remain outside this mechanical cut: edit parsing/lossless verification carries message-only cause evidence, and render.value/window reduces a caught failure to message evidence. No catch policy was changed.
+
+All measured individual lane commands and REPL checks remained sub-second. The maximum recorded command was the E15 slice wrapper, **426.549 ms**, proportional to its selected file; the slowest packaged-contract check was E17, **64.851 ms**. Exact envelopes, file bases, generated rosters, residue and command timings remain under `tmp/error-constructor/E13-*` through `E30-*`. Runtime behavioral and performance proof belongs to the orchestrator's named namespaces above; static contract compilation is not that proof.
+
+Continuation scoped landing citation check: **1 document, 0 failures, 77 ms**.
