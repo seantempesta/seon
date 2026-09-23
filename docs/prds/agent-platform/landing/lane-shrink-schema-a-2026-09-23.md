@@ -47,10 +47,73 @@ Proof:
 - Fresh JVM from the snapshot with this file: `(require 'seon.cluster.boot 'seon.db 'seon.fn
   'seon.schema.edn 'seon.schema.admission)` loads, 478 namespaces, 15,674 ms.
 
+S2 landed as `575b0d710` (accepted by the orchestrator).
+
+Orchestrator ruling (2026-09-23, after S2): no probe JVMs or scratch roots. Proofs run on
+`default`'s JVM only (`bin/test-check`, MCP `eval_clj` in throwaway namespaces). The S2 probe
+JVM above was stopped; its evidence stands as recorded.
+
+## S3a — Malli fork: a loaded function Var is returned as the Var (`dbe35560b`)
+
+Fork `reference-code/malli` branch `seon-ref-scope`, commit `8725a8cb`, pushed to
+`seantempesta/malli`. `-loaded-qualified-value` (`src/malli/core.cljc:2889-2896`) returned
+`[@target-var]`, so `[:fn 'ns/pred?]` captured the function object and a re-evaluated `defn`
+was invisible to an already compiled validator. It now returns the Var when its value is a
+function (a Var is `IFn`), and the value otherwise. The value case stays because `:gen/gen`
+names a generator Var (`generator.cljc:466-484`; fork test `loaded-qualified-generator`), and
+that must stay a generator. The change is +3/−1 in `core.cljc`.
+
+Fork regression in `eval-test` (`test/malli/core_test.cljc`): a validator compiled from
+`[:fn 'malli.core-test/redefined-predicate?]` accepts 1. After `alter-var-root` of that Var to
+`string?`, the SAME validator refuses 1. `clojure -M:test` over `malli.core-test`: 53 tests,
+1,595 assertions, 0 failures, 0 errors. That was one fork-test JVM, started before the
+no-parallel-JVM ruling and stopped once its summary printed.
+
+Seon gitlink bumped `25710a67` → `8725a8cb`. `default` loads Malli from source
+(`deps.edn:15`, `:local/root`), so it keeps the old `-loaded-qualified-value` until it is
+moved to HEAD. At HEAD, Seon's `compilable-form` still replaces every `[:fn sym]` with the
+Var before Malli sees it. The fork change is therefore observable in Seon only where Malli
+resolves a symbol itself. The Seon half of S3 depends on it.
+
+## S3b — Seon predicate machinery: blocked on file ownership (not started)
+
+The machinery's public surface has callers outside this lane's paths:
+
+| Var | callers outside `schema.clj` |
+|---|---|
+| `compilable-form` | `error.clj:1654`, `program.cljc:1059` (dirty: another lane), `fn/schema_shape.clj:110,429`, `instrument.clj:650` |
+| `canonical-definition` | `fn.clj:688`, `fn/schema_shape.clj:81`, docstring `test/arm.clj:23` |
+| `predicate-functions-in` | `error.clj:1654`, `fn.clj:2756,2814,2936`, `fn/schema_shape.clj:110,122,429`, `instrument.clj:408,621,632,652`, `sci/eval.clj:453,2848,2859` |
+| `core-predicate-registered?` | `schema/edn.clj:507` (held) |
+| tests | `contracts_compile_test`, `instrument_test`, `program_test`, `db_test`, `call_preparation_test`, `schema/projection_acquisition_test` |
+
+Retiring these Vars is one loadable slice together with every caller (AGENTS: "Retire a public
+Var and convert every caller in one loadable slice"). Keeping them as thin Vars
+(`predicate-functions-in` returning `{}`, `canonical-definition` returning the authored form)
+would leave shims.
+
+## S4 — the same gap
+
+Removed projection members still have readers outside this lane:
+
+| Member | Readers outside `schema.clj` |
+|---|---|
+| `:seon.schema.projection/fingerprint` | `render/web.clj`, `render/walk.clj`, `sci/eval.clj` (S1) |
+| `…/shape-index` | `call_preparation.clj` |
+| `…/shape-rows` | `render/transcript.clj` |
+| `…/compiled` | `render/walk.clj` |
+| `…/schema-dependencies` | `instrument.clj`, `fn/schema_shape.clj` |
+| `load-projection` | `db.clj` (the A2 half) |
+
+`default` (pid 88504) runs S2 (`seon.schema/activate!` does not resolve; `build-projection`
+at line 2146). It still runs the old Malli: `(-loaded-qualified-value 'clojure.core/int?)`
+returns a function, not a Var. Its source snapshot is `data/source/e483b8ab…`.
+
 ## TIMINGS (over 1 s)
 
 | Operation | ms | Justification |
 |---|---:|---|
 | probe JVM `(require 'seon.schema 'seon.schema.edn 'seon.schema.datahike)` | 6,437 | compiles first-party source of the schema closure; dependency classes hit the shared cache; once per probe JVM |
 | first `build-projection` over the live population | 10,780 | includes `require` of every predicate-owning namespace (524 loaded); the warm build is 289 ms unarmed |
+| `clojure -M:test` over `malli.core-test` (fork) | >300,000 wall (backgrounded at the tool timeout) | one fork namespace, 53 tests, run while the machine was thrashing; **over 10 s**, and a second JVM is now ruled out, so it is not repeated |
 | fresh-JVM HEAD load (system closure) | 15,674 | **over 10 s**: proportional to all first-party source, compiled from source by design (only dependencies are class-cached). Same class as `docs/seon/issues/from-zero-boot-takes-minutes.md`; row for the orchestrator to fold |
