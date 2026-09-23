@@ -124,3 +124,4 @@ Both status entrances observed PID 48902, archive `ce73846828a5cc32798ef630b5a57
 | E35: `src/seon/sci/admit.clj` | 3 | 9 / 15 / -6; +0 | 0 / 25 | 23.446167 | `seon.sci.admit-test` | None; X retained; ex-info Throwable cause preserved |
 | E36: `src/seon/sci/eval.clj` | 13 | 37 / 63 / -26; +0 | 54 / 98 | 33.768125 | `seon.sci.eval-test` | None; three X contexts retained; Throwable causes and chain assoc preserved |
 | E37: `src/seon/sci/kernel.clj` | 5 | 13 / 25 / -12; +0 | 1 / 23 | 25.059625 | `seon.sci.eval-test` | None; X retained; existing diagnostic Throwable inputs preserved |
+| E38: `src/seon/shell/jvm.clj` | 8 | 24 / 40 / -16; +0 | 1 / 22 | 22.478084 | `seon.shell.jvm-test` | None; raw Throwable map retained; process behavior unchanged |
