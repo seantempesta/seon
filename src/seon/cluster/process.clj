@@ -23,6 +23,12 @@
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value] (instance? clojure.lang.IAtom value))
 
+(defn id
+  "The provenance id of one `(pid, start-instant)` identity."
+  {:malli/schema [:=> [:cat :seon.cluster.process/identity] :seon.db.process/id]}
+  [identity]
+  (str (:seon.boot/pid identity) "-" (inst-ms (:seon.boot/start-instant identity))))
+
 (defn current-identity
   "This JVM's `(pid, start-instant)` identity.
 
