@@ -121,3 +121,4 @@ Both status entrances observed PID 48902, archive `ce73846828a5cc32798ef630b5a57
 | E32: `src/seon/run.clj` | 2 | 8 / 11 / -3; +0 | 0 / 11 | 22.805667 | `seon.run6-stall-test` | None |
 | E33: `src/seon/schedule.clj` | 7 | 20 / 35 / -15; +0 | 2 / 27 | 26.611 | `seon.schedule-test` | None; X retained; handler Throwable and cond-> evidence preserved |
 | E34: `src/seon/schema.clj` | 4 | 12 / 20 / -8; +0 | 32 / 86 | 38.005917 | `seon.schema-test` | None; raw Throwable and two X contexts retained; no schema declaration changed |
+| E35: `src/seon/sci/admit.clj` | 3 | 9 / 15 / -6; +0 | 0 / 25 | 23.446167 | `seon.sci.admit-test` | None; X retained; ex-info Throwable cause preserved |
