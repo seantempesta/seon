@@ -620,19 +620,6 @@
   [evaluation-id]
   (id/symbol-in "result" \e evaluation-id))
 
-(defn print-node-edn
-  "Return canonical readable EDN for one admitted print node.
-
-  The result is independent of ambient REPL print bindings. The print node is
-  already finite, so no print cap is needed at this sink. Admission itself
-  does NOT come through here — it emits its EDN while it walks, which is how
-  the storage bound stops an unbounded source — so this is for callers that
-  hold a finished node and want its bytes."
-  {:malli/schema [:=> [:cat :seon.print/node]
-                  :seon.sci.admit/edn]}
-  [print-node]
-  (canonical-edn print-node))
-
 (declare admit-walk)
 
 (defn- missing-bound-refusal

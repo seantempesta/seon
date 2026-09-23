@@ -456,7 +456,7 @@
     (is (= (:seon.sci.admit/value admitted)
            (value/artifact-value restored)))
     (is (= (:seon.sci.admit/edn admitted)
-           (admit/print-node-edn (:seon.sci.admit/print-node restored))))))
+           (admit/canonical-edn (:seon.sci.admit/print-node restored))))))
 
 (deftest profile-fit-supersedes-legacy-print-cuts-with-values
   (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))
