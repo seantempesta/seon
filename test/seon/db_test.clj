@@ -1158,6 +1158,35 @@
               (select-keys data [:error :expected :new])))
        (is (instance? datahike.datom.Datom (:old data)))))))
 
+(deftest a-merge-shares-the-write-fence-and-records-immutable-lineage
+  (with-codec-database
+   {:seon.test-support/extra-schema (schema.datahike/malli->datahike-schema-in fixture-projection [::row-id])}
+   (fn [connection]
+     (let [configuration (:config @connection)
+           candidate (keyword "seon.db-test" (str (name (:branch configuration)) "-merge"))
+           _ (d/branch! connection (:branch configuration) candidate)
+           candidate-connection (d/connect (assoc configuration :branch candidate))
+           merge-write (fn [basis-t entity]
+                         (db/transact! connection {:tx-data [entity] :datahike/expected-basis-t basis-t
+                                                   :parents #{(d/commit-id @candidate-connection)}}))]
+       (try
+         (d/transact candidate-connection [{::row-id "merged"}])
+         (let [c (d/commit-id @candidate-connection)
+               stale-t (:max-tx @connection)
+               h (do (test-support/transacted! connection [{::row-id "moved"}])
+                     (d/commit-id @connection))]
+           (is (= :transaction/stale-basis
+                  (get-in (merge-write stale-t {::row-id "merged"}) [:seon.error/data :error])))
+           (is (= {:seon.fn/sym 'seon.source.test/incomplete} ; the final owning-value validator
+                  (get-in (merge-write (:max-tx @connection) {:seon.fn/sym 'seon.source.test/incomplete})
+                          [:seon.error/data :seon.db/entity])))
+           (is (= h (d/commit-id @connection)) "refused merges leave the head and its datoms")
+           (let [report (merge-write (:max-tx @connection) {::row-id "merged"})]
+             (is (= #{h c} (set (d/parent-commit-ids @connection))) (pr-str report))
+             (is (= (d/commit-id (:db-after report)) (d/commit-id @connection)))
+             (is (= c (d/commit-id @candidate-connection)) "the merged parent is unchanged")))
+         (finally (d/release candidate-connection) (d/delete-branch! connection candidate)))))))
+
 (deftest an-agent-write-that-does-not-deliver-refuses-at-the-declared-bound
   ;; Ruling 1r (owner, 2026-09-18): the dial bounds AGENT/turn writes. The
   ;; provenance user this transaction carries is what selects it.

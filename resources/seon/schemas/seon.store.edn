@@ -36,7 +36,9 @@
               :seon.store/transaction-data
               [:map
                [:tx-data :seon.store/transaction-data]
-               [:tx-meta {:optional true} :map]]],
+               [:tx-meta {:optional true} :map]
+               [:datahike/expected-basis-t {:optional true} :int]
+               [:parents {:optional true} [:set {:min 1} :uuid]]]],
              :transaction-data
              [:vector :seon.store/transaction-operation],
              :transaction-operation

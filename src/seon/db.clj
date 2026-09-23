@@ -4363,7 +4363,8 @@
                       declared-bound))
                   request
                   (schema.datahike/encode-transaction-in projection prepared)
-                  pending (d/transact! connection request)
+                  ;; Parents make it Datahike's merge: same fence and validator.
+                  pending ((if (:parents request) d/merge-db! d/transact!) connection request)
                   timeout (Object.)
                   started (System/nanoTime)
                   report
@@ -4601,6 +4602,9 @@
   lookup refs when available, including identities removed by this transaction.
   Tempids are resolved. The next read observes the changed database.
   Explicit-connection system callers retain Datahike's full report.
+  A map may carry `:datahike/expected-basis-t` (a stale head refuses before
+  any datom lands) and `:parents`, immutable commit ids that make the write
+  Datahike's multi-parent merge commit through the same validation.
 
   Waiting for the Datahike writer is bounded by the branch's declared
   :seon.config.db/write-time-limit-ms fact. If that bound fires, this returns
