@@ -1,6 +1,6 @@
 ---
-type: plan
-status: investigation + recommended design, 2026-09-23 (lane braid-errors, Opus 5.5); no src/test/resources edits by this lane; one owner decision open (§7)
+type: research
+status: evidence (point-in-time, 2026-09-23, lane braid-errors, Opus 5.5, HEAD db296b08f). The design is folded into lane-b3-errors-tasks-dials.md §2a ("Shown text first") and §5 E1–E7, which supersede §3–§8 here; §7 option 2 (never armed) was rejected by the owner 2026-09-23 15:15Z
 created: 2026-09-23
 tags: [agent-platform, errors, repl, mcp, operator, simple-made-easy]
 owner: B3 (errors) display half; composes the one error route (error-route-final-design-2026-09-23.md, recording half) and lane repl-prd (REPL scope)
@@ -25,7 +25,7 @@ database recording are optional layers **on top**. When a layer fails, its own f
 **added** to the reply. It never replaces the original.
 
 This document owns the floor (`seon.error.refusal/floor`) and the wire rule (§3.2). The
-REPL lane (`lane-repl-simple-reliable.md`, not yet committed when this was written) owns
+REPL lane (`lane-repl-simple-reliable.md`, since folded into B1 §3b) owns
 restructuring `mcp-valf`, the ThreadLocal hand-off and `get_value`. That lane *uses* the
 floor and the rule and does not redesign them. The error-route design owns recording,
 policy and delivery (`docs/research/agent-platform/error-route-final-design-2026-09-23.md`).

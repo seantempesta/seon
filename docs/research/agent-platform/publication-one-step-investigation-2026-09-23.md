@@ -1,6 +1,6 @@
 ---
-type: lane-spec
-status: investigation + recommended design (docs only); owner decisions D1–D3 below
+type: research
+status: evidence (point-in-time, 2026-09-23, lane braid-publication, Opus 5.5). The design is folded into lane-b1-one-publication-path.md §2a′ and README §4 1.2b, which supersede §3–§8 here; D1–D3 are open owner decisions
 created: 2026-09-23
 lane: braid-publication (Opus 5.5)
 extends: README §4 1.2b remainder (per-declaration reload), 1.4c (candidate branches); B1 §2a steps 13–17; landing lane-opus-publication-2026-09-23.md ("Fix 3", "Hazard", "Next", "Resources")

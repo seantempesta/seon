@@ -1,6 +1,6 @@
 ---
-type: plan
-status: design only; replaces B3 §5 rows 7–9 (add `seon.task` +450, convert −250, retire −3,900) with in-place slices
+type: research
+status: evidence (point-in-time census at HEAD e9e66028d, lane b3-task-design, Opus 5.5). The slices are folded into lane-b3-errors-tasks-dials.md §2b and §5 S1–S7, which supersede §3 here; S1/S2 landed cadc19410, 9d2b4d403
 created: 2026-09-23
 lane: b3-task-design (Opus 5.5)
 extends: lane-b3-errors-tasks-dials.md §2b, §5 rows 7–9, §8; lane-namespace-agents-first-loop.md

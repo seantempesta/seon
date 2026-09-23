@@ -114,7 +114,7 @@ request (C6). `P` absent means pathless discovery (step 2b).
 
 | # | Step | Data in → out | Carried | Seam (file:line) | Proportional to |
 |---|---|---|---|---|---|
-| 1 | serialize | the publication monitor (`ReentrantLock`); its acquisition bound is `B`'s `:request` | JVM | `cluster.clj:1571` `with-source-refresh-monitor!` (kept) | 1 |
+| 1 | serialize | none in the JVM: the monitor is deleted (README 1.3f; its re-introduction `986cdc521` was reverted by `e1dfa0b74`). `current-src` moves through step 11's expected-commit guard and the cluster record through `adoption-guard-tx` (`cluster.clj:2451`). Open: the [lock-deletion review](../../../research/agent-platform/review-publication-lock-deletion-2026-09-23.md) P1 findings (analysis drops its captured expected head; a multi-write adoption is not serialized) are §2a′'s serialization decision | store | `versioning.cljc:323`; `cluster.clj:2451` | 1 |
 | 2a | capture (explicit `P`) | read each path's bytes ONCE → `{path {bytes digest}}`; directories are gitlinks → pinned commit | value | `source.clj:109` `path-digests` (keeps its directory case) | \|P\| |
 | 2b | discover (no `P`) | declared input roots walked → current path set (`input-roots`, `input-paths` moved into `source.clj`) vs stored `:seon.fn.file/relative-path` rows: added, removed, differing digest | value | `test/cache.clj:45`, `:154` (moved); `source.clj:125` `stored-path-digests` | \|inputs\| ≈ 791 |
 | 3 | compare | seek each captured path's stored digest on the published commit VALUE; `changed` = differing/absent; `removed` = stored, not on disk. Empty ⇒ skip to step 11 with the current commit id | value | `source.clj:125`, `:139` `current`; `versioning.cljc:469` `commit-as-db` | \|P\| pulls |
@@ -156,6 +156,61 @@ observation (`cluster.clj:1832`), the projection re-derivation once A1 lands
 `(all-ns)` arming walk once A1 lands, `upsert!`/`populate-upserts!`
 (`source.clj:540-565`, no callers outside the file), and
 `publication-input-digest!` (`:352`).
+
+### 2a′. Adoption in parts that fail alone
+
+Evidence: [publication-one-step investigation](../../../research/agent-platform/publication-one-step-investigation-2026-09-23.md)
+(five incidents on 2026-09-23 traced to two braids; probes P1–P5, all sub-second). Line
+references are HEAD `e9e66028d`. Braid A: default's loaded code follows whatever disk bytes a
+`require :reload` reads, so another lane's unpublished dependent blocks or leaks into an
+adoption (`verify-development-sources!` `cluster.clj:2299`, seeded by every dependent because
+`compiled-into-callers` `:2183` lists `clojure.core/def`), and a publication's schema world
+reads all of `resources/seon/schemas/` (`schema.edn/packaged-forms` `edn.clj:397` via
+`cluster.clj:2860`, `:1666`, `fn.clj:2955`). Braid B: `development-source-refresh!` (`:2544`)
+reloads the JVM before it writes rows, so the running adopter calls Vars the reload just
+replaced (first adoption of `68f769a4a` failed with "argument count of 4"), and a failure after
+the reload leaves loaded code no row describes. Steps 13–17 become six parts, each one job:
+
+| part | one job | proportional to | fails alone |
+|---|---|---|---|
+| capture | read each named path's bytes once (`source/capture-paths`, `source.clj:104`) | \|P\| bytes | a missing or outside path refuses by name (`ca9587817`) |
+| publish | rows for exactly those bytes on `current-src` (steps 2–11, unchanged) | changed files | stale head or refused rows leave `current-src` unmoved |
+| adopt rows | ONE transaction on the cluster branch: `head-guard-tx`, schema declarations, `reconcile-tx-in`, `issue/adopt-tx` — schema operations first, since a transaction applies schema datoms before later operations (`D/db/transaction.cljc:466`); `seon.fn/index!`'s `:seon.db/tx-data` (`fn.clj:3620`) moves before the reconcile operation | touched identities | refused ⇒ branch unchanged, JVM untouched |
+| load | make the loaded Vars equal the adopted rows (mechanism: owner decision below) | changed declarations (+ macro/const referrers by `:seon.fn/references`; 17 type/protocol rows keep the namespace closure; `defmulti` is `ns-unmap`ped first as for deleted symbols, `cluster.clj:2598-2605`) | a compile failure is a core fault; the record stays at R, so contexts interpret the rows that differ (B2 §2a, `sci/eval.clj:2532`) |
+| arm | `instrument/apply!` over the loaded Vars (step 16) | changed Vars | as load |
+| record | its own guarded transaction after load and arm: `adoption-guard-tx` (prior = R), `:seon.source/commit-id` C, `:seon.test/adoption-*` (step 17 as written) | 1 | refused ⇒ a newer convergence owns the record |
+
+Only the JVM can be partial, only between load and record, and never backwards: every loaded
+declaration is R's or C's, and the record names R until the whole of C is loaded.
+`68f769a4a` currently writes the record with the rows (owner question pending). Deletions:
+`verify-development-sources!` and its calls (`:2594`, `:2611`) once the loaded bytes are the
+published bytes; `clojure.core/def` leaves `compiled-into-callers` (README 1.2b: a `def`,
+like a `defn`, is read through its Var); the three-transaction `adopt-rows!` (`:2483`);
+`issue/adopt!`'s 5-arity (`issue.clj:991`) if unused. A partial publication's schema forms are
+the published commit's stored `:seon.schema/form` rows plus the named resource paths only,
+which needs an optional `:seon.schema/file` ref on each schema row (P5: `:seon.flow/executor`
+has none today); from zero still reads everything. The other runtime `packaged-forms` readers
+(`db.clj:292`, `env.clj:162`, `print.cljc:342`, `instrument.clj:1053`) belong to the 1.4 sweep.
+
+| slice | change | files | est. src | regression (wanted behaviour) |
+|---|---|---|---|---|
+| S1 | `def` leaves `compiled-into-callers` | `cluster.clj` | 0 / −1 | a private `def` edit in a namespace with dependents reloads only that namespace |
+| S2 | optional `:seon.fn/line` from clj-kondo `:row` at `var-row` (only if load is per row) | `fn.clj`, `seon.fn.edn` | +4 | an indexed `defn`'s line equals its file line |
+| S3 | load from published bytes (owner decision below) replacing both verify calls | `cluster.clj` | +35 / −45 | adopting X while dependent Y's disk bytes differ from its published bytes succeeds with Y's Var unchanged; a `defmethod`-only edit loads |
+| S4 | rows → load → arm → record; rows in one transaction; `save-gate!` (`:2759`) converted in the slice | `cluster.clj`, `fn.clj`, `issue.clj` | +15 / −45 | an adoption changing `adopt-rows!`'s own arity succeeds the first time; a declaration that fails to compile leaves record R, rows C, one stored fault, and the next adoption converges |
+| S5 | concurrent adoptions serialize (owner decision below) | `cluster.clj` | ≤ +20 | two concurrent adoptions of one declaration end with the newer source loaded and recorded |
+| S6 | named resources only; optional `:seon.schema/file` | `fn.clj`, `cluster.clj`, `seon.schema.edn` | +20 / −5 | an unnamed dirty resource does not reach the published projection |
+
+Probe inside S3/S4 before code: the rows-ahead window (target < 100 ms for a `defn` edit);
+residue top-level forms with no row (75 `declare`, 69 `defonce`, 26 `defmethod`, 41
+`schema.edn/load!`, …) need a change signal that a comment-only edit does not trip; an
+`accrete-schema-population!` purge inside the one rows transaction on a branch of default.
+**Open (owner):** how load reads bytes (`require :reload` of the namespace — the ruled
+vocabulary — versus `Compiler/load` of captured bytes, `Compiler.java:8194-8233`, per file or
+per row; P4: a `LineNumberingPushbackReader` at 2180 gives `:line 2180` and the right frame in
+0.66 ms); how concurrent adoptions serialize (guards only, per 1.3f, versus one Clojure agent
+converging to the head); and whether the record stays with the rows (`68f769a4a`) or follows
+load and arm (step 17).
 
 ### 2b. The reset's cold path
 
@@ -201,7 +256,7 @@ Line counts are estimates, not constraints. B1b §0 records guarantees kept and 
 | 7 `bootstrap_drive.clj:450` | the same request |
 | 9 progress mechanisms (pack §3c) | ONE `:seon.source/progress!` argument threaded through `publish!` and `index!`; the prepl client prints `:out` events; `*source-progress!*` (`cluster.clj:90`), `*boot-progress!*` `:247`, `report-index-progress!` `fn.clj:34`, the phase clock `fresh_operator.clj:2755-2790`, `publication-output!`, `SOURCE_PROGRESS` deleted. Foreign reader to convert in the same slice: `test/runner.clj:60` (B4's file, one line) |
 | 18 bound declarations (pack §3d) | publication phases: one config fact `:seon.config.source/phase-bounds-ms` `{:request :observe :analysis :transaction :reload :arm}` carried on the request; each phase fails with a typed error naming the phase, the bound and the work in flight. NOT collapsed (different resources, enforced at their own seams): the lifecycle `flock` bound (`state.clj:413`), child-exit (`:22`), boot readiness, and the prepl socket silence bound (`fresh_operator.clj:81`, `:1820-1853`) — a socket timeout does not cancel admitted work, so the JVM-side phase bound is the one that stops it |
-| hook publication `bin/seon-hook:1486-1665` (result files, pending queue, worker pid file, detached worker, `bin/seon` child, stdout re-parse) | ~40 lines: read the advertisement, `prepl-eval!` the request with the edited paths, print `:out` as it arrives, print the reply. Coalescing: the monitor SERIALIZES; it does not merge paths — so the hook sends each event's paths and an unchanged path costs one pull (step 3). `.codex/hooks.json` (26 lines) STAYS: it is the only Codex trigger, for the lint hooks too. The transit-cache diagnostic `:318-456` (~130) dies with the sweep; the shell-write digest walk `:1688-1819` (~130, 112 ms measured) stays until the pathless request (step 2b) measures ≤ 150 ms on the JVM, then becomes that request |
+| hook publication `bin/seon-hook:1486-1665` (result files, pending queue, worker pid file, detached worker, `bin/seon` child, stdout re-parse) | ~40 lines: read the advertisement, `prepl-eval!` the request with the edited paths, print `:out` as it arrives, print the reply. Coalescing: nothing merges paths — the hook sends each event's paths and an unchanged path costs one pull (step 3). `.codex/hooks.json` (26 lines) STAYS: it is the only Codex trigger, for the lint hooks too. The transit-cache diagnostic `:318-456` (~130) dies with the sweep; the shell-write digest walk `:1688-1819` (~130, 112 ms measured) stays until the pathless request (step 2b) measures ≤ 150 ms on the JVM, then becomes that request |
 | the hook's OWN lint (`run-clj-kondo` `:250-292` with `--cache false`, `validate-clojure-edit`/`validate-schema-edit`/`findings-feedback`/`clj-kondo-feedback` `:779-960`, `docstring-feedback` `:1046`, `run-schema-admission` `:483-537` with its child-JVM fallback) — a second analysis path in Babashka beside the JVM's | **one prospective-edit request** (deep review win 4): the hook sends `{path prospective-bytes}` to the live JVM, which lints through `analyzer/analyze` over `::sources` with the project cache, admits schema resources through A1-9's pure `admit`, and checks docstrings from program facts; the hook parses the event, sends, prints. `bin/seon-hook` ≈ 150 lines, plus `reconstruct-patched-file` `:538-760` (220) only while an `apply_patch` payload lacks the resulting file, plus the asynchronous Gemini review batch `:1166-1462` (≈ 300, unchanged, counted separately). No live JVM ⇒ the hook refuses with the exact `bin/seon start` command (**ruled 2026-09-21**; no Babashka fallback, one lint path). Proof: a syntax error refused by the JVM's findings; a `cat >` write caught by the pathless request |
 | `.claude/seon-hook.edn` `:current-source {:enabled false}` | enabled ONLY after: the owner-coordinated reset that batches §2g; consumer conversion loaded; one live adoption observed in `default`; the `adopt-noncore ≤ 700 ms` row recorded. Then one real hook event (a named-file edit AND a shell-created new file) is observed adopted, and the 2026-09-20 comment block is deleted. The orchestrator ruling "re-enable only when the measured edit is cheap" is this row |
 
@@ -215,7 +270,7 @@ A rejected candidate must not later supply the resolver context for an admitted 
 `var-def-keys` (`K/impl/core.clj:618-624`: `:arities :fixed-arities
 :varargs-min-arity :private :macro …`), not `:arglist-strs` or `:doc` — a
 docstring edit changes no cached signature, which is why it selects no
-caller. Concurrent `run!`s: publications are serialized by the monitor; the
+caller. Concurrent `run!`s: publications are not serialized in the JVM (step 1); the
 hook's prospective lints run `--cache false` (`bin/seon-hook:250-262`).
 
 | Case | Mechanism (all existing) | Regression |
@@ -315,6 +370,70 @@ The open evidence is `docs/seon/issues/runtime-status-throws-on-a-map-entry.md`,
 
 Acceptance is a fresh bounded lane exposing both tools, receiving complete `runtime_status` and `(let [c (seon.operator/connection "default")] {:value (+ 1 1) :basis (seon.db/basis-t (seon.db/db c))})` envelopes, and reconnecting after the owner replaces the JVM. Cover an ordinary map entry, absent cluster, timed-out observation and ambiguous selection. Tool registration cannot be proven by the server’s own tool list. No hand-written replacement transport is introduced. These tool files add an explicitly unpriced repair to §2h; count their net change separately until measured.
 
+### 3b. The development REPL: four parts, nothing stored
+
+Owner (2026-09-23): "A repl should do what all good repls do -- be very reliable and
+resiliant and helpful when possible"; "I'm not sure the mcp tools should be keeping any stored
+system results". Evidence, defects D1–D17 and every number here:
+[REPL investigation](../../../research/agent-platform/repl-investigation-2026-09-23.md). Today
+one `eval_clj` braids transport, evaluation, printing, error description, a configuration read,
+blob storage and page invalidation through a ThreadLocal (`cluster.clj:260-319`); printing
+depends on the projection, configuration and admission, so a fault there removes the REPL that
+should diagnose it (D8); answers are matched by position, so one throwing print shifts later
+answers to the wrong caller (D1, reproduced); the error face drops the outer message, `ex-data`
+and chain (D3). The target:
+
+| part | one role | where |
+|---|---|---|
+| bridge | JSON-RPC ⇄ one prepl connection per call (0.47–0.70 ms incl. connect); checks the answer's request id (mismatch → `:seon.dev.mcp/desync`, connection dropped); `tools/call` on a future (`stdout-lock` already serializes writes, `mcp.clj:807`); discovery = advertisement + exact `(pid, start-instant)` (`operator.clj:106-131`), no health observation per call (today ~105 ms) | `script/seon/dev/mcp.clj` (889 → ≈ 360) |
+| wire | print prepl events; a print failure is an answer, never a throw (Clojure's `io-prepl`, CLJ-2620, `server.clj:275-289`); exit check that cannot throw; no `ns-resolve` of `seon.cluster` | `resources/seon/operator/prepl.clj` |
+| evaluator | `seon.repl/host-eval`: one form in a named namespace (JVM) or context (SCI arm = today's `sci-evaluation-form` template, `mcp.clj:480-528`, as ordinary code calling `seon.sci.eval/evaluate`); value and error rendered once; `:ms` from prepl (`server.clj:233-235`) and the C1 directive over one second | `src/seon/repl.clj` (+≈105) |
+| renderer | the shown text: `seon.render.value/render-ai` under the compiled profile `(render/agent-render-profile seon.config/defaults)`; proportional to the shown window (2.1 ms for a 2×10⁵ vector that admission spends 385 ms printing to 8 MB today, 1.5 ms for `(range)`) | exists |
+
+Properties: an error answer is B3 §2a's shown text (every link's class, message and `ex-data`,
+phase, first-party frames, `ex-str` line; 4.8 ms for two links) and a render failure still
+shows a bounded print of the value with the failure; nothing is kept — no star vars
+(`5aa3989d0`), no stored result, no blob write; the elision's requery text says `(def v …)`
+then `get-in`/`take`/`drop`; MCP content is the shown text with a header of namespace, ms and
+request id, so `:k` and `"k"` stay distinct (D14); page caches refresh on adoption
+(`bin/seon init --dev … --changed`, which already offers `:runtime-eval`, `cluster.clj:2647-2650`),
+never on evaluation; `runtime_status` observes health only when asked. Mechanisms deleted:
+the ThreadLocal hand-off, `loaded-code-mark` and the page fan-out (`cluster.clj:263-291`,
+`:522-535`), `mcp-effective` (`:325-348`), `exception-summary`/`first-seon-frame`/`nil-deref?`
+(`:350-402`), `mcp-project` (`:404-510`), `mcp-valf` (`:512-549`), `mcp-io-prepl` (`:551-569`),
+the bridge's sessions (`mcp.clj:188-240`, `:631-643`), enrichment (`:351-423`) and the
+discovery observation's swallowing catch (`:106`); the operator's `request-form` mark
+(`operator.clj:204-209`); the `seon.dev.mcp*` projection members with their last writer. Kept:
+`mcp-runtime-observation` (`cluster.clj:628-691`) for status only; the bridge form check
+(`mcp.clj:242-324`, its comment skipper replaced by a second `read`); the JSON-RPC loop
+(`:821-889`). Fixed at the owner: "PREPL evaluation failed." lifts the failing link's class and
+message (`operator.clj:175`, D6); `readable-response` (`boot.clj:535-545`) prints bounded (D9).
+`seon.repl/error-text`'s `(catch Throwable _ nil)` (`repl.clj:165`) is fixed in R1. Projected
+src + script + resources ≈ −830, tests ≈ −900.
+
+| slice | change | files | est. src | regression (wanted behaviour) |
+|---|---|---|---|---|
+| R1 | `seon.repl/host-eval` with complete contracts over declared schemas | `src/seon/repl.clj`, `seon.repl` schema, `test/seon/repl_host_eval_test.clj` | +85 | `(vec (range 200000))` shows its head and an elision naming 199,968 omitted in < 50 ms; `(ex-info "outer" {:k 1} (IllegalStateException. "inner"))` shows both messages, `{:k 1}` and both classes; a throwing `toString` still returns the success, a core print and the print failure; `(sorted-map "a" 1)`, a Var and `(range)` render |
+| R2 | total wire | `prepl.clj` (after error-floor E2) | +8 / −10 | `(sorted-map "a" 1)` then `:next` on one connection yield exactly two `:ret` events with those forms' values (D1) |
+| R3 | bridge: one connection per call, request id, timeout names the running id, text content | `mcp.clj`, `test/seon/dev/mcp_bridge_test.clj` | +45 / −330 | two interleaved callers each get their own answer; a stale extra `:ret` yields `desync`; `(+ 1 2)` issues no runtime observation; `:k` ≠ `"k"` |
+| R4 | delete the MCP projection; convert `bin/seon-hook:1652`, `operator.clj:207`, `web_context_test.clj:227-245`, `reload_measure.clj`, `hook_measure.clj` | `cluster.clj` (after m4-n1), those files, `seon.dev.mcp.edn` | +5 / −380 | a page keeps its cache across a code-free `eval_clj` and refreshes after `init --dev --changed` |
+| R5 | `get_value` and REPL blob writes deleted (owner decision) | `mcp.clj`, `cluster.clj`, `seon.dev.mcp.artifact.edn` | −130 | a 100 KB value writes no blob and shows head + requery text |
+| R6 | operator and boot wire: D6, D9, bounded `operator.clj:1437` | `script/seon/operator.clj`, `boot.clj` | +15 / −5 | `bin/seon init` on a misplaced schema attribute prints the attribute message first; a reply holding a Var reads as EDN (D5) |
+| R7 | interrupt on timeout (owner decision): thread named `seon.repl/<request-id>`, `.interrupt` via `Thread/getAllStackTraces`; SCI's interrupt hook in SCI mode | `repl.clj`, `mcp.clj` | +20 | a `Thread/sleep`-blocked form ends with `InterruptedException` at the bound; a CPU loop reports "interrupt requested; outcome unknown" |
+| R8 | rewrite `.agents/skills/repl/SKILL.md` MCP section, every claim `file:line` | skill | docs | — |
+
+Order R1 → R2 → R3 → R4/R5 → R6 → R7 → R8. Closes on landing:
+`mcp-exception-projection-is-opaque-after-the-kind-removal.md`,
+`mcp-eval-refuses-map-results-without-cluster-projection-state.md`,
+`mcp-jvm-small-result-projection-fails-during-live-adoption.md`,
+`mcp-sci-error-projection-passes-a-nil-database.md`,
+`mcp-session-loss-claims-unobserved-restart.md`,
+`a-missing-required-dial-kills-every-io-prepl-connection.md`. **Open (owner):** `get_value`
+and blob-stored results (recommended: delete both); named sessions (recommended: one
+connection per call, no `session_id`); interrupt on timeout (recommended: R7); whether the
+answer to a failed evaluation is the declared error value or its shown text alone; whether the
+wire's own byte/length bound on `pr-str` is a second clipping spot.
+
 ## 4. REPL protocol
 
 Historical abbreviated rows in §1 are observations, not executable forms or promised fresh values. At implementation, retain the exact request/envelope for each measurement. This standalone read provides explicit custody and missing-projection evidence without changing runtime state:
@@ -365,6 +484,7 @@ the same commit.
 | # | Commit | Net | Probe / seam |
 |---|---|---:|---|
 | 0 | repair the MCP registration/status boundary in §3a; retain source-independent discovery through operator changes | measured | fresh-lane tool availability, complete status and bounded evaluation |
+| 0b | the development REPL, §3b R1–R8 | ≈ −830 | §3b regressions |
 | 1 | after §2e’s ownership/refusal probes pass, delete `discard-obsolete-cache-entries!`, the second `run!`, the hook transit diagnostic `:318-456`; regression for the six §2e cases through the real captured-source adapter | −190 | `(require 'seon.fn.analyzer)`; case table green, including rejected-candidate retry and competing analysis |
 | 2 | manifest dissolved: `build-manifest`, `database-manifest`, `manifest-data`, `artifact-by-path`, `manifest-function-symbols`, `replace-manifest-artifacts`, `published-index-rows` → rows from analysis; `full-source-refresh!` = capture → compare → classify → lint → rows; manifest schema keys deleted with their last reader | ≈ −600 | `adopt-nochange` row; `runtime_status` |
 | 3 | caller-less `fn.clj` vars (pack §4) and their `fn_test.clj` sections; three `sha-256` copies → `seon.id/sha-256` (`[bytes]` argument shape at each caller) | ≈ −1,400 | `(require 'seon.fn 'seon.test.cache 'seon.schema)` |
@@ -373,6 +493,7 @@ the same commit.
 | 6 | `publish!`: seal row, `publication-input-digest!`, `upsert!`/`populate-upserts!`, aggregate `:seon.source/digest` deleted; `test-input-digest` producers stop only with B4's reads (`test.clj:900,916,1365,2161`, `runner.clj:3639`, `fast.clj:30`) converted in the same commit — B4 seam, stop if held | ≈ −250 | **RESET NEEDED** (schema keys) |
 | 7 | snapshot/toolchain: `source-snapshot`, `current-source-snapshot`, `require-publication-resources!`, the second observation; `input-roots`/`input-paths`/`gitlink-digests`/`toolchain-dependencies` moved into `source.clj`; step-4 classification with its typed refusals | ≈ −200 | `adopt-noncore` row |
 | 8 | adoption: commit-id compare on every request; roots from both databases; `reload-order` refuses; post-reload digest verification replaces the blind retry; `instrument/apply!` receives `:seon.instrument/changed-identities` (A1 owns `apply!`; the producer and A1 consumer land together; existing broad arming remains beforehand) | −40 | `adopt-first` row; a forced reload refusal leaves the prior record |
+| 8′ | adoption in parts that fail alone, §2a′ S1–S6 (supersedes commit 8's reload/verify/retry wording where they differ) | ≈ −7 | §2a′ regressions; the rows-ahead window timed |
 | 9 | reset cold path: tempid = identity print for submitted rows, keywords inside the map, `index-tempids` deleted; the §2b attribution probe recorded FIRST | −120 | `init-zero` row and the phase table |
 | 10 | one progress argument; `:seon.config.source/phase-bounds-ms`; the nine mechanisms and the publication-phase bounds deleted; `test/runner.clj:60` converted; script re-homed and its grep rewritten | ≈ −200 | each phase fires as a typed error under a 1 ms bound |
 | 11 | [B1b — operator and boot rewrite](lane-b1b-operator-and-boot-rewrite.md): replacement client/boot/store admission, tool and surviving-maintenance caller conversion, old files and superseded tests removed in one slice; temporary tool/boot breakage permitted inside the slice | measure deletions, moves and new code separately; ~900 is not a ceiling | B1b’s eight scratch-root drills; tools restored; orchestrator restarts `default` once |

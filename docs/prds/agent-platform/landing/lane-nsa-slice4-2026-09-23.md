@@ -2,7 +2,7 @@
 type: landing
 status: landed
 lane: nsa-s4 (Opus 5.5)
-spec: docs/prds/agent-platform/plan/lane-nsa-slice4-prepare-accept.md (bb8ab9bb6)
+spec: lane-nsa-slice4-prepare-accept.md (bb8ab9bb6) — folded into docs/prds/agent-platform/plan/lane-namespace-agents-first-loop.md "Slice 4 as landed"
 created: 2026-09-23
 ---
 

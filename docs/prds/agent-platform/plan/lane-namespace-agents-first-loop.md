@@ -1,6 +1,6 @@
 ---
 type: plan
-status: design only; five bounded implementation slices, not an installed merge API
+status: five bounded slices; 2, 3 and 4 landed (owner-invoked prepare/accept installed), 1 landed with its loop regression red, 5 open
 created: 2026-09-23
 lane: ns-agents-design
 ---
@@ -14,9 +14,10 @@ Do not wait for B3's task replacement, D1 export, or cut 4's turn rewrite.
 This is the first increment of README §4 cut 3/3.x, not completion of README §2's
 export/two-candidate acceptance. README §7's must-fix order still precedes execution.
 
-**Today there is no complete installed gated merge.** Branches, interpreted overrides,
-three-way comparison and the test request exist. Acceptance and their composition
-remain work. “Compose installed seams” means extending these owners, not pretending
+**The gated merge is installed as an owner-invoked JVM request** (slice 4, `003a931d4`):
+`seon.cluster.source/prepare-merge!` and `accept-merge!` over branches, interpreted
+overrides, change-scoped three-way comparison, the guarded merge writer and the one test
+request. No agent-facing accept, task settlement or export exists. “Compose installed seams” means extending these owners, not pretending
 `my.task/merge!` or `seon.task/start-call` exists.
 
 Source anchors below were checked against committed HEAD `57d2312e299172cdd0e85572b623e309bced6e36`;
@@ -172,7 +173,7 @@ No new task, runner, cache, registry, launcher or merge service namespace.
 | 1. Start one worker on its branch | `src/seon/issue.clj`: thread optional existing `:seon.agent/branch` through start!/start-tx/create-tx to creation-tx. `test/seon/namespace_agent_loop_test.clj`: use installed acquisition/route/arm, branch-local issue and one virtual ordinary reply | 15–25 source + 50–60 test = **65–85** | One worker only; definition, evaluation, effect and fault facts stay on C; H digest unchanged; no paid call. Repeated start resumes/refuses through existing issue rules. If graph scope requires new machinery, give the held agent owner the exact failing seam; do not create another lifecycle |
 | 2. Change-scoped comparison | `src/seon/program.cljc` + its schema resource: extend digest-map input to identities derived from digest assertions/retractions since retained B; resolve deleted identities through history. `test/seon/program_test.clj` | 35–50 source/schema + 25–35 test = **60–85** | Existing three-way sees replacement/addition/deletion/equal revert/conflict; missing digest/family/history refuses. Target cost follows changed history, not P. Restrict first loop to function/test replacements with unchanged ns/schema bindings; refuse other changed program families explicitly. Keep generalized export later |
 | 3. Guard existing merge writer | Maintained Datahike `api.cljc`, `versioning.cljc`, `writing.cljc` and its regression; `src/seon/db.clj` + transaction schema: expose expected basis and immutable parents through the existing prepared write path | 30–45 source/schema + 35–45 test = **65–90** | Stale H leaves all datoms unchanged; final validator refusal leaves parents unchanged; good merge has immutable H/C/S lineage and updates the held connection. Reuse ordinary transact guard inside merge-writer!, not a copied validator. Do not trade away lineage silently |
-| 4. Compose preparation, gate and named accept | D1 owner `src/seon/cluster/source.clj`, `resources/seon/schemas/seon.cluster.edn`, `test/seon/cluster/merge_test.clj`. Proposed `prepare-merge!` / `accept-merge!` requests, not installed names | 55–65 source + 10 schema + 20–25 test = **85–100** | S from H, portable identity-scoped rows via `published-index-rows`, one test run with S recording custody; red/missing coverage/stale proof refuses. Root/owner explicit accept only. Existing source→test require cycle means resolve runner at call boundary, not a second runner |
+| 4. Compose preparation, gate and named accept — **landed `003a931d4`** | `src/seon/cluster/source.clj` (+139), `src/seon/program.cljc` (+5/−4), `test/seon/cluster/merge_test.clj` (+117); no schema, no new key, no reason enum, no second run at accept. `prepare-merge! [source held-store candidate issue]` → `{:seon.source/candidate S :seon.test.run/id :seon.test/passed? :seon.source/tally :datahike/expected-basis-t :parents #{C}}`, a nonempty `:seon.program/three-way`, or the refusing owner's flat error; `accept-merge! [source held-store proposal]` → the transaction report or `:seon.source/test-evidence-error` / `:transaction/stale-basis` / `digest-map-refusal` | 144 source + 117 test = **261**, over the 85–100 budget | Landed algorithm and its over-budget follow-ups are below the table |
 | 5. First real fix demonstration | `test/seon/namespace_agent_loop_test.clj` and committed `script/seon/namespace_agent_loop.clj`; agent authors its own database definitions | 35–50 test + 25–35 script = **60–85** | Actual missing contract → ordinary worker reply → regression red-before/green-after → combined gate → named accepted digest → shared indirect call. Script is repeatable composition of prior owners, not runtime machinery |
 
 Three-way comparison itself costs **0 new lines**. Portable row normalization,
@@ -197,6 +198,33 @@ Keep C and S roster branches through owner inspection; release connections only
 after body/graph exit. Automatic unlink waits for D1's retained-run-after-unlink
 proof under the real retention policy. This bounded two-branch retention uses the
 existing roster, not a new durable acceptance entity or copied run facts.
+
+**Slice 4 as landed** ([landing](../landing/lane-nsa-slice4-2026-09-23.md)). Merge base B:
+alternate parent walks from C and H over `:datahike/parents` meta (O(commits since fork),
+2.3 ms per commit, bound 10,000). Compare: `changed-identities B C` — the candidate's own
+changes only, because H's basis-t numbers belong to another lineage — then `digest-map` scoped
+to them and `three-way`. Delta: `published-index-rows C D` + `reconcile-tx` against the head.
+Gate: the existing `seon.cluster/candidate-gate!` unchanged, with an advance of `(constantly #{})`,
+one `seon.test/run :named` over D ∪ the issue's tests on a fresh branch S. Accept rereads the
+named run on S (tested branch, complete, every member green, every replaced function reached
+by `gate-sets`) and refuses a program write since the run through
+`seon.test.runner/program-written-since?` (`as-of` keeps the head's basis-t, so a
+`changed-identities` comparison from `as-of` would answer `#{}` falsely); `changed-identities`
+now also accepts a basis-t on the compared value's own lineage, and accept compares from the
+proposal's `:datahike/expected-basis-t`. The test owner does not refuse a changed function that
+reaches zero tests (`seon.test/select` of `my.agent/branch` → 0 members, no refusal), so accept
+refuses each uncovered function by name. One real merge: prepare 3,837 ms (3,003 ms the nested
+run), accept 1,187 ms (≈714 ms the first `gate-sets` reach index on E, whole program; 21 ms
+warm); merged parents #{H C E}. The named merge-test request took 35 s (five nested runs, each
+a new candidate commit — over ten seconds, the save-gate cost class in
+`cache-invalidation-audit-2026-09-23.md` item 6). **Over-budget follow-ups:** `merge-base`
+(22 lines) is deleted when the Datahike fork exposes a common-ancestor function beside
+`branch-history` (`versioning.cljc:191`, which materializes every commit on one side);
+accept's evidence block (≈14 lines) moves to `seon.test` as a "run R positively covers
+identities D" predicate, where the zero-reach refusal also belongs. **Not yet as specified
+above:** accept checks no arming or input-digest evidence and no accepter identity (owner JVM
+request only; a root accept needs D1's request boundary); "unfinished" and "other-run"
+evidence are not exercised by a regression.
 
 Slices 2 and 3 can proceed independently of slice 1; slice 4 needs 2+3; slice 5
 needs all. Slice 1's `issue.clj` is held: queue that change to its current holder
@@ -271,8 +299,8 @@ with `s` the acquired intermediate handle and `required-tests` the verified unio
 ```
 
 This is a WRITE and belongs to implementation/demo, not this read-only design lane.
-The final script exposes proposed prepare/accept forms from slice 4 only after
-those APIs land; there is no honest installed accept command to give today.
+The final script calls the installed `seon.cluster.source/prepare-merge!` and, after the
+owner reads the printed proposal, `accept-merge!` with that proposal.
 The owner approves the printed concrete H/C/S/run proposal. A red rehearsal, a
 moved H rehearsal and the accepted contract's indirect-call proof must be visible.
 No namespace GET or create-owner POST is necessary to watch these facts.

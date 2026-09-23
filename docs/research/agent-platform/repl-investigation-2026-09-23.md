@@ -3,7 +3,7 @@ type: research
 status: evidence (point-in-time observation, 2026-09-23 ~14:10–14:40Z, default pid 63253 started 14:11:20Z)
 created: 2026-09-23
 lane: repl-prd (Opus 5.5)
-feeds: docs/prds/agent-platform/plan/lane-repl-simple-reliable.md
+feeds: docs/prds/agent-platform/plan/lane-b1-one-publication-path.md §3b (the PRD lane-repl-simple-reliable.md, 9fd0f5347, was folded there)
 ---
 
 # The development REPL, end to end — investigation
