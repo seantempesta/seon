@@ -171,13 +171,11 @@
       (install! ctx database function-symbol)
       (throw
        (ex-info "SCI context has no database-program installer."
-                {:seon.error/at (java.util.Date.)
-                 :seon.error/layer ::installation
-                 :seon.error/operation 'seon.sci.kernel/ensure-function!
-                 ::guard-observation
+                (seon.error.refusal/diagnostic (java.util.Date.) ::installation 'seon.sci.kernel/ensure-function!
+                 {::guard-observation
                  {:seon.error.evidence/attribute :seon.fn/sym
                   :seon.error.evidence/value function-symbol}
-                 :seon.fn/sym function-symbol}))))
+                 :seon.fn/sym function-symbol})))))
   function-symbol)
 
 (defn context-projection
@@ -301,12 +299,10 @@
     (when-not guard
       (throw
        (ex-info "SCI context has no stable interrupt guard."
-                {:seon.error/at (java.util.Date.)
-                 :seon.error/layer ::arming
-                 :seon.error/operation 'seon.sci.kernel/acquire-arm
-                 ::guard-observation
+                (seon.error.refusal/diagnostic (java.util.Date.) ::arming 'seon.sci.kernel/acquire-arm
+                 {::guard-observation
                  {:seon.error.evidence/attribute ::guard
-                  :seon.error.evidence/value :seon.error/unknown}})))
+                  :seon.error.evidence/value :seon.error/unknown}}))))
     (if-let [armed (current-thread-arm guard)]
       (do
         (when-not (same-interpreter? armed ctx)
@@ -319,14 +315,12 @@
                    " for interpreter " (::interpreter-id existing)
                    " was armed at " (pr-str (::armed-at existing))
                    "; requested interpreter " (::interpreter-id requested) ".")
-              {:seon.error/at (java.util.Date.)
-               :seon.error/layer ::arming
-               :seon.error/operation 'seon.sci.kernel/acquire-arm
-               ::guard-observation
+              (seon.error.refusal/diagnostic (java.util.Date.) ::arming 'seon.sci.kernel/acquire-arm
+               {::guard-observation
                {:seon.error.evidence/attribute ::arm-id
                 :seon.error.evidence/value (::arm-id existing)}
                ::existing-arm existing
-               ::requested-context requested}))))
+               ::requested-context requested})))))
         {:interrupt-fn (::interrupt-fn guard)
          ::built-in-calls (fn [] @(::built-in-calls armed))
          ::stop! (constantly nil)
@@ -557,11 +551,8 @@
         (not (string? (:seon.error/message existing)))
         (assoc :seon.error/message
                (or (ex-message throwable) "The operation was refused.")))
-      (seon.error.refusal/diagnostic
-       {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.sci.kernel/evaluation
-        :seon.error/operation 'seon.sci.kernel/failure-value
-        :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/duration-ms
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.kernel/evaluation 'seon.sci.kernel/failure-value
+       {:seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/duration-ms
          :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
         :seon.error/message (or (:seon.error/message existing)
           (cond->> (if timed-out?
@@ -676,11 +667,8 @@
               :seon.sci.admit/record record-value})
             (catch Throwable admission-failure
               {:seon.sci.admit/value
-               (seon.error.refusal/diagnostic
-                {:seon.error/at (java.util.Date.)
-                 :seon.error/layer :seon.sci.kernel/evaluation
-                 :seon.error/operation 'seon.sci.kernel/invoke
-                 :seon.error/message "The invocation failure could not be admitted; inspect its admission evidence."
+               (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.kernel/evaluation 'seon.sci.kernel/invoke
+                {:seon.error/message "The invocation failure could not be admitted; inspect its admission evidence."
                  :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.error/message
                   :seon.error.evidence/value (or (ex-message admission-failure) "Failure admission failed.")}
                  :seon.error/throwable admission-failure
