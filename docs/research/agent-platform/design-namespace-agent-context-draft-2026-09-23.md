@@ -28,6 +28,11 @@ This draft synthesizes eight research notes (evidence at the end) and the owner'
 3. **Links are values written where the knowledge is produced.** Observed names are qualified
    symbols/keywords (they survive deletion of their target; "names nothing" is one query).
    Reverse edges ("who calls me", "what links here") are queries, never stored.
+   **Every symbol reference is stored as a Datahike symbol, never a string** (owner, 2026-09-23):
+   function, namespace, test, renderer, context-function and link targets are `:qualified-symbol`
+   (namespaces `:symbol`). Known violations to convert: issue citations' unresolved tokens as
+   strings (`resources/seon/schemas/seon.issue.edn:27`), `pr-str`'d forms and triage
+   (producer inventory §1.5).
 4. **Prose is never parsed.** Docstrings and `:description` are plain text. Every link is a real
    symbol or keyword that clj-kondo or Malli already reports. No mini-language in strings.
 5. **Context is forms, ordered like code.** Render functions return a comment plus a form; forms
