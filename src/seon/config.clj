@@ -11,7 +11,7 @@
   inherits the shipped decision; it does not retract a defaulted optional
   attribute. `:seon.config/absent` is the one explicit retraction form, is
   refused for required attributes, and never becomes nil or a datom."
-  (:require
+  (:require [seon.error.refusal]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -119,10 +119,8 @@
                                        (not (:seon.config/missing-effective effective)))
                                effective)]
     (if missing
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.config/read
-        :seon.error/operation 'seon.config/result-caps
-        :seon.config/error-key missing
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.config/read 'seon.config/result-caps
+       {:seon.config/error-key missing
         :seon.error/expected-key missing
         :seon.error/message "Value-admission caps require every declared configuration bound."
         :seon.error/offending effective
@@ -131,7 +129,7 @@
          (assoc :seon.config/missing-effective
                 (:seon.config/missing-effective effective))
          cluster-less-refusal
-         (assoc ::configuration-refusal cluster-less-refusal))}
+         (assoc ::configuration-refusal cluster-less-refusal))})
       (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
@@ -788,11 +786,9 @@
                         db)]
             (if (:seon.db/invalid-read available)
               available
-            {:seon.error/at (java.util.Date.)
-              :seon.error/layer :seon.config/read
-              :seon.error/operation 'seon.config/effective-in
-              :seon.config/error-key :seon.config/cluster
+            (seon.error.refusal/diagnostic (java.util.Date.) :seon.config/read 'seon.config/effective-in
+             {:seon.config/error-key :seon.config/cluster
               :seon.error/expected-key :seon.config/effective
               :seon.config/missing-effective cluster-name
               :seon.error/message "Effective configuration requires a matching cluster row with every required dial."
-              :seon.error/data {::missing missing ::available (vec (sort available))}})))))))
+              :seon.error/data {::missing missing ::available (vec (sort available))}}))))))))
