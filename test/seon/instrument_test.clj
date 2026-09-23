@@ -21,6 +21,7 @@
             [clojure.string :as str]
             [malli.instrument :as mi]
             [malli.core :as m]
+            [malli.registry :as mr]
             [sci.core :as sci]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
@@ -972,31 +973,38 @@
                           [:seon.error/operation]))
                "each exact qualified Var symbol selects its own contract")))))))
 
-(deftest registration-failure-names-the-var-and-authored-contract
-  (let [namespace-name 'n5.registration.probe
-        namespace-object (create-ns namespace-name)
-        function-symbol 'n5.registration.probe/broken
-        authored-schema [:=> [:cat [:ref :n5/missing]] :int]]
+(deftest one-uncompilable-contract-refuses-alone-and-the-rest-arm
+  ;; A1-1 (G1): each wrapper is compiled once at arming and installed; a
+  ;; contract that cannot compile keeps its Var's previous root and comes
+  ;; back as one registration error, while every other Var in the batch arms.
+  (let [names ['arming-broken 'arming-healthy]
+        [broken healthy] (mapv #(intern 'seon.instrument-test % identity) names)
+        [broken-sym healthy-sym] (mapv #(symbol "seon.instrument-test" (str %)) names)
+        unresolvable [:=> [:cat [:ref :seon.instrument-test/absent]] :int]
+        contract [:=> [:cat :int] :int]
+        admitted (schema/projection-with-function-contract
+                  (schema/handed-projection) healthy-sym contract
+                  {:seon.schema.admission/source :core})
+        registry (:seon.schema.projection/registry admitted)
+        projection (assoc admitted :seon.schema.projection/registry
+                          (mr/composite-registry {broken-sym unresolvable} registry))
+        broken-root @broken]
     (try
-      (intern namespace-object
-              (with-meta 'broken {:malli/schema authored-schema})
-              identity)
-      (let [failure
-            (try
-              ;; ABSENT MEANS NO KEY: the admission caps are optional here
-              ;; and a nil in an optional key fails its contract.
-              (instrument/apply! {:seon.config/on-core-error :panic})
-              (catch clojure.lang.ExceptionInfo thrown thrown))
-            diagnostic (ex-data failure)]
-        (is (= function-symbol
-               (:seon.error/member diagnostic)))
-        (is (= authored-schema
-               (:seon.error/expected diagnostic)))
-        (is (= :n5/missing
-               (:seon.error/offending diagnostic))))
-      (finally
-        (instrument/remove!)
-        (remove-ns namespace-name)))))
+      (alter-meta! broken assoc :malli/schema unresolvable)
+      (alter-meta! healthy assoc :malli/schema contract)
+      (let [refusal (instrument/apply!
+                     {:seon.config/on-core-error :panic :seon.schema/projection projection
+                      :seon.instrument/changed-identities
+                      #{[:seon.fn/sym broken-sym] [:seon.fn/sym healthy-sym]}})]
+        (is (= broken-sym (:seon.error/member refusal) (:seon.instrument/fn refusal)))
+        (is (= unresolvable (:seon.error/expected refusal)))
+        (is (= :seon.instrument-test/absent (:seon.error/offending refusal)))
+        (is (seq (:seon.error/chain refusal)) "the compile failure's whole chain survives")
+        (is (m/validate :seon.instrument/registration-error refusal {:registry registry}))
+        (is (identical? broken-root @broken) "the refused Var keeps its previous root")
+        (is (contains? (instrument/instrumented) healthy) "the rest of the batch arms")
+        (is (thrown? clojure.lang.ExceptionInfo (healthy "not an int"))))
+      (finally (doseq [name names] (ns-unmap 'seon.instrument-test name))))))
 
 (deftest re-evaluating-a-defn-silently-strips-instrumentation
   ;; the measured fact this namespace's discipline exists for

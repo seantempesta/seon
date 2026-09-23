@@ -744,14 +744,16 @@
 (defn- arm-var!
   {:malli/schema
    [:function
-    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps] :seon.instrument/callable]
-    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps [:or :nil :map]] :seon.instrument/callable]
-    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps [:or :nil :map] [:or :nil :seon.program/definition-digest]] :seon.instrument/callable]]}
-  ([candidate authored projection bootstrap caps]
-   (arm-var! candidate authored projection bootstrap caps nil nil))
-  ([candidate authored projection bootstrap caps policy]
-   (arm-var! candidate authored projection bootstrap caps policy nil))
-  ([candidate authored projection bootstrap caps policy digest]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable :seon.sci.admit/caps] :seon.instrument/callable]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable :seon.sci.admit/caps [:or :nil :map]] :seon.instrument/callable]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable :seon.sci.admit/caps [:or :nil :map] [:or :nil :seon.program/definition-digest]] :seon.instrument/callable]]}
+  ;; `boot-wrapper` is the wrapper arming compiled once for this Var; the
+  ;; installation calls that same object, so a call never compiles.
+  ([candidate authored projection boot-wrapper caps]
+   (arm-var! candidate authored projection boot-wrapper caps nil nil))
+  ([candidate authored projection boot-wrapper caps policy]
+   (arm-var! candidate authored projection boot-wrapper caps policy nil))
+  ([candidate authored projection boot-wrapper caps policy digest]
   (alter-var-root
    candidate
    (fn [current]
@@ -770,10 +772,6 @@
              contract (get (:seon.schema.projection/function-contracts projection)
                            function-symbol authored)
              definitions (contract-definitions projection contract)
-             boot-wrapper (delay
-                            (binding [*compiling-contract* true]
-                              (compiled-wrapper bootstrap function-symbol
-                                                authored original caps policy)))
              supplied-wrapper (atom nil)]
          (profile/with-cell cell
           (with-meta
@@ -802,7 +800,7 @@
                                                                     authored original caps policy))]
                                     (reset! supplied-wrapper [projection wrapper])
                                     wrapper))))
-                            @boot-wrapper))]
+                            boot-wrapper))]
                   (apply wrapped arguments)))))
            {:malli.instrument/original original
             ::cell cell
@@ -925,30 +923,43 @@
           (doseq [candidate candidates
                   :when (and (bound? candidate) (not (find contracts candidate)))]
             (alter-var-root candidate mi/-f->original))
-          (doseq [[candidate authored] pending]
-            (try
-              (binding [*compiling-contract* true]
-                (compiled-wrapper projection (var-symbol candidate)
-                                  authored (mi/-f->original @candidate) caps policy))
-              (catch Throwable failure
-                (let [data (registration-cause-data failure)
-                      diagnostic
-                      (registration-error (var-symbol candidate)
-                       {:seon.error/message (str "The loaded function contract " (var-symbol candidate)
-                                                " cannot compile: " (ex-message failure))
-                        :seon.error/layer :instrumentation
-                        :seon.error/operation 'seon.instrument/apply!
-                        :seon.error/expected authored
-                        :seon.error/offending (or (:schema data) (get-in data [:data :ref])
-                            (get-in data [:data :schema]))
-                        :seon.error/member (var-symbol candidate)})]
-                  (throw (ex-info (:seon.error/message diagnostic)
-                                  diagnostic failure)))))
-            (when changed (alter-var-root candidate mi/-f->original))
-            (arm-var! candidate authored projection projection caps policy
-                      (get digests (var-symbol candidate))))
-          {:seon.instrument/registered (count contracts)
-           :seon.instrument/instrumented (count (instrumented))})))))
+          ;; Each Var's wrapper is compiled once and that object installed. A
+          ;; contract that cannot compile leaves its Var on its previous root
+          ;; and becomes a registration error; every other Var still arms.
+          (let [refused
+                (into []
+                      (keep
+                       (fn [[candidate authored]]
+                         (let [function-symbol (var-symbol candidate)
+                               built (try
+                                       (binding [*compiling-contract* true]
+                                         (compiled-wrapper projection function-symbol authored
+                                                           (mi/-f->original @candidate) caps policy))
+                                       (catch Throwable failure failure))]
+                           (if (instance? Throwable built)
+                             (let [data (registration-cause-data built)]
+                               (registration-error function-symbol
+                                {:seon.error/message (str "The loaded function contract " function-symbol
+                                                          " cannot compile: " (ex-message built))
+                                 :seon.error/layer :instrumentation
+                                 :seon.error/operation 'seon.instrument/apply!
+                                 :seon.error/expected authored
+                                 :seon.error/offending (or (:schema data) (get-in data [:data :ref])
+                                                           (get-in data [:data :schema]))
+                                 :seon.error/member function-symbol
+                                 :seon.error/throwable built}))
+                             (do (when changed (alter-var-root candidate mi/-f->original))
+                                 (arm-var! candidate authored projection built caps policy
+                                           (get digests function-symbol))
+                                 nil)))))
+                      pending)]
+            (if-let [first-refusal (first refused)]
+              (cond-> first-refusal
+                (next refused)
+                (update :seon.error/message str " Also refused: "
+                        (mapv :seon.instrument/fn (rest refused)) "."))
+              {:seon.instrument/registered (count contracts)
+               :seon.instrument/instrumented (count (instrumented))})))))))
 
 (defn remove!
   "Return the shared JVM wrapper count. Cluster teardown cannot remove host contracts."
@@ -1052,13 +1063,15 @@
         (let [projection ((mi/-f->original schema/declaration-projection)
                           (schema.edn/packaged-forms))]
           ;; Compile the complete replacement set before installing any wrapper.
-          (doseq [[candidate authored policy] pending]
-            (binding [*compiling-contract* true]
-              (compiled-wrapper projection (var-symbol candidate) authored
-                                (mi/-f->original @candidate)
-                                (:seon.sci.admit/caps policy) policy)))
-          (doseq [[candidate authored policy] pending]
-            (arm-var! candidate authored projection projection
+          (doseq [[candidate authored policy wrapper]
+                  (mapv (fn [[candidate authored policy]]
+                          [candidate authored policy
+                           (binding [*compiling-contract* true]
+                             (compiled-wrapper projection (var-symbol candidate) authored
+                                               (mi/-f->original @candidate)
+                                               (:seon.sci.admit/caps policy) policy))])
+                        pending)]
+            (arm-var! candidate authored projection wrapper
                       ;; A replaced definition's digest is unknown here.
                       (:seon.sci.admit/caps policy) policy nil)))))
     replaced))
