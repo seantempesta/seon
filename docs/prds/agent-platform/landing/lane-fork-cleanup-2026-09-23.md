@@ -31,6 +31,8 @@ still needed; upstream does not cover it.
 pass the root lib to `discovery-form` as an argument, so the regression drives the
 same form. S11: rebase the one commit onto the release. No new mechanism.
 
+Commits: Seon 4558a1c39 (dev_cache.clj, its regression, http-kit gitlink 238a85c → f56bbea, this note); fork seantempesta/http-kit f56bbea on branch `seon-pending-write-state-beta4`.
+
 ## S11 — http-kit
 
 - Fork commit **f56bbea** "Expose per-channel pending write state" (238a85c rebased onto
