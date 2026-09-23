@@ -2004,6 +2004,9 @@
                                    (db/q '[:find [?path ...]
                                            :where [_ :seon.fn.file/relative-path ?path]] committed)))))
             prior (if committed (source/stored-path-digests committed paths) {})
+            _ (when-let [unknown (seq (remove #(or (contains? observed %) (contains? prior %)) requested))]
+                (refused! "Changed paths are neither in the JVM's source directory nor published."
+                          {:seon.fn/root directory :seon.source/changed-paths (vec unknown)}))
             changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)
             classification (cond
                              (nil? committed) :all
@@ -2828,6 +2831,12 @@
            _ (when (and development-cluster (not instance))
                (refused! "Development updates require the named cluster to be running."
                          {:seon.boot/cluster-name development-cluster}))
+           ;; A named path resolves in THIS JVM's source directory; one outside it
+           ;; would publish nothing while answering with a commit id.
+           _ (when-let [outside (seq (filter #(str/starts-with? (fs/relative-path directory %) "..")
+                                             changed-paths))]
+               (refused! "Changed paths lie outside the JVM's source directory."
+                         {:seon.fn/root directory :seon.source/changed-paths (vec outside)}))
            config (resolve-bootstrap {:seon.boot/root root})
            store-dir (:seon.boot/store-dir config)
            _ (report-source-progress! "store acquisition")
