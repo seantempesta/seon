@@ -302,7 +302,14 @@
   [:seon.test/namespaces {:optional true} [:set :symbol]]
   [:seon.test/changed {:optional true} :seon.test/changed]
   [:seon.test/include-long? {:optional true} :boolean]
-  [:seon.test/check-time-limit-ms {:optional true} :seon.test/check-time-limit-ms]]
+  [:seon.test/check-time-limit-ms {:optional true} :seon.test/check-time-limit-ms]
+  [:seon.test/batch-limit {:optional true} :seon.test/batch-limit]]
+ :seon.test/loaded-source [:and {:description "The source commit this JVM loaded (its store's published head), supplied to selection."} :seon.source/commit-id]
+ :seon.test/loaded-source-drift
+ [:map {:description "The loaded source differs from the program rows the cluster records: recorded evidence cannot vouch for what executes, so nothing was reused."}
+  [:seon.test/loaded-source :seon.test/loaded-source]
+  [:seon.source/commit-id {:optional true} :seon.source/commit-id]]
+ :seon.test/batch-limit [:int {:min 1 :description "Members per admission and per release transaction; defaults to seon.test/batch-limit."}]
  :seon.test/executed-count [:int {:min 0}]
  :seon.test/reused-count [:int {:min 0}]
  :seon.test/passed? [:boolean {:description "True only when every obligation of the request has green evidence; exclusions, pending and unfinished members are unfulfilled."}]
@@ -339,5 +346,6 @@
   [:seon.test/long-excluded {:optional true} :seon.test/long-excluded]
   [:seon.test/pending {:optional true} :seon.test/pending]
   [:seon.test/unfinished {:optional true} :seon.test/unfinished]
-  [:seon.test/recording-refusal {:optional true} :seon.test/recording-refusal]]
+  [:seon.test/recording-refusal {:optional true} :seon.test/recording-refusal]
+  [:seon.test/loaded-source-drift {:optional true} :seon.test/loaded-source-drift]]
 }

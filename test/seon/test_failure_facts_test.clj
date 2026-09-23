@@ -240,6 +240,30 @@
      [{:seon.test/sym test-symbol :seon.test/pass-count (if (zero? failures) 1 0)
        :seon.test/fail-count failures :seon.test/error-count 0}]}))
 
+(deftest a-claim-reported-at-a-moved-line-records-another-report
+  ;; A report's id once named only its claim, so an edit that moved a failing
+  ;; assertion gave the new report the stored report's id with other facts:
+  ;; the recorder refused the whole request with :seon.test/report-conflict
+  ;; and left every later member pending (run df397c67dcc7, 2026-09-23).
+  (let [attributes [:seon.test/failure-identity :seon.test.failure/type
+                    :seon.test.failure/line :seon.test.failure/reported-file]
+        s 'report.facts/moved
+        failure (fn [line]
+                  {:seon.test/failure-identity (id/digest 64 [::moved-claim])
+                   :seon.test.failure/type :fail
+                   :seon.test.failure/line line
+                   :seon.test.failure/reported-file "test/report/facts.clj"
+                   :seon.test.failure/file {:db/id 1}})
+        at-10 (runner/report-row attributes s (failure 10))
+        at-12 (runner/report-row attributes s (failure 12))]
+    (is (not= (:seon.test.report/id at-10) (:seon.test.report/id at-12))
+        "the moved claim is another report")
+    (is (= at-12 (runner/report-row attributes s (failure 12)))
+        "an equal report is the same entity")
+    (is (= 12 (:seon.test.failure/line at-12)))
+    (is (nil? (find at-12 :seon.test.failure/file))
+        "only declared report attributes are stored")))
+
 (defn- transact! [connection rows]
   (support/transacted! connection
            (mapv (fn [row]

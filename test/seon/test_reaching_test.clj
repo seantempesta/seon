@@ -84,8 +84,13 @@
         (is (:db/id (db/pull database [:db/id] [:seon.fn/sym 'my.note/add!])))
         (is (vector? actual))
         (is (= (set (functions/tests-reaching database 'my.note/add!)) (set actual)))
-        (is (string? (:seon.test/unknown (sut/reaching {:seon.db/db database
-                               :seon.test/changed ['absent.function/no-row]}))))))))
+        (is (= :seon.test/identity-unresolved
+               (:seon.test/selection-refusal
+                ;; Built at run time: a quoted symbol here would itself be an
+                ;; indexed reference edge from this test.
+                (sut/reaching {:seon.db/db database
+                               :seon.test/changed [(symbol "absent.function"
+                                                           (str "no-row-" (random-uuid)))]}))))))))
 
 (defn- with-indexed-tests [connection namespace-name sources assertion]
   (let [root (doto (clojure.java.io/file "tmp" (str "reaching-source-" (id/id))) .mkdirs)]
@@ -121,53 +126,6 @@
                          (db/pull (db/db connection) [:seon.test/sym]
                                   [:seon.test/sym test-symbol]))]
             (is (qualified-symbol? written) (pr-str written))))))))
-
-(deftest concurrent-completions-use-the-canonical-program
-  (support/with-database
-    (fn [connection]
-      (let [database (db/db connection)
-            s 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol
-            completion (assoc (runner/provenance database)
-                              :seon.test.runner/results [{:seon.test/sym s
-                                :seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0}])
-            expected {s (sut/reach-digest database s)}
-            workers (mapv (fn [_] (future (#'runner/completion-reach-digests completion))) (range 2))]
-        (try
-          (doseq [worker workers]
-            (let [result (support/await-event! worker :reach-digest/completion)]
-              (is (= expected (:seon.test/reach-digests result)))
-              (is (= (:seon.test.run/program-digest completion)
-                     (:seon.test.run/program-digest result)))))
-          (finally (doseq [worker workers] (future-cancel worker))))))))
-
-(deftest transported-results-retain-the-tested-database-digest
-  (support/with-database
-    (fn [connection]
-      (with-test connection '(clojure.test/is true)
-        (fn [s v]
-          (let [tested (db/db connection)
-                provenance (runner/provenance tested)
-                digest (sut/reach-digest tested s)
-                result (runner/run-var! v)
-                transported (#'runner/completion-reach-digests
-                              (assoc provenance :seon.test/reach-digests {s digest}
-                                     :seon.test/reaches (runner/reach-memberships tested [s])
-                                     :seon.test.runner/results [result]))]
-            (is (:db-after (db/transact! connection
-                             [[:db/add [:seon.test/sym s] :seon.test/source
-                               "(clojure.test/deftest probe (clojure.test/is (= 1 1)))"]])))
-            (let [completion {:seon.test.runner/results [result]
-                              :seon.test/reach-digests (:seon.test/reach-digests transported)
-                              :seon.test/reaches (:seon.test/reaches transported)
-                              :seon.test.run/provenance provenance
-                              :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                              :seon.test/run-at (:seon.test.run/at provenance)}
-                  recorded (runner/commit-results! connection completion)]
-              (is (= digest (:seon.test/reach-digest (first recorded))) (pr-str recorded))
-              (is (not= digest (sut/reach-digest (db/db connection) s)))
-              (is (false? (sut/verified? (db/db connection) s)))
-              (is (some #{s} (sut/stale (db/db connection))))
-              (is (.contains (#'runner/persistent-results-form transported) digest)))))))))
 
 (deftest fixture-observations-remain-stale
   (support/with-database
@@ -253,24 +211,6 @@
                            [[:db/add [:seon.fn/sym f] :seon.fn/source
                              (str (first sources) "\n")]])))
           (is (not= before (sut/reach-digest (db/db connection) s))))))))
-
-(deftest fixture-state-observation-is-total
-  (support/with-database
-    (fn [connection]
-      (let [unrealized (delay (throw (ex-info "must not force" {})))
-            failed (delay (throw (ex-info "failed fixture acquisition" {})))
-            acquired (delay {:seon.sci.eval/ctx (support/fork-cluster-ctx connection)})]
-        (try @failed (catch Exception _ nil))
-        @acquired
-        (is (nil? (#'runner/sci-base-namespace-sizes unrealized)))
-        (is (not (realized? unrealized)))
-        (let [observation (#'runner/sci-base-namespace-sizes failed)]
-          (is (string? (:seon.test.runner/fixture-base-unavailable observation)))
-          (is (= "failed fixture acquisition" (:seon.error/message observation))))
-        (let [sizes (#'runner/sci-base-namespace-sizes acquired)]
-          (is (seq sizes))
-          (is (some pos? (vals sizes))))
-        (is (map? (#'runner/ambient-snapshot)))))))
 
 (deftest run-carries-the-connections-projection-to-the-test-thread
   (support/with-database

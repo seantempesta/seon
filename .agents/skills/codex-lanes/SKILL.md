@@ -56,13 +56,12 @@ account"); the cheap model is `gpt-5.6-luna`. Dials: `LANE_MODEL`,
 ## The rules a lane lives under
 
 - **Identity:** the launcher exports `SEON_CODEX_LANE=<name>` on run and
-  resume; `bin/test` refuses cold gates with that identity (`aba5d94a5`).
-  A lane iterates with `bin/test-fast --paths <its files> -- <namespaces>`,
-  one run at a time, foreground with a long timeout; never `--all`/`--full`;
-  never `SEON_TEST_SLOTS` or `SEON_TEST_SILENCE_SECONDS` (refused, `0db8b71bc`).
-- **Fast runs use the newest published graph** for the overlay check and
-  name its digest and age; with no base at all they refuse and name
-  `bin/test --prepare-head-base`, which the orchestrator runs (`312f60560`).
+  resume. A lane iterates with ONE `seon.test/run` request on its cluster
+  (`src/seon/test.clj`, `run`): `bin/test-check [--root ROOT] CLUSTER --ns <namespace>`
+  (or `--test NS/TEST`, `--changed NS/SYM`), or the same request from the MCP
+  eval tool; each member runs on its own branch of that cluster and no JVM
+  starts. The isolated platform host (`bin/test --platform`) is the
+  orchestrator's.
 - **Hooks:** the launcher passes `--dangerously-bypass-hook-trust` on both
   paths, because Codex silently skips a project hook whose trust snapshot
   no longer matches (`c41dd408b`). Codex snapshots `.codex/hooks.json` at

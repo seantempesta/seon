@@ -5,9 +5,12 @@
             [clojure.string :as str]
             [sci.core :as sci]
             [seon.config :as config]
+            [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.fn :as functions]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -118,6 +121,13 @@
                       (when data (str " " (pr-str data)))))
                (when-let [frame (first trace)] [(str "at " (pr-str frame))])))))
 
+(def ^:dynamic *member*
+  "The execution handle of the member whose host (JVM) test body runs on this
+  thread, bound by `seon.test/run` around that body exactly as clojure.test
+  binds `*testing-vars*`. Canonical fixtures branch off it. Nil outside a
+  member body; an agent (SCI) body reaches its branch through custody instead."
+  nil)
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
@@ -127,7 +137,8 @@
   the body thread never started. The caller hands all cleanup to it."
   {:malli/schema [:=> [:cat :seon.test/var [:int {:min 1}]
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
-                        [:seon.sci.eval/ctx :seon.sci.eval/ctx]]
+                        [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+                        [:seon.test/member {:optional true} :seon.agent/execution-handle]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
   [test-var timeout-ms custody release!]
@@ -138,12 +149,21 @@
             ;; The SCI arm interrupts interpreted bodies at the declared per-test
             ;; bound; `duration-failures` fails any body that completes over it.
             body-bound (or (:seon.test/long-ms markers) 5000)
+            member (:seon.test/member custody)
             task (FutureTask.
                   (bound-fn []
                     (with-test-loader
-                      #(sci.eval/run-test
-                        (assoc custody :seon.test/var test-var
-                                       :seon.sci.eval/time-limit-ms body-bound)))))
+                      #(if (var? test-var)
+                         ;; A host body runs unarmed, with no inherited cluster
+                         ;; custody, as a JVM test body always has: it may
+                         ;; evaluate its own SCI contexts, which another arm on
+                         ;; this thread would refuse.
+                         (binding [*member* member]
+                           (runner/run-var! test-var {}))
+                         (sci.eval/run-test
+                          (assoc (dissoc custody :seon.test/member)
+                                 :seon.test/var test-var
+                                 :seon.sci.eval/time-limit-ms body-bound))))))
             thread (.unstarted (Thread/ofVirtual) task)
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol
@@ -196,11 +216,10 @@
   working directory — the developer's checkout, with its live `data/store`.
 
   `bin/seon [--root PATH] start` declares the root it operates on every child
-  JVM, so an ordinary development JVM declares the checkout it runs in; a
-  `bin/test` worker declares its isolated run root
-  (`src/seon/test/runner.clj:2549`) and `bin/test-fast` declares none. Returns
-  the canonical development root, or nil when this JVM operates an isolated
-  root or declares nothing."
+  JVM, so an ordinary development JVM declares the checkout it runs in, and
+  the `bin/test --platform` host declares its fresh run root. Returns the
+  canonical development root, or nil when this JVM operates an isolated root
+  or declares nothing."
   [declared]
   (when-not (str/blank? declared)
     (let [root (.getCanonicalPath (io/file declared))
@@ -646,8 +665,8 @@
                             {} (if last-green (drop-while #(<= (one % :seon.test.run/selection-tx)
                                                                 (one last-green :seon.test.run/selection-tx)) runs) runs))
             observed-changed (if comparison (changed-definition-symbols database comparison) #{})
-            changed (into observed-changed
-                          (selection-read! (selection-seeds database (vec (:seon.test/changed request)))))
+            requested-changed (selection-read! (selection-seeds database (vec (:seon.test/changed request))))
+            changed (into observed-changed requested-changed)
             schema-changes (when (and comparison (= :incremental policy) (not first-run?))
                              (selection-read!
                               (db/q '[:find [?e ...] :in $ [?attribute ...] :where [?e ?attribute]]
@@ -659,10 +678,19 @@
                       (selection-read! (functions/gate-sets {:seon.db/db database :seon.fn/seeds changed})) [])
             work? (or first-run? (seq changed) (seq pending))
             reached (set reached)
+            ;; A named request's `:seon.test/changed` names the tests reaching
+            ;; exactly those identities; changes observed since the last run
+            ;; widen only incremental requests.
+            requested-reached (if (and (= :named policy) (seq requested-changed))
+                                (set (selection-read!
+                                      (functions/gate-sets {:seon.db/db database
+                                                            :seon.fn/seeds requested-changed})))
+                                #{})
             candidates
             (if (or first-run? (#{:all :full} policy))
               (selection-read! (db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database))
-              (into (into (into identities reached) (keys pending))
+              (into (into (into identities (if (= :named policy) requested-reached reached))
+                          (keys pending))
                     (concat
                      (when (and (= :incremental policy) (not work?))
                        (map #(one % :seon.test.member/symbol) (mapcat members runs)))
@@ -672,7 +700,10 @@
                                 :where [?ns :seon.ns/name ?name]
                                        [?test :seon.test/ns ?ns] [?test :seon.test/sym ?symbol]]
                               database namespaces)))
-                     (when (or work? (= :platform policy))
+                     ;; The declared platform tier has its own isolated host
+                     ;; (`bin/test --platform`); an incremental request asks for
+                     ;; its changed reach and outstanding work only.
+                     (when (= :platform policy)
                        (selection-read!
                         (db/q '[:find [?symbol ...]
                                 :where [?test :seon.test/platform] [?test :seon.test/sym ?symbol]] database))))))
@@ -699,9 +730,12 @@
             named? (fn [[symbol entity]]
                      (or (identities symbol)
                          (namespaces (one (one entity :seon.test/ns) :seon.ns/name))))
+            ;; Fixture material is never gate membership. A declared fixture
+            ;; observation IS membership: it needs a file-backed host, which
+            ;; `seon.test/run` gives it off a development root and names
+            ;; with its platform command on one.
             excluded? (fn [[_ entity]]
-                        (or (one entity :seon.test/fixture)
-                            (one entity :seon.test/fixture-observation)))
+                        (one entity :seon.test/fixture))
             _ (doseq [entry tests :when (and (named? entry) (excluded? entry))]
                 (refuse! :seon.test/fixture-excluded "Explicit fixture material is not gate membership." (first entry)))
             eligible (into {}
@@ -712,7 +746,10 @@
                                           (named? entry))
                                       (or include-long? (identities (first entry))
                                           (not (one entity :seon.test/long)))
-                                      (or (not= :named policy) (named? entry))))) tests)
+                                      ;; A named request's changed identities
+                                      ;; name the tests reaching them too.
+                                      (or (not= :named policy) (named? entry)
+                                          (requested-reached (first entry)))))) tests)
             _ (doseq [symbol identities :when (not (get eligible symbol))]
                 (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
             _ (doseq [ns-symbol namespaces
@@ -735,7 +772,7 @@
                                        (and first-run? (not= :platform policy)) (conj :first-run)
                                        (and (not= :platform policy) (reached symbol)) (conj :reaches-changed)
                                        (or (named? entry) (#{:all :full} policy)) (conj :named)
-                                       (and (or work? (#{:platform :all :full} policy)) (one entity :seon.test/platform)) (conj :platform))]
+                                       (and (#{:platform :all :full} policy) (one entity :seon.test/platform)) (conj :platform))]
                          (if (seq reasons) (assoc result symbol reasons) result)))
                      (sorted-map) eligible)
             digest (selection-read! (runner/program-digest database))
@@ -749,7 +786,18 @@
                                               (not (one % :seon.test.run/tested-branch))
                                               (= input-digest (one % :seon.test.run/input-digest))
                                               (one % :seon.test.run/selection-tx)) run-ids)))
-            reuse-candidates (if (and (= :incremental policy) (not work?)) eligible reasons)
+            ;; Recorded evidence was earned by the program its JVM loaded. When
+            ;; the JVM loaded source the cluster's program rows do not describe
+            ;; (a restart from changed files, before adoption), the rows cannot
+            ;; vouch for what executes: unknown, so nothing is reused.
+            loaded-drift? (when-let [loaded (:seon.test/loaded-source request)]
+                            (not= loaded (:seon.source/commit-id
+                                          (selection-read!
+                                           (db/pull database [:seon.source/commit-id] cluster)))))
+            reuse-candidates (cond
+                               loaded-drift? {}
+                               (and (= :incremental policy) (not work?)) eligible
+                               :else reasons)
             changed-program-candidates
             (into {} (keep (fn [[test-symbol _]]
                              (when-let [[run-eid member] (get latest test-symbol)]
@@ -814,7 +862,12 @@
           (seq removed-files) (assoc :seon.test.selection/removed (vec (sort removed-files)))
           comparison (assoc :seon.test.run/change-basis-t comparison)
           (seq namespaces) (assoc :seon.test.run/namespaces namespaces)
-          (seq identities) (assoc :seon.test.run/identities identities))))
+          (seq identities) (assoc :seon.test.run/identities identities)
+          loaded-drift? (assoc :seon.test/loaded-source-drift
+                               {:seon.test/loaded-source (:seon.test/loaded-source request)
+                                :seon.source/commit-id (:seon.source/commit-id
+                                                        (selection-read!
+                                                         (db/pull database [:seon.source/commit-id] cluster)))}))))
     (catch clojure.lang.ExceptionInfo failure
       (let [refusal (ex-data failure)]
         (if (or (:seon.test/selection-refusal refusal)
@@ -1066,42 +1119,51 @@
                          (contains? runs :seon.error/layer)
                          (contains? runs :seon.error/operation))
                 (throw (ex-info (:seon.error/message runs) runs)))
+            ;; A body cannot outlive its JVM: only runs admitted since this JVM
+            ;; started can hold members; older admissions are interrupted work,
+            ;; outstanding obligations for selection, never reservations.
+            jvm-started (java.util.Date. (.getStartTime (java.lang.management.ManagementFactory/getRuntimeMXBean)))
+            ;; One query bounded by the requested members, never a walk of
+            ;; every recorded run's members.
+            symbols (mapv :seon.test.member/symbol members)
+            candidates (if (and (seq runs) (seq symbols))
+                         (selection-read!
+                          (db/q '[:find ?run ?member ?symbol
+                                  :in $ [?run ...] [?symbol ...] ?since
+                                  :where [?run :seon.test.run/members ?member]
+                                         [?member :seon.test.member/symbol ?symbol]
+                                         [?run :seon.test.run/at ?at]
+                                         [(compare ?at ?since) ?order]
+                                         [(>= ?order 0)]]
+                                database (vec runs) symbols jvm-started))
+                         [])
+            scope-of (memoize
+                      (fn [run-eid]
+                        (let [candidate (selection-read! (db/pull database selector run-eid))]
+                          (admission-scope
+                           (cond-> candidate
+                             (:seon.test.run/cluster candidate)
+                             (assoc :seon.test.run/cluster
+                                    (get-in candidate [:seon.test.run/cluster :db/id])))))))
             existing
             (into {}
-                  (mapcat (fn [run-eid]
-                            (let [candidate (db/pull database selector run-eid)
-                                  _ (when (and (map? candidate)
-                                               (contains? candidate :seon.error/at)
-                                               (contains? candidate :seon.error/layer)
-                                               (contains? candidate :seon.error/operation))
-                                      (throw (ex-info (:seon.error/message candidate) candidate)))
-                                  candidate (cond-> candidate
-                                              (:seon.test.run/cluster candidate)
-                                              (assoc :seon.test.run/cluster
-                                                     (get-in candidate [:seon.test.run/cluster :db/id])))]
-                              (when (= (admission-scope row) (admission-scope candidate))
-                                (map (juxt :seon.test.member/symbol identity)
-                                     (->> (admission-members database run-eid)
-                                       (remove #(get (selection-read!
-                                                      (db/pull database [:seon.test.member/completed-tx]
-                                                               (:db/id %)))
-                                                     :seon.test.member/completed-tx))))))))
-                  (sort > runs))
-            ;; A body that has not been observed to exit still holds its member
-            ;; in every scope: nothing admits the same test while it may run.
-            unexited
-            (into {}
-                  (mapcat (fn [run-eid]
-                            (map (juxt :seon.test.member/symbol identity)
-                                 (filter #(let [row (selection-read!
-                                                     (db/pull database [:seon.test.member/completed-tx
-                                                                        :seon.test.member/terminated-tx]
-                                                              (:db/id %)))]
-                                            (and (:seon.test.member/completed-tx row)
-                                                 (not (:seon.test.member/terminated-tx row))))
-                                         (admission-members database run-eid)))))
-                  (sort > runs))
-            existing (merge unexited existing)
+                  (keep (fn [[run-eid member-eid test-symbol]]
+                          (let [member-row (selection-read!
+                                     (db/pull database [:db/id :seon.test.member/symbol
+                                                        :seon.test.member/reasons
+                                                        :seon.test.member/completed-tx
+                                                        :seon.test.member/terminated-tx]
+                                              member-eid))]
+                            (when (if (:seon.test.member/completed-tx member-row)
+                                    ;; A body not observed to exit holds its test
+                                    ;; in every scope.
+                                    (not (:seon.test.member/terminated-tx member-row))
+                                    ;; An admitted, unstarted member covers an
+                                    ;; identical concurrent request.
+                                    (= (admission-scope row) (scope-of run-eid)))
+                              [test-symbol (select-keys member-row [:db/id :seon.test.member/symbol
+                                                             :seon.test.member/reasons])]))))
+                  (sort-by first > candidates))
             covered (keep #(get existing (:seon.test.member/symbol %)) members)
             coverage (into (set (:seon.test.run/covered-by request)) (map :db/id) covered)
             reserved (remove #(get existing (:seon.test.member/symbol %)) members)]
@@ -1185,12 +1247,9 @@
                        {:seon.test/ns [:seon.ns/name]}]
                      [:seon.test/sym test-symbol])
         acquired (sci.eval/acquired-program ctx)
-        acquired-db (:seon.db/db acquired)
-        ;; One Datahike commit id names one immutable value: a member branch
-        ;; at the acquired commit holds the acquired program by construction.
-        same-commit? (and acquired-db (= (db/commit-id database) (db/commit-id acquired-db)))
-        wanted (when-not same-commit? (runner/program-digest database))
-        actual (when (and acquired-db (not same-commit?)) (runner/program-digest acquired-db))
+        ;; The acquisition owner answers whether this context holds the tested
+        ;; program (same value, or equal program revisions at another commit).
+        acquired? (sci.eval/acquired-database? ctx database)
         source (:seon.test/source row)
         admission (:seon.schema.admission/source row)]
     (cond
@@ -1204,11 +1263,10 @@
           ;; Acquired program equality below verifies the complete admitted facts.
           (nil? (:seon.program/analyzed-source-digest row)))
       (refuse :seon.test/provenance-unknown "The test lacks matching source, namespace or analysis evidence." row)
-      (and (map? wanted) (contains? wanted :seon.error/at) (contains? wanted :seon.error/layer) (contains? wanted :seon.error/operation)) wanted
-      (and (map? actual) (contains? actual :seon.error/at) (contains? actual :seon.error/layer) (contains? actual :seon.error/operation)) actual
-      (and (not same-commit?) (not= wanted actual))
+      (not acquired?)
       (refuse :seon.test/program-mismatch "The SCI context did not acquire the tested program."
-              {:seon.test.run/program-digest wanted :seon.test/acquired-digest actual})
+              {:seon.source/commit-id (db/commit-id database)
+               :seon.test/acquired-commit-id (some-> (:seon.db/db acquired) db/commit-id)})
       (seq (:seon.test/acquisition-refusals acquired))
       (first (:seon.test/acquisition-refusals acquired))
       (not (or (= :agent admission) (and (= :core admission) (:seon.fn/file row))))
@@ -1427,13 +1485,14 @@
                         ;; An agent (SCI) test is the member branch's own work,
                         ;; so its elided `seon.db` arities reach that branch. A
                         ;; host test body inherits no custody, as a JVM test body
-                        ;; always has; its fixtures find the member through the
-                        ;; SCI arm governing its thread.
+                        ;; always has; its fixtures find the member through
+                        ;; `*member*`.
                         #(bounded-result
                           test-var remaining-ms
-                          (cond-> {:seon.sci.eval/ctx ctx}
-                            (not (var? test-var))
-                            (assoc :seon.db/connection (:seon.db/connection child)))
+                          (if (var? test-var)
+                            {:seon.sci.eval/ctx ctx :seon.test/member child}
+                            {:seon.sci.eval/ctx ctx
+                             :seon.db/connection (:seon.db/connection child)})
                           (fn [watched?]
                             (release! watched?)
                             (when watched?
@@ -1462,6 +1521,49 @@
         (when-not @handed? (release! false))
         (when-let [cleanup @cleanup-failure] (.addSuppressed failure cleanup))
         (throw failure)))))
+
+(defn isolated-members
+  "The tests a development-root JVM never runs, which the platform host does:
+  the declared `:seon.test/platform` rows, members reaching a
+  `:seon.fn/destroys` owner, and members declaring a
+  `:seon.test/fixture-observation`. Fixture material is never a member. An
+  unanswerable destroyer declaration is the typed unknown."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or [:set :seon.test/sym] :seon.error/value]]}
+  [database]
+  (let [reach (destructive-reach database)]
+    (if (:seon.error/at reach)
+      reach
+      (let [declared (selection-read!
+                      (db/q '[:find [?symbol ...]
+                              :where (or [?test :seon.test/platform]
+                                         [?test :seon.test/fixture-observation])
+                                     [?test :seon.test/sym ?symbol]
+                                     (not [?test :seon.test/fixture])]
+                            database))
+            material (set (selection-read!
+                           (db/q '[:find [?symbol ...]
+                                   :where [?test :seon.test/fixture] [?test :seon.test/sym ?symbol]]
+                                 database)))]
+        (into (set declared) (remove material) (keys reach))))))
+
+(defn declared-bound-ms
+  "The sum of the named tests' declared body bounds: `:seon.test/long-ms` where
+  declared, the ordinary 5,000 ms otherwise. A request over them is bounded by
+  what its members declare, never by a blanket allowance."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.test/sym]] [:int {:min 1}]]}
+  [database symbols]
+  (let [declared (into {} (selection-read!
+                           (db/q '[:find ?symbol ?ms :in $ [?symbol ...]
+                                   :where [?test :seon.test/sym ?symbol] [?test :seon.test/long-ms ?ms]]
+                                 database (vec symbols))))]
+    (max 1 (reduce + 0 (map #(get declared % 5000) symbols)))))
+
+(def batch-limit
+  "The declared bound on members per admission and per release transaction.
+  A request over more members admits, runs and releases one batch at a time,
+  each its own run, so no transaction's size grows with the request."
+  64)
 
 (defn- green?
   {:malli/schema [:=> [:cat :seon.test/result] :boolean]}
@@ -1505,14 +1607,16 @@
         elapsed #(/ (- (System/nanoTime) started) 1000000.0)
         cluster (:seon.cluster/name execution)
         database (db/db (:seon.db/connection execution))
+        held-store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
         effective (config/effective database cluster)
         bound (or (:seon.test/check-time-limit-ms request)
                   (:seon.test/check-time-limit-ms effective))]
     (cond
       (:seon.error/at effective) effective
-      (and (= :named policy) (empty? identities) (empty? namespaces))
+      (and (= :named policy) (empty? identities) (empty? namespaces)
+           (empty? (:seon.test/changed request)))
       (request-refusal :seon.test/policy-unscoped
-                       "A :named request needs :seon.test/identities or :seon.test/namespaces."
+                       "A :named request needs :seon.test/identities, :seon.test/namespaces or :seon.test/changed."
                        (select-keys request [:seon.test/policy]))
       (not (pos-int? bound))
       (unknown :seon.test/check-time-limit-ms
@@ -1526,7 +1630,11 @@
                          (seq identities) (assoc :seon.test/identities (set identities))
                          (seq namespaces) (assoc :seon.test/namespaces (set namespaces))
                          (seq (:seon.test/changed request))
-                         (assoc :seon.test/changed (vec (:seon.test/changed request)))))
+                         (assoc :seon.test/changed (vec (:seon.test/changed request)))
+                         ;; The source this JVM loaded: the held store's published head.
+                         held-store
+                         (assoc :seon.test/loaded-source
+                                (:seon.source/commit-id (source/current held-store)))))
             selected (when-not (:seon.error/at selection)
                        (mapv :seon.test.member/symbol (:seon.test.run/members selection)))
             exclusions (when selected
@@ -1537,85 +1645,91 @@
                                                         (:seon.test/deferred exclusions))))]
                          (vec (remove excluded selected))))
             provenance (:seon.test.run/provenance selection)
-            admitted (when runnable
-                       (db/transact!
-                        recording
-                        [[:db.fn/call admit-run
-                          (cond-> (assoc selection :seon.test.run/members
-                                         (filterv #((set runnable) (:seon.test.member/symbol %))
-                                                  (:seon.test.run/members selection)))
-                            (or (seq (:seon.test/long-excluded selection))
-                                (not= (count runnable) (count selected)))
-                            (assoc :seon.test.run/exclusions
-                                   (vec (concat
-                                         (for [entry (:seon.test/long-excluded selection)]
-                                           {:seon.test.member/symbol (:seon.test/sym entry)
-                                            :seon.test.selection/disposition :long})
-                                         (for [entry (:seon.test/destructive-excluded exclusions)]
-                                           {:seon.test.member/symbol (:seon.test/sym entry)
-                                            :seon.test.selection/disposition :destructive})
-                                         (for [entry (:seon.test/deferred exclusions)]
-                                           {:seon.test.member/symbol (:seon.test/sym entry)
-                                            :seon.test.selection/disposition :deferred})))))]]))]
+            exclusion-rows
+            (when runnable
+              (vec (concat
+                    (for [entry (:seon.test/long-excluded selection)]
+                      {:seon.test.member/symbol (:seon.test/sym entry)
+                       :seon.test.selection/disposition :long})
+                    (for [entry (:seon.test/destructive-excluded exclusions)]
+                      {:seon.test.member/symbol (:seon.test/sym entry)
+                       :seon.test.selection/disposition :destructive})
+                    (for [entry (:seon.test/deferred exclusions)]
+                      {:seon.test.member/symbol (:seon.test/sym entry)
+                       :seon.test.selection/disposition :deferred}))))]
         (cond
           (:seon.error/at selection) selection
           (:seon.error/at exclusions) exclusions
-          (:seon.error/at admitted) admitted
           :else
-          (let [;; Execute only what THIS request's writer reserved: a member
-                ;; another admitted run still holds (unfinished, or not yet
-                ;; exited) is covered there, never run twice at once.
-                reserved (if (seq runnable)
-                           (set (db/q '[:find [?symbol ...] :in $ ?run-id
-                                        :where [?run :seon.test.run/id ?run-id]
-                                               [?run :seon.test.run/members ?member]
-                                               [?member :seon.test.member/symbol ?symbol]]
-                                      (:db-after admitted) (:seon.test.run/id provenance)))
-                           #{})
-                held-elsewhere (vec (remove reserved runnable))
-                runnable (filterv reserved runnable)
-                settle! (fn [result]
-                          ;; A later observation of termination adds its
-                          ;; transaction without changing the recorded outcome.
-                          (runner/commit-results!
-                           recording
-                           {:seon.db/db database
-                            :seon.test.runner/results [result]
-                            :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                            :seon.test/run-at (:seon.test.run/at provenance)
-                            :seon.test.run/provenance provenance
-                            :seon.test.run/terminated? true})
-                          nil)
-                platform? (fn [test-symbol]
+          (let [platform? (fn [test-symbol]
                             (some #(and (= test-symbol (:seon.test.member/symbol %))
                                         ((:seon.test.member/reasons %) :platform))
                                   (:seon.test.run/members selection)))
                 ordered (sort-by (fn [test-symbol] [(if (platform? test-symbol) 0 1) test-symbol])
                                  runnable)
+                ;; Admission, execution and release proceed one bounded batch
+                ;; at a time: no transaction carries more than `limit` members,
+                ;; and a batch is admitted only when its turn comes.
+                limit (or (:seon.test/batch-limit request) batch-limit)
+                batches (vec (partition-all limit ordered))
+                deadline (+ started (* 1000000 bound))
+                remaining-ms #(quot (- deadline (System/nanoTime)) 1000000)
+                recording-completion
+                (fn [batch-provenance results terminated?]
+                  {:seon.db/db database
+                   :seon.test.runner/results results
+                   :seon.test/run-basis-t (:seon.test.run/basis-t batch-provenance)
+                   :seon.test/run-at (:seon.test.run/at batch-provenance)
+                   :seon.test.run/provenance batch-provenance
+                   :seon.test.run/terminated? terminated?})
+                admit! (fn [index members]
+                         (let [batch-provenance (cond-> provenance
+                                                  (pos? index) (assoc :seon.test.run/id (id/id)))
+                               row (cond-> (assoc selection
+                                                  :seon.test.run/provenance batch-provenance
+                                                  :seon.test.run/members
+                                                  (filterv #((set members) (:seon.test.member/symbol %))
+                                                           (:seon.test.run/members selection)))
+                                     (and (zero? index) (seq exclusion-rows))
+                                     (assoc :seon.test.run/exclusions exclusion-rows)
+                                     (pos? index) (dissoc :seon.test.run/covered-by))
+                               report (db/transact! recording [[:db.fn/call admit-run row]])]
+                           (if (:seon.error/at report)
+                             report
+                             {::provenance batch-provenance
+                              ;; Execute only what THIS batch's writer reserved:
+                              ;; a member another admitted run still holds
+                              ;; (unfinished, or not yet exited) is covered
+                              ;; there, never run twice at once.
+                              ::reserved (set (db/q '[:find [?symbol ...] :in $ ?run-id
+                                                      :where [?run :seon.test.run/id ?run-id]
+                                                             [?run :seon.test.run/members ?member]
+                                                             [?member :seon.test.member/symbol ?symbol]]
+                                                    (:db-after report)
+                                                    (:seon.test.run/id batch-provenance)))})))
                 request-handle (when (seq ordered)
                                  (@acquire-context! execution nil
                                                     {:seon.agent/isolate? true
                                                      :seon.cluster.registry/from (db/commit-id database)}))
-                deadline (+ started (* 1000000 bound))
-                outcome
-                (try
-                  (loop [remaining ordered
-                         outcome {:seon.test/results [] :seon.test/timings []}]
-                    (if-let [test-symbol (first remaining)]
-                      (let [remaining-ms (quot (- deadline (System/nanoTime)) 1000000)]
-                        (if-not (pos? remaining-ms)
-                          (assoc outcome :seon.test/pending (vec remaining))
+                run-batch
+                (fn [outcome batch-provenance members]
+                  (let [settle! (fn [result]
+                                  ;; A later observation of termination adds its
+                                  ;; transaction without changing the recorded outcome.
+                                  (runner/commit-results!
+                                   recording (recording-completion batch-provenance [result] true))
+                                  nil)]
+                    (loop [remaining members outcome outcome]
+                      (if-let [test-symbol (first remaining)]
+                        (if-not (pos? (remaining-ms))
+                          (assoc outcome ::stopped (vec remaining))
                           (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle test-symbol remaining-ms settle!)
+                                (member-result request-handle test-symbol (remaining-ms) settle!)
                                 committed (runner/commit-results!
                                            recording
-                                           {:seon.db/db database
-                                            :seon.test.runner/results [(dissoc result :seon.agent/branch)]
-                                            :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                                            :seon.test/run-at (:seon.test.run/at provenance)
-                                            :seon.test.run/provenance provenance
-                                            :seon.test.run/terminated?
-                                            (true? (:seon.test.run/terminated? result))})
+                                           (recording-completion
+                                            batch-provenance [(dissoc result :seon.agent/branch)]
+                                            (true? (:seon.test.run/terminated? result))))
                                 outcome (-> outcome
                                             (update :seon.test/timings conj
                                                     (assoc timings :seon.test/sym test-symbol))
@@ -1626,40 +1740,64 @@
                             (cond
                               (:seon.error/at committed)
                               (assoc outcome :seon.test/recording-refusal committed
-                                             :seon.test/pending (vec (next remaining)))
+                                             ::stopped (vec (next remaining)))
                               (not (:seon.test.run/terminated? result))
                               (assoc outcome :seon.test/unfinished [result]
-                                             :seon.test/pending (vec (next remaining)))
+                                             ::stopped (vec (next remaining)))
                               (and (platform? test-symbol) (not (green? result)))
-                              (assoc outcome :seon.test/pending (vec (next remaining)))
-                              :else (recur (next remaining) outcome)))))
+                              (assoc outcome ::stopped (vec (next remaining)))
+                              :else (recur (next remaining) outcome))))
+                        outcome))))
+                release-not-started!
+                ;; A reserved member a batch never started is released as an
+                ;; unfulfilled obligation (one transaction of at most `limit`),
+                ;; never left to cover later requests.
+                (fn [batch-provenance members]
+                  (when (seq members)
+                    (runner/commit-results!
+                     recording
+                     (recording-completion
+                      batch-provenance
+                      (mapv (fn [test-symbol]
+                              {:seon.test/sym test-symbol
+                               :seon.test.member/began? false :seon.test.member/ended? false
+                               :seon.test/pass-count 0 :seon.test/fail-count 0
+                               :seon.test/error-count 1
+                               :seon.test/failure-message
+                               (str "Not started: request " (:seon.test.run/id provenance)
+                                    " stopped before this member.")})
+                            members)
+                      true))))
+                outcome
+                (try
+                  (loop [index 0
+                         outcome {:seon.test/results [] :seon.test/timings []
+                                  ::held [] :seon.test/pending []}]
+                    (if-let [members (get batches index)]
+                      (if-not (pos? (remaining-ms))
+                        (update outcome :seon.test/pending into (mapcat identity (subvec batches index)))
+                        (let [admitted (admit! index members)]
+                          (if (:seon.error/at admitted)
+                            (assoc outcome ::admission-refusal admitted
+                                           :seon.test/pending
+                                           (into (:seon.test/pending outcome)
+                                                 (mapcat identity (subvec batches index))))
+                            (let [reserved (::reserved admitted)
+                                  outcome (-> (update outcome ::held into (remove reserved members))
+                                              (run-batch (::provenance admitted) (filterv reserved members)))
+                                  stopped (::stopped outcome)
+                                  released (release-not-started! (::provenance admitted) stopped)
+                                  outcome (cond-> (dissoc outcome ::stopped)
+                                            (:seon.error/at released)
+                                            (update :seon.test/recording-refusal #(or % released)))]
+                              (if (some? stopped)
+                                (update outcome :seon.test/pending into
+                                        (concat stopped (mapcat identity (subvec batches (inc index)))))
+                                (recur (inc index) outcome))))))
                       outcome))
                   (finally
                     (when request-handle (@release-context! request-handle))))
-                ;; A reserved member this request never started is released as
-                ;; an unfulfilled obligation, never left to cover later requests.
-                not-started (:seon.test/pending outcome)
-                released (when (seq not-started)
-                           (runner/commit-results!
-                            recording
-                            {:seon.db/db database
-                             :seon.test.runner/results
-                             (mapv (fn [test-symbol]
-                                     {:seon.test/sym test-symbol
-                                      :seon.test.member/began? false :seon.test.member/ended? false
-                                      :seon.test/pass-count 0 :seon.test/fail-count 0
-                                      :seon.test/error-count 1
-                                      :seon.test/failure-message
-                                      (str "Not started: request " (:seon.test.run/id provenance)
-                                           " stopped before this member.")})
-                                   not-started)
-                             :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                             :seon.test/run-at (:seon.test.run/at provenance)
-                             :seon.test.run/provenance provenance
-                             :seon.test.run/terminated? true}))
-                outcome (cond-> outcome
-                          (:seon.error/at released)
-                          (update :seon.test/recording-refusal #(or % released)))
+                held-elsewhere (::held outcome)
                 reused (vec (:seon.test.selection/unchanged selection))
                 results (into (vec (:seon.test/results outcome)) reused)
                 ;; Every exclusion is an unfulfilled obligation, a declared
@@ -1668,6 +1806,8 @@
                                  (:seon.test/deferred exclusions)
                                  (:seon.test/long-excluded selection))
                 pending (into held-elsewhere (:seon.test/pending outcome))]
+            (if-let [refusal (and (empty? (:seon.test/results outcome)) (::admission-refusal outcome))]
+              refusal
             (cond-> {:seon.test.run/id (:seon.test.run/id provenance)
                      :seon.test.run/policy policy
                      :seon.test.run/basis-t (:seon.test.run/basis-t provenance)
@@ -1693,10 +1833,14 @@
               (assoc :seon.test/long-excluded (:seon.test/long-excluded selection))
               (seq pending)
               (assoc :seon.test/pending pending)
+              (:seon.test/loaded-source-drift selection)
+              (assoc :seon.test/loaded-source-drift (:seon.test/loaded-source-drift selection))
               (seq (:seon.test/unfinished outcome))
               (assoc :seon.test/unfinished (:seon.test/unfinished outcome))
               (:seon.test/recording-refusal outcome)
-              (assoc :seon.test/recording-refusal (:seon.test/recording-refusal outcome)))))))))
+              (assoc :seon.test/recording-refusal (:seon.test/recording-refusal outcome))
+              (::admission-refusal outcome)
+              (assoc :seon.test/recording-refusal (::admission-refusal outcome))))))))))
 
 (defn tally
   "Render one request's answer as the text a launcher prints.
@@ -1720,6 +1864,10 @@
            (apply str (for [entry (:seon.test/unfinished result)]
                         (str "\nunfinished " (:seon.test/sym entry) " on branch "
                              (:seon.agent/branch entry) ": " (:seon.test/failure-message entry))))
+           (when-let [drift (:seon.test/loaded-source-drift result)]
+             (str "\nno reuse: this JVM loaded source " (:seon.test/loaded-source drift)
+                  " but the cluster's program rows record " (:seon.source/commit-id drift)
+                  " (adopt the files to reuse recorded evidence)"))
            (when-let [pending (seq (:seon.test/pending result))]
              (str "\npending (not started): " (str/join " " pending)))
            (apply str (for [entry (concat (:seon.test/destructive-excluded result)

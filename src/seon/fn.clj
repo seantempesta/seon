@@ -999,22 +999,17 @@
                                       program-facts)]
                        (assoc row :seon.program/definition-digest
                               (program/definition-digest row resolver-context))))]
-    [(if program-row
-       {}
-       (let [calls (into #{}
-                         (keep call-target)
-                         (::analyzer/var-usages analysis))]
-         (cond-> {} (seq calls) (assoc :seon.fn/calls calls))))
-     merged-row]))
+    ;; A declaration row owns its edges; a form without one carries no
+    ;; analysis facts (receipts assert no program attribute).
+    [{} merged-row]))
 
 (defn analyze-forms
   "Analyze submitted forms in one kondo batch, returning form-local facts.
 
-  A declaration row owns its edges. Without a declaration, the first tuple
-  member carries the form's static call targets as analysis only: nothing
-  persists them, because static form analysis is not evidence that a call
-  executed and a receipt asserts no program attribute (`seon.turn`
-  settlement analyzes declarations alone). No synthetic function is minted."
+  A declaration row owns its edges. The first tuple member is empty: static
+  form analysis without a declaration is not evidence that a call executed,
+  and a receipt asserts no program attribute (`seon.turn` settlement analyzes
+  declarations alone). No synthetic function is minted."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:vector [:map

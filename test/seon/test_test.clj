@@ -90,31 +90,13 @@
                       :seon.schema/projection (schema/projection-from-database database)
                       :seon.test/class-loader (clojure.lang.RT/baseLoader)}]
          (is (= :seon.test/program-mismatch (:seon.test/resolution-refusal (sut/resolve-test request))))
-         (let [snapshot (sci.eval/acquired-program stale)
-               refused (#'runner/run-task!
-                        {:seon.test.runner/task-namespace "seon.test-test"
-                         :seon.test.runner/task-symbols ['seon.test-test/admitted-fileless-test]}
-                        request)]
-           (is (= 0 (get-in refused [:seon.test.runner/task-summary :seon.test.runner/test-count])))
-           (is (= 1 (get-in refused [:seon.test.runner/task-summary :seon.test.runner/error-count])))
-           (is (identical? (:seon.db/db snapshot)
-                           (:seon.db/db (sci.eval/acquired-program stale))))
-           (is (= :seon.test/program-mismatch
-                  (:seon.test/resolution-refusal (sut/resolve-test request)))))
+         (is (= :seon.test/program-mismatch
+                (:seon.test/resolution-refusal (sut/resolve-test request)))
+             "resolution never mutates the stale context into acquiring")
          (sci.eval/install-evaluated-rows!
           {:seon.sci.eval/ctx ctx :seon.db/db database
            :seon.sci.eval/installations
            [{:seon.program/row declaration :seon.sci.eval/evaluation evaluation}]})
-         (let [worker-result
-               (#'runner/run-task!
-                {:seon.test.runner/task-namespace "seon.test-test"
-                 :seon.test.runner/task-symbols ['seon.test-test/admitted-fileless-test]}
-                (assoc request :seon.sci.eval/ctx ctx
-                               :seon.db/custody-request {:seon.db/connection connection}))]
-           (is (= {:seon.test.runner/test-count 1 :seon.test.runner/pass-count 1
-                   :seon.test.runner/fail-count 0 :seon.test.runner/error-count 0}
-                  (:seon.test.runner/task-summary worker-result))
-               (pr-str worker-result)))
          (let [resolved (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx))]
            (is (runner/var-reference? resolved) (pr-str resolved)))
          (let [core-symbol (first (db/q '[:find [?symbol ...]

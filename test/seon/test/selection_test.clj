@@ -13,14 +13,12 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [seon.test.selection :as selection]
             [seon.test.cache :as cache]
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-runner-failure-fixture :as failure-fixture]
             [seon.id :as id]
             [seon.db :as db]
-            [seon.error :as error]
             [datahike.api :as d]
             [seon.fn :as functions]
             [seon.config :as config]
@@ -388,80 +386,6 @@
          (is (some #{(symbol "seon.test.selection-test" "fileless-selection")}
                    (sut/reaching {:seon.db/db (db/db connection) :seon.test/changed ['seon.id/id]}))))))))
 
-(deftest snapshot-provenance-reuses-green-members-across-fresh-run-events
-  (support/with-database
-   (fn [connection]
-     (let [basis (db/basis-t (db/db connection))
-           executions (atom 0)
-           snapshot {:seon.test.run/published-base-digest (id/digest 64 [:fixture :base])
-                     :seon.test.run/overlay-input-digest (id/digest 64 [:fixture :overlay])
-                     :seon.test.run/program-digest (id/digest 64 [:fixture :program])
-                     :seon.test.run/basis-t basis :seon.test.run/branch :current-src}
-           request {:seon.test.run/input-digest (id/digest 64 [:fixture :inputs])
-                    :seon.test.run/policy :named
-                    :seon.test/namespaces #{'seon.test-runner-failure-fixture}
-                    :seon.test.run/members [{:seon.test.member/symbol 'seon.test-runner-failure-fixture/passing-example
-                                             :seon.test.member/reasons #{:named}}]}
-           execute! (fn [policy & [overlay]]
-                      (let [request (assoc request :seon.db/db (db/db connection)
-                                           :seon.test.run/policy policy
-                                           :seon.test.run/provenance
-                                           (assoc (cond-> snapshot overlay
-                                                    (assoc :seon.test.run/overlay-input-digest overlay))
-                                                  :seon.test.run/id (id/id)
-                                                           :seon.test.run/at (java.util.Date.)))
-                            admission (sut/selection-admission request)
-                            run (:seon.test.run/provenance admission)]
-                        (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
-                        (when (seq (:seon.test.run/members admission))
-                          (is (= :seon.test/population-unknown
-                                 (:seon.test/execution-refusal
-                                  (runner/run-results (db/db connection) (:seon.test.run/id run))))
-                              "An admitted member without completion never becomes a zero tally."))
-                        (let [results (mapv (fn [_]
-                                              (swap! executions inc)
-                                              (runner/run-var! #'failure-fixture/passing-example))
-                                            (:seon.test.run/members admission))
-                              recorded (runner/commit-results!
-                                        connection {:seon.test.run/provenance run
-                                                    :seon.test/run-basis-t basis
-                                                    :seon.test/run-at (:seon.test.run/at run)
-                                                    :seon.test.run/terminated? true
-                                                    :seon.test.runner/results results})]
-                          (is (vector? recorded) (pr-str recorded))
-                          (when (vector? recorded)
-                            (let [facts (runner/run-results (db/db connection) (:seon.test.run/id run))
-                                  _ (is (vector? facts) (pr-str facts))
-                                  summary (runner/recorded-summary facts)]
-                              (is (= (count (:seon.test.run/members admission))
-                                     (:seon.test.runner/test-count summary)))
-                              (is (= (count (:seon.test.selection/unchanged admission))
-                                     (:seon.test.runner/unchanged-count summary)))
-                              (is (= 1 (:seon.test.runner/pass-count summary)))
-                              (is (= 0 (:seon.test.runner/fail-count summary)
-                                     (:seon.test.runner/error-count summary))))))
-                        admission))
-           first-run (execute! :named)]
-       (is (= 1 @executions))
-       (doseq [policy [:named :all :full :platform :incremental]]
-         (let [next-run (execute! policy)
-               unchanged (:seon.test.selection/unchanged next-run)]
-           (is (not= (get-in first-run [:seon.test.run/provenance :seon.test.run/id])
-                     (get-in next-run [:seon.test.run/provenance :seon.test.run/id])))
-           (is (empty? (:seon.test.run/members next-run)))
-           (is (= 1 (count unchanged)))
-           (is (= (select-keys snapshot [:seon.test.run/published-base-digest
-                                         :seon.test.run/overlay-input-digest
-                                         :seon.test.run/program-digest :seon.test.run/basis-t])
-                  (select-keys (first unchanged) [:seon.test.run/published-base-digest
-                                                  :seon.test.run/overlay-input-digest
-                                                  :seon.test.run/program-digest :seon.test.run/basis-t])))))
-       (is (= 1 @executions) "A fresh request event never promises another execution.")
-       (let [changed (id/digest 64 [:fixture :changed-overlay])]
-         (is (= 1 (count (:seon.test.run/members (execute! :named changed)))))
-         (is (empty? (:seon.test.run/members (execute! :named changed))))
-         (is (= 2 @executions) "Changed snapshot inputs require fresh execution evidence."))))))
-
 (deftest gate-inputs-no-call-edge-can-reach-widen
   (is (cache/widening-path? "resources/seon/schemas/seon.db.edn"))
   (is (cache/widening-path? "deps.edn"))
@@ -483,59 +407,6 @@
     (is (cache/widening-path? (str root "/fixtures/input.txt")))
     (doseq [extension [".clj" ".cljc" ".edn"]]
       (is (not (cache/widening-path? (str root "/example" extension)))))))
-
-(deftest differing-published-inputs-name-each-path-and-both-digests
-  (support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           source-digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)
-           published {"deps.edn" (apply str (repeat 64 "a"))
-                      "test/fixtures/input.txt" (apply str (repeat 64 "b"))}
-           requested {"deps.edn" (apply str (repeat 64 "c"))
-                      "test/fixtures/added.txt" (apply str (repeat 64 "d"))}
-           published-digest (cache/input-evidence-digest published)
-           requested-digest (cache/input-evidence-digest requested)
-           _ (support/transacted!
-              connection
-              [{:seon.source/digest source-digest
-                :seon.source/test-input-digest published-digest}])
-           database (db/db connection)
-           refusal
-           (sut/select
-            {:seon.db/db database
-             :seon.test.run/input-digest requested-digest
-             :seon.test.selection/input-evidence
-             {:seon.test.selection/published-inputs published
-              :seon.test.selection/requested-inputs requested}
-             :seon.test.run/policy :incremental
-             :seon.test.run/members []
-             :seon.test.run/provenance
-             {:seon.test.run/id (id/id)
-              :seon.test.run/at (java.util.Date.)
-              :seon.test.run/program-digest (runner/program-digest database)
-              :seon.test.run/published-base-digest (apply str (repeat 64 "e"))
-              :seon.test.run/overlay-input-digest (apply str (repeat 64 "f"))
-              :seon.test.run/basis-t (db/basis-t database)
-              :seon.test.run/branch :current-src}})
-           differences (get-in refusal [:seon.error/data
-                                         :seon.test.selection/input-differences])]
-       (is (= :seon.test/input-evidence-unavailable
-              (:seon.test/selection-refusal refusal)) (pr-str refusal))
-       (is (= [{:seon.test.selection/input-path "deps.edn"
-                :seon.test.selection/published-input-digest (apply str (repeat 64 "a"))
-                :seon.test.selection/requested-input-digest (apply str (repeat 64 "c"))}
-               {:seon.test.selection/input-path "test/fixtures/added.txt"
-                :seon.test.selection/published-input-digest :seon.error/absent
-                :seon.test.selection/requested-input-digest (apply str (repeat 64 "d"))}
-               {:seon.test.selection/input-path "test/fixtures/input.txt"
-                :seon.test.selection/published-input-digest (apply str (repeat 64 "b"))
-                :seon.test.selection/requested-input-digest :seon.error/absent}]
-              differences))
-       (let [printed (with-out-str (#'runner/print-selection-refusal! refusal))]
-         (doseq [path ["deps.edn" "test/fixtures/added.txt" "test/fixtures/input.txt"]]
-           (is (str/includes? printed path) printed))
-         (is (str/includes? printed "published=") printed)
-         (is (str/includes? printed "requested=") printed))))))
 
 (deftest documentation-only-input-changes-do-not-refuse-published-selection
   (support/with-database
@@ -580,75 +451,6 @@
        (is (not (:seon.error/at selection)) (pr-str selection))
        (is (contains? (set (map :seon.test/sym (:seon.test.run/members selection)))
                       (fixture-symbol "documentation-safe")))))))
-
-(deftest omitted-dirty-callers-use-head-and-carry-recordable-provenance
-  (let [root (.toFile (Files/createTempDirectory
-                       (.toPath (io/file "tmp")) "overlay-head-"
-                       (into-array FileAttribute [])))
-        checkout (io/file root "checkout")
-        snapshot (io/file root "snapshot")
-        leaf "src/overlay/leaf.clj"
-        caller "src/overlay/caller.clj"
-        head-leaf "(ns overlay.leaf)\n(defn value {:malli/schema [:=> [:cat] :int]} [] 1)\n"
-        head-caller "(ns overlay.caller (:require [overlay.leaf :as leaf]))\n(defn value {:malli/schema [:=> [:cat] :int]} [] (leaf/value))\n"
-        git! (fn [& args]
-               (let [child (process/process (into ["git"] args)
-                                            {:dir (.getPath checkout) :out :string :err :string})]
-                 (try
-                   (:out (process/check (deref child 30000 {:exit 124 :err "Git fixture bound expired"})))
-                   (finally (process/destroy-tree child)))))]
-    (try
-      (doseq [directory [checkout snapshot] path [leaf caller]]
-        (io/make-parents (io/file directory path)))
-      (git! "init")
-      (spit (io/file checkout leaf) head-leaf)
-      (spit (io/file checkout caller) head-caller)
-      (git! "add" "src")
-      (git! "-c" "user.name=Fixture" "-c" "user.email=fixture@example.invalid"
-            "-c" "core.hooksPath=/dev/null" "commit" "-m" "Fixture HEAD")
-      (let [head (str/trim (git! "rev-parse" "HEAD"))
-            manifest (functions/build-manifest {:seon.fn/root (.getCanonicalPath checkout)
-                                                :seon.fn/roots ["src"]})]
-        (doseq [path [leaf caller]]
-          (spit (io/file snapshot path) (git! "show" (str head ":" path))))
-        (spit (io/file snapshot leaf) (str/replace head-leaf "[] 1" "[] 2"))
-        (spit (io/file checkout caller) "UNREADABLE DIRTY CALLER (((")
-        (let [output (with-out-str
-                       (is (nil? (selection/assert-complete-overlay!
-                                  manifest (.getCanonicalPath checkout)
-                                  (.getCanonicalPath snapshot) head [leaf]))))
-              provenance (selection/overlay-provenance (.getCanonicalPath snapshot))]
-          (is (str/includes? output (str "caller " caller " uses HEAD bytes")))
-          (is (= #{caller} (:seon.test.run/callers-at-head provenance)))
-          (is (= head-caller (slurp (io/file snapshot caller))))
-          (is (= "UNREADABLE DIRTY CALLER (((" (slurp (io/file checkout caller))))
-          (support/with-database
-           (fn [connection]
-             (let [database (db/db connection)
-                   run (merge provenance
-                              {:seon.test.run/id (id/id)
-                               :seon.test.run/at (java.util.Date.)
-                               :seon.test.run/program-digest (:seon.fn.manifest/digest manifest)
-                               :seon.test.run/basis-t (db/basis-t database)
-                               :seon.test.run/branch (get-in database [:config :branch])})
-                   completion {:seon.test.run/provenance run
-                                         :seon.test/run-basis-t (:seon.test.run/basis-t run)
-                                         :seon.test/run-at (:seon.test.run/at run)
-                                         :seon.test.runner/results []}
-                   _ (is (= {} (runner/reach-digests database [])))
-                   _ (is (= {} (runner/reach-memberships database [])))
-                   recorded (runner/commit-results! connection completion)]
-               (is (vector? recorded) (pr-str recorded))
-               (is (vector? (runner/commit-results! connection completion))
-                   "Replaying the same set-valued provenance remains immutable.")
-               (is (= #{caller}
-                      (set (db/q '[:find [?path ...] :in $ ?id
-                                   :where [?run :seon.test.run/id ?id]
-                                          [?run :seon.test.run/callers-at-head ?path]]
-                                 (db/db connection) (:seon.test.run/id run))))))))))
-      (finally
-        ((requiring-resolve 'seon.fs/delete-recursively!)
-         (.getCanonicalPath (io/file "tmp")) (.getCanonicalPath root))))))
 
 (deftest changed-inputs-are-decided-by-content-not-modification-time
   (let [root (.toFile (Files/createTempDirectory

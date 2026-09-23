@@ -411,7 +411,9 @@
           (is (= #{"fixture.auto-check/capability"}
                  (:seon.test.accretion/capabilities effectful-check))))))))
 
-(deftest every-packaged-schema-answers-generatability-as-a-boolean
+(deftest ^{:seon.test/long "Constructs a generator for every packaged schema (3,350): 2.5 s at the REPL, 7.4 s under a request on a scratch cluster at 0e53eb8b1."
+           :seon.test/long-ms 12000}
+  every-packaged-schema-answers-generatability-as-a-boolean
   ;; 169 packaged schemas (e.g. :seon.sci.eval/evaluation) named their
   ;; generator by symbol in `:gen/gen`; malli handed the symbol to gen/fmap and
   ;; threw an AssertionError that only a catch-everything hid. The fork now

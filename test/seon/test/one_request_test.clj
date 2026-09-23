@@ -85,9 +85,15 @@
        (testing "unchanged green members are answered from the record"
          (let [again (request #{'seon.test.one-request-test/writes-a})]
            (is (true? (:seon.test/passed? again)) (sut/tally again))
-           (is (= 0 (:seon.test/executed-count again)))
-           (is (= 1 (:seon.test/reused-count again)))
-           (is (every? :seon.test/unchanged (:seon.test/results again)))))
+           ;; Reuse also requires the loaded program to be the one the rows
+           ;; record (proved both ways in
+           ;; `evidence-earned-by-another-loaded-program-is-never-reused`);
+           ;; a restart from files before adoption executes again, by name.
+           (if (:seon.test/loaded-source-drift again)
+             (is (= 1 (:seon.test/executed-count again)))
+             (do (is (= 0 (:seon.test/executed-count again)))
+                 (is (= 1 (:seon.test/reused-count again)))
+                 (is (every? :seon.test/unchanged (:seon.test/results again)))))))
        (testing "a request whose bound fires before a member starts leaves it pending"
          (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
                                 :seon.test/recording-connection connection
@@ -156,8 +162,8 @@
             "the watcher released after observing exit")
         (finally (.countDown gate) (ns-unmap 'seon.test.one-request-test 'gated-probe)))))
 
-(deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 23.3 s measured at 15ffb4936 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
-           :seon.test/long-ms 35000}
+(deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
+           :seon.test/long-ms 45000}
   an-unexited-member-is-never-started-again-until-its-exit-is-recorded
   (support/with-database
    (fn [connection]
@@ -214,3 +220,60 @@
     (is (true? (::probe (ex-data failure))))
     (is (= before (set (registry/roster store)))
         "every member and request branch the failed request acquired is unlinked")))
+
+(deftest ^{:seon.test/long "One request over three indexed members in batches of two: 24.0 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed config-transaction and per-connection projection costs."
+           :seon.test/long-ms 30000}
+  a-request-admits-and-releases-in-bounded-batches
+  (support/with-database
+   (fn [connection]
+     (let [members #{'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol
+                     'seon.id-test/data-shape-and-explicit-length-determine-identity
+                     'seon.test.one-request-test/a-member-body-runs-on-its-own-listed-branch}
+           result (sut/run {:seon.test/execution (support/execution-handle connection)
+                            :seon.test/recording-connection connection
+                            :seon.test/policy :named
+                            :seon.test/identities members
+                            :seon.test/batch-limit 2})
+           runs (set (map (comp second :seon.test/run) (:seon.test/results result)))
+           sizes (map (fn [run-id]
+                        (count (db/q '[:find [?member ...] :in $ ?id
+                                       :where [?run :seon.test.run/id ?id]
+                                              [?run :seon.test.run/members ?member]]
+                                     (db/db connection) run-id)))
+                      runs)]
+       (is (true? (:seon.test/passed? result)) (sut/tally result))
+       (is (= 3 (:seon.test/executed-count result)))
+       (is (= 2 (count runs)) "three members over a limit of two admit as two runs")
+       (is (every? #(<= % 2) sizes) (pr-str sizes))))))
+
+(deftest ^{:seon.test/long "One request recording green, then two selections: about 10 s on a scratch cluster at 0e53eb8b1, dominated by the routed per-request costs."
+           :seon.test/long-ms 30000}
+  evidence-earned-by-another-loaded-program-is-never-reused
+  ;; A restart from changed files loads new source while the cluster's program
+  ;; rows still describe the old program: green recorded against the rows then
+  ;; vouched for code the JVM no longer runs (run bba05ce63419, 2026-09-23).
+  (support/with-database
+   (fn [connection]
+     (let [test-symbol 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol
+           handle (support/execution-handle connection)
+           recorded (sut/run {:seon.test/execution handle
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/identities #{test-symbol}})
+           database (db/db connection)
+           cluster [:seon.cluster/name (:seon.cluster/name handle)]
+           rows-commit (:seon.source/commit-id (db/pull database [:seon.source/commit-id] cluster))
+           select (fn [loaded]
+                    (sut/select {:seon.db/db database :seon.test.run/cluster cluster
+                                 :seon.test.run/policy :named :seon.test/identities #{test-symbol}
+                                 :seon.test/loaded-source loaded}))
+           matching (select rows-commit)
+           drifted (select (random-uuid))]
+       (is (true? (:seon.test/passed? recorded)) (sut/tally recorded))
+       (is (uuid? rows-commit) "the cluster records the source commit its rows came from")
+       (is (= [test-symbol] (map :seon.test/sym (:seon.test.selection/unchanged matching)))
+           "the same loaded program reuses its recorded green")
+       (is (empty? (:seon.test.selection/unchanged drifted)))
+       (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members drifted)))
+           "another loaded program executes the member again")
+       (is (:seon.test/loaded-source-drift drifted))))))

@@ -445,107 +445,33 @@
     (prn result)
     result))
 
-(defn- test-inputs
-  [root dependency-digest]
-  (when-not (resolve 'seon.test.cache/input-digests)
-    (load-file (str (io/file root "src/seon/test/bounds.clj")))
-    (load-file (str (io/file root "src/seon/test/cache.clj"))))
-  [(into (sorted-map) ((resolve 'seon.test.cache/input-digests) root))
-   (slurp (io/file root "dev_cache.clj")) dependency-digest])
-
-(defn- test-digest
-  ([inputs] (hex-digest inputs))
-  ([root dependency-digest]
-   (test-digest (test-inputs root dependency-digest))))
-
-(defn- test-classpath!
-  [selection]
-  ;; The selector already owns the complete gate inputs. Loading it here works
-  ;; in tools.deps' tool classpath (which contains "."); the `:dev-cache` alias
-  ;; declares that namespace's own dependencies.
-  (let [inputs (test-inputs "." (:seon.dev-cache/digest selection))
-        digest (test-digest inputs)
-        file (io/file "target/test-classpaths" (str digest ".edn"))
-        basis-file (io/file "target/test-classpaths" (str digest ".basis.edn"))
-        resolved
-        (if (and (.isFile file) (.isFile basis-file))
-          (edn/read-string (slurp basis-file))
-          (let [basis (b/create-basis {:project "deps.edn" :aliases [:test]})
-                root (.toPath (canonical-file "."))
-                paths (mapv
-                       (fn [path]
-                         (let [canonical (.toPath (canonical-file path))]
-                           (if (.startsWith canonical root)
-                             (let [relative (str (.relativize root canonical))]
-                               (if (empty? relative) "." relative))
-                             (str canonical))))
-                       (:classpath-roots basis))
-                ordered (into [(:seon.dev-cache/path selection)] paths)
-                value (str/join java.io.File/pathSeparator ordered)
-                resolved {:seon.test/classpath-roots ordered
-                          :seon.test/classpath-root (str (canonical-file "."))
-                          :seon.test/jvm-options (vec (get-in basis [:argmap :jvm-opts]))
-                          :seon.dev-cache/digest (:seon.dev-cache/digest selection)}]
-            (atomic-write-edn! file value)
-            (atomic-write-edn! basis-file resolved)
-            resolved))]
-    ;; Retain the exact inputs hashed above, so base compatibility compares
-    ;; corresponding inputs rather than unrelated aggregate digests.
-    (atomic-write-edn! (io/file "target/test-classpaths" (str digest ".inputs.edn"))
-                       inputs)
-    (assoc selection
-           :seon.dev-cache/test-digest digest
-           :seon.dev-cache/test-classpath resolved
-           :seon.dev-cache/test-basis-file (.getCanonicalPath basis-file)
-           :seon.dev-cache/test-classpath-file (.getCanonicalPath file))))
-
-(defn- record-process-reference!
-  [pid selection]
-  (let [handle (.orElseThrow (java.lang.ProcessHandle/of (long pid)))
-        started (.orElseThrow (.startInstant (.info handle)))]
-    (atomic-write-edn!
-     (io/file process-reference-root (str pid ".edn"))
-     {:seon.boot/pid pid
-      :seon.boot/start-instant (java.util.Date/from started)
-      :seon.operator.process-record/cache-path
-      (:seon.dev-cache/path selection)})))
-
 (defn- claim-current-cache!
   "Choose an already-valid immutable cache and record the claim, or nothing.
   `reap` is the only deleter and takes the same reference lock, so a chosen
   directory is referenced before it can be considered unreferenced."
-  [test? pid]
+  []
   (with-reference-lock
     (fn []
       (when-let [{:seon.dev-cache/keys [directory manifest]} (current-cache)]
-        (let [selection (cache-result directory manifest :current)]
-          (when (and test? pid)
-            (record-process-reference! pid selection))
-          selection)))))
+        (cache-result directory manifest :current)))))
 
 (defn ensure-cache
-  "Reuse matching dependency classes; optionally prepare the test classpath."
-  [{:keys [test? pid]}]
+  "Reuse matching dependency classes, rebuilding under the lock when inputs changed."
+  [_]
   ;; A published cache directory is immutable and a rebuild only ever admits
   ;; a NEW directory, so a valid cache is a hit without the rebuild lock: a
   ;; peer's cold build cannot invalidate it and must not be waited out.
   (let [selection
-        (or (claim-current-cache! test? pid)
+        (or (claim-current-cache!)
             (with-cache-lock
               (fn []
-                (or (claim-current-cache! test? pid)
+                (or (claim-current-cache!)
                     (do
                       (println "seon cache: inputs changed; rebuilding")
                       (flush)
-                      (let [selection (refresh!)]
-                        (with-reference-lock
-                          (fn []
-                            (when (and test? pid)
-                              (record-process-reference! pid selection))))
-                        selection))))))
-        result (if test? (test-classpath! selection) selection)]
-    (prn result)
-    result))
+                      (refresh!))))))]
+    (prn selection)
+    selection))
 
 (defn- process-reference-files
   []

@@ -2,7 +2,10 @@
 ;; Run no JVM: send one seon.test/run request over the live cluster's prepl.
 ;; bin/test-check [--root PATH] [CLUSTER] [--policy P] [--test NS/TEST]...
 ;;                [--ns NS]... [--changed NS/SYM]... [--include-long]
-;;                [--time-limit-ms N]
+;;                [--isolated] [--time-limit-ms N]
+;; --isolated names the members a development root never runs
+;; (seon.test/isolated-members): the platform host's request. Its bound is the
+;; members' declared bounds (seon.test/declared-bound-ms) unless given.
 ;; The execution value is the cluster's own handle; results record on its
 ;; connection. Exit 0 only when the request answers :seon.test/passed? true.
 (require '[clojure.java.io :as io]
@@ -11,7 +14,7 @@
 (defn- usage! []
   (throw (ex-info (str "Usage: bin/test-check [--root PATH] [CLUSTER] [--policy "
                        "named|incremental|platform|all] [--test NS/TEST]... [--ns NS]... "
-                       "[--changed NS/SYM]... [--include-long] [--time-limit-ms N]") {})))
+                       "[--changed NS/SYM]... [--include-long] [--isolated] [--time-limit-ms N]") {})))
 
 (defn- parse [args]
   (loop [args args request {}]
@@ -23,6 +26,7 @@
           "--ns" (recur (drop 2 args) (update request :seon.test/namespaces (fnil conj #{}) (symbol value)))
           "--changed" (recur (drop 2 args) (update request :seon.test/changed (fnil conj []) (symbol value)))
           "--include-long" (recur (rest args) (assoc request :seon.test/include-long? true))
+          "--isolated" (recur (rest args) (assoc request ::isolated? true))
           "--time-limit-ms" (recur (drop 2 args)
                                    (assoc request :seon.test/check-time-limit-ms
                                           (or (parse-long (or value "")) (usage!))))
@@ -42,21 +46,40 @@
                                :seon.test/check-time-limit-ms)]
   (try
     (let [request (parse args)
+          handle-form (list :seon.turn.loop/cluster
+                            (list 'get (list 'deref 'seon.operator.runtime/running-instances)
+                                  cluster))
+          eval! (fn [form timeout-ms] (#'operator/prepl-value! advertisement (pr-str form) timeout-ms))
+          _ (when-not advertisement
+              (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
+          request (if-not (::isolated? request)
+                    request
+                    (let [database (list 'seon.db/db (list :seon.db/connection handle-form))
+                          isolated (eval! (list 'let ['members (list 'seon.test/isolated-members database)]
+                                                (list 'if (list :seon.error/at 'members) 'members
+                                                      {:members 'members
+                                                       :bound (list 'seon.test/declared-bound-ms database 'members)}))
+                                          transport-bound)]
+                      (when-not (set? (:members isolated))
+                        (throw (ex-info (str "The isolated members are unknown: "
+                                             (or (:seon.error/message isolated) (pr-str isolated))) {})))
+                      (cond-> (-> (dissoc request ::isolated?)
+                                  (assoc :seon.test/policy :named)
+                                  (update :seon.test/identities (fnil into #{}) (:members isolated)))
+                        (not (:seon.test/check-time-limit-ms request))
+                        (assoc :seon.test/check-time-limit-ms (:bound isolated)))))
           request (cond-> request
                     (not (:seon.test/policy request))
                     (assoc :seon.test/policy
                            (if (or (seq (:seon.test/identities request))
-                                   (seq (:seon.test/namespaces request)))
+                                   (seq (:seon.test/namespaces request))
+                                   (seq (:seon.test/changed request)))
                              :named :incremental)))]
       (when-not (#{:named :incremental :platform :all} (:seon.test/policy request))
         (usage!))
-      (when-not advertisement
-        (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
       (when-not (pos-int? shipped-check-bound)
         (throw (ex-info "config/default.edn declares no :seon.test/check-time-limit-ms; the transport has no backstop to derive." {})))
-      (let [form (list 'let ['handle (list :seon.turn.loop/cluster
-                                           (list 'get (list 'deref 'seon.operator.runtime/running-instances)
-                                                 cluster))
+      (let [form (list 'let ['handle handle-form
                              'result (list 'seon.test/run
                                            (list 'merge (list 'quote request)
                                                  {:seon.test/execution 'handle
@@ -64,10 +87,9 @@
                                                   (list :seon.db/connection 'handle)}))]
                        [(list 'seon.test/tally 'result)
                         (list 'true? (list :seon.test/passed? 'result))])
-            result (#'operator/prepl-value! advertisement (pr-str form)
-                                            (+ (or (:seon.test/check-time-limit-ms request)
-                                                   shipped-check-bound)
-                                               transport-bound))]
+            result (eval! form (+ (or (:seon.test/check-time-limit-ms request)
+                                      shipped-check-bound)
+                                  transport-bound))]
         (println (if (vector? result) (first result) (or (:seon.error/message result) (pr-str result))))
         (when-not (and (vector? result) (true? (second result)))
           (System/exit 1))))

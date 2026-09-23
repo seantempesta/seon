@@ -28,7 +28,10 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "supplied-docs")
-     (support/transacted! connection [{:seon.agent/id "supplied-docs"} {:seon.agent/id "root"}])
+     ;; An agent's branch is required: these agents work live on the fixture's own branch.
+     (let [branch (get-in (db/db connection) [:config :branch])]
+       (support/transacted! connection [{:seon.agent/id "supplied-docs" :seon.agent/branch branch}
+                                        {:seon.agent/id "root" :seon.agent/branch branch}]))
      (let [ctx (support/fork-cluster-ctx connection "supplied-docs")]
        (doseq [sym ['my.message/send 'my.note/add!]]
          (let [documented (evaluate ctx connection (str "(doc " sym ")"))

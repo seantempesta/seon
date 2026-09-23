@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 created: 2026-09-23
 owner: B4 / README §4 1.3d commit 5 (the published test base and its launcher are deleted there)
 ---
@@ -25,3 +25,11 @@ in-flight schema edit breaks every other lane's base and focused runs.
 1.3d commit 4/5 replaces: tests run on a branch in the shared JVM. Close this note with
 that commit. Until then, the orchestrator runs `--prepare-head-base` only when no lane
 holds an uncommitted `resources/` hunk.
+
+**Resolved (2026-09-23, track 1.3d commit 5, lane realities).** The published test base,
+`--prepare-head-base`, the worker classpath and its checkout copy are deleted with
+`bin/test`'s worker gate. Tests run as `seon.test/run` requests on branches of a running
+cluster; `bin/test --platform` boots the committed HEAD from an archive
+(`bin/seon --root R reset --force`, `script/seon/operator.clj` `committed-source!`), so no
+live-checkout `resources/` can enter it. Landing note:
+`docs/prds/agent-platform/landing/lane-realities-commit-5-2026-09-23.md`.

@@ -19,7 +19,9 @@
   (seon.test/run
    (cond-> {:seon.test/execution context
             :seon.test/recording-connection connection
-            :seon.test/policy :incremental}
+            ;; The reaching set of a named change; with no change, the
+            ;; outstanding and changed work since the recorded evidence.
+            :seon.test/policy (if (seq (:seon.test/changed request)) :named :incremental)}
      (seq (:seon.test/changed request))
      (assoc :seon.test/changed (vec (:seon.test/changed request))))))
 

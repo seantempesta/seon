@@ -126,18 +126,13 @@
 
   ;; Rebuild the source-preferred class cache for the dependency namespaces
   ;; reached by `seon.artifact`; first-party source remains uncached.
-  ;; `ensure-cache` load-files `seon.test.selection` to derive the gate's
-  ;; input digests from the one selector, so this tool classpath carries that
-  ;; namespace's own dependencies. Omitting one refuses the whole gate at its
-  ;; dependency-cache phase.
   :dev-cache
   {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
           babashka/process {:local/root "reference-code/babashka-process"}}
    :ns-default dev-cache}
 
-  ;; The system test gate: `bin/test` (all suites) or
-  ;; `bin/test seon.cluster.run-test` (selection). Source classpath,
-  ;; in-memory Datahike, seconds per cycle.
+  ;; The test classpath every cluster JVM runs with: `seon.test/run` executes
+  ;; tests in the cluster's own JVM (`bin/test-check`, `bin/test`).
   :test
   {:extra-paths ["test" "script" "."]
    :extra-deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}
@@ -145,12 +140,8 @@
                 ;; v0.1.5@376d6ec + 1 commit. fbff842 publishes the bound port.
                 io.github.clojure/core.async.flow-monitor
                 {:local/root "reference-code/core.async.flow-monitor"}}
-   ;; Test JVMs are many at once (a gate = coordinator + pool workers + a
-   ;; serial worker; two gates may run; lanes' fast loops beside them). At
-   ;; 12.5 % of a 128 GB machine each could take 16 GB and the machine
-   ;; swapped (2026-09-20: 8 of 9 GB swap used). 8 % (~10 GB) covers the
-   ;; measured worker peaks (7–8 GB; the population base preparation 13 GB
-   ;; once) — a base preparation that needs more will say so in its log.
+   ;; 8 % of a 128 GB machine (~10 GB) per JVM, measured when several test
+   ;; JVMs ran at once (2026-09-20: 8 of 9 GB swap used at 12.5 %).
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=8"

@@ -4,8 +4,8 @@
             [seon.db :as db]
             [seon.test-support :as support]))
 
-(deftest ^{:seon.test/long "Three config applies on one fixture branch: 57.0 s measured at 15ffb4936 on a scratch cluster, each apply's one reconcile transaction ~16.5 s (routed to the writer-cost owner; 313 ms per apply at bfe3445f8)."
-           :seon.test/long-ms 90000}
+(deftest ^{:seon.test/long "Three config applies on one fixture branch: 57.0 s at 15ffb4936 and 94.8 s at 0e53eb8b1 on scratch clusters, each apply's one reconcile transaction ~16.5 s (routed to the writer-cost owner; 313 ms per apply at bfe3445f8)."
+           :seon.test/long-ms 120000}
   a-config-another-cluster-references-survives-a-later-apply
   ;; Every config row is first written by the one config process, so a
   ;; process-scoped reconciliation managed all of them: applying B retracted

@@ -8,7 +8,6 @@
             [datahike.api :as d]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.export :as cluster.export]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
@@ -22,8 +21,7 @@
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
-            [seon.sci.kernel :as kernel]
-            [seon.test.cache :as cache])
+            [seon.test])
   (:import [java.util.concurrent CountDownLatch ExecutionException Future TimeUnit
             TimeoutException]))
 
@@ -59,8 +57,10 @@
 
 (declare await-event!)
 
+(declare delete-recursively!)
+
 (defn- clone-directory!
-  "Copy one immutable test base into a private mutable root."
+  "Copy-on-write clone one directory tree (a file-store fixture or a checkout copy)."
   {:malli/schema [:=> [:cat :seon.schema/value :seon.schema/value] :string]}
   [source target]
   (let [source (.getCanonicalFile (io/file source))
@@ -76,12 +76,12 @@
                           (.redirectErrorStream true)))
         output (future (slurp (.getInputStream process)))]
     (try
-      (await-event! (.onExit process) ::published-base-cloned)
+      (await-event! (.onExit process) ::directory-cloned)
       (let [exit (.exitValue process)
-            output (await-event! output ::published-base-clone-output)]
+            output (await-event! output ::directory-clone-output)]
         (when-not (zero? exit)
           (throw
-           (ex-info "The shared published test base could not be cloned."
+           (ex-info "The directory could not be cloned."
                     {::source (.getPath source)
                      ::target (.getPath target)
                      ::exit exit
@@ -90,66 +90,30 @@
       (finally
         (when (.isAlive process)
           (.destroyForcibly process)
-          (await-event! (.onExit process) ::published-base-clone-stopped))
-        (await-event! output ::published-base-clone-output)))))
+          (await-event! (.onExit process) ::directory-clone-stopped))
+        (await-event! output ::directory-clone-output)))))
 
-(declare delete-recursively!)
-
-(defn- replace-directory!
-  [authority source target]
-  (when (.exists (io/file target))
-    (fs/delete-recursively! (str authority) (str target)))
-  (clone-directory! source target))
 
 (defn populate-published-root!
-  "Populate `root` from the runner's immutable base, or publish standalone."
+  "Publish the checkout's program into `root`'s own store (a file-backed fixture)."
   {:seon.fn/destroys
-   "the store directory of the root it is handed, replaced wholesale by a clone of the runner's published base"}
+   "the store directory of the root it is handed: publication creates it there, deleting an incomplete prior store"}
   ([root] (populate-published-root! root {}))
-  ([root options]
-  ((requiring-resolve 'seon.test.runner/fixture-observation!)
-   'seon.test-support/populate-published-root! options)
-  (if-let [base (System/getProperty "seon.test.published-base")]
-    (let [root (clone-directory! base root)
-          source-store (io/file base "data" "store")
-          store (:seon.boot/store-dir
-                 (cluster/resolve-bootstrap {:seon.boot/root root}))
-          ;; the deletion authority is the run root this fixture genuinely
-          ;; holds — never the JVM-wide operator root, which in an
-          ;; undeclared worker resolves to the developer's checkout
-          authority root]
-      (replace-directory! authority source-store store)
-      (cluster.export/reidentify-branches!
-       store #{source/current-branch})
-      root)
-    (do
-      (cluster/refresh-source! (str root))
-      (str root)))))
+  ([root _options]
+   (cluster/refresh-source! (str root))
+   (str root)))
 
 (defn populate-published-operator-root!
-  "Populate an operator root from the runner's immutable current-src base."
+  "Publish the checkout's program into an operator root's cluster store."
   {:seon.fn/destroys
-   "the store directory under the operator root it is handed, replaced wholesale by a clone of the runner's published current-src base"}
+   "the store directory under the operator root it is handed: publication creates it there, deleting an incomplete prior store"}
   ([root] (populate-published-operator-root! root {}))
-  ([root options]
-  ((requiring-resolve 'seon.test.runner/fixture-observation!)
-   'seon.test-support/populate-published-operator-root! options)
-  (if-let [base (System/getProperty "seon.test.published-base")]
-    (let [source-store (io/file base "data" "store")
-          store (io/file root "data" "store")]
-      (replace-directory! root source-store store)
-      ;; An operator opens :db for store custody, then forks the published
-      ;; :current-src head. Exact retained commits are never branch sources in
-      ;; this fixture copy.
-      (cluster.export/reidentify-branches!
-       (str store) #{:db source/current-branch})
-      (str root))
-    (do
-      (cluster/refresh-source! (str (io/file root "data" "clusters")))
-      (str root)))))
+  ([root _options]
+   (cluster/refresh-source! (str (io/file root "data" "clusters")))
+   (str root)))
 
 (defn with-published-file-database
-  "Run `body` on a private file-store branch of the published test base.
+  "Run `body` on a private file-store branch of a root the checkout is published into.
 
   The connection CARRIES the branch's own program projection, exactly as the
   canonical in-memory base and a live cluster's boot do. A branch connection
@@ -194,62 +158,28 @@
 (defn- published-commit-ids
   "The `:current-src` heads this JVM's held stores currently name.
 
-   One konserve head record per store (measured 1.05 ms in default PID 88182),
-   so this is an ordinary FACT read, not a cached mirror: nothing has to tell
-   the fixture that the program moved."
+   One konserve head record per store, so this is an ordinary FACT read,
+   not a cached mirror: nothing has to tell the fixture that the program moved."
   []
   (not-empty
    (into (sorted-set)
          (keep (fn [held]
                  (when-let [store (:seon.store/store held)]
-                   (try
-                     (:seon.source/commit-id (source/current store))
-                     (catch Throwable _ nil)))))
+                   (:seon.source/commit-id (source/current store)))))
          (vals @operator.runtime/root-store-holder))))
-
-(defn- publication-key
-  "The publication a canonical fixture built RIGHT NOW would carry.
-
-   An isolated worker's published snapshot is immutable for the JVM's life, so
-   its path is the whole key. A development JVM populates from the working
-   tree, and the fact that moves under it is the store's `:current-src` head:
-   `bin/seon init --dev` advances that head only once adoption converges, so a
-   converged adoption is a cache MISS by construction and no run ever branches
-   from a base older than the publication it runs under.
-
-   No reachable store means nothing observable moved: the key then carries no
-   commit member and the existing base stands, exactly as before. A check that
-   answers `fine` when its subject is absent is the project's named failure
-   class, so the absent case is the key's own member, never a silent `nil`."
-  ([] (publication-key (System/getProperty "seon.test.published-base")
-                       (published-commit-ids)))
-  ([published-base commits]
-   (cond
-     published-base {:seon.test-support/published-base published-base}
-     commits {:seon.source/commit-id commits}
-     :else {:seon.test-support/published-base :seon.test-support/no-store})))
-
-(defn- build-source-manifest
-  []
-  (if-let [base (System/getProperty "seon.test.published-base")]
-    (cache/manifest base)
-    (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots})))
 
 (defonce ^:private manifest-cache (atom {}))
 
 (def source-manifest
-  "The source manifest of the publication this JVM currently runs under.
+  "The source manifest of the checkout this JVM runs under.
 
-   The isolated runner publishes one immutable manifest per snapshot. A
-   development JVM derives it from its own checkout, and re-derives it when
-   `publication-key` moves: the base and this manifest therefore always
-   describe the same publication, and an adopted accreted arity is present in
-   both without any hand rebuild."
+   It is re-derived when a held store's `:current-src` head moves, so an
+   adopted accreted arity is present without any hand rebuild."
   (reify clojure.lang.IDeref
     (deref [_]
-      (let [publication (publication-key)]
+      (let [publication (published-commit-ids)]
         (or (get @manifest-cache publication)
-            (let [manifest (build-source-manifest)]
+            (let [manifest (seon.fn/build-manifest {:seon.fn/roots seon.fn/source-roots})]
               (reset! manifest-cache {publication manifest})
               manifest))))))
 
@@ -331,14 +261,13 @@
 
 (defn execution-handle
   "The executing test's handle: the one held for `connection`, else for this
-  body's custody, else for the member whose SCI context arms this thread.
-  `seon.test/run` executes every body on a member branch the entrance
-  acquired and arms that member's context around the body."
+  body's custody, else the host member `seon.test/run` binds around this body
+  (`seon.test/*member*`). Every member runs on a branch the entrance acquired."
   {:malli/schema [:=> [:cat [:or :nil :seon.db/connection]] :seon.agent/execution-handle]}
   [connection]
   (or (held-handle connection)
       (held-handle db/*conn*)
-      (held-handle (some-> (kernel/current-arm) :seon.sci.kernel/ctx env/of :seon.db/connection))
+      seon.test/*member*
       (throw (ex-info (str "The canonical fixture needs an executing test handle: run the "
                            "test through seon.test/run, whose member branch the agent "
                            "entrance acquired.")
@@ -647,6 +576,9 @@
 (defn- run-database-body
   "Call `body` with `connection` as its custody, under the projection the
   connection carries: the fixture's writes are its own branch's work."
+  {:malli/schema [:=> [:cat :seon.db/connection [:or :nil [:vector :map]] [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
   [connection extra-schema body]
   (db/call-with-custody
    {:seon.db/connection connection}
@@ -662,6 +594,9 @@
   program's installed attribute schema. Blob keys, roster and GC are
   store-global, so a subject over them needs a store, not a branch; its
   program facts are the test's own writes."
+  {:malli/schema [:=> [:cat [:or :nil :uuid :string] [:or :nil [:vector :map]] [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
   [database-id extra-schema body]
   (let [handle (execution-handle db/*conn*)
         source (db/db (:seon.db/connection handle))
@@ -693,6 +628,9 @@
   "Run `body` on a fresh branch off the commit the executing handle was
   acquired at, acquired and released through the agent entrance: an isolated
   agent for one fixture. A nested fixture never sees its parent's writes."
+  {:malli/schema [:=> [:cat [:or :nil [:vector :map]] [:fn clojure.core/ifn?]]
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]}
   [extra-schema body]
   (let [parent (execution-handle db/*conn*)
         handle (agent/acquire-context!
@@ -716,6 +654,13 @@
    `:seon.test-support/fresh-store?` (or `:seon.test-support/database-id`)
    supplies an independent empty in-memory store with the installed attribute
    schema, for store-global subjects such as blob keys."
+  {:malli/schema [:function
+                  [:=> [:cat [:fn clojure.core/ifn?]]
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]
+                  [:=> [:cat :map [:fn clojure.core/ifn?]]
+                   [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "A fixture returns its body's arbitrary result unchanged."}]]]}
   ([body] (with-database {} body))
   ([{:seon.test-support/keys [database-id extra-schema fresh-store?]} body]
     (if (or database-id fresh-store?)
