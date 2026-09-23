@@ -17,7 +17,7 @@
           (let [projection (schema/projection-from-database database)
                 base {:seon.error/at (java.util.Date.)
                       :seon.error/layer :seon.test/selection
-                      :seon.error/operation 'seon.test.runner/run!
+                      :seon.error/operation 'seon.test/run
                       :seon.error/message "Invalid producer input."}]
             (is (uuid? (:seon.source/commit-id published)))
             (doseq [[declared-schema members]
