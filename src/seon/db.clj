@@ -3522,6 +3522,189 @@
                 (or (nil? maximum) (<= (long arity) (long maximum)))))
          declared)))
 
+(def ^:private call-edges-query
+  '[:find ?caller-symbol ?call
+    :where [?caller :seon.fn/call-arities ?call]
+    (or [?caller :seon.fn/sym ?caller-symbol]
+        [?caller :seon.test/sym ?caller-symbol])])
+
+(def ^:private arity-attributes
+  "Every attribute the arity gate reads."
+  [:seon.fn/call-arities :seon.fn/sym :seon.test/sym :seon.fn/arities
+   :seon.fn.arity/min :seon.fn.arity/max])
+
+(defn- error-value?
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (boolean (and (map? value) (inst? (:seon.error/at value))
+                (qualified-keyword? (:seon.error/layer value))
+                (qualified-symbol? (:seon.error/operation value)))))
+
+(defn- arity-comparison
+  "Candidate edges of `edges` under `bounds`: callees declaring arities none
+  of which admits the recorded count, with the comparison's coverage."
+  {:malli/schema [:=> [:cat [:set :seon.schema/value] :map]
+                  [:map [::candidates [:set :seon.schema/value]] [::checked :int] [::edges :int]]]}
+  [edges bounds]
+  (let [checked (filterv (fn [[_ [callee _]]] (contains? bounds callee)) edges)]
+    {::candidates (into #{} (remove (fn [[_ [callee n]]] (arity-admitted? (get bounds callee) n))) checked)
+     ::checked (count checked)
+     ::edges (count edges)}))
+
+(defonce ^:private arity-base-cache
+  ;; Four recent bases; each key holds the read attributes' datom vectors,
+  ;; whose unchanged datoms are the index's own objects.
+  (cache/lru-cache-factory {} :threshold 4))
+
+(defn- arity-base
+  "The arity gate's whole-program input for a value, memoized by the datoms it
+  reads: edges, bounds, the comparison, and the edges indexed by caller and
+  callee so a report can replace only the ones it touched."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :map :seon.db/error-result]]}
+  [database]
+  (let [derive (fn []
+                 (let [edges (d/q call-edges-query database)
+                       bounds (declared-arity-bounds d/q database)]
+                   (if (error-value? bounds)
+                     bounds
+                     (let [edges (set edges)]
+                       (merge (arity-comparison edges bounds)
+                              {::edge-set edges
+                               ::bounds bounds
+                               ::by-caller (group-by first edges)
+                               ::by-callee (group-by (comp first second) edges)})))))]
+    ;; Keyed by the datoms it reads. The writer's own `:db-before` carries no
+    ;; committed identity (Datahike's writer loop threads each report's
+    ;; `:db-after`, `datahike/writer.cljc:118`, and `with` clears its
+    ;; cache-context, `datahike/core.cljc:136`), so neither revisions nor a
+    ;; commit id can name it; its datoms can. Datom equality compares e, a
+    ;; and v (`datahike/datom.cljc:106`), which is all the gate reads.
+    @(cache/lookup-or-miss
+      arity-base-cache
+      [::arity-content (mapv (fn [attribute]
+                               [attribute (if (get (dbi/-schema database) attribute)
+                                            (vec (d/datoms database :aevt attribute))
+                                            [])])
+                             arity-attributes)]
+      (fn [_] (delay (derive))))))
+
+(defn- report-arity-comparison
+  "The arity comparison of a report's final value from its `:db-before`'s
+  memoized base: only edges and bounds under a caller or callee
+  symbol this report touched are read again on `:db-after`. An edge belongs to
+  its caller's symbol and a bound to its callee's, so every other edge and
+  bound is unchanged. Without every read attribute installed before, the
+  final value is compared whole."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] [:or :map :seon.db/error-result]]}
+  [report]
+  (let [before (:db-before report)
+        after (:db-after report)
+        tx-data (:tx-data report)]
+    (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
+      (let [edges (d/q call-edges-query after)
+            bounds (declared-arity-bounds d/q after)]
+        (if (error-value? bounds)
+          bounds
+          (assoc (arity-comparison (set edges) bounds) ::bounds bounds)))
+      (let [base (arity-base before)]
+        (if (error-value? base)
+          base
+          (let [symbols (fn [database entities attributes]
+                          (into #{}
+                                (for [entity entities attribute attributes
+                                      :when (get (dbi/-schema database) attribute)
+                                      datom (d/datoms database :eavt entity attribute)]
+                                  (:v datom))))
+                touched (fn [attributes] (into #{} (comp (filter (comp attributes :a)) (map :e)) tx-data))
+                callers (touched #{:seon.fn/call-arities :seon.fn/sym :seon.test/sym})
+                arity-owners (into #{}
+                                   (for [arity (touched #{:seon.fn.arity/min :seon.fn.arity/max})
+                                         database [before after]
+                                         datom (dbi/search database [nil :seon.fn/arities arity])]
+                                     (:e datom)))
+                callees (into (touched #{:seon.fn/arities :seon.fn/sym}) arity-owners)
+                caller-symbols (into (symbols before callers [:seon.fn/sym :seon.test/sym])
+                                     (symbols after callers [:seon.fn/sym :seon.test/sym]))
+                callee-symbols (into (symbols before callees [:seon.fn/sym])
+                                     (symbols after callees [:seon.fn/sym]))]
+            (if (and (empty? caller-symbols) (empty? callee-symbols))
+              (select-keys base [::candidates ::checked ::edges ::bounds])
+              (let [removed (into #{} (concat (mapcat (::by-caller base) caller-symbols)
+                                              (mapcat (::by-callee base) callee-symbols)))
+                    after-callers
+                    (when (seq caller-symbols)
+                      (d/q '[:find ?caller-symbol ?call
+                             :in $ [?caller-symbol ...]
+                             :where
+                             (or [?caller :seon.fn/sym ?caller-symbol]
+                                 [?caller :seon.test/sym ?caller-symbol])
+                             [?caller :seon.fn/call-arities ?call]]
+                           after caller-symbols))
+                    after-bounds
+                    (when (seq callee-symbols)
+                      (reduce
+                       (fn [bounds [function-symbol minimum maximum]]
+                         (update bounds function-symbol (fnil conj #{})
+                                 (cond-> {:seon.fn.arity/min minimum}
+                                   (nat-int? maximum) (assoc :seon.fn.arity/max maximum))))
+                       {}
+                       (d/q '[:find ?function-symbol ?minimum ?maximum
+                              :in $ [?function-symbol ...]
+                              :where
+                              [?function :seon.fn/sym ?function-symbol]
+                              [?function :seon.fn/arities ?arity]
+                              [?arity :seon.fn.arity/min ?minimum]
+                              [(get-else $ ?arity :seon.fn.arity/max -1) ?maximum]]
+                            after callee-symbols)))
+                    bounds (merge (apply dissoc (::bounds base) callee-symbols) after-bounds)
+                    affected (into (set after-callers)
+                                   (remove #(caller-symbols (first %)))
+                                   (mapcat (::by-callee base) callee-symbols))
+                    prior (arity-comparison removed (::bounds base))
+                    current (arity-comparison affected bounds)]
+                {::candidates (into (reduce disj (::candidates base) removed) (::candidates current))
+                 ::checked (+ (- (::checked base) (::checked prior)) (::checked current))
+                 ::edges (+ (- (::edges base) (::edges prior)) (::edges current))
+                 ::bounds bounds}))))))))
+
+(defn- arity-verdict
+  "Refuse or report the candidates whose prepared arities also refuse."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map]
+                  [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
+  [database projection {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
+  (let [candidates (vec candidates)
+        snapshot (when (seq candidates)
+                   (@call-preparation-snapshot database projection))
+        refusal (or (when (error-value? snapshot) snapshot)
+                    (first (:seon.call-preparation/refusals snapshot)))]
+    (or refusal
+        (let [plans (into {} (map (fn [callee]
+                                    [callee (@call-preparation-plan-for
+                                             database snapshot callee)]))
+                          (distinct (map (comp first second) candidates)))
+              refused (some #(when (error-value? %) %) (vals plans))]
+          (or refused
+              {:seon.fn/arity-mismatches
+               (->> candidates
+                    (keep (fn [[caller [callee n]]]
+                            (let [declared (vec (sort-by
+                                                 (juxt :seon.fn.arity/min
+                                                       #(get % :seon.fn.arity/max Long/MAX_VALUE))
+                                                 (get bounds callee)))
+                                  prepared (if-let [plan (get plans callee)]
+                                             (@call-preparation-arities plan)
+                                             declared)]
+                              (when-not (arity-admitted? prepared n)
+                                {:seon.fn/caller caller
+                                 :seon.fn/callee callee
+                                 :seon.fn/call-arity (long n)
+                                 :seon.fn/declared-arities declared
+                                 :seon.fn/prepared-arities prepared}))))
+                    (sort-by (juxt :seon.fn/caller :seon.fn/callee :seon.fn/call-arity))
+                    vec)
+               :seon.fn/arity-checked checked
+               :seon.fn/arity-unchecked (- edges checked)})))))
+
 (defn- arity-mismatches-with
   [query-fn database projection]
   (let [edges (query-fn '[:find ?caller-symbol ?call
@@ -3835,7 +4018,10 @@
      (when (some @changed-identity-attributes
                  [:seon.fn/sym :seon.test/sym :seon.schema/key
                   :seon.schema.shape/fingerprint :seon.call-preparation/key])
-       (let [result (arity-mismatches-with d/q database projection)
+       (let [comparison (report-arity-comparison report)
+             result (if (error-value? comparison)
+                      comparison
+                      (arity-verdict database projection comparison))
              mismatches (:seon.fn/arity-mismatches result)]
          (if (and (map? result) (inst? (:seon.error/at result))
              (qualified-keyword? (:seon.error/layer result))

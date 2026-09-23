@@ -2307,3 +2307,24 @@
          (declare-entity! connection ::rendered))
        (is (= [1] @rendered) "the render gate reads the one written declaration")))))
 
+(deftest a-report-touching-no-function-reuses-the-committed-arity-comparison
+  ;; The arity gate compares only call edges and bounds under a caller or
+  ;; callee this report touched; every other edge is its committed basis's.
+  ;; A plain write to a declaration row runs the gate (its root is a schema
+  ;; key) and leaves the arity attributes' revisions equal. A transaction
+  ;; function's commit advances Datahike's conservative revision instead
+  ;; (datahike/writer.cljc:249), so that basis is compared again.
+  (test-support/with-database
+   (fn [connection]
+     (let [compare-edges @#'seon.db/arity-comparison
+           compared (atom [])
+           toggle! (fn [value]
+                     (test-support/transacted!
+                      connection
+                      [[:db/add [:seon.schema/key :seon.error/base] :seon.schema/generatable? value]]))]
+       (toggle! false)
+       (toggle! true)
+       (with-redefs [seon.db/arity-comparison
+                     (fn [edges bounds] (swap! compared conj (count edges)) (compare-edges edges bounds))]
+         (toggle! false))
+       (is (empty? @compared) "the committed basis's comparison is reused")))))
