@@ -1267,21 +1267,47 @@
                                        (:seon.boot/advertisement outcome)))
             report (assoc-in report [:seon.operator/phases :seon.operator/restore-ms]
                              (elapsed-ms began-restore))
-            terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))]
+            terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))
+            ;; The replaced program runs again, once: no retry loop.
+            began-resume (System/nanoTime)
+            resumed (when previous-source
+                      (let [back (try (:seon.operator/value
+                                       (launch-child! (assoc request :seon.operator/command :start
+                                                             :seon.boot/cluster-name "default")
+                                                      previous-source true))
+                                      (catch clojure.lang.ExceptionInfo cause
+                                        (diagnostic (ex-message cause) (or (ex-data cause) {})
+                                                    :client-failed cause)))
+                            back-missing (get-in back [:seon.boot/readiness :seon.boot/missing-layers])
+                            back-ready? (and (not (:seon.error/message back))
+                                             (vector? back-missing) (empty? back-missing))]
+                        {:seon.operator/source-root previous-source
+                         :seon.operator/ready? back-ready?
+                         :seon.operator/value back
+                         :seon.operator/terminated
+                         (if back-ready? []
+                             (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root)))}))
+            report (assoc-in report [:seon.operator/phases :seon.operator/resume-previous-ms]
+                             (elapsed-ms began-resume))]
         (assoc (diagnostic (str "The JVM from " (:seon.source/git-sha source)
                                 (if ready? " refused to adopt its publication" " did not reach readiness")
                                 (case (:seon.operator/rollback restored)
                                   :restored "; its branch heads were put back"
                                   nil "; it wrote to no existing store"
                                   "; ITS BRANCH HEADS COULD NOT BE PUT BACK (see :seon.operator/heads)")
-                                "; it was terminated, so no JVM of this root runs. The store and caches are kept.")
+                                "; it was terminated"
+                                (cond (nil? resumed) ", and no program ran before it, so no JVM of this root runs"
+                                      (:seon.operator/ready? resumed) (str "; the previous program " previous-source " runs again")
+                                      :else (str "; THE PREVIOUS PROGRAM " previous-source " ALSO FAILED (see :seon.operator/resumed), so no JVM of this root runs"))
+                                ". The store and caches are kept.")
                            (merge report {:seon.operator/value value
                                           :seon.operator/heads restored
                                           :seon.operator/adoption adoption
                                           :seon.boot/advertisement (:seon.boot/advertisement outcome)
-                                          :seon.operator/terminated terminated})
+                                          :seon.operator/terminated terminated
+                                          :seon.operator/resumed resumed})
                            :client-failed)
-               :seon.operator/process-exit? true)))))
+               :seon.operator/process-exit? (not (:seon.operator/ready? resumed)))))))
 
 (defn request! [request]
   (try

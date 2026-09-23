@@ -201,3 +201,23 @@ assertions, 0 failures (bb, 0.4 s), adding the per-root analysis cache and the
 capture/restore form structure (exact-commit branch!, never force-branch!).
 Limit: the restore runs only in a live failed child; a child that exits after
 writing leaves the heads captured in the result for a manual restore.
+
+## Follow-up 2: a failed move runs the previous program again
+
+After the heads are restored and the failed replacement is terminated, the move
+launches the program the replaced JVM ran (its `-Dseon.repository.root`, read
+before the stop) once, with the class cache, no retry. The result carries
+`:seon.operator/resumed` (source root, `ready?`, the new JVM's readiness and
+identity, or its full cause); a resume that fails is terminated and both causes
+are returned; `:process-exit?` is true only when no JVM runs. A move from a root
+with no running JVM has nothing to resume and says so. +30 lines, operator only.
+
+Proof, scratch root `tmp/mth3-root` (deleted after; evidence
+`tmp/mth-evidence/resume-previous/`): nuke at `bfcce39ad` 191.4 s (ready
+140,569 ms); move to `ad41853a0`: adoption refused, heads restored (122 ms), the
+`bfcce39ad` archive ran again as pid 74799, ready 8,805 ms, missing `[]`, source
+commit `6ab345bf…` = the captured `:current-src`; `bin/seon status` answered pid
+74799 with `hook-publication :off` from the archive. Wall 173.1 s: source 3,462;
+down 1,446; launch 119,911 (ready 90,318: DEFECT, publication of the diff, same
+issue); adopt 8,762; restore 122; resume-previous 38,803 (JVM start with no class
+cache, same issue). Regression suite unchanged, 7 tests / 39 assertions green.
