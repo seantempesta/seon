@@ -5412,9 +5412,9 @@
 (defn- arm-turn-completion-backstop!
   "Arm the live bound after the ready permit is consumed.
 
-  Success cancels only after the permit is republished. An escaped transform
-  republishes the permit for lifecycle progress but deliberately leaves this
-  observer armed, so quiescence cannot hide the failed turn."
+  The step cancels it once the permit is republished, whether the pass
+  returned or threw: an escaped transform's throw is its turn's one fault,
+  surfaced to Flow, so the observer never re-reports it after the bound."
   {:malli/schema [:=> [:cat [:map [:seon.agent/executor :seon.flow/executor]
                             [:seon.agent/timeout-ms [:int {:min 0}]]]]
                   [:map [:seon.agent/cancel :seon.flow/channel]
@@ -5512,10 +5512,8 @@
        (if-some [turn-bound (await-turn-permit! state)]
        (let [backstop (arm-turn-completion-backstop! turn-bound)
              cluster (assoc cluster :seon.turn.loop/await-part
-                            (:seon.turn.loop/await-part backstop))
-             succeeded? (volatile! false)]
+                            (:seon.turn.loop/await-part backstop))]
         (try
-          (let [result
                 (let [agent-id (:seon.agent/id state)
                       connection (:seon.db/connection cluster)
                       process (:seon.db.process/id cluster)
@@ -5593,12 +5591,10 @@
                                    agent-id (:seon.turn/id report)
                                    refusal refusals bound))))
                 ;; flow's own report channel: observation, never a dependency
-                       {::flow/report [report]}])))]
-           (vreset! succeeded? true)
-           result)
+                       {::flow/report [report]}])))
          (finally
            (if (async/offer! completion :seon.agent/ready)
-             (when @succeeded?
+             (do
                (async/offer! (:seon.agent/cancel backstop) :seon.agent/completed)
                (when-let [backstop-state
                           (:seon.agent/turn-backstop-state cluster)]
