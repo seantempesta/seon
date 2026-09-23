@@ -1,7 +1,8 @@
 (ns seon.cluster.save-gate-test
   "The save gate: a change reaches its target only when the tests reaching it
   pass on the target's candidate branch (`seon.cluster/candidate-gate!`)."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
@@ -89,3 +90,49 @@
         (is (not= before (db/commit-id (db/db (:seon.db/connection target)))) "adopted first")
         (is (pos? (:seon.test/fail-count (first (:seon.test/results (:seon.source/gate-run answer))) 0))
             "the reaching test's failure comes back")))))
+
+(deftest ^{:seon.test/long "One nested seon.test/run on a new candidate commit; seon.test.runner/program-digest re-derives per new commit (10.7 s measured 2026-09-23, cache audit item 6)."
+           :seon.test/long-ms 60000}
+  a-deleted-function-reaches-the-gate-with-its-reaching-tests
+  ;; The writer refuses a deletion that severs a reaching test (1.3e), so every
+  ;; test that reached a deleted function is itself changed; the deleted
+  ;; symbol still goes to `seon.test/run`, which resolves it through history.
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        connection (:seon.db/connection target)
+        branch (keyword (str "save-gate-test-" (id/id)))
+        ;; Built, not quoted: a quoted symbol here would be this test's own
+        ;; reference to the function it deletes.
+        callee (symbol "seon.cluster.save-gate-test" "gate-callee")
+        caller (symbol "seon.cluster.save-gate-test" "gate-caller")
+        head #(db/commit-id (db/db connection))]
+    (support/transacted! connection
+                         [(support/program-fn-row (db/db connection) callee "(defn gate-callee [] 1)")
+                          (deftest-row (db/db connection) "gate-caller" "(= 1 (seon.cluster.save-gate-test/gate-callee))")])
+    (try
+      (let [before (head)
+            refusal (try (gate! target branch (fn [handle]
+                                                (support/transacted! (:seon.db/connection handle)
+                                                                     [[:db/retractEntity [:seon.fn/sym callee]]])
+                                                #{[:seon.fn/sym callee]}))
+                         (catch clojure.lang.ExceptionInfo refused refused))]
+        (is (clojure.string/includes? (str (ex-message refusal)) "surviving referrers") (pr-str refusal))
+        (is (some #(= caller (get-in % [:seon.program/referrer :seon.test/sym]))
+                  (tree-seq coll? seq (ex-data refusal)))
+            "the refusal names the reaching test")
+        (is (= before (head)) "the target keeps the function")
+        (let [gate (gate! target branch
+                          (fn [handle]
+                            (let [connection (:seon.db/connection handle)]
+                              (support/transacted! connection
+                                                   [[:db/retractEntity [:seon.fn/sym callee]]
+                                                    [:db/retractEntity [:seon.test/sym caller]]
+                                                    (deftest-row (db/db connection) "gate-replacement" "(= 1 2)")])
+                              #{[:seon.fn/sym callee] [:seon.test/sym caller]
+                                [:seon.test/sym 'seon.cluster.save-gate-test/gate-replacement]})))]
+          (is (false? (:seon.test/passed? gate)) (:seon.source/tally gate))
+          (is (= ['seon.cluster.save-gate-test/gate-replacement]
+                 (mapv :seon.test/sym (:seon.test/timings (:seon.source/gate-run gate)))))
+          (is (= before (head)) "red: the target keeps the function")))
+      (finally
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))

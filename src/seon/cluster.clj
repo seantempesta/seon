@@ -2644,26 +2644,20 @@
 
 (defn- reaching-run
   "The tests reaching `identities`, answered on `execution` and recorded on its
-  connection. Only declarations present there are members: a retired test is
-  none. No changed function or test, no request."
+  connection. Every changed function and test is passed, deleted ones
+  included: `seon.test/run` resolves a deleted symbol through history and its
+  surviving incoming edges. No changed function or test, no request."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
                    [:seon.source/gate-run {:optional true}
                     [:or :seon.test/run-result :seon.error/value]]]]}
   [execution identities]
-  (let [database (db/db (:seon.db/connection execution))
-        of (fn [attribute]
-             (vec (db/q '[:find [?value ...] :in $ ?attribute [?value ...]
-                          :where [_ ?attribute ?value]]
-                        database attribute
-                        (into [] (keep (fn [[a v]] (when (= attribute a) v))) identities))))
-        [changed tests] [(of :seon.fn/sym) (of :seon.test/sym)]
-        run (when (or (seq changed) (seq tests))
+  (let [changed (into [] (keep (fn [[a v]] (when (#{:seon.fn/sym :seon.test/sym} a) v))) identities)
+        run (when (seq changed)
               ((requiring-resolve 'seon.test/run)
-               (cond-> {:seon.test/policy :named :seon.test/execution execution
-                        :seon.test/recording-connection (:seon.db/connection execution)}
-                 (seq changed) (assoc :seon.test/changed changed)
-                 (seq tests) (assoc :seon.test/identities (set tests)))))]
+               {:seon.test/policy :named :seon.test/execution execution
+                :seon.test/recording-connection (:seon.db/connection execution)
+                :seon.test/changed changed}))]
     (cond-> {:seon.test/passed? (if run (true? (:seon.test/passed? run)) true)
              :seon.source/tally (if run ((requiring-resolve 'seon.test/tally) run)
                                     "no changed function or test: no test selected")}
