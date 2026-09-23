@@ -42,15 +42,13 @@
       (throw
        (ex-info
         "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
-        {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.cluster/process
-          :seon.error/operation `current-identity
-          :seon.error/message
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster/process `current-identity
+         {:seon.error/message
           "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
           :seon.error/member :seon.boot/start-instant
           :seon.error/expected :process-generation-timestamp
           :seon.cluster.process/start-instant-unavailable (.pid handle)
-          :seon.boot/pid (.pid handle)})))
+          :seon.boot/pid (.pid handle)}))))
     {:seon.boot/pid (.pid handle)
      :seon.boot/start-instant (java.util.Date/from (.get start))}))
 
@@ -199,24 +197,20 @@
                  (integer? deadline-ms) (pos? deadline-ms))
     (throw
      (ex-info "Supply nonempty argv and a positive process deadline."
-              {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.operator/lifecycle
-         :seon.error/operation 'seon.cluster.process/run-process!
-         :seon.error/message "Supply nonempty argv and a positive process deadline."
+              (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
+               {:seon.error/message "Supply nonempty argv and a positive process deadline."
          :seon.error/offending request
          :seon.error/member :seon.operator.subprocess/deadline-ms
          :seon.error/expected "a positive deadline and nonempty argv"
-         :seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-ms})))
+         :seon.operator.subprocess/deadline-member :seon.operator.subprocess/deadline-ms}))))
   (when (and silence-ms (not (and (pos-int? silence-ms) progress observe-output!)))
     (throw (ex-info "Supply a progress atom and output observer for the silence bound."
-                    {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.operator/lifecycle
-         :seon.error/operation 'seon.cluster.process/run-process!
-         :seon.error/message "Supply a progress atom and output observer for the silence bound."
+                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
+                     {:seon.error/message "Supply a progress atom and output observer for the silence bound."
          :seon.error/offending request
          :seon.error/member :seon.operator.subprocess/progress
          :seon.error/expected "a phase observation for the silence bound"
-         :seon.operator.subprocess/progress-member :seon.operator.subprocess/progress})))
+         :seon.operator.subprocess/progress-member :seon.operator.subprocess/progress}))))
   (let [deadline-ns (+ (System/nanoTime) (* 1000000 (long deadline-ms)))
         last-progress (atom (System/nanoTime))
         watch-key (Object.)
@@ -276,10 +270,8 @@
         (throw
          (ex-info
           "The process and its output must finish within the declared bound."
-          {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.operator/lifecycle
-         :seon.error/operation 'seon.cluster.process/run-process!
-         :seon.error/message "The process and its output must finish within the declared bound."
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
+           {:seon.error/message "The process and its output must finish within the declared bound."
          :seon.error/offending argv
          :seon.error/member :seon.operator.subprocess/deadline-ms
          :seon.error/expected deadline-ms
@@ -290,7 +282,7 @@
            :seon.operator.subprocess/pid (.pid child)
            :seon.operator.subprocess/start-instant
            (:seon.boot/start-instant (first identities))
-           :seon.operator.subprocess/reaped? reaped?})))
+           :seon.operator.subprocess/reaped? reaped?}))))
       {:seon.operator.subprocess/argv argv
        :seon.operator.subprocess/exit (.exitValue child)
        :seon.operator.subprocess/output output
