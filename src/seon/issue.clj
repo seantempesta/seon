@@ -1036,11 +1036,14 @@
         :seon.error/expected "test entities in the success references"}))))
 
 (defn- create-tx
-  "Create the assigned worker, its plan, and its opening in one writer decision."
+  "Create the assigned worker, its plan, and its opening in one writer decision.
+  A supplied `:seon.agent/branch` is the worker's branch (a candidate's own);
+  otherwise creation defaults it to the cluster branch."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/id :seon.issue/id]
                         [:seon.issue/budget :seon.issue/budget]
                         [:seon.ns/name {:optional true} :seon.ns/name]
+                        [:seon.agent/branch {:optional true} :seon.agent/branch]
                         [:seon.agent/settings {:optional true} :seon.config/agent-overlay]
                         [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
                   :seon.db/tx-data]}
@@ -1099,7 +1102,9 @@
         :seon.issue/existing-worker-id agent-id
         :seon.error/expected "an available derived worker identity"}))
     (let [creation (@cluster-agent-creation-tx
-                    {:seon.agent/id agent-id :seon.ns/name namespace-name :seon.cluster/name cluster-name})
+                    (merge {:seon.agent/id agent-id :seon.ns/name namespace-name
+                            :seon.cluster/name cluster-name}
+                           (select-keys request [:seon.agent/branch])))
           step-id (id/id [:seon.issue/step issue-id])
           creation (mapv
                     (fn [entry]
@@ -1138,6 +1143,7 @@
                        [:map [:seon.issue/id :seon.issue/id]
                         [:seon.issue/budget :seon.issue/budget]
                         [:seon.ns/name {:optional true} :seon.ns/name]
+                        [:seon.agent/branch {:optional true} :seon.agent/branch]
                         [:seon.agent/settings {:optional true} :seon.config/agent-overlay]
                         [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
                   :seon.db/tx-data]}
@@ -1229,11 +1235,14 @@
       [])))
 
 (defn start!
-  "Start or resume the same issue worker with a larger total budget atomically."
+  "Start or resume the same issue worker with a larger total budget atomically.
+  Start on a candidate's connection with its `:seon.agent/branch` to create the
+  worker there; a resume keeps the worker's existing branch."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                              [:seon.issue/id :seon.issue/id]
                              [:seon.issue/budget :seon.issue/budget]
                              [:seon.ns/name {:optional true} :seon.ns/name]
+                             [:seon.agent/branch {:optional true} :seon.agent/branch]
                              [:seon.agent/settings {:optional true} :seon.config/agent-overlay]
                              [:seon.config.ai/no-provider {:optional true} :seon.config.ai/no-provider]]]
                   [:or :map :seon.db/error-result :seon.issue/not-found-error :seon.issue/already-started-error :seon.issue/no-tests-error :seon.issue/no-namespace-error :seon.issue/no-cluster-error :seon.issue/worker-exists-error :seon.issue/not-a-test-error]]}
