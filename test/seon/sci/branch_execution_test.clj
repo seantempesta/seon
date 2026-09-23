@@ -256,3 +256,79 @@
          (is (not (identical? (:env a) (:env b))) "each context keeps its own environment")
          (is (= 2 (sci/eval-string* a "(seon.sci.eval-test/concurrent-acquisition-probe)")))
          (is (= 2 (sci/eval-string* b "(seon.sci.eval-test/concurrent-acquisition-probe)")))))))))
+
+(defn- acquisition-view
+  "What one acquisition compared against, what it interpreted and what it refused."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :map]}
+  [ctx]
+  (let [acquired (eval/acquired-program ctx)]
+    {:loaded (db/commit-id (:seon.sci.eval/loaded-database
+                            @(:seon.sci.kernel/program-snapshot ctx)))
+     :interpreted-count (:seon.sci.eval/interpreted-count acquired)
+     :refused (into #{} (map :seon.sci.eval/refused-function)
+                    (:seon.test/acquisition-refusals acquired))}))
+
+(deftest ^{:seon.test/long "Four complete SCI acquisitions of the canonical fixture program (one per loaded commit and branch) plus two fixture writes and two branches."
+           :seon.test/long-ms 12000}
+  an-adoption-record-moves-the-loaded-program-every-acquisition-compares-against
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [subject 'seon.render.hiccup/escape
+             before (db/db connection)
+             record-entity (db/q '[:find ?e . :where [?e :seon.source/commit-id]] before)
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before (db/carried-projection before))
+                                   {:seon.sci.eval/loaded-connection connection})
+             first-acquire (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db before}))
+             baseline (acquisition-view ctx)
+             _ (support/transacted! connection
+                 [[:db/add [:seon.fn/sym subject] :seon.program/definition-digest
+                   (id/digest 64 ["m9-adoption" (str subject)])]])
+             edited (db/db connection)
+             edited-commit (db/commit-id edited)
+             edited-acquire (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db edited}))
+             unadopted (acquisition-view ctx)
+             _ (support/transacted! connection
+                 [[:db/add record-entity :seon.source/commit-id edited-commit]])
+             adopted-db (db/db connection)]
+         (is (true? (:seon.fn/host-bound? (db/pull before '[*] [:seon.fn/sym subject])))
+             "the subject is a compiled declaration SCI cannot interpret")
+         (is (= #{} (:refused baseline)) "the fixture's own program interprets nothing it refuses")
+         (is (contains? (:refused unadopted) subject)
+             "before adoption the changed host-bound row differs from the loaded program and refuses by name")
+         (is (not (eval/acquired-database? ctx adopted-db))
+             "a moved adoption record alone makes the acquisition stale")
+         (let [adopted-acquire (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db adopted-db}))
+               adopted (acquisition-view ctx)]
+           (println "M9-ADOPTION-PROOF"
+                    (pr-str {:first-acquire-ms (:ms first-acquire)
+                             :edited-acquire-ms (:ms edited-acquire)
+                             :adopted-acquire-ms (:ms adopted-acquire)
+                             :baseline baseline :unadopted unadopted :adopted adopted}))
+           (is (= edited-commit (:loaded adopted))
+               "the loaded program is the commit the record names")
+           (is (= (:interpreted-count baseline) (:interpreted-count adopted)))
+           (is (= #{} (:refused adopted)) "the adopted row is compiled, so nothing refuses")
+           (on-branch connection adopted-db :m9-adoption-isolated
+            (fn [child]
+              (let [fork (eval/fork-cluster-ctx
+                          ctx (db/db child) child
+                          (eval/projection-state (db/db child) (db/carried-projection (db/db child))))]
+                (println "M9-ADOPTION-ISOLATED-MS"
+                         (:ms (measured #(eval/acquire! {:seon.sci.eval/ctx fork :seon.db/db (db/db child)}))))
+                (is (= (select-keys adopted [:loaded :interpreted-count :refused])
+                       (acquisition-view fork))
+                    "an isolated branch at the head compares against the cluster's record"))))
+           (on-branch connection before :m9-adoption-stable
+            (fn [child]
+              (let [fork (eval/fork-cluster-ctx
+                          ctx (db/db child) child
+                          (eval/projection-state (db/db child) (db/carried-projection (db/db child))))]
+                (println "M9-ADOPTION-STABLE-MS"
+                         (:ms (measured #(eval/acquire! {:seon.sci.eval/ctx fork :seon.db/db (db/db child)}))))
+                (let [stable (acquisition-view fork)]
+                  (is (= edited-commit (:loaded stable)))
+                  (is (contains? (:refused stable) subject)
+                      "a branch opened before the adoption keeps its own row, which refuses by name"))))))))))))

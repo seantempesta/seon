@@ -121,6 +121,7 @@
             [seon.fn]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.render :as render]
@@ -834,36 +835,66 @@
         true))))
 
 (defn- interpretation-error
-  "Refuse a row whose branch definition cannot execute in this context."
-  {:malli/schema [:=> [:cat :qualified-symbol :string]
-                  :seon.sci.eval/interpretation-error]}
-  [sym reason]
-  {:seon.error/at (java.util.Date.)
-   :seon.error/layer :seon.sci.eval/program
-   :seon.error/operation 'seon.sci.eval/install-row!
-   :seon.error/message (str "Cannot interpret " sym ": " reason)
-   :seon.error/expected :seon.sci.eval/interpretable-definition
-   :seon.sci.eval/refused-function sym
-   :seon.sci.eval/interpretation-reason reason})
+  "Refuse a row whose branch definition cannot execute in this context.
+  A refusal caused by a throwable carries its whole cause: class, root frame
+  and chain (`seon.error.refusal/chain`), each link's message and ex-data."
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-symbol :string]
+                   :seon.sci.eval/interpretation-error]
+                  [:=> [:cat :qualified-symbol :string :seon.error/throwable]
+                   :seon.sci.eval/interpretation-error]]}
+  ([sym reason]
+   {:seon.error/at (java.util.Date.)
+    :seon.error/layer :seon.sci.eval/program
+    :seon.error/operation 'seon.sci.eval/install-row!
+    :seon.error/message (str "Cannot interpret " sym ": " reason)
+    :seon.error/expected :seon.sci.eval/interpretable-definition
+    :seon.sci.eval/refused-function sym
+    :seon.sci.eval/interpretation-reason reason})
+  ([sym reason ^Throwable failure]
+   (let [frame (error.refusal/root-frame failure)]
+     (cond-> (assoc (interpretation-error sym reason)
+                    :seon.error/exception-class (symbol (.getName (class failure)))
+                    :seon.error/chain (error.refusal/chain failure))
+       frame (assoc :seon.error/frame frame)))))
 
-(defn- loaded-program
-  "Materialize the source commit recorded by the cluster that loaded the JVM.
-   A source-branch constructor already receives that immutable program value;
-   forks carry this value, rather than treating their edited branch as loaded."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
+(defn- loaded-source
+  "The database whose adoption record names the JVM's loaded source commit.
+
+  The loaded namespaces are one per JVM, so this is the adopting cluster's live
+  connection (`::loaded-connection`, which a fork inherits), read now: its
+  `:seon.source/commit-id` moves when `seon.cluster/development-source-refresh!`
+  has reloaded and armed. A branch's own record is its branch-point value and
+  stays behind a later adoption. A context handed no connection reads `database`."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value] :seon.db/database-value]}
+  [holder database]
+  (if-let [connection (::loaded-connection holder)] (db/db connection) database))
+
+(defn- loaded-commit-id
+  "The source commit the JVM loaded, as the adoption record in `database` names it.
+  A `current-src` value without a record is that commit itself."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/commit-id]}
   [database]
   (let [commits (db/q '[:find [?commit ...]
                         :where [_ :seon.source/commit-id ?commit]] database)]
     (cond
-      (= 1 (count commits))
-      (or (some-> (d/commit-as-db database (first commits) {:secondary-indices? false})
-                  (vary-meta assoc :seon.schema/projection (db/carried-projection database)))
-          (throw (ex-info "The JVM's recorded source commit is unavailable."
-                          {:seon.source/commit-id (first commits)})))
-      (= :current-src (get-in database [:config :branch])) database
+      (= 1 (count commits)) (first commits)
+      (= :current-src (get-in database [:config :branch])) (db/commit-id database)
       :else (throw (ex-info "The JVM's loaded source commit is unknown."
                             {:seon.error/expected :seon.source/commit-id
                              :seon.error/offending commits})))))
+
+(defn- loaded-program
+  "Materialize the source commit the JVM loaded (`loaded-commit-id` of `database`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
+  [database]
+  (let [commit (loaded-commit-id database)]
+    (if (= commit (db/commit-id database))
+      database
+      (or (some-> (d/commit-as-db database commit {:secondary-indices? false})
+                  (vary-meta assoc :seon.schema/projection (db/carried-projection database)))
+          (throw (ex-info "The JVM's recorded source commit is unavailable."
+                          {:seon.source/commit-id commit}))))))
 
 (defn- row-definition-digest
   {:malli/schema [:=> [:cat :map] :seon.program/definition-digest]}
@@ -1002,7 +1033,8 @@
                         (when (:seon.instrument/registration-observation (error/refusal failure))
                           (throw failure))
                         (interpretation-error function-symbol
-                          (or (ex-message failure) (.getName (class failure))))))))]
+                          (or (ex-message failure) (.getName (class failure)))
+                          failure)))))]
           (if (map? result)
             (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
                                        (list 'quote (symbol (name function-symbol)))))
@@ -1726,7 +1758,8 @@
                           (.getName (class failure)))]
     (if (:seon.sci.eval/refused-function failure-data)
       failure-data
-      {:seon.error/at (java.util.Date.)
+      (cond->
+       {:seon.error/at (java.util.Date.)
       :seon.error/layer ::acquisition
       :seon.error/operation 'seon.sci.eval/acquisition-refusal
       :seon.sci.eval/row-member (second identity)
@@ -1738,7 +1771,9 @@
         failure-data (assoc ::acquisition-failure failure-data)
         (instance? Throwable failure)
         (assoc ::acquisition-throwable-class (.getName (class failure))))
-      :seon.error/expected ::installed})))
+      :seon.error/expected ::installed}
+       (instance? Throwable failure)
+       (assoc :seon.error/chain (error.refusal/chain failure))))))
 
 (defn- acquisition-refusal-id
   [refusal]
@@ -1750,6 +1785,20 @@
               (:seon.error/operation refusal)
               (get-in refusal [:seon.error/data ::acquisition-cause-message])]))
 
+(defn- refusal-member
+  "Where one row's acquisition refusal belongs in the acquisition state.
+
+  An agent-authored row (`:seon.schema.admission/source :agent`) that cannot be
+  installed is that agent's mistake (AGENTS.md error policy): it is recorded
+  through the one error owner, which routes it to the namespace's agent, and
+  the rest of the program acquires without it (`::agent-mistakes`). Any other
+  row's refusal refuses the acquisition (`::acquisition-refusals`)."
+  {:malli/schema [:=> [:cat :map] [:enum ::agent-mistakes ::acquisition-refusals]]}
+  [declaration]
+  (if (= :agent (:seon.schema.admission/source declaration))
+    ::agent-mistakes
+    ::acquisition-refusals))
+
 (defn- record-acquisition-refusals!
   "Record contained row refusals through the one durable error owner, once.
 
@@ -1760,7 +1809,7 @@
   delivers through the supplied fault recorder."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :map [:or :nil :seon.flow/commit-fault!]] :map]}
   [ctx db state commit-fault!]
-  (let [refusals (::acquisition-refusals state)]
+  (let [refusals (into (vec (::acquisition-refusals state)) (::agent-mistakes state))]
     (if-not (seq refusals)
       state
       (if-let [connection (:seon.db/connection (::custody ctx))]
@@ -2018,7 +2067,7 @@
                     :seon.program/row row})]
               (if (or (contains? installed :seon.instrument/check)
                       (:seon.sci.eval/refused-function installed))
-                (update state ::acquisition-refusals (fnil conj [])
+                (update state (refusal-member row) (fnil conj [])
                         (acquisition-refusal row installed))
                 (cond-> (assoc state
                        :seon.schema/projection
@@ -2032,7 +2081,7 @@
             (catch Throwable failure
               (when (:seon.instrument/registration-observation (error/refusal failure))
                 (throw failure))
-              (update state ::acquisition-refusals (fnil conj [])
+              (update state (refusal-member row) (fnil conj [])
                       (acquisition-refusal row failure)))))]
     ;; Imports are explicit namespace facts. Install their named classes before
     ;; the namespace bindings resolve them; SCI is containment, not a security
@@ -2454,6 +2503,33 @@
         database))
      (derive-base-ctx database arm-request))))
 
+(defn- loaded-basis
+  "The revision of the adoption record's attribute in the loaded source.
+
+  Datahike advances an attribute's revision exactly when a commit touches it
+  (`revision-basis`), so an equal basis proves the record did not move."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [source]
+  (program-basis (revision-basis source) #{:seon.source/commit-id}))
+
+(defn- loaded-program-current?
+  "Whether the program this acquisition compared against is still the JVM's loaded one.
+
+  An unmoved record answers from its attribute revision; a moved one compares
+  the commit it names with the loaded commit the acquisition used, and an equal
+  answer records the new revision so the next call reads it."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value] :boolean]}
+  [ctx database]
+  (let [snapshot @(::kernel/program-snapshot ctx)
+        source (loaded-source snapshot database)
+        basis (loaded-basis source)]
+    (or (= (::loaded-basis snapshot) basis)
+        (when (= (some-> (::loaded-database snapshot) db/commit-id)
+                 (loaded-commit-id source))
+          (swap! (::kernel/program-snapshot ctx) assoc ::loaded-basis basis)
+          true)
+        false)))
+
 (defn acquired-database?
   "Whether this context already acquired the program the supplied value holds.
 
@@ -2472,6 +2548,9 @@
     (boolean
      (and (::acquisition snapshot)
           previous
+          ;; An adoption moves the JVM's loaded program without touching this
+          ;; branch's rows; an acquisition compared against the older one is stale.
+          (loaded-program-current? ctx database)
           (or (identical? previous database)
               (when (and commit-id (commit-id-of previous))
                 (let [attributes (acquisition-attributes (db/carried-projection previous))
@@ -2505,7 +2584,8 @@
                         (program-basis (acquisition-attributes
                                         (db/carried-projection database))))
         target (or (:seon.db/connection (::custody ctx)) commit-fault!)]
-    (if (and (seq (::acquisition-refusals acquired)) program target)
+    (if (and (or (seq (::acquisition-refusals acquired)) (seq (::agent-mistakes acquired)))
+             program target)
       (let [cache-key [program target]
             cell (cache/lookup-or-miss
                   refusal-recording-cache cache-key
@@ -2543,8 +2623,10 @@
         (::acquisition snapshot))
       (let [commit-fault! (or commit-fault! (:seon.flow/commit-fault! snapshot))
             _ (load-core-namespaces! database)
+            source (loaded-source snapshot database)
             generated (base-ctx database
-                                (cond-> {::loaded-database (::loaded-database snapshot)} commit-fault!
+                                (cond-> {::loaded-database (loaded-program source)}
+                                  commit-fault!
                                   (assoc :seon.flow/commit-fault! commit-fault!)))
             acquired (::acquisition generated)]
         ;; SCI stamps later definitions with this generation. Installing the
@@ -2553,8 +2635,14 @@
         (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
         (advance-context-projection! ctx database (:seon.schema/projection generated))
         (let [recorded (record-refusals-once! ctx database acquired commit-fault!)]
+          ;; The memoized base is shared by key; the loaded authority belongs
+          ;; to this context, not to the base.
           (reset! (::kernel/program-snapshot ctx)
-                  (assoc @(::kernel/program-snapshot generated) ::acquisition recorded))
+                  (cond-> (assoc @(::kernel/program-snapshot generated)
+                                 ::acquisition recorded
+                                 ::loaded-basis (loaded-basis source))
+                    (::loaded-connection snapshot)
+                    (assoc ::loaded-connection (::loaded-connection snapshot))))
           recorded)))))
 
 (defn- acquire-function-from-database!
@@ -2582,7 +2670,8 @@
      :seon.sci.eval/ctx]
     [:=> [:cat :seon.db/database-value :seon.db/connection
           :seon.sci.eval/projection-state
-          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]]]
+          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
+           [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]]]
      :seon.sci.eval/ctx]]}
   ;; EACH ARITY HANDS ON ONLY WHAT IT HAS. Delegating through the widest
   ;; arity with `nil` made the function violate its own declared contract the
@@ -2609,8 +2698,9 @@
                                 connection (assoc :seon.db/connection connection)
                                 (nil? connection) (assoc :seon.db/db db)))
          _ (swap! (::kernel/program-snapshot ctx) merge
-                  {::loaded-database (loaded-program db)}
-                  (select-keys arm-request [:seon.flow/commit-fault! ::loaded-database]))
+                  {::loaded-database (loaded-program (loaded-source arm-request db))}
+                  (select-keys arm-request
+                               [:seon.flow/commit-fault! ::loaded-database ::loaded-connection]))
          projection-state (or supplied-projection-state
                               (projection-state db projection))
          ctx (call-preparation/install
@@ -2645,7 +2735,8 @@
     [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value
           :seon.db/connection :seon.sci.eval/projection-state
           [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
-           [:seon.env/environment {:optional true} :seon.env/environment]]]
+           [:seon.env/environment {:optional true} :seon.env/environment]
+           [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]]]
      :seon.sci.eval/ctx]]}
   ([base-ctx db connection]
    (fork-cluster-ctx base-ctx db connection
@@ -2677,7 +2768,9 @@
                       ::kernel/program-snapshot
                       (atom (merge (dissoc @(::kernel/program-snapshot base-ctx)
                                            :seon.flow/commit-fault!)
-                                   (select-keys arm-request [:seon.flow/commit-fault! ::loaded-database])))
+                                   (select-keys arm-request
+                                                [:seon.flow/commit-fault! ::loaded-database
+                                                 ::loaded-connection])))
                       ::custody {:seon.db/connection connection}
                       :seon.schema/projection projection)
                projection-state))]

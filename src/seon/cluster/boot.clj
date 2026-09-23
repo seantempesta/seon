@@ -73,7 +73,10 @@
            boot-dials (config/effective (db/db connection) cluster-name)
            arm-request {:seon.flow/commit-fault!
                         #(cluster/commit-fault! connection cluster-name process
-                                        (config/result-caps boot-dials) %)}
+                                        (config/result-caps boot-dials) %)
+                        ;; This cluster's adoption record names the JVM's
+                        ;; loaded program at every acquisition (`sci.eval/loaded-source`).
+                        :seon.sci.eval/loaded-connection connection}
            ;; Every contracted Var this JVM has loaded is armed once here,
            ;; with its profiling cell and definition digest; adoption later
            ;; re-arms only changed identities (`cluster/refresh-source!`).
