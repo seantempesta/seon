@@ -3,6 +3,11 @@
 ;; bin/test-check [--root PATH] [CLUSTER] [--policy P] [--test NS/TEST]...
 ;;                [--ns NS]... [--changed NS/SYM]... [--include-long]
 ;;                [--isolated] [--time-limit-ms N]
+;; bin/test-check [--root PATH] [CLUSTER] --gate --changed-path PATH...
+;; --gate is the save gate (seon.cluster/refresh-source! with
+;; {:seon.source/gate? true}): PATH is published, the tests reaching its changes
+;; run on the cluster's candidate branch, and the cluster adopts only on green.
+;; It prints the tally, each phase's ms and the slow-call profile.
 ;; --isolated names the members a development root never runs
 ;; (seon.test/isolated-members): the platform host's request. Its bound is the
 ;; members' declared bounds (seon.test/declared-bound-ms) unless given.
@@ -14,7 +19,8 @@
 (defn- usage! []
   (throw (ex-info (str "Usage: bin/test-check [--root PATH] [CLUSTER] [--policy "
                        "named|incremental|platform|all] [--test NS/TEST]... [--ns NS]... "
-                       "[--changed NS/SYM]... [--include-long] [--isolated] [--time-limit-ms N]") {})))
+                       "[--changed NS/SYM]... [--include-long] [--isolated] [--time-limit-ms N] "
+                       "| [CLUSTER] --gate --changed-path PATH...") {})))
 
 (defn- parse [args]
   (loop [args args request {}]
@@ -27,6 +33,8 @@
           "--changed" (recur (drop 2 args) (update request :seon.test/changed (fnil conj []) (symbol value)))
           "--include-long" (recur (rest args) (assoc request :seon.test/include-long? true))
           "--isolated" (recur (rest args) (assoc request ::isolated? true))
+          "--gate" (recur (rest args) (assoc request ::gate? true))
+          "--changed-path" (recur (drop 2 args) (update request ::paths (fnil conj []) (or value (usage!))))
           "--time-limit-ms" (recur (drop 2 args)
                                    (assoc request :seon.test/check-time-limit-ms
                                           (or (parse-long (or value "")) (usage!))))
@@ -52,6 +60,28 @@
           eval! (fn [form timeout-ms] (#'operator/prepl-value! advertisement (pr-str form) timeout-ms))
           _ (when-not advertisement
               (throw (ex-info "No live cluster advertisement; test-check starts no JVM." {})))
+          _ (when (::gate? request)
+              (when-not (seq (::paths request)) (usage!))
+              (let [paths (mapv #(.getCanonicalPath (io/file %)) (::paths request))
+                    ;; The answer the caller reads, not the whole run: tally,
+                    ;; verdict, phase ms and the profile lines, or the refusal.
+                    form (list 'let ['result (list 'seon.cluster/refresh-source! root paths cluster
+                                                   '(seon.fs/source-directory) {:seon.source/gate? true})]
+                               '(if (:seon.error/at result)
+                                  result
+                                  (cond-> {:seon.source/gate (dissoc (:seon.source/gate result)
+                                                                     :seon.source/gate-run)}
+                                    (:seon.profile/explanation result)
+                                    (assoc-in [:seon.profile/explanation :seon.profile/lines]
+                                              (get-in result [:seon.profile/explanation
+                                                              :seon.profile/lines])))))
+                    result (eval! form (+ shipped-check-bound transport-bound))
+                    gate (:seon.source/gate result)]
+                (println (or (:seon.source/tally gate) (:seon.error/message result) (pr-str result)))
+                (when gate (println "phase ms:" (pr-str (:seon.source/phase-ms gate))))
+                (doseq [line (get-in result [:seon.profile/explanation :seon.profile/lines])]
+                  (println line))
+                (System/exit (if (true? (:seon.test/passed? gate)) 0 1))))
           request (if-not (::isolated? request)
                     request
                     (let [database (list 'seon.db/db (list :seon.db/connection handle-form))
@@ -94,6 +124,9 @@
         (when-not (and (vector? result) (true? (second result)))
           (System/exit 1))))
     (catch Exception failure
+      ;; The whole cause: every class, message and ex-data in the chain.
       (binding [*out* *err*]
-        (println "check unavailable:" (ex-message failure)))
+        (println "check unavailable:")
+        (doseq [cause (take-while some? (iterate ex-cause failure))]
+          (println " " (.getName (class cause)) (ex-message cause) (pr-str (ex-data cause)))))
       (System/exit 1))))

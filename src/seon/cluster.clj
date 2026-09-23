@@ -2467,40 +2467,21 @@
                        :seon.source/adopted-commit-id adopted})))
     []))
 
-(defn- development-source-refresh!
-  {:malli/schema
-   [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
-          [:vector :string]
-          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
-    [:or :seon.source/adoption-result :seon.source/publication-error]]}
-  [held-store instance published changed-paths _roots]
-  (let [connection (:seon.boot/cluster-connection instance)
-        cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
-        cluster-ref [:seon.cluster/name cluster-name]
-        ctx (:seon.sci.eval/ctx instance)
-        prior-commit (:seon.source/commit-id
-                      (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
-    (cond
-      (and prior-commit (= prior-commit (:seon.source/commit-id published)))
-      (do (report-source-progress! "development cluster converged")
-          {:seon.source/reloaded-namespaces []
-           :seon.source/arming-identities #{}})
-      ;; A newer publication owns adoption; this one never starts writing.
-      (not= (:seon.source/commit-id published)
-            (:seon.source/commit-id (source/current held-store)))
-      (source/publication-error 'seon.cluster/refresh-source!
-                                {:branch source/current-branch
-                                 :expected-current-commit (:seon.source/commit-id published)
-                                 :current-commit (:seon.source/commit-id (source/current held-store))})
-      :else
-      (let [previous-database (db/db connection)
-        ;; Every adoption write is derived from this published commit and
-        ;; refuses at the writer once another publication moves the head.
+(defn- adopt-rows!
+  "Write the program, schema and issue rows `published` changed since `prior-commit`
+  onto `connection`, and answer the program identities written.
+
+  The one database half of adoption: development adoption hands it the cluster's
+  connection, the save gate its candidate's. Every write refuses once another
+  publication moves `current-src` (`expected-head`)."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.db/connection :seon.source/published
+                       [:maybe :seon.source/commit-id] :seon.db/database-value]
+                  :seon.reconcile/adopt-identities]}
+  [held-store connection published prior-commit published-database]
+  (let [previous-database (db/db connection)
         expected-head {:seon.source/branch source/current-branch
                        :seon.source/expected-commit-id (:seon.source/commit-id published)}
-        published-database (source/database held-store (:seon.source/commit-id published))]
-       (try
-        (let [published-projection (db/carried-projection published-database)
+        published-projection (db/carried-projection published-database)
         identities (if prior-commit
                      (source/changed-identities held-store published prior-commit)
                      (into #{} (keep program/row-identity)
@@ -2538,7 +2519,39 @@
             (report-source-progress! "development changed issues")
             (require-committed!
              ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities expected-head)
-             {:seon.boot/population :seon.issue/rows}))
+             {:seon.boot/population :seon.issue/rows}))]
+    program-identities))
+
+(defn- development-source-refresh!
+  {:malli/schema
+   [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
+          [:vector :string]
+          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
+    [:or :seon.source/adoption-result :seon.source/publication-error]]}
+  [held-store instance published changed-paths _roots]
+  (let [connection (:seon.boot/cluster-connection instance)
+        cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
+        cluster-ref [:seon.cluster/name cluster-name]
+        ctx (:seon.sci.eval/ctx instance)
+        prior-commit (:seon.source/commit-id
+                      (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
+    (cond
+      (and prior-commit (= prior-commit (:seon.source/commit-id published)))
+      (do (report-source-progress! "development cluster converged")
+          {:seon.source/reloaded-namespaces []
+           :seon.source/arming-identities #{}})
+      ;; A newer publication owns adoption; this one never starts writing.
+      (not= (:seon.source/commit-id published)
+            (:seon.source/commit-id (source/current held-store)))
+      (source/publication-error 'seon.cluster/refresh-source!
+                                {:branch source/current-branch
+                                 :expected-current-commit (:seon.source/commit-id published)
+                                 :current-commit (:seon.source/commit-id (source/current held-store))})
+      :else
+      (let [previous-database (db/db connection)
+        published-database (source/database held-store (:seon.source/commit-id published))]
+       (try
+        (let [program-identities (adopt-rows! held-store connection published prior-commit published-database)
         database (db/db connection)
         projection (schema/projection-from-database database)
         changed-identities (adoption-identities program-identities)
@@ -2614,8 +2627,107 @@
        :seon.source/arming-identities arming-identities}))
     (finally (d/release-materialized-db published-database)))))))
 
+(defn candidate-gate!
+  "Answer the tests reaching one change on `branch`, the source's candidate.
+
+  `branch` is reset to the head of `source`'s connection unless it already
+  names it, `write!` puts the change onto the candidate's execution handle and
+  answers its identities, and `seon.test/run` answers the tests reaching them
+  there through the agent acquisition entrance. Only a green verdict calls
+  `advance!`, whose answer is `:seon.source/advanced`; `source` is never
+  written here. A change naming no function or test selects and runs nothing."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch
+                       :seon.instrument/callable :seon.instrument/callable]
+                  [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
+                   [:seon.source/candidate :seon.store/branch]
+                   [:seon.source/phase-ms [:map-of :keyword :double]]
+                   [:seon.source/gate-run {:optional true}
+                    [:or :seon.test/run-result :seon.error/value]]
+                   [:seon.source/advanced {:optional true}
+                    [:or :seon.source/adoption-result :seon.source/publication-error
+                     :seon.reconcile/adopt-identities]]]]}
+  [source held-store branch write! advance!]
+  (let [started (System/nanoTime)
+        ms #(/ (- (System/nanoTime) %) 1000000.0)
+        target {:seon.store/store held-store :seon.store/branch branch}
+        head (db/commit-id (db/db (:seon.db/connection source)))
+        held? (contains? (registry/roster held-store) branch)]
+    (when-not (and held? (= head (registry/branch-commit-id target)))
+      (when held? (registry/retire-branch! target))
+      (registry/branch! (assoc target :seon.cluster.registry/from head)))
+    (let [execution (cluster.agent/acquire-context! source nil {:seon.agent/branch branch})
+          gate
+          (try
+            (let [identities (write! execution)
+                  candidate-ms (ms started)
+                  written (db/db (:seon.db/connection execution))
+                  ;; A retired declaration has no test to run; it is no member.
+                  of (fn [attribute]
+                       (vec (db/q '[:find [?value ...] :in $ ?attribute [?value ...]
+                                    :where [_ ?attribute ?value]]
+                                  written attribute
+                                  (into [] (keep (fn [[a v]] (when (= attribute a) v))) identities))))
+                  [changed tests] [(of :seon.fn/sym) (of :seon.test/sym)]
+                  run (when (or (seq changed) (seq tests))
+                        ((requiring-resolve 'seon.test/run)
+                         (cond-> {:seon.test/policy :named :seon.test/execution execution
+                                  :seon.test/recording-connection (:seon.db/connection execution)}
+                           (seq changed) (assoc :seon.test/changed changed)
+                           (seq tests) (assoc :seon.test/identities (set tests)))))]
+              (cond-> {:seon.test/passed? (if run (true? (:seon.test/passed? run)) true)
+                       :seon.source/candidate branch
+                       :seon.source/tally (if run ((requiring-resolve 'seon.test/tally) run)
+                                              "no changed function or test: no test selected")
+                       :seon.source/phase-ms {:seon.source/candidate-ms candidate-ms
+                                              :seon.source/tests-ms (- (ms started) candidate-ms)}}
+                run (assoc :seon.source/gate-run run)))
+            (finally (cluster.agent/release-context! execution)))]
+      (if (:seon.test/passed? gate)
+        (let [advancing (System/nanoTime)
+              advanced (advance!)]
+          (-> (assoc gate :seon.source/advanced advanced)
+              (assoc-in [:seon.source/phase-ms :seon.source/adopt-ms] (ms advancing))))
+        gate))))
+
+(defn- save-gate!
+  "Adopt `published` into a development cluster only when the tests reaching it
+  pass on the cluster's candidate branch `:cluster-<name>-candidate`.
+
+  The changed rows reach the candidate through `adopt-rows!`, the database
+  half of the cluster's own adoption; green advances the cluster through
+  `development-source-refresh!`. An adopted commit is unchanged: no test."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.boot/instance :seon.source/published
+                       [:vector :string]
+                       [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
+                  [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]]]}
+  [held-store instance published changed-paths roots]
+  (let [connection (:seon.boot/cluster-connection instance)
+        cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
+        prior-commit (:seon.source/commit-id
+                      (db/pull (db/db connection) [:seon.source/commit-id]
+                               [:seon.cluster/name cluster-name]))
+        branch (keyword (str (name (registry/cluster-branch cluster-name)) "-candidate"))]
+    (if (= prior-commit (:seon.source/commit-id published))
+      {:seon.test/passed? true :seon.source/candidate branch
+       :seon.source/tally "unchanged: no changed declaration, no test selected"
+       :seon.source/phase-ms {}
+       :seon.source/advanced (development-source-refresh!
+                              held-store instance published changed-paths roots)}
+      (let [published-database (source/database held-store (:seon.source/commit-id published))]
+        (try
+          (candidate-gate!
+           (:seon.turn.loop/cluster instance) held-store branch
+           #(adopt-rows! held-store (:seon.db/connection %) published prior-commit published-database)
+           #(development-source-refresh! held-store instance published changed-paths roots))
+          (finally (d/release-materialized-db published-database)))))))
+
 (defn refresh-source!
   "Publish the current source tree onto the one `current-src` branch.
+
+  With `{:seon.source/gate? true}` a development cluster adopts only when the
+  tests reaching the change pass on its candidate branch (`save-gate!`); a red
+  gate leaves the cluster unchanged. `:seon.source/gate` carries the tally, the
+  run and each phase's milliseconds.
 
   Content digests select changed inputs and declaration edges select affected
   files. The captured input bytes produce rows directly; the current database
@@ -2629,6 +2741,9 @@
     [:=> [:cat :seon.boot/root [:vector :string] [:maybe :seon.boot/cluster-name]]
      :seon.source/refresh-result]
     [:=> [:cat :seon.boot/root [:vector :string] [:maybe :seon.boot/cluster-name] :string]
+     :seon.source/refresh-result]
+    [:=> [:cat :seon.boot/root [:vector :string] [:maybe :seon.boot/cluster-name] :string
+          [:map [:seon.source/gate? {:optional true} :boolean]]]
      :seon.source/refresh-result]]}
   ([root]
    (refresh-source! root []))
@@ -2637,6 +2752,8 @@
   ([root changed-paths development-cluster]
    (refresh-source! root changed-paths development-cluster (fs/source-directory)))
   ([root changed-paths development-cluster directory]
+   (refresh-source! root changed-paths development-cluster directory {}))
+  ([root changed-paths development-cluster directory {gate? :seon.source/gate?}]
    (report-source-progress! "request accepted")
      (report-source-progress! "bootstrap configuration")
      (let [;; A publication over one second reports what the armed
@@ -2661,17 +2778,25 @@
          (schema/call-with-projection
           (schema/declaration-projection (schema.edn/packaged-forms))
           (fn []
-            (let [published (full-source-refresh! root held-store roots)
-                  result
-                  (if (:seon.error/at published)
-                    published
-                    (let [adoption (if instance
-                                     (development-source-refresh! held-store instance published changed-paths roots)
-                                     {:seon.source/reloaded-namespaces []
-                                      :seon.source/arming-identities #{}})]
-                      (if (:seon.error/at adoption)
-                        adoption
-                        (merge published adoption))))]
+            (let [started (System/nanoTime)
+                  published (full-source-refresh! root held-store roots)
+                  publish-ms (/ (- (System/nanoTime) started) 1000000.0)
+                  gate (when (and gate? instance (not (:seon.error/at published)))
+                         (-> (save-gate! held-store instance published changed-paths roots)
+                             (assoc-in [:seon.source/phase-ms :seon.source/publish-ms] publish-ms)))
+                  adoption (cond
+                             gate (:seon.source/advanced gate
+                                                         {:seon.source/reloaded-namespaces []
+                                                          :seon.source/arming-identities #{}})
+                             (and instance (not (:seon.error/at published)))
+                             (development-source-refresh! held-store instance published changed-paths roots)
+                             :else {:seon.source/reloaded-namespaces []
+                                    :seon.source/arming-identities #{}})
+                  result (cond
+                           (:seon.error/at published) published
+                           (:seon.error/at adoption) adoption
+                           :else (cond-> (merge published adoption)
+                                   gate (assoc :seon.source/gate (dissoc gate :seon.source/advanced))))]
               (if-let [explanation (profile/explain-slow profile-mark)]
                 (do (report-source-progress!
                      (str "profile: " (str/join "\n  " (:seon.profile/lines explanation))))

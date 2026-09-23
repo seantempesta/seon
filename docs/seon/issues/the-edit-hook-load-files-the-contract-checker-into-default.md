@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: defect
 created: 2026-09-23
 tags: [issue, hook, instrument, replaced-roots, default, agent-platform]
@@ -78,3 +78,12 @@ checker changed.
    `(.endsWith loaded-file relative-path)`.
 3. Add one regression: a namespace `load-file`d from its own path reports no
    replaced roots, and an `alter-var-root` still does.
+
+## Resolution (2026-09-23, lane save-gate)
+
+`bin/seon-hook` `run-contract-compile` now sends `(require 'seon.contracts-compile-test)`,
+with `:reload` only when the edited paths include `test/seon/contracts_compile_test.clj`;
+no `load-file` reaches default. Observed after the change: hook lines at 04:36:47Z and
+04:36:56Z `available errors=0` (72–96 ms). Vars loaded by an earlier `load-file` keep
+their absolute `:file` until that namespace's next reload. Evidence:
+`docs/prds/agent-platform/landing/lane-save-gate-2026-09-23.md`.

@@ -557,8 +557,9 @@
 (defn- run-contract-compile
   "Compile every contract the files declare, in the live root JVM.
 
-  The checker is loaded from this checkout on every call: the live JVM may run
-  a published snapshot whose classpath has no copy of it, or an older one.
+  The live JVM runs from this checkout, so the checker is `require`d from its
+  classpath, and reloaded only when the checker file itself is among the
+  edited paths; it is never `load-file`d over the root's Vars.
   No live root is `:unavailable`, never a pass."
   [{:seon.hook/keys [file-paths prospective-content]}]
   (if-not (get-in (load-config) [:contract-compile :enabled] true)
@@ -574,7 +575,10 @@
                       {:seon.contracts-compile-test/root repo-root
                        :seon.contracts-compile-test/paths absolute-paths})
             form (pr-str
-                  `(do (load-file ~(str (root-file contract-checker-path)))
+                  `(do ~(if (some #{(absolute-file-path (root-file contract-checker-path))}
+                                  absolute-paths)
+                          `(require '~'seon.contracts-compile-test :reload)
+                          `(require '~'seon.contracts-compile-test))
                        (mapv (fn [finding#]
                                (-> (select-keys finding# [:filename :row :col :level
                                                           :type :message])
@@ -1648,7 +1652,13 @@
                    (~'seon.cluster/project-next-prepl-value!
                     {:seon.dev.mcp/read-only? false :seon.dev.mcp/project? false})
                    (try
-                     (~'seon.cluster/refresh-source! ~root ~paths ~cluster)
+                     ;; The save gate: adopt only when the reaching tests pass on
+                     ;; the cluster's candidate branch.
+                     (let [result# (~'seon.cluster/refresh-source! ~root ~paths ~cluster
+                                    (~'seon.fs/source-directory) {:seon.source/gate? true})]
+                       (cond-> result#
+                         (:seon.source/gate result#)
+                         (update :seon.source/gate dissoc :seon.source/gate-run)))
                      (catch Throwable failure#
                        (merge {:seon.error/at (java.util.Date.)
                                :seon.error/layer :seon.cluster/publication
@@ -1660,6 +1670,10 @@
                                        timeout-ms)]
       (cond
         (:seon.error/message result) (str "refused: " (pr-str result))
+        (false? (get-in result [:seon.source/gate :seon.test/passed?]))
+        (str "refused by the save gate; default unchanged: "
+             (get-in result [:seon.source/gate :seon.source/tally])
+             " " (pr-str (get-in result [:seon.source/gate :seon.source/phase-ms])))
         (and (:seon.source/commit-id result)
              (vector? (:seon.source/reloaded-namespaces result))
              (set? (:seon.source/arming-identities result)))
