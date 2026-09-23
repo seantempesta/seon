@@ -268,48 +268,61 @@
   (let [owners (destroyers database)]
     (if (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation))
       owners
-      (reduce
-       (fn [reached owner]
-         (let [tests (functions/tests-reaching database owner)]
-           (if (and (map? tests) (contains? tests :seon.error/at) (contains? tests :seon.error/layer) (contains? tests :seon.error/operation))
-             (reduced tests)
-             (reduce #(assoc %1 %2 owner) reached tests))))
-       {}
-       (sort (keys owners))))))
+      (let [by-owner (functions/gate-sets database (sort (keys owners)))]
+        (if (:seon.db/invalid-read by-owner)
+          by-owner
+          (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
+                  {} (sort by-owner)))))))
 
-(defn- destructive-path
-  "Shortest named call path to a destructive declaration."
-  [database test-symbol owner-symbol]
-  (loop [frontier [[test-symbol]] seen #{}]
-    (when (seq frontier)
-      (if-let [found (first (filter #(= owner-symbol (peek %)) frontier))]
-        found
-        (let [paths
-              (into []
-                    (mapcat (fn [path]
-                              (let [name (peek path)
-                                    identity-attribute (if (= name test-symbol) :seon.test/sym :seon.fn/sym)
-                                    row (db/pull database
-                                                 '[(limit :seon.fn/calls nil) :seon.test/subject]
-                                                 [identity-attribute name])]
-                                (when (and (map? row) (contains? row :seon.error/at) (contains? row :seon.error/layer) (contains? row :seon.error/operation))
-                                  (throw (ex-info "Destructive path unavailable." row)))
-                                (for [target (concat (:seon.fn/calls row)
-                                                     (when-let [subject (:seon.test/subject row)] [subject]))
-                                      :when (not (seen target))]
-                                  (conj path target))))) frontier)]
-          (recur paths (into seen (map peek) frontier)))))))
+(defn- destructive-paths
+  "Shortest named call path from every name reaching `owner-symbol` down to it.
+
+  One breadth-first reverse walk from the owner over the index edges
+  `seon.fn/gate-set-in` walks (`:seon.fn/calls`, `:seon.fn/references`,
+  `:seon.test/subject`), so the cost follows the owner's reverse closure once,
+  never one forward walk per member."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+                  [:map-of :qualified-symbol :seon.test/destructive-path]]}
+  [database owner-symbol]
+  (let [datoms (fn [& arguments]
+                 (let [found (apply db/datoms database arguments)]
+                   (if (:seon.db/invalid-read found)
+                     (throw (ex-info "Destructive path unavailable." found))
+                     found)))
+        name-of (fn [entity]
+                  (some #(:v (first (datoms :eavt entity %))) [:seon.test/sym :seon.fn/sym]))]
+    (loop [frontier [owner-symbol] next-hop {owner-symbol nil}]
+      (if (empty? frontier)
+        (into {} (map (fn [start]
+                        [start (loop [path [start]]
+                                 (if-let [hop (next-hop (peek path))] (recur (conj path hop)) path))]))
+              (keys next-hop))
+        (let [fresh (reduce (fn [found [caller target]]
+                              (if (or (contains? next-hop caller) (contains? found caller))
+                                found
+                                (assoc found caller target)))
+                            {}
+                            (for [target frontier
+                                  attribute [:seon.fn/calls :seon.fn/references :seon.test/subject]
+                                  datom (datoms :avet attribute target)
+                                  :let [caller (name-of (:e datom))]
+                                  :when caller]
+                              [caller target]))]
+          (recur (vec (sort (keys fresh))) (merge next-hop fresh)))))))
 
 (defn- destructive-exclusion
-  "One selected test's destructive evidence, or nil when it reaches no owner."
-  [database owners reach test-symbol]
+  "One selected test's destructive evidence, or nil when it reaches no owner.
+  `paths` maps each owner to `destructive-paths` from it; a reach the walk
+  cannot name keeps no path key, never a nil one."
+  [owners reach paths test-symbol]
   (when-let [owner (get reach test-symbol)]
-    (cond-> {:seon.test/sym test-symbol
-             :seon.fn/sym owner
-             :seon.test/destructive-path (destructive-path database test-symbol owner)
-             :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}
-      (string? (get owners owner))
-      (assoc :seon.fn/destroys (get owners owner)))))
+    (let [path (get-in paths [owner test-symbol])]
+      (cond-> {:seon.test/sym test-symbol
+               :seon.fn/sym owner
+               :seon.test/command ["bin/test" "--" (namespace (symbol test-symbol))]}
+        path (assoc :seon.test/destructive-path path)
+        (string? (get owners owner))
+        (assoc :seon.fn/destroys (get owners owner))))))
 
 (defn host
   "Where one test runs, and why, as data.
@@ -348,7 +361,11 @@
           (let [reach (destructive-reach database)]
             (if (and (map? reach) (contains? reach :seon.error/at) (contains? reach :seon.error/layer) (contains? reach :seon.error/operation))
               reach
-              (if-let [evidence (destructive-exclusion database owners reach test-symbol)]
+              (if-let [evidence (destructive-exclusion
+                                 owners reach
+                                 (when-let [owner (get reach test-symbol)]
+                                   {owner (destructive-paths database owner)})
+                                 test-symbol)]
                 (assoc evidence :seon.test/host :seon.test.host/isolated-snapshot)
                 {:seon.test/sym test-symbol
                  :seon.test/host :seon.test.host/in-process}))))))))
@@ -1232,7 +1249,8 @@
 (defn resolve-test
   "Resolve an admitted test in the host or acquired SCI program by provenance."
   {:malli/schema [:=> [:cat :seon.test/resolution-request]
-                  [:or :seon.test/var :seon.test/resolution-error :seon.test/not-runnable-error :seon.test.run/unavailable-error :seon.db/invalid-read-error :seon.schema/missing-projection-error]]}
+                  [:or :seon.test/var :seon.test/resolution-error :seon.test/not-runnable-error :seon.test.run/unavailable-error :seon.db/invalid-read-error :seon.schema/missing-projection-error
+                   :seon.sci.eval/row-acquisition-error :seon.sci.eval/interpretation-error]]}
   [{database :seon.db/db test-symbol :seon.test/identity
     ctx :seon.sci.eval/ctx loader :seon.test/class-loader
     projection :seon.schema/projection}]
@@ -1390,14 +1408,20 @@
           reach (if (:seon.error/at owners) owners (destructive-reach database))]
       (if (:seon.error/at reach)
         reach
-        (let [destructive (into [] (keep #(destructive-exclusion database owners reach %)) symbols)
+        (let [paths (into {} (map (fn [owner] [owner (destructive-paths database owner)]))
+                          (distinct (keep reach symbols)))
+              destructive (into [] (keep #(destructive-exclusion owners reach paths %)) symbols)
               excluded (set (map :seon.test/sym destructive))
+              observations (into {} (selection-read!
+                                     (db/q '[:find ?symbol ?reason
+                                             :in $ [?symbol ...]
+                                             :where [?test :seon.test/sym ?symbol]
+                                                    [?test :seon.test/fixture-observation ?reason]]
+                                           database symbols)))
               deferred (into []
                              (keep (fn [test-symbol]
                                      (when-let [reason (and (not (excluded test-symbol))
-                                                            (:seon.test/fixture-observation
-                                                             (db/pull database [:seon.test/fixture-observation]
-                                                                      [:seon.test/sym test-symbol])))]
+                                                            (get observations test-symbol))]
                                        {:seon.test/sym test-symbol
                                         :seon.test/fixture-observation reason
                                         :seon.test/command ["bin/test" "--platform" "--" (str test-symbol)]})))
@@ -1640,7 +1664,7 @@
                          (seq namespaces) (assoc :seon.test/namespaces (set namespaces))
                          (seq (:seon.test/changed request))
                          (assoc :seon.test/changed (vec (:seon.test/changed request)))
-                         ;; The source this JVM loaded: the held store's published head.
+                         ;; The held store's published source head, which adoption may not have reached.
                          held-store
                          (assoc :seon.test/loaded-source
                                 (:seon.source/commit-id (source/current held-store)))))
@@ -1728,6 +1752,9 @@
                                   (runner/commit-results!
                                    recording (recording-completion batch-provenance [result] true))
                                   nil)]
+                    ;; A throw leaves no admitted member open: each unrecorded
+                    ;; member is recorded red with the throwable, which is rethrown.
+                    (try
                     (loop [remaining members outcome outcome]
                       (if-let [test-symbol (first remaining)]
                         (if-not (pos? (remaining-ms))
@@ -1756,7 +1783,16 @@
                               (and (platform? test-symbol) (not (green? result)))
                               (assoc outcome ::stopped (vec (next remaining)))
                               :else (recur (next remaining) outcome))))
-                        outcome))))
+                        outcome))
+                    (catch Throwable failure
+                      (try
+                        (let [recorded (runner/record-interrupted!
+                                        recording (recording-completion batch-provenance [] true) failure)]
+                          (when (:seon.error/at recorded)
+                            (.addSuppressed failure (ex-info (:seon.error/message recorded) recorded))))
+                        (catch Throwable recording-failure
+                          (.addSuppressed failure recording-failure)))
+                      (throw failure)))))
                 release-not-started!
                 ;; A reserved member a batch never started is released as an
                 ;; unfulfilled obligation (one transaction of at most `limit`),
@@ -1874,8 +1910,8 @@
                         (str "\nunfinished " (:seon.test/sym entry) " on branch "
                              (:seon.agent/branch entry) ": " (:seon.test/failure-message entry))))
            (when-let [drift (:seon.test/loaded-source-drift result)]
-             (str "\nno reuse: this JVM loaded source " (:seon.test/loaded-source drift)
-                  " but the cluster's program rows record "
+             (str "\nno reuse: source " (:seon.test/loaded-source drift)
+                  " is published but not yet adopted; the cluster's program rows record "
                   (or (:seon.source/commit-id drift) "no source commit")
                   " (adopt the files to reuse recorded evidence)"))
            (when-let [pending (seq (:seon.test/pending result))]

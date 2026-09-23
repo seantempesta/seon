@@ -1064,7 +1064,7 @@
 (defn- invoked
   "One producer's returned value, or the typed unknown that replaces it."
   {:malli/schema [:=> [:cat :map :seon.render/output :qualified-symbol]
-                  [:or :seon.render/rendered :seon.render/error-result]]}
+                  [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
 
   [request output selected]
   (let [result (invoke-selected request selected)]
@@ -1226,7 +1226,7 @@
 
 (defn- invoke-producer
 
-  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :seon.render/rendered :seon.render/error-result]]}
+  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
   [request output output-schema]
   (let [selected (or (:seon.render.call/selected-producer request)
                      (producer request output output-schema))]
@@ -1236,7 +1236,7 @@
 
 (defn- raw-output
   {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :qualified-symbol]
-                  [:or :seon.render/rendered :seon.render/error-result]]}
+                  [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
   [request output selected]
   (let [projection (request-projection request)
         rendered (invoked request output selected)
