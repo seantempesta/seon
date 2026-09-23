@@ -561,6 +561,35 @@
   [db]
   (:db/txInstant (db/pull db [:db/txInstant] (inc (db/basis-t db)))))
 
+(defn- namespace-rows
+  "One row per distinct namespace a plan's sources run in, keyed by the
+  `namespace:` tempid. An existing namespace is only referenced. An absent one
+  is declared through `program/declaration-row`: its evaluation's own digested
+  row when one is supplied, else the source that moved into it. With neither,
+  the identity alone remains and the writer refuses it by name."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name
+                       [:sequential :map] [:sequential :map]]
+                  [:vector :map]]}
+  [database starting-namespace sources program-rows]
+  (let [in-ns-of #(or (:seon.ns/name %) starting-namespace)
+        declaring (into {} (map (fn [[before after]]
+                                  [(in-ns-of after) (:seon.cluster.eval/source before)]))
+                        (reverse (partition 2 1 sources)))]
+    (into []
+          (comp (map in-ns-of) (keep identity) (distinct)
+                (map (fn [namespace-name]
+                       (assoc (or (when-not (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]]
+                                                  database namespace-name)
+                                    (or (some #(when (= namespace-name (:seon.ns/name %)) %) program-rows)
+                                        (when-let [source (declaring namespace-name)]
+                                          (program/declaration-row
+                                           (db/carried-projection database)
+                                           {:seon.ns/name namespace-name :seon.ns/source source}
+                                           :contracted :agent))))
+                                  {:seon.ns/name namespace-name})
+                              :db/id (str "namespace:" namespace-name)))))
+          (cons {:seon.ns/name starting-namespace} sources))))
+
 (defn- source-rows
   "The shared namespace rows and the ordered evaluation entities of one plan.
 
@@ -570,16 +599,7 @@
   identity fence is the one `receipt-start-call` keeps — an ordinal that
   ever had an evaluation refuses forever, so nothing re-executes."
   [db id run-eid first-ordinal starting-namespace author at sources]
-  (let [namespaces (into []
-                           (comp (map #(or (:seon.ns/name %)
-                                          starting-namespace))
-                                 (keep identity)
-                                 (distinct)
-                                 (map (fn [namespace-name]
-                                        {:db/id (str "namespace:"
-                                                     namespace-name)
-                                         :seon.ns/name namespace-name})))
-                           (cons {:seon.ns/name starting-namespace} sources))
+  (let [namespaces (namespace-rows db starting-namespace sources [])
           evaluations
           (into []
                 (map-indexed
@@ -1450,23 +1470,9 @@
               (range) sources evaluations)
         expected {::recorded-run (recorded-run run)
                   ::evaluations (mapv recorded-evaluation prepared-evaluations)}
-        namespace-rows
-        (into []
-              (comp (map #(or (:seon.ns/name %) starting-namespace))
-                    (keep identity)
-                    (distinct)
-                    ;; An existing namespace is only referenced; a new one
-                    ;; arrives as the digested row its `in-ns` evaluation
-                    ;; declared (`seon.sci.eval`'s ending-namespace row).
-                    (map (fn [namespace-name]
-                           (assoc (or (when-not (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]]
-                                                    database namespace-name)
-                                        (some #(when (= namespace-name (get-in % [:seon.program/row :seon.ns/name]))
-                                                 (:seon.program/row %))
-                                              evaluations))
-                                      {:seon.ns/name namespace-name})
-                                  :db/id (str "namespace:" namespace-name)))))
-              (cons {:seon.ns/name starting-namespace} sources))]
+        namespaces
+        (namespace-rows database starting-namespace sources
+                        (keep :seon.program/row evaluations))]
     (when-not agent-eid
       (refuse! `record-evaluated-call ::no-such-agent request))
     (when (db/q '[:find ?turn . :in $ ?agent
@@ -1494,7 +1500,7 @@
               :seon.agent/runtime {:seon.runtime/agent agent-eid
                                    :seon.runtime/turns [run-eid]}}]
             cat
-            [namespace-rows
+            [namespaces
              (mapcat
               (fn [evaluation]
                 (let [receipt (receipt-row run-eid evaluation)]
