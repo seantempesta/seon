@@ -408,49 +408,18 @@
     (doseq [extension [".clj" ".cljc" ".edn"]]
       (is (not (cache/widening-path? (str root "/example" extension)))))))
 
-(deftest documentation-only-input-changes-do-not-refuse-published-selection
-  (support/with-database
-   (fn [connection]
-     (support/seed-cluster! connection "documentation-selection")
-     (install-namespace! connection 'selection.fixture)
-     (install-selection-program!
-      connection
-      "(clojure.test/deftest documentation-safe (clojure.test/is true))")
-     (let [base-inventory {"deps.edn" (apply str (repeat 64 "a"))
-                           "docs/base-note.md" (apply str (repeat 64 "b"))}
-           head-inventory (assoc base-inventory "docs/base-note.md"
-                                 (apply str (repeat 64 "c")))
-           published (cache/external-input-digests "." base-inventory)
-           requested (cache/external-input-digests "." head-inventory)
-           input-digest (cache/input-evidence-digest published)
-           database (db/db connection)
-           source-digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] database)
-           _ (support/transacted!
-              connection
-              [{:seon.source/digest source-digest
-                :seon.source/test-input-digest input-digest}])
-           database (db/db connection)
-           selection
-           (sut/select
-            {:seon.db/db database
-             :seon.test.run/input-digest (cache/input-evidence-digest requested)
-             :seon.test.selection/input-evidence
-             {:seon.test.selection/published-inputs published
-              :seon.test.selection/requested-inputs requested}
-             :seon.test.run/policy :incremental
-             :seon.test.run/members []
-             :seon.test.run/provenance
-             {:seon.test.run/id (id/id)
-              :seon.test.run/at (java.util.Date.)
-              :seon.test.run/program-digest (runner/program-digest database)
-              :seon.test.run/published-base-digest (apply str (repeat 64 "d"))
-              :seon.test.run/overlay-input-digest (apply str (repeat 64 "e"))
-              :seon.test.run/basis-t (db/basis-t database)
-              :seon.test.run/branch :current-src}})]
-       (is (= published requested))
-       (is (not (:seon.error/at selection)) (pr-str selection))
-       (is (contains? (set (map :seon.test/sym (:seon.test.run/members selection)))
-                      (fixture-symbol "documentation-safe")))))))
+(deftest documentation-only-input-changes-leave-the-input-evidence-unchanged
+  ;; A documentation edit never widens a gate (AGENTS.md): the declared
+  ;; external inputs hash without the markdown note. The published-selection
+  ;; path this once exercised was deleted with the published test base.
+  (let [base-inventory {"deps.edn" (apply str (repeat 64 "a"))
+                        "docs/base-note.md" (apply str (repeat 64 "b"))}
+        head-inventory (assoc base-inventory "docs/base-note.md"
+                              (apply str (repeat 64 "c")))]
+    (is (= (cache/external-input-digests "." base-inventory)
+           (cache/external-input-digests "." head-inventory)))
+    (is (= (cache/input-evidence-digest (cache/external-input-digests "." base-inventory))
+           (cache/input-evidence-digest (cache/external-input-digests "." head-inventory))))))
 
 (deftest changed-inputs-are-decided-by-content-not-modification-time
   (let [root (.toFile (Files/createTempDirectory

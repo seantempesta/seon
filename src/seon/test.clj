@@ -865,10 +865,13 @@
           (seq namespaces) (assoc :seon.test.run/namespaces namespaces)
           (seq identities) (assoc :seon.test.run/identities identities)
           loaded-drift? (assoc :seon.test/loaded-source-drift
-                               {:seon.test/loaded-source (:seon.test/loaded-source request)
-                                :seon.source/commit-id (:seon.source/commit-id
-                                                        (selection-read!
-                                                         (db/pull database [:seon.source/commit-id] cluster)))}))))
+                               ;; Rows that record no source commit are absent,
+                               ;; never a nil commit id.
+                               (let [recorded (:seon.source/commit-id
+                                               (selection-read!
+                                                (db/pull database [:seon.source/commit-id] cluster)))]
+                                 (cond-> {:seon.test/loaded-source (:seon.test/loaded-source request)}
+                                   recorded (assoc :seon.source/commit-id recorded)))))))
     (catch clojure.lang.ExceptionInfo failure
       (let [refusal (ex-data failure)]
         (if (or (:seon.test/selection-refusal refusal)
@@ -1872,7 +1875,8 @@
                              (:seon.agent/branch entry) ": " (:seon.test/failure-message entry))))
            (when-let [drift (:seon.test/loaded-source-drift result)]
              (str "\nno reuse: this JVM loaded source " (:seon.test/loaded-source drift)
-                  " but the cluster's program rows record " (:seon.source/commit-id drift)
+                  " but the cluster's program rows record "
+                  (or (:seon.source/commit-id drift) "no source commit")
                   " (adopt the files to reuse recorded evidence)"))
            (when-let [pending (seq (:seon.test/pending result))]
              (str "\npending (not started): " (str/join " " pending)))
