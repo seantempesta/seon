@@ -1769,41 +1769,66 @@
                                   ;; transaction without changing the recorded outcome.
                                   (runner/commit-results!
                                    recording (recording-completion batch-provenance [result] true))
-                                  nil)]
-                    ;; A throw leaves no admitted member open: each unrecorded
-                    ;; member is recorded red with the throwable, which is rethrown.
+                                  nil)
+                        ;; Executed and not yet recorded: [result timings] in order.
+                        executed (volatile! [])
+                        ;; One recording transaction for the batch's terminated
+                        ;; members (and one for a member whose body did not exit),
+                        ;; never one per member; each member's facts stay its own.
+                        record! (fn [outcome]
+                                  (let [pairs @executed
+                                        _ (vreset! executed [])
+                                        committed
+                                        (into {}
+                                              (mapcat
+                                               (fn [[terminated? group]]
+                                                 (let [c (runner/commit-results!
+                                                          recording
+                                                          (recording-completion
+                                                           batch-provenance
+                                                           (mapv #(dissoc % :seon.agent/branch) group)
+                                                           terminated?))]
+                                                   (if (:seon.error/at c)
+                                                     (map #(vector (:seon.test/sym %) c) group)
+                                                     (map #(vector (:seon.test/sym %1) %2) group c)))))
+                                              (group-by #(true? (:seon.test.run/terminated? %))
+                                                        (map first pairs)))
+                                        refusal (first (filter :seon.error/at (vals committed)))]
+                                    (cond-> (reduce (fn [o [result timings]]
+                                                      (let [c (get committed (:seon.test/sym result))]
+                                                        (-> o
+                                                            (update :seon.test/timings conj timings)
+                                                            (update :seon.test/results conj
+                                                                    (if (:seon.error/at c)
+                                                                      (assoc result :seon.test/recording-refusal c)
+                                                                      (merge result c))))))
+                                                    outcome pairs)
+                                      refusal (assoc :seon.test/recording-refusal refusal))))]
+                    ;; A throw leaves no admitted member open: executed members are
+                    ;; recorded with their outcomes, every other one red with the
+                    ;; throwable, which is rethrown.
                     (try
-                    (loop [remaining members outcome outcome]
-                      (if-let [test-symbol (first remaining)]
-                        (if-not (pos? (remaining-ms))
-                          (assoc outcome ::stopped (vec remaining))
-                          (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle test-symbol (remaining-ms) settle!)
-                                committed (runner/commit-results!
-                                           recording
-                                           (recording-completion
-                                            batch-provenance [(dissoc result :seon.agent/branch)]
-                                            (true? (:seon.test.run/terminated? result))))
-                                outcome (-> outcome
-                                            (update :seon.test/timings conj
-                                                    (assoc timings :seon.test/sym test-symbol))
-                                            (update :seon.test/results conj
-                                                    (if (:seon.error/at committed)
-                                                      (assoc result :seon.test/recording-refusal committed)
-                                                      (merge result (first committed)))))]
-                            (cond
-                              (:seon.error/at committed)
-                              (assoc outcome :seon.test/recording-refusal committed
-                                             ::stopped (vec (next remaining)))
-                              (not (:seon.test.run/terminated? result))
-                              (assoc outcome :seon.test/unfinished [result]
-                                             ::stopped (vec (next remaining)))
-                              (and (platform? test-symbol) (not (green? result)))
-                              (assoc outcome ::stopped (vec (next remaining)))
-                              :else (recur (next remaining) outcome))))
-                        outcome))
+                      (let [stop (loop [remaining members]
+                                   (if-let [test-symbol (first remaining)]
+                                     (if-not (pos? (remaining-ms))
+                                       {::stopped (vec remaining)}
+                                       (let [{result :seon.test/result timings :seon.test/timings}
+                                             (member-result request-handle test-symbol (remaining-ms) settle!)]
+                                         (vswap! executed conj [result (assoc timings :seon.test/sym test-symbol)])
+                                         (cond
+                                           (not (:seon.test.run/terminated? result))
+                                           {:seon.test/unfinished [result] ::stopped (vec (next remaining))}
+                                           (and (platform? test-symbol) (not (green? result)))
+                                           {::stopped (vec (next remaining))}
+                                           :else (recur (next remaining)))))
+                                     {}))]
+                        (merge (record! outcome) stop))
                     (catch Throwable failure
                       (try
+                        (when (seq @executed)
+                          (let [recorded (record! outcome)]
+                            (when-let [refusal (:seon.test/recording-refusal recorded)]
+                              (.addSuppressed failure (ex-info (:seon.error/message refusal) refusal)))))
                         (let [recorded (runner/record-interrupted!
                                         recording (recording-completion batch-provenance [] true) failure)]
                           (when (:seon.error/at recorded)

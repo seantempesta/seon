@@ -3521,6 +3521,36 @@
                          :seon.fn/missing-paths missing})))
       (into paths dependents))))
 
+(defn- reconcile-call
+  "The writer operation replacing `previous-identities` with `rows`: the writer
+  hands its current db to `reconcile-tx-in`, so the authority decides the diff,
+  and a refused diff throws with its whole value."
+  {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :seon.program/shapes
+                       [:vector :map] [:sequential :seon.db/ref]]
+                  :seon.store/transaction-operation]}
+  [projection row-shapes rows previous-identities]
+  [:db.fn/call
+   (fn [database]
+     (let [tx-data (schema/call-with-projection
+                    projection
+                    #(reconcile-tx-in row-shapes database rows previous-identities))]
+       (if (and (map? tx-data) (contains? tx-data :seon.error/at))
+         (throw (ex-info (:seon.error/message tx-data) tx-data))
+         tx-data)))])
+
+(defn adoption-tx
+  "Transaction data adopting the program `identities` from `source` — the
+  published commit's rows — into whichever database the writer holds."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/database-value
+                       :seon.reconcile/adopt-identities]
+                  [:or :seon.db/tx-data :seon.error/value]]}
+  [projection source identities]
+  (let [rows (published-index-rows source (vec identities))]
+    (if (map? rows)
+      rows
+      (do (assert-one-row-per-identity! rows)
+          [(reconcile-call projection (program/shapes-in projection) rows (vec identities))]))))
+
 (defn index!
   "Populate one fresh source scratch branch from static analysis.
 
@@ -3621,28 +3651,11 @@
               (db/transact!
                connection
                (cond-> {:tx-data
-                        (cond->> [[:db.fn/call
-                          (fn [database]
-                            (let [tx-data
-                                  (schema/call-with-projection
-                                   projection
-                                   #(reconcile-tx-in row-shapes database
-                                                     rows previous-identities))]
-                              (if (and (map? tx-data)
-                                       (contains? tx-data :seon.error/at)
-                                       (contains? tx-data :seon.error/layer)
-                                       (contains? tx-data :seon.error/operation))
-                                (throw
-                                 (ex-info (:seon.error/message tx-data)
-                                          tx-data))
-                                tx-data)))]]
+                        (cond->> [(reconcile-call projection row-shapes rows previous-identities)]
                           ;; Rows derived from one published commit refuse at
                           ;; the writer once another publication moved its head.
                           expected-head (cons [:db.fn/call registry/head-guard-tx expected-head])
-                          true vec
-                          ;; A caller's record of this write lands in the same
-                          ;; transaction, or not at all.
-                          (:seon.db/tx-data request) (#(into % (:seon.db/tx-data request))))}
+                          true vec)}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-identities (require-committed! (report-identities report)

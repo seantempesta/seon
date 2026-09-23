@@ -69,10 +69,12 @@
   (let [rule @#'cluster/declaration-reload-rule]
     (doseq [head '[clojure.core/defmacro clojure.core/defprotocol
                    clojure.core/deftype clojure.core/defrecord
-                   clojure.core/definterface clojure.core/definline clojure.core/def]]
-      (is (= :seon.reload/compiled-into-callers (rule head :seon.reload/unknown))))
+                   clojure.core/definterface clojure.core/definline]]
+      (is (= :seon.reload/compiled-into-callers (rule head :seon.reload/unknown false))))
+    (is (= :seon.reload/compiled-into-callers (rule 'clojure.core/def :seon.reload/unknown true))
+        "a def beside a defmacro may be read at expansion")
     (doseq [head [nil 'clojure.core/defn 'sample/defining-macro]]
-      (is (= :seon.reload/unknown (rule head :seon.reload/unknown))))))
+      (is (= :seon.reload/unknown (rule head :seon.reload/unknown false))))))
 
 (deftest ^{:seon.test/long "Canonical fixture cold acquisition and namespace analysis previously measured 12 seconds in publication-delta-test."
            :seon.test/long-ms 20000}

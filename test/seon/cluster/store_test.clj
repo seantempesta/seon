@@ -143,9 +143,15 @@
                              (fn [{written :key}]
                                (when (and (uuid? written) (compare-and-set! armed true false))
                                  (throw (AssertionError. "injected Error in one store write")))))
-          (is (thrown? Throwable
-                       (db/transact! connection [{:seon.store.test/marker "lost"}]))
-              "under :panic the failed commit throws to its caller")
+          ;; A bare store declares no :seon.config/on-core-error, so the
+          ;; mode decides only HOW the failure surfaces (a throw, or the
+          ;; outcome-unknown refusal); either way it is never a report.
+          (let [outcome (try (db/transact! connection [{:seon.store.test/marker "lost"}])
+                             (catch Throwable failure failure))]
+            (is (or (instance? Throwable outcome)
+                    (true? (:seon.db/transaction-outcome-unknown outcome)))
+                "the failed commit is never reported as a committed transaction")
+            (is (not (:db-after outcome))))
           (is (false? @armed) "the injected Error fired")
           (is (= before (d/commit-id @connection))
               "the connection stays at the prior head")

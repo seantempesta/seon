@@ -2182,24 +2182,27 @@
 
 (def ^:private compiled-into-callers
   "Clojure expands macros/inline bodies and embeds protocol/type interfaces at
-  caller compilation. Constants can be read by macros at compilation too.
-  These form heads therefore require the stored reverse dependency closure.
-  Ordinary defn uses Var indirection when analyzed inline metadata is false."
+  caller compilation; these form heads require the stored reverse dependency
+  closure. A plain `def` or `defmulti` is read through its Var, like a `defn`
+  whose analyzed inline metadata is false."
   '#{clojure.core/defmacro clojure.core/defprotocol clojure.core/deftype
-     clojure.core/defrecord clojure.core/definterface clojure.core/definline
-     clojure.core/def})
+     clojure.core/defrecord clojure.core/definterface clojure.core/definline})
 
 (defn- declaration-reload-rule
-  "Missing compiler facts are unknown, never evidence for excluding callers."
+  "Missing compiler facts are unknown, never evidence for excluding callers.
+  A `def` beside a `defmacro` may be read at a caller's macro expansion."
   {:malli/schema [:=> [:cat [:maybe :qualified-symbol]
-                           [:or :boolean [:= :seon.reload/unknown]]]
+                           [:or :boolean [:= :seon.reload/unknown]]
+                           :boolean]
                   [:enum :seon.reload/compiled-into-callers
                    :seon.reload/var-indirection :seon.reload/unknown]]}
-  [defined-by inline?]
+  [defined-by inline? macro-namespace?]
   (cond
-    (or (compiled-into-callers defined-by) (true? inline?))
+    (or (compiled-into-callers defined-by) (true? inline?)
+        (and macro-namespace? (= 'clojure.core/def defined-by)))
     :seon.reload/compiled-into-callers
-    (and (#{'clojure.core/defn 'clojure.core/defn-} defined-by) (false? inline?))
+    (or (#{'clojure.core/def 'clojure.core/defmulti} defined-by)
+        (and (#{'clojure.core/defn 'clojure.core/defn-} defined-by) (false? inline?)))
     :seon.reload/var-indirection
     :else :seon.reload/unknown))
 
@@ -2232,11 +2235,21 @@
                                            :where [?e :seon.fn/sym ?symbol]
                                                   [?e :seon.fn/defined-by ?head]
                                                   [(get-else $ ?e :seon.fn/inline? :seon.reload/unknown) ?inline]]
-                                         database symbols)]
-                         (when (:seon.error/at facts)
-                           (refused! "Declaration reload facts could not be read." facts))
-                         (into {} (map (fn [[symbol head inline?]]
-                                         [symbol (declaration-reload-rule head inline?)])) facts)))
+                                         database symbols)
+                             macro-namespaces (db/q '[:find [?name ...] :in $ [?symbol ...]
+                                                      :where [?e :seon.fn/sym ?symbol] [?e :seon.fn/ns ?ns]
+                                                             [?m :seon.fn/ns ?ns]
+                                                             [?m :seon.fn/defined-by clojure.core/defmacro]
+                                                             [?ns :seon.ns/name ?name]]
+                                                    database symbols)]
+                         (doseq [result [facts macro-namespaces]]
+                           (when (:seon.error/at result)
+                             (refused! "Declaration reload facts could not be read." result)))
+                         (into {} (map (fn [[declared head inline?]]
+                                         [declared (declaration-reload-rule
+                                                  head inline?
+                                                  (contains? (set macro-namespaces)
+                                                             (symbol (namespace declared))))])) facts)))
                      databases)
          ;; Moving a declaration within its file changes its stored span, not
          ;; its definition digest; an equal digest in both values is no edit.
@@ -2481,64 +2494,41 @@
     (into #{} (keep program/row-identity) (seon.fn/published-index-rows published-database))))
 
 (defn- adopt-rows!
-  "Write the program, schema and issue rows among `identities` from
-  `published-database` onto `connection`, and answer the program identities.
+  "Write the schema, program and issue rows among `identities` from
+  `published-database` onto `connection` in ONE transaction, and answer the
+  program identities.
 
-  The one database half of adoption: development adoption hands it the cluster's
-  connection and its adoption `record`, the save gate its candidate's and none.
-  `record` rides the LAST row write, so it lands exactly when the rows do.
-  Every write refuses once another publication moves `current-src`
-  (`expected-head`)."
+  Schema declarations go first: the writer applies schema datoms before the
+  operations after them (`datahike/db/transaction.cljc:466`). Issues go last:
+  their citations resolve the program rows. The write refuses once another
+  publication moves `current-src` (`head-guard-tx`); refused, nothing lands."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/published
-                       :seon.reconcile/adopt-identities :seon.db/database-value :seon.db/tx-data]
+                       :seon.reconcile/adopt-identities :seon.db/database-value]
                   :seon.reconcile/adopt-identities]}
-  [connection published identities published-database record]
-  (let [previous-database (db/db connection)
-        expected-head {:seon.source/branch source/current-branch
-                       :seon.source/expected-commit-id (:seon.source/commit-id published)}
-        published-projection (db/carried-projection published-database)
+  [connection published identities published-database]
+  (let [projection (db/carried-projection published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         issue-identities (into #{} (keep (fn [[attribute value]]
                                          (when (= :seon.issue/id attribute) value))) identities)
-        forms (:seon.schema.projection/forms published-projection)
-        _ (when (some #(= :seon.schema/key (first %)) identities)
-            (report-source-progress! "development changed schema declarations")
-            (schema/call-with-forms
-             forms
-             #(require-committed!
-               (db/transact! connection
-                             {:tx-data (cond-> [[:db.fn/call registry/head-guard-tx expected-head]
-                                                [:db.fn/call
-                                                 (fn [database]
-                                                   (declaration-changes database published-projection))]]
-                                         (not (or (seq program-identities) (seq issue-identities)))
-                                         (into record))})
-               {:seon.boot/population :seon.schema/declarations})))
-        _ (when (seq program-identities)
-            (report-source-progress! "development changed program rows")
-            (require-committed!
-             (schema/call-with-projection
-              published-projection
-              #(seon.fn/index!
-              {:seon.db/connection connection
-               :seon.schema/projection published-projection
-               :seon.source/database published-database
-               :seon.source/previous-database previous-database
-               :seon.source/expected-head expected-head
-               :seon.reconcile/adopt-identities program-identities
-               :seon.db/tx-data (if (seq issue-identities) [] record)}
-              *source-progress!*))
-             {:seon.boot/population :seon.fn/population}))
-        _ (when (seq issue-identities)
-            (report-source-progress! "development changed issues")
-            (require-committed!
-             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities
-                                                     expected-head record)
-             {:seon.boot/population :seon.issue/rows}))
-        _ (when (and (seq record) (not-any? #(#{:seon.schema/key :seon.issue/id} (first %)) identities)
-                     (empty? program-identities))
-            (require-committed! (db/transact! connection {:tx-data record})
-                                {:seon.boot/population :seon.source/commit-id}))]
+        tx-data (cond-> [[:db.fn/call registry/head-guard-tx
+                          {:seon.source/branch source/current-branch
+                           :seon.source/expected-commit-id (:seon.source/commit-id published)}]]
+                  (some #(= :seon.schema/key (first %)) identities)
+                  (conj [:db.fn/call (fn [database] (declaration-changes database projection))])
+                  (seq program-identities)
+                  (into (require-committed! (seon.fn/adoption-tx projection published-database program-identities)
+                                            {:seon.boot/population :seon.fn/population}))
+                  (seq issue-identities)
+                  (into (require-committed! ((requiring-resolve 'seon.issue/adopt-call)
+                                             published-database issue-identities)
+                                            {:seon.boot/population :seon.issue/rows})))]
+    (when (next tx-data)
+      (report-source-progress! "development rows")
+      (require-committed!
+       (schema/call-with-forms
+        (:seon.schema.projection/forms projection)
+        #(schema/call-with-projection projection (fn [] (db/transact! connection {:tx-data tx-data}))))
+       {:seon.boot/population :seon.source/adoption-rows}))
     program-identities))
 
 (defn- development-source-refresh!
@@ -2570,9 +2560,9 @@
       (let [previous-database (db/db connection)
         published-database (source/database held-store (:seon.source/commit-id published))]
        (try
-        ;; Reload, verify and arm from the published rows FIRST; the cluster's
-        ;; rows and its adoption record are written last, back to back, so no
-        ;; acquisition sees adopted rows that the loaded program does not have.
+        ;; Rows, then load, then arm, then the record: the adopter writes with
+        ;; the code it started with, and the record names the loaded commit.
+        ;; Rows ahead of the record are interpreted by contexts (B2 §2a).
         (let [identities (published-changes held-store published prior-commit published-database)
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         projection (db/carried-projection published-database)
@@ -2584,6 +2574,7 @@
     ;; dependent never enters this JVM. The check after reload catches an
     ;; edit that lands during it.
     (verify-development-sources! published-database (fs/source-directory) namespaces)
+    (adopt-rows! connection published identities published-database)
     (report-source-progress! "development loaded definitions")
     ;; Clojure reload leaves removed interns behind. Remove only definitions
     ;; whose identity is absent from the published database.
@@ -2627,20 +2618,21 @@
            (when (arming-refused? effective arming-identities result)
              (refused! "Development JVM instrumentation did not restore contracts."
                        result)))))
-      ;; The record means indexing, reload and instrumentation succeeded; it
-      ;; rides the last row write, so rows and record land together or not.
+      ;; The record means rows, reload and instrumentation succeeded.
       ;; SCI acquires this database on first use; it does no work here.
-      (report-source-progress! "development rows and adoption record")
-      (adopt-rows! connection published identities published-database
-                   [[:db.fn/call adoption-guard-tx held-store cluster-ref
-                     prior-commit (:seon.source/commit-id published)]
-                    {:db/id cluster-ref
-                     :seon.source/commit-id (:seon.source/commit-id published)}
-                    {:db/id :db/current-tx
-                     :seon.test/adoption-cluster cluster-ref
-                     :seon.test/adoption-identities (set/difference (set changed-identities)
-                                                                   (set deleted-identities))
-                     :seon.test/adoption-inputs (set changed-paths)}])
+      (report-source-progress! "development adoption record")
+      (require-committed!
+       (db/transact! connection
+                     {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
+                                 prior-commit (:seon.source/commit-id published)]
+                                {:db/id cluster-ref
+                                 :seon.source/commit-id (:seon.source/commit-id published)}
+                                {:db/id :db/current-tx
+                                 :seon.test/adoption-cluster cluster-ref
+                                 :seon.test/adoption-identities (set/difference (set changed-identities)
+                                                                               (set deleted-identities))
+                                 :seon.test/adoption-inputs (set changed-paths)}]})
+       {:seon.boot/population :seon.source/commit-id})
       (let [database (db/db connection)]
         (env/advance-projection! (get ctx env/state-carrier)
                                  (db/basis-t database) (schema/projection-from-database database)))
@@ -2790,7 +2782,7 @@
             (if (empty? host-bound)
               (candidate-gate!
                (:seon.turn.loop/cluster instance) held-store branch
-               #(adopt-rows! (:seon.db/connection %) published identities published-database [])
+               #(adopt-rows! (:seon.db/connection %) published identities published-database)
                adopt!)
               (assoc (adopt-then-test! (:seon.turn.loop/cluster instance) identities host-bound adopt!)
                      :seon.source/candidate branch)))
@@ -2970,8 +2962,7 @@
   {:malli/schema [:=> [:cat :seon.cluster.process/identity]
                   :seon.db.process/id]}
   [advertisement]
-  (str (:seon.boot/pid advertisement) "-"
-       (inst-ms (:seon.boot/start-instant advertisement))))
+  (cluster.process/id advertisement))
 
 (defn recover-runs!
   "Close all prior open turns before arming agents. The writer decides

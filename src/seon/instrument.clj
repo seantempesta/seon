@@ -655,25 +655,49 @@
                             (mr/var-registry))}
         compiled (or retained (m/schema bound options))
         arities (mapv m/-function-info (m/-function-schema-arities compiled))
-        refusal? ((mi/-f->original schema/projection-cache-value)
-                  projection ::refusal-validator
-                  #((mi/-f->original schema/projection-validator) projection :seon.instrument/refusal-result))
+        ;; Read on the refusal path only, so an absent refusal schema is a
+        ;; minimal refusal at the call, not an arming failure.
+        refusal? (delay ((mi/-f->original schema/projection-cache-value)
+                         projection ::refusal-validator
+                         #((mi/-f->original schema/projection-validator)
+                           projection :seon.instrument/refusal-result)))
         marker (Object.)
-        reject! (fn [declared-schema value]
-                  (when-not (refusal? value)
-                    (throw (ex-info "Instrumentation constructed an invalid refusal." value)))
-                  (throw (ex-info (:seon.error/message value)
-                                  (with-meta value {::boundary marker
-                                                    :seon.error/declared-schema declared-schema}))))
+        ;; The base from Malli's report alone: valid by construction, a core
+        ;; fault, the report key naming who is wrong, the failure in its chain.
+        minimal (fn [kind failure]
+                  [:seon.error/base
+                   (seon.error.refusal/diagnostic
+                    {:seon.error/at (java.util.Date.)
+                     :seon.error/layer :seon.instrument/invocation
+                     :seon.error/operation function-symbol
+                     :seon.error/member kind
+                     :seon.error/message (str function-symbol " " kind
+                                              ": the refusal could not be built.")
+                     :seon.error/throwable failure})])
+        refusal (fn [kind data]
+                  (if (= :malli.core/invalid-schema-at-call kind)
+                    (minimal kind (:exception data))
+                    (try
+                      (let [value (boundary-refusal projection caps kind
+                                                    (assoc data :fn-name function-symbol) arities)]
+                        (if (@refusal? value)
+                          [(if (= :malli.core/invalid-arity kind)
+                             :seon.instrument/arity-error :seon.instrument/contract-error) value]
+                          (minimal kind (ex-info "Instrumentation constructed an invalid refusal."
+                                                 {:seon.instrument/problems
+                                                  (mapv #(select-keys % [:path :in])
+                                                        (:errors (m/explain :seon.instrument/refusal-result
+                                                                            value options)))}))))
+                      (catch Throwable failure (minimal kind failure)))))
         wrapped
         (m/-instrument
          {:schema compiled :scope #{:input :output :guard}
           :report (fn [kind data]
                     (binding [*compiling-contract* true]
-                      (reject! (if (= :malli.core/invalid-arity kind)
-                                 :seon.instrument/arity-error :seon.instrument/contract-error)
-                               (boundary-refusal projection caps kind
-                                                 (assoc data :fn-name function-symbol) arities))))}
+                      (let [[declared-schema value] (refusal kind data)]
+                        (throw (ex-info (:seon.error/message value)
+                                        (with-meta value {::boundary marker
+                                                          :seon.error/declared-schema declared-schema}))))))}
          original options)]
     (fn [& arguments]
       (try (apply wrapped arguments)

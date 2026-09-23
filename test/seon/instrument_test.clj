@@ -1006,6 +1006,39 @@
         (is (thrown? clojure.lang.ExceptionInfo (healthy "not an int"))))
       (finally (doseq [name names] (ns-unmap 'seon.instrument-test name))))))
 
+(deftest a-validator-that-throws-at-the-call-is-a-minimal-declared-error
+  ;; A1-8b (G2-G4): a contract whose lazy ref does not resolve compiles, and
+  ;; its validator throws only at the call. Malli reports it as
+  ;; ::invalid-schema-at-call and the wrapper throws the base built from the
+  ;; report alone; its required members derive from the packaged base.
+  (let [name 'lazy-absent
+        sym 'seon.instrument-test/lazy-absent
+        lazy {:registry (assoc (m/default-schemas) :lazy-ref (m/-ref-schema {:lazy true}))}
+        contract (m/schema [:=> [:cat [:schema [:lazy-ref ::absent]]] :int] lazy)
+        candidate (intern 'seon.instrument-test name identity)
+        admitted (schema/handed-projection)
+        registry (:seon.schema.projection/registry admitted)
+        projection (assoc admitted :seon.schema.projection/registry
+                          (mr/composite-registry {sym contract} registry))
+        required (into #{} (keep (fn [[k properties _]] (when-not (:optional properties) k)))
+                       (m/children (m/deref-all (m/schema :seon.error/base {:registry registry}))))]
+    (try
+      (alter-meta! candidate assoc :malli/schema (m/form contract))
+      (is (= {:seon.instrument/registered 1}
+             (select-keys (instrument/apply!
+                           {:seon.config/on-core-error :panic :seon.schema/projection projection
+                            :seon.instrument/changed-identities #{[:seon.fn/sym sym]}})
+                          [:seon.instrument/registered])))
+      (let [refusal (try (candidate 1) nil
+                         (catch clojure.lang.ExceptionInfo thrown (ex-data thrown)))]
+        (is (= :malli.core/invalid-schema-at-call (:seon.error/member refusal)))
+        (is (= sym (:seon.error/operation refusal)) "the error names the call")
+        (is (= ::absent (get-in (peek (:seon.error/chain refusal)) [:seon.error/data :data :ref]))
+            "the chain names the unresolvable schema")
+        (is (every? #(some? (find refusal %)) required))
+        (is (m/validate :seon.error/base refusal {:registry registry})))
+      (finally (ns-unmap 'seon.instrument-test name)))))
+
 (deftest re-evaluating-a-defn-silently-strips-instrumentation
   ;; the measured fact this namespace's discipline exists for
   ;; (research §4.3): `alter-var-root`'s wrapper is undone by the new
