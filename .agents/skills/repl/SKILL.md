@@ -40,10 +40,10 @@ PRD §12 requires virtual replies through the ordinary proc.
 
 Installed: `base-ctx` derives the program-only base from one database value,
 memoized by program identity (`src/seon/sci/eval.clj:2475`). Each turn,
-`fork-for-turn` (`:2287`) forks the current base and, when the agent's previous
+`fork-for-turn` (`:2302`) forks the current base and, when the agent's previous
 context is held, carries the private layer in memory, preserving its context
 handle, owned Vars, atoms and result objects (`regenerate-agent-context!`,
-`:2224`). **[TARGET]** B2 makes the fork the context, with no regeneration
+`:2239`). **[TARGET]** B2 makes the fork the context, with no regeneration
 diff (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0). SCI's generation-based isolation
 is supplied by `reference-code/sci/src/sci/core.cljc:345`. Private objects
 never enter the base or another agent; a JVM restart loses them.
@@ -65,7 +65,7 @@ from the value renderer, plus out and error, not the result object.
 System turns store opening and refreshed read evaluations. Before an agent
 turn, every distinct read form's latest evidence is checked against changes
 since its evaluation `:t` (installed: `system-turn`,
-`src/seon/turn.clj:2055`). Generated and agent-written reads participate;
+`src/seon/turn.clj:2064`). Generated and agent-written reads participate;
 writes and effects never rerun. Compaction wipes evaluations and regenerates
 the opening.
 
@@ -117,3 +117,55 @@ and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3359`
 Use actual agent turns for persistence, isolation, publication, or
 outcome-storage claims. HTTP reachability and a successful host eval
 prove neither those behaviors nor browser repaint.
+
+## A lane works on its own branch
+
+Verified at default's REPL on 2026-09-23. Forms and timings are in
+[the landing note](../../../docs/prds/agent-platform/landing/lane-branch-repl-2026-09-23.md).
+Line numbers are for commit `cc9737c1d` plus this lane's diff.
+
+1. **Name your branch.** Call the MCP `branch` tool with `action create` and a
+   `name`. It branches off the cluster head's commit through
+   `seon.cluster.registry/branch!` (`src/seon/cluster/registry.clj:193`) and is
+   built in `script/seon/dev/mcp.clj:545` (`branch-form`). There is no default
+   name. These refuse as `:seon.error` values: the cluster's own branch, and a
+   name that already exists.
+2. **Code by evaluating forms there.** Call `eval_clj` with `mode sci` and
+   `branch <name>`. The context is acquired through
+   `seon.cluster.agent/acquire-context!` (`src/seon/cluster/agent.clj:782`) and
+   retained under `[branch nil]` (`mcp.clj:509-517`). A def is callable in your
+   next evaluation, and in any agent context acquired on that branch, because
+   agent contexts fork from the same branch base.
+3. **What the branch context is not, today.**
+   - It is private SCI state, not program rows. A `defn` writes no `:seon.fn/*`
+     row. Rows are written only by a turn's settlement
+     (`analyze-settlement`, `src/seon/turn.clj:935`; `gate-function-install`,
+     `src/seon/turn.clj:3214`), and MCP runs no turn.
+   - A redefined file-backed function is interpreted only when you call it
+     directly. Its compiled callers still call the compiled Var (B2 §2a
+     [TARGET]).
+   - Overriding a declaration with `:seon.fn/host-bound?` true does not refuse.
+     The named refusal exists only on the source-adoption path
+     (`src/seon/cluster.clj:2714`). An unadmitted class fails SCI analysis
+     ("Unable to resolve classname").
+4. **Test there.** `seon.test/run` (`src/seon/test.clj:1621`) takes the branch
+   handle as `:seon.test/execution` and records on its connection. It runs the
+   branch's program rows, so it does not test an in-memory def (measured).
+5. **Accept.** Accepting work is D1 §2c's merge:
+   `prepare-merge!` (`src/seon/cluster/source.clj:741`), then
+   `accept-merge!` (`src/seon/cluster/source.clj:791`). They merge the branch's changed
+   program rows through the tested head. Private SCI defs never merge. File
+   write-back (D1 §2d, slice 7) is **not built**. Until it is, the lane edits
+   the file and adopts once (`bin/seon init --dev <cluster> --changed <paths>`).
+   Host-bound declarations always go through the files.
+6. **Retire.** Call `branch` with `action retire`. It releases the retained
+   context (`src/seon/cluster/agent.clj:749`), then calls `retire-branch!`
+   (`registry.clj:330`). If an agent still holds the branch, retire refuses.
+
+A branch evaluation that persists rows needs an armed agent whose custody is
+the branch. The work then goes through `seon.cluster.agent/submit-source!`
+(`src/seon/cluster/agent.clj:606`), the path a model reply uses. A worker is
+created on a candidate by `seon.issue/start!` (`src/seon/issue.clj:1259`). No
+installed operation arms that worker inside the cluster's JVM:
+`test/seon/namespace_agent_loop_test.clj` composes it by hand. That is D1 §2a's
+owed candidate handle, and it is the gap.
