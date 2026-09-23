@@ -105,6 +105,10 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "render-results")
+     (is (= 'seon.shell.jvm/run
+            (:seon.effect/capability
+             (db/pull (db/db connection) '[:seon.effect/capability]
+                      [:seon.fn/sym 'my.shell/run!]))))
      (let [written (support/transacted! connection
                      (into (agent/creation-tx
                             {:seon.agent/id "render-results"
@@ -116,7 +120,8 @@
                          :seon.turn/reply (.repeat "turn detail " 1000)}
                         {:seon.effect/id "render-results-effect"
                          :seon.effect/run [:seon.turn/id "render-results-turn"]
-                         :seon.effect/owner [:seon.fn/sym 'seon.db/q]
+                         :seon.effect/owner [:seon.fn/sym 'my.shell/run!]
+                         :seon.effect/capability 'seon.shell.jvm/run
                          :seon.effect/form-ordinal 0
                          :seon.effect/ordinal 0
                          :seon.effect/opened-at (java.util.Date. 0)
@@ -218,6 +223,10 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "poll-render")
+     (is (= 'seon.shell.jvm/run
+            (:seon.effect/capability
+             (db/pull (db/db connection) '[:seon.effect/capability]
+                      [:seon.fn/sym 'my.shell/run!]))))
      (let [configuration (support/effective-config)
            profile (assoc (render/agent-render-profile configuration)
                           :seon.render.profile/max-string-length 128)
@@ -235,7 +244,8 @@
                                   :seon.turn/opened-tx (db/basis-t (db/db connection))}
                                  {:seon.effect/id "poll-render-effect"
                                   :seon.effect/run [:seon.turn/id "poll-render-turn"]
-                                  :seon.effect/owner [:seon.fn/sym 'seon.db/q]
+                                  :seon.effect/owner [:seon.fn/sym 'my.shell/run!]
+                                  :seon.effect/capability 'seon.shell.jvm/run
                                   :seon.effect/form-ordinal 0 :seon.effect/ordinal 0
                                   :seon.effect/opened-at (java.util.Date. 0)
                                   :seon.effect/request-edn "{}"
