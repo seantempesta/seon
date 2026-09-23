@@ -381,13 +381,15 @@
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
    {:seon.test-support/extra-schema
-    [{:seon.schema/key :fixture/declared-producer
-      :seon.schema.admission/source :core
-      :seon.schema/form
-      (pr-str [:map {:seon.render/ai 'seon.error/render-ai
-                     :seon.render/html 'seon.error/render-html}
-               [:my.message/no-recipient [:= true]]
-               [:seon.error/message :string]])}]}
+    (let [forms {:fixture/declared-producer
+                 [:map {:seon.render/ai 'seon.error/render-ai
+                        :seon.render/html 'seon.error/render-html}
+                  [:my.message/no-recipient [:= true]]
+                  [:seon.error/message :string]]}
+          projection (schema/build-projection
+                      (merge (:seon.schema.projection/forms (schema/handed-projection))
+                             forms))]
+      (schema/canonical-schema-rows projection forms))}
    (fn [connection]
      (let [failure {:my.message/no-recipient true
                     :seon.error/message "A recipient is required."}

@@ -27,6 +27,7 @@
            refusal (support/refusal-data #(wrapped nil))
            explanations (:seon.instrument/explanations refusal)
            item (first (:seon.instrument.explanations/items explanations))
+           actual (:seon.instrument.explanation/actual item)
            forms (:seon.schema.projection/forms projection)
            fingerprint (fn [form]
                          (:seon.schema.shape/fingerprint
@@ -52,8 +53,10 @@
               (:seon.error/expected-shape refusal)))
        (is (= (fingerprint [:fn 'malli.core/schema?])
               (:seon.instrument.explanation/expected-shape item)))
-       (is (= (error/project-observation caps nil)
-              (:seon.instrument.explanation/actual item)))
+       (is (= (error/project-observation
+               (assoc caps :seon.config.eval.result/max-bytes
+                      (:seon.error.projection/bound-bytes actual)) nil)
+              actual))
        (is (= [] (wrapped (m/schema [:map]))))
        (let [anonymous (try
                          (schema/canonical-definition [:fn (fn [_] true)] predicates)
