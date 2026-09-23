@@ -730,6 +730,20 @@
             (select-keys (:seon.schema.projection/forms projection)
                          (keys definitions))))))
 
+(defn- validates-loaded-contract?
+  "True when `projection` can validate the loaded function's own contract.
+
+  It must carry the same function contract the Var was armed with (a stored
+  row of a cluster that retains an older program may declare another) and
+  declare every schema key of `definitions`."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value
+                       [:map-of :keyword :seon.schema/value]] :boolean]}
+  [projection function-symbol contract definitions]
+  (let [forms (:seon.schema.projection/forms projection)]
+    (and (= contract (get (:seon.schema.projection/function-contracts projection)
+                          function-symbol contract))
+         (every? #(some? (find forms %)) (keys definitions)))))
+
 (defn- arm-var!
   {:malli/schema
    [:function
@@ -771,10 +785,19 @@
                (profile/timed
                 (let [wrapped
                       (binding [*compiling-contract* true]
-                        (if-let [projection (supplied-projection arguments)]
-                          (compiled-wrapper projection function-symbol
-                                            authored original caps policy)
-                          @boot-wrapper))]
+                        (or (when-let [projection (supplied-projection arguments)]
+                              ;; A supplied projection validates this call only
+                              ;; when it carries the loaded contract and declares
+                              ;; every schema it closes over. A cluster whose
+                              ;; stored program predates the loaded files lacks
+                              ;; them; the files' own declarations then decide.
+                              ((mi/-f->original schema/projection-cache-value)
+                               projection [::declared-wrapper function-symbol authored original policy]
+                               #(when (validates-loaded-contract? projection function-symbol
+                                                                  contract definitions)
+                                  (compiled-wrapper projection function-symbol
+                                                    authored original caps policy))))
+                            @boot-wrapper))]
                   (apply wrapped arguments)))))
            {:malli.instrument/original original
             ::cell cell

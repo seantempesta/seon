@@ -1548,3 +1548,28 @@
        (is (= (get digests 'seon.id/valid?)
               (:seon.profile/digest (:seon.instrument/cell (meta @(requiring-resolve (quote seon.id/valid?))))))
            "the host cell carries the function row's definition digest")))))
+
+(deftest a-handed-projection-without-the-contracts-declarations-uses-the-loaded-ones
+  ;; A cluster whose stored program predates a loaded schema resource hands a
+  ;; projection lacking its keys; the host wrapper then validates against the
+  ;; declarations it was armed with (the files'), never refusing with
+  ;; :malli.core/invalid-schema (default's first armed boot, 2026-09-23).
+  (let [var-name (symbol (str "loaded-declarations-" (random-uuid)))
+        candidate (intern 'seon.instrument-test var-name identity)
+        request-key :seon.instrument-test/loaded-only-request
+        handed (schema/handed-projection)
+        loaded (schema/build-projection (assoc (schema/snapshot) request-key [:map [::value :int]]))
+        contract [:=> [:cat request-key] :map]
+        effective (test-support/effective-config)]
+    (try
+      (alter-meta! candidate assoc :malli/schema contract)
+      (#'instrument/arm-var! candidate contract loaded loaded (config/result-caps effective)
+                             {:seon.config/on-core-error :panic
+                              :seon.config.error/max-evidence-bytes
+                              (:seon.config.error/max-evidence-bytes effective)})
+      (is (nil? (find (:seon.schema.projection/forms handed) request-key)))
+      (is (= {::value 1} (schema/call-with-projection handed #(candidate {::value 1}))))
+      (is (thrown? clojure.lang.ExceptionInfo
+                   (schema/call-with-projection handed #(candidate {::value "one"})))
+          "the loaded declarations still refuse an invalid input")
+      (finally (ns-unmap 'seon.instrument-test var-name)))))
