@@ -408,6 +408,14 @@ then reconnects and verifies. Reset loses database and private state; disposable
 synonymous with automatically reconstructible. Adoption freshness and browser paint
 are observed separately. Do not claim a disabled hook published an edit.
 
+A commit touching a hot path (writer, projection, publication, acquisition, fixture)
+reports the same probe timed on its parent and on itself; a slowdown over 20 % or 50 ms
+is a defect fixed before commit. Never `alter-var-root`, `with-redefs`, `load-file` or
+`intern` over `default`'s own Vars, even briefly; probe under a throwaway namespace or on
+a scratch cluster. Every contract uses declared schemas or named registered predicates,
+never an anonymous `fn` or an incomplete form; compile touched contracts against the
+packaged projection before committing.
+
 **Mechanical edits are scripted, never read-and-edit fifty times (owner, 2026-09-23).**
 A conversion that follows one rule across many files — a rename, a caller sweep, a
 fixture conversion — is one script (`sed`, `perl`, a Babashka or Python form) run once
@@ -488,11 +496,15 @@ proof, a cap or fallback), the design is probably wrong: stop and say so.
 
 ## Operation and delegation
 
-`bin/seon` owns start/status/open/init/config apply/stop/down/reset; destructive
-process drills use `--root` and exact `(pid, start-instant)` identity. Never signal
-children by an unverified PID. Reset is one replacement JVM: it takes the sibling
-store lock before deletion and retains it through publication and boot. A racing
-start may win the replacement gap; the loser refuses without deleting or killing.
+`bin/seon` owns start (including `start --head`, which moves the root's JVM to committed
+HEAD keeping the store and every cache)/status/open/init/config apply/stop/down/reset/nuke;
+destructive process drills use `--root` and exact `(pid, start-instant)` identity. Never
+signal children by an unverified PID. `reset --force` unlinks the cluster branch and forks
+a fresh one from the program rows, keeping every cache. `nuke --force` is the one
+replacement JVM: it takes the sibling store lock before deleting the store and every
+derived cache, retains it through publication and boot, rebuilds from committed files,
+falls back to the newest booting commit and never refuses. A racing start may win the
+replacement gap; the loser refuses without deleting or killing.
 Use the installed CLI's help; do not call deleted operator internals.
 
 The orchestrator coordinates default replacement, shared exhaust and integration.
