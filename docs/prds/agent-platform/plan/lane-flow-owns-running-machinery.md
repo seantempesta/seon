@@ -1,6 +1,6 @@
 ---
 type: plan
-status: revised 2026-09-23 after the Astra review (review-flow-prd-2026-09-23.md): five P0s and the P1 shrink applied; decisions A and B RULED by the owner (README §7 "Wake routing through Flow; launcher kept"); no src/test/resources edits by this lane
+status: revised 2026-09-23 twice — after the Astra review and after its re-check of 8d341a41b (review-flow-prd-2026-09-23.md, "Re-check"): settlement/receipt propagation, lock-inclusive deadline, terminal tap retirement, listener retirement by identity, P1 ordering; decisions A and B RULED by the owner (README §7 "Wake routing through Flow; launcher kept"); no src/test/resources edits by this lane
 created: 2026-09-23
 tags: [agent-platform, flow, core-async-flow, errors, datahike, listeners, lifecycle]
 owner: the flow half of README §4 cut 3/4; composes B2 (execution), B3 (errors), A2 (Datahike seams), B1b (boot)
@@ -19,7 +19,13 @@ sweep runs after cut 3's first namespace agents.
 **Review (Astra, `docs/research/agent-platform/review-flow-prd-2026-09-23.md`):**
 retain the direction; correct the terminal and error paths before MUST-NOW is approved.
 Its five P0s and its P1 are applied in §2 and marked **[R1]**–**[R6]**; its placement
-and acceptance corrections are applied in §3 and §5. **Decisions A and B were then
+and acceptance corrections are applied in §3 and §5. **Its re-check of `8d341a41b`**
+resolved P0-2 and P0-5 and found four residues, applied here and marked **[RC1]**–**[RC4]**:
+receipt propagation designed together with unconditional settlement (N1e); one
+deadline over lock acquisition, request, stop and join (N1c, N2); terminal tap
+retirement that completes a pending mult delivery (N1c); listener retirement by
+registration identity, not key (N3); and the write bound as a prerequisite of every
+synchronous `fault!` caller with N2 ordered after N1b/N1c. **Decisions A and B were then
 ruled by the owner (README §7 "Wake routing through Flow; launcher kept"; §4):** the
 router is a Flow proc fed by one offer-only listener, waking each affected agent on its
 mailbox wake port, a failed hand-off throwing into Datahike through the fork's failure
@@ -101,7 +107,7 @@ connection. Nothing new is scheduled, dispatched, batched or cached.
 
 | principle | end state | why |
 |---|---|---|
-| **Flow owns every cluster thread's lifecycle** | Every thread a cluster starts is a Flow proc (built through `var-process`, `flow.clj:132`; stopped by `flow/stop` under bounded command admission; joined at its delivered exit fact under a declared bound) or a launcher task (admitted by the refusing buffer, `flow.clj:304-345`; settled exactly once at the `::completion` in-port, `flow.clj:525-580`; drained at stop). The SSE writer per tab is the one exception the audit keeps (row 19): Flow topology is static and tabs are dynamic; it is registered and joined at `web/stop!` under the feed bound. | AGENTS "Bounded, event-driven execution": every surface has a declared bound at admission and awaits the exact terminal event; a thread nobody joins is an unobserved exit (D8). |
+| **Flow owns every cluster thread's lifecycle** | Every thread a cluster starts is a Flow proc (built through `var-process`, `flow.clj:132`; stopped by `flow/stop` under bounded command admission; joined at its delivered exit fact under a declared bound) or a launcher task (admitted by the refusing buffer, `flow.clj:304-345`; settled exactly once by its terminal owner, with admission released at the `::completion` in-port, `flow.clj:425-445,525-580`; drained at stop). The SSE writer per tab is the one exception the audit keeps (row 19): Flow topology is static and tabs are dynamic; it is registered and joined at `web/stop!` under the feed bound. | AGENTS "Bounded, event-driven execution": every surface has a declared bound at admission and awaits the exact terminal event; a thread nobody joins is an unobserved exit (D8). |
 | **Long or blocking work goes through the bounded launcher; completion is a message** | The launcher proc already has the shape: `::compute-submission`/`::io-submission` in, `::completion` back in, one terminal per submission. A model call (S8), an SCI evaluation (S7) and a capability handler (audit row 9) become submissions whose completion re-enters the owning proc as a message on a declared in-port, so the proc never blocks inside a transform and answers ping and stop between messages (F5, D10). Which of these land, and when, is B2's single execution design (§3, §4 B). | A proc is deaf during a transform (Flow:288-300); the only way to stay observable across a 51 s model call (audit P2) is to not be inside the transform for it. |
 | **One error route, composed with Flow, synchronous** | `fault!` is the one required function (final design). The fork hook calls it from Flow's catches; the launcher's terminal calls it for failures it emits as data; every out-of-proc boundary (boot request, MCP eval, http-kit `:error-logger`, subprocess checks) calls it directly; the listener failure handler and the process uncaught handler are the backstops. In the pre-agent slice `fault!` commits synchronously on the caller's thread (triage M4: "minimal"; B2 defers batching); the acknowledged batching committer of the final design is revisited after the first agents with measured repeat load **[R6]**. The counted-dropping route, the fault graph, both fan-out joins and `emit-core-fault!` are deleted with M4. | AGENTS error policy: stored with its chain at the owning boundary, delivered through the wake route, loud under `:panic`, panic in both modes when the database is down. No committer means no stop-order cycle (a stopping proc awaiting a committer stopped in the same graph). |
 | **A failed graph is positively visible; exit is a delivered fact** | Under `:panic` the failing proc runs its stop transition and exits; the fork delivers `{pid outcome cleanup-ex}` on a per-proc exit promise-chan; the supervisor joins it under the bound. The stored occurrence carries the graph/agent identity and the observed panic mode as a historical observation (not a mutable flag); `seon.problems/open-panics` (final design; `problems.clj:109-128` today) joins it to the agent, and oversight (`oversight.clj:186 flow-status`) reports `:failed <error id>` for that graph. | "A failed graph is positively visible"; "derive state, do not remember it" — the fact is the occurrence; the exit is the run boundary's delivery, not an inference from a returned loop. |
@@ -120,7 +126,8 @@ Shrunk per the review **[R6]**: the dependency hook plus channel-`:xform` refusa
 (N1), bounded stop and exit (N2), the listener failure lifecycle (N3) and a minimal,
 evidence-attributed uncaught handler (N4). No Seon step wrapper, no committer, no
 batching. They land inside M4's window (after M3's fault-cost fix, `error.clj` P4:
-1,099.9 ms in-transaction vs 26.1 ms outside) except N2, which depends on nothing.
+1,099.9 ms in-transaction vs 26.1 ms outside). The system-write bound below precedes
+every synchronous `fault!` caller; N2 follows N1b/N1c's exit and admission seams.
 Estimates are revised design estimates including the terminal, custody and recursion
 proofs the review named; they are not measurements.
 
@@ -168,7 +175,8 @@ handler (N4) never sees this; the exit fact is the only truthful channel for it.
 The Seon adapter, supplied by the cluster owner at graph construction so `create-flow`
 definitions stay data (`var-process`, `flow.clj:132`, gains a required `::on-error`
 option and passes it through; no wrapper of the step Var exists):
-`(fn [failure] (case (fault/fault! world failure ctx) :seon.fault/recorded ::flow/continue …))`
+the adapter maps the named recorded result/receipt from `(fault/fault! world failure ctx)`
+to `::flow/continue` while retaining its evidence (N1e extends the recorded result)
 where `world` is the environment the proc's args already carry
 (`env/refuse-absent-environment!`, `flow.clj:167`), `ctx` is
 `{:seon.error/layer :seon.flow/proc :seon.error/operation <step Var symbol> ::flow/pid pid :seon.agent/id (when carried)}`,
@@ -185,7 +193,8 @@ answer, sets `nstatus :exit` and runs `(handle-transition step status :exit stat
 (Flow:209-217) inside its own `try`: this is the proc's `::flow/stop` transition, where
 Seon delivers `proc-stopped` and releases resources today (`flow.clj:526-528`,
 `schedule.clj:809-813`, `turn.clj:5487`, `web.clj:2647`). If the transition throws, the
-handler is called once more with `{op :transition ex}` and **the terminal disposition is
+handler is called once more for a **new** cleanup failure with `{op :transition ex}`
+(propagated receipts or recorder failures bypass another write) and **the terminal disposition is
 retained regardless of the answer**: a proc asked to exit exits. The same rule fixes
 D2's sibling under `:record`: a stop-transition throw today restores the old status
 (Flow:285, 299, 317-320) and the proc keeps running; with the fork, a failure inside the
@@ -207,29 +216,60 @@ The Seon `proc-stopped` promises (`flow.clj:526-528`, `agent.clj` `turn-stopped`
 readers of the exit-chans in the same slice or are deleted where the exit fact replaces
 them; a hand-rolled completion beside the fork's exit fact is a second mechanism.
 
-**N1c — bounded control admission [R3].** Three changes at the dependency owner:
+**N1c — bounded control admission, lock included [R3, RC2, RC3].** Four changes at
+the dependency owner:
 
-1. An exiting proc untaps its control tap at the run boundary (`async/untap
-   control-mult control-tap`, Flow:153-154) before delivering its exit fact, so an exited
-   proc never holds the mult (`core.async.clj:797-804`: a mult waits for every tap).
-2. `send-command` (Flow:71-75) takes a bound: `(alts!! [[control cmap] (timeout ms)])`;
-   a timeout returns `#::flow{:admission :timeout :command … :to …}` instead of blocking.
-   `stop`, `pause`, `resume`, `ping` and the failing proc's sibling-stop all use it.
-   Public `stop` takes an optional `timeout-ms` (default: the lib's `ping` default,
-   1,000 ms) and returns the admission result; it still holds its lock across the bounded
-   send (Flow:174-183), which is now bounded, so the lock is too. A timed-out stop is a
-   typed failure the caller sees, never `true`.
-3. A failing proc under `::flow/exit` sends stop to its siblings through the bounded
+1. **Terminal tap retirement that completes outstanding delivery [RC3].** `untap`
+   only dissociates the tap (`core.async.clj:817`); a delivery the mult already started
+   has captured the tap, installed a `put!` and waits for its callback (`:828-835`), and
+   `close!` completes takers only, never a pending put (`impl/channels.clj:255-283`).
+   So an exiting proc, at its run boundary and before delivering its exit fact:
+   `untap` (no new deliveries are captured), then **drain** its control tap with
+   `poll!` until empty (a take completes the one delivery that may be pending — the mult
+   waits for every tap before the next item, so at most one is in flight per tap), then
+   `close!` it. A delivery captured before the untap and arriving after the drain either
+   fits the now-empty fixed-10 buffer (completes immediately) or meets the closed
+   channel (`put!` returns false and the mult untaps it, `:833`). No path leaves the
+   mult waiting on an exited proc. The probe: exit a proc whose tap is full with a put
+   already pending; the sibling's next command is admitted within the bound.
+2. **One deadline covers the lock [RC2].** `start` holds the flow lock through the whole
+   startup (Flow:95) and `stop` acquires it with no deadline (Flow:175); a bounded send
+   behind an unbounded `.lock` is not bounded. The bounded entry points take one absolute
+   **monotonic** deadline derived once from the caller's declared `timeout-ms` and
+   `System/nanoTime`, and acquire with
+   `(.tryLock lock remaining-nanos TimeUnit/NANOSECONDS)`; failure returns
+   `#::flow{:admission :lock-timeout}` — a typed result the caller sees, never a block
+   and never `true`. The same deadline bounds every send below. Unlock only after
+   successful acquisition. Keep upstream's no-option behaviour; expose the bounded overloads
+   through the public API and Graph protocol together. Seon always supplies its bound.
+3. **Bounded sends.** `send-command` (Flow:71-75) takes the remaining deadline:
+   race the put against the remaining time, refusing immediately if the deadline
+   has expired (even if the put is ready); a timeout returns
+   `#::flow{:admission :timeout :command … :to …}`. `stop`, `pause`, `resume`, `ping`,
+   the failing proc's sibling-stop and **startup's direct send at Flow:164** (the
+   `start-proc` catch's `>!!`) all use it; the startup case reports the admission result
+   inside the rethrown `ex-info` beside the started procs' exit-chans (N1b). Startup
+   sends on its locally held control channel: `running-chans` is not installed until
+   Flow:169. A failed start retires its newly allocated tap too if no run took custody.
+   `ping` spends the same deadline on admission and replies. Stop timeout leaves
+   graph/channel custody intact; it must not run Flow:179-182's close/reset branch.
+   Successful command admission also retains exit handles until actual exit: it
+   cannot authorize a concurrent restart. Startup may hold the lock inside arbitrary
+   proc init; bounded lock acquisition makes stop return on time without pretending
+   to terminate that init. Partial-start joins share the caller's remaining deadline;
+   expiry reports still-live procs and retains custody rather than claiming cleanup.
+4. A failing proc under `::flow/exit` sends stop to its siblings through the bounded
    send; on admission timeout the exit fact carries `:sibling-stop :timeout` and the proc
-   still exits. Stopping the siblings is then the supervisor's job, which retries `stop`
-   under its own bound and reports the missing event; nothing moves the blocking send
-   into an unobserved Future.
+   still exits (after its own tap retirement). Stopping the siblings is then the
+   supervisor's job through its one N2 stop request under the remaining deadline;
+   it reports a failed admission as the missing event, without a retry loop; nothing
+   moves the blocking send into an unobserved Future.
 
 A busy proc (inside a transform, Flow:288-300) does not drain its tap; with taps of 10 the
 mult blocks on the eleventh queued command. Bounded admission makes that a reported
-failure at the sender; the supervisor's bound (N2) makes it a named missing event. It is
-not termination: expiry retains custody and denies restart or overlapping work until the
-exit fact arrives.
+failure at the sender; the supervisor's one deadline (N2) makes it a named missing
+event. It is not termination: expiry retains custody and denies restart or overlapping
+work until the exit fact arrives.
 
 **N1d — `:xform` refused before channels exist.** `start-graph!` (`flow.clj:71`) walks
 the graph definition's `:chan-opts` (`:xform`, `:in-opts`, `:out-opts`) and refuses
@@ -237,20 +277,72 @@ naming pid and cid **before** `flow/create-flow` and `flow/start` create any cha
 The source search found none under `src/seon`; admission enforces it, not the search.
 Nothing transacts, waits or stops under a channel mutex.
 
-**N1e — failures emitted as data, recorded by their producer [R1].** Flow's catches
-never see these; N1a alone would make them silently losable once the launcher join
-(`c2140df4e`) leaves. Three sites in the launcher, all converted in N1's slice, none
-adding a channel reader:
+**N1e — receipt propagation and unconditional settlement are one protocol [R1, RC1].**
+The existing terminal owner (`io-terminal!`, `flow.clj:425-445`, and the compute
+terminal at `:390-413`) owns a submission's failure recording as well as its one
+terminal delivery. Convert both together; the completion transform no longer records
+a task failure. The error join (`c2140df4e`) leaves only after this protocol is proven.
 
-| site | today | with N1e |
-|---|---|---|
-| `::completion` transform (`flow.clj:559-580`): a task's `::throwable` becomes a `::flow/error` output | the map goes to the launcher graph's `error-chan` → the join → the fault channel | the launcher proc, in the same transform and after `release-admission!` (`:563`), calls `(fault/fault! (env/of work) throwable {:seon.error/layer :seon.flow/submission :seon.error/operation <work-fn symbol> ::submission-id …})` with the submission's carried world; the `::flow/error` output is kept as an observation. Exactly-once settlement is unchanged: the submitter's terminal already ran on the task thread (`io-terminal!`, `:425-445`); the fault is recorded once, by the proc, after admission release. Under `:panic` the adapter's disposition applies to the launcher graph as for any proc (N1b) |
-| `io-terminal!`'s `complete!` callback (`flow.clj:425-445`, `try`/`finally`, no catch) | a throwing `complete!` propagates to the task thread; the `FutureTask` captures it; lost | a `catch Throwable` around the `kernel/adopt-arm` call records through `fault!` with `(env/of work)` and puts the callback failure into the completion message (`::callback-throwable`) so the launcher proc applies the disposition; the `finally` still releases the submission and offers the completion |
-| `execute-io-work!`'s `.execute` rejection (`flow.clj:474-486`) and the compute twin (`execute-work!`) | terminal settled with the rejection | the same: recorded once through `fault!` with the submission's world at the settling site, then settled |
+1. **Claim once, then record once.** The existing submission status/CAS decides which
+   terminal path won; only that path may record, call `complete!` or deliver the result,
+   and publish completion. A body failure or executor rejection enters this same owner
+   with the submission's carried world. Declared admission refusals remain agent mistakes.
+   No `.execute` catch records first and then invokes a second recording terminal path.
+2. **Recording yields propagation evidence even when it throws.** Extend M4's named
+   recorded result to expose its verified receipt (store/branch, occurrence identity,
+   commit evidence and writer-decided disposition), not just a success keyword. Keep
+   the receipt with the original terminal failure. A panic receipt is captured as that
+   same committed outcome with terminal disposition; recorder failure/outcome-unknown
+   instead carries the original and full recording throwable, no fabricated receipt,
+   terminal disposition in BOTH modes, and no retry. These are declared transient
+   terminal members, not durable stamps or a throwable registry. Cause-preserving
+   wrappers propagate a verified receipt without a count/write; a bare error id is not
+   a receipt. A later independent use of the same original throwable still counts.
+3. **Settlement is unconditional once claimed.** Capture the recording outcome inside
+   a `try` whose `finally` invokes the existing terminal delivery exactly once, carrying
+   that outcome. A panic or recorder failure cannot skip result delivery or the
+   `complete!` attempt. Nest the callback's own `try`/`finally` so its throw cannot skip
+   terminal bookkeeping or completion publication either. Do not throw the panic out
+   of the task Future before this finalization. Submission settlement, callback success,
+   body exit and admission release are separate observations: a throwing callback was
+   invoked once, not successfully delivered, and is never retried.
+4. **Callback failures use the same evidence rule.** If `complete!` propagates the
+   receipt it was handed, forward it unchanged. A new callback exception is a distinct
+   failure and is recorded once with the submission's world and callback operation;
+   preserve both outcomes when the task also failed. Catch that recording's panic or
+   failure into the completion too. An existing recording-failure propagation takes
+   the emergency exit directly, never a second `fault!`. Thus a Future cannot silently
+   capture the only copy of either failure.
+5. **Completion consumes, never recounts.** After actual body exit, the existing
+   `::completion` transform releases admission and commits its decremented count/state
+   before applying the carried terminal disposition. Do not throw through the ordinary
+   step catch and restore the pre-completion state after releasing the slot. The fork's
+   opt-in transform result is `[nstate outputs terminal]`, with the optional third
+   member carrying `::flow/exit` and its propagation evidence. Existing two-member
+   results retain their meaning. At Flow:303-311, inspect this terminal member before
+   output dispatch, adopt `nstate`, and enter N1b cleanup directly; no throw, self-send,
+   blocking hand-off or additional catch adapter. The stop transition receives this
+   completed state, and the exit fact retains the receipt/recording failure. New cleanup
+   failures follow N1b; the original terminal is never recorded again. Under `:record`, a verified continue receipt
+   permits normal continuation; panic or recorder failure stops admission and fails the
+   launcher graph. Child computation still alive retains its slot/custody (gate 2).
 
-The launcher's `error-chan` therefore needs no reader; `boot/join-launcher-errors!`
-leaves, and schedule row 29's stop-order gap closes because nothing crosses a channel
-between graphs any more.
+| producer | terminal/completion obligation |
+|---|---|
+| Body failure formerly emitted by `::completion` as `::flow/error` (`flow.clj:558-578`) | Record in the winning submission terminal; result and completion carry the same receipt. The error output is observation only. |
+| `io-terminal!` callback throw (`:425-445`) | Finalize even if callback recording fails; propagate an existing receipt or carry one separate callback outcome, never merely `::callback-throwable` for another recorder. |
+| I/O `.execute` rejection (`:474-494`) and compute twin (`:400-413`) | Enter the same terminal owner with rejection; both modes settle once even if recording panics/fails, then completion consumes the outcome. |
+
+The fixed completion buffer is already sized to admitted compute + I/O work
+(`flow.clj:525`); one terminal message per admitted slot fits while that slot remains
+held until consumption. Preserve and prove this invariant, including queued cancellation.
+Check the completion `offer!`: a closed/rejected hand-off is a terminal emergency,
+retained with the whole outcome in N4's process/graph observation and exposed to the
+supervisor, never print-only or an unobserved Future throw. No retry or second queue;
+retain uncertain admission custody. During stop, the existing launcher drain consumes
+these same terminal outcomes for work it settles, so graph shutdown cannot orphan a
+receipt. Result delivery is not proof of actual body exit. Keep the recording connection
+open through all producer finalization and stop cleanup.
 
 **N1f — what leaves with M4 (M4's slice, listed here so the dependency is explicit):**
 `counted-dropping-buffer` (`flow.clj:999`), the fault graph and the committer as the
@@ -275,7 +367,7 @@ beside it would be a second catch adapter.
 `:526-528`, `:559-580`, `:760`, `:999-1320`.
 
 **Proof:** §5 gates 1–2. **Cost:** fork ≈ 1.5 days (hook, terminal protocol, exit
-facts, bounded admission, untap, fork regressions incl. upstream-compatible defaults);
+facts, bounded admission, terminal tap retirement, fork regressions incl. upstream-compatible defaults);
 Seon ≈ 1.5 days (`var-process` option, `start-graph!` refusal and construction
 boundary, launcher producer sites, `proc-stopped` replaced by exit facts); ≈ 3 days
 total. Risk medium: every proc's catch and exit path changes; every proof in §5 gate 2 is
@@ -284,9 +376,15 @@ owed before N1 is called landed.
 ### N2. Bound every stop: the whole request/stop/join sequence [R3]
 
 The exact per-site change is in the quick-wins landing note (Step 5, rows 26-27) and is
-amended here in one respect: the bound covers the **entire** sequence — request
-(the armer `>!!`), the stop command's admission (N1c's bounded `stop`), and the exit
-joins (N1b's exit-chans) — not only the `<!!` calls after a stop already sent.
+amended here: derive one monotonic deadline at the public operation's entry, before
+any request or lock acquisition. Pass it through request admission, quiescence reply,
+N1c's lock acquisition and stop send, and every N1b exit join. Every phase consumes
+remaining time; no per-phase/per-proc fresh timeout. This includes any lifecycle lock
+above Flow, which must use the same timed acquisition or leave the wait path.
+`await!` currently starts a fresh clock per call (`await.clj:136`); extend that owner
+and its declared request to accept the caller's deadline before composing these calls.
+A timeout diagnostic retains the original configured bound and names the expired phase.
+Do not inline another await implementation or claim separate bounded calls compose.
 
 - `cluster.clj` `disarm-agents!` (`:3385-3417`): the armer `>!!`+`<!! quiesced` and the
   cluster-loop and render joins go through `seon.await/await!` (`await.clj:110-122`, the
@@ -306,8 +404,8 @@ joins (N1b's exit-chans) — not only the `<!!` calls after a stop already sent.
   and any overlapping work until the exit fact arrives, and reports the live thread. No
   retry, no second wait beyond the declared one.
 
-**Seams:** `await.clj:110-150`; Flow:174-183; N1b/N1c. **Proof:** §5 gate 2 (stop
-part). **Cost:** < 0.5 day after N1c; risk low. Waits on `cluster.clj`'s release by M7's
+**Seams:** `await.clj:110-150`; Flow:95, 174-183; N1b/N1c. **Proof:** §5 gate 2 (stop
+part). **Cost:** < 0.5 day after N1b/N1c and the deadline-aware await request; risk low. Waits on `cluster.clj`'s release by M7's
 lane; `flow.clj` is free.
 
 ### N3. The listener failure path — loud, and non-recursive [R4]
@@ -323,9 +421,14 @@ try to; the fault is swallowed by AGENTS' definition.
 1. `notify-listeners!` reads an optional failure handler from the connection's meta,
    beside `:listeners` (`(:listener-failure (meta connection))`, installed by Seon at
    connection open through the same `alter-meta!` path `d/listen` uses).
-2. On a listener Throwable, **the failed listener is retired first**: its key is
-   removed from the connection's listener registry (`swap! listeners dissoc key`) before
-   the handler runs. Then `(handler {:listener-key k :exception e :tx-report report})` is
+2. On a listener Throwable, **retire the captured registration by identity [RC4]**
+   before recording. `writer.cljc:398,413` captures the callback snapshot: pass that
+   callback and the connection to the registry owner. Its atomic `swap!` removes `k`
+   only when `(identical? (get current k) captured-callback)` inside the swap; otherwise
+   it returns the registry unchanged. A separate check followed by `d/unlisten` is racy.
+   Re-arm supplies a fresh callback identity; reusing the failed callback object is not
+   a repaired registration. No parallel registry or generation stamp. Then the handler
+   receives the key, captured callback, exception, report and retirement outcome and is
    called on the same thread, after the promise was delivered, never inside the commit
    loop (DH `writer.cljc:256-261`). When no handler is installed, the fork logs as today
    and does not retire (upstream behaviour).
@@ -338,15 +441,18 @@ try to; the fault is swallowed by AGENTS' definition.
 same connection, which notifies the listeners again. Because the failed listener was
 retired before the handler ran, the fault transaction cannot re-invoke it, so there is no
 feedback. Callbacks of that listener already in flight on other `:mixed` threads (L1/L2:
-notification is concurrent) may fail once more each; retirement is idempotent and each
-such failure is one more `fault!` call whose occurrence dedupes by D13 identity in the
-writer (a count increment, not a new fact). The bound is therefore the number of
-in-flight notifications at retirement, never unbounded.
+notification is concurrent) may fail once more each; identity-conditional retirement
+is idempotent, never removes a replacement B registered under A's key, and each failure
+is one more `fault!` call whose occurrence dedupes by D13 identity in the writer (a count
+increment, not a new fact). For A, the bound is the number of callbacks in snapshots already
+captured at retirement (including callbacks not yet invoked), never future commits.
+A replacement B that itself fails is a new registration failure, retired by the same
+rule; recording never automatically re-arms either registration.
 
 **The Seon handler**, installed where the connection is opened for a cluster
 (`store/open-branch!` / `boot.clj`, free), with that cluster's environment captured at
 install — the exact world, not a lookup:
-`(fault/fault! world failure {:seon.error/layer :seon.db/listener :seon.error/operation <listener-key> :seon.db/listener-retired true})`.
+`(fault/fault! world failure {:seon.error/layer :seon.db/listener :seon.error/operation <listener-key> :seon.db/listener-retired <actual retirement outcome>})`.
 Under `:record` it returns and notification continues for the remaining listeners. Under
 `:panic` `fault!` throws the panic receipt; the handler recognizes it, exposes it through
 the process failure observation (N4's seam) and returns — no graph owns a listener, so
@@ -357,10 +463,11 @@ observation, no second `fault!` attempt, return.
 
 **Failed delivery is visible pending work.** The retired key is in the occurrence's
 context, and the owning lifecycle re-arms it: the router's owner re-registers at the
-next arm (`cluster.clj`'s cluster loop / `wake.clj:495`), the schedule proc at its next
-transition, the program-identity observer at the next context acquisition. Until then
-`runtime_status` reports the cluster's wake route as retired with the occurrence id,
-never as healthy absence.
+next arm with a fresh callback (`cluster.clj`'s cluster loop / `wake.clj:495`), the
+schedule proc at its next transition, the program-identity observer at the next context acquisition. Until then
+`runtime_status` reports the route's actual registration and pending delivery work
+with the occurrence id, never healthy absence. An old A failure is historical evidence,
+not proof that replacement B is retired or that B delivered the pending work.
 
 The router's own catch (`wake.clj:546-547`) is deleted (call-site rule 3: not exist), as
 is the `offer!` result drop at `:388`. Once L1 makes the router a proc, N3 covers the
@@ -375,7 +482,12 @@ it, so this is a parked thread, not a deadlock. The pre-agent slice supplies the
 applies to every write, system writes included, with the existing
 `:seon.db/write-bound-exceeded` as the outcome-unknown result; `fault!` reports outcome
 unknown without retry and without an overlapping replacement write. This is `db.clj`
-(held by writer-cost): a follow-up to that holder, required before N3 is landed.
+(held by writer-cost): required **before M4's synchronous `fault!` and every N1, N3,
+N4 or N1f caller is admitted**, not a late N3 addition. Apply the same deadline to
+write admission and acknowledgement; a bounded deref after unbounded admission is
+insufficient. Nested stop cleanup uses the smaller of the system-write deadline and
+the remaining stop deadline. Keep connection custody until accepted writes' outcomes
+and producer exits are known; timeout alone cannot release it.
 
 **Seams:** DH `writer.cljc:256-261`, `:379-387`, `:390-406`; `dispatch.clj:63-69`,
 `:106-111`; `db.clj:3872-3886`. **Proof:** §5 gate 3. **Cost:** fork ≈ 0.75 day
@@ -422,13 +534,29 @@ to that holder.
 
 ### The dependency between N1–N4 and the error route
 
-N1, N3 and N4 call `fault!`, which is M4's function (final design §"One required
-namespace") in its synchronous form. The order inside M4's window: M3 (fault cost) →
-`seon.fault/fault!` synchronous (M4 step 0, B3's file) → N1 (fork + `var-process` +
-`start-graph!` + launcher producers) → N3 (fork + handler + write bound) → N4 → N1f's
-deletions and the site conversions. N2 is independent and lands when `cluster.clj`
-frees. The batching committer, its ack protocol and the stop-order question it raises
-are revisited after the first agents with measured repeat load (§3 L8).
+N1, N3 and N4 call M4's synchronous `fault!`. Inside the ruled M4 window:
+M3 (fault cost) → system-write admission/acknowledgement bound at `seon.db` →
+M4 step 0 (synchronous `fault!`, verified receipts including the `:record` return,
+and terminal recording-failure outcomes). Supply the process/graph observation seam
+before enabling foreign/Future callers; N4's uncaught-handler installation follows
+that seam and the bounded route. Then N1's fork/terminal/producer conversion and N3's
+identity-safe listener conversion may land in their disjoint ownership slices.
+N2 follows **N1b/N1c** plus deadline-aware `await!`, when its owned files are free;
+it is not independent. N1f's route deletions follow complete conversion and gates 1–3,
+including N4, not just the presence of `fault!`. Keep recording custody alive until
+all producers and cleanup have terminated. No batching committer is required; measured
+repeat load after the first namespace agents may reopen it (§3 L8).
+
+### Readiness after the second revision
+
+READY means design-ready in this dependency order, **not implemented or runtime-proven**.
+
+| item | readiness | why / prerequisite |
+|---|---|---|
+| N1 | READY | Receipt propagation and unconditional settlement share the terminal owner; control includes lock deadlines and pending-tap retirement. Requires bounded M4 recording and the failure observation seam. |
+| N2 | READY | One deadline covers request, locks, stop and all joins; follows N1b/N1c and deadline-aware `await!`. |
+| N3 | READY | Atomic retirement compares captured callback identity; repaired replacements survive. Bounded recording precedes installation. |
+| N4 | READY | Unchanged: evidence-based custody and receipt propagation; follows bounded synchronous recording and process observation. |
 
 ## 3. LATER — the flow restructure, ordered and placed against README §4
 
@@ -523,8 +651,15 @@ rejection. Each yields exactly one durable occurrence and one wake on the correc
 before acknowledged continuation, with a two-link chain where two links were thrown (the
 fixture forces two). Under `:panic` there is no "next input": the assertion observes from
 the supervisor via the exit fact. More than 100 distinct concurrent failures in one graph
-preserve every identity (the channel slid; the store did not). `:xform` anywhere in a
-definition refuses at `start-graph!` before any channel exists, naming pid and cid.
+preserve every identity (the channel slid; the store did not). In both modes cross
+body failure, executor rejection and callback failure with recorder success, panic,
+refusal and outcome-unknown: result delivery/callback attempt and completion each occur
+once, admission decrements once after actual exit, and no Future hides recording failure.
+Successful recording gives one count per distinct failure and no count on propagation;
+a failed/unknown write gives no claimed receipt and no second attempt (it may yet commit).
+A callback propagating the task's receipt is not a second occurrence; a new callback
+failure is. Check failed completion hand-off and stop/drain receipt consumption too.
+`:xform` anywhere in a definition refuses at `start-graph!` before any channel exists, naming pid and cid.
 
 **Gate 2 — terminal, cleanup and admission are truthful (N1b, N1c, N2).** Saturate the
 control channel and every tap before a panic; throw during stop in both modes; fail the
@@ -532,9 +667,14 @@ recorder while stopping; time out a compute Future whose body remains alive. Pro
 bounded command admission (a typed admission timeout, never a blocked sender); the stop
 transition ran and its outcome (`:exited` / `:failed` + `:cleanup-ex`) is in the
 delivered exit fact; a handler throw retains the exit disposition and both throwables;
-an exited proc no longer holds the mult (untapped); no self-join; no resource reuse or
+an exited proc no longer holds the mult (untap, drain, close); force a full tap
+with a put already pending, plus a captured delivery arriving after the drain; no self-join; no resource reuse or
 replacement work before the exit fact; expiry retains custody and denies restart; the
-whole `disarm-agents!` sequence fails within its one bound naming the missing event; an
+whole `disarm-agents!` sequence fails within its one bound naming the missing event.
+Hold the Flow lock in startup beyond the stop deadline; assert timed lock refusal.
+Consume most of the budget in request admission, then stop/join several procs: total
+time must stay within that original deadline (scheduler tolerance reported), not one
+budget per phase. Exercise partial startup's direct stop send before `chans` exists; an
 independent graph pings and the REPL evaluates throughout; `rg '<!!' src/seon/cluster.clj src/seon/flow.clj`
 finds only sites inside `await!`. A proc-completion promise alone does not prove its child
 computation exited: the compute-timeout case asserts the body's own exit signal
@@ -546,8 +686,11 @@ listener was retired before recording, fault writes are bounded by the in-flight
 (assert the exact count with a latch-held concurrent notification), no recursive
 recording, remaining listeners behave under each mode (`:record` continues; `:panic`
 exposes the receipt and returns), the writer stays usable afterwards, and the retired
-route is reported as pending repair then re-armed by its owner. Inject faults on two
-branches plus an unattributed process thread: no cross-branch recording, no receipt
+route is reported as pending repair then re-armed by its owner. Hold old callback A
+in flight, install fresh B under the same key, then fail A: B remains registered and
+receives the next transaction, while A's occurrence records its actual retirement
+outcome. Repeat with concurrent A failures; B must survive each atomic comparison.
+Inject faults on two branches plus an unattributed process thread: no cross-branch recording, no receipt
 recount, the unattributed failure appears in `:seon.process/failures` with its
 `Throwable->map` and an explicit database-unavailable status when the store is down.
 Verify recipient wake delivery separately from transaction-promise delivery. Installing
@@ -592,11 +735,11 @@ exercises the new handler), with the forks' own compatibility tests retained and
 - A Flow fault's evidence measures the whole environment carried in `::flow/msg`
   (201 ms, 8.4 MB; schedule row 30). N1 hands `fault!` the same map Flow builds today;
   the cost belongs to `error/prepare`'s owner and gates nothing here once M3 lands.
-- The system-write bound (audit row 29) is now a prerequisite of N3, in `db.clj`
+- The system-write bound (audit row 29) is now a prerequisite of every synchronous `fault!` caller, in `db.clj`
   (held by writer-cost); recorded here for the ledger, not filed as a new issue.
 
 ## PROPOSAL — one row for README §4 (the orchestrator integrates it after review)
 
 | Step | Slice | Frees |
 |---|---|---|
-| 3.f | **Flow owns running machinery** ([spec](lane-flow-owns-running-machinery.md); reviewed 2026-09-23; ruled order `a2e9253fe`): MUST-NOW inside M4's window, synchronous `fault!` only — the core.async fork gains one optional per-proc error handler called at its three catches on the proc thread (`::flow/exit` runs the proc's own stop transition and retains the disposition even when cleanup throws; every proc's exit is a delivered fact on a per-proc promise-chan; an exiting proc untaps control; command admission is bounded and typed; `:xform` refused before channels exist), the launcher records the failures it emits as data through the same function at their producers (no channel reader), the Datahike fork's `notify-listeners!` retires a failing listener before calling a per-connection failure handler (default: today's log) so recording cannot recurse, the process uncaught handler attributes only from evidence the throwable carries and otherwise reports an explicit process failure, and every stop sequence in `cluster.clj`/`flow.clj` — request, bounded stop, exit join — runs under one `await!` bound with expiry retaining custody; the counted-dropping route, fault graph, fan-out joins, `emit-core-fault!` and the six `offer!`+`println` sites leave with M4. Ruled (README §7 "Wake routing through Flow; launcher kept"): the router is a Flow proc fed by one offer-only sliding-1 listener, reading its own connection and waking each affected agent on its mailbox wake port, a failed hand-off throwing into Datahike through the fork's failure callback; the launcher stays the admission owner and B2 commit 7 retires it only on an admission proof. LATER, after the first namespace agents: the router proc deleting the per-agent, call-preparation and program-identity listeners; the armer owning arm/disarm; SSE join and http-kit shutdown; capability dispatch through the launcher; with B2 in cut 4: turn evaluation wiring, the model call as a submission, ping during a call; batching revisited on measured repeat load | every cluster thread under Flow or the launcher with a delivered exit; no fault crosses a dropping channel; no Seon work on the writer's thread; stop is bounded end to end; the turn proc observable during a model call (cut 4) |
+| 3.f | **Flow owns running machinery** ([spec](lane-flow-owns-running-machinery.md); reviewed 2026-09-23; ruled order `a2e9253fe`): MUST-NOW inside M4's window, system-write admission/ack bound before every synchronous `fault!` caller — the core.async fork gains one optional per-proc error handler called at its three catches on the proc thread (`::flow/exit` runs the proc's own stop transition and retains the disposition even when cleanup throws; every proc's exit is a delivered fact on a per-proc promise-chan; an exiting proc untaps, drains and closes its control tap; command admission includes timed lock acquisition; `:xform` refused before channels exist), the launcher records the failures it emits as data through the same function at their terminal owners with unconditional settlement and receipt propagation (no channel reader), the Datahike fork's `notify-listeners!` retires a failing registration by atomic identity comparison before calling a per-connection failure handler (default: today's log) so recording cannot recurse, the process uncaught handler attributes only from evidence the throwable carries and otherwise reports an explicit process failure, and every stop sequence in `cluster.clj`/`flow.clj` — request, bounded stop, exit join — runs under one `await!` bound with expiry retaining custody; the counted-dropping route, fault graph, fan-out joins, `emit-core-fault!` and the six `offer!`+`println` sites leave with M4. Ruled (README §7 "Wake routing through Flow; launcher kept"): the router is a Flow proc fed by one offer-only sliding-1 listener, reading its own connection and waking each affected agent on its mailbox wake port, a failed hand-off throwing into Datahike through the fork's failure callback; the launcher stays the admission owner and B2 commit 7 retires it only on an admission proof. LATER, after the first namespace agents: the router proc deleting the per-agent, call-preparation and program-identity listeners; the armer owning arm/disarm; SSE join and http-kit shutdown; capability dispatch through the launcher; with B2 in cut 4: turn evaluation wiring, the model call as a submission, ping during a call; batching revisited on measured repeat load | every cluster thread under Flow or the launcher with a delivered exit; no fault crosses a dropping channel; no Seon work on the writer's thread; stop is bounded end to end; the turn proc observable during a model call (cut 4) |
