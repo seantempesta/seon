@@ -1368,7 +1368,11 @@
                          (when-not (map? manifest) (fail! "Manifest must be a map." {}))
                          (recur (nnext args) (assoc request :seon.config/manifest manifest) positionals))
           "--changed" (if (seq (next args))
-                         (recur nil (assoc request :seon.source/changed-paths (vec (next args))) positionals)
+                         ;; Canonical, as bin/test-check sends them: a relative path would
+                         ;; resolve in the JVM's source directory, not the caller's.
+                         (recur nil (assoc request :seon.source/changed-paths
+                                           (mapv #(.getCanonicalPath (io/file %)) (next args)))
+                                positionals)
                          (fail! "--changed requires paths." {}))
           (if (str/starts-with? arg "--") (fail! "Unknown option." {:seon.operator/argument arg})
               (recur (next args) request (conj positionals arg))))

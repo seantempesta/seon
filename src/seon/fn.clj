@@ -2337,14 +2337,18 @@
 
 (declare report-identities)
 
-(defn caller-files
-  "Direct caller files of declarations touched by the committed report.
+(def ^:private signature-attributes
+  "Facts a caller's analysis reads from its callee (B1 §2a step 9): a body or
+  docstring edit changes none of them, so it relints no caller."
+  #{:seon.fn/sym :seon.fn/arglists :seon.fn/arities :seon.fn/spec :seon.fn/private?
+    :seon.fn/macro? :seon.fn/inline? :seon.fn/defined-by :seon.fn/constant?})
 
-  Keep selection conservative until complete callability dependencies are
-  declared: arity and privacy changes need caller analysis even without a
-  changed contract. Schema changes also select callers of their consumers."
+(defn caller-files
+  "Direct caller files of declarations whose signature the committed report
+  changed: identity, arglists, arities or their contracts, privacy, macro or
+  inline status. Schema changes also select callers of their consumers."
   {:malli/schema [:=> [:cat :seon.db/transaction-report] [:set :string]]}
-  [{database :db-after :as report}]
+  [{database :db-after before :db-before datoms :tx-data :as report}]
   (let [identities (report-identities report)
         _ (when (:seon.error/at identities)
             (throw (ex-info (:seon.error/message identities) identities)))]
@@ -2373,8 +2377,18 @@
                         [])
             _ (when (:seon.error/at referring)
                 (throw (ex-info (:seon.error/message referring) referring)))
-            symbols (into (set referring) (keep (fn [[attribute value]]
-                                                 (when (= attribute :seon.fn/sym) value))) identities)
+            changed (into #{} (comp (filter #(or (signature-attributes (:a %))
+                                                 (= "seon.fn.arity" (namespace (:a %)))))
+                                    (map :e))
+                          datoms)
+            read! #(if (map? %) (throw (ex-info "Publication could not read changed signatures." %)) %)
+            owners (mapcat #(read! (db/q '[:find [?f ...] :in $ [?e ...] :where [?f :seon.fn/arities ?e]]
+                                         % (vec changed)))
+                           [before database])
+            symbols (into (set referring)
+                          (comp (mapcat #(read! (db/pull-many % [:seon.fn/sym] (vec (into changed owners)))))
+                                (keep :seon.fn/sym))
+                          [before database])
             paths (db/q '[:find [?path ...]
                       :in $ [?symbol ...]
                       :where
