@@ -134,3 +134,26 @@ caller; the dial suffices for M4. (c) This slice: delete the provenance branch.
   proves only the `seon.db` seam the PRD requires first.
 - Platform and integration tiers not run (plan §6: once per cut).
 - No RESET NEEDED.
+
+## Follow-up A: the lookup-ref pull happy path (orchestrator follow-up)
+
+Closes `docs/seon/issues/a-lookup-ref-pull-sorts-the-whole-installed-schema-on-the-happy-path.md`.
+`lookup-ref-error` and `attribute-installed?` read Datahike's installed schema
+(`dbi/-schema`) directly; the sorted whole-schema observation (proportional to 2,429
+attributes) is built only on refusal. Cost now O(1) per lookup ref.
+
+- Hot-path timing, same `pull-probe` form parent vs fix: lookup-ref `seon.db/pull`
+  606 µs → 67.6 µs; `attribute-installed?` 429 µs → 6.3 µs; `d/pull` 6.3–7.8 µs.
+  Target within 2× of `d/pull` not met; the remaining gap is shared by the eid path
+  (60 µs) and unattributed (see the issue's resolution).
+- Adoption: 10 attempts; nine refused "The source head changed before publication."
+  (14–80 s each) while other lanes adopted; the tenth succeeded in 34 s. Same class
+  as `docs/seon/issues/a-db-adoption-refuses-while-another-lane-edits-a-dependent.md`.
+- Reaching tests: `bin/test-check default --policy incremental --changed seon.db/lookup-ref-error --changed 'seon.db/attribute-installed?'`
+  → run `b2f5b25ee8cc`, executed 51, reused 17, pass 573, fail 34, error 34, 121 s.
+  Every red is another class, none reads a lookup ref: fixture agent rows missing the
+  required `:seon.agent/branch` (my.plan/note/message/agent tests), a missing
+  `:seon.program/definition-digest`, and "Host-bound declaration
+  seon.cluster.source/dependency-digests must change through the loaded source files"
+  (my.program/turn tests). No lookup-ref or attribute-installed message appears in the
+  output. The 121 s run is the runner defect filed above.

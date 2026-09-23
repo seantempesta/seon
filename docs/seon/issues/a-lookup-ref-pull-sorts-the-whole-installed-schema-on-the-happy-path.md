@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 created: 2026-09-23
 tags: [issue, database, read, performance, profile, agent-platform]
@@ -78,3 +78,25 @@ reported by the plan status audit
 
 Yes. The observation is a function of the database value's installed schema,
 and the happy path needs none of it. Deletion is the fix, not caching.
+
+## Resolution (lane m4-write-bound, 2026-09-23)
+
+- `lookup-ref-error` reads the one declaration from `dbi/-schema`; the whole-schema
+  `attribute-observation` is built only inside its two refusal branches and
+  `unknown-attribute-error`. `attribute-installed?` is the same direct `get`.
+- Measured on default pid 90963 (`pull-probe`, 300 warm iterations each, same
+  form before and after adoption):
+
+  | read | parent | fixed | `d/pull` |
+  |---|---|---|---|
+  | `seon.db/pull` by lookup ref `[:seon.cluster/name "default"]` | 606–1,328 µs | 67.6 µs | 6.3–7.8 µs |
+  | `seon.db/pull` by eid | 52.6–110 µs | 60.1 µs | |
+  | `attribute-installed?` | 429–1,008 µs | 6.3 µs | |
+
+- The lookup-ref path now costs the eid path. The 2×-of-`d/pull` target is NOT met:
+  the remaining ~55 µs is shared by every `seon.db/pull` (armed `pull`/`pull-call`/
+  `with-declarations`, result decoding and validation), not attributed here; the
+  same holds for `q` (~130 µs vs 4 µs). Neither is profiled below the armed cells.
+- Refusal branches verified at the REPL: non-unique, wrong value type and
+  uninstalled attribute each still carry `::installed-declaration` and 8–12
+  registered candidates.

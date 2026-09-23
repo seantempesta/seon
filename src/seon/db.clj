@@ -1647,7 +1647,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword]
                   :boolean]}
   [database attribute]
-  (boolean (get (installed-attribute-declarations database) attribute)))
+  (boolean (get (dbi/-schema (schema-database database)) attribute)))
 
 (defn- registered-attribute-candidates
   [declarations attribute]
@@ -1684,14 +1684,12 @@
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value] [:or :nil :seon.error/base]]}
   [operation database entity-id]
   (when (and (sequential? entity-id) (= 2 (count entity-id)))
+    ;; One declaration read; the whole-schema observation only on refusal.
     (let [[attribute value] entity-id
-          evidence (when (keyword? attribute)
-                     (attribute-observation database attribute))
-          declaration (::installed-declaration evidence)
+          installed (dbi/-schema (schema-database database))
+          declaration (when (qualified-keyword? attribute) (get installed attribute))
           valid-value? (and declaration
-                            (datahike.schema/value-valid?
-                             attribute value
-                             (dbi/-schema (schema-database database))))]
+                            (datahike.schema/value-valid? attribute value installed))]
       (cond
         (nil? declaration)
         (unknown-attribute-error operation database attribute entity-id)
@@ -1705,7 +1703,8 @@
           :seon.error/operation operation
           :seon.error/expected declaration
           :seon.error/offending entity-id
-          :seon.error/data (merge evidence {:seon.error/member attribute})})
+          :seon.error/data (merge (attribute-observation database attribute)
+                                  {:seon.error/member attribute})})
 
         (not valid-value?)
         (diagnostic
@@ -1717,7 +1716,8 @@
           :seon.error/operation operation
           :seon.error/expected declaration
           :seon.error/offending {::attribute attribute ::value value}
-          :seon.error/data (merge evidence {:seon.error/member attribute :seon.error/source {::validation ::value-does-not-match-installed-type
+          :seon.error/data (merge (attribute-observation database attribute)
+                                  {:seon.error/member attribute :seon.error/source {::validation ::value-does-not-match-installed-type
            ::value-type (:db/valueType declaration)}})})))))
 
 (defn- query-binding-values
