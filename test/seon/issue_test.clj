@@ -405,13 +405,13 @@
                                    {:seon.agent/settings [*]}] [:seon.agent/id agent-id])
            opening (seon.db/pull d '[*] [:seon.turn/id (seon.id/id [:seon.issue/opening issue-id])])]
        (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str started))
-       (clojure.test/is (= 1 (count (get-in agent-row [:seon.agent/plan :my.plan/steps]))))
+       (clojure.test/is (empty? (get-in agent-row [:seon.agent/plan :my.plan/steps])))
        (clojure.test/is (= 1 (get-in agent-row [:seon.agent/settings :seon.config.run/max-episode-runs])))
        (clojure.test/is (true? (get-in agent-row [:seon.agent/settings :seon.config.ai/no-provider])))
        (clojure.test/is (some? (:seon.turn/trigger opening)))
        (clojure.test/is (nil? (:seon.turn/closed-tx opening)))
        (clojure.test/is (= issue-id (:seon.issue/assigned-issue-id (seon.issue/start! start))))
-       (clojure.test/is (nil? (seon.db/q seon.issue/done-query d [:seon.issue/id issue-id])))
+       (clojure.test/is (false? (seon.issue/done? d [:seon.issue/id issue-id])))
        (clojure.test/is (= :seon.agent/id (:seon.issue/non-test-reference-member (seon.issue/tests! {:seon.db/connection c :seon.agent/id "issue-author"
                                                                :seon.issue/id issue-id :seon.issue/tests #{[:seon.agent/id "issue-author"]}})))))))))
 

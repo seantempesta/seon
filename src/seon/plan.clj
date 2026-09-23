@@ -662,10 +662,6 @@
                  :seon.error/expected "a positive configured query deadline"}))
     (+ (System/nanoTime) (* 1000000 limit))))
 
-(def issue-done-query
-  "The issue owner's completion query, shared with issue assignment."
-  issue/done-query)
-
 (defn- stale-issue-tests
   "The agent's open-issue tests whose reach closure changed or that never ran.
   A test whose closure is unchanged since its recorded result is not re-run:
@@ -736,8 +732,7 @@
   [database step deadline]
   (let [subject (:my.plan.item/subject step)
         subject (if (map? subject) (:db/id subject) subject)
-        issue? (and subject (:seon.issue/id (db/pull database [:seon.issue/id] subject)))
-        query (if issue? issue-done-query (:my.plan.item/done-query step))
+        query (:my.plan.item/done-query step)
         request (if (and (map? query) (:query query)) query {:query query})
         result (db/q (assoc request
                            :args (cond-> [database] subject (conj subject))
@@ -763,18 +758,16 @@
   (if (coll? result) (boolean (seq result)) (boolean result)))
 
 (defn- completion-tx
+  {:malli/schema [:=> [:cat :seon.db/database-value :int :int] :seon.db/tx-data]}
   [database plan-entity step]
-  (let [subject (db/q '[:find ?subject . :in $ ?step
-                        :where [?step :my.plan.item/subject ?subject]
-                        [?subject :seon.issue/id]] database step)]
-    (cond-> [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
-      subject (conj [:db/add subject :seon.issue/resolved-tx "datomic.tx"])
-      (= step (db/q '[:find ?current . :in $ ?plan
-                      :where [?plan :my.plan/current-step ?current]] database plan-entity))
-      (conj [:db/retract plan-entity :my.plan/current-step step]))))
+  (cond-> [[:db/add step :my.plan.item/completed-tx "datomic.tx"]]
+    (= step (db/q '[:find ?current . :in $ ?plan
+                    :where [?plan :my.plan/current-step ?current]] database plan-entity))
+    (conj [:db/retract plan-entity :my.plan/current-step step])))
 
 (defn settle-call
-  "Evaluate every open query-backed step and record first completion in this write."
+  "Evaluate every open query-backed step, record first completion in this write,
+  then settle the agent's issue."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
                   :seon.db/tx-data]}
   [database agent-id]
@@ -784,17 +777,17 @@
                              [?step :my.plan.item/done-query _]
                              (not [?step :my.plan.item/completed-tx _])]
                     database rules agent-id)]
-    (if (empty? plan-steps)
-      []
-      (let [deadline (query-deadline database agent-id)
-            plan-entity (plan-eid database (agent-eid database agent-id))]
-        (conj (into []
-              (mapcat (fn [eid]
-                        (let [step (db/pull database step-selector eid)]
-                          (when (query-satisfied? (done-query-result database step deadline))
-                            (completion-tx database plan-entity eid)))))
-              plan-steps)
-              [:db.fn/call #'issue/exhaust-tx agent-id])))))
+    (conj (if (empty? plan-steps)
+            []
+            (let [deadline (query-deadline database agent-id)
+                  plan-entity (plan-eid database (agent-eid database agent-id))]
+              (into []
+                    (mapcat (fn [eid]
+                              (let [step (db/pull database step-selector eid)]
+                                (when (query-satisfied? (done-query-result database step deadline))
+                                  (completion-tx database plan-entity eid)))))
+                    plan-steps)))
+          [:db.fn/call #'issue/settle-call agent-id])))
 
 (defn- complete-step-call
   [database request]

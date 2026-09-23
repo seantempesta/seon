@@ -14,9 +14,9 @@
             [malli.registry :as mr]
             [seon.test :as seon.test]))
 
-;;; LOAD-CYCLE BOUNDARIES. `seon.plan` reads `seon.issue/done-query` at load
-;;; (`src/seon/plan.clj:599`) and `seon.turn` requires `seon.plan`, so this
-;;; namespace cannot require `seon.turn` or `seon.cluster.agent` back. One
+;;; LOAD-CYCLE BOUNDARIES. `seon.plan` requires this namespace for
+;;; `settle-call` and `seon.turn` requires `seon.plan`, so this namespace
+;;; cannot require `seon.turn` or `seon.cluster.agent` back. One
 ;;; resolution per var, realized at first use, instead of a
 ;;; `requiring-resolve` on every call (AGENTS §2.1).
 (defonce ^:private turn-turns-left
@@ -1015,12 +1015,6 @@
 
       :else false)))
 
-(def done-query
-  "The issue's tests decide done when present; otherwise its detector does."
-  '[:find ?subject . :in $ ?input :where
-    [(identity ?input) ?subject]
-    [(seon.issue/done? $ ?subject) ?done]
-    [(true? ?done)]])
 
 (defn- require-test-refs! [database references]
   (doseq [reference references]
@@ -1036,7 +1030,7 @@
         :seon.error/expected "test entities in the success references"}))))
 
 (defn- create-tx
-  "Create the assigned worker, its plan, and its opening in one writer decision.
+  "Create the assigned worker and its opening in one writer decision.
   A supplied `:seon.agent/branch` is the worker's branch (a candidate's own);
   otherwise creation defaults it to the cluster branch."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -1105,7 +1099,6 @@
                     (merge {:seon.agent/id agent-id :seon.ns/name namespace-name
                             :seon.cluster/name cluster-name}
                            (select-keys request [:seon.agent/branch])))
-          step-id (id/id [:seon.issue/step issue-id])
           creation (mapv
                     (fn [entry]
                       (if (= agent-id (:seon.agent/id entry))
@@ -1114,16 +1107,7 @@
                                     (cond-> (merge {:seon.config.run/max-episode-runs (:seon.issue/budget request)}
                                                    (:seon.agent/settings request))
                                       (:seon.config.ai/no-provider request)
-                                      (assoc :seon.config.ai/no-provider true)))
-                            (update :seon.agent/plan merge
-                                    {:my.plan/objective (:seon.issue/problem row)
-                                     :my.plan/current-step (str "issue-step:" issue-id)
-                                     :my.plan/steps [{:db/id (str "issue-step:" issue-id)
-                                                      :my.plan.item/id step-id
-                                                      :my.plan.item/title (:seon.issue/title row)
-                                                      :my.plan.item/position 0
-                                                      :my.plan.item/subject [:seon.issue/id issue-id]
-                                                      :my.plan.item/done-query done-query}]}))
+                                      (assoc :seon.config.ai/no-provider true))))
                         entry))
                     creation)]
       (into (conj creation
@@ -1233,6 +1217,19 @@
         (into [[:db/add [:seon.issue/id issue-id] :seon.issue/budget-exhausted-tx "datomic.tx"]]
               (:seon.message/rows delivery)))
       [])))
+
+(defn settle-call
+  "Resolve the agent's open assigned issue when `done?` holds, then record exhaustion."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id] :seon.db/tx-data]}
+  [database agent-id]
+  (let [issue (db/q '[:find ?issue . :in $ ?agent-id :where
+                      [?agent :seon.agent/id ?agent-id]
+                      [?issue :seon.issue/agent ?agent]
+                      (not [?issue :seon.issue/resolved-tx])] database agent-id)]
+    (when (map? issue) (throw (ex-info (:seon.error/message issue) issue)))
+    (cond-> []
+      (and issue (done? database issue)) (conj [:db/add issue :seon.issue/resolved-tx "datomic.tx"])
+      :always (conj [:db.fn/call #'exhaust-tx agent-id]))))
 
 (defn start!
   "Start or resume the same issue worker with a larger total budget atomically.

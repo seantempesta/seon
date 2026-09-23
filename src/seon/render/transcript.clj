@@ -1231,12 +1231,10 @@
                (nil? (:seon.turn/reply-blob latest))
                failure (pos? (turn/turns-left database agent-id))
                (nil? (turn/next-agent-work database {:seon.agent/id agent-id})))
-      (let [plan (db/pull database
-                          '[{:seon.agent/plan
-                             [{:my.plan/steps [:my.plan.item/id :my.plan.item/completed-tx]}]}]
-                          [:seon.agent/id agent-id])
-            pending (remove :my.plan.item/completed-tx
-                            (get-in plan [:seon.agent/plan :my.plan/steps]))
+      (let [pending (remove :seon.issue/resolved-tx
+                            (:seon.issue/_agent
+                             (db/pull database '[{:seon.issue/_agent [:seon.issue/resolved-tx]}]
+                                      [:seon.agent/id agent-id])))
             at (get-in latest [:seon.turn/closed-tx :db/txInstant])]
         (when (seq pending)
           {::turn latest
@@ -1250,7 +1248,7 @@
   (let [agent-id (:seon.agent/id request)
         agent-row (db/pull (:seon.db/db request)
                            '[{:seon.agent/namespace [:seon.ns/name]}
-                             {:seon.agent/plan [:my.plan/objective]}]
+                             {:seon.issue/_agent [:seon.issue/problem :seon.issue/resolved-tx]}]
                            [:seon.agent/id agent-id])
         active (last (remove :seon.turn/closed-tx rows))
         latest (or active (last rows))
@@ -1270,7 +1268,8 @@
        (when (and latest (not stalled))
          (list " since " (runtime-time (get-in latest [(if active :seon.turn/opened-tx :seon.turn/closed-tx) :db/txInstant]))))
        " · " (:seon.cluster/name request)]]
-     (when-let [objective (get-in agent-row [:seon.agent/plan :my.plan/objective])]
+     (when-let [objective (some #(when-not (:seon.issue/resolved-tx %) (:seon.issue/problem %))
+                                (:seon.issue/_agent agent-row))]
        [:p {:class "seon-session-objective"} objective])
      [:div {:class "seon-session-toolbar"}
       [:nav {:class "seon-session-nav" :aria-label "Agent pages"}

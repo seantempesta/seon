@@ -118,8 +118,8 @@
                                       (java.util.Date.))))
                        (recur (inc pass)))))))
            issue-ref [:seon.issue/id "settlement-fixture"]
-           step (fn [] (db/pull (db/db connection) [:my.plan.item/completed-tx]
-                                [:my.plan.item/id "settlement-step"]))]
+           resolved (fn [] (:seon.issue/resolved-tx
+                            (db/pull (db/db connection) [:seon.issue/resolved-tx] issue-ref)))]
        (try
          (admit! connection ctx namespace-name
                  "(defn answer {:malli/schema [:=> [:cat] :int]} [] 0)")
@@ -137,22 +137,14 @@
                  :seon.issue/problem "The SCI answer must be one."
                  :seon.issue/agent [:seon.agent/id aid] :seon.issue/budget 2
                  :seon.issue/tests #{[:seon.test/sym test-symbol]
-                                     [:seon.test/sym steady-symbol]}}
-                {:seon.agent/id aid
-                 :seon.agent/plan
-                 {:my.plan/objective "Verify the SCI answer"
-                  :my.plan/steps [{:my.plan.item/id "settlement-step"
-                                   :my.plan.item/title "Make answer one"
-                                   :my.plan.item/position 0
-                                   :my.plan.item/subject "issue"
-                                   :my.plan.item/done-query plan/issue-done-query}]}}])))
+                                     [:seon.test/sym steady-symbol]}}])))
          ;; A SYSTEM TURN RUNS NO ISSUE TESTS. It appends generated reads;
          ;; nothing it settles can newly satisfy the issue, and the opening
          ;; settles one form per pass, so a test run there is pure cost.
          (system-settle)
          (is (nil? (:seon.test/run (evidence test-symbol))))
          (is (nil? (:seon.test/run (evidence steady-symbol))))
-         (is (nil? (:my.plan.item/completed-tx (step))))
+         (is (nil? (resolved)))
          ;; The ordinary close runs the issue's stale tests — here both,
          ;; because neither has a recorded result yet.
          (close-ordinary-turn!)
@@ -174,13 +166,13 @@
            (is (string? (:seon.test.run/program-digest red)))
            (is (string? (:seon.test.run/input-digest red)))
            (is (= 1 (:seon.test/pass-count steady)) (pr-str steady))
-           (is (nil? (:my.plan.item/completed-tx (step))))
+           (is (nil? (resolved)))
            ;; Only matching green evidence suppresses execution. The failing
            ;; member gets a fresh result; steady's green evidence is reused.
            (close-ordinary-turn!)
            (is (not= red-run (run-id test-symbol)))
            (is (= steady-run (run-id steady-symbol)))
-           (is (nil? (:my.plan.item/completed-tx (step))))
+           (is (nil? (resolved)))
            (is (some? (:seon.issue/budget-exhausted-tx
                         (db/pull (db/db connection) [:seon.issue/budget-exhausted-tx] issue-ref))))
            (is (nil? (turn/next-agent-work (db/db connection) {:seon.agent/id aid})))
@@ -219,7 +211,7 @@
              (is (pos? (:seon.test/error-count errored)) (pr-str errored))
              (is (not= red-run (run-id test-symbol)))
              (is (= steady-run (run-id steady-symbol)))
-             (is (nil? (:my.plan.item/completed-tx (step)))))
+             (is (nil? (resolved))))
            ;; The shared deadline still owns a test that will not finish, and
            ;; the expiry is recorded against the test rather than swallowed.
            (admit! connection ctx namespace-name
@@ -231,25 +223,22 @@
              (is (pos? (:seon.test/error-count expired)) (pr-str expired))
              (is (seq (:seon.test/failure-message expired)))
              (is (= steady-run (run-id steady-symbol)))
-             (is (nil? (:my.plan.item/completed-tx (step)))))
+             (is (nil? (resolved))))
            (support/transacted! connection
                    [{:seon.agent/id aid :seon.agent/settings {:seon.config.eval/time-limit-ms 10000}}])
            (admit! connection ctx namespace-name
                    "(defn answer {:malli/schema [:=> [:cat] :int]} [] 1)")
            (close-ordinary-turn!)
            (let [green (evidence test-symbol)
-                 completed (:my.plan.item/completed-tx (step))
-                 resolved (:seon.issue/resolved-tx (db/pull (db/db connection)
-                                                  [:seon.issue/resolved-tx] issue-ref))]
+                 completed (resolved)]
              (is (= 1 (:seon.test/pass-count green)) (pr-str green))
              (is (not= red-run (second (:seon.test/run green))))
              (is (true? (tests/verified? (db/db connection) test-symbol)))
-             ;; The step completes on RECORDED evidence: steady-test has not
+             ;; The issue resolves on RECORDED evidence: steady-test has not
              ;; re-run since its first green, and still answers the query.
              (is (= steady-run (run-id steady-symbol)))
              (is (true? (tests/verified? (db/db connection) steady-symbol)))
              (is (some? completed))
-             (is (= completed resolved))
              (let [shown (:seon.eval/shown
                           (last (filter #(str/includes? (:seon.cluster.eval/source % "") "my.issue/status")
                                         (seon.eval/of-agent (db/db connection) aid))))]
