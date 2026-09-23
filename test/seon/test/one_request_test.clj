@@ -151,7 +151,9 @@
         released (promise)
         handle (support/execution-handle nil)
         body (fn [] (is (.await gate 20 java.util.concurrent.TimeUnit/SECONDS)))
-        gated (intern 'seon.test.one-request-test (with-meta 'gated-probe {:test body}) nil)
+        ;; The gated Var lives in a namespace this test creates and removes.
+        owned (create-ns (gensym "seon.test.one-request-test.gated-"))
+        gated (intern owned (with-meta 'gated-probe {:test body}) nil)
         result (#'sut/bounded-result gated 100 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)}
                                      (fn [watched?] (deliver released watched?) nil))]
       (try
@@ -160,7 +162,7 @@
         (.countDown gate)
         (is (true? (support/await-event! (future (deref released)) ::released))
             "the watcher released after observing exit")
-        (finally (.countDown gate) (ns-unmap 'seon.test.one-request-test 'gated-probe)))))
+        (finally (.countDown gate) (remove-ns (ns-name owned))))))
 
 (deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
            :seon.test/long-ms 45000}
@@ -203,23 +205,30 @@
          (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
          (is (true? (:seon.test/passed? after))))))))
 
-(deftest ^{:seon.test/long "One request that acquires its handle and a member branch before its setup throws: 7.6 s measured at 15ffb4936 on a scratch cluster, dominated by the routed per-request acquisition cost."
-           :seon.test/long-ms 15000}
-  setup-that-throws-still-releases-the-member-branch
-  (let [store (:seon.store/store (support/execution-handle nil))
-        before (set (registry/roster store))
-        failure (try
-                  (with-redefs [sut/resolve-test (fn [_] (throw (ex-info "resolution exploded" {::probe true})))]
-                    (sut/run {:seon.test/execution (support/execution-handle nil)
-                              :seon.test/recording-connection (:seon.db/connection (support/execution-handle nil))
+(deftest ^{:seon.test/long "One agent test definition, one row edit and one nested request on a fixture branch: 13.8 s measured on default's JVM (load 14.7): define 1.0 s, edit 0.2 s, member 0.06 s, the nested request's admission and recording 12.6 s (docs/seon/issues/a-data-only-commit-rebuilds-the-whole-sci-program.md)."
+           :seon.test/long-ms 30000}
+  a-member-whose-test-does-not-resolve-is-red-and-its-branch-released
+  ;; A real resolution failure: the row's namespace is not its symbol's, so
+  ;; the member's resolution refuses its provenance.
+  (support/with-database
+   (fn [connection]
+     (let [handle (support/execution-handle connection)
+           store (:seon.store/store handle)
+           test-symbol 'seon.test.one-request-test/resolves-nowhere]
+       (define-agent-test! handle "(clojure.test/deftest resolves-nowhere (clojure.test/is true))")
+       (support/transacted! connection [{:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name probe-ns]}])
+       (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
                               :seon.test/policy :named
-                              :seon.test/identities #{'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol}}))
-                  nil
-                  (catch clojure.lang.ExceptionInfo caught caught))]
-    (is (= "resolution exploded" (ex-message failure)) "the setup failure propagates whole")
-    (is (true? (::probe (ex-data failure))))
-    (is (= before (set (registry/roster store)))
-        "every member and request branch the failed request acquired is unlinked")))
+                              :seon.test/identities #{test-symbol}})
+             branches (map :seon.agent/branch (:seon.test/timings result))]
+         (is (false? (:seon.test/passed? result)) (sut/tally result))
+         (is (= [test-symbol] (map :seon.test/sym (:seon.test/results result))) (sut/tally result))
+         (is (pos? (:seon.test/error-count (first (:seon.test/results result)) 0)) (sut/tally result))
+         ;; Only this request's own branches: other lanes acquire on the same store.
+         (is (= 1 (count branches)) (pr-str (:seon.test/timings result)))
+         (is (not-any? (set (registry/roster store)) branches)
+             "the member branch is unlinked after its resolution failed"))))))
 
 (deftest ^{:seon.test/long "One request over three indexed members in batches of two: 24.0 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed config-transaction and per-connection projection costs."
            :seon.test/long-ms 30000}
