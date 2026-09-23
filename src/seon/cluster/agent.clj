@@ -883,12 +883,15 @@
                            (sci.eval/projection-state selected
                             (db/carried-projection selected))
                            {:seon.env/environment (or (env/of handle) (env/of source-ctx))}))
-                 _ (sci.eval/acquire!
-                    {:seon.sci.eval/ctx base :seon.db/db selected})
-                 refusals (:seon.test/acquisition-refusals (sci.eval/acquired-program base))
-                 _ (when (seq refusals)
-                     (throw (ex-info "Program acquisition refused."
-                                     {:seon.test/acquisition-refusals refusals})))
+                 ;; A row the program cannot install is recorded by the
+                 ;; acquisition (an agent's row as its mistake, a core row as a
+                 ;; core fault) and the rest of the program arms. Only a
+                 ;; database that cannot store that record refuses here.
+                 acquired (sci.eval/acquire!
+                           {:seon.sci.eval/ctx base :seon.db/db selected})
+                 _ (when-let [failure (:seon.sci.eval/acquisition-recording-error acquired)]
+                     (throw (ex-info "Program acquisition could not record its refusals."
+                                     {:seon.sci.eval/acquisition-recording-error failure})))
                  _ (env/replace-environment!
                     (:seon.sci.eval/projection-state base)
                     (cond-> (assoc (env/of base) :seon.agent/context-state contexts)

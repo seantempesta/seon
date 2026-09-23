@@ -37,6 +37,7 @@
             [seon.repl :as repl]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
+            [seon.id :as id]
             [seon.render.web :as web]
             [seon.test-support :as test-support])
   (:import [java.util Date]
@@ -1210,6 +1211,33 @@
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
+
+(deftest a-refused-core-row-is-recorded-and-every-agent-still-arms
+  ;; Owner ruling 2026-09-23 (AGENTS.md error policy): a core row the program
+  ;; cannot install is a recorded core fault, never a throw out of arm!.
+  ;; acquire-context! threw "Program acquisition refused." and stopped every
+  ;; agent after it. The changed host-bound row is M9's refusal recipe.
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            subject 'seon.render.hiccup/escape]
+        (test-support/transacted! connection
+                                  [(config-row "core-fault" {})
+                                   (agent-row connection "fault-a")
+                                   (agent-row connection "fault-b")])
+        (test-support/transacted! connection
+                                  [[:db/add [:seon.fn/sym subject] :seon.program/definition-digest
+                                    (id/digest 64 ["core-fault" (str subject)])]])
+        (try
+          (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
+                second-agent (arm-one! connection ctx routing "core-fault" "fault-b")]
+            (is (some? (:seon.flow/started first-agent)) (pr-str (keys first-agent)))
+            (is (some? (:seon.flow/started second-agent)) "the next agent arms too")
+            (is (seq (db/q '[:find [?error ...]
+                             :where [?error :seon.error/declared-schema :seon.sci.eval/interpretation-error]]
+                           @connection))
+                "the refusal is recorded as a fault"))
+          (finally (disarm-all! routing)))))))
 
 (deftest canonical-agent-handle-supplies-declared-producer-outputs
   (with-connection
