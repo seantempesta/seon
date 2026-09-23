@@ -149,3 +149,5 @@ The counts include concurrent work from other lanes.
   and I did not change it in this lane.
 
 RESET NEEDED: no.
+
+Commit: `090601ae1` (fixtures, this note, two issue notes).
