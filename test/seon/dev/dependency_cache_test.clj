@@ -293,3 +293,64 @@
                (configuration-digest recorded))))
       (finally
         (test-support/delete-recursively! recorded)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Compile order: a namespace precedes the extension it tail-requires
+;;;
+;;; `babashka.process` ends by requiring `babashka.process.pprint` when
+;;; `clojure.pprint` is loaded, and the extension requires it back. Discovery
+;;; records each namespace when its load STARTS, so the compile child finds
+;;; `babashka.process` in `*loaded-libs*` before the extension asks for it;
+;;; recorded at load END, the extension compiled first and the tail require was
+;;; a cyclic load.
+
+(defn- babashka-process-directory
+  []
+  (-> (io/resource "babashka/process.cljc") .toURI io/file
+      .getParentFile .getParentFile .getCanonicalPath))
+
+(deftest ^{:seon.test/platform
+           "Compiles a dependency closure in two child JVMs, as the class-cache build does."}
+  discovery-compiles-a-namespace-before-the-extension-it-tail-requires
+  (let [root (fresh-root)
+        source-root (io/file root "source")
+        staging (io/file root "staging")
+        result (io/file root "result.edn")
+        basis {:classpath-roots
+               (conj (str/split (System/getProperty "java.class.path")
+                                (re-pattern java.io.File/pathSeparator))
+                     (.getCanonicalPath source-root))
+               :jvm-opts []}
+        run-child! (private-var 'run-child!)]
+    (try
+      ;; A row before the extension loads clojure.pprint, as in the real
+      ;; closure, so compiling in end order reproduces the cyclic load.
+      (doseq [[file text] {"uses_pprint.clj" "(ns cache-probe.uses-pprint (:require [clojure.pprint]))\n"
+                           "pprint_root.clj" (str "(ns cache-probe.pprint-root\n"
+                                                  "  (:require [cache-probe.uses-pprint] [babashka.process]))\n")}]
+        (doto (io/file source-root "cache_probe" file)
+          (-> .getParentFile .mkdirs)
+          (spit text)
+          ;; Loader classes must be strictly newer than source under RT/load.
+          (.setLastModified 1)))
+      (.mkdirs staging)
+      (run-child! basis
+                  ((private-var 'discovery-form)
+                   {:directories [(babashka-process-directory)
+                                  (.getCanonicalPath source-root)]
+                    :archives #{}}
+                   (.getCanonicalPath result)
+                   'cache-probe.pprint-root)
+                  "The compile-order probe discovery failed." (.getPath staging))
+      (let [rows (edn/read-string (slurp result))
+            order (mapv :seon.dev-cache/namespace rows)]
+        (testing "discovery records the namespace before its extension"
+          (is (= '[babashka.process babashka.process.pprint]
+                 (filterv '#{babashka.process babashka.process.pprint} order))))
+        (testing "the recorded order compiles in a fresh JVM"
+          (run-child! basis
+                      ((private-var 'compile-form) rows (.getCanonicalPath staging))
+                      "The compile-order probe compilation failed." (.getPath staging))
+          ((private-var 'validate!) staging rows)))
+      (finally
+        (test-support/delete-recursively! root)))))

@@ -58,7 +58,13 @@
                     set)}))
 
 (defn- discovery-form
-  [{:keys [directories archives]} result]
+  "The child-JVM form that requires `root-lib` and writes, to `result`, the
+  dependency namespaces it loaded in load-START order."
+  {:malli/schema [:=> [:cat [:map [:directories [:vector :string]]
+                             [:archives [:set :string]]]
+                       :string :symbol]
+                  seq?]}
+  [{:keys [directories archives]} result root-lib]
   `(do
      (require '[clojure.java.io :as io]
               '[clojure.string :as str])
@@ -99,12 +105,15 @@
                   :seon.dev-cache/source-url (str url#)})))]
        (let [loads# (atom [])
              original-load# @#'clojure.core/load]
+         ;; Record at load START: compiling in that order finds each
+         ;; namespace in `*loaded-libs*` once its `ns` form has run, so a
+         ;; tail require back into it (babashka.process -> its pprint
+         ;; extension) is a no-op instead of a cyclic load.
          (with-redefs [clojure.core/load
                        (fn [& paths#]
-                         (let [result# (apply original-load# paths#)]
-                           (swap! loads# into paths#)
-                           result#))]
-           (require 'seon.artifact))
+                         (swap! loads# into paths#)
+                         (apply original-load# paths#))]
+           (require '~root-lib))
          (let [loaded# (clojure.core/loaded-libs)
                by-root# (into {} (map (juxt root-for# identity)) loaded#)
                rows# (->> @loads#
@@ -157,7 +166,7 @@
   [basis staging-dir]
   (let [staging (.getCanonicalPath (canonical-file staging-dir))
         result (.getCanonicalPath (canonical-file result-file))
-        discovery (discovery-form (dependency-containers basis) result)]
+        discovery (discovery-form (dependency-containers basis) result 'seon.artifact)]
     (run-child! basis discovery
                 "Development dependency-cache discovery failed."
                 staging)
