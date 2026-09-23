@@ -53,11 +53,12 @@
     (fn [connection]
       (let [database (db/db connection)
             cache @(ns-resolve 'seon.db 'projection-cache)
-            cache-key @(ns-resolve 'seon.db 'projection-cache-key)
             derive-projection schema/load-projection
             derivations (atom 0)
             reads (atom 0)]
-        (cache/evict cache (cache-key database))
+        ;; The population is memoized under several keys (revisions, commit,
+        ;; value, content); an empty cache is the cold start this counts from.
+        (cache/seed cache {})
         (with-redefs [schema/load-projection
                       (fn [value] (swap! derivations inc) (derive-projection value))]
           (let [read! (fn [value] (swap! reads inc) (db/carried-projection value))
@@ -87,17 +88,19 @@
 (deftest speculative-values-derive-without-committed-identity
   (support/with-database
     (fn [connection]
-      (let [database (:db-after (d/with (db/db connection) []))
+      (let [cache @(ns-resolve 'seon.db 'projection-cache)
+            database (:db-after (d/with (db/db connection) []))
             derive-projection schema/load-projection
             derivations (atom 0)]
+        (cache/seed cache {})
         (is (nil? (:cache-context database)))
         (with-redefs [schema/load-projection
                       (fn [value] (swap! derivations inc) (derive-projection value))]
           (let [left (db/carried-projection database)
                 right (db/carried-projection database)]
-            (is (= (:seon.schema.projection/forms left)
-                   (:seon.schema.projection/forms right)))
-            (is (= 2 @derivations))))))))
+            (is (identical? left right)
+                "a value without committed identity is memoized by its declarations")
+            (is (= 1 @derivations))))))))
 
 (deftest an-as-of-view-before-a-declaration-change-reads-the-older-population
   (support/with-database

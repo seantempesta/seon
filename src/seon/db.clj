@@ -1216,13 +1216,20 @@
 
 (def projection-cache-policy
   "Bound retained compiled projections independently of the number of commits."
-  {::projection-cache-size 32
+  {::projection-cache-size 24
    ::projection-cache-reason
-   "Retain eight recent declaration populations under each of their four keys (a committed value's attribute revisions, its commit, the value object, and the declaration content itself) for active branches, in-transaction values and retained reports; older populations derive again without retaining an unbounded compiled program population."})
+   "Retain eight recent declaration populations under each of their three durable keys (a committed value's attribute revisions, its commit, and the declaration content itself) for active branches and retained reports; older populations derive again without retaining an unbounded compiled program population."
+   ::value-cache-size 4
+   ::value-cache-reason
+   "Retain the four most recent value objects, weakly, so the reads of one in-transaction value cost one lookup instead of one content key each; a burst of speculative values cannot evict the durable keys."})
 
 ;; The same core.cache wrapped LRU used by datahike.schema-cache:8.
 (defonce ^:private projection-cache
   (cache/lru-cache-factory {} :threshold (::projection-cache-size projection-cache-policy)))
+
+;; The value tier of the same memo, in its own bound (`content-projection`).
+(defonce ^:private value-projection-cache
+  (cache/lru-cache-factory {} :threshold (::value-cache-size projection-cache-policy)))
 
 (defn- projection-cache-key
   "The part of Datahike's cache-context a projection derivation depends on.
@@ -1280,17 +1287,36 @@
               [attribute datoms (into [] (map :tx) datoms)]))
           schema/projection-attributes)))
 
+(deftype ^:private ValueKey [^int hash ^java.lang.ref.WeakReference reference]
+  ;; One database value object as a cache key, held weakly. A DB's own
+  ;; equality compares every datom when two hashes agree
+  ;; (`datahike/db.cljc:711`); the in-transaction value one `:db.fn/call`
+  ;; reads many times is one object, so identity is the exact, constant-time
+  ;; question. The weak reference lets that value be collected while its
+  ;; entry ages out of the LRU: the tier finds a projection, never keeps a
+  ;; database alive.
+  Object
+  ;; Reflexive even after collection, so the LRU can still evict the entry.
+  (equals [this other]
+    (or (identical? this other)
+        (and (instance? ValueKey other)
+             (let [value (.get reference)]
+               (and (some? value)
+                    (identical? value (.get ^java.lang.ref.WeakReference (.-reference ^ValueKey other))))))))
+  (hashCode [_] hash))
+
+(defn- value-key
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:fn #(instance? ValueKey %)]]}
+  [database]
+  (ValueKey. (System/identityHashCode database) (java.lang.ref.WeakReference. database)))
+
 (defn- content-projection
   "The projection of `database`'s declaration content, memoized by the value
   object and then by that content."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
   [database]
   @(cache/lookup-or-miss
-    ;; The in-transaction value one `:db.fn/call` reads many times is one
-    ;; object: its identity hash makes the lookup constant-time, and the
-    ;; value itself keeps the key exact (a database's own equality compares
-    ;; datoms only when hashes agree, `datahike/db.cljc:711`).
-    projection-cache [::value (System/identityHashCode database) database]
+    value-projection-cache (value-key database)
     (fn [_]
       (delay
        @(cache/lookup-or-miss projection-cache [::declaration-content (declaration-content-key database)]
