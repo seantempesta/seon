@@ -51,3 +51,25 @@ Also: `:seon.boot/readiness` in `resources/seon/schemas/seon.boot.edn:114`
 declares `:seon.problems/problems` as the family map only, while `readiness`
 (`src/seon/cluster/boot.clj:346`) carries the declared union that
 `seon.problems/problems` returns; the readiness schema should be the union.
+
+## Recurrence on default pid 90963 (2026-09-23, lane live-defects-diagnosis)
+
+The plan status audit (commit 04899bece, 04:18:59Z) saw `runtime_status`
+problems unavailable with `seon.test/population-unknown`. Read-only
+re-observation:
+
+- `(seon.problems/problems db {})` answered the family map at 04:19Z and again
+  at 04:28:47Z. The unknown is intermittent, not permanent.
+- Runs since boot that left members without `:seon.test.member/completed-tx`
+  (query: runs with `:seon.test.run/at` after boot, members minus completed):
+  - `47a759c6f410`, 04:11:14Z, `seon.program-test`: 8 of 30 members open.
+  - `80d1340b16fc`, 04:23:40Z, `seon.render.transcript-test`: 13 of 17 members open.
+- Later complete runs of the same namespaces superseded them, and `problems`
+  recovered. Those runs are `3cc834ea6b90` (04:14:12Z, 30 members) and
+  `f430406e6816` / `3d30c0558fa5` (04:24–04:25Z, 17 members).
+- The profile shows `seon.test/run` threw 4 times by 04:23 and 5 by 04:28.
+- Every thrown in-process `bin/test-check` run makes `problems` unknown until
+  its members run again to completion. An in-flight run does the same for its
+  duration. Both owners named above still stand:
+  - The runner should record unfinished members as terminated.
+  - `problems` should confine the unknown to the failed-tests family.
