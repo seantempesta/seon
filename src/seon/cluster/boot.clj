@@ -517,16 +517,6 @@
    (or (:seon.boot/cluster-connection (selected-instance name))
        (refuse! "Cluster database connection is not acquired." {:seon.boot/cluster-name name}))))
 
-(defn refork!
-  "Refork an unconnected branch at the exact supplied publication."
-  {:malli/schema [:=> [:cat :seon.operator/refork-request] :seon.cluster.registry/branch-result]}
-  [request]
-  (let [dir (str (io/file (:seon.operator/managed-root request) "data/store"))
-        held (cluster/acquire-root-store! dir)]
-    (try
-      (registry/reset-cluster! (assoc request :seon.store/store held))
-      (finally (cluster/release-root-store! dir)))))
-
 (defn- readable-response
   "Return one plain-EDN response; malformed diagnostic evidence becomes readable data."
   {:malli/schema [:=> [:cat :seon.schema/value] :seon.operator/response]}
