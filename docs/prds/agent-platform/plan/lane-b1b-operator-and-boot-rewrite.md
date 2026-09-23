@@ -39,7 +39,7 @@ contracts and acquisition owners, without assuming steps 1.1–1.3 have landed.
 | Exact target root, no symlink traversal, validate before destruction | KEEP explicit canonical root, admitted store path and no-follow recursive deletion; never delete the held lock inode | T:1558,1585; S`fs.clj:35,293` |
 | Healthy sibling cluster survives named stop; stale instance cannot stop its replacement | KEEP instance-addressed stop, sibling store holdings and identity checks | C:3404,3504; O:653 |
 | Failed database release retains store exclusion and diagnostic REPL | KEEP. A timeout/cancel is not proof the writer or proc exited | S`cluster/store.clj:518`; C:3556 |
-| Existing branch is sovereign; refork is explicit and exact-commit based | KEEP; branch creation/reset remains registry work, no automatic ordinary-cluster adoption | S`cluster/registry.clj:269,304` |
+| Existing branch is sovereign; a fresh branch (reset) is explicit and exact-commit based | KEEP; branch creation/reset remains registry work, no automatic ordinary-cluster adoption | S`cluster/registry.clj:269,304` |
 | Recovery marks interrupted work; configuration and root seeding occur before agents start | KEEP existing owners, no replay of interrupted execution | C:2287,2504,3103 |
 | Bootstrap supplies dependencies, test classpath and environment | KEEP one resolved launch classpath including tests; `.env` remains data and invoking environment wins | O:472,491,496,563,2129 |
 | Collection verifies retained roots; log rotation preserves the live inode; disk observation is bounded by its requested scope | KEEP surviving maintenance in its existing domain owner, including dry-run refusal semantics; do not delete it with operator plumbing | S`operator.clj:515,796,1112`; T:1457; S`schedule.clj:44` |
@@ -246,7 +246,7 @@ bound (S`test.clj:541`); do not use a raw clojure.test runner or mock store/SCI.
 | Order inside ONE rewrite slice | Conversion / deletion |
 |---|---|
 | 1 | Write the three replacement files and store option; declare contracts. Reuse publication, registry, config, process and resource owners. Temporary broken tools/boot are permitted by owner. |
-| 2 | Move JVM connection/status/refork entry points into boot; convert every direct and symbol-valued caller. Put surviving maintenance in S`maintenance.clj`, filesystem measurements in S`fs.clj`; update S`schedule.clj:44` and its schema/seed consumers. Retire claim/reap/census schedules with their mechanism. |
+| 2 | Move JVM connection/status/branch-reset entry points into boot; convert every direct and symbol-valued caller. Put surviving maintenance in S`maintenance.clj`, filesystem measurements in S`fs.clj`; update S`schedule.clj:44` and its schema/seed consumers. Retire claim/reap/census schedules with their mechanism. |
 | 3 | Convert MCP discovery/imports, `bin/test-check`, hook and other tooling callers to the new client/boot owners. Keep script-only launcher code out of the indexed runtime program; no duplicate `seon.operator` namespace on the classpath. |
 | 4 | Delete O, T, S`operator.clj` and replaced boot functions in C. Delete `test/seon/dev/fresh_operator_test.clj`, `fresh_operator_reset_test.clj`, `test/seon/operator_test.clj`; retain their surviving maintenance assertions under their new owner. Replace operator cases in `test/seon/cluster/boot_test.clj` with §7. |
 | 5 | Restore loadable HEAD and working tools; run the named drills and cut-level platform checkpoint. Orchestrator replaces default once and observes JVM/SCI evaluation, DB access and web independently. No full suite per edit. |
@@ -256,7 +256,7 @@ operation in the new client, then delete it with those callers in cut 2. It is n
 second operator implementation (B1 commit 14; README §4). Convert store's references
 to T (`store.clj:25,151,409`) and all boot callers in the deletion slice. Mechanical
 call conversion is required scope; unrelated publication/registry redesign is not.
-Recover with `git revert <rewrite-commit>`, then the reverted `bin/seon reset --force`.
+Recover with `git revert <rewrite-commit>`, then the reverted `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store).
 Revert restores code, not discarded data. No lane resets default or pushes this slice.
 
 ## 6. Better than the floor
@@ -286,6 +286,8 @@ stay in fixtures, not a production pause API (S`fs.clj:293`; testing skill).
 | 6 `start-during-reset` | Run the winner IN the test JVM: call `open-store!` with `:seon.store/destroy? true` on the scratch store and hold its real sequence after lock acquisition, before deletion, under fixture control. Keep the winning boot in that JVM for the before-ready interval too. In each interval launch the competing cold start as a real child; it refuses, then release the fixture hold and let the winner complete. No child pause or production pause API. |
 | 7 `reset-loses-replacement-race` | Reset captures/stops old I; another start acquires before reset replacement. Reset child refuses, never deletes and never kills/reselects winner. This is the precise reset-during-start race; no claim that explicit force-reset can never stop an already selected booting process. |
 | 8 `same-lock-through-reset-boot` | Two actual processes compete; put a sentinel at deletion entry, observe loser never enters it. Winner retains identical FileLock/channel from destructive admission through ready. Kill winner, await its actual exit, prove a fresh process acquires the same retained lock file. Checking `.isValid` alone is insufficient. |
+
+**Superseded 2026-09-23 (owner, README §7 "Schema change and reset"; landed `76b42f90f`, `9744c970d`, `ddd9f8edf`):** the one-JVM destroy described in the `reset --force` row, §2c and drills 5–8 is now `nuke --force` (deletes the store and every derived cache, rebuilds from committed files, falls back to the newest booting commit, never refuses); `reset --force` unlinks the cluster branch and forks a fresh one keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store. The drills apply to `nuke` unchanged.
 
 Only cold-from-zero boot belongs to the platform tier; process/concurrency drills
 remain named destructive tests, with extra processes strictly as their subjects.

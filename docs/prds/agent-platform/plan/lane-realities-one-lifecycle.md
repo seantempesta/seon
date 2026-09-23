@@ -1,6 +1,6 @@
 ---
 type: plan
-status: design 2026-09-22 (orchestrator, from the owner's rulings and the four data packs); astra review requested before commit 2
+status: design 2026-09-22 (orchestrator, from the owner's rulings and the four data packs); Astra-reviewed 2026-09-22; commits 1, 2, 4 landed; README 1.3d's (5) machinery deletion running as realities-commit-5
 owner: track 1.3d (README §4), composing A2, B1, B2, B4, D1 seams
 ---
 
@@ -66,12 +66,12 @@ compile time separately).
 
 ## 3. Commits, mapped to the waves in README §4
 
-1. acquisition correctness (rows 5, 6, 7) — **running**
-2. **acquisition only** (review option 1, taken 2026-09-22): live/isolated handle acquisition through the refactored `acquire-context!` (row 3), branch custody (row 2), `:seon.agent/branch`, a branch member on the MCP eval tool; working branches available; NO merge-facing `my.*` request yet — its proof is isolation and visibility, not merge
-3. publish to a held candidate, reload as its own request (1.2b, **running**); the hook as one prepl request returning the terminal result (1.5, row 13)
-4. `seon.test/run` on the handle (rows 8, 9); B4 machinery deleted only where platform hosting and actual-exit have replacements
-5. the two facts in the indexer (row 1)
-6. three-way comparison (row 11), accept over the prepared writer (row 12), `my.*` merge request, release (row 14); write-back as a separate spec
+1. acquisition correctness (rows 5, 6, 7) — LANDED `39a337013`
+2. LANDED `1ada78050` — **acquisition only** (review option 1, taken 2026-09-22): live/isolated handle acquisition through the refactored `acquire-context!` (row 3), branch custody (row 2), `:seon.agent/branch`, a branch member on the MCP eval tool; working branches available; NO merge-facing `my.*` request yet — its proof is isolation and visibility, not merge
+3. publish to a held candidate, reload as its own request (1.2b; reload per declaration B/C/D landed `2bd568c08`, `da703089b`, `af5eea72f`); the hook as one prepl request returning the terminal result (1.5, row 13; landed `324d41507`)
+4. `seon.test/run` on the handle (rows 8, 9) — LANDED `678009fcd`; B4 machinery deletion is README 1.3d's (5), running as realities-commit-5
+5. the two facts in the indexer (row 1) — host binding LANDED `25f315779`
+6. three-way comparison (row 11) LANDED `b51a24055`, `e4cd4ee97`, `d8734f1e7`; accept over the prepared writer (row 12), `my.*` merge request, release (row 14) open; write-back as a separate spec
 
 ## 4. Proofs that decide it
 

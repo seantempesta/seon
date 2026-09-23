@@ -1,6 +1,6 @@
 ---
 type: plan
-status: five-commit sweep specified; writer prerequisite RULED 2026-09-23 (owner): the projection is a memoized function of the database value (core.cache, keyed by `:cache-context`) — no writer stamp, no fork change, no single-flight; commit 1 is that memo
+status: five-commit sweep specified; writer prerequisite RULED 2026-09-23 (owner): the projection is a memoized function of the database value (core.cache, keyed by `:cache-context`) — no writer stamp, no fork change, no single-flight; commit 1 is that memo — LANDED `55ddec16c` (keyed by what it reads: revisions, commit, value, declaration content; after the `9b8c5b405` regression); the sweep (commits 2–5) runs AFTER cut 3's first namespace agents (owner 2026-09-23, README §7 "Priority to namespace agents")
 ---
 Verified: 72 transport calls/24 src files; 25+ rows inspected; 13 corrections below; test census is now 511 text matches/86 files, not 509.
 Decision 1: cluster executor → `(:io (root-executors))`; callers carry their connection/context.
@@ -97,7 +97,7 @@ batching and late commits become irrelevant. The ordered-declaration case derive
 transaction's intermediate `with` value (unmemoized when it carries no context). Commit 1
 below is rewritten accordingly; the proof keeps A-then-B, abort, plus hit/miss counts.
 
-### Writer prerequisite: the table cannot authorize a blind replacement
+### Writer prerequisite: the table cannot authorize a blind replacement (superseded by the ruling above; kept as the three rejected scopes)
 
 The five O decisions are settled. This additional omission is a cross-owner design boundary under AGENTS “One mechanism”: the current code proves that stamping the entering P is insufficient for sequential declarations or db-after. Before giving commit 1 to Sol, the orchestrator must select one of these **three concrete scopes**; no further discovery is assigned to Sol:
 
@@ -106,6 +106,8 @@ The five O decisions are settled. This additional omission is a cross-owner desi
 3. **Retain the accessor until a later cut.** Land only independent wrapper/argument/test conversions, leaving the old construction accessor and writer sites intact. Guarantee: HEAD keeps the current writer semantics. Cost: two phases and delayed deletion; gives up this step's completion and acquisition-speed claim.
 
 Producer proof is concrete: one transaction declares schema A then schema B referring to A; both are usable in returned db-after, entering db-before lacks both, retained earlier database identity is unchanged; a later invalid declaration aborts the whole transaction and does not advance connection P. This is required before `projection-from-database` becomes a read. No speed measurement or grep may waive it. The input's requested five-commit **complete** mechanical sweep is therefore conditional on option 2; it would be dishonest to label the current tree ready for that launch.
+
+Under the ruling above and AGENTS.md "No stamps", a cold owner below reads the projection through the memo (`carried-projection` = look up or derive); "stamp" in this table names the owner that acquires, never a `vary-meta` to add.
 
 | Cold owner | Construction and stamp |
 |---|---|
@@ -205,8 +207,8 @@ Preserve regressions for evaluated schema expressions, invalid candidates leavin
 
 ## 8. Completion proof, measurements and ownership handoff
 
-Every commit leaves its source loadable and the named scratch probe answering; record exact form/result, loaded revision, arming evidence and line delta in the executing lane's landing note. Estimates are net lines, not promises. This spec-writing assignment runs **no tests**. During execution use installed focused requests; if necessary `bin/test-fast --paths <owned paths> -- <focused namespaces>`, HEAD plus owned paths only. Lanes never run `bin/test` gates. If the shared tree cannot load, prove HEAD plus only the lane's diff from a `git archive` snapshot with the shared caches linked (no git worktree, owner 2026-09-23); name foreign boundary in landing evidence. Never edit/resume/message another lane's session. Default is never the scratch root.
-The orchestrator runs **`bin/test --platform` once at the step's end**, affected integration and a **from-zero scratch-root boot**, particularly after the request schema/registration changes. Confirm ready layers, source program identity, carried snapshot and a transaction-function decode, not just process exit. Reset reuses boot; no reset of default. Work exceeding ten seconds, including cold boot/index, needs the existing owner authorization explicitly recorded for that run.
+Every commit leaves its source loadable and the named scratch probe answering; record exact form/result, loaded revision, arming evidence and line delta in the executing lane's landing note. Estimates are net lines, not promises. This spec-writing assignment runs **no tests**. During execution use installed focused requests (`seon.test/run` / `bin/test-check`, 1.3d commit 4), HEAD plus owned paths only. Lanes never run `bin/test` gates. If the shared tree cannot load, prove HEAD plus only the lane's diff from a `git archive` snapshot with the shared caches linked (no git worktree, owner 2026-09-23); name foreign boundary in landing evidence. Never edit/resume/message another lane's session. Default is never the scratch root.
+The orchestrator runs **`bin/test --platform` once at the step's end**, affected integration and the incremental proof of any schema change (its declaration transaction on a branch of a live store; owner 2026-09-23: "a schema change should not require a from scratch boot. Period.", README 1.3e). Confirm ready layers, source program identity, carried snapshot and a transaction-function decode, not just process exit. Reset reuses boot; no reset of default. Work exceeding ten seconds, including cold boot/index, needs the existing owner authorization explicitly recorded for that run.
 Remeasure the original acquisition after final source adoption, using `test/seon/sci/branch_execution_test.clj:92` setup (two branches, changed `cut?`, same `a-ctx`): `(measured #(eval/acquire! {:seon.sci.eval/ctx a-ctx :seon.db/db (db/db a)}))`. Record **1,658.341 ms → measured new ms**, no invented target result; repeat unchanged acquisition separately. The baseline is [commit 1 landing](../landing/lane-realities-commit-1-2026-09-22.md:137). Record heap before/after and whether compilation/acquisition was cold. Publication slices also owe the clock row from `docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`; no suite substitutes for that measurement.
 Exit “every reconstruction fallback; the last dynamic-var authority” requires this search to print **nothing** (exit 1). Local variables named `current-projection` are legitimate, so match API calls/definitions, not all prose or local names:
 

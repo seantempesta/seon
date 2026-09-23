@@ -1,6 +1,6 @@
 ---
 type: plan
-status: implementation specification; proof gates explicit
+status: implementation specification; proof gates explicit. C1 MINIMAL LANDED `ed62a3e06` (owner 2026-09-23: "prioritize C1", "don't make it optional"): always-on nanoTime counters in the host and SCI wrappers, explanation lines for every operation over 1 s in MCP eval, status, hook publication and SCI evaluation output; the stored observations, settlement consumers and `my.program/profile` below remain; a sampling profiler (JFR on demand) is LATER
 created: 2026-09-21
 lane: C1
 depends-on: [A1, B1, B3, B4]
@@ -139,8 +139,8 @@ next owning completion. For open turns/background work, reuse the existing root
 schedule or completion event and report its configured bound; close-only gives
 no universal persistence bound. No timer thread or periodic proc is added.
 Crashes lose uncommitted observations and an unfinished call has no completed
-duration. Optional profiling failure cannot invalidate a turn, but must surface
-as unavailable evidence rather than a false zero.
+duration. Profiling is not optional (owner 2026-09-23); a profiling failure is an unhandled error under
+the AGENTS.md error policy — stored and delivered, never a false zero or a silent gap.
 
 ### Stored shape, reads and findings
 

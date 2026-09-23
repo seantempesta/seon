@@ -14,8 +14,8 @@ publication sections of `src/seon/cluster.clj` (`:999-1525`, `:1526-2279`),
 `bin/seon-hook`, `src/seon/id.clj`, `script/seon/dev/mcp.clj`, `bin/mcp-server`, the Seon registration in `.codex/config.toml`, and the input readers of
 `src/seon/test/cache.clj` (`input-paths :45`, `input-roots :154`,
 `gitlink-digests :190`, `toolchain-dependencies :217`). `bin/codex-agent` and
-the lane launcher are NOT in scope (orchestrator ruling: the plan is
-implemented by astra lanes). Source citations use the recorded `209a6652a` working-tree snapshot; dependency lines use clj-kondo `57252e07` and Datahike `006e634a`. `K/` means `reference-code/clj-kondo/src/clj_kondo/`; `D/` means `reference-code/datahike/src/datahike/`. Historical §1 reads are baseline evidence, not fresh runtime or implementation proof.
+the lane launcher are NOT in scope (owner 2026-09-23, README §4: Opus 5.5
+implements, Astra reviews and writes designs, no Fable). Source citations use the recorded `209a6652a` working-tree snapshot; dependency lines use clj-kondo `57252e07` and Datahike `006e634a`. `K/` means `reference-code/clj-kondo/src/clj_kondo/`; `D/` means `reference-code/datahike/src/datahike/`. Historical §1 reads are baseline evidence, not fresh runtime or implementation proof.
 
 Evidence: [B1 data pack](../research/data-pack-b1-publication-2026-09-21.md) and [durable rulings](../research/durable-goals-and-rulings-2026-09-21.md) supply the historical measurements and ruled publication sequence. The implementation contract is complete below.
 
@@ -356,7 +356,7 @@ fresh cluster seeds agent `root`; downed and deleted after). Bind any aliases an
 
 Each commit: HEAD loads (`clojure -M -e "(require …)"` for touched
 namespaces), `require :reload` of them on `default` succeeds, and the named
-probe answers. Recovery when it breaks anyway: `bin/seon reset --force`,
+probe answers. Recovery when it breaks anyway: `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store),
 which discards all database facts/history in that store and live private/result objects. Preserve required evidence before recovery; disposability permits loss, it does not imply that no durable data existed. A lane never resets `default`;
 RESET NEEDED items are batched by the orchestrator with hook publication
 paused. Every retirement converts ALL callers, schema consumers and tests in

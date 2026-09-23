@@ -159,7 +159,7 @@ read-only on `default`; they run on a fixture branch through the canonical fixtu
 | G | validator selection | fixture branch: a docstring edit through `seon.db/transact!` while counting `d/datoms :avet :seon.fn/calls` seeks and declarations selected (a fixture-bound counting var, not wall time) | whole-program Datalog + 3,337 form parses | 0 selected for a docstring edit; N callers × changed callees for an arity change |
 | H | liveness after each commit | `mcp__seon__runtime_status`; `bin/seon status` | — | alive; plus the probe named per commit in §5 |
 
-Recovery when a commit breaks `default` anyway: `bin/seon reset --force`.
+Recovery when a commit breaks `default` anyway: `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store).
 What it loses: every stored turn, evaluation, error, task and history fact on
 that store and every in-memory private object and result — data the ruling
 calls disposable, not "nothing durable". A lane never resets `default`; it

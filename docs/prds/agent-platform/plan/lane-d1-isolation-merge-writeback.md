@@ -312,8 +312,8 @@ changed behavior and its adoption record; observe the candidate agent page.
 Before each commit, prove the touched require graph loads in the authorized
 implementation harness; then use the running host's reload/adoption owner and
 verify a debug read/ordinary turn. Graph topology changes use existing lifecycle
-completion. No lane stops/reforks/restarts `default`. Recovery reset is the
-orchestrator's `bin/seon reset --force`, after preserving needed evidence: it
+completion. No lane stops/resets/restarts `default`. Recovery reset is the
+orchestrator's `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store), after preserving needed evidence: it
 loses disposable database turns/results/tasks and private/result objects, rather
 than “nothing durable.” Reset recovery is not proof of intermediate loadability.
 

@@ -210,7 +210,7 @@ probe named per row. A public retirement and every caller's conversion,
 tests included, are ONE commit; until the owning files are free, the existing
 API stays and independent internal reductions land. Fork commits are pushed
 before the deletion they enable. Recovery when a commit breaks `default`
-anyway: `bin/seon reset --force`, performed only by the orchestrator. Reset discards the store’s recorded agents, turns, evaluations, tasks and history, plus in-memory private objects and results; disposability authorizes that loss. Preserve evidence before recovery.
+anyway: `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store), performed only by the orchestrator. Reset discards the store’s recorded agents, turns, evaluations, tasks and history, plus in-memory private objects and results; disposability authorizes that loss. Preserve evidence before recovery.
 
 | # | Commit | Delete | Build / convert | Probe on `default` |
 |---|---|---|---|---|
@@ -249,7 +249,7 @@ evidence and the rejected candidates.
 
 ## 7. Tests
 
-The lane runs only the tests reaching its change through B4’s final `seon.test/run` request on the exact supplied program. Before that API lands, use the currently admitted in-process entry point or `bin/test-fast --paths <owned> -- <ns>`; retire it only with all callers. Never a suite or a lane cold gate. B4’s platform owner supplies cold-load proof separately.
+The lane runs only the tests reaching its change through B4’s final `seon.test/run` request on the exact supplied program. Before that API lands, use the installed in-process request (`seon.test/run` / `bin/test-check`, 1.3d commit 4 `678009fcd`); `bin/test-fast` leaves with 1.3d commit 5. Never a suite or a lane cold gate. B4’s platform owner supplies cold-load proof separately.
 
 Owned test files (18, **7,011** lines by `wc -l` at HEAD): `schema_test`
 1,590; `instrument_test` 1,478; `call_preparation_test` 826;

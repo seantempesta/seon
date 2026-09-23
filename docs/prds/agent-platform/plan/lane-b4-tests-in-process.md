@@ -1,6 +1,6 @@
 ---
 type: plan
-status: implementation specification; proof gates stated below
+status: implementation specification; proof gates stated below. SUPERSEDED IN PART by README §4 1.3d (tests run as agents run, ruled 2026-09-22): the independent capture/acquire/context/thread lifecycle and worker ownership below are deleted from the plan; commit 4 landed `678009fcd` (one `seon.test/run` on the acquisition entrance), commit 5 (machinery deletion) is running; 1.3d commit 6 rewrites this spec to the installed seams. Selection, per-member evidence, fixture semantics, recorder and actual-exit stand
 created: 2026-09-21
 owner: lane B4 — `src/seon/test.clj`, `src/seon/test/*` except `arm.clj` and `accretion.clj`, `test/seon/test_support.clj`, `bin/test*`, `resources/seon/schemas/seon.test*.edn`
 tags: [agent-platform, lane-b4, seon.test, seon.test.runner, fixtures, bin/test]

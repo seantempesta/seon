@@ -186,7 +186,7 @@ after the require graph is read — B3 edits nothing in `db.clj`.
 the fault committer (B1's `cluster.clj`) and `db.clj:3228` (A2); B3 changes
 nothing there. `:seon.config.error/escalate-to`, `/recurrence-limit`, `steward`
 (`error.clj:1526`), `message-tx` (`:1553`) and the `recipients` block
-(`:1663-1669`) are deleted: recurrence opens a task, never a message.
+(`:1663-1669`) are deleted: recurrence opens a task, never a message. **Ruled since (owner 2026-09-23, AGENTS.md error policy; [final design](../../../research/agent-platform/error-route-final-design-2026-09-23.md)):** every unhandled error takes the one route `seon.fault/fault!` — stored with `:seon.error/chain` at the owning boundary (never through the counted-dropping fault channel), deduplicated by the D13 signature with count/last-at, and delivered by waking the responsible agent (root by default, else the namespace's owning agent) through the ordinary wake route; `:panic` throws to the caller and stops the failing graph, `:record` keeps running; a database that cannot store the error panics in both modes. It lands as the M4 slot with the flow must-now items (README §4 row 1.6), so the committer is no longer "unchanged".
 
 ### 2b. One task family
 
@@ -349,7 +349,7 @@ exercised a hot-reloaded Var or in-place adoption.
 Each commit loads HEAD (`clojure -M -e "(require …)"` over the namespaces it
 TOUCHES, named per row) and hot-reloads on `default`. A held file defers the
 commit that needs it; the completion criterion never shrinks to "unheld files".
-Only the orchestrator may recover a broken `default` with `bin/seon reset --force` —
+Only the orchestrator may recover a broken `default` with `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store) —
 loses recorded turns, results, tasks and in-memory objects; reseeds root.
 
 | # | Commit | Requirers proven to load | Net | RESET |
