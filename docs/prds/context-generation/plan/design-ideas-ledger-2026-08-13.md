@@ -1095,6 +1095,17 @@ Before trusting selective execution, prove actual leaf/shared dependency paths a
 unchanged-request reuse, separating calls from diagnostic symbols and unresolved
 dispatch. Missing evidence must never count as an unaffected test.
 
+### 2026-09-21 — preparation serves the refactor's agent capabilities
+
+Owner: “no point in making everything work before we break it with the refactor.
+prioritize abilty for agents to test correctly, experiment with the repl and
+database , and other core platform”. Preparation gates are correct test execution
+and reuse, usable JVM/SCI evaluation, real database reads/writes, and core runtime
+access. Unrelated legacy failures remain visible and belong to their owning
+refactor cut; making the entire old gate green is not a prerequisite. Do not
+weaken a core correctness check or claim a passing baseline from unrelated green
+tests. This narrows the earlier blanket platform-stability preparation scope.
+
 ## Parked explicitly (owner said not yet / needs design first)
 
 ### 2026-09-19 owner clarification — plural responsibility and reusable context

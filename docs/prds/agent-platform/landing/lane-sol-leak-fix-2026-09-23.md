@@ -1,11 +1,20 @@
 ---
 type: landing
-status: implementation landed; adoption proof incomplete
+status: redo in progress
 created: 2026-09-23
 ---
 # Default heap retention: schema registries and callable wrappers
 
 ## Design and cost before code
+
+The first code commit `5ddeac5fb` was reverted by `118b6907e` after its
+adoption refused. The refusal was caused by this lane's resolver: it omitted
+`:seon.db/component-schema` property edges. The owned-storage check at
+`src/seon/schema/internal.cljc:254-271` resolves that property's target
+through the compiled schema's registry. The redo includes that declared
+property edge in the canonical reference graph and therefore in incremental
+reverse dependencies. Scanning one changed definition costs its form size;
+retained memory remains O(live schemas + direct reference and property edges).
 
 Malli fork `8725a8cbd9d595f4a970ce53a2eefdbe7211b96d`:
 `reference-code/malli/src/malli/registry.cljc:81-95` lets a lazy provider

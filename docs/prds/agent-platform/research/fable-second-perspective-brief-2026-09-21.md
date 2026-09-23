@@ -49,7 +49,10 @@ errors. Triage identifies 17 stale symbol assertions and 18 duration overruns,
 plus fixture/query-seam problems and unresolved cases. A repeated-selection
 failure was traced to a fixture opening a second admission instead of completing
 the first owner's members; that finding does not replace its corrected proof.
-Platform acceptance and final live recovery remain outstanding. Read
+Core-platform acceptance and final live recovery remain outstanding. The owner
+has narrowed preparation explicitly: prioritize agents' ability to test correctly,
+experiment through the REPL and database, and use core platform services. Do not
+require every old test or feature to work before the refactor replaces it. Read
 `docs/prds/agent-platform/landing/fresh-start-2026-09-21.md` and its logs for the
 current evidence, and verify Git status. At this brief's creation the branch is
 still `steward-platform`; the intended fresh branch is `refactor/agent-platform`.

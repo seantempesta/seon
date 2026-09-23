@@ -1,0 +1,872 @@
+{
+  "threadDump": {
+    "processId": "20610",
+    "time": "2026-09-21T20:21:16.141841Z",
+    "runtimeVersion": "26.0.1",
+    "threadContainers": [
+      {
+        "container": "<root>",
+        "parent": null,
+        "owner": null,
+        "threads": [
+          {
+            "tid": "3",
+            "time": "2026-09-21T20:21:16.147932Z",
+            "name": "main",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.FutureTask@179cc20"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)",
+              "java.base\/java.util.concurrent.FutureTask.awaitDone(FutureTask.java:510)",
+              "java.base\/java.util.concurrent.FutureTask.get(FutureTask.java:205)",
+              "seon.test.runner$bounded_worker_task_BANG_.invokeStatic(runner.clj:1953)",
+              "seon.test.runner$bounded_worker_task_BANG_.invoke(runner.clj:1927)",
+              "seon.test.runner$serve_worker_commands_BANG_.invokeStatic(runner.clj:2026)",
+              "seon.test.runner$serve_worker_commands_BANG_.invoke(runner.clj:1986)",
+              "seon.test.runner$serve_worker_commands_BANG_$fn__12159.invoke(runner.clj:2005)",
+              "seon.schema$call_with_projection.invokeStatic(schema.clj:1139)",
+              "seon.schema$call_with_projection.invoke(schema.clj:1133)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:156)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:424)",
+              "seon.test.runner$serve_worker_commands_BANG_.invokeStatic(runner.clj:2003)",
+              "seon.test.runner$serve_worker_commands_BANG_.invoke(runner.clj:1986)",
+              "seon.test.runner$worker_command_loop_BANG_.invokeStatic(runner.clj:2103)",
+              "seon.test.runner$worker_command_loop_BANG_.invoke(runner.clj:2071)",
+              "seon.test.runner$worker_main_BANG_.invokeStatic(runner.clj:2123)",
+              "seon.test.runner$worker_main_BANG_.invoke(runner.clj:2115)",
+              "seon.test.runner$_main.invokeStatic(runner.clj:4959)",
+              "seon.test.runner$_main.doInvoke(runner.clj:4953)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.Var.applyTo(Var.java:707)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.main$main_opt.invokeStatic(main.clj:515)",
+              "clojure.main$main_opt.invoke(main.clj:511)",
+              "clojure.main$main.invokeStatic(main.clj:665)",
+              "clojure.main$main.doInvoke(main.clj:617)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.Var.applyTo(Var.java:707)",
+              "clojure.main.main(main.java:40)"
+            ]
+          },
+          {
+            "tid": "16",
+            "time": "2026-09-21T20:21:16.150411Z",
+            "name": "Reference Handler",
+            "state": "RUNNABLE",
+            "stack": [
+              "java.base\/java.lang.ref.Reference.waitForReferencePendingList(Native Method)",
+              "java.base\/java.lang.ref.Reference.processPendingReferences(Reference.java:240)",
+              "java.base\/java.lang.ref.Reference$ReferenceHandler.run(Reference.java:202)"
+            ]
+          },
+          {
+            "tid": "17",
+            "time": "2026-09-21T20:21:16.150549Z",
+            "name": "Finalizer",
+            "state": "WAITING",
+            "waitingOn": "java.lang.ref.ReferenceQueue$Lock@1c59f49f",
+            "stack": [
+              "java.base\/java.lang.Object.wait0(Native Method)",
+              "java.base\/java.lang.Object.wait(Object.java:391)",
+              "java.base\/java.lang.Object.wait(Object.java:353)",
+              "java.base\/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:137)",
+              "java.base\/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:215)",
+              "java.base\/java.lang.ref.Finalizer$FinalizerThread.run(Finalizer.java:165)"
+            ],
+            "monitorsOwned": [
+              {
+                "depth": 4,
+                "locks": [
+                  "java.lang.ref.ReferenceQueue$Lock@1c59f49f"
+                ]
+              }
+            ]
+          },
+          {
+            "tid": "18",
+            "time": "2026-09-21T20:21:16.155147Z",
+            "name": "Signal Dispatcher",
+            "state": "RUNNABLE",
+            "stack": [
+            ]
+          },
+          {
+            "tid": "33",
+            "time": "2026-09-21T20:21:16.155208Z",
+            "name": "Notification Thread",
+            "state": "RUNNABLE",
+            "stack": [
+            ]
+          },
+          {
+            "tid": "34",
+            "time": "2026-09-21T20:21:16.155237Z",
+            "name": "Common-Cleaner",
+            "state": "TIMED_WAITING",
+            "waitingOn": "java.lang.ref.ReferenceQueue$Lock@5cb8543f",
+            "stack": [
+              "java.base\/java.lang.Object.wait0(Native Method)",
+              "java.base\/java.lang.Object.wait(Object.java:391)",
+              "java.base\/java.lang.ref.ReferenceQueue.remove0(ReferenceQueue.java:123)",
+              "java.base\/java.lang.ref.ReferenceQueue.remove(ReferenceQueue.java:201)",
+              "java.base\/jdk.internal.ref.CleanerImpl.run(CleanerImpl.java:146)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)",
+              "java.base\/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)"
+            ],
+            "monitorsOwned": [
+              {
+                "depth": 3,
+                "locks": [
+                  "java.lang.ref.ReferenceQueue$Lock@5cb8543f"
+                ]
+              }
+            ]
+          },
+          {
+            "tid": "50",
+            "time": "2026-09-21T20:21:16.155486Z",
+            "name": "clojure.core.async.timers\/timeout-daemon",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@4d5df293"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:271)",
+              "java.base\/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.awaitNanos(AbstractQueuedSynchronizer.java:1803)",
+              "java.base\/java.util.concurrent.DelayQueue.take(DelayQueue.java:255)",
+              "clojure.core.async.impl.timers$timeout_worker.invokeStatic(timers.clj:47)",
+              "clojure.core.async.impl.timers$timeout_worker.invoke(timers.clj:43)",
+              "clojure.lang.AFn.run(AFn.java:22)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)"
+            ]
+          },
+          {
+            "tid": "52",
+            "time": "2026-09-21T20:21:16.155792Z",
+            "name": "VirtualThread-unblocker",
+            "state": "RUNNABLE",
+            "stack": [
+              "java.base\/java.lang.VirtualThread.takeVirtualThreadListToUnblock(Native Method)",
+              "java.base\/java.lang.VirtualThread.unblockVirtualThreads(VirtualThread.java:1545)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)",
+              "java.base\/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)"
+            ]
+          },
+          {
+            "tid": "55",
+            "time": "2026-09-21T20:21:16.155974Z",
+            "name": "Read-Poller",
+            "state": "RUNNABLE",
+            "stack": [
+              "java.base\/sun.nio.ch.KQueue.poll(Native Method)",
+              "java.base\/sun.nio.ch.KQueuePoller.poll(KQueuePoller.java:68)",
+              "java.base\/sun.nio.ch.Poller.pollerLoop(Poller.java:248)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)",
+              "java.base\/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)"
+            ]
+          },
+          {
+            "tid": "56",
+            "time": "2026-09-21T20:21:16.156173Z",
+            "name": "Write-Poller",
+            "state": "RUNNABLE",
+            "stack": [
+              "java.base\/sun.nio.ch.KQueue.poll(Native Method)",
+              "java.base\/sun.nio.ch.KQueuePoller.poll(KQueuePoller.java:68)",
+              "java.base\/sun.nio.ch.Poller.pollerLoop(Poller.java:248)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)",
+              "java.base\/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)"
+            ]
+          },
+          {
+            "tid": "99",
+            "time": "2026-09-21T20:21:16.156268Z",
+            "name": "Attach Listener",
+            "state": "RUNNABLE",
+            "stack": [
+              "java.base\/jdk.internal.vm.ThreadSnapshot.create(Native Method)",
+              "java.base\/jdk.internal.vm.ThreadSnapshot.of(ThreadSnapshot.java:62)",
+              "java.base\/jdk.internal.vm.ThreadDumper.dumpThread(ThreadDumper.java:319)",
+              "java.base\/jdk.internal.vm.ThreadDumper.dumpThreads(ThreadDumper.java:294)",
+              "java.base\/jdk.internal.vm.ThreadDumper.dumpThreadsToJson(ThreadDumper.java:269)",
+              "java.base\/jdk.internal.vm.ThreadDumper.dumpThreadsToFile(ThreadDumper.java:131)",
+              "java.base\/jdk.internal.vm.ThreadDumper.dumpThreadsToJson(ThreadDumper.java:89)"
+            ]
+          },
+          {
+            "tid": "53",
+            "time": "2026-09-21T20:21:16.156500Z",
+            "virtual": true,
+            "name": "HttpClient-1-SelectorManager",
+            "state": "TIMED_WAITING",
+            "stack": [
+              "java.base\/java.lang.VirtualThread.parkNanos(VirtualThread.java:802)",
+              "java.base\/java.lang.System$1.parkVirtualThread(System.java:2305)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:406)",
+              "java.base\/sun.nio.ch.Poller.poll(Poller.java:195)",
+              "java.base\/sun.nio.ch.Poller.pollSelector(Poller.java:161)",
+              "java.base\/sun.nio.ch.KQueueSelectorImpl.timedPoll(KQueueSelectorImpl.java:170)",
+              "java.base\/sun.nio.ch.KQueueSelectorImpl.doSelect(KQueueSelectorImpl.java:114)",
+              "java.base\/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)",
+              "java.base\/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)",
+              "java.net.http\/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1509)",
+              "java.base\/java.lang.VirtualThread.run(VirtualThread.java:475)"
+            ],
+            "monitorsOwned": [
+              {
+                "depth": 7,
+                "locks": [
+                  "sun.nio.ch.Util$2@3c9c1d2f",
+                  "sun.nio.ch.KQueueSelectorImpl@6988f757"
+                ]
+              }
+            ]
+          },
+          {
+            "tid": "59",
+            "time": "2026-09-21T20:21:16.156817Z",
+            "virtual": true,
+            "name": "HttpClient-2-SelectorManager",
+            "state": "TIMED_WAITING",
+            "stack": [
+              "java.base\/java.lang.VirtualThread.parkNanos(VirtualThread.java:802)",
+              "java.base\/java.lang.System$1.parkVirtualThread(System.java:2305)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:406)",
+              "java.base\/sun.nio.ch.Poller.poll(Poller.java:195)",
+              "java.base\/sun.nio.ch.Poller.pollSelector(Poller.java:161)",
+              "java.base\/sun.nio.ch.KQueueSelectorImpl.timedPoll(KQueueSelectorImpl.java:170)",
+              "java.base\/sun.nio.ch.KQueueSelectorImpl.doSelect(KQueueSelectorImpl.java:114)",
+              "java.base\/sun.nio.ch.SelectorImpl.lockAndDoSelect(SelectorImpl.java:130)",
+              "java.base\/sun.nio.ch.SelectorImpl.select(SelectorImpl.java:142)",
+              "java.net.http\/jdk.internal.net.http.HttpClientImpl$SelectorManager.run(HttpClientImpl.java:1509)",
+              "java.base\/java.lang.VirtualThread.run(VirtualThread.java:475)"
+            ],
+            "monitorsOwned": [
+              {
+                "depth": 7,
+                "locks": [
+                  "sun.nio.ch.Util$2@778f4ff5",
+                  "sun.nio.ch.KQueueSelectorImpl@5564e2fd"
+                ]
+              }
+            ]
+          }
+        ],
+        "threadCount": "13"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@f0437be",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@61c2fa2",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@1dfd39fe",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "ForkJoinPool-2\/jdk.internal.vm.SharedThreadContainer@6020e30e",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "ForkJoinPool.commonPool\/jdk.internal.vm.SharedThreadContainer@1ab4bfcc",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "java.util.concurrent.ScheduledThreadPoolExecutor@75dc1d5a",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+          {
+            "tid": "90",
+            "time": "2026-09-21T20:21:16.163157Z",
+            "name": "seon-sci-time-limit",
+            "state": "WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject@4ee9bc0d"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.park(LockSupport.java:369)",
+              "java.base\/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionNode.block(AbstractQueuedSynchronizer.java:520)",
+              "java.base\/java.util.concurrent.ForkJoinPool.unmanagedBlock(ForkJoinPool.java:4367)",
+              "java.base\/java.util.concurrent.ForkJoinPool.managedBlock(ForkJoinPool.java:4313)",
+              "java.base\/java.util.concurrent.locks.AbstractQueuedSynchronizer$ConditionObject.await(AbstractQueuedSynchronizer.java:1752)",
+              "java.base\/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:1154)",
+              "java.base\/java.util.concurrent.ScheduledThreadPoolExecutor$DelayedWorkQueue.take(ScheduledThreadPoolExecutor.java:883)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1016)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)"
+            ]
+          }
+        ],
+        "threadCount": "1"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@3f7ca653",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@247c85e8",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+          {
+            "tid": "97",
+            "time": "2026-09-21T20:21:16.163654Z",
+            "name": "InnocuousThread-2",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.SynchronousQueue$Transferer@217dc9ba"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:408)",
+              "java.base\/java.util.concurrent.LinkedTransferQueue$DualNode.await(LinkedTransferQueue.java:452)",
+              "java.base\/java.util.concurrent.SynchronousQueue$Transferer.xferLifo(SynchronousQueue.java:194)",
+              "java.base\/java.util.concurrent.SynchronousQueue.xfer(SynchronousQueue.java:235)",
+              "java.base\/java.util.concurrent.SynchronousQueue.poll(SynchronousQueue.java:338)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1015)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)",
+              "java.base\/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)"
+            ]
+          },
+          {
+            "tid": "98",
+            "time": "2026-09-21T20:21:16.163809Z",
+            "name": "InnocuousThread-3",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.SynchronousQueue$Transferer@217dc9ba"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:408)",
+              "java.base\/java.util.concurrent.LinkedTransferQueue$DualNode.await(LinkedTransferQueue.java:452)",
+              "java.base\/java.util.concurrent.SynchronousQueue$Transferer.xferLifo(SynchronousQueue.java:194)",
+              "java.base\/java.util.concurrent.SynchronousQueue.xfer(SynchronousQueue.java:235)",
+              "java.base\/java.util.concurrent.SynchronousQueue.poll(SynchronousQueue.java:338)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1015)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)",
+              "java.base\/jdk.internal.misc.InnocuousThread.run(InnocuousThread.java:148)"
+            ]
+          }
+        ],
+        "threadCount": "2"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@5149d43e",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+          {
+            "tid": "85",
+            "time": "2026-09-21T20:21:16.164327Z",
+            "name": "seon-test-worker-pool-1",
+            "state": "RUNNABLE",
+            "stack": [
+              "clojure.lang.PersistentHashMap$ArrayNode$Seq.next(PersistentHashMap.java:626)",
+              "clojure.lang.PersistentHashMap$ArrayNode$Seq.next(PersistentHashMap.java:626)",
+              "clojure.lang.APersistentMap$KeySeq.next(APersistentMap.java:175)",
+              "clojure.lang.RT.next(RT.java:733)",
+              "clojure.core$next__5472.invokeStatic(core.clj:64)",
+              "clojure.core$next__5472.invoke(core.clj:64)",
+              "datahike.resource$pop_pending.invokeStatic(resource.cljc:115)",
+              "datahike.resource$pop_pending.invoke(resource.cljc:111)",
+              "datahike.resource$shallow_weight_within.invokeStatic(resource.cljc:135)",
+              "datahike.resource$shallow_weight_within.invoke(resource.cljc:120)",
+              "datahike.query$result_weight.invokeStatic(query.cljc:2471)",
+              "datahike.query$result_weight.invoke(query.cljc:2466)",
+              "datahike.query$result_cache_put_BANG_.invokeStatic(query.cljc:3031)",
+              "datahike.query$result_cache_put_BANG_.invoke(query.cljc:3027)",
+              "datahike.query$raw_q_mode$fn__55979.invoke(query.cljc:4685)",
+              "datahike.query.single_flight$acquire_execution_BANG_$run__48366.invoke(single_flight.cljc:367)",
+              "datahike.query.single_flight$run_call_BANG_.invokeStatic(single_flight.cljc:221)",
+              "datahike.query.single_flight$run_call_BANG_.invoke(single_flight.cljc:216)",
+              "datahike.query$run_q_BANG_.invokeStatic(query.cljc:4806)",
+              "datahike.query$run_q_BANG_.invoke(query.cljc:4802)",
+              "datahike.query$q_with_evidence.invokeStatic(query.cljc:135)",
+              "datahike.query$q_with_evidence.doInvoke(query.cljc:129)",
+              "clojure.lang.RestFn.invoke(RestFn.java:413)",
+              "seon.db$q$fn__3500.invoke(db.clj:2042)",
+              "seon.db$with_declarations.invokeStatic(db.clj:1293)",
+              "seon.db$with_declarations.invoke(db.clj:1266)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:165)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$_function_schema$reify$reify__42511$fn__42525.doInvoke(core.cljc:2292)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:460)",
+              "seon.db$q.invokeStatic(db.clj:2033)",
+              "seon.db$q.doInvoke(db.clj:1994)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:142)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:460)",
+              "seon.test$selection_facts.invokeStatic(test.clj:640)",
+              "seon.test$selection_facts.invoke(test.clj:632)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:160)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:439)",
+              "seon.test$select.invokeStatic(test.clj:899)",
+              "seon.test$select.invoke(test.clj:840)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:154)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:411)",
+              "seon.test$selection_admission.invokeStatic(test.clj:1186)",
+              "seon.test$selection_admission.invoke(test.clj:1180)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:154)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:411)",
+              "seon.test.selection_test$complete_selection_BANG_.invokeStatic(selection_test.clj:71)",
+              "seon.test.selection_test$complete_selection_BANG_.invoke(selection_test.clj:67)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:156)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:424)",
+              "seon.test.selection_test$exercise_selection_BANG_$fn__32897$fn__33027.invoke(selection_test.clj:241)",
+              "seon.test.selection_test$exercise_selection_BANG_$fn__32897.invoke(selection_test.clj:236)",
+              "seon.test_support$run_database_body$fn__27897.invoke(test_support.clj:919)",
+              "seon.schema$call_with_projection_state.invokeStatic(schema.clj:1148)",
+              "seon.schema$call_with_projection_state.invoke(schema.clj:1141)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:156)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:424)",
+              "seon.test_support$run_database_body.invokeStatic(test_support.clj:914)",
+              "seon.test_support$run_database_body.invoke(test_support.clj:911)",
+              "seon.test_support$with_branched_database.invokeStatic(test_support.clj:971)",
+              "seon.test_support$with_branched_database.invoke(test_support.clj:946)",
+              "seon.test_support$with_database.invokeStatic(test_support.clj:996)",
+              "seon.test_support$with_database.invoke(test_support.clj:982)",
+              "seon.test_support$with_database.invokeStatic(test_support.clj:992)",
+              "seon.test_support$with_database.invoke(test_support.clj:982)",
+              "seon.test.selection_test$exercise_selection_BANG_.invokeStatic(selection_test.clj:133)",
+              "seon.test.selection_test$exercise_selection_BANG_.invoke(selection_test.clj:126)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:154)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:411)",
+              "seon.test.selection_test$fn__33100.invokeStatic(selection_test.clj:299)",
+              "seon.test.selection_test$fn__33100.invoke(selection_test.clj:296)",
+              "clojure.test$test_var$fn__9898.invoke(test.clj:717)",
+              "clojure.test$test_var.invokeStatic(test.clj:717)",
+              "clojure.test$test_var.invoke(test.clj:708)",
+              "clojure.test$test_vars$fn__9924$fn__9929.invoke(test.clj:735)",
+              "clojure.test$default_fixture.invokeStatic(test.clj:687)",
+              "clojure.test$default_fixture.invoke(test.clj:683)",
+              "clojure.test$test_vars$fn__9924.invoke(test.clj:735)",
+              "clojure.test$default_fixture.invokeStatic(test.clj:687)",
+              "clojure.test$default_fixture.invoke(test.clj:683)",
+              "clojure.test$test_vars.invokeStatic(test.clj:731)",
+              "clojure.test$test_vars.invoke(test.clj:723)",
+              "seon.test.runner$run_selected_tests.invokeStatic(runner.clj:1279)",
+              "seon.test.runner$run_selected_tests.invoke(runner.clj:1244)",
+              "seon.test.runner$run_vars_BANG_$fn__11760$fn__11761.invoke(runner.clj:691)",
+              "seon.db$call_with_custody.invokeStatic(db.clj:387)",
+              "seon.db$call_with_custody.invoke(db.clj:365)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:156)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:424)",
+              "seon.test.runner$run_vars_BANG_$fn__11760.invoke(runner.clj:690)",
+              "seon.test.runner$run_vars_BANG_.invokeStatic(runner.clj:682)",
+              "seon.test.runner$run_vars_BANG_.invoke(runner.clj:655)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:156)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10682.doInvoke(instrument.clj:776)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "malli.core$__EQ__GT$reify$reify__42455$fn__42487.doInvoke(core.cljc:2215)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$compiled_wrapper$fn__10671$fn__10694.doInvoke(instrument.clj:811)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$apply.invoke(core.clj:662)",
+              "seon.instrument$arm_var_BANG_$fn__10716$fn__10719.doInvoke(instrument.clj:889)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:140)",
+              "clojure.lang.AFunction$1.doInvoke(AFunction.java:33)",
+              "clojure.lang.RestFn.invoke(RestFn.java:424)",
+              "seon.test.runner$run_resolved_tests_BANG_.invokeStatic(runner.clj:1383)",
+              "seon.test.runner$run_resolved_tests_BANG_.invoke(runner.clj:1360)",
+              "seon.test.runner$run_task_BANG_$fn__12103.invoke(runner.clj:1684)",
+              "seon.test.runner$run_task_BANG_.invokeStatic(runner.clj:1681)",
+              "seon.test.runner$run_task_BANG_.invoke(runner.clj:1657)",
+              "seon.test.runner$bounded_worker_task_BANG_$fn__12150.invoke(runner.clj:1950)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:152)",
+              "clojure.lang.AFn.applyTo(AFn.java:144)",
+              "clojure.core$apply.invokeStatic(core.clj:667)",
+              "clojure.core$with_bindings_STAR_.invokeStatic(core.clj:1994)",
+              "clojure.core$with_bindings_STAR_.doInvoke(core.clj:1994)",
+              "clojure.lang.RestFn.invoke(RestFn.java:428)",
+              "clojure.lang.AFn.applyToHelper(AFn.java:156)",
+              "clojure.lang.RestFn.applyTo(RestFn.java:135)",
+              "clojure.core$apply.invokeStatic(core.clj:671)",
+              "clojure.core$bound_fn_STAR_$fn__5839.doInvoke(core.clj:2024)",
+              "clojure.lang.RestFn.invoke(RestFn.java:400)",
+              "seon.test.runner$on_caller_loader$fn__11597.invoke(runner.clj:109)",
+              "clojure.lang.AFn.call(AFn.java:18)",
+              "java.base\/java.util.concurrent.FutureTask.run(FutureTask.java:330)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1090)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)"
+            ]
+          }
+        ],
+        "threadCount": "1"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@54afe8cf",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+          {
+            "tid": "94",
+            "time": "2026-09-21T20:21:16.166204Z",
+            "name": "async-mixed-7",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.SynchronousQueue$Transferer@46a27608"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:408)",
+              "java.base\/java.util.concurrent.LinkedTransferQueue$DualNode.await(LinkedTransferQueue.java:452)",
+              "java.base\/java.util.concurrent.SynchronousQueue$Transferer.xferLifo(SynchronousQueue.java:194)",
+              "java.base\/java.util.concurrent.SynchronousQueue.xfer(SynchronousQueue.java:235)",
+              "java.base\/java.util.concurrent.SynchronousQueue.poll(SynchronousQueue.java:338)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1015)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)"
+            ]
+          },
+          {
+            "tid": "95",
+            "time": "2026-09-21T20:21:16.166329Z",
+            "name": "async-mixed-8",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.SynchronousQueue$Transferer@46a27608"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:408)",
+              "java.base\/java.util.concurrent.LinkedTransferQueue$DualNode.await(LinkedTransferQueue.java:452)",
+              "java.base\/java.util.concurrent.SynchronousQueue$Transferer.xferLifo(SynchronousQueue.java:194)",
+              "java.base\/java.util.concurrent.SynchronousQueue.xfer(SynchronousQueue.java:235)",
+              "java.base\/java.util.concurrent.SynchronousQueue.poll(SynchronousQueue.java:338)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1015)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)"
+            ]
+          },
+          {
+            "tid": "96",
+            "time": "2026-09-21T20:21:16.166500Z",
+            "name": "async-mixed-9",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.SynchronousQueue$Transferer@46a27608"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.locks.LockSupport.parkNanos(LockSupport.java:408)",
+              "java.base\/java.util.concurrent.LinkedTransferQueue$DualNode.await(LinkedTransferQueue.java:452)",
+              "java.base\/java.util.concurrent.SynchronousQueue$Transferer.xferLifo(SynchronousQueue.java:194)",
+              "java.base\/java.util.concurrent.SynchronousQueue.xfer(SynchronousQueue.java:235)",
+              "java.base\/java.util.concurrent.SynchronousQueue.poll(SynchronousQueue.java:338)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.getTask(ThreadPoolExecutor.java:1015)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor.runWorker(ThreadPoolExecutor.java:1076)",
+              "java.base\/java.util.concurrent.ThreadPoolExecutor$Worker.run(ThreadPoolExecutor.java:614)",
+              "java.base\/java.lang.Thread.run(Thread.java:1516)"
+            ]
+          }
+        ],
+        "threadCount": "3"
+      },
+      {
+        "container": "java.util.concurrent.ThreadPoolExecutor@64a7efee",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+        ],
+        "threadCount": "0"
+      },
+      {
+        "container": "ForkJoinPool-1\/jdk.internal.vm.SharedThreadContainer@79d7ebcf",
+        "parent": "<root>",
+        "owner": null,
+        "threads": [
+          {
+            "tid": "54",
+            "time": "2026-09-21T20:21:16.166873Z",
+            "name": "ForkJoinPool-1-worker-1",
+            "state": "WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.ForkJoinPool@7add392c"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.ForkJoinPool.awaitWork(ForkJoinPool.java:2109)",
+              "java.base\/java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.java:2063)",
+              "java.base\/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2027)",
+              "java.base\/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)"
+            ]
+          },
+          {
+            "tid": "57",
+            "time": "2026-09-21T20:21:16.167013Z",
+            "name": "ForkJoinPool-1-delayScheduler",
+            "state": "TIMED_WAITING",
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.DelayScheduler.loop(DelayScheduler.java:253)",
+              "java.base\/java.util.concurrent.DelayScheduler.run(DelayScheduler.java:221)"
+            ]
+          },
+          {
+            "tid": "86",
+            "time": "2026-09-21T20:21:16.167061Z",
+            "name": "ForkJoinPool-1-worker-2",
+            "state": "TIMED_WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.ForkJoinPool@7add392c"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.ForkJoinPool.awaitWork(ForkJoinPool.java:2109)",
+              "java.base\/java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.java:2063)",
+              "java.base\/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2027)",
+              "java.base\/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)"
+            ]
+          },
+          {
+            "tid": "87",
+            "time": "2026-09-21T20:21:16.167103Z",
+            "name": "ForkJoinPool-1-worker-3",
+            "state": "WAITING",
+            "parkBlocker": {
+              "object": "java.util.concurrent.ForkJoinPool@7add392c"
+            },
+            "stack": [
+              "java.base\/jdk.internal.misc.Unsafe.park(Native Method)",
+              "java.base\/java.util.concurrent.ForkJoinPool.awaitWork(ForkJoinPool.java:2109)",
+              "java.base\/java.util.concurrent.ForkJoinPool.deactivate(ForkJoinPool.java:2063)",
+              "java.base\/java.util.concurrent.ForkJoinPool.runWorker(ForkJoinPool.java:2027)",
+              "java.base\/java.util.concurrent.ForkJoinWorkerThread.run(ForkJoinWorkerThread.java:187)"
+            ]
+          }
+        ],
+        "threadCount": "4"
+      }
+    ]
+  }
+}
