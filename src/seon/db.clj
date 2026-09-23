@@ -269,9 +269,7 @@
          [:maybe :seon.sci.eval/projection-state]]
     [:or :seon.db/database-value :seon.error/value]]}
   [database state]
-  (if (and state (not (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))))
+  (if (and state (not (:seon.error/at database)))
     (let [projection (or (:seon.schema/projection (meta database))
                          (:seon.schema/projection @state))]
       (cond-> (vary-meta database assoc :seon.sci.eval/projection-state state)
@@ -359,9 +357,7 @@
     [:or :seon.db/connection-identity :seon.error/value]]}
   [connection]
   (cond
-    (and (map? connection) (inst? (:seon.error/at connection))
-             (qualified-keyword? (:seon.error/layer connection))
-             (qualified-symbol? (:seon.error/operation connection))) connection
+    (:seon.error/at connection) connection
 
     (not (map? (:config @connection)))
     (error-value
@@ -432,9 +428,7 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :seon.db/database-value-identity :seon.error/value]]}
   [database]
-  (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+  (if (:seon.error/at database)
     database
     (let [configuration (dbi/-config database)
           commit-id (d/commit-id database)]
@@ -461,9 +455,7 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :int :seon.error/value]]}
   [database]
-  (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+  (if (:seon.error/at database)
     database
     (long (dbi/-max-tx database))))
 
@@ -1152,9 +1144,7 @@
                        [:vector :seon.db/read-evidence]]
                   [:or :boolean :seon.db/error-result]]}
   [database retained]
-  (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+  (if (:seon.error/at database)
     database
     (every?
      (fn [{source-position :seon.db/source-argument-position
@@ -1552,9 +1542,7 @@
    (if (and (nil? database) (= :seon.db/relation-only absent))
      (continue relation-only-declarations)
      (let [declarations (read-declarations database operation)]
-       (if (and (map? declarations) (inst? (:seon.error/at declarations))
-             (qualified-keyword? (:seon.error/layer declarations))
-             (qualified-symbol? (:seon.error/operation declarations)))
+       (if-not (::read-projection declarations)
          declarations
          (continue declarations))))))
 
@@ -2050,9 +2038,7 @@
   ([]
    (current-database-value))
   ([connection]
-   (if (and (map? connection) (inst? (:seon.error/at connection))
-             (qualified-keyword? (:seon.error/layer connection))
-             (qualified-symbol? (:seon.error/operation connection)))
+   (if (:seon.error/at connection)
      (assoc connection :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/db)
      (resolve-database-value connection))))
 
@@ -2116,14 +2102,13 @@
         (unsupplied-custody-error "a connection"))))
 
 (defn- source-argument-error
+  {:malli/schema [:=> [:cat [:sequential :map] [:vector :seon.schema/value]] [:or :nil :seon.error/value]]}
   [source-bindings arguments]
   (some (fn [source]
           (let [position (:datahike.query.source/argument-position source)]
             (when (< position (count arguments))
               (let [argument (nth arguments position)]
-                (when (and (map? argument) (inst? (:seon.error/at argument))
-             (qualified-keyword? (:seon.error/layer argument))
-             (qualified-symbol? (:seon.error/operation argument)))
+                (when (:seon.error/at argument)
                   argument)))))
         source-bindings))
 
@@ -2150,6 +2135,7 @@
 
 (defn- query-input-position
   "Return the omitted $ position, :explicit, or :invalid from parsed bindings."
+  {:malli/schema [:=> [:cat :boolean :map [:or :nil [:sequential :seon.schema/value]]] [:or :int [:enum :explicit :invalid]]]}
   [explicit-database? query-form arguments]
   (let [arguments (vec arguments)
         input-count (d/query-input-count query-form)
@@ -2165,9 +2151,7 @@
                         value (get arguments (if (and omitted? (> index position))
                                                (dec index) index))]
                     (or (and omitted? (= index position))
-                        (db.utils/db? value) (and (map? value) (inst? (:seon.error/at value))
-             (qualified-keyword? (:seon.error/layer value))
-             (qualified-symbol? (:seon.error/operation value))))))
+                        (db.utils/db? value) (:seon.error/at value))))
                 sources)]
     (cond
       (not valid-sources?) :invalid
@@ -2176,6 +2160,7 @@
       :else :invalid)))
 
 (defn- aligned-query-arguments
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/database-value] :map [:or :nil [:sequential :seon.schema/value]]] [:or [:vector :seon.schema/value] :seon.db/error-result]]}
   [explicit-database query-form arguments]
   (let [arguments (vec arguments)]
     (or (source-argument-error (d/query-source-bindings query-form) arguments)
@@ -2184,9 +2169,7 @@
             :explicit arguments
             :invalid (query-input-shape-error query-form arguments)
             (let [database (or explicit-database (current-database-value))]
-              (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+              (if (:seon.error/at database)
                 database
                 (into (conj (subvec arguments 0 position) database)
                       (subvec arguments position)))))))))
@@ -2203,9 +2186,7 @@
   [[call-arguments result]]
   (let [[query-or-database & arguments] call-arguments]
     (cond
-      (and (map? query-or-database) (inst? (:seon.error/at query-or-database))
-           (qualified-keyword? (:seon.error/layer query-or-database))
-           (qualified-symbol? (:seon.error/operation query-or-database)))
+      (:seon.error/at query-or-database)
       true
 
       (and (map? result) (::invalid-read result)
@@ -2231,9 +2212,7 @@
                   :string]}
   [{value :value} _options]
   (let [[[head & tail] result] value]
-    (or (when (and (map? result) (inst? (:seon.error/at result))
-             (qualified-keyword? (:seon.error/layer result))
-             (qualified-symbol? (:seon.error/operation result))) (:seon.error/message result))
+    (or (when (:seon.error/at result) (:seon.error/message result))
         (let [explicit? (db.utils/db? head)
               query-input (if explicit? (first tail) head)
               supplied (if explicit? (rest tail) tail)
@@ -2247,9 +2226,7 @@
   {:malli/schema
    [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
-  (if (and (map? query-or-database) (inst? (:seon.error/at query-or-database))
-             (qualified-keyword? (:seon.error/layer query-or-database))
-             (qualified-symbol? (:seon.error/operation query-or-database)))
+  (if (:seon.error/at query-or-database)
     (assoc query-or-database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/q)
     (let [explicit-database? (db.utils/db? query-or-database)
         query-input
@@ -2272,9 +2249,7 @@
                (when explicit-database? query-or-database)
                (:query normalized)
                (:args normalized)))]
-        (if (and (map? aligned) (inst? (:seon.error/at aligned))
-             (qualified-keyword? (:seon.error/layer aligned))
-             (qualified-symbol? (:seon.error/operation aligned)))
+        (if-not (vector? aligned)
           (assoc aligned :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/q)
           (let [request (assoc normalized :args aligned)
                 parsed-query (query/memoized-parse-query (:query request))]
@@ -2338,9 +2313,7 @@
   [projection public-operation schema-key selector value]
   (let [projected (schema/projection-with-pulled-form-in
                    projection schema-key selector)]
-    (if (and (map? projected) (inst? (:seon.error/at projected))
-             (qualified-keyword? (:seon.error/layer projected))
-             (qualified-symbol? (:seon.error/operation projected)))
+    (if-not (:seon.schema.projection/registry projected)
       ;; THE DERIVATION REFUSED, NOT THE READ. `pulled-form-in` declines
       ;; recursion and wildcard component cycles, so a `'[*]` pull over
       ;; `:seon.fn/fn` (whose bindings revisit `:seon.fn.binding/row`) has no
@@ -2405,9 +2378,7 @@
 (defn- pull-call
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result :seon.db/pull-budget-error]]}
   [database arguments operation operation-key result-key public-operation]
-  (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+  (if (:seon.error/at database)
     (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation public-operation)
     (or (missing-pull-selector-error public-operation arguments)
         (let [many? (= :pull-many operation-key)
@@ -2463,14 +2434,11 @@
           (dependency-error public-operation cause)))))))
 
 (defn- pull-call-valid?
+  {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]] :boolean]}
   [[arguments _result]]
   (let [[head & tail] arguments
-        inputs (if (or (db.utils/db? head) (and (map? head) (inst? (:seon.error/at head))
-             (qualified-keyword? (:seon.error/layer head))
-             (qualified-symbol? (:seon.error/operation head)))) tail arguments)]
-    (or (and (map? head) (inst? (:seon.error/at head))
-             (qualified-keyword? (:seon.error/layer head))
-             (qualified-symbol? (:seon.error/operation head)))
+        inputs (if (or (db.utils/db? head) (:seon.error/at head)) tail arguments)]
+    (or (some? (:seon.error/at head))
         (and (= 1 (count inputs)) (map? (first inputs)))
         (and (= 2 (count inputs)) (vector? (first inputs))
              (not (map? (second inputs)))))))
@@ -2502,10 +2470,7 @@
               :datahike.pull/result
               'seon.db/pull))
   ([database-or-selector options-or-eid]
-   (if (or (db.utils/db? database-or-selector)
-           (and (map? database-or-selector) (inst? (:seon.error/at database-or-selector))
-             (qualified-keyword? (:seon.error/layer database-or-selector))
-             (qualified-symbol? (:seon.error/operation database-or-selector))))
+   (if-not (vector? database-or-selector)
      (pull-call database-or-selector
                 [options-or-eid]
                 pull-plan-with-evidence
@@ -2555,10 +2520,7 @@
               :datahike.pull-many/result
               'seon.db/pull-many))
   ([database-or-selector options-or-eids]
-   (if (or (db.utils/db? database-or-selector)
-           (and (map? database-or-selector) (inst? (:seon.error/at database-or-selector))
-             (qualified-keyword? (:seon.error/layer database-or-selector))
-             (qualified-symbol? (:seon.error/operation database-or-selector))))
+   (if-not (vector? database-or-selector)
      (pull-call database-or-selector
                 [options-or-eids]
                 pull-many-plan-with-evidence
@@ -2664,10 +2626,9 @@
        (some? value) (assoc :seon.db/pattern-value value))}))
 
 (defn- datoms-call
+  {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value] [:or :nil [:sequential :seon.schema/value]]] [:or :seon.db/datoms :seon.db/invalid-read-error]]}
   [database arguments]
-  (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+  (if (:seon.error/at database)
     (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/datoms)
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
@@ -2693,13 +2654,12 @@
         (dependency-error 'seon.db/datoms cause)))))
 
 (defn- datoms-call-valid?
+  {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]] :boolean]}
   [[arguments _result]]
   (let [[head & tail] arguments
         inputs (if (db.utils/db? head) tail arguments)
         [index & components] inputs]
-    (or (and (map? head) (inst? (:seon.error/at head))
-             (qualified-keyword? (:seon.error/layer head))
-             (qualified-symbol? (:seon.error/operation head)))
+    (or (some? (:seon.error/at head))
         (if (map? index)
           (empty? components)
           (and (#{:eavt :aevt :avet} index)
@@ -2711,9 +2671,7 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.db/invalid-read-error] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
   (if (or (db.utils/db? database-or-index)
-          (and (map? database-or-index) (inst? (:seon.error/at database-or-index))
-             (qualified-keyword? (:seon.error/layer database-or-index))
-             (qualified-symbol? (:seon.error/operation database-or-index))))
+          (:seon.error/at database-or-index))
     (datoms-call database-or-index arguments)
     (datoms-call (current-database-value)
                  (cons database-or-index arguments))))
@@ -2729,9 +2687,7 @@
      [:or ::index-page-result :seon.db/error-result]]]}
   ([options] (index-page (current-database-value) options))
   ([database options]
-   (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+   (if (:seon.error/at database)
      database
      (try
        (with-declarations database 'seon.db/index-page
@@ -2767,9 +2723,7 @@
     [:or :seon.db/database-value :seon.db/invalid-read-error]]}
   [operation database arguments]
   (cond
-    (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+    (:seon.error/at database)
     (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/database-view)
 
     (not (dbi/-temporal-index? database))
@@ -2799,10 +2753,9 @@
         (dependency-error 'seon.db/temporal-read cause)))))
 
 (defn- database-identity
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/database-value] :seon.schema/value] :qualified-symbol [:or :seon.db/database-value :seon.error/value]] [:or :seon.schema/value :seon.db/error-result]]}
   [operation operation-name database]
-  (if (and (map? database) (inst? (:seon.error/at database))
-             (qualified-keyword? (:seon.error/layer database))
-             (qualified-symbol? (:seon.error/operation database)))
+  (if (:seon.error/at database)
     database
     (try
       (let [result (operation database)]
@@ -3627,13 +3580,6 @@
   [:seon.fn/call-arities :seon.fn/sym :seon.test/sym :seon.fn/arities
    :seon.fn.arity/min :seon.fn.arity/max])
 
-(defn- error-value?
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (boolean (and (map? value) (inst? (:seon.error/at value))
-                (qualified-keyword? (:seon.error/layer value))
-                (qualified-symbol? (:seon.error/operation value)))))
-
 (defn- arity-comparison
   "Candidate edges of `edges` under `bounds`: callees declaring arities none
   of which admits the recorded count, with the comparison's coverage."
@@ -3659,7 +3605,7 @@
   (let [derive (fn []
                  (let [edges (d/q call-edges-query database)
                        bounds (declared-arity-bounds d/q database)]
-                   (if (error-value? bounds)
+                   (if (:seon.error/at bounds)
                      bounds
                      (let [edges (set edges)]
                        (merge (arity-comparison edges bounds)
@@ -3696,11 +3642,11 @@
     (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
       (let [edges (d/q call-edges-query after)
             bounds (declared-arity-bounds d/q after)]
-        (if (error-value? bounds)
+        (if (:seon.error/at bounds)
           bounds
           (assoc (arity-comparison (set edges) bounds) ::bounds bounds)))
       (let [base (arity-base before)]
-        (if (error-value? base)
+        (if-not (::bounds base)
           base
           (let [symbols (fn [database entities attributes]
                           (into #{}
@@ -3773,14 +3719,14 @@
   (let [candidates (vec candidates)
         snapshot (when (seq candidates)
                    (@call-preparation-report-snapshot report projection))
-        refusal (or (when (error-value? snapshot) snapshot)
+        refusal (or (when (:seon.error/at snapshot) snapshot)
                     (first (:seon.call-preparation/refusals snapshot)))]
     (or refusal
         (let [plans (into {} (map (fn [callee]
                                     [callee (@call-preparation-plan-for
                                              database snapshot callee)]))
                           (distinct (map (comp first second) candidates)))
-              refused (some #(when (error-value? %) %) (vals plans))]
+              refused (some #(when (:seon.error/at %) %) (vals plans))]
           (or refused
               {:seon.fn/arity-mismatches
                (->> candidates
@@ -3804,40 +3750,31 @@
                :seon.fn/arity-unchecked (- edges checked)})))))
 
 (defn- arity-mismatches-with
+  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]] :seon.db/database-value :seon.schema/projection] [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
   [query-fn database projection]
   (let [edges (query-fn '[:find ?caller-symbol ?call
                          :where [?caller :seon.fn/call-arities ?call]
                          (or [?caller :seon.fn/sym ?caller-symbol]
                              [?caller :seon.test/sym ?caller-symbol])]
                        database)
-        bounds (when-not (and (map? edges) (inst? (:seon.error/at edges))
-             (qualified-keyword? (:seon.error/layer edges))
-             (qualified-symbol? (:seon.error/operation edges)))
+        bounds (when-not (:seon.error/at edges)
                  (declared-arity-bounds query-fn database))]
-    (or (when (and (map? edges) (inst? (:seon.error/at edges))
-             (qualified-keyword? (:seon.error/layer edges))
-             (qualified-symbol? (:seon.error/operation edges))) edges)
-        (when (and (map? bounds) (inst? (:seon.error/at bounds))
-             (qualified-keyword? (:seon.error/layer bounds))
-             (qualified-symbol? (:seon.error/operation bounds))) bounds)
+    (or (when (:seon.error/at edges) edges)
+        (when (:seon.error/at bounds) bounds)
         (let [checked (filterv (fn [[_ [callee _]]] (contains? bounds callee)) edges)
               candidates (filterv (fn [[_ [callee n]]]
                                     (not (arity-admitted? (get bounds callee) n)))
                                   checked)
               snapshot (when (seq candidates)
                          (@call-preparation-snapshot database projection))
-              refusal (or (when (and (map? snapshot) (inst? (:seon.error/at snapshot))
-             (qualified-keyword? (:seon.error/layer snapshot))
-             (qualified-symbol? (:seon.error/operation snapshot))) snapshot)
+              refusal (or (when (:seon.error/at snapshot) snapshot)
                           (first (:seon.call-preparation/refusals snapshot)))]
           (or refusal
               (let [plans (into {} (map (fn [callee]
                                          [callee (@call-preparation-plan-for
                                                   database snapshot callee)]))
                                 (distinct (map (comp first second) candidates)))
-                    refused (some #(when (and (map? %) (inst? (:seon.error/at %))
-             (qualified-keyword? (:seon.error/layer %))
-             (qualified-symbol? (:seon.error/operation %))) %) (vals plans))]
+                    refused (some #(when (:seon.error/at %) %) (vals plans))]
                 (or refused
                     {:seon.fn/arity-mismatches
                      (->> candidates
@@ -4117,13 +4054,11 @@
                  [:seon.fn/sym :seon.test/sym :seon.schema/key
                   :seon.schema.shape/fingerprint :seon.call-preparation/key])
        (let [comparison (report-arity-comparison report)
-             result (if (error-value? comparison)
-                      comparison
-                      (arity-verdict database projection report comparison))
+             result (if (::candidates comparison)
+                      (arity-verdict database projection report comparison)
+                      comparison)
              mismatches (:seon.fn/arity-mismatches result)]
-         (if (and (map? result) (inst? (:seon.error/at result))
-             (qualified-keyword? (:seon.error/layer result))
-             (qualified-symbol? (:seon.error/operation result)))
+         (if-not mismatches
            (assoc result ::transaction-refused true)
            (when (seq mismatches)
            (diagnostic
@@ -4297,126 +4232,116 @@
 
 (defn- transact-call
   {:malli/schema
-   [:=> [:cat :seon.db/database-value [:or :seon.db/connection :seon.error/value]
-         :seon.store/transaction]
+   [:=> [:cat :seon.db/database-value :seon.db/connection :seon.store/transaction]
     [:or :seon.db/transaction-report :seon.db/error-result]]}
   [database connection transaction]
-  (if (and (map? connection) (inst? (:seon.error/at connection))
-             (qualified-keyword? (:seon.error/layer connection))
-             (qualified-symbol? (:seon.error/operation connection)))
-    connection
-    (try
-      (let [projection (carried-projection database)]
-        (or (write-error database projection transaction)
-            (let [bound-attribute :seon.config.db/write-time-limit-ms
-                  configured-bounds
-                  (when (get (dbi/-schema database) bound-attribute)
-                    (map :v (d/datoms database :aevt bound-attribute)))
-                  declared-bound
-                  (:seon.config/default
-                   (m/properties (mr/schema (:seon.schema.projection/registry projection) bound-attribute)))
-                  prepared
-                  (jdk-integers->long
-                   (let [request (stamp-receipt transaction)
-                         request (if (map? request) request {:tx-data request})]
-                     (assoc-in request [:tx-meta :datahike/validate-report]
-                               (write-report-validator projection))))
-                  ;; Every write, system writes included, is bounded by the
-                  ;; branch's dial (lane-flow-owns-running-machinery.md N3,
-                  ;; R6): a synchronous fault writer must never park forever.
-                  write-time-limit-ms
-                  (if (seq configured-bounds)
-                    (apply min configured-bounds)
-                    declared-bound)
-                  request
-                  (schema.datahike/encode-transaction-in projection prepared)
-                  timeout (Object.)
-                  ;; One deadline covers admission and acknowledgement: the
-                  ;; writer's put! into its transaction queue runs inside the
-                  ;; go block whose promise this derefs
-                  ;; (datahike/writer.cljc:46-55, 393-402).
-                  started (System/nanoTime)
-                  ;; Parents make it Datahike's merge: same fence and validator.
-                  pending ((if (:parents request) d/merge-db! d/transact!) connection request)
-                  report
-                  (try
-                    (deref pending
-                           (max 0 (- write-time-limit-ms
-                                     (quot (- (System/nanoTime) started) 1000000)))
-                           timeout)
-                    (catch Throwable throwable
-                      ;; Datahike's throwable-promise wraps the JDK timeout in
-                      ;; ExceptionInfo. Preserve every delivered writer error.
-                      (if (or (instance? TimeoutException throwable)
-                              (instance? TimeoutException (ex-cause throwable)))
-                        timeout
-                        (throw throwable))))]
-              (if (identical? timeout report)
-                (let [elapsed-ms
-                      (quot (+ (- (System/nanoTime) started) 999999) 1000000)
-                      evidence
-                      {:seon.db/connection-identity
-                       (connection-identity connection)
-                       :seon.store/branch (:branch (:config database))
-                       :seon.config.db/write-time-limit-ms write-time-limit-ms
-                       :seon.db/write-wait-elapsed-ms elapsed-ms
-                       ;; The refusal hands back the transaction; the caller
-                       ;; must not retry it blindly (the outcome is unknown).
-                       :seon.store/transaction transaction
-                       :seon.db/transaction-outcome-unknown true}]
-                  (diagnostic
-                   {:seon.error/message (str "seon.db/transact! stopped waiting after " elapsed-ms
-                         " ms (bound " write-time-limit-ms
-                         " ms). Datahike may still commit the queued transaction; "
-                         "its outcome is unknown.")
-                    :seon.db/transaction-outcome-unknown true
-                    :seon.error/layer :database-write
-                    :seon.error/operation 'seon.db/transact!
-                    :seon.error/expected {:seon.config.db/write-time-limit-ms write-time-limit-ms}
-                    :seon.error/offending (select-keys evidence
-                                 [:seon.db/connection-identity
-                                  :seon.store/branch])
-                    :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
-                report))))
-      (catch Throwable throwable
-        (let [data (error.refusal/refusal throwable)]
-          (cond
-            (let [observation (:datahike/validation-refusal data)]
-              (and (map? observation) (inst? (:seon.error/at observation))
-                   (qualified-keyword? (:seon.error/layer observation))
-                   (qualified-symbol? (:seon.error/operation observation))))
-            (:datahike/validation-refusal data)
+  (try
+    (let [projection (carried-projection database)]
+      (or (write-error database projection transaction)
+          (let [bound-attribute :seon.config.db/write-time-limit-ms
+                configured-bounds
+                (when (get (dbi/-schema database) bound-attribute)
+                  (map :v (d/datoms database :aevt bound-attribute)))
+                declared-bound
+                (:seon.config/default
+                 (m/properties (mr/schema (:seon.schema.projection/registry projection) bound-attribute)))
+                prepared
+                (jdk-integers->long
+                 (let [request (stamp-receipt transaction)
+                       request (if (map? request) request {:tx-data request})]
+                   (assoc-in request [:tx-meta :datahike/validate-report]
+                             (write-report-validator projection))))
+                ;; Every write, system writes included, is bounded by the
+                ;; branch's dial (lane-flow-owns-running-machinery.md N3,
+                ;; R6): a synchronous fault writer must never park forever.
+                write-time-limit-ms
+                (if (seq configured-bounds)
+                  (apply min configured-bounds)
+                  declared-bound)
+                request
+                (schema.datahike/encode-transaction-in projection prepared)
+                timeout (Object.)
+                ;; One deadline covers admission and acknowledgement: the
+                ;; writer's put! into its transaction queue runs inside the
+                ;; go block whose promise this derefs
+                ;; (datahike/writer.cljc:46-55, 393-402).
+                started (System/nanoTime)
+                ;; Parents make it Datahike's merge: same fence and validator.
+                pending ((if (:parents request) d/merge-db! d/transact!) connection request)
+                report
+                (try
+                  (deref pending
+                         (max 0 (- write-time-limit-ms
+                                   (quot (- (System/nanoTime) started) 1000000)))
+                         timeout)
+                  (catch Throwable throwable
+                    ;; Datahike's throwable-promise wraps the JDK timeout in
+                    ;; ExceptionInfo. Preserve every delivered writer error.
+                    (if (or (instance? TimeoutException throwable)
+                            (instance? TimeoutException (ex-cause throwable)))
+                      timeout
+                      (throw throwable))))]
+            (if (identical? timeout report)
+              (let [elapsed-ms
+                    (quot (+ (- (System/nanoTime) started) 999999) 1000000)
+                    evidence
+                    {:seon.db/connection-identity
+                     (connection-identity connection)
+                     :seon.store/branch (:branch (:config database))
+                     :seon.config.db/write-time-limit-ms write-time-limit-ms
+                     :seon.db/write-wait-elapsed-ms elapsed-ms
+                     ;; The refusal hands back the transaction; the caller
+                     ;; must not retry it blindly (the outcome is unknown).
+                     :seon.store/transaction transaction
+                     :seon.db/transaction-outcome-unknown true}]
+                (diagnostic
+                 {:seon.error/message (str "seon.db/transact! stopped waiting after " elapsed-ms
+                       " ms (bound " write-time-limit-ms
+                       " ms). Datahike may still commit the queued transaction; "
+                       "its outcome is unknown.")
+                  :seon.db/transaction-outcome-unknown true
+                  :seon.error/layer :database-write
+                  :seon.error/operation 'seon.db/transact!
+                  :seon.error/expected {:seon.config.db/write-time-limit-ms write-time-limit-ms}
+                  :seon.error/offending (select-keys evidence
+                               [:seon.db/connection-identity
+                                :seon.store/branch])
+                  :seon.error/data (merge evidence {:seon.error/member bound-attribute})}))
+              report))))
+    (catch Throwable throwable
+      (let [data (error.refusal/refusal throwable)]
+        (cond
+          (:datahike/validation-refusal data)
+          (:datahike/validation-refusal data)
 
-            ;; A Seon transition refusal returns its own value verbatim.
-            (and (map? data) (inst? (:seon.error/at data))
-                 (qualified-keyword? (:seon.error/layer data))
-                 (qualified-symbol? (:seon.error/operation data)))
-            data
+          ;; A Seon transition refusal returns its own value verbatim.
+          (:seon.error/at data)
+          data
 
-            ;; A Datahike abort keeps the dependency's classification.
-            (some? (:error data))
-            (rejected-value database transaction throwable data)
+          ;; A Datahike abort keeps the dependency's classification.
+          (some? (:error data))
+          (rejected-value database transaction throwable data)
 
-            :else
-            (let [failure
-                  (write-observation
-                   database transaction
-                   (error.refusal/diagnostic
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer :seon.db/database-write
-                     :seon.error/operation 'seon.db/transact!
-                     :seon.error/throwable throwable
-                     :seon.error/message
-                     (or (ex-message throwable)
-                         (.getName (class throwable)))
-                     :seon.error/data (or data {})
-                     :seon.db/transaction-outcome-unknown true}))]
-              (when (panic-on-core-error? connection)
-                (throw
-                 (ex-info (:seon.error/message failure)
-                          failure
-                          throwable)))
-              failure)))))))
+          :else
+          (let [failure
+                (write-observation
+                 database transaction
+                 (error.refusal/diagnostic
+                  {:seon.error/at (java.util.Date.)
+                   :seon.error/layer :seon.db/database-write
+                   :seon.error/operation 'seon.db/transact!
+                   :seon.error/throwable throwable
+                   :seon.error/message
+                   (or (ex-message throwable)
+                       (.getName (class throwable)))
+                   :seon.error/data (or data {})
+                   :seon.db/transaction-outcome-unknown true}))]
+            (when (panic-on-core-error? connection)
+              (throw
+               (ex-info (:seon.error/message failure)
+                        failure
+                        throwable)))
+            failure))))))
 
 (defn- missing-transaction-data-error
   {:malli/schema [:=> [:cat :seon.schema/value] [:or :nil :seon.db/invalid-request-error]]}
@@ -4533,9 +4458,7 @@
    [:=> [:cat [:or :seon.db/transaction-report :seon.db/error-result]]
     [:or :seon.db/transaction-result :seon.db/error-result]]}
   [report]
-  (if (and (map? report) (inst? (:seon.error/at report))
-           (qualified-keyword? (:seon.error/layer report))
-           (qualified-symbol? (:seon.error/operation report)))
+  (if-not (:db-after report)
     report
     (let [before (:db-before report)
           after (:db-after report)
@@ -4601,9 +4524,7 @@
          (or
           (missing-transaction-data-error transaction)
           (cond
-            (and (map? connection) (inst? (:seon.error/at connection))
-             (qualified-keyword? (:seon.error/layer connection))
-             (qualified-symbol? (:seon.error/operation connection))) connection
+            (:seon.error/at connection) connection
 
             (not (connection? connection))
             (dependency-error
@@ -4611,16 +4532,12 @@
              (ex-info "The explicit transaction connection is not live."
                       {::connection connection}))
 
-            (and (map? database) (inst? (:seon.error/at database))
-                 (qualified-keyword? (:seon.error/layer database))
-                 (qualified-symbol? (:seon.error/operation database))) database
+            (:seon.error/at database) database
 
             :else
             (or (foreign-connection-error database connection transaction)
                 (transact-call database connection transaction))))]
-     (if (and (map? result) (inst? (:seon.error/at result))
-              (qualified-keyword? (:seon.error/layer result))
-              (qualified-symbol? (:seon.error/operation result)))
+     (if-not (:db-after result)
        (let [refusal (assoc result :seon.db/transaction-refused true)]
          (if (:seon.db.write.attempt/request-id refusal)
            refusal
