@@ -293,9 +293,35 @@
              (str/split-lines (slurp file))))
      (into {} (System/getenv)))))
 
+(defn- head-capture-form
+  "The child's read of every branch head of the store at `store-dir`, before
+  its boot writes anything: `{branch commit-id}` from the roster
+  (`seon.cluster.registry/roster`, `branch-commit-id`), or the full cause. On
+  success the store stays held (`seon.cluster/acquire-root-store!` counts
+  holders), so the boot's own acquisition reuses it instead of opening it a
+  second time; the launch form releases this holder once boot answers."
+  [store-dir]
+  `(try
+     (require '~'seon.cluster '~'seon.cluster.registry)
+     (let [began# (System/nanoTime)
+           store# ((resolve '~'seon.cluster/acquire-root-store!) ~store-dir)]
+       (try
+         {:seon.operator/heads
+          (into {} (map (fn [branch#]
+                          [branch# ((resolve '~'seon.cluster.registry/branch-commit-id)
+                                    {:seon.store/store store# :seon.store/branch branch#})]))
+                ((resolve '~'seon.cluster.registry/roster) store#))
+          :seon.operator/store-read-ms (quot (- (System/nanoTime) began#) 1000000)}
+         (catch Throwable cause#
+           ((resolve '~'seon.cluster/release-root-store!) ~store-dir)
+           (throw cause#))))
+     (catch Throwable cause#
+       {:seon.error/message (ex-message cause#) :seon.error/cause (Throwable->map cause#)})))
+
 (defn- launch-form [request port]
   ;; Only Clojure core loads before opening and reporting the diagnostic REPL.
-  ;; The second callback value is terminal boot evidence, never a file poll.
+  ;; The second callback value is terminal boot evidence, never a file poll;
+  ;; a move reads the branch heads first, as the value between them.
   (pr-str
    `(do
       (require '~'clojure.core.server '~'clojure.java.io)
@@ -312,13 +338,19 @@
         (with-open [callback# (java.net.Socket. "127.0.0.1" ~port)
                     writer# (~'clojure.java.io/writer callback#)]
           (.write writer# (str (pr-str coordinates#) "\n")) (.flush writer#)
-          (let [result# (try
+          (let [heads# ~(some-> (:seon.operator/capture-heads request) head-capture-form)
+                _# (when heads# (.write writer# (str (pr-str heads#) "\n")) (.flush writer#))
+                result# (try
                           (require '~'seon.cluster.boot)
                           ((resolve '~'seon.cluster.boot/request!)
-                           (assoc '~request :seon.boot/prepl-server listener#))
+                           (assoc '~(dissoc request :seon.operator/capture-heads)
+                                  :seon.boot/prepl-server listener#))
                           (catch Throwable cause#
                             {:seon.error/message (ex-message cause#)
                              :seon.error/cause (Throwable->map cause#)}))]
+            ;; The capture's holder of the store ends once boot holds its own.
+            (when (:seon.operator/heads heads#)
+              ((resolve '~'seon.cluster/release-root-store!) ~(:seon.operator/capture-heads request)))
             (.write writer# (str (pr-str result#) "\n")) (.flush writer#)
             (when (and (:seon.error/message result#) (.isClosed listener#))
               (System/exit 1))))
@@ -509,6 +541,14 @@
                 ;; Cold indexing has the publication's declared bound, independently of socket silence.
                 boot-bound (operator-boot-bound-ms {})
                 _ (.setSoTimeout socket boot-bound)
+                ;; A move's child states the branch heads before its boot writes.
+                capture-began (System/nanoTime)
+                heads (when (:seon.operator/capture-heads request)
+                        (assoc (if-let [line (.readLine reader)]
+                                 (edn/read-string {:default tagged-literal} line)
+                                 {:seon.error/message "Child closed its boot channel before stating the branch heads."})
+                               ;; Includes requiring seon.cluster, which boot needs next anyway.
+                               :seon.operator/capture-ms (quot (- (System/nanoTime) capture-began) 1000000)))
                 terminal (CompletableFuture/supplyAsync
                           (reify Supplier (get [_] (if-let [line (.readLine reader)]
                                                     (edn/read-string {:default tagged-literal} line) ::eof))))
@@ -516,14 +556,16 @@
                             boot-bound TimeUnit/MILLISECONDS)]
             (when-not (map? value)
               (fail! "Child exited or closed its boot channel before readiness."
-                     {:seon.operator/event value :seon.operator/log (str log)
-                      :seon.boot/advertisement coordinates}))
+                     (cond-> {:seon.operator/event value :seon.operator/log (str log)
+                              :seon.boot/advertisement coordinates}
+                       heads (assoc :seon.operator/captured-heads heads))))
             (when (some #(and (map? %)
                               (= :seon.cluster.store/held-elsewhere (:seon.cluster.store/rule %)))
                         (tree-seq coll? seq value))
               (.get (.onExit child) bound TimeUnit/MILLISECONDS))
-            {:seon.operator/value (assoc value :seon.dev-cache/dependency-classes classes)
-             :seon.boot/advertisement coordinates}))))))
+            (cond-> {:seon.operator/value (assoc value :seon.dev-cache/dependency-classes classes)
+                     :seon.boot/advertisement coordinates}
+              heads (assoc :seon.operator/captured-heads heads))))))))
 
 (defn launch! [request]
   (:seon.operator/value (launch-child! request (repository-root) true)))
@@ -660,6 +702,14 @@
         (fs/move staging target {:atomic-move true})))
     (.getCanonicalPath target)))
 
+(defn- pins-text
+  "`git ls-files --stage -- reference-code` output for `gitlinks`, the bytes
+  `seon.dev.dependency-digest/dependency-pins` keys a snapshot on."
+  {:malli/schema [:=> [:cat [:vector [:map [:path :string] [:pin :string]]]] :string]}
+  [gitlink-pins]
+  (apply str (map (fn [{:keys [path pin]}] (str "160000 " pin " 0\t" path "\n"))
+                  (sort-by :path gitlink-pins))))
+
 (defn committed-source!
   "A commit's program (HEAD by default) as a directory of committed bytes,
   built once per commit. Each gitlink is the checked-out submodule when it is
@@ -706,7 +756,13 @@
             ;; products until tools.deps prepares them (e.g. http-kit's and
             ;; datahike's compiled Java), once per pin.
             _ (when (some :prepared? submodules)
-                (command! ["clojure" "-X:deps" "prep" ":aliases" "[:dev :test]"] staging 300000))]
+                (command! ["clojure" "-X:deps" "prep" ":aliases" "[:dev :test]"] staging 300000))
+            ;; An archive is no Git work tree: without its commit's pins, a
+            ;; `git ls-files` inside it answers the ENCLOSING checkout's index
+            ;; (`seon.test.cache/gitlink-digests`, `dependency-digest/dependency-pins`),
+            ;; so a nuke published the checkout's gitlink pins, not the commit's.
+            _ (spit (io/file staging dependency-digest/dependency-pins-file)
+                    (pins-text (gitlinks repository sha)))]
         (fs/move staging target {:atomic-move true})
         {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
          :seon.operator/source-built? true :seon.operator/submodules submodules})))))
@@ -900,34 +956,57 @@
 ;;; whose program is an archive does not see the working tree, so hook
 ;;; publication is off until the root starts from the checkout again.
 
-(def ^:private shared-cache-paths
-  "Derived caches an archive shares with the operator's checkout by link:
-  `target` (the dependency class cache, its locks and process references,
-  `dev_cache.clj:13-19`) and `.clj-kondo/.cache` (the analyzer cache,
-  `seon.fn.analyzer` `cache-directory`). Per-file analysis lives in the store."
-  ["target" ".clj-kondo/.cache"])
+(def ^:private analysis-cache
+  "The analyzer cache every archive of a root links (`seon.fn.analyzer`
+  `cache-directory` is `<source>/.clj-kondo/.cache`). clj-kondo keys a
+  namespace's entry by nothing but its name, so the entry is valid only for the
+  bytes last linted: it follows the ROOT's published program, never the
+  checkout's working tree, whose edits the hook lints into the checkout's own
+  cache (observed 2026-09-23: an archive linked to the checkout's cache refused
+  publication on `Unresolved var: cache/worker-checkout!`, entries of a
+  working-tree `seon.test.cache` the archive does not have)."
+  "data/source/analysis-cache")
 
-(defn- pins-text
-  "`git ls-files --stage -- reference-code` output for `gitlinks`, the bytes
-  `seon.dev.dependency-digest/dependency-pins` keys a snapshot on."
-  {:malli/schema [:=> [:cat [:vector [:map [:path :string] [:pin :string]]]] :string]}
-  [gitlink-pins]
-  (apply str (map (fn [{:keys [path pin]}] (str "160000 " pin " 0\t" path "\n"))
-                  (sort-by :path gitlink-pins))))
+(defn- root-analysis-cache!
+  "This root's analyzer cache directory, seeded once from the cache of the
+  program the root ran before (`previous-source`, the replaced JVM's source
+  directory), whose entries describe that program's published bytes; a root
+  with no prior program starts it empty and says so."
+  {:malli/schema [:=> [:cat :string [:maybe :string]] :map]}
+  [root previous-source]
+  (let [cache (io/file root analysis-cache)
+        seed (some-> previous-source (io/file ".clj-kondo" ".cache"))]
+    (cond
+      (.isDirectory cache)
+      {:seon.operator/analysis-cache (.getCanonicalPath cache) :seon.operator/seeded :kept}
+      (and seed (.isDirectory seed)
+           (not= (.getCanonicalPath seed) (.getCanonicalPath cache)))
+      (let [staging (io/file (.getParentFile cache)
+                             (str "analysis-cache.staging-" (.pid (java.lang.ProcessHandle/current))))]
+        (fs/delete-tree staging)
+        (fs/copy-tree (.getCanonicalPath seed) staging)
+        (fs/move staging cache {:atomic-move true})
+        {:seon.operator/analysis-cache (.getCanonicalPath cache)
+         :seon.operator/seeded (.getCanonicalPath seed)})
+      :else
+      (do (.mkdirs cache)
+          {:seon.operator/analysis-cache (.getCanonicalPath cache) :seon.operator/seeded :empty}))))
 
 (defn- share-caches!
-  "Link `source`'s derived cache paths to `repository`'s and record the
-  commit's pins (`dependency-pins.txt`) so the class cache key is computable
-  in a directory that is not a Git work tree. A real directory in a link's
-  place (a JVM that ran from this archive before) is replaced; its bytes were
-  that JVM's private cache."
-  {:malli/schema [:=> [:cat :string :string [:vector [:map [:path :string] [:pin :string]]]] :map]}
-  [repository source gitlink-pins]
+  "Link each of `source`'s derived cache paths to its shared directory
+  (`links`: relative path -> directory) and record the commit's pins
+  (`dependency-pins.txt`) so the class cache key is computable in a directory
+  that is not a Git work tree. A real directory in a link's place (a JVM that
+  ran from this archive before) is replaced; its bytes were that JVM's
+  private cache."
+  {:malli/schema [:=> [:cat [:map-of :string :string] :string
+                       [:vector [:map [:path :string] [:pin :string]]]] :map]}
+  [links source gitlink-pins]
   (let [pins (io/file source dependency-digest/dependency-pins-file)
         linked
-        (mapv (fn [relative]
+        (mapv (fn [[relative directory]]
                 (let [link (fs/path source relative)
-                      shared (fs/path repository relative)]
+                      shared (fs/path directory)]
                   (fs/create-dirs shared)
                   (cond
                     (and (fs/sym-link? link)
@@ -939,7 +1018,7 @@
                       (fs/create-dirs (fs/parent link))
                       (fs/create-sym-link link (fs/real-path shared))
                       {:path relative :placed (if replaced? :replaced :linked)}))))
-              shared-cache-paths)]
+              (sort links))]
     (when-not (.isFile pins)
       (spit pins (pins-text gitlink-pins)))
     {:seon.operator/linked linked
@@ -992,7 +1071,9 @@
   (let [held (held-sources)
         pins (io/file root pinned-directory)
         archives (filter #(and (.isDirectory ^java.io.File %)
-                               (not= (.getCanonicalPath pins) (.getCanonicalPath ^java.io.File %))
+                               (not (contains? #{(.getCanonicalPath pins)
+                                                 (.getCanonicalPath (io/file root analysis-cache))}
+                                               (.getCanonicalPath ^java.io.File %)))
                                (not (str/includes? (.getName ^java.io.File %) ".staging-")))
                          (or (.listFiles (io/file root "data/source")) []))
         {pruned true retained false}
@@ -1018,6 +1099,81 @@
                                              (.getName ^java.io.File %))
                                        stale-pins)}))
 
+(defn- head-restore-form
+  "The form a failed replacement evaluates to put every branch back on the
+  exact commit it named before its boot wrote. Datahike has no head reset that
+  keeps a commit id (`force-branch!`, `reference-code/datahike/src/datahike/
+  versioning.cljc:323`, writes a NEW commit, which a later adoption reads as a
+  change), so every connection this JVM holds to a moved branch is released
+  (`connector.cljc:468`, all references), unlinked (`versioning.cljc:279`) and branched again from
+  the captured commit (`:212`, which stores that commit's own record as the
+  head). A branch the attempt created is released and unlinked."
+  [store-dir heads]
+  `(let [store# (seon.cluster/acquire-root-store! ~store-dir)]
+     (try
+       (let [heads# '~heads
+             connection# (:seon.store/connection-object store#)
+             head# (fn [branch#] (seon.cluster.registry/branch-commit-id
+                                  {:seon.store/store store# :seon.store/branch branch#}))
+             store-id# (get-in @connection# [:config :store :id])
+             unlink!# (fn [branch#]
+                        ;; Every connection this JVM holds to the branch
+                        ;; (`datahike.connections/*connections*`, `connections.cljc:3`).
+                        (doseq [{held# :conn} (vals @datahike.connections/*connections*)
+                                :let [config# (:config @held#)]
+                                :when (and (= branch# (:branch config#))
+                                           (= store-id# (get-in config# [:store :id])))]
+                          (datahike.api/release held# true))
+                        (datahike.api/delete-branch! connection# branch#))
+             now# (into {} (map (juxt identity head#)) (seon.cluster.registry/roster store#))
+             restored#
+             (into []
+                   (keep (fn [[branch# commit#]]
+                           (let [current# (get now# branch#)]
+                             (when (not= current# commit#)
+                               (when current# (unlink!# branch#))
+                               (datahike.api/branch! connection# commit# branch#)
+                               {:seon.store/branch branch# :seon.operator/from current#
+                                :seon.operator/to (head# branch#)}))))
+                   heads#)
+             unlinked# (into [] (remove (set (keys heads#))) (keys now#))]
+         (run! unlink!# unlinked#)
+         {:seon.operator/restored restored# :seon.operator/unlinked unlinked#
+          :seon.operator/heads-after (into {} (map (juxt identity head#))
+                                           (seon.cluster.registry/roster store#))})
+       (finally (seon.cluster/release-root-store! ~store-dir)))))
+
+(defn- restore-heads!
+  "Put the root's branches back on the heads a failed replacement captured,
+  through that replacement's own REPL (it holds the store's flock); a
+  replacement that exited or captured nothing answers the typed unknown."
+  {:malli/schema [:=> [:cat :string [:maybe :map] [:maybe :map]] :map]}
+  [store-dir captured advertisement]
+  (cond
+    (not (:seon.operator/heads captured))
+    {:seon.operator/rollback :unknown
+     :seon.operator/reason "The replacement stated no branch heads before its boot."
+     :seon.operator/captured-heads captured}
+    (not (and advertisement (matching-handle advertisement true)))
+    {:seon.operator/rollback :unknown
+     :seon.operator/reason "The replacement exited; no JVM holds the store to restore its branch heads."
+     :seon.operator/captured-heads captured}
+    :else
+    (try
+      (let [result (prepl-value! advertisement
+                                 (pr-str (head-restore-form store-dir (:seon.operator/heads captured)))
+                                 (operator-silence-backstop-ms {}))]
+        (assoc result
+               ;; Restored means every branch names its captured commit again.
+               :seon.operator/rollback (if (= (:seon.operator/heads captured)
+                                              (:seon.operator/heads-after result))
+                                         :restored :failed)
+               :seon.operator/captured-heads captured))
+      (catch clojure.lang.ExceptionInfo cause
+        (assoc (diagnostic "Restoring the branch heads failed; the store may be ahead of older programs."
+                           {:seon.operator/captured-heads captured} :client-failed cause)
+               :seon.operator/rollback :failed)))))
+
 (defn move-to-head!
   "Replace the root's JVM with one whose program is committed HEAD (a drill
   may name `:seon.source/revision`), keeping the store and every cache.
@@ -1036,7 +1192,13 @@
         source (committed-source! root (get request :seon.source/revision "HEAD"))
         archive-ms (elapsed-ms began)
         source-root (:seon.operator/source-root source)
-        shared (share-caches! repository source-root (gitlinks repository (:seon.source/git-sha source)))
+        ;; The replaced JVM's program directory seeds this root's analyzer cache.
+        previous-source (some-> (advertisement root nil) program-source :seon.operator/source-root)
+        analysis (root-analysis-cache! root previous-source)
+        shared (assoc (share-caches! {"target" (str (io/file repository "target"))
+                                      ".clj-kondo/.cache" (:seon.operator/analysis-cache analysis)}
+                                     source-root (gitlinks repository (:seon.source/git-sha source)))
+                      :seon.operator/analysis analysis)
         share-ms (- (elapsed-ms began) archive-ms)
         ;; tools.deps computes the archive's classpath once, into its own
         ;; `.cpcache`, while the old JVM still serves.
@@ -1046,13 +1208,22 @@
         stopped (down! request (selected-processes root))
         down-ms (elapsed-ms began-down)
         began-launch (System/nanoTime)
+        store-dir (.getCanonicalPath (io/file root "data/store"))
+        ;; A store the replacement will resume states its branch heads first,
+        ;; so a failed attempt can put them back (a failed move must stay
+        ;; revertible to every older program).
+        capture? (seq (.list (io/file store-dir)))
         outcome (try
-                  (launch-child! (assoc request :seon.operator/command :start
-                                        :seon.boot/cluster-name "default")
+                  (launch-child! (cond-> (assoc request :seon.operator/command :start
+                                                :seon.boot/cluster-name "default")
+                                   capture? (assoc :seon.operator/capture-heads store-dir))
                                  source-root true)
-                  (catch Exception cause
-                    {:seon.operator/value
-                     (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)}))
+                  (catch clojure.lang.ExceptionInfo cause
+                    (let [evidence (:seon.error/offending (ex-data cause))]
+                      {:seon.operator/value
+                       (diagnostic (ex-message cause) (or (ex-data cause) {}) :client-failed cause)
+                       :seon.boot/advertisement (:seon.boot/advertisement evidence)
+                       :seon.operator/captured-heads (:seon.operator/captured-heads evidence)})))
         launch-ms (elapsed-ms began-launch)
         value (:seon.operator/value outcome)
         missing (get-in value [:seon.boot/readiness :seon.boot/missing-layers])
@@ -1080,13 +1251,25 @@
                 :seon.operator/phases phases}]
     (if adopted?
       (merge value report
-             {:seon.operator/adoption adoption :seon.operator/archives pruned}
+             {:seon.operator/adoption adoption :seon.operator/archives pruned
+              :seon.operator/captured-heads (:seon.operator/captured-heads outcome)}
              (program-source (:seon.boot/advertisement outcome)))
-      (let [terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))]
+      (let [began-restore (System/nanoTime)
+            restored (when capture?
+                       (restore-heads! store-dir (:seon.operator/captured-heads outcome)
+                                       (:seon.boot/advertisement outcome)))
+            report (assoc-in report [:seon.operator/phases :seon.operator/restore-ms]
+                             (elapsed-ms began-restore))
+            terminated (mapv #(terminate! % (operator-silence-backstop-ms {})) (selected-processes root))]
         (assoc (diagnostic (str "The JVM from " (:seon.source/git-sha source)
                                 (if ready? " refused to adopt its publication" " did not reach readiness")
-                                "; it was terminated and no JVM of this root runs. The store and caches are kept.")
+                                (case (:seon.operator/rollback restored)
+                                  :restored "; its branch heads were put back"
+                                  nil "; it wrote to no existing store"
+                                  "; ITS BRANCH HEADS COULD NOT BE PUT BACK (see :seon.operator/heads)")
+                                "; it was terminated, so no JVM of this root runs. The store and caches are kept.")
                            (merge report {:seon.operator/value value
+                                          :seon.operator/heads restored
                                           :seon.operator/adoption adoption
                                           :seon.boot/advertisement (:seon.boot/advertisement outcome)
                                           :seon.operator/terminated terminated})

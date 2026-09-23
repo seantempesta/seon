@@ -109,3 +109,95 @@ change. Limits: `default` was not moved (lane rule); a move of a root with
 sibling clusters restarts only `default`. Incident: a mistyped `git config`
 read set `.git/config` `diff.ignoreSubmodules = status.submoduleSummary` for
 about a minute; unset at once, verified absent. RESET NEEDED: no.
+
+## Follow-up: a failed move stays revertible (P0 0j)
+
+Incident (orchestrator, `tmp/orchestrator/move/`): `start --head` of `default` to
+`ad41853a0` failed readiness after its boot had published HEAD's schema resources
+onto `:current-src` and `:cluster-default`; a move back to `bfcce39ad` then refused
+at `changed-source-paths` ("Predicate seon.profile/snapshot? has no admitted
+callable"), and `default` had to be nuked.
+
+Fix, option (b) of the follow-up (option (a), a candidate branch the boot publishes
+onto, needs `src/seon/cluster/boot.clj`, held by m9-adoption):
+
+- **Capture.** A move's child, before its boot writes, reads every roster branch's
+  head (`seon.cluster.registry/roster`, `branch-commit-id`) and sends it to the
+  operator as the callback's second line (`head-capture-form`). The store it opened
+  stays held, so boot's own `acquire-root-store!` reuses it (holder count) and the
+  store is opened once, as before; the launch form drops that holder when boot
+  answers.
+- **Restore.** No readiness, or a refused adoption: through the failed child's REPL
+  (it holds the flock), every branch whose head moved is put back on its EXACT
+  captured commit: every connection this JVM holds to it is released
+  (`datahike.connections/*connections*`, `connections.cljc:3`; `release` all,
+  `connector.cljc:468`), the branch is unlinked (`versioning.cljc:279`) and branched
+  again from the captured commit (`versioning.cljc:212`, which stores that commit's
+  own record as the head). A branch the attempt created is unlinked. `force-branch!`
+  (`versioning.cljc:323`) was tried first and rejected: it writes a NEW commit, so
+  the older program's adoption saw `prior ≠ published` and refused (zero-arming
+  [issue](../../../seon/issues/adoption-refuses-a-publication-that-changes-no-definition.md)).
+  The result is `:restored` only when every head equals its captured commit again;
+  an exited child answers `:unknown` with the captured heads.
+- **Found on the way, fixed:** a nuke archive carried no `dependency-pins.txt`, so
+  `git ls-files` inside it answered the ENCLOSING checkout's index and the nuke
+  published the checkout's gitlink pins (datahike, bumped in `cc1aa4f00`), not the
+  commit's; every archive now records its commit's pins at build time.
+- **Found on the way, fixed:** linking an archive's `.clj-kondo/.cache` to the
+  checkout's was wrong. clj-kondo keys an entry by namespace name only, so it is
+  valid only for the bytes last linted; the checkout's cache follows the working
+  tree. A scratch move to `ad41853a0` refused publication on `Unresolved var:
+  cache/worker-checkout!` (entries of the working tree's `seon.test.cache`). Each
+  root now has one analyzer cache, `data/source/analysis-cache`, seeded once by
+  copy from the replaced JVM's own cache (the program the store published), linked
+  from every archive of that root. **The checkout's `.clj-kondo/.cache` received
+  entries linted from committed archives (default's `start --head` runs and this
+  lane's scratch runs, which linked it): its owner (publication-work) should
+  re-lint the working tree into it.**
+
+### Proof (scratch root `tmp/mth2-root`, deleted after; no holder)
+
+Evidence `tmp/mth-evidence/revertible/` (`round1`, `round2` are the superseded
+`force-branch!` and pre-pins attempts).
+
+| Step | Program | Result | Wall | Phases (ms) |
+|---|---|---|---|---|
+| 1 | nuke at `bfcce39ad` | ready | 227,530 | launch 214,163; ready 168,413 |
+| 2 | move to `ad41853a0` | publishes, adoption refused (`write-render-target-error` arity); heads restored exactly: `:current-src` `6ab32d5e…`→`6ab32cba…`, `:cluster-default` `6ab32d6a…`→`6ab32cd7…` = captured | 163,540 | source 5,110; down 3,602; launch 140,946; ready 107,272; adopt 12,769; restore 386 |
+| 3 | move back to `bfcce39ad` | **ready, adoption converged** (`6ab32cba…` = captured `:current-src`); `ad41853a0` archive pruned | 49,420 | launch 45,274; ready 10,497; adopt 1,938 |
+| 4 | move to `f96dd9c0e` (= `bfcce39ad` + one docstring) | ready, **adopted** `6ab32e00…` | 90,590 | launch 79,708; ready 31,751; adopt 5,287 |
+| 7 | final code: move to `bfcce39ad` | ready, adopted | 59,330 | launch 50,907; ready 18,311; adopt 3,316; capture 31,315 of which store read 118 |
+| 8 | final code: move to `ad41853a0` | refused adoption; restored; heads-after = captured | 146,310 | ready 99,019; adopt 10,058; restore 135 |
+| 9 | final code: move back to `bfcce39ad` | ready, adoption converged on the captured commit | 46,460 | launch 44,115; ready 10,123; adopt 1,405 |
+
+Store unchanged except the failed attempt: the `:db` head is the same commit
+(`6ab32c23…`) in every capture; `:unlinked []` (the failed attempts created no
+branch); the failed commits are unreachable for the retention sweep.
+
+### Hot-path timing (successful move, parent `e4f280e81` vs this)
+
+The success path adds one store read in the child: 118–135 ms (`store-read-ms`),
+which is the store open plus three head reads; the store stays held into boot, so
+boot's own open (measured 119 ms by lane resume-in-seconds) becomes a holder
+increment: net ≈ 0 by construction. `capture-ms` (31–47 s) is the `require` of
+`seon.cluster` that boot performs next anyway (dependency class miss). Whole
+moves on the same one-docstring shape: parent 85,670 ms (drill 2 above, load 17)
+vs this 90,590 / 59,330 ms (load 23 / 15): machine load dominates; no slowdown is
+attributable to the change. A parent run from an extract was not possible: the
+operator derives its checkout from its own file location and refuses outside a Git
+top level.
+
+| Operation | ms | Justification / defect |
+|---|---|---|
+| head capture store read | 118–135 | store open + roster + 3 head records; replaces boot's own open |
+| head restore | 135–386 | per moved branch: release, unlink, branch (2 branches) |
+| nuke at an older commit | 196,320–227,530 | DEFECT, from-zero class (lane-owned issue) |
+| failed move | 146,310–163,540 | DEFECT: 99–107 s boot publication of HEAD's diff ([move-to-head issue](../../../seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md)) |
+| move back / success moves | 46,460–90,590 | DEFECT, same issue: JVM start 44–80 s with no class cache |
+
+Commits: this follow-up's commit (paths `script/seon/operator.clj`,
+`script/seon/operator_move_test.clj`, this note). Regression: 7 tests, 39
+assertions, 0 failures (bb, 0.4 s), adding the per-root analysis cache and the
+capture/restore form structure (exact-commit branch!, never force-branch!).
+Limit: the restore runs only in a live failed child; a child that exits after
+writing leaves the heads captured in the result for a manual restore.

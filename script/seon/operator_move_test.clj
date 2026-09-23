@@ -54,8 +54,10 @@
       ;; An archive a JVM ran from before carries its own private kondo cache.
       (fs/create-dirs (fs/path archive ".clj-kondo" ".cache" "v1"))
       (spit (str (fs/path archive ".clj-kondo" ".cache" "v1" "private")) "private")
-      (let [first-pass (#'operator/share-caches! (str repository) (str archive) pins)
-            second-pass (#'operator/share-caches! (str repository) (str archive) pins)]
+      (let [links {"target" (str (fs/path repository "target"))
+                   ".clj-kondo/.cache" (str (fs/path repository ".clj-kondo" ".cache"))}
+            first-pass (#'operator/share-caches! links (str archive) pins)
+            second-pass (#'operator/share-caches! links (str archive) pins)]
         (is (= "store" (slurp (str (fs/path root "data" "store" "datoms")))) "the store is untouched")
         (is (= {"target" :linked ".clj-kondo/.cache" :replaced}
                (into {} (map (juxt :path :placed)) (:seon.operator/linked first-pass))))
@@ -114,3 +116,51 @@
   (is (str/includes? (try (operator/parse-argv ["stop" "--head"]) ""
                           (catch clojure.lang.ExceptionInfo refusal (ex-message refusal)))
                      "only by start")))
+
+(deftest a-root-analysis-cache-follows-the-program-it-replaces
+  (let [base (fs/create-temp-dir {:prefix "seon-move-analysis"})
+        root (fs/path base "root")
+        previous (fs/path base "previous")
+        fresh (fs/path base "fresh")]
+    (try
+      (fs/create-dirs (fs/path previous ".clj-kondo" ".cache" "v1"))
+      (spit (str (fs/path previous ".clj-kondo" ".cache" "v1" "seon.a.transit.json")) "program")
+      (fs/create-dirs fresh)
+      (let [seeded (#'operator/root-analysis-cache! (str root) (str previous))
+            kept (#'operator/root-analysis-cache! (str root) (str fresh))
+            cache (:seon.operator/analysis-cache seeded)]
+        (is (= (str (fs/canonicalize (fs/path previous ".clj-kondo" ".cache")))
+               (:seon.operator/seeded seeded))
+            "the replaced program's analysis seeds the root's cache")
+        (is (= "program" (slurp (str (fs/path cache "v1" "seon.a.transit.json")))))
+        (is (= :kept (:seon.operator/seeded kept)) "a later move keeps the root's own cache")
+        (is (= "program" (slurp (str (fs/path previous ".clj-kondo" ".cache" "v1" "seon.a.transit.json"))))
+            "the seed is copied, never moved"))
+      (is (= :empty (:seon.operator/seeded
+                     (#'operator/root-analysis-cache! (str (fs/path base "other")) nil)))
+          "a root with no prior program starts empty and says so")
+      (finally (fs/delete-tree base)))))
+
+(deftest a-move-states-branch-heads-before-its-boot-writes
+  (let [with-capture (read-string (#'operator/launch-form
+                                   {:seon.boot/cluster-name "default"
+                                    :seon.operator/capture-heads "/root/data/store"} 1))
+        without (read-string (#'operator/launch-form {:seon.boot/cluster-name "default"} 1))
+        symbols (fn [form] (set (filter symbol? (tree-seq coll? seq form))))
+        boot-request (fn [form] (some #(when (and (seq? %) (= 'clojure.core/assoc (first %))
+                                                  (map? (second (second %))))
+                                         (second (second %)))
+                                      (tree-seq coll? seq form)))]
+    (is (contains? (symbols with-capture) 'seon.cluster.registry/branch-commit-id)
+        "the child reads every head from the roster")
+    (is (not (contains? (symbols without) 'seon.cluster.registry/branch-commit-id))
+        "a start or nuke reads none")
+    (is (= "default" (:seon.boot/cluster-name (boot-request with-capture))))
+    (is (not (contains? (boot-request with-capture) :seon.operator/capture-heads))
+        "boot receives the request without the operator's capture key"))
+  (let [form (read-string (pr-str (#'operator/head-restore-form
+                                   "/root/data/store"
+                                   {:current-src #uuid "6ab327f6-766f-5ea5-8c16-5f386271f129"})))]
+    (is (contains? (set (filter symbol? (tree-seq coll? seq form))) 'datahike.api/branch!)
+        "a head is restored to its exact commit by branching from it, never force-branch!'s new commit")
+    (is (not (contains? (set (filter symbol? (tree-seq coll? seq form))) 'datahike.api/force-branch!)))))
