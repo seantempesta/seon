@@ -534,7 +534,7 @@
                                        "This changed declaration has no bounded graph selection." change))))))
    #{} changed))
 
-(defn- green-members
+(defn green-members
   "Member identities with positive, terminated assertion evidence."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :int]] [:set :int]]}
   [database members]
@@ -1022,7 +1022,11 @@
         cluster-row (when cluster (db/pull database [:db/id :seon.cluster/name] cluster))
         cluster-id (:db/id cluster-row)
         branch (get-in (db/schema-database database) [:config :branch])
-        digest (if snapshot? (:seon.test.run/program-digest run) (runner/program-digest database))
+        ;; The writer's value has no commit id, so the digest memo cannot name it;
+        ;; with no program write since the tested basis its digest is the tested one.
+        digest (if (or snapshot? (false? (runner/program-written-since? database (:seon.test.run/basis-t run))))
+                 (:seon.test.run/program-digest run)
+                 (runner/program-digest database))
         row (-> (merge (select-keys request
                                    [:seon.test.run/cluster :seon.test.run/input-digest
                                     :seon.test.run/policy :seon.test.run/include-long?
@@ -1677,6 +1681,10 @@
                                                 (concat (:seon.test/destructive-excluded exclusions)
                                                         (:seon.test/deferred exclusions))))]
                          (vec (remove excluded selected))))
+            ;; One reach read over every runnable member: each member's
+            ;; recording then reads the index (68 members 1,086 ms, against
+            ;; 317 ms for each member read alone, 2026-09-23).
+            reach (when (seq runnable) (runner/reach-digests database runnable))
             provenance (:seon.test.run/provenance selection)
             exclusion-rows
             (when runnable
@@ -1693,6 +1701,7 @@
         (cond
           (:seon.error/at selection) selection
           (:seon.error/at exclusions) exclusions
+          (:seon.error/at reach) reach
           :else
           (let [platform? (fn [test-symbol]
                             (some #(and (= test-symbol (:seon.test.member/symbol %))

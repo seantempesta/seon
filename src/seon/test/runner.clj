@@ -784,9 +784,22 @@
               seen (into seen pending)]
           (recur (into #{} (remove seen) (identities tokens)) seen (merge rows acquired)))))))
 
+(defn- reach-revisions
+  "Datahike's revisions of the attributes reach reads (`datahike.db/advance-cache-context`,
+  `reference-code/datahike/src/datahike/db.cljc:423`): equal revisions mean no reach
+  datom changed, so a moved head costs one map comparison, not a history scan."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:vector :seon.schema/value]]]}
+  [database]
+  (let [context (:cache-context database)]
+    (when (:datahike.cache/committed? context)
+      [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
+       (:datahike.cache/conservative-revision context)
+       (select-keys (:datahike.cache/attribute-revisions context) reach-attributes)])))
+
 (defn- reach-refresh [database previous test-symbols]
  (let [basis (db/basis-t database)
-       changed-entities (when previous
+       revisions (reach-revisions database)
+       changed-entities (when (and previous (not (and revisions (= revisions (::reach-revisions previous)))))
                           (db/q '[:find [?entity ...] :in $ [?attribute ...]
                                   :where [?entity ?attribute]]
                                 (db/since (db/history database) (::reach-basis previous))
@@ -795,9 +808,11 @@
      (throw (ex-info "Reach changes unavailable." changed-entities)))
    (if (and previous (empty? changed-entities)
             (every? #(get-in previous [::reach-symbols %]) test-symbols))
-     (assoc previous ::reach-basis basis ::reach-updated 0 ::reach-invalidated 0)
+     (assoc previous ::reach-basis basis ::reach-revisions revisions ::reach-updated 0 ::reach-invalidated 0)
  (let [by-entity (reach-facts database test-symbols)
-       ids (into (set (keys (::reach-rows previous))) (keys by-entity))
+       ;; Rows re-read for these tests, and retained rows a write since the
+       ;; previous basis touched; every other retained row is kept as it is.
+       ids (into (set (keys by-entity)) (filter (::reach-rows previous {})) changed-entities)
        old-rows (::reach-rows previous {})
        pulled (mapv (fn [entity] (assoc (get by-entity entity {}) :db/id entity)) ids)
        changed (filterv #(not= (dissoc (get old-rows (:db/id %)) ::reach-symbol ::reach-leaf ::reach-keys) %) pulled)
@@ -816,7 +831,7 @@
                     (::reach-digests previous {}))
               (::reach-digests previous {}))]
   (assoc (or previous {})
-    ::reach-basis basis ::reach-rows rows
+    ::reach-basis basis ::reach-revisions revisions ::reach-rows rows
     ::reach-symbols (if (seq changed) (into {} (keep (fn [[e r]] (when-let [s (::reach-symbol r)] [s e]))) rows) (::reach-symbols previous {}))
     ::reach-schemas schemas
     ::reach-digests kept
@@ -877,9 +892,12 @@
   (if holder
    (locking holder
     (let [previous (::reach-index (meta holder))
+          revisions (reach-revisions database)
+          ;; Equal reach-attribute revisions name the same reach rows at any basis.
           usable (and value-identity (= configuration (::reach-config previous))
                       (or (< (::reach-basis previous 0) (db/basis-t database))
-                          (and value-identity (= value-identity (::reach-value-identity previous)))))
+                          (= value-identity (::reach-value-identity previous))
+                          (and revisions (= revisions (::reach-revisions previous)))))
           index (derive-index (when usable previous))]
      (when (and value-identity (or usable (nil? previous)))
       (alter-meta! holder assoc ::reach-index index))
@@ -930,63 +948,56 @@
       (conj :seon.source/digest)))
 
 (defn- derive-program-digest
-  "Identify the tested program from its source seal and current program facts.
-  An unchanged publication keeps its exact snapshot digest. Admitted changes
-  extend that identity with canonical program facts; result-only writes do not.
-  Only program rows touched since the seal need comparison."
+  "Identify the tested program from its source seal and the program rows
+  written since it. An unchanged publication keeps its exact snapshot digest.
+  Each row written since the seal contributes its identity and its producer's
+  `:seon.program/definition-digest` (absent: a digest of its program fact;
+  retracted: nothing), so the cost follows the rows written since the seal:
+  no as-of read, and no printing of whole rows. Result-only writes touch no
+  program attribute."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.test.run/program-digest :seon.test.run/unavailable-error]]}
   [database]
   (try
-   (let [seals (db/q '[:find ?digest ?t
-                     :where [_ :seon.source/digest ?digest ?t]] database)
-        _ (when (and (map? seals) (contains? seals :seon.error/at) (contains? seals :seon.error/layer) (contains? seals :seon.error/operation))
-            (throw (ex-info "Cannot read the tested source identity." seals)))
-        _ (when (> (count seals) 1)
-            (throw (ex-info "The tested program has multiple source seals." {})))
-        [digest basis] (first seals)
-        _ (when-not digest
-            (throw (ex-info "The tested program has no source snapshot identity." {})))
-        before (db/as-of database basis)
-        changed (db/since (db/history database) basis)
-        ;; Only a program attribute's datom can change a program fact: a result
-        ;; write since the seal is no work here.
-        changed-entities (if (= basis (db/basis-t database))
-                           []
-                           (db/q '[:find [?entity ...] :in $ [?attribute ...]
+   (let [read! (fn [value message]
+                 (when (and (map? value) (:seon.error/at value) (:seon.error/layer value)
+                            (:seon.error/operation value))
+                   (throw (ex-info message value)))
+                 value)
+         seals (read! (db/q '[:find ?digest ?t :where [_ :seon.source/digest ?digest ?t]] database)
+                      "Cannot read the tested source identity.")
+         _ (when (> (count seals) 1)
+             (throw (ex-info "The tested program has multiple source seals." {})))
+         [digest basis] (first seals)
+         _ (when-not digest
+             (throw (ex-info "The tested program has no source snapshot identity." {})))
+         projection (or (db/carried-projection database) (schema/handed-projection))
+         changed (db/since (db/history database) basis)
+         entities (if (= basis (db/basis-t database))
+                    []
+                    (read! (db/q '[:find [?entity ...] :in $ [?attribute ...]
                                    :where [?entity ?attribute]]
-                                 changed
-                                 (vec (program-digest-read-attributes
-                                       (or (db/carried-projection database)
-                                           (schema/handed-projection))))))
-        _ (when (and (map? changed-entities) (:seon.error/at changed-entities))
-            (throw (ex-info "Cannot identify changes since the source identity." changed-entities)))
-        entities (if (seq changed-entities)
-                   (db/q '[:find [?entity ...]
-                           :in $ [?entity ...] [?identity ...]
-                           :where [?entity ?identity]]
-                         database changed-entities program/identity-attributes)
-                   [])
-        _ (when (and (map? entities) (contains? entities :seon.error/at) (contains? entities :seon.error/layer) (contains? entities :seon.error/operation))
-            (throw (ex-info "Cannot identify changed program rows." entities)))
-        old-rows (if (seq entities) (db/pull-many before '[*] entities) [])
-        current-rows (if (seq entities) (db/pull-many database '[*] entities) [])
-        _ (doseq [rows [old-rows current-rows]]
-            (when (and (map? rows) (contains? rows :seon.error/at) (contains? rows :seon.error/layer) (contains? rows :seon.error/operation))
-              (throw (ex-info "Cannot read tested program rows." rows))))
-        row-shapes (when (seq entities)
-                     (program/shapes-in (or (db/carried-projection database)
-                                            (schema/handed-projection))))
-        differences
-        (into []
-              (keep (fn [[old-row current-row]]
-                      (let [old (program-fact row-shapes old-row)
-                            current (program-fact row-shapes current-row)]
-                        (when (not= old current)
-                          [(program/row-identity (or current old)) current]))))
-              (map vector old-rows current-rows))]
-    (if (empty? differences) digest
-        (id/digest 64 [digest (vec (sort-by pr-str differences))])))
+                                 changed (vec (program-digest-read-attributes projection)))
+                           "Cannot identify changes since the source identity."))
+         rows (if (seq entities)
+                (read! (db/q '[:find ?entity ?attribute ?value ?definition
+                               :in $ [?entity ...] [?attribute ...]
+                               :where [?entity ?attribute ?value]
+                                      [(get-else $ ?entity :seon.program/definition-digest "") ?definition]]
+                             database entities program/identity-attributes)
+                       "Cannot read tested program rows.")
+                [])
+         undigested (into [] (keep (fn [[entity _ _ definition]] (when (= "" definition) entity))) rows)
+         row-shapes (when (seq undigested) (program/shapes-in projection))
+         facts (zipmap undigested
+                       (map #(some->> (program-fact row-shapes %) vector (id/digest 64))
+                            (read! (db/pull-many database '[*] undigested) "Cannot read tested program rows.")))
+         entries (->> rows
+                      (keep (fn [[entity attribute value definition]]
+                              (when-let [content (if (= "" definition) (get facts entity) definition)]
+                                [(pr-str [attribute value]) content])))
+                      sort vec)]
+     (if (empty? entries) digest (id/digest 64 [digest entries])))
    (catch Exception failure
      {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/provenance
       :seon.error/operation 'seon.test.runner/program-digest
@@ -994,6 +1005,21 @@
       :seon.test.run/provenance-failure (or (ex-message failure) (.getName (class failure)))
       :seon.error/data (or (ex-data failure) {})
       :seon.error/message (str "Test provenance unavailable: " (ex-message failure))})))
+
+(defn program-written-since?
+  "Whether any datom of an attribute the program digest reads was written after
+  `basis-t` on `database`'s lineage: O(datoms since `basis-t`). A value with no
+  such write has the program digest of its `basis-t` value, which lets the
+  writer's in-transaction value (no commit id, so no memo) confirm a digest
+  its caller derived instead of deriving it again."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
+                  [:or :boolean :seon.db/invalid-read-error]]}
+  [database basis-t]
+  (let [written (db/q '[:find ?entity . :in $ [?attribute ...] :where [?entity ?attribute]]
+                      (db/since (db/history database) basis-t)
+                      (vec (program-digest-read-attributes
+                            (or (db/carried-projection database) (schema/handed-projection)))))]
+    (if (and (map? written) (:seon.error/at written)) written (some? written))))
 
 (def program-digest-cache-policy
   "Bound the program digests one projection retains independently of the number of commits."
@@ -1109,49 +1135,60 @@
     (throw (ex-info (:seon.error/message value) value)))
   value)
 
-(defn- execution-members [database run-id]
-  (let [run (execution-read
-             (db/pull database [:db/id :seon.test.run/selection-tx]
-                      [:seon.test.run/id run-id]))]
-    (when-not (:seon.test.run/selection-tx run)
-      (execution-refusal! 'seon.test.runner/execution-members run-id
-                          :seon.test/population-unknown :admitted-selection
-                          (or run :absent)))
-    (let [members-at
-          (fn [value]
-            (execution-read
-             (db/q '[:find [?member ...] :in $ ?run [?attribute ...]
-                     :where [?run ?attribute ?member]]
-                   value (:db/id run)
-                   [:seon.test.run/members :seon.test.run/covered-by])))
-          current (members-at database)
-          selected-at (get-in run [:seon.test.run/selection-tx :db/id])
-          selected (members-at (db/as-of database selected-at))]
-      (when (not= (set selected) (set current))
-        (execution-refusal! 'seon.test.runner/execution-members run-id
-                            :seon.test/population-unknown selected current))
-    (mapv
-     (fn [member-id]
-       (let [member (execution-read
-       (db/pull database
-                [:db/id :seon.test.member/symbol :seon.test.member/reasons
-                 :seon.test.member/worker :seon.test.member/claimed-at
-                 :seon.test.member/claim-tx :seon.test.member/host
-                 :seon.test.member/completed-tx :seon.test.member/terminated-tx
-                 :seon.test.member/pass-count :seon.test.member/fail-count
-                 :seon.test.member/error-count :seon.test.member/began?
-                 :seon.test.member/ended? :seon.test.member/error] member-id))
-             counts (select-keys member [:seon.test.member/pass-count :seon.test.member/fail-count
-                                         :seon.test.member/error-count])]
-         (when (or (and (:seon.test.member/completed-tx member)
-                        (or (not= 3 (count counts))
-                            (not (boolean? (:seon.test.member/began? member)))
-                            (not (boolean? (:seon.test.member/ended? member)))))
-                   (and (seq counts) (not (:seon.test.member/completed-tx member))))
-           (execution-refusal! 'seon.test.runner/execution-members run-id
-                               :seon.test/population-unknown :complete-outcome member))
-         member))
-     current))))
+(defn- execution-members
+  "The admitted members of `run-id` (those named by `symbols` when given), each
+  pulled once. Membership refs are asserted only by the admission transaction,
+  so any membership datom from another transaction (an addition or a
+  retraction) is a changed population: one history read of this run's refs,
+  never an as-of view of the store."
+  ([database run-id] (execution-members database run-id nil))
+  ([database run-id symbols]
+   (let [run (execution-read
+              (db/pull database [:db/id :seon.test.run/selection-tx]
+                       [:seon.test.run/id run-id]))
+         _ (when-not (:seon.test.run/selection-tx run)
+             (execution-refusal! 'seon.test.runner/execution-members run-id
+                                 :seon.test/population-unknown :admitted-selection
+                                 (or run :absent)))
+         attributes [:seon.test.run/members :seon.test.run/covered-by]
+         changed (execution-read
+                  (db/q '[:find [?member ...] :in $ ?run [?attribute ...] ?selected
+                          :where [?run ?attribute ?member ?tx] [(not= ?tx ?selected)]]
+                        (db/history database) (:db/id run) attributes
+                        (get-in run [:seon.test.run/selection-tx :db/id])))
+         _ (when (seq changed)
+             (execution-refusal! 'seon.test.runner/execution-members run-id
+                                 :seon.test/population-unknown :admitted-membership changed))
+         current (execution-read
+                  (if symbols
+                    (db/q '[:find [?member ...] :in $ ?run [?attribute ...] [?symbol ...]
+                            :where [?run ?attribute ?member] [?member :seon.test.member/symbol ?symbol]]
+                          database (:db/id run) attributes (vec symbols))
+                    (db/q '[:find [?member ...] :in $ ?run [?attribute ...]
+                            :where [?run ?attribute ?member]]
+                          database (:db/id run) attributes)))]
+     (mapv
+      (fn [member]
+        (let [counts (select-keys member [:seon.test.member/pass-count :seon.test.member/fail-count
+                                          :seon.test.member/error-count])]
+          (when (or (and (:seon.test.member/completed-tx member)
+                         (or (not= 3 (count counts))
+                             (not (boolean? (:seon.test.member/began? member)))
+                             (not (boolean? (:seon.test.member/ended? member)))))
+                    (and (seq counts) (not (:seon.test.member/completed-tx member))))
+            (execution-refusal! 'seon.test.runner/execution-members run-id
+                                :seon.test/population-unknown :complete-outcome member))
+          member))
+      (execution-read
+       (db/pull-many database
+                     [:db/id :seon.test.member/symbol :seon.test.member/reasons
+                      :seon.test.member/worker :seon.test.member/claimed-at
+                      :seon.test.member/claim-tx :seon.test.member/host
+                      :seon.test.member/completed-tx :seon.test.member/terminated-tx
+                      :seon.test.member/pass-count :seon.test.member/fail-count
+                      :seon.test.member/error-count :seon.test.member/began?
+                      :seon.test.member/ended? :seon.test.member/error]
+                     (vec current)))))))
 
 (defn- worker-identity [database worker]
   (execution-read
@@ -1279,7 +1316,8 @@
   (let [run-id (:seon.test.run/id run)
         operation 'seon.test.runner/record-tx
         members (into {} (map (juxt :seon.test.member/symbol identity))
-                      (execution-members database run-id))
+                      (execution-members database run-id
+                                         (mapv (comp symbol :seon.test/sym) results)))
         worker-id (when worker (:db/id (worker-identity database worker)))
         claim-id (when claim (:db/id (execution-read (db/pull database [:db/id] claim))))
         forms (:seon.schema.projection/forms (db/carried-projection database))
@@ -1659,8 +1697,7 @@
          :seon.test/execution-refusal :seon.test/population-unknown)))))
 
 (defn- recorded-member-result [database run test-symbol]
-  (let [member (first (filter #(= (symbol test-symbol) (:seon.test.member/symbol %))
-                             (execution-members database (:seon.test.run/id run))))
+  (let [member (first (execution-members database (:seon.test.run/id run) [(symbol test-symbol)]))
         report-ids (execution-read
                     (db/q '[:find [?report ...] :in $ ?member
                             :where [?member :seon.test.member/failures ?report]]
