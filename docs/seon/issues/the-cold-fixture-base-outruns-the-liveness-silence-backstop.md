@@ -182,7 +182,7 @@ than repeated whole-population queries. Every fixture carries the same
 projection object. The landing note records the complete split and prior
 failed measurements. Plain database fixture acquisition now meets all three
 targets; this issue remains open for the separate cold SCI readiness and
-obsolete liveness allowances, now owned by `src/seon/test/bounds.clj`.
+obsolete liveness allowances, now owned by `8bc917872^:src/seon/test/bounds.clj`.
 
 ## Base-export client boundary — 2026-09-22
 

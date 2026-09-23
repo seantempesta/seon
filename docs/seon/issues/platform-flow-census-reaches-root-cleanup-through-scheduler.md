@@ -9,7 +9,7 @@ tags: [issue, testing, flow]
 # Platform admission refuses the Flow census through scheduler reach
 
 The preparation-cost slice's `bin/test --paths src/seon/test/runner.clj
-src/seon/test/arm.clj test/seon/test_preparation_test.clj --platform` at snapshot
+src/seon/test/arm.clj 8bc917872^:test/seon/test_preparation_test.clj --platform` at snapshot
 HEAD `1304a404b32b407fb74caaadc4c3d71faaaffbb2` selected 96 platform tests, then
 refused before any test began. Kind: `:seon.test.runner/destructive-platform-test`.
 Exact reported path:
