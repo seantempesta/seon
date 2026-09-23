@@ -3,7 +3,9 @@
   must still hold its name (`name` (`path:N`)): a Clojure Var (clj-kondo
   `:var-definitions`) overlapping the lines, or the name on them. A missing
   path fails. `bb script/seon/dev/citations.clj [file ...]`; with no file, the
-  staged skill Markdown (the git pre-commit hook). Git blame says what moved."
+  staged skill Markdown (the git pre-commit hook). Every file is read from the
+  index, the content being committed (HEAD's blob where nothing is staged),
+  never the working tree. Git blame says what moved."
   (:require [babashka.fs :as fs]
             [babashka.process :as process]
             [clojure.edn :as edn]
@@ -63,17 +65,35 @@
              :text (first (ss j)) :cited path :start start :end end}
       nm (assoc :name (str/replace-first nm "#'" "")))))
 
+(defn- index-blobs
+  "{path content}: the blobs of `paths` as committed, one `git cat-file --batch`
+  per repository (concurrently): the index, or a submodule's file at the gitlink
+  `links` names."
+  [root links paths]
+  (->> (group-by (fn [p] (some #(when (str/starts-with? p (key %)) (key %)) links)) paths)
+       (pmap (fn [[pre ps]]
+               (let [in (java.io.DataInputStream. (java.io.ByteArrayInputStream.
+                          (:out (process/sh ["git" "cat-file" "--batch"]
+                                            {:dir (str root "/" pre) :out :bytes
+                                             :in (str/join (map #(str (if pre (str (links pre) ":" (subs % (count pre))) (str ":" %)) "\n") ps))}))))]
+                 (for [p ps :let [h (.readLine in) n (or (parse-long (subs h (inc (str/last-index-of h " "))))
+                                                         (throw (ex-info "not committed" {:path p :git h})))
+                                  b (byte-array n)]]
+                   (do (.readFully in b) (.read in) [p (String. b "UTF-8")])))))
+       (into {} cat)))
+
 (defn- definitions
   "{path [{:row :end-row :name}]}: clj-kondo `:var-definitions`, one process per
   path, run concurrently (one run over many paths is serial: 0.95 s for 7 files).
   A run that yields no analysis throws with its exit and stderr."
-  [root paths]
+  [root blobs paths]
   (into {}
         (pmap (fn [path]
                 (let [{:keys [exit out err]} (process/sh ["clj-kondo" "--cache" "false" "--config"
                                                           (str "{:output {:format :edn} :linters ^:replace {} :analysis {:var-usages false"
                                                                " :locals false :keywords false :arglists false :protocol-impls false}}")
-                                                          "--lint" path] {:dir root})
+                                                          "--filename" path "--lint" "-"]
+                                                         {:dir root :in (blobs path)})
                       analysis (:analysis (edn/read-string out))]
                   (when-not (map? analysis)
                     (throw (ex-info "clj-kondo returned no analysis" {:exit exit :err err :path path})))
@@ -102,21 +122,25 @@
 (defn check
   "The failing citations of `documents` (root-relative) under `root`."
   [root documents]
-  (let [cites (for [doc documents
-                    :let [cs (citations (slurp (str (fs/path root doc))))
-                          dirs (->> cs (map :cited) (filter #(fs/regular-file? (fs/path root %)))
+  (let [git #(str/split-lines (:out (process/sh (into ["git" "ls-files"] %&) {:dir root})))
+        file? (set (git "--recurse-submodules"))
+        links (into {} (for [l (git "--stage") :when (str/starts-with? l "160000 ")]
+                         [(str (subs l (inc (str/index-of l "\t"))) "/") (subs l 7 (str/index-of l " " 7))]))
+        docs (index-blobs root links documents)
+        cites (for [doc documents
+                    :let [cs (citations (docs doc))
+                          dirs (->> cs (map :cited) (filter file?)
                                     (mapcat #(take-while some? (rest (iterate fs/parent (fs/path %))))) distinct)]
                     c cs]
-                (let [file? #(fs/regular-file? (fs/path root %))
-                      ;; a bare filename resolves below one directory the document cites
+                (let [;; a bare filename resolves below one directory the document cites
                       ms (distinct (filter file? (map #(str (fs/path % (:cited c))) dirs)))]
                   (assoc c :doc doc :path (if (file? (:cited c)) (:cited c) (when (= 1 (count ms)) (first ms))))))
-        lines (into {} (map (fn [p] [p (str/split-lines (slurp (str (fs/path root p))))]))
-                    (distinct (keep :path cites)))
+        blobs (index-blobs root links (distinct (keep :path cites)))
+        lines (update-vals blobs str/split-lines)
         ;; a name on its cited lines holds without analysis, so only the Clojure
         ;; files of text failures are linted: the Var may still overlap the lines
         suspects (filter #(verdict % (lines (:path %)) []) cites)
-        defs (definitions root (distinct (filter #(some (partial str/ends-with? %) [".clj" ".cljc" ".cljs"])
+        defs (definitions root blobs (distinct (filter #(some (partial str/ends-with? %) [".clj" ".cljc" ".cljs"])
                                                  (keep :path suspects))))]
     (for [c suspects :let [why (verdict c (lines (:path c)) (get defs (:path c) []))] :when why]
       (assoc c :why why))))
