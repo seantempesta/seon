@@ -22,27 +22,28 @@
             written
             (db/transact!
              connection
-             [{:db/id "agent" :seon.agent/id "runtime-reader"
-               :seon.agent/runtime
-               {:seon.runtime/agent "agent"
-                :seon.runtime/trigger "message"
-                :seon.runtime/turns ["older" "newer"]
-                :seon.runtime/listens [{:seon.listen/attribute :seon.message/to}]}}
-              {:seon.agent/id "root"}
-              {:db/id "message" :seon.message/id "private-message-id"
-               :seon.message/from [:seon.agent/id "root"]
-               :seon.message/to "agent"
-               :seon.message/content "Which customer has the largest total?\nShow the calculation."}
-              {:db/id "older" :seon.turn/id "private-older-id"
-               :seon.turn/agent "agent" :seon.turn/opened-tx "datomic.tx"
-               :seon.turn/closed-tx "datomic.tx" :seon.turn/reply-blob reply-digest}
-              {:db/id "newer" :seon.turn/id "private-newer-id"
-               :seon.turn/agent "agent" :seon.turn/opened-tx "datomic.tx"
-               :seon.turn/trigger "message" :seon.turn/reply "Newest reply\nFull reply remains stored."}
-              {:seon.cluster.eval/id "private-eval-id"
-               :seon.cluster.eval/at (java.util.Date. 0)
-               :seon.cluster.eval/run "newer" :seon.cluster.eval/ordinal 0
-               :seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3"}])
+             (into (support/agent-tx @connection "root")
+               [{:db/id "agent" :seon.agent/id "runtime-reader"
+                 :seon.agent/runtime
+                 {:seon.runtime/agent "agent"
+                  :seon.runtime/trigger "message"
+                  :seon.runtime/turns ["older" "newer"]
+                  :seon.runtime/listens [{:seon.listen/attribute :seon.message/to}]}}
+              
+                {:db/id "message" :seon.message/id "private-message-id"
+                 :seon.message/from [:seon.agent/id "root"]
+                 :seon.message/to "agent"
+                 :seon.message/content "Which customer has the largest total?\nShow the calculation."}
+                {:db/id "older" :seon.turn/id "private-older-id"
+                 :seon.turn/agent "agent" :seon.turn/opened-tx "datomic.tx"
+                 :seon.turn/closed-tx "datomic.tx" :seon.turn/reply-blob reply-digest}
+                {:db/id "newer" :seon.turn/id "private-newer-id"
+                 :seon.turn/agent "agent" :seon.turn/opened-tx "datomic.tx"
+                 :seon.turn/trigger "message" :seon.turn/reply "Newest reply\nFull reply remains stored."}
+                {:seon.cluster.eval/id "private-eval-id"
+                 :seon.cluster.eval/at (java.util.Date. 0)
+                 :seon.cluster.eval/run "newer" :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/source "(+ 1 2)" :seon.eval/shown "3"}]))
             _ (is (:db-after written) (pr-str written))
             opened (db/transact! connection
                                  [[:db/add [:seon.turn/id "private-newer-id"]

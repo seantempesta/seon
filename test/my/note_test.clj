@@ -12,9 +12,8 @@
   (support/with-database
     (fn [connection]
       (let [written (db/transact! connection
-                                  [{:seon.agent/id "alice"}
-                                   {:seon.agent/id "bob"}
-                                   [:db/add "subject" :seon.message/id "subject-1"]])]
+                                  (into (support/agents-tx @connection ["alice" "bob"])
+                                    [[:db/add "subject" :seon.message/id "subject-1"]]))]
         (is (:db-after written) (pr-str written)))
       (f connection))))
 

@@ -14,21 +14,21 @@
       (let [now (Date.)]
         (support/transacted!
                 connection
-                [{:seon.agent/id "background-agent"}
-                 {:seon.turn/id "origin-run" :seon.turn/agent [:seon.agent/id "background-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
-                 {:seon.effect/id "background-effect"
-                  :seon.effect/run [:seon.turn/id "origin-run"]
-                  :seon.effect/owner [:seon.fn/sym 'clojure.core/identity]
-                  :seon.effect/capability 'clojure.core/identity
-                  :seon.effect/form-ordinal 0
-                  :seon.effect/ordinal 0
-                  :seon.effect/request-edn "{}"
-                  :seon.effect/opened-at now
-                  :seon.effect/result-edn "{:my.example/value 7}"
-                  :seon.effect/result-size 21
-                  :seon.effect/duration-ms 3
-                  :seon.effect/settled-at now
-                  :seon.effect/to [:seon.agent/id "background-agent"]}])
+                (into (support/agent-tx @connection "background-agent")
+                  [{:seon.turn/id "origin-run" :seon.turn/agent [:seon.agent/id "background-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
+                   {:seon.effect/id "background-effect"
+                    :seon.effect/run [:seon.turn/id "origin-run"]
+                    :seon.effect/owner [:seon.fn/sym 'clojure.core/identity]
+                    :seon.effect/capability 'clojure.core/identity
+                    :seon.effect/form-ordinal 0
+                    :seon.effect/ordinal 0
+                    :seon.effect/request-edn "{}"
+                    :seon.effect/opened-at now
+                    :seon.effect/result-edn "{:my.example/value 7}"
+                    :seon.effect/result-size 21
+                    :seon.effect/duration-ms 3
+                    :seon.effect/settled-at now
+                    :seon.effect/to [:seon.agent/id "background-agent"]}]))
         (is (= {:seon.turn.work/situation :open
                 :seon.agent/id "background-agent"}
                (turn/next-agent-work

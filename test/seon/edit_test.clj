@@ -292,15 +292,16 @@
   [connection]
   (test-support/transacted!
    connection
-   [(:seon.config/desired-row
-     (config/compile-manifest
-      {:seon.boot/cluster-name "default"
-       :seon.config/manifest
-       {:seon.config.effect.background/time-limit-ms 60000}}))
-    {:seon.agent/id "edit-agent"}
-    {:seon.turn/id "edit-run"
-     :seon.turn/agent [:seon.agent/id "edit-agent"]
-     :seon.turn/opened-tx "datomic.tx"}]))
+   (into (test-support/agent-tx @connection "edit-agent")
+     [(:seon.config/desired-row
+       (config/compile-manifest
+        {:seon.boot/cluster-name "default"
+         :seon.config/manifest
+         {:seon.config.effect.background/time-limit-ms 60000}}))
+    
+      {:seon.turn/id "edit-run"
+       :seon.turn/agent [:seon.agent/id "edit-agent"]
+       :seon.turn/opened-tx "datomic.tx"}])))
 
 (defn- effect-of
   [connection ordinal]

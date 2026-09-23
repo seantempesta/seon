@@ -39,7 +39,7 @@
 (defn- with-connection [body]
   (test-support/with-database
     (fn [connection]
-      (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
+      (test-support/transacted! connection (test-support/agent-tx @connection "agent-a"))
       (body connection))))
 
 (defn- agent-eid
@@ -136,13 +136,13 @@
       :db/cardinality :db.cardinality/one}]}
    (fn [connection]
      (is (some? (:db-after (db/transact! connection
-                             [{:seon.agent/id "agent-a"}
-                              {:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
-                              [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
-                              {:seon.message/id "order-a" :seon.message/content "a"
-                               :seon.message/to [:seon.agent/id "agent-a"]}
-                              {:seon.message/id "order-b" :seon.message/content "b"
-                               :seon.message/to [:seon.agent/id "agent-a"]}]))))
+                             (into (test-support/agent-tx @connection "agent-a")
+                               [{:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
+                                [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
+                                {:seon.message/id "order-a" :seon.message/content "a"
+                                 :seon.message/to [:seon.agent/id "agent-a"]}
+                                {:seon.message/id "order-b" :seon.message/content "b"
+                                 :seon.message/to [:seon.agent/id "agent-a"]}])))))
      (let [mailbox (async/chan (async/sliding-buffer 1))
            {:keys [key faults armer render search]} (route-probe! connection mailbox)
            write! (fn [tx]
@@ -193,11 +193,11 @@
    (fn [connection]
      (test-support/transacted!
       connection
-      [{:seon.agent/id "agent-a"}
-       {:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
-       [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
-       {:seon.message/id "order-a" :seon.message/content "a"
-        :seon.message/to [:seon.agent/id "agent-a"]}])
+      (into (test-support/agent-tx @connection "agent-a")
+        [{:db/id "runtime" :seon.runtime/agent [:seon.agent/id "agent-a"]}
+         [:db/add [:seon.agent/id "agent-a"] :seon.agent/runtime "runtime"]
+         {:seon.message/id "order-a" :seon.message/content "a"
+          :seon.message/to [:seon.agent/id "agent-a"]}]))
      (let [recipient (agent-eid connection)]
        (test-support/transacted!
         connection
@@ -338,7 +338,7 @@
       (let [mailbox (async/chan (async/sliding-buffer 1))
             {:keys [armer key]} (route-probe! connection mailbox)]
         (try
-          (test-support/transacted! connection [{:seon.agent/id "agent-b"}])
+          (test-support/transacted! connection (test-support/agent-tx @connection "agent-b"))
           (is (some? (test-support/await-event! armer "creation arm wake"))
               "creating an agent asserts its arming attribute, so the
                armer takes a pass without anyone addressing it")
@@ -379,7 +379,7 @@
        :seon.wake/listen true
        :seon.wake/opens-turn? true}]}
     (fn [connection]
-      (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
+      (test-support/transacted! connection (test-support/agent-tx @connection "agent-a"))
       (let [recipient (agent-eid connection)
             mailbox (async/chan (async/sliding-buffer 1))
             {:keys [key]} (route-probe! connection mailbox)]
@@ -429,9 +429,9 @@
 (deftest a-fault-wakes-the-steward-of-the-failing-functions-namespace
   (test-support/with-database
     (fn [connection]
-      (test-support/transacted! connection [{:seon.agent/id "agent-a"}
-                                           {:seon.ns/name 'my.agents.agent-a
-                                            :seon.ns/steward [:seon.agent/id "agent-a"]}])
+      (test-support/transacted! connection (into (test-support/agent-tx @connection "agent-a")
+                                             [{:seon.ns/name 'my.agents.agent-a
+                                              :seon.ns/steward [:seon.agent/id "agent-a"]}]))
       (test-support/transacted!
        connection
        [(test-support/program-fn-row (db/db connection) 'my.agents.agent-a/broken
@@ -660,7 +660,7 @@
           [commits (gen/vector (gen/elements [:message :agent :run]) 1 8)]
           (test-support/with-database
             (fn [connection]
-              (test-support/transacted! connection [{:seon.agent/id "agent-a"}])
+              (test-support/transacted! connection (test-support/agent-tx @connection "agent-a"))
               (let [recipient-eid (agent-eid connection)
                     mailbox (async/chan 64)
                     channels {recipient-eid mailbox}
@@ -690,8 +690,7 @@
                       ;; attribute: it routes to nobody's mailbox and
                       ;; offers the armer exactly one wake
                       :agent (db/transact! connection
-                                         [{:seon.agent/id
-                                           (str "pa-" index)}])
+                                         (test-support/agent-tx @connection (str "pa-" index)))
                       :run (db/transact! connection (run-tx
                                                    (str "pr-" index)))))
                   (let [drain (fn [channel]

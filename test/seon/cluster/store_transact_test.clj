@@ -110,7 +110,7 @@
   (with-connection
     (fn [connection]
       (let [outcome (db/transact! connection
-                                     [{:seon.agent/id "agent-a"}])]
+                                     (support/agent-tx @connection "agent-a"))]
         (is (map? outcome))
         (is (contains? outcome :db-after) "the report, not a wrapper")
         (is (some? (:db-after outcome)))))))

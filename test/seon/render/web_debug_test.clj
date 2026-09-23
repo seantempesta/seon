@@ -554,10 +554,10 @@
                [:seon.agent/id :seon.agent/id]])}]}
    (fn [connection]
      (support/transacted! connection
-                          [{:seon.agent/id "relationships"}
-                           {::left [:seon.agent/id "relationships"]}
-                           {::right [:seon.agent/id "relationships"]}
-                           {::hidden [:seon.agent/id "relationships"]}])
+                          (into (support/agent-tx @connection "relationships")
+                            [{::left [:seon.agent/id "relationships"]}
+                             {::right [:seon.agent/id "relationships"]}
+                             {::hidden [:seon.agent/id "relationships"]}]))
      (let [database @connection
            projection (schema/projection-from-database database)
            result (schema/call-with-projection
@@ -632,7 +632,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "identity-blocks")
-     (support/transacted! connection [{:seon.agent/id "identity-blocks"}])
+     (support/transacted! connection (support/agent-tx @connection "identity-blocks"))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            projection (schema/projection-from-database database)
@@ -686,12 +686,12 @@
                         ::identity-alias)])
            _ (is (:db-after installed) (pr-str installed))
            written (db/transact! connection
-                                 [{:seon.agent/id "reference-agent"}
-                                  {::identity-alias "aliased-reference"}
-                                  {:db/id "plan"
-                                   :my.plan/agent [:seon.agent/id "reference-agent"]}
-                                  {:db/id "unidentified"
-                                   :my.plan/objective "No identity"}])
+                                 (into (support/agent-tx @connection "reference-agent")
+                                   [{::identity-alias "aliased-reference"}
+                                    {:db/id "plan"
+                                     :my.plan/agent [:seon.agent/id "reference-agent"]}
+                                    {:db/id "unidentified"
+                                     :my.plan/objective "No identity"}]))
            _ (is (:db-after written) (pr-str written))
            database @connection
            projection (schema/projection-from-database database)

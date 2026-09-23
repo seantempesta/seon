@@ -16,7 +16,7 @@
   (:import [java.util.concurrent CountDownLatch]))
 
 (defn- with-message-route [connection body]
-  (support/transacted! connection [{:seon.agent/id "recipient"}])
+  (support/transacted! connection (support/agent-tx @connection "recipient"))
   (let [recipient (:db/id (db/pull @connection [:db/id]
                                  [:seon.agent/id "recipient"]))
         mailbox (async/chan (async/sliding-buffer 1))

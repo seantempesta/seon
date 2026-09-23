@@ -28,17 +28,17 @@
            report
            (db/transact!
             connection
-            [{:seon.agent/id "p1-carriage"}
-             {:seon.ns/name 'seon.db.carriage}
-             [:db.fn/call
-              (fn [value]
-                (schema/call-with-projection-state
-                 (atom {})
-                 (fn []
-                   (let [agent-row (db/pull value [:seon.agent/id]
-                                        [:seon.agent/id "p1-carriage"])]
-                     [[:db/add [:seon.ns/name 'seon.db.carriage]
-                       :seon.ns/doc (:seon.agent/id agent-row)]]))))]])
+            (into (test-support/agent-tx @connection "p1-carriage")
+              [{:seon.ns/name 'seon.db.carriage}
+               [:db.fn/call
+                (fn [value]
+                  (schema/call-with-projection-state
+                   (atom {})
+                   (fn []
+                     (let [agent-row (db/pull value [:seon.agent/id]
+                                          [:seon.agent/id "p1-carriage"])]
+                       [[:db/add [:seon.ns/name 'seon.db.carriage]
+                         :seon.ns/doc (:seon.agent/id agent-row)]]))))]]))
            raw @connection
            database (db/carry-projection-state raw state)
            rebuilds (atom 0)

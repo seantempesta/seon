@@ -293,13 +293,13 @@
                                        '[{:seon.issue/tests [:seon.test/sym]}] issue)))))]
           (is (:db-after
                (db/transact! connection
-                [{:seon.agent/id "retention-creator"} {:seon.agent/id "retention-worker"}
-                 {:seon.issue/id "retention-fixture" :seon.issue/title "Keep required tests"
-                  :seon.issue/path "docs/seon/issues/retention-fixture.md"
-                  :seon.issue/problem "Required tests survive assignment changes."
-                  :seon.issue/status :open :seon.issue/severity :cleanup
-                  :seon.issue/created-by creator :seon.issue/agent worker
-                  :seon.issue/tests #{a b}}])))
+                (into (support/agents-tx @connection ["retention-creator" "retention-worker"])
+                  [{:seon.issue/id "retention-fixture" :seon.issue/title "Keep required tests"
+                    :seon.issue/path "docs/seon/issues/retention-fixture.md"
+                    :seon.issue/problem "Required tests survive assignment changes."
+                    :seon.issue/status :open :seon.issue/severity :cleanup
+                    :seon.issue/created-by creator :seon.issue/agent worker
+                    :seon.issue/tests #{a b}}]))))
           (doseq [tx [[[:db/retract issue :seon.issue/tests a]]
                      [[:db/retract issue :seon.issue/tests]]
                      [[:db/retract a :seon.test/sym "my.agents.retention/a"]]

@@ -295,7 +295,7 @@
            report (db/transact! connection [])
            result (binding [db/*conn* connection]
                     (db/transact! []))
-           refusal (db/transact! connection [{:seon.agent/id 42}])
+           refusal (db/transact! connection (test-support/agent-tx @connection 42))
            findings (->> (seon.fn/contract-findings (db/db connection))
                          (filterv #(= "seon.db" (namespace (:seon.fn/sym %)))))
            transaction-findings
@@ -343,7 +343,7 @@
            (is (schema/valid-candidate-value? (schema/handed-projection)
                                              :seon.db.write/validation-refusal result)))))
      (test-support/transacted! connection
-                               [{:seon.agent/id "busy-agent"}])
+                               (test-support/agent-tx @connection "busy-agent"))
      (is (map? (db/transact!
                 connection
                 (turn/open-tx
@@ -456,7 +456,7 @@
 (deftest instrumented-wildcard-pull-keeps-unparsed-database-fields-ordinary
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection [{:seon.agent/id "wildcard-agent"}])
+     (test-support/transacted! connection (test-support/agent-tx @connection "wildcard-agent"))
      (test-support/preserving-instrumentation-state
       (fn []
        (instrument/apply! {:seon.config/on-core-error :panic
@@ -665,7 +665,7 @@
          (is (every? #((schema/projection-validator (schema/handed-projection) :seon.db/read-evidence) %)
                      evidence))
          (test-support/transacted! connection
-                                   [{:seon.agent/id "unrelated-agent"}])
+                                   (test-support/agent-tx @connection "unrelated-agent"))
          (is (db/read-evidence-current? @connection evidence)
              "an unrelated attribute revision retains the renderer read")
          (test-support/transacted!
@@ -726,7 +726,7 @@
          (let [before (capture)]
            (case attribute
              :seon.agent/id (test-support/transacted!
-                            connection [{:seon.agent/id "bound-agent"}])
+                            connection (test-support/agent-tx @connection "bound-agent"))
              :seon.cluster/name (test-support/seed-cluster! connection "bound-cluster"))
            (is (false? (db/read-evidence-current? @connection before))
                (str "the bound attribute must invalidate its evidence: " attribute))))))))
@@ -756,10 +756,10 @@
            "the explicit process-local cache retains stable replay values")
        (test-support/transacted!
                     connection
-                    [{:seon.agent/id "db-test-recipient"}
-                     {:seon.message/id "semantic-replay-unrelated"
-                      :seon.message/to [:seon.agent/id "db-test-recipient"]
-                      :seon.message/content "unrelated"}])
+                    (into (test-support/agent-tx @connection "db-test-recipient")
+                      [{:seon.message/id "semantic-replay-unrelated"
+                        :seon.message/to [:seon.agent/id "db-test-recipient"]
+                        :seon.message/content "unrelated"}]))
        (is (true? (db/read-evidence-current? @connection durable))
            "an equal wildcard replay survives an unrelated transaction")
        (is (true? (db/read-evidence-current? @connection process-local))
@@ -782,11 +782,11 @@
        (when (= :seon.message/id (first subject))
          (test-support/transacted!
                       connection
-                      [{:seon.agent/id "db-test-recipient"}
-                       {:seon.message/id (second subject)
-                        :seon.message/to [:seon.agent/id "db-test-recipient"]
-                        :seon.message/content
-                        (apply str (repeat 100000 "x"))}]))
+                      (into (test-support/agent-tx @connection "db-test-recipient")
+                        [{:seon.message/id (second subject)
+                          :seon.message/to [:seon.agent/id "db-test-recipient"]
+                          :seon.message/content
+                          (apply str (repeat 100000 "x"))}])))
        (let [captured (atom [])]
          (binding [db/*read-evidence-sink* captured]
            (db/pull @connection '[*] subject))
@@ -1164,7 +1164,7 @@
    (fn [connection]
      (test-support/transacted!
                   connection
-                  [{:seon.agent/id "db-cas-owner"}])
+                  (test-support/agent-tx @connection "db-cas-owner"))
      (let [rejected
            (db/transact!
             connection
@@ -1315,7 +1315,7 @@
                  (future
                    (db/transact!
                     connection
-                    [{:seon.agent/id "throwing-listener-agent"}]))
+                    (test-support/agent-tx @connection "throwing-listener-agent")))
                  report
                  (test-support/await-event!
                   submission
@@ -1346,7 +1346,7 @@
              (let [next-report
                    (test-support/transacted!
                     connection
-                    [{:seon.agent/id "after-throwing-listener-agent"}])]
+                    (test-support/agent-tx @connection "after-throwing-listener-agent"))]
                (is (contains? next-report :db-after)
                    "the write after a thrown listener commits through the same writer")
                (is (< (db/basis-t (:db-before next-report))
@@ -1366,10 +1366,10 @@
            before-t (db/basis-t before)]
        (test-support/transacted!
                     connection
-                    [{:seon.agent/id "db-test-recipient"}
-                     {:seon.message/id "db-test-temporal"
-                      :seon.message/to [:seon.agent/id "db-test-recipient"]
-                      :seon.message/content "temporal"}])
+                    (into (test-support/agent-tx @connection "db-test-recipient")
+                      [{:seon.message/id "db-test-temporal"
+                        :seon.message/to [:seon.agent/id "db-test-recipient"]
+                        :seon.message/content "temporal"}]))
        (let [after @connection]
          (binding [db/*conn* connection]
            (is (= (db/q exam-query (db/history after))
@@ -1447,7 +1447,7 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection
-                               [{:seon.agent/id "identity-admission-present"}])
+                               (test-support/agent-tx @connection "identity-admission-present"))
      (let [unknown-attribute
            (db/q '[:find ?entity
                    :where [?entity :seon.agent/idd _]]
@@ -1549,7 +1549,7 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection
-                               [{:seon.agent/id "temporal-schema-present"}])
+                               (test-support/agent-tx @connection "temporal-schema-present"))
      (let [database @connection
            basis (db/basis-t database)
            views [(db/history database)
@@ -1634,8 +1634,8 @@
       (fn [foreign-connection]
         (binding [db/*conn* writing-connection]
           (let [explicit (db/transact! writing-connection
-                                       [{:seon.agent/id "own"}])
-                elided (db/transact! [{:seon.agent/id "elided"}])
+                                       (test-support/agent-tx @writing-connection "own"))
+                elided (db/transact! (test-support/agent-tx @writing-connection "elided"))
                 refused (db/transact! foreign-connection
                                       [{:seon.agent/id "foreign"}])
                 message-ids
@@ -1807,10 +1807,10 @@
      (let [namespace-name (symbol "reset.required")
            function (symbol (str namespace-name) "target")]
        (test-support/transacted!
-        connection [{:seon.agent/id "root"}
-                    {:seon.ns/name namespace-name}
-                    (test-support/program-fn-row (db/db connection) function "(defn target [] nil)")
-                    [:db.fn/call #'schedule/root-maintenance-seed-call]])
+        connection (into (test-support/agent-tx @connection "root")
+                     [{:seon.ns/name namespace-name}
+                      (test-support/program-fn-row (db/db connection) function "(defn target [] nil)")
+                      [:db.fn/call #'schedule/root-maintenance-seed-call]]))
        (let [task-id (first (sort (db/q '[:find [?id ...] :where [_ :seon.schedule.task/id ?id]]
                                         (db/db connection))))]
          (is (some? task-id))

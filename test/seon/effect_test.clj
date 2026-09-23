@@ -230,12 +230,13 @@
     (fn [connection]
       (transact-fixture!
        connection
-       [(cluster-config 60000)
-        {:seon.agent/id "effect-agent"}
-        {:seon.turn/id "effect-run"
-         :seon.turn/opened-tx "datomic.tx"
-         :seon.turn/agent
-         [:seon.agent/id "effect-agent"]}])
+       (into (test-support/agent-tx @connection "effect-agent")
+         [(cluster-config 60000)
+        
+          {:seon.turn/id "effect-run"
+           :seon.turn/opened-tx "datomic.tx"
+           :seon.turn/agent
+           [:seon.agent/id "effect-agent"]}]))
       (install-capability! connection)
       (let [settled (CountDownLatch. 1)
             observation (atom nil)
@@ -361,11 +362,12 @@
     (fn [connection]
       (transact-fixture!
        connection
-       [(cluster-config 60000)
-        {:seon.agent/id "effect-agent"}
-        {:seon.turn/id "effect-run"
-         :seon.turn/opened-tx "datomic.tx"
-         :seon.turn/agent [:seon.agent/id "effect-agent"]}])
+       (into (test-support/agent-tx @connection "effect-agent")
+         [(cluster-config 60000)
+        
+          {:seon.turn/id "effect-run"
+           :seon.turn/opened-tx "datomic.tx"
+           :seon.turn/agent [:seon.agent/id "effect-agent"]}]))
       (install-arm-probe! connection)
       (let [events (async/chan 4)
             listener-key (random-uuid)
@@ -452,11 +454,12 @@
       (fn [connection]
         (transact-fixture!
          connection
-         [(cluster-config config-limit-ms)
-          {:seon.agent/id "effect-agent"}
-          {:seon.turn/id "effect-run"
-           :seon.turn/opened-tx "datomic.tx"
-           :seon.turn/agent [:seon.agent/id "effect-agent"]}])
+         (into (test-support/agent-tx @connection "effect-agent")
+           [(cluster-config config-limit-ms)
+          
+            {:seon.turn/id "effect-run"
+             :seon.turn/opened-tx "datomic.tx"
+             :seon.turn/agent [:seon.agent/id "effect-agent"]}]))
         (install-arm-probe! connection)
         (let [events (async/chan 4)
               listener-key (random-uuid)
@@ -591,10 +594,10 @@
   (testing "a cluster with no background limit refuses the submission"
     (test-support/with-database
       (fn [connection]
-        (transact-fixture! connection [{:seon.agent/id "effect-agent"}
-                                  {:seon.turn/id "effect-run"
-                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
-                                 :seon.turn/opened-tx "datomic.tx"}])
+        (transact-fixture! connection (into (test-support/agent-tx @connection "effect-agent")
+                                        [{:seon.turn/id "effect-run"
+                                   :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                   :seon.turn/opened-tx "datomic.tx"}]))
         (install-arm-probe! connection)
         (let [result
               (binding [effect/*request-context*
@@ -612,11 +615,12 @@
   (testing "a nonsense explicit limit is refused, never treated as absent"
     (test-support/with-database
       (fn [connection]
-        (transact-fixture! connection [(cluster-config 60000)
-                                  {:seon.agent/id "effect-agent"}
-                                  {:seon.turn/id "effect-run"
-                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
-                                 :seon.turn/opened-tx "datomic.tx"}])
+        (transact-fixture! connection (into (test-support/agent-tx @connection "effect-agent")
+                                        [(cluster-config 60000)
+                                  
+                                    {:seon.turn/id "effect-run"
+                                   :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                   :seon.turn/opened-tx "datomic.tx"}]))
         (install-arm-probe! connection)
         (let [basis (db/basis-t (db/db connection))]
           (is (thrown? clojure.lang.ExceptionInfo
@@ -843,7 +847,7 @@
   (test-support/with-database
     (fn [connection]
       (let [now (Date. 1700000000000)]
-        (transact-fixture! connection [{:seon.agent/id "effect-agent"}])
+        (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
         (transact-fixture!
          connection
          (turn/open-tx
@@ -883,11 +887,12 @@
   [connection]
   (transact-fixture!
    connection
-   [(cluster-config 60000)
-    {:seon.agent/id "effect-agent"}
-    {:seon.turn/id "effect-run"
-     :seon.turn/agent [:seon.agent/id "effect-agent"]
-     :seon.turn/opened-tx "datomic.tx"}]))
+   (into (test-support/agent-tx @connection "effect-agent")
+     [(cluster-config 60000)
+    
+      {:seon.turn/id "effect-run"
+       :seon.turn/agent [:seon.agent/id "effect-agent"]
+       :seon.turn/opened-tx "datomic.tx"}])))
 
 (defn- effect-receipt
   [connection selector]

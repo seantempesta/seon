@@ -328,10 +328,10 @@
         (fn [connection]
           (let [written (db/transact!
                          connection
-                         [{:seon.agent/id "shell-author"}
-                          {:seon.turn/id "shell-time-limit"
-                           :seon.turn/agent [:seon.agent/id "shell-author"]
-                           :seon.turn/opened-tx "datomic.tx"}])]
+                         (into (support/agent-tx @connection "shell-author")
+                           [{:seon.turn/id "shell-time-limit"
+                             :seon.turn/agent [:seon.agent/id "shell-author"]
+                             :seon.turn/opened-tx "datomic.tx"}]))]
             (is (:db-after written) (pr-str written)))
           (let [effective-map
                 (effective root

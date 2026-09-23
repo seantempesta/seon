@@ -65,7 +65,7 @@
                                 (filterv :seon.call-preparation/key
                                          (:seon.config/initialization
                                           (config/compile-manifest {:seon.boot/cluster-name "default"}))))
-      (test-support/transacted! connection [{:seon.agent/id "supplied"}])
+      (test-support/transacted! connection (test-support/agent-tx @connection "supplied"))
       (let [database @connection
             indexed (db/pull database
                              '[:seon.fn/sym

@@ -16,7 +16,7 @@
 (deftest one-listened-write-produces-one-commit-and-no-fault-write
   (support/with-database
    (fn [connection]
-     (support/transacted! connection [{:seon.agent/id "store-growth-agent"}])
+     (support/transacted! connection (support/agent-tx @connection "store-growth-agent"))
      (let [recipient (d/q '[:find ?entity .
                             :where [?entity :seon.agent/id "store-growth-agent"]]
                           @connection)

@@ -12,9 +12,8 @@
    (fn [connection]
      (is (some? (:db-after (db/transact!
                 connection
-                [{:seon.agent/id "juniper"}
-                 {:seon.agent/id "root"}
-                 {:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message"}]))))
+                (into (test-support/agents-tx @connection ["juniper" "root"])
+                  [{:seon.message/id "opening" :seon.message/to [:seon.agent/id "juniper"] :seon.message/content "Opening message"}])))))
      (let [ctx (test-support/fork-cluster-ctx connection)
            captured (atom [])
            evaluation
@@ -73,12 +72,11 @@
   (test-support/with-database
    (fn [connection]
      (is (some? (:db-after (db/transact! connection
-                             [{:seon.agent/id "juniper"}
-                              {:seon.agent/id "root"}
-                              {:seon.message/id "mine" :seon.message/content "mine"
-                               :seon.message/to [:seon.agent/id "juniper"]}
-                              {:seon.message/id "theirs" :seon.message/content "theirs"
-                               :seon.message/to [:seon.agent/id "root"]}]))))
+                             (into (test-support/agents-tx @connection ["juniper" "root"])
+                               [{:seon.message/id "mine" :seon.message/content "mine"
+                                 :seon.message/to [:seon.agent/id "juniper"]}
+                                {:seon.message/id "theirs" :seon.message/content "theirs"
+                                 :seon.message/to [:seon.agent/id "root"]}])))))
      (doseq [where '[[[?m :seon.message/to ?recipient]
                      (not [?m :seon.message/from])]
                     [[?m :seon.message/to ?recipient]

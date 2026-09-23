@@ -21,8 +21,7 @@
   (support/with-database
     (fn [connection]
       (support/transacted! connection
-                           [{:seon.agent/id "alice"}
-                            {:seon.agent/id "bob"}])
+                           (support/agents-tx @connection ["alice" "bob"]))
       (let [before (db/basis-t @connection)]
         (support/transacted! connection
                              [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "bob"] :seon.message/from [:seon.agent/id "alice"] :seon.message/content "First message"}

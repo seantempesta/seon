@@ -35,8 +35,7 @@
 (deftest settings-updates-preserve-one-component-and-agent-isolation
   (support/with-database
    (fn [connection]
-     (support/transacted! connection [{:seon.agent/id "settings-owner"}
-                                     {:seon.agent/id "other-owner"}])
+     (support/transacted! connection (support/agents-tx @connection ["settings-owner" "other-owner"]))
      (is (= {:seon.config.ai/model "example-model"
              :seon.config.run/max-episode-runs 4}
             (agent/settings! {:seon.config.ai/model "example-model"

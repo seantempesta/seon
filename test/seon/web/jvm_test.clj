@@ -407,11 +407,11 @@
                   :seon.config.web/max-inline-bytes 4096))
           (support/transacted!
                   connection
-                  [{:seon.agent/id "web-agent"}
-                   {:seon.turn/id "web-receipt-run"
-                    :seon.turn/agent
-                    [:seon.agent/id "web-agent"]
-                    :seon.turn/opened-tx "datomic.tx"}])
+                  (into (support/agent-tx @connection "web-agent")
+                    [{:seon.turn/id "web-receipt-run"
+                      :seon.turn/agent
+                      [:seon.agent/id "web-agent"]
+                      :seon.turn/opened-tx "datomic.tx"}]))
           (let [request {:my.web/query "web capability evidence"
                          :my.web/max-results 2}
                 accepted (accepted-at-the-door connection 'my.web/search request)
@@ -453,11 +453,11 @@
                   :seon.config.web/max-inline-bytes 4096))
           (support/transacted!
                   connection
-                  [{:seon.agent/id "web-agent"}
-                   {:seon.turn/id "web-receipt-run"
-                    :seon.turn/agent
-                    [:seon.agent/id "web-agent"]
-                    :seon.turn/opened-tx "datomic.tx"}])
+                  (into (support/agent-tx @connection "web-agent")
+                    [{:seon.turn/id "web-receipt-run"
+                      :seon.turn/agent
+                      [:seon.agent/id "web-agent"]
+                      :seon.turn/opened-tx "datomic.tx"}]))
           (let [context (effect-context connection)
                 text-request {:my.web/url (str base-url "/small-html")}
                 binary-request {:my.web/url (str base-url "/binary")}

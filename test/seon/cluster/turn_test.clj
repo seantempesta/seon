@@ -3250,9 +3250,8 @@
                                              failed-phase}}]
               (test-support/transacted!
                            connection
-                           [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}
-                            {:seon.agent/id "agent-a"
-                             }])
+                           (into (test-support/agent-tx @connection "agent-a")
+                             [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/opened-tx "datomic.tx"}]))
               (when evaluation?
                 (test-support/transacted!
                              connection

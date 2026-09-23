@@ -327,11 +327,12 @@
    (fn [connection]
      (support/seed-cluster! connection "renderer-facts")
      (support/transacted! connection
-              [{:seon.ns/name 'user}
-               {:seon.agent/id "renderer-facts"}
-               {:seon.turn/id "renderer-facts-turn"
-                :seon.turn/agent [:seon.agent/id "renderer-facts"]
-                :seon.turn/opened-tx "datomic.tx"}])
+              (into (support/agent-tx @connection "renderer-facts")
+                [{:seon.ns/name 'user}
+               
+                 {:seon.turn/id "renderer-facts-turn"
+                  :seon.turn/agent [:seon.agent/id "renderer-facts"]
+                  :seon.turn/opened-tx "datomic.tx"}]))
      (let [ctx (support/fork-cluster-ctx connection "renderer-facts")
            configuration (support/effective-config)]
        (doseq [[ordinal source expected] [[0 "(dir seon.repl)" 'seon.repl/render-directory-ai]

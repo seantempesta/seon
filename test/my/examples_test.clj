@@ -63,10 +63,10 @@
                                              :seon.ns/name 'my.examples-fixture
                                                            :seon.cluster/name "examples"}))))
           (is (:db-after (db/transact! connection
-                                       [{:seon.agent/id "root"}
-                                        {:seon.message/id "example-message"
-                                         :seon.message/to [:seon.agent/id "examples"]
-                                         :seon.message/content "Inspect the input."}])))
+                                       (into (support/agent-tx @connection "root")
+                                         [{:seon.message/id "example-message"
+                                           :seon.message/to [:seon.agent/id "examples"]
+                                           :seon.message/content "Inspect the input."}]))))
           (let [opened (db/transact! connection
                                      (turn/open-tx {:seon.turn/id "examples"
                                                     :seon.turn/agent [:seon.agent/id "examples"]

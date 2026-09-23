@@ -718,6 +718,13 @@
                           (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]]
                                 database)})))})))
 
+(defn agents-tx
+  "Create several fixture agents, each through `agent-tx`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.agent/id]]
+                  :seon.store/transaction-data]}
+  [database agent-ids]
+  (into [] (mapcat #(agent-tx database %)) agent-ids))
+
 (defn program-row
   "Analyze an explicit synthetic declaration through the production source path."
   [database identity source]

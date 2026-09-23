@@ -37,7 +37,7 @@
 (deftest plan-pairs-are-readable-with-unchanged-ai
   (support/with-database
     (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "alice"}])
+      (support/transacted! connection (support/agent-tx @connection "alice"))
       (plan/plan! {:my.plan/objective "Ship a clear plan"
                    :my.plan/steps [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}
                                    {:my.plan.item/id "second" :my.plan.item/title "Ship"
@@ -75,7 +75,7 @@
 (deftest message-pairs-derive-unread-and-preserve-ai
   (support/with-database
     (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "alice"} {:seon.agent/id "bob"}])
+      (support/transacted! connection (support/agents-tx @connection ["alice" "bob"]))
       (support/transacted! connection [{:seon.message/id "hello" :seon.message/content "Hello\nagain"
                                         :seon.message/from [:seon.agent/id "bob"]
                                         :seon.message/to [:seon.agent/id "alice"]}])
@@ -95,8 +95,8 @@
 (deftest note-pairs-link-titles-and-preserve-ai
   (support/with-database
     (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "alice"}
-                                        {:my.plan.item/id "first" :my.plan.item/title "Prepare"}])
+      (support/transacted! connection (into (support/agent-tx @connection "alice")
+                                        [{:my.plan.item/id "first" :my.plan.item/title "Prepare"}]))
       (support/transacted! connection [{:my.note/id "observation" :my.note/content "Verified"
                                         :my.note/agent [:seon.agent/id "alice"]
                                         :my.note/about [:my.plan.item/id "first"]}])

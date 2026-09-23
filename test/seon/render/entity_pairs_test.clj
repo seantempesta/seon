@@ -16,20 +16,21 @@
    (fn [connection]
      (let [report
            (support/transacted! connection
-             [{:seon.ns/name 'entity-pairs.fixture}
-              {:seon.agent/id "entity-pairs-agent"}
-              (support/program-fn-row (db/db connection) 'entity-pairs.fixture/function
-                                      "(defn function [] true)")
-              (assoc (support/program-row (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
-                                          "(clojure.test/deftest test (clojure.test/is true))")
-                     :seon.fn/calls #{'entity-pairs.fixture/function})
-              {:seon.issue/id "entity-pairs-issue"
-               :seon.issue/title "Render linked entities"
-               :seon.issue/problem "Verify the entity pairs"
-               :seon.issue/status :open :seon.issue/severity :cleanup
-               :seon.issue/agent [:seon.agent/id "entity-pairs-agent"]
-               :seon.issue/functions [[:seon.fn/sym (quote entity-pairs.fixture/function)]]
-               :seon.issue/tests [[:seon.test/sym (quote entity-pairs.fixture/test)]]}])]
+             (into (support/agent-tx @connection "entity-pairs-agent")
+               [{:seon.ns/name 'entity-pairs.fixture}
+              
+                (support/program-fn-row (db/db connection) 'entity-pairs.fixture/function
+                                        "(defn function [] true)")
+                (assoc (support/program-row (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
+                                            "(clojure.test/deftest test (clojure.test/is true))")
+                       :seon.fn/calls #{'entity-pairs.fixture/function})
+                {:seon.issue/id "entity-pairs-issue"
+                 :seon.issue/title "Render linked entities"
+                 :seon.issue/problem "Verify the entity pairs"
+                 :seon.issue/status :open :seon.issue/severity :cleanup
+                 :seon.issue/agent [:seon.agent/id "entity-pairs-agent"]
+                 :seon.issue/functions [[:seon.fn/sym (quote entity-pairs.fixture/function)]]
+                 :seon.issue/tests [[:seon.test/sym (quote entity-pairs.fixture/test)]]}]))]
        (is (:db-after report) (pr-str report)))
      (let [database (db/db connection)
            entity (db/pull database '[*] entity-lookup)

@@ -303,7 +303,7 @@
                              :seon.ai/prompt "Probe terminal refusal."))]
        (try
          (assert (nil? (System/getenv "SEON_LOOP_PROOF_UNSET_CREDENTIAL")))
-         (is (some? (:db-after (db/transact! connection [{:seon.agent/id "root"}]))))
+         (is (some? (:db-after (db/transact! connection (support/agent-tx @connection "root")))))
          (is (some? (:db-after (db/transact! connection
                                   (turn/open-tx {:seon.turn/id "refusal-proof" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"})))))
          (let [failure (ai/complete (seon.schema/handed-projection) target)

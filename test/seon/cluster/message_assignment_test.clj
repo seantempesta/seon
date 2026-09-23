@@ -16,19 +16,18 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection
-                             [{:seon.agent/id "alice"}
-                              {:seon.agent/id "bob"}
-                              {:seon.error/id "failure-17"}
-                              {:seon.turn/id "red-run" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
-                              {:seon.cluster.eval/id "receipt-17"
-                               :seon.cluster.eval/run
-                               [:seon.turn/id "red-run"]
-                               :seon.cluster.eval/ordinal 0
-                               :seon.cluster.eval/at now
+                             (into (test-support/agents-tx @connection ["alice" "bob"])
+                               [{:seon.error/id "failure-17"}
+                                {:seon.turn/id "red-run" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/opened-tx "datomic.tx"}
+                                {:seon.cluster.eval/id "receipt-17"
+                                 :seon.cluster.eval/run
+                                 [:seon.turn/id "red-run"]
+                                 :seon.cluster.eval/ordinal 0
+                                 :seon.cluster.eval/at now
 
-                               :seon.cluster.eval/error
-                               "Unable to resolve symbol: missing-dependency"
-                               :seon.cluster.eval/source "(missing-dependency)"}])
+                                 :seon.cluster.eval/error
+                                 "Unable to resolve symbol: missing-dependency"
+                                 :seon.cluster.eval/source "(missing-dependency)"}]))
      (body connection))))
 
 (defn- request

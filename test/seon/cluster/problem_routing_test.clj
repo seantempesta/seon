@@ -20,14 +20,15 @@
    (fn [connection]
      (test-support/transacted!
                   connection
-                  [{:seon.ns/name 'my.gen.planner}
-                   {:seon.ns/name 'my.gen.alpha}
-                   {:seon.agent/id "planner"
-                    :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-                   {:seon.agent/id "alpha"
-                    :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-                   {:seon.agent/id "root"}
-                   {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program."}])
+                  (into (test-support/agent-tx @connection "root")
+                    [{:seon.ns/name 'my.gen.planner}
+                     {:seon.ns/name 'my.gen.alpha}
+                     {:seon.agent/id "planner"
+                      :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+                     {:seon.agent/id "alpha"
+                      :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
+                   
+                     {:seon.message/id "goal" :seon.message/to [:seon.agent/id "root"] :seon.message/content "Generate the program."}]))
      (test-support/transacted!
                   connection
                   [{:seon.message/id "planner-goal" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/caused-by [:seon.message/id "goal"] :seon.message/content "Generate the program."}])

@@ -7,8 +7,7 @@
 (deftest history-orders-turn-transactions-before-ordinals-and-keeps-unfinished-forms
   (support/with-database
    (fn [connection]
-     (support/transacted! connection [{:seon.agent/id "a"}
-                                      {:seon.agent/id "b"}])
+     (support/transacted! connection (support/agents-tx @connection ["a" "b"]))
      (is (= [] (evaluation/of-agent @connection "a")))
      (doseq [[turn-id timestamp agent-id sources]
              [["z-first" 2000 "a" [[1 "a1"] [0 "a0"]]]

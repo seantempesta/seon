@@ -845,8 +845,8 @@
                           @connection source namespace-ref row))]
                 (support/transacted!
                         connection
-                        [{:seon.agent/id agent-id}
-                         {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
+                        (into (support/agent-tx @connection agent-id)
+                          [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
                 (support/transacted!
                         connection
                         (turn/receipt-start-tx
@@ -1645,10 +1645,9 @@
                        request))))]
         (support/transacted!
                 connection
-                [{:seon.ns/name namespace-name
-                  :seon.schema.admission/source :agent}
-                 {:seon.agent/id agent-a}
-                 {:seon.agent/id agent-b}])
+                (into (support/agents-tx @connection [agent-a agent-b])
+                  [{:seon.ns/name namespace-name
+                    :seon.schema.admission/source :agent}]))
         (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
           (support/transacted!
                   connection
@@ -2009,7 +2008,7 @@
                      agent-id (str "keeper-" run-id)
 ]
                  (support/transacted! connection
-                                    [{:seon.agent/id agent-id}])
+                                    (support/agent-tx @connection agent-id))
                  (support/transacted! connection
                                     (turn/open-tx
                                      {::turn/id run-id ::turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))

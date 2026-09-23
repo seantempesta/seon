@@ -103,7 +103,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "error-result")
-     (support/transacted! connection [{:seon.agent/id "error-result-agent"}])
+     (support/transacted! connection (support/agent-tx @connection "error-result-agent"))
      (support/transacted! connection
                          (turn/open-tx {:seon.turn/id "error-result-turn"
                                         :seon.turn/agent [:seon.agent/id "error-result-agent"]

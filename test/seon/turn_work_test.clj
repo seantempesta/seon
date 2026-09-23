@@ -39,7 +39,7 @@
   [body]
   (support/with-database
    (fn [connection]
-      (support/transacted! connection [{:seon.agent/id agent-id}])
+      (support/transacted! connection (support/agent-tx @connection agent-id))
       (body connection))))
 
 (defn- add-trigger!

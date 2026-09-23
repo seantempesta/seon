@@ -27,7 +27,7 @@
            ordinal 0
            receipt-id (pr-str [run-id ordinal])
            now (java.util.Date. 1785000000000)]
-       (support/transacted! connection [{:seon.agent/id agent-id}])
+       (support/transacted! connection (support/agent-tx @connection agent-id))
        (support/transacted!
                connection
                (turn/open-tx
@@ -76,7 +76,7 @@
                      [?agent :seon.agent/id ?agent-id]]
                    @connection "receipt-carrier")))))
        (support/transacted! connection
-                            [{:seon.agent/id system-agent-id}])
+                            (support/agent-tx @connection system-agent-id))
        (testing "a system write outside receipt custody asserts no receipt"
          (is (nil?
               (db/q

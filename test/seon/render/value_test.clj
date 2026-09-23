@@ -59,7 +59,7 @@
            database (db/db connection)
            directory (evaluation/directory-value database 'seon.repl true)
            step (plan/item {:seon.db/db database :my.plan.item/id "prepare"})
-           _ (support/transacted! connection [{:seon.agent/id "plan-reader"}])
+           _ (support/transacted! connection (support/agent-tx @connection "plan-reader"))
            installed (plan/plan!
                       {:my.plan/objective "Verify the render"
                        :my.plan/current-step {:my.plan.item/id "focus"}
@@ -105,20 +105,20 @@
    (fn [connection]
      (support/seed-cluster! connection "render-results")
      (let [written (db/transact! connection
-                     [{:seon.agent/id "render-results"}
-                      {:seon.turn/id "render-results-turn"
-                       :seon.turn/agent [:seon.agent/id "render-results"]
-                       :seon.turn/opened-tx (db/basis-t (db/db connection))
-                       :seon.turn/reply (.repeat "turn detail " 1000)}
-                      {:seon.effect/id "render-results-effect"
-                       :seon.effect/run [:seon.turn/id "render-results-turn"]
-                       :seon.effect/owner [:seon.fn/sym "seon.db/q"]
-                       :seon.effect/form-ordinal 0
-                       :seon.effect/ordinal 0
-                       :seon.effect/opened-at (java.util.Date. 0)
-                       :seon.effect/request-edn "{}"
-                       :seon.effect/result-edn (.repeat "payload " 1000)
-                       :seon.effect/duration-ms 12}])
+                     (into (support/agent-tx @connection "render-results")
+                       [{:seon.turn/id "render-results-turn"
+                         :seon.turn/agent [:seon.agent/id "render-results"]
+                         :seon.turn/opened-tx (db/basis-t (db/db connection))
+                         :seon.turn/reply (.repeat "turn detail " 1000)}
+                        {:seon.effect/id "render-results-effect"
+                         :seon.effect/run [:seon.turn/id "render-results-turn"]
+                         :seon.effect/owner [:seon.fn/sym "seon.db/q"]
+                         :seon.effect/form-ordinal 0
+                         :seon.effect/ordinal 0
+                         :seon.effect/opened-at (java.util.Date. 0)
+                         :seon.effect/request-edn "{}"
+                         :seon.effect/result-edn (.repeat "payload " 1000)
+                         :seon.effect/duration-ms 12}]))
            database (db/db connection)
            ctx (support/fork-cluster-ctx connection "render-results")
            configuration (support/effective-config)
@@ -219,18 +219,18 @@
             (fn [size]
               (let [payload (.repeat "x" size)
                     written (db/transact! connection
-                              [{:seon.agent/id "poll-render"}
-                               {:seon.turn/id "poll-render-turn"
-                                :seon.turn/agent [:seon.agent/id "poll-render"]
-                                :seon.turn/opened-tx (db/basis-t (db/db connection))}
-                               {:seon.effect/id "poll-render-effect"
-                                :seon.effect/run [:seon.turn/id "poll-render-turn"]
-                                :seon.effect/owner [:seon.fn/sym "seon.db/q"]
-                                :seon.effect/form-ordinal 0 :seon.effect/ordinal 0
-                                :seon.effect/opened-at (java.util.Date. 0)
-                                :seon.effect/request-edn "{}"
-                                :seon.effect/result-edn payload
-                                :seon.effect/duration-ms 12}])
+                              (into (support/agent-tx @connection "poll-render")
+                                [{:seon.turn/id "poll-render-turn"
+                                  :seon.turn/agent [:seon.agent/id "poll-render"]
+                                  :seon.turn/opened-tx (db/basis-t (db/db connection))}
+                                 {:seon.effect/id "poll-render-effect"
+                                  :seon.effect/run [:seon.turn/id "poll-render-turn"]
+                                  :seon.effect/owner [:seon.fn/sym "seon.db/q"]
+                                  :seon.effect/form-ordinal 0 :seon.effect/ordinal 0
+                                  :seon.effect/opened-at (java.util.Date. 0)
+                                  :seon.effect/request-edn "{}"
+                                  :seon.effect/result-edn payload
+                                  :seon.effect/duration-ms 12}]))
                     ctx (support/fork-cluster-ctx connection "poll-render")
                     result (evaluation/evaluate
                              {:seon.cluster.eval/source

@@ -14,7 +14,7 @@
 (deftest listened-datom-delivers-under-armed-contracts
   (support/with-database
    (fn [connection]
-     (support/transacted! connection [{:seon.agent/id "root"}])
+     (support/transacted! connection (support/agent-tx @connection "root"))
      (let [mailbox (async/chan (async/sliding-buffer 1))
            armer (async/chan (async/sliding-buffer 1))
            render (async/chan (async/sliding-buffer 1))

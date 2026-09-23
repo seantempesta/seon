@@ -98,7 +98,7 @@
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= 'seon.bootstrap/render-help-ai (:seon.eval/renderer saved)))
            (is (= (:seon.eval/shown saved) (repl/response (repl/entity-emission saved))))
-           (support/transacted! connection [{:seon.agent/id "unrelated"}])
+           (support/transacted! connection (support/agent-tx @connection "unrelated"))
            (is (true? (db/read-evidence-current? @connection evidence)))
            (is (= shown (repl/render-ai (first (evaluation/of-agent @connection "help")))))
            (let [source (:seon.fn/source

@@ -348,8 +348,8 @@
         (support/with-database
           (fn [connection]
             (support/transacted! connection
-                               [{:seon.agent/id "status-agent"}
-                                {:seon.turn/id "status-run" :seon.turn/agent [:seon.agent/id "status-agent"] :seon.turn/opened-tx "datomic.tx"}])
+                               (into (support/agent-tx @connection "status-agent")
+                                 [{:seon.turn/id "status-run" :seon.turn/agent [:seon.agent/id "status-agent"] :seon.turn/opened-tx "datomic.tx"}]))
             ((ns-resolve 'seon.turn 'record-attempt!)
              {:seon.db/connection connection
               :seon.db.process/id "process/status-test"
@@ -378,9 +378,10 @@
     {::support/fresh-store? true}
     (fn [connection]
       (support/transacted! connection
-                         [{:seon.config.eval.result/blob-threshold 65536}
-                          {:seon.agent/id "reasoning-agent"}
-                          {:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}])
+                         (into (support/agent-tx @connection "reasoning-agent")
+                           [{:seon.config.eval.result/blob-threshold 65536}
+                          
+                            {:seon.turn/id "reasoning-run" :seon.turn/agent [:seon.agent/id "reasoning-agent"] :seon.turn/opened-tx "datomic.tx"}]))
       (let [inline-reasoning "private reasoning"
             large (apply str (repeat 65537 "x"))
             cluster {:seon.db/connection connection

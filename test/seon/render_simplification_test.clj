@@ -101,7 +101,7 @@
   attribute-declared-producers-select-for-every-projection
   (support/with-database
     (fn [connection]
-      (db/transact! connection [{:seon.agent/id "plan-owner"}])
+      (db/transact! connection (support/agent-tx @connection "plan-owner"))
       (let [database (db/db connection)
             owner (db/q '[:find ?e . :where [?e :seon.agent/id "plan-owner"]] database)
             entity {:my.plan/agent owner, :my.plan/objective "Verify the plan"}
@@ -138,11 +138,11 @@
     (fn [connection]
       (db/transact!
         connection
-        [{:seon.agent/id "pulled-render-owner"}
-         {:my.plan.item/id "pulled-render-item",
-          :my.plan.item/title "Render the pulled item",
-          :my.plan.item/agent [:seon.agent/id "pulled-render-owner"],
-          :my.plan.item/about ['seon.plan/render-item-html]}])
+        (into (support/agent-tx @connection "pulled-render-owner")
+          [{:my.plan.item/id "pulled-render-item",
+            :my.plan.item/title "Render the pulled item",
+            :my.plan.item/agent [:seon.agent/id "pulled-render-owner"],
+            :my.plan.item/about ['seon.plan/render-item-html]}]))
       (let [database (db/db connection)
             pulled (db/pull database '[*] [:my.plan.item/id "pulled-render-item"])
             prepared (value/transacted pulled database)

@@ -85,11 +85,11 @@
        connection "default" {:seon.config.eval.result/blob-threshold 8})
       (support/transacted!
               connection
-              [{:seon.agent/id "binary-agent"}
-               {:seon.turn/id "binary-run"
-                :seon.turn/agent
-                [:seon.agent/id "binary-agent"]
-                :seon.turn/opened-tx "datomic.tx"}])
+              (into (support/agent-tx @connection "binary-agent")
+                [{:seon.turn/id "binary-run"
+                  :seon.turn/agent
+                  [:seon.agent/id "binary-agent"]
+                  :seon.turn/opened-tx "datomic.tx"}]))
       (install-capability! connection)
       (let [threshold
             (db/q '[:find ?threshold .

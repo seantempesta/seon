@@ -637,7 +637,7 @@ handle))}}
   (support/with-database
    (fn [connection]
      (support/transacted! connection
-                          [{:seon.agent/id "unit-owner"}])
+                          (support/agent-tx @connection "unit-owner"))
      (is (map? (:my.plan/diff
                 (plan/plan! {:my.plan/objective "Inspect the page"}
                             @connection connection "unit-owner"))))
@@ -1659,8 +1659,8 @@ handle))}}
             run-b "stream-run-b"]
         (open-run! connection run-a)
         (support/transacted! connection
-                           [{:seon.agent/id "agent-b"}
-                            {:seon.turn/id run-b :seon.turn/agent [:seon.agent/id "agent-b"] :seon.turn/opened-tx "datomic.tx"}])
+                           (into (support/agent-tx @connection "agent-b")
+                             [{:seon.turn/id run-b :seon.turn/agent [:seon.agent/id "agent-b"] :seon.turn/opened-tx "datomic.tx"}]))
         (let [tab (open-feed server (str "/feed/" agent-id))]
         (try
           (is (not (str/includes? (read-complete-paint! tab connection)
@@ -1854,7 +1854,7 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (support/transacted! connection
-                         [{:seon.agent/id "alice"}])
+                         (support/agent-tx @connection "alice"))
       (let [response
             (fetch server
                    "/data?entity=%5B%3Aseon.cluster.agent%2Fid+%22alice%22%5D&path=%5B%5D&offset=0")
@@ -2057,7 +2057,7 @@ handle))}}
   ;; seed 2026072905 — the former prefix-dispatch shadow class.
   (with-server
     (fn [connection server _context]
-      (support/transacted! connection [{:seon.agent/id "bob"}])
+      (support/transacted! connection (support/agent-tx @connection "bob"))
       (is (= 404 (.statusCode (fetch server "/agent/bob/message"))))
       (is (= 404 (.statusCode (post-form server "/agent/bob" "content=x"))))
       (is (= 404 (.statusCode

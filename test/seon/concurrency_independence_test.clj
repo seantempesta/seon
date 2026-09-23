@@ -580,30 +580,30 @@
             interrupted-at (Date.)]
         (test-support/transacted!
                      connection
-                     [{:seon.agent/id "receipt-diagnostic-agent"}
-                      {:seon.turn/id run-id
-                       :seon.turn/agent [:seon.agent/id "receipt-diagnostic-agent"]
-                       :seon.turn/opened-tx "datomic.tx"}
-                      {:seon.cluster.eval/id (pr-str [run-id 0])
-                       :seon.cluster.eval/run [:seon.turn/id run-id]
-                       :seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/at interrupted-at
-                       :seon.eval/shown "42"}
-                      {:seon.cluster.eval/id (pr-str [run-id 1])
-                       :seon.cluster.eval/run [:seon.turn/id run-id]
-                       :seon.cluster.eval/ordinal 1
-                       :seon.cluster.eval/at interrupted-at
-                       :seon.cluster.eval/error "failed"}
-                      {:seon.cluster.eval/id (pr-str [run-id 2])
-                       :seon.cluster.eval/run [:seon.turn/id run-id]
-                       :seon.cluster.eval/ordinal 2
-                       :seon.cluster.eval/at interrupted-at
-                       :seon.error/message "refused"}
-                      {:seon.cluster.eval/id (pr-str [run-id 3])
-                       :seon.cluster.eval/run [:seon.turn/id run-id]
-                       :seon.cluster.eval/ordinal 3
-                       :seon.cluster.eval/at interrupted-at
-                       :seon.cluster.eval/interrupted-at interrupted-at}])
+                     (into (test-support/agent-tx @connection "receipt-diagnostic-agent")
+                       [{:seon.turn/id run-id
+                         :seon.turn/agent [:seon.agent/id "receipt-diagnostic-agent"]
+                         :seon.turn/opened-tx "datomic.tx"}
+                        {:seon.cluster.eval/id (pr-str [run-id 0])
+                         :seon.cluster.eval/run [:seon.turn/id run-id]
+                         :seon.cluster.eval/ordinal 0
+                         :seon.cluster.eval/at interrupted-at
+                         :seon.eval/shown "42"}
+                        {:seon.cluster.eval/id (pr-str [run-id 1])
+                         :seon.cluster.eval/run [:seon.turn/id run-id]
+                         :seon.cluster.eval/ordinal 1
+                         :seon.cluster.eval/at interrupted-at
+                         :seon.cluster.eval/error "failed"}
+                        {:seon.cluster.eval/id (pr-str [run-id 2])
+                         :seon.cluster.eval/run [:seon.turn/id run-id]
+                         :seon.cluster.eval/ordinal 2
+                         :seon.cluster.eval/at interrupted-at
+                         :seon.error/message "refused"}
+                        {:seon.cluster.eval/id (pr-str [run-id 3])
+                         :seon.cluster.eval/run [:seon.turn/id run-id]
+                         :seon.cluster.eval/ordinal 3
+                         :seon.cluster.eval/at interrupted-at
+                         :seon.cluster.eval/interrupted-at interrupted-at}]))
         (is (= #{[run-id 1 :seon.cluster.eval/error "failed"]
                  [run-id 2 :seon.error/message "refused"]
                  [run-id 3 :seon.cluster.eval/interrupted-at interrupted-at]}

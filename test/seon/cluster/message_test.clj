@@ -54,8 +54,7 @@
   (test-support/with-database
     (fn [connection]
       (test-support/transacted! connection
-                              [{:seon.agent/id "alice"}
-                               {:seon.agent/id "bob"}])
+                              (test-support/agents-tx @connection ["alice" "bob"]))
       (body connection))))
 
 (deftest message-render-resolves-supported-agent-ref-shapes
@@ -590,7 +589,7 @@
       (test-support/transacted!
                    connection
                    (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
-      (test-support/transacted! connection [{:seon.agent/id "alice"}])
+      (test-support/transacted! connection (test-support/agent-tx @connection "alice"))
       (ask! connection "m-0" "alice" "hello")
       (let [report
             (db/transact!

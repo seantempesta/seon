@@ -18,11 +18,10 @@
       (support/seed-cluster! connection "plan-completion")
       (is (:db-after
            (db/transact! connection
-                         [{:seon.agent/id "worker"}
-                          {:seon.agent/id "requester"}
-                          {:seon.message/id "request"
-                           :seon.message/to [:seon.agent/id "worker"]
-                           :seon.message/content "Report the result."}])))
+                         (into (support/agents-tx @connection ["worker" "requester"])
+                           [{:seon.message/id "request"
+                             :seon.message/to [:seon.agent/id "worker"]
+                             :seon.message/content "Report the result."}]))))
       (let [added (plan/add! {:my.plan.item/id "report"
                               :my.plan.item/title "Report"
                               :my.plan.item/done-when "The reply exists."

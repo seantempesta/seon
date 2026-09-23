@@ -73,13 +73,12 @@
    (fn [connection]
      (support/transacted!
              connection
-             [{:seon.agent/id "temporal-root-agent"}
-              {:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message."}])
+             (into (support/agent-tx @connection "temporal-root-agent")
+               [{:seon.message/id "temporal-root-message" :seon.message/to [:seon.agent/id "temporal-root-agent"] :seon.message/content "The opening message."}]))
      (support/transacted!
              connection
-             [{:seon.turn/id "temporal-root-run" :seon.turn/agent [:seon.agent/id "temporal-root-agent"] :seon.turn/trigger [:seon.message/id "temporal-root-message"] :seon.turn/opened-tx "datomic.tx"}
-              {:seon.agent/id "temporal-root-agent"
-               }])
+             (into (support/agent-tx @connection "temporal-root-agent")
+               [{:seon.turn/id "temporal-root-run" :seon.turn/agent [:seon.agent/id "temporal-root-agent"] :seon.turn/trigger [:seon.message/id "temporal-root-message"] :seon.turn/opened-tx "datomic.tx"}]))
      (let [current @connection
            temporal (db/as-of current (db/basis-t current))
            current-selector (walk/root-selector current 1 caps)
@@ -122,8 +121,8 @@
    (fn [connection]
      (support/transacted!
              connection
-             [{:seon.agent/id "historical-walk-agent"}
-              {:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate."}])
+             (into (support/agent-tx @connection "historical-walk-agent")
+               [{:seon.message/id "historical-walk-message" :seon.message/to [:seon.agent/id "historical-walk-agent"] :seon.message/content "A historical walk must terminate."}]))
      (let [current @connection
            render-request {:seon.db/db current
                     :seon.agent/id "historical-walk-agent"

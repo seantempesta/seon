@@ -83,7 +83,7 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "error-write-timing")
-     (support/transacted! connection [{:seon.agent/id "error-write-timing"}])
+     (support/transacted! connection (support/agent-tx @connection "error-write-timing"))
      (support/transacted! connection
                           (turn/open-tx {:seon.turn/id "error-write-timing-turn"
                                          :seon.turn/agent [:seon.agent/id "error-write-timing"]
@@ -136,14 +136,14 @@
                    (db/transact! connection {:tx-data tx :tx-meta {:seon.db/user actor}}))]
        (support/transacted!
         connection
-        [{:seon.agent/id (second creator)} {:seon.agent/id (second worker)}
-         {:seon.issue/id (second issue) :seon.issue/title "Retain tests"
-          :seon.issue/path "docs/seon/issues/error-write-retention.md"
-          :seon.issue/problem "Verify indexed retention at the final writer."
-          :seon.issue/status :open :seon.issue/severity :cleanup
-          :seon.issue/budget (Integer/valueOf 7)
-          :seon.issue/created-by creator :seon.issue/agent worker
-          :seon.issue/tests #{a b}}])
+        (into (support/agents-tx @connection [(second creator) (second worker)])
+          [{:seon.issue/id (second issue) :seon.issue/title "Retain tests"
+            :seon.issue/path "docs/seon/issues/error-write-retention.md"
+            :seon.issue/problem "Verify indexed retention at the final writer."
+            :seon.issue/status :open :seon.issue/severity :cleanup
+            :seon.issue/budget (Integer/valueOf 7)
+            :seon.issue/created-by creator :seon.issue/agent worker
+            :seon.issue/tests #{a b}}]))
        (is (= 7 (:seon.issue/budget (db/pull (db/db connection) [:seon.issue/budget] issue)))
            "Java integers in actual storage entries still become Datahike longs.")
        (doseq [tx [[[:db.fn/call (fn [_] [[:db/retract issue :seon.issue/tests a]])]]

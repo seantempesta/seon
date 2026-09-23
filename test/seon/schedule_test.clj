@@ -33,8 +33,8 @@
    (fn [connection]
      (let [declarations @#'schedule/root-maintenance-portfolio
            result (db/transact! connection
-                                [{:seon.agent/id "root"}
-                                 [:db.fn/call #'schedule/root-maintenance-seed-call]])
+                                (into (test-support/agent-tx @connection "root")
+                                  [[:db.fn/call #'schedule/root-maintenance-seed-call]]))
            database (db/db connection)
            rows (db/q database
                       '[:find ?task-id ?function ?expression ?zone
@@ -131,17 +131,17 @@
   (let [handler-ns (symbol (namespace (symbol handler)))
         result (db/transact!
    connection
-   [{:seon.agent/id "root"}
-    {:seon.ns/name handler-ns}
-    (test-support/program-fn-row @connection handler (repl/source-fn handler))
-    {:seon.schedule/id (str task-id "/schedule")
-     :seon.schedule/expression "* * * * *"
-     :seon.schedule/zone-id "UTC"}
-    {:seon.schedule.task/id task-id
-     :seon.schedule.task/owner [:seon.agent/id "root"]
-     :seon.schedule.task/function [:seon.fn/sym handler]
-     :seon.schedule.task/schedule
-     [:seon.schedule/id (str task-id "/schedule")]}])]
+   (into (test-support/agent-tx @connection "root")
+     [{:seon.ns/name handler-ns}
+      (test-support/program-fn-row @connection handler (repl/source-fn handler))
+      {:seon.schedule/id (str task-id "/schedule")
+       :seon.schedule/expression "* * * * *"
+       :seon.schedule/zone-id "UTC"}
+      {:seon.schedule.task/id task-id
+       :seon.schedule.task/owner [:seon.agent/id "root"]
+       :seon.schedule.task/function [:seon.fn/sym handler]
+       :seon.schedule.task/schedule
+       [:seon.schedule/id (str task-id "/schedule")]}]))]
     (is (seq (:tx-data result)) (pr-str result))
     result))
 

@@ -12,15 +12,14 @@
    (fn [connection]
      (is (:db-after
           (db/transact! connection
-            [{:seon.agent/id "root"}
-             {:seon.agent/id "juniper"}
-             {:seon.message/id "trigger" :seon.message/content "Read the orders."
-              :seon.message/from [:seon.agent/id "root"]
-              :seon.message/to [:seon.agent/id "juniper"]}
-             {:seon.agent/id "juniper"
-              :seon.agent/runtime
-              {:seon.runtime/agent [:seon.agent/id "juniper"]
-               :seon.runtime/trigger [:seon.message/id "trigger"]}}])))
+            (into (support/agents-tx @connection ["root" "juniper"])
+              [{:seon.message/id "trigger" :seon.message/content "Read the orders."
+                :seon.message/from [:seon.agent/id "root"]
+                :seon.message/to [:seon.agent/id "juniper"]}
+               {:seon.agent/id "juniper"
+                :seon.agent/runtime
+                {:seon.runtime/agent [:seon.agent/id "juniper"]
+                 :seon.runtime/trigger [:seon.message/id "trigger"]}}]))))
      (let [ctx (support/fork-cluster-ctx connection)
            run (fn [source]
                  (evaluation/evaluate

@@ -89,15 +89,13 @@
                                                :seon.config.error/recurrence-limit 100}))
             _ (test-support/seed-cluster! connection "error-graph")
             _ (is (:db-after (db/transact! connection
-                                          [{:seon.agent/id "error-graph-a"}
-                                           {:seon.agent/id "error-graph-b"}
-                                           {:seon.agent/id "error-graph-steward"}
-                                           {:seon.ns/name 'my.error-graph
-                                            :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
-                                           (test-support/program-fn-row
-                                            (db/db connection) 'my.error-graph/raise
-                                            "(defn raise [] nil)")
-                                           {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}])))
+                                          (into (test-support/agents-tx @connection ["error-graph-a" "error-graph-b" "error-graph-steward"])
+                                            [{:seon.ns/name 'my.error-graph
+                                              :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
+                                             (test-support/program-fn-row
+                                              (db/db connection) 'my.error-graph/raise
+                                              "(defn raise [] nil)")
+                                             {:seon.turn/id "error-graph-turn" :seon.turn/agent [:seon.agent/id "error-graph-a"] :seon.turn/opened-tx "datomic.tx"}]))))
             a (error/recording (db/db connection) (request "error-graph-a" "error-graph-process-1" at))
             b (error/recording (db/db connection) (request "error-graph-b" "error-graph-process-1" at))
             read-error #(db/pull (db/db connection)
@@ -718,8 +716,7 @@
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "error-test")
-      (test-support/transacted! connection [{:seon.agent/id "root"}
-                                          {:seon.agent/id "agent-3"}])
+      (test-support/transacted! connection (test-support/agents-tx @connection ["root" "agent-3"]))
       (body connection))))
 
 (defn- commit-request

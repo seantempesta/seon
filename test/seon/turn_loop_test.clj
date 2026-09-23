@@ -197,10 +197,10 @@
       (config/apply! {:seon.boot/cluster-name "default" :seon.db/connection connection})
       (test-support/transacted!
                    connection
-                   [{:seon.agent/id "gauge-agent"}
-                    {:seon.turn/id "gauge-run"
-                     :seon.turn/agent [:seon.agent/id "gauge-agent"]
-                     :seon.turn/opened-tx "datomic.tx"}])
+                   (into (test-support/agent-tx @connection "gauge-agent")
+                     [{:seon.turn/id "gauge-run"
+                       :seon.turn/agent [:seon.agent/id "gauge-agent"]
+                       :seon.turn/opened-tx "datomic.tx"}]))
       ;; A REGISTERED id. The gauges are an observation of a model the config
       ;; descriptors declare. This test named "deepseek-v4-flash", which no
       ;; shipped descriptor carries (they are deepseek-flash, deepseek-v4-pro,
@@ -315,8 +315,8 @@
                                     {:seon.config.run/max-episode-runs 100})
         (test-support/transacted!
                      connection
-                     [{:seon.agent/id agent-id}
-                      {:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once"}])
+                     (into (test-support/agent-tx @connection agent-id)
+                       [{:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once"}]))
         (is (= :open (:seon.turn.work/situation
                       (turn/next-agent-work (db/db connection) request)))
             "the wake opens exactly one turn")
@@ -558,9 +558,8 @@
                           [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove live settings"}])
   (test-support/transacted!
                connection
-               [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}
-                {:seon.agent/id agent-id
-                 }]))
+               (into (test-support/agent-tx @connection agent-id)
+                 [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}])))
 
 (defn- call-work
   [agent-id run-id]
@@ -989,8 +988,7 @@
     (test-support/with-database
      (fn [connection]
        (test-support/transacted! connection
-                                 [{:seon.agent/id "worker"}
-                                  {:seon.agent/id "supervisor"}])
+                                 (test-support/agents-tx @connection ["worker" "supervisor"]))
        (is (= [[] [] ["supervisor"] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "supervisor" "worker"))
                     (range 6)))
@@ -1001,7 +999,7 @@
   (testing "the failing agent is never mailed about its own refusal"
     (test-support/with-database
      (fn [connection]
-       (test-support/transacted! connection [{:seon.agent/id "worker"}])
+       (test-support/transacted! connection (test-support/agent-tx @connection "worker"))
        (is (= [[] [] [] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "worker" "worker"))
                     (range 6)))
@@ -1198,8 +1196,8 @@
                               (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
       (testing "the trigger — the exact transact the live drive failed on"
         (is (map? (db/transact! connection
-                              [{:seon.agent/id "alice"}
-                               {:seon.message/id "m-live" :seon.message/to [:seon.agent/id "alice"] :seon.message/content "count the widgets"}]))))
+                              (into (test-support/agent-tx @connection "alice")
+                                [{:seon.message/id "m-live" :seon.message/to [:seon.agent/id "alice"] :seon.message/content "count the widgets"}])))))
       (testing "the run, its agent pointer, and recorded trigger"
         (is (map? (db/transact!
                    connection
@@ -1288,9 +1286,10 @@
       (config/apply! {:seon.db/connection connection
                       :seon.boot/cluster-name "loop-test"})
       (test-support/transacted! connection
-                              [{:seon.ns/name 'user}
-                               {:seon.agent/id "agent-a"}
-                               {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go"}])
+                              (into (test-support/agent-tx @connection "agent-a")
+                                [{:seon.ns/name 'user}
+                               
+                                 {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go"}]))
       (body connection))))
 
 (defn- commit-run! [connection {:keys [planned? receipts closed? completed?]}]

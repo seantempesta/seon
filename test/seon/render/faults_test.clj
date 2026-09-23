@@ -18,10 +18,10 @@
      (let [effective config/defaults
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
-           _ (support/transacted! connection [{:seon.agent/id "fault-render-agent"}
-                                              {:seon.turn/id "fault-render-turn"
-                                               :seon.turn/agent [:seon.agent/id "fault-render-agent"]
-                                               :seon.turn/opened-tx "datomic.tx"}])
+           _ (support/transacted! connection (into (support/agent-tx @connection "fault-render-agent")
+                                               [{:seon.turn/id "fault-render-turn"
+                                                 :seon.turn/agent [:seon.agent/id "fault-render-agent"]
+                                                 :seon.turn/opened-tx "datomic.tx"}]))
            recording (error/recording
                       (db/db connection)
                       {:seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.faults-test/fixture :seon.error/operation 'seon.render.faults-test/pulled-fault-concern-uses-the-entity-pair :seon.render/refused-member :seon.render/output

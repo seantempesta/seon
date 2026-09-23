@@ -11,14 +11,14 @@
    (fn [connection]
      (let [written
            (db/transact! connection
-             [{:seon.agent/id "page"}
-              {:seon.ns/name 'my.agents.page}
-              {:seon.turn/id "old" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "Earlier reply"}
-              {:seon.cluster.eval/id "old-eval"
-               :seon.cluster.eval/at (java.util.Date. 0)
-               :seon.cluster.eval/run [:seon.turn/id "old"]
-               :seon.cluster.eval/ordinal 0
-               :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}])]
+             (into (support/agent-tx @connection "page")
+               [{:seon.ns/name 'my.agents.page}
+                {:seon.turn/id "old" :seon.turn/agent [:seon.agent/id "page"] :seon.turn/opened-tx "datomic.tx" :seon.turn/reply "Earlier reply"}
+                {:seon.cluster.eval/id "old-eval"
+                 :seon.cluster.eval/at (java.util.Date. 0)
+                 :seon.cluster.eval/run [:seon.turn/id "old"]
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/source "(+ 1 1)" :seon.eval/shown "2"}]))]
        (is (:db-after written) (pr-str written)))
      (let [written
            (db/transact! connection

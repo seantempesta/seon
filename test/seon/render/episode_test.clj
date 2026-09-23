@@ -11,7 +11,7 @@
      ;; Only seon.turn/open-tx writes the agent's runtime turn edge; a
      ;; hand-authored turn map is refused, and the refusal used to read here
      ;; as an agent with no stored evaluation.
-     (support/transacted! connection [{:seon.agent/id "episode-agent"}])
+     (support/transacted! connection (support/agent-tx @connection "episode-agent"))
      (support/transacted!
       connection
       (turn/open-tx {:seon.turn/id "episode-turn"

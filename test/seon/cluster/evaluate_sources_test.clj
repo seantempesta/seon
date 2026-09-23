@@ -95,7 +95,7 @@
                     (is (= 1700 (:seon.sci.eval/time-limit-ms request)))
                     (let [result (original-evaluate request)]
                       (when (= 1 (swap! evaluations inc))
-                        (support/transacted! connection [{:seon.agent/id "later-agent"}]))
+                        (support/transacted! connection (support/agent-tx @connection "later-agent")))
                       result))]
                  (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster

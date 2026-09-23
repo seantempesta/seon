@@ -12,7 +12,7 @@
            ordinal 0
            receipt-id (turn/receipt-identity run-id ordinal)
            receipt-var (ns-resolve 'seon.db '*receipt*)]
-       (support/transacted! connection [{:seon.agent/id agent-id}])
+       (support/transacted! connection (support/agent-tx @connection agent-id))
        (support/transacted!
         connection
         (turn/open-tx

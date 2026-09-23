@@ -85,7 +85,7 @@
                        (db/db connection)))
            "the refused row seeded nothing")
        (let [report (test-support/transacted!
-                     connection [{:seon.agent/id "admitted-fixture-write"}])]
+                     connection (test-support/agent-tx @connection "admitted-fixture-write"))]
          (is (some? (:db-after report)))
          (is (= "admitted-fixture-write"
                 (db/q '[:find ?id . :where [_ :seon.agent/id ?id]]
