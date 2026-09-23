@@ -241,3 +241,25 @@ Tests on scratch `root` after adoption + restart: run `ebc9ad6898f3` (7 instrume
 - `59d8cc6a6` #63: comment-only adoption 5,043 ms, 0 reloaded; unchanged adoption
   1,634 ms (publication of zero files; `full-source-refresh!` digest walk).
 - 24z (page-cache signal from post-eval evidence) not started.
+
+## Third follow-ups
+
+- `967bcb86e` registry: only digest-valued attributes are blob references (515
+  ref/symbol attributes were read as digests through their properties maps); explicit
+  sweep now runs, collects an unreferenced blob, `get_value` answers value-not-found.
+  `blob_publication_test` 20/20 (112,312 ms; its fixture root's from-zero
+  publication is most of it — DEFECT >10 s). Its last assertion ("a second collection
+  sweeps zero") was a retired assumption per `collect!`'s docstring; it now asserts the
+  rooted blob survives. Regression `only-digest-valued-attributes-are-swept-as-blob-references`
+  (run `c7519f78574d`). #63 regression `an-adoption-that-changes-no-definition-is-not-an-arming-failure`
+  (run `8b19e0e5fada`). New issue: `an-explicit-collection-sweeps-the-clusters-adopted-source-commit.md`
+  (an explicit now-cutoff sweep made the scratch root unbootable).
+- #63 phases, comment-only adoption 6,280 ms: store 210; source build 3,492 (kondo
+  analysis of the changed file plus digesting every input); branch publication 1,756
+  (contract projection over 3,394 schemas 334, program rows, reconciliation
+  transaction 933); development reconciliation 467; arming + record 118. Unchanged
+  adoption 1,292 ms: 1,105 ms is the source build's input digest walk (every input
+  re-read and hashed) before the commit-id comparison converges. Sub-second needs the
+  capture keyed by (path, size, mtime) → digest in `seon.cluster.source` (not my file).
+- `81e620d4b` 24z: page-cache signal from post-evaluation evidence (`Var/rev` +
+  namespace mappings identity), mark 236 µs, only for non-read_only evaluations.
