@@ -778,18 +778,16 @@
       (refuse! `append-generated-call ::generated-ordinal request))
     (when-not prior-terminal?
       (refuse! `append-generated-call ::generated-prefix-unsettled request))
-    (into
-     [{:db/id (str "namespace:" namespace-name) :seon.ns/name namespace-name}]
-     (receipt-start-call
-      db
-      (cond-> {::id id
-               :seon.cluster.eval/ordinal ordinal
-               :seon.cluster.eval/at receipt-at
-               :seon.cluster.eval/author :system
-               :seon.cluster.eval/source source
-               :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
-        (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
-        comment (assoc :seon.cluster.eval/comment comment))))))
+    (receipt-start-call
+     db
+     (cond-> {::id id
+              :seon.cluster.eval/ordinal ordinal
+              :seon.cluster.eval/at receipt-at
+              :seon.cluster.eval/author :system
+              :seon.cluster.eval/source source
+              :seon.cluster.eval/ns [:seon.ns/name namespace-name]}
+       (:seon.eval/origin request) (assoc :seon.eval/origin (:seon.eval/origin request))
+       comment (assoc :seon.cluster.eval/comment comment)))))
 
 (defn append-generated-tx
   "Transaction data appending one dependency-ready generated form."
@@ -803,7 +801,7 @@
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.turn/generated-run-request]
                   :seon.store/transaction-data]}
-  [database request]
+  [_database request]
   (let [{agent-id :seon.agent/id
          run-id ::id
          opened-at ::opened-tx
@@ -811,13 +809,10 @@
          trigger ::trigger} request
         namespace-name (if (vector? starting-ns)
                          (second starting-ns)
-                         starting-ns)
-        namespace-tempid (str "namespace:" namespace-name)]
-    (into [] cat
-          [[{:db/id namespace-tempid :seon.ns/name namespace-name}]
-           (open-tx
-            (cond-> {::id run-id ::agent [:seon.agent/id agent-id] ::starting-ns [:seon.ns/name namespace-name] :seon.turn.work/situation :generate ::opened-tx "datomic.tx"}
-              trigger (assoc ::trigger trigger)))])))
+                         starting-ns)]
+    (open-tx
+     (cond-> {::id run-id ::agent [:seon.agent/id agent-id] ::starting-ns [:seon.ns/name namespace-name] :seon.turn.work/situation :generate ::opened-tx "datomic.tx"}
+       trigger (assoc ::trigger trigger)))))
 
 (defn- current-receipt
   "The receipt identified by run and ordinal, or nil.
@@ -1460,9 +1455,17 @@
               (comp (map #(or (:seon.ns/name %) starting-namespace))
                     (keep identity)
                     (distinct)
+                    ;; An existing namespace is only referenced; a new one
+                    ;; arrives as the digested row its `in-ns` evaluation
+                    ;; declared (`seon.sci.eval`'s ending-namespace row).
                     (map (fn [namespace-name]
-                           {:db/id (str "namespace:" namespace-name)
-                            :seon.ns/name namespace-name})))
+                           (assoc (or (when-not (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]]
+                                                    database namespace-name)
+                                        (some #(when (= namespace-name (get-in % [:seon.program/row :seon.ns/name]))
+                                                 (:seon.program/row %))
+                                              evaluations))
+                                      {:seon.ns/name namespace-name})
+                                  :db/id (str "namespace:" namespace-name)))))
               (cons {:seon.ns/name starting-namespace} sources))]
     (when-not agent-eid
       (refuse! `record-evaluated-call ::no-such-agent request))

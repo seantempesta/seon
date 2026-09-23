@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocking
 created: 2026-09-23
 tags: [issue, turn, program, definition-digest]
@@ -43,3 +43,18 @@ and 3d30c0558fa5. The test's fixture rows are canonical: the agent comes from
 These writers reference the namespace and never create a bare row. A new
 namespace arrives through its digested declaration row, either the evaluation's
 own row or `namespace-seed-call`. Owner: `seon.turn`, outside lane fixture-reds.
+
+## Resolution (2026-09-23, lane turn-ns-digest)
+
+`append-generated-call` and `generated-run-tx` no longer write a namespace row:
+both already reference the namespace by lookup ref. `record-evaluated-call`
+references an existing namespace and, for a new one, carries the digested
+`:seon.program/row` its `in-ns` evaluation declared (built by
+`program/declaration-row` in `seon.sci.eval`); no second digest path. With no
+such row the bare identity remains and the writer refuses by name, as before.
+Proof: run 83087cf65291 (38 assertions pass, no refusal; the test stays red
+only on its 5000 ms duration bound, 8820 ms). Baseline run 8ad8eb11b01b
+reproduced the refusal. Not converted: `source-rows` (plan-time receipts,
+`src/seon/turn.clj` near `defn- source-rows`) still upserts an identity-only
+row per source namespace; no digested row exists before evaluation there.
+Landing: `docs/prds/agent-platform/landing/lane-turn-ns-digest-2026-09-23.md`.
