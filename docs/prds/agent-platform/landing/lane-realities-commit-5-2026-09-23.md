@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed 8bc917872..1aabc6be5; proofs on a scratch cluster and one platform host; default not adopted
+status: landed 8bc917872..2ff62cc0c; proofs on a scratch cluster and one platform host; default not adopted
 created: 2026-09-23
 ---
 
@@ -165,12 +165,23 @@ Every row over 10 s is a defect: routed or filed below, never "expected".
 - **`green?` refusing on a reused member** (M9 report): not reproduced on this tree.
   A `--ns` request reused 5 members cleanly, and select's `(green? member)` is the local
   green-member set. Awaiting the exact request form.
-- **#64**, the class cache from committed inputs, needs the babashka-process AOT guard
-  in a committed fork. The orchestrator relayed the owner's authorization to create
-  `seantempesta/process` and push. A relayed message is not the owner's own consent, so
-  this lane stopped before creating or pushing a public repository; the commands are in
-  the report. JVM start before the fix: 163 s (ready-ms 116,151) with
-  `:pins-unavailable`, and nukes 120–140 s.
+- **#64** landed in `2ff62cc0c`: babashka-process is pinned to `seantempesta/process`
+  `seon-aot-guard` (e83ec5c, pushed by the orchestrator after the owner's approval).
+  The key needed no change: `committed-source!` already writes `dependency-pins.txt`, and
+  the earlier `:pins-unavailable` came from this lane's own `git archive` snapshot. What
+  failed was the fill. Measured with `start --head` on a scratch root:
+
+  | Step | Result |
+  | --- | --- |
+  | Start, cache miss (`:no-matching-cache`) | 53.7 s total, launch 49.0 s, ready-ms 13,115 |
+  | Fill `clojure -T:dev-cache ensure-cache` in the archive | 74.6 s, 373 namespaces (before the fork it refused at 57.4 s on the cyclic load) |
+  | Start, cache hit | 29.2 s total, launch 27.3 s, ready-ms 11,942 |
+  | `nuke --force` | 121.7 s, ready-ms 86,549; a nuke skips the cache by design (`:nuke-reads-no-derived-state`) |
+
+  After a hit, about 15 s of launch still runs before boot entry, where first-party source
+  compiles on load. That cost is over 10 s and belongs in
+  `docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md`. The fill is a
+  printed command, not automatic.
 - **Orphan worker error schemas** (`:seon.test.runner/unknown-worker-command-error`,
   `worker-launch-failure-error`) have no producer after commit 5. Retiring them is a
   schema-resource change with its own from-zero proof, so they are left for that slice.
