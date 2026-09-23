@@ -1,6 +1,7 @@
 (ns seon.cluster.status
   "Root's cluster observation and per-agent accounting, derived at read time."
-  (:require [clojure.edn :as edn]
+  (:require [seon.error.refusal]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [cheshire.core :as json]
             [seon.blob :as blob]
@@ -13,11 +14,9 @@
 (defn- unknown
   {:malli/schema [:=> [:cat :string] :seon.cluster.status/unavailable-error]}
   [message]
-  {:seon.error/at (java.util.Date.)
-   :seon.error/layer :seon.cluster.status/observation
-   :seon.error/operation 'seon.cluster.status/unknown
-   :seon.error/message message
-   :seon.cluster.status/unavailable-observation message})
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.status/observation 'seon.cluster.status/unknown
+   {:seon.error/message message
+   :seon.cluster.status/unavailable-observation message}))
 
 (defn- boot-time []
   (java.util.Date. (.getStartTime (ManagementFactory/getRuntimeMXBean))))

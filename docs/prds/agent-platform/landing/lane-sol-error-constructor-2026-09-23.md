@@ -66,3 +66,16 @@ Existing swallowing/error-policy residue found in touched files is retained unde
 The tool-triggered repository Markdown audit reported 46 findings, with surfaced examples citing obsolete dependency pins in other landing notes; its full output was elided. That repository-wide audit is not a pass for this cut. The scoped citation check for this landing is recorded separately below.
 
 Scoped landing citation check: `bb script/seon/dev/citations.clj docs/prds/agent-platform/landing/lane-sol-error-constructor-2026-09-23.md` — **1 document, 0 failures, 74 ms**.
+
+
+## Continuation from E13
+
+Authorized after the diagnosis at `6cea7a3e0` (`docs/research/agent-platform/error-constructor-reds-2026-09-23.md`). That diagnosis found no demonstrated E-slice regression: 25 of 27 reds have pre-existing causes; two remain unattributed. Constructor/error/schema proof members were still pending, and my.* proof namespaces were omitted from the earlier request. This continuation is not a claim that the first tranche is green.
+
+The same diagnostic owns construction; each conversion preserves ordered value expressions and the complete remainder. Cost stays proportional to error members and existing Throwable evidence. No new runtime mechanism, schema, or error taxonomy is introduced. Holds remain current dirty paths plus the explicitly held value test. Each slice rechecks Git status and regenerates a selected census before preview/application.
+
+Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be07701393a3038f7f48eb6f3bb3a`, publication off, and currently no replaced roots. The diagnosed unfinished-test/contract-restoration boundary remains orchestrator evidence to resolve; this lane inspected no foreign session and did not run tests or adopt. Packaged-contract checks read absolute checkout paths on that live JVM.
+
+| Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
+|---|---:|---|---|---:|---|---|
+| E13: `src/seon/cluster/status.clj` | 1 | 5 / 6 / -1; +0 | 1 / 50 | 64.458709 | `seon.cluster.status-test` | None |
