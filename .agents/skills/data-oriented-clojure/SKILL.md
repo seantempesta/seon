@@ -46,7 +46,7 @@ Optional stored values are absent; stored nilable shapes refuse at
 shape choices and datahike for transaction/query mechanics.
 
 Every function, private included, requires a complete Malli contract
-(`AGENTS.md:265`). `collect-contracts!` (`src/seon/instrument.clj:810-820`)
+(`AGENTS.md:271`). `collect-contracts!` (`src/seon/instrument.clj:810-820`)
 walks every loaded namespace's `ns-interns`, so private declarations are armed
 too. Authored incomplete slots and predicate-contract omissions are checked by
 `assert-complete-schema!` (`src/seon/schema/internal.cljc:291`); live

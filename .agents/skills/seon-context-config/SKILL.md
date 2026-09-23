@@ -42,7 +42,7 @@ acquisition table whose referenced mechanisms are being deleted.
 
 Each turn forks the agent's SCI context from the cluster base and carries its
 private layer over (`fork-for-turn`, `src/seon/sci/eval.clj:2287`); defs,
-atoms, and result objects stay in memory (`AGENTS.md:169`). The evaluation stores
+atoms, and result objects stay in memory (`AGENTS.md:175`). The evaluation stores
 shown text produced under the render profile once, plus out and error.
 Do not restore a def-blob threshold, result serializer, or separate
 result storage cap as a config requirement.

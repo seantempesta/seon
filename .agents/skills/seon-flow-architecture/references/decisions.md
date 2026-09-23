@@ -42,7 +42,7 @@ loop inside the JVM and adds a second scheduling authority beside
 core.async.flow and the database.
 
 The law: each agent owns a flow graph and no central scheduler or dispatcher
-is added (`AGENTS.md:162-163`). Database facts say which agents and work
+is added (`AGENTS.md:168-169`). Database facts say which agents and work
 exist; each graph derives its own eligible episode when woken.
 
 Current proof:
@@ -67,7 +67,7 @@ It does not divide CPU from I/O.
 Seon therefore refuses missing or `:mixed` workloads in `var-process`
 (`src/seon/flow.clj:132-184`). Construction-time refusal is stronger than a
 warning or production metric: an unclassified proc cannot enter a graph. The
-law is `AGENTS.md:162`.
+law is `AGENTS.md:168`.
 
 This replaced the old willingness to accept core.async's default and discover
 the thread cost under scale.
@@ -84,14 +84,14 @@ Read `recover-call` (`src/seon/turn.clj:1650-1672`), its caller
 runs before config application and before any agent arms
 (`src/seon/cluster/boot.clj:59-69`). The database records what settled; an
 interrupted receipt is evidence for the next agent decision, not authority for
-an automatic retry. The law is `AGENTS.md:168-170`.
+an automatic retry. The law is `AGENTS.md:174-176`.
 
 This replaced replay/retry machinery whose exactly-once claim could not be
 proved across external effects.
 
 ## Channels carry only losable in-flight values
 
-The transport law divides values by recovery need (`AGENTS.md:164-166`):
+The transport law divides values by recovery need (`AGENTS.md:170-172`):
 
 - anything recovery or another process may need is a database fact;
 - in-flight values may ride channels at full size when loss is free;
@@ -102,7 +102,7 @@ Current examples are the sliding-one agent wake channel
 (`src/seon/cluster/agent.clj:124-128`), the cluster's sliding-one armer,
 stream, render and pages channels (`src/seon/cluster.clj:3367-3390`), and
 counted-dropping fault observation (`src/seon/flow.clj:966-1003`). The fault
-tap is the one example the error policy rejects (`AGENTS.md:285-289`); see
+tap is the one example the error policy rejects (`AGENTS.md:291-295`); see
 [wakes and faults](wakes-and-faults.md#fault-fan-out).
 
 This replaced both extremes: committing high-churn partial presentation state
@@ -112,7 +112,7 @@ channels.
 ## Presence, not kinds
 
 An entity is its attributes and relations, not a stamped kind
-(`AGENTS.md:330-331`). Agent identity is discovered by the presence of its
+(`AGENTS.md:336-337`). Agent identity is discovered by the presence of its
 unique identity attribute; graph custody is discovered by presence in the
 armed routing map. There is no `:type`, `:kind`, active-set row, or status
 flag.
@@ -145,7 +145,7 @@ snapshots that required reconciliation.
 
 ## One mechanism
 
-When a surviving owner exists, strengthen it in place (`AGENTS.md:317-325`):
+When a surviving owner exists, strengthen it in place (`AGENTS.md:323-331`):
 
 - wake selection belongs behind the one cluster wake router;
 - work admission belongs in the work launcher (`seon.flow/submit!!`,
@@ -186,4 +186,4 @@ keyframe bytes, while the agent graph contains mailbox, turn, and schedule
 
 These built and target boundaries apply the simpler facts/channels/derived-
 render model without restoring the deleted CLJS mechanisms: fresh Seon is
-CLJ-only and one JVM runs the system (`AGENTS.md:150`).
+CLJ-only and one JVM runs the system (`AGENTS.md:156`).

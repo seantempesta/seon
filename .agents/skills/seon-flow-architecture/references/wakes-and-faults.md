@@ -127,7 +127,7 @@ Every graph exposes core.async.flow's error and report channels.
   commits each fault as a database fact, in its own graph whose `:io-exec` is
   supplied (`:1183-1189`).
 
-The error policy (`AGENTS.md:279-300`) says a core fault is committed at the
+The error policy (`AGENTS.md:285-306`) says a core fault is committed at the
 owning boundary and never dropped by an overload channel. The installed
 fan-out is an overload channel of capacity 64
 (`src/seon/cluster.clj:3419`), so that half of the policy is **[TARGET]**.
@@ -159,8 +159,8 @@ The cluster's panic handler, `emit-core-fault!`
 (`src/seon/cluster.clj:3229-3252`), prints one `SEON CORE FAULT` line to
 stderr and returns nil. It does not throw, stop the graph or mark it failed.
 The owner's `:panic` policy (the operation throws to its caller and the
-failing graph stops and shows as failed, `AGENTS.md:290-294`) and delivery of
-the fault fact to the responsible agent (`AGENTS.md:288-289`) are
+failing graph stops and shows as failed, `AGENTS.md:296-300`) and delivery of
+the fault fact to the responsible agent (`AGENTS.md:294-295`) are
 **[TARGET]**. Change the one handler and the committer; do not add per-site
 panic decisions.
 

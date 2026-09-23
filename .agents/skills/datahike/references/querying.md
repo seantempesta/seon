@@ -11,7 +11,7 @@ show Datahike's query grammar with `d/q` over one explicit immutable database
 value; reads are synchronous. In Seon code the query owner is `seon.db/q`
 (`src/seon/db.clj:2245`), which accepts the same grammar; direct `datahike.api`
 calls survive only inside `seon.db`, the store/registry and classified
-branch-custody owners, and system-side listeners (`AGENTS.md:377-380`).
+branch-custody owners, and system-side listeners (`AGENTS.md:383-386`).
 
 ## Contents
 

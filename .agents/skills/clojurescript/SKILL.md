@@ -6,7 +6,7 @@ description: "Mine the deleted Seon CLJS pod through Git history (AGENTS.md:19).
 # Historical CLJS pod quarry
 
 The CLJS build is off and the pod is deleted. Current Seon is CLJ/JVM only:
-one JVM runs the CLJ system (`AGENTS.md:150`). Current agent
+one JVM runs the CLJ system (`AGENTS.md:156`). Current agent
 evaluation belongs to `src/seon/sci/eval.clj`; current web rendering belongs to
 `src/seon/render/web.clj`.
 

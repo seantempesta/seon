@@ -9,8 +9,8 @@ tags: [reference, flow]
 Use this runbook when a scratch cluster fails during startup, especially while
 other lanes are changing the shared tree. Do not restart, stop or mutate
 another lane's cluster to obtain a cleaner signal; lanes never stop, refork or
-reset `default` (`AGENTS.md:405-406`). A boot longer than ten seconds needs the
-owner's explicit authorization (`AGENTS.md:83-84`).
+reset `default` (`AGENTS.md:411-412`). A boot longer than ten seconds needs the
+owner's explicit authorization (`AGENTS.md:89-90`).
 
 ## 1. Separate launch failure from degraded boot
 

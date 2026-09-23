@@ -60,8 +60,8 @@ agent's own private Vars over it as actual objects; inherited program bindings
 are replaced. Base contexts are memoized by program identity in a four-entry
 LRU (`program-cache-policy`, `:2321-2328`). The law is that a context is
 reacquired from its branch head at turn start and cached by commit id, and
-private defs, atoms and result objects stay in memory (`AGENTS.md:169`,
-`:211-212`). Do not restore `:seon.def` rows or rebuild a private layer from
+private defs, atoms and result objects stay in memory (`AGENTS.md:175`,
+`:217-218`). Do not restore `:seon.def` rows or rebuild a private layer from
 the database.
 
 **[TARGET]** (`docs/prds/agent-platform/plan/lane-b2-walk-flow-fork.md` §0,
@@ -85,7 +85,7 @@ Opening is system turn 0: ordinary submitted source, reply present, no
 provider attempt. Before each agent turn, the system turn projects the declared
 opening and every distinct retained read form; unchanged reads contribute no
 evaluation (`system-turn`, `src/seon/turn.clj:2055`). Include generated and
-agent-written reads, never writes or effects (`AGENTS.md:373-375`).
+agent-written reads, never writes or effects (`AGENTS.md:379-381`).
 
 Datahike evidence capture and validity live in `seon.db/read-evidence`
 (`src/seon/db.clj:914`) and `seon.db/read-evidence-current?` (`:1149`).
