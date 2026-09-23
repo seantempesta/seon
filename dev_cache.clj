@@ -2,14 +2,14 @@
   "Refreshes the source-preferred development class cache."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.tools.build.api :as b])
   (:import [java.io RandomAccessFile]
            [java.nio.file AtomicMoveNotSupportedException DirectoryNotEmptyException
             FileAlreadyExistsException
             Files StandardCopyOption]
-           [java.security MessageDigest]))
+           [java.security MessageDigest]
+           [java.util.concurrent TimeUnit]))
 
 (def cache-root "target/dev-dependency-classes")
 (def staging-root "target/dev-dependency-classes.next")
@@ -425,14 +425,18 @@
   []
   ;; An archive carries recorded pins, not a git work tree.
   (when (.exists (io/file ".git"))
-    (let [{:keys [exit out err]} (shell/sh "git" "submodule" "status" "--" "reference-code")
-          mismatches (filter #(contains? #{\+ \- \U} (first %))
-                             (str/split-lines out))]
-      (when (or (not (zero? exit)) (seq mismatches))
-        (throw (ex-info "Reference-code checkout differs from its gitlink."
-                        {:seon.dev-cache/exit exit
-                         :seon.dev-cache/mismatches (vec mismatches)
-                         :seon.dev-cache/error err}))))))
+    (let [child (.start (doto (ProcessBuilder. ^java.util.List
+                                              ["git" "submodule" "status" "--" "reference-code"])
+                          (.redirectErrorStream true)))]
+      (when-not (.waitFor child 10 TimeUnit/SECONDS)
+        (.destroyForcibly child)
+        (throw (ex-info "Reference-code pin query timed out." {})))
+      (let [output (slurp (.getInputStream child))
+            mismatches (filter #(#{\+ \- \U} (first %)) (str/split-lines output))]
+        (when (or (not (zero? (.exitValue child))) (seq mismatches))
+          (throw (ex-info "Reference-code checkout differs from its gitlink."
+                          {:seon.dev-cache/exit (.exitValue child), :seon.dev-cache/mismatches (vec mismatches)
+                           :seon.dev-cache/output output})))))))
 
 (defn- refresh!
   []
