@@ -32,7 +32,7 @@ changes every existing start: a fixture-branch start would get the fixture's bra
 instead of `:cluster-<name>`. Making that the default is a later ruling. The slice
 threads the key the spec names, and creation already accepts it. It adds no machinery.
 
-## Change
+## Change (commit `78a35a2c1`)
 
 - `src/seon/issue.clj`, +12/−3:
   - `start!`, `start-tx` and `create-tx` declare an optional
