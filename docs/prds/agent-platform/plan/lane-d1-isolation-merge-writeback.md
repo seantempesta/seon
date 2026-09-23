@@ -216,13 +216,12 @@ post-publication check, not the export inventory (`program.cljc:43-77`).
    reads (`effect.clj:278-306`). An agent replacement may omit current file/span
    facts. A genuinely new declaration supplies destination and insertion position;
    ambiguous namespace-to-file mapping refuses with identity and candidate paths.
-2. The source owner creates isolated staging at the expected source commit.
+2. The source owner captures staging bytes outside live paths at the expected source commit.
    Read each touched file once; group edits against original bytes; apply existing
    lossless splices in descending half-open UTF-8 span order. Deletions remove old
    forms, additions have actual positions, and new-file absence is expressed
    under `:my.fs/precondition`. Stage the complete file set before analysis/loading.
-   An implementation lane does not create an ad hoc worktree to evade ownership;
-   this is the explicitly owned export operation's isolated-checkout contract.
+   Keep whole-file holds through integration; use captured staging, never a git worktree.
 3. Run B1's ordinary file publication analysis with captured staged bytes and its
    namespace/alias/refer/import/macro, reader, dependency and configuration context.
    Compare canonical definition digests for every accepted identity; verify intended
@@ -233,11 +232,12 @@ post-publication check, not the export inventory (`program.cljc:43-77`).
    callable loads and executes. A typed SCI-unloadable JVM fallback cannot certify
    the changed body. Use B4's existing isolated execution host for that proof,
    retaining its one admission/resolution/recording authority; no D1 runner.
-5. Commit the complete loadable file change path-limited in staging, naming task
-   and M. Integrate through B1's source owner only against the expected checkout
-   state, then publish/adopt the complete set. Its publication monitor alone does
-   not serialize filesystem editors. Never expose partially written multi-file
-   source to a live reload; use existing digest-fenced edits/controlled integration.
+5. Integrate the complete staged change through B1's source owner only against
+   the expected checkout state; verify all installed bytes, then commit path-limited,
+   naming task and M. Publish/adopt the complete set under the existing evaluation/adoption
+   boundary. Close reload admission during installation; reconcile each installed file
+   as specified in §2e before reopening it. A failed load leaves affected execution
+   unavailable until load, arming and recorded convergence are proven.
 6. Verify publication completion, actual loaded behavior and browser paint
    separately. No automatic push. Remove staging through its lifecycle owner only
    after retaining required evidence or a resumable commit.
@@ -252,174 +252,236 @@ of unrelated edits.
 
 ### 2e. Outside agents take the same path
 
-**Owner ruling (2026-09-23), supersedes anything below that conflicts:** "stick with our git and datahike terms … Kinda like regular programming. You branch off the code that's loaded in an existing branch or default, you make changes through the repl which is targeting this same cluster / env, the changes trigger automatic tests that are affected by just those changes (not system wide), we have checks ensuring all functions have malli schemas, malli schemas are fully namespaced, tests are written for the function (at least one). I don't necessarily want to gate accepting a function that doesn't have a schema; more have the repl warn that it won't be allowed to be merged until all tests pass, all functions are spec'ed, all specs are well formed … This is mostly work for the seon agents code and the mcp tool is just putting them in that same environment." Therefore:
-1. **The interface is branches.** Every MCP call names its branch; tools create a branch off default's loaded code or any branch's head, list branches, and delete (unlink) one. No "agent" concept at the interface; if custody needs an agent row per branch, it is an implementation detail behind the branch name.
-2. **Code changes through the REPL on that branch**, in the same cluster environment Seon agents use; a `defn` persists as the branch's program rows and is live there immediately; undefining deletes it.
-3. **Each change triggers the tests reaching just that change** on that branch, automatically, with results in the reply — never a system-wide run.
-4. **Definition WARNS, merge GATES.** A function without a Malli schema, a schema not fully namespaced or not well formed, or a function with no test is still accepted; the reply warns that the branch cannot merge until it is fixed. (This replaces "a `defn` without `:malli/schema` is refused and never becomes a row" below.) The merge gate requires: every affected test green, every function spec'ed with a well-formed, fully namespaced schema, and at least one test per function.
-   **Configurable (owner, 2026-09-23: "I'm not sure what will work better so make it so it's configurable. We may want to gate at the time of repl entry. Forcing functions to think about the data model up front or even to have tests (tdd) could have merit").** Each check — schema present, schema well formed and fully namespaced, at least one test — has one declared config dial with two values, `:warn` (accept at REPL entry, block at merge) or `:gate` (refuse at REPL entry with the declared error); a test-first (TDD) setting gates a function whose test does not yet exist. The dials are ordinary cluster configuration facts (settable per cluster, and per branch where the branch overlays its cluster), read at the one entrance Seon agents and outside agents share; the merge gate always enforces all checks regardless of the dials. Default: `:warn` for every check until the owner rules otherwise.
-5. The work is Seon agents' own environment first; MCP only places outside agents in it.
-7. **Context by namespace, and feedback on it (owner, 2026-09-23: "I also want a repl function so the agent can generate their context based on what namespace they are working on using our same context system. We need to keep tuning it so that agents are getting good context and having our claude and codex agents give us feedback (this is not helpful, we need to add more context explaining all the functions and the schemas in this namespace, etc.). We are dogfooding the entire system as if your agents ARE seon agents. That's the goal").** One REPL function returns the context a Seon agent working on a namespace would receive — produced by the SAME context/selection/render owners (`seon.context`, the namespace render in `seon.render.ns`, B2), never a parallel builder — for the caller's branch and namespace. Outside agents call it through the same door and must report on it: context-quality feedback is declared data (what was missing, unhelpful or wrong, naming the namespace and the context version) recorded as an ordinary task/issue fact so tuning is measured and routed to the context owner, not lost in chat. Every outside lane working on a namespace starts from this context and files feedback when it had to look elsewhere.
-6. **Root reviews and merges; the orchestrator acts as root (owner: "I want you to act as root checking the diffs for changes an agent has made on their branch and for us to build out that experience of merging it into the main cluster codebase and then if all tests are passing persisting to the files").** This rules O-b below. Root's experience, built as part of this section: a **branch diff** — the declarations changed since the branch's base (`program/changed-identities`, three-way against the cluster head), each with its source diff, its schema/test warnings and the reaching tests' latest results on that branch; then **accept** (merge through §2c into the cluster's branch, the gate enforcing item 4) or **send back** with a reason the branch's author sees; then **write-back** (§2d) persists the accepted delta to the files and commits, only when every required test passed.
+Owner ruling, 2026-09-23 (`a29faf5a6`, `38863a0c8`, `215c32d9a`, `5ec049cfd`): “stick with our git and datahike terms”; “make it so it's configurable”; “I want you to act as root checking the diffs”.
 
+**Compose what exists.** A branch holds program rows; the ordinary agent path evaluates,
+settles and installs them. Put MCP at that entrance and compose the existing diff,
+test and merge owners. No MCP-only evaluator, persistence, loader or agent tool.
+This is a target, not installed proof. The dated
+[outside-agents evidence](../../../research/agent-platform/outside-agents-process-2026-09-23.md)
+and [review, items 1–3 and 11](../../../research/agent-platform/astra-plan-review-2026-09-23.md)
+supply the defects and measurements; the optional `agent-code-writing-api-2026-09-23.md`
+is absent from this checkout. Current `script/seon/dev/mcp.clj:509-527` retains a
+named branch's context, correcting the earlier per-call-release observation, but still
+calls `evaluate` without settlement. Context retention is not program persistence.
 
+**The interface is branches.** Every MCP tool call names its branch, including status
+and JVM inspection (the latter observes the host, not branch-local compiled Vars).
+Extend the existing `branch` tool (`script/seon/dev/mcp.clj:548-605,839`): create from
+an explicitly selected branch head or default's loaded program, list branches, delete
+(unlink). Capture the immutable base once. Creating from loaded code must also carry
+the cluster's configuration/custody facts: a bare publication commit lacks the cluster
+row and cannot run tests (dated evidence, break B5). No cluster start or program copy.
+If custody requires an agent row, create it behind the branch name, retain its handle
+in the existing context state, and archive it when the branch is unlinked. Release the
+handle only after owned work terminates; unlink uses `registry/retire-branch!`, not GC.
 
-Owner (2026-09-23): "the goal is to switch over to SEON agents writing their own code
-within the system and I want our agents to have a way to do that"; "make it easy for our
-agents to use mcp tools or whatever to do things the way we want agents running inside it
-to do things. Don't create some broken loading shit." The traced evidence, with forms,
-values and timings, is in
-[outside-agents-process](../../../research/agent-platform/outside-agents-process-2026-09-23.md).
+The branch REPL (`submit`, branch + source + request identity) calls
+`seon.cluster.agent/submit-source!` (`src/seon/cluster/agent.clj:606`), the same entrance
+as a model reply: `sci.eval/evaluate` → `settle-batch!` → `install-evaluated-rows!`
+(`src/seon/sci/eval.clj:3192,1218`; `src/seon/turn.clj:4970`). A definition becomes a
+program row and is callable on that branch when the reply completes; another branch
+is unchanged. `my.program/ns-unmap!` (`src/my/program.clj:555`) retracts through the
+same custody and refuses surviving referrers. Delete the non-persisting SCI arm of
+`eval_clj` (`script/seon/dev/mcp.clj:482-528`); B1's `host-eval` is JVM inspection only.
 
-**What already exists.** An inside agent writes code by replying source.
-`seon.cluster.agent/submit-source!` (`cluster/agent.clj:606`) accepts system-authored
-source and sends it through the path a model reply takes: parse, `sci.eval/evaluate`
-(`sci/eval.clj:3192`) whose `definition-row` (`:426`) analyzes the form with the file
-indexer, then `settle-batch!` commits the rows on the agent's custody connection, then
-`install-evaluated-rows!` (`:1218`) installs them. **The smallest composition:** an
-outside agent (a Claude Code or Codex lane) is an ordinary agent row on its own branch.
-Its replies arrive through MCP instead of a provider. MCP is a door onto that one
-entrance. It has no evaluator of its own, no persistence and no loader.
+O1 installs the listener **before** submission, reconciles the returned run id against
+its durable run/closed-turn facts, and returns each evaluation's shown text, warnings
+and test results. A disconnect or deadline without terminal evidence says **outcome
+unknown**, names the request/run, and does not release execution custody. Retrying the
+same admitted request identity resolves that run instead of evaluating source again;
+land that admission at the existing run writer if absent, not in an MCP dedup cache.
+Observe actual termination before release/unlink. A provider-free submission must
+finish through ordinary run completion; a continuation that needs a provider refuses
+by name. Prove these lifecycle semantics, including disconnect after admission, before
+calling the door complete; a fifty-line estimate is not that proof.
 
-**How an agent writes code.** Evaluating a contracted `defn`, `deftest`, schema
-declaration or `ns` form in its context produces one program row, analyzed by the same
-indexer the files use. When the turn settles, the row commits on the agent's branch, and
-the evaluated root is installed into the context. From then on every agent on that branch
-can call it: live agents see it at their next evaluation; an isolated agent's writes stay
-unseen until merge. A `defn` without `:malli/schema` is refused and never becomes a row.
-`my.program/ns-unmap!` (`src/my/program.clj:555`) retracts a declaration and unmaps it in
-the fork and the base. It is refused while `my.program/breaks` names surviving callers.
-`my.test/check` runs the tests that reach a change, each on its own branch off the agent's
-commit. The complete per-form catalog (what each form writes, loads and refuses) and the
-ranked API gaps are in
-[agent-code-writing-api](../../../research/agent-platform/agent-code-writing-api-2026-09-23.md).
+**Start from the namespace context.** Add one REPL function `my.program/context` taking
+the branch's execution value and namespace, returning exactly the context a Seon agent
+working there receives. Compose `seon.context`, the existing prompt selection owner and
+`seon.render.ns/render-ai` (`src/seon/context.clj:1-42`;
+`src/seon/render/ns.clj:795`); no outside-agent context builder. Every outside lane starts
+there and reports missing, unhelpful or wrong context when it must look elsewhere.
+Declare that feedback on the ordinary task/issue value, naming the namespace, branch
+commit and context version/selection inputs, with the observed deficiency and requested
+context. Route it to the context owner through the existing task writer so tuning has
+queryable evidence. O1d owns this B2 composition and B1 REPL exposure; its result is
+rendered context, not a stored live evaluation result.
 
-| step | the outside agent does | the one function (installed / **gap**) | proportional to |
-|---|---|---|---|
-| identity | `seon agent` MCP tool: create once per lane, or reuse by name | existing agent creation (`creation-tx`, `agent.clj:185`) with `:seon.agent/branch` isolated off the cluster head; `registry/branch!` 28–30 ms | O(1): a pointer and one agent transaction |
-| custody | nothing further: every later call names the agent | `acquire-context!` keyed `[branch agent]` in `:seon.agent/context-state` and retained across calls (**gap**: the MCP door releases the handle per call, `mcp.clj:528`) | unchanged head: a commit-id compare; changed: the overridden closure, not the program |
-| read | `my.program/callers`, `tests-reaching`, `history`, `breaks` and the row's `:seon.fn/source` on its branch; files only for code it has not changed | existing `my.program/*` (**gap**: a `source` read of a row) | the rows read |
-| write | submit forms: `(defn … {:malli/schema …} …)`, `deftest`, schema declarations, `ns-unmap!` | `submit-source!` through MCP `submit`; the answer is each evaluation's shown text once the run's `:seon.turn/closed-tx` is observed (`d/listen`, the exact terminal event) | forms × (analysis of the one form + settle + install of changed rows and affected callers) |
-| feedback | contract refusal at definition; `(my.test/check {:seon.test/changed ['ns/f]})` | existing contracts and `seon.test/run`; the over-one-second directive rides every answer (C1) | reached closure plus selected bodies (reach p50 24 tests) |
-| merge | `(my.task/merge! …)` requests acceptance of its branch | `prepare-merge!` / `accept-merge!` (`source.clj:741,791`) as the explicit request (**gap**: additions and deletions refuse at `:767`; the accepter is an owner JVM call) | commits since fork + changed identities + the gate run |
-| conflict | reads the three-way value; repairs on its branch; requests again | `program/three-way`; conflicts become root tasks (§2c.2) | changed identities |
-| files and git | nothing: the write-back operation commits | §2d on the accepted delta (**gap**: slice 7) | touched files' bytes + changed declarations |
+**Entry policy is data; merge policy is unconditional.** The config-schema search found
+no matching check dial: `resources/seon/schemas/seon.config.eval.edn:1` declares the
+deadline and `seon.config.test.edn:1` the auto-check count. O1c adds these four leaves to
+`seon.config.eval.edn`, each `[:enum {:seon.config/dial true} :warn :gate]`, with an
+explicit shipped default `:warn` through `seon.config/default-decisions`
+(`src/seon/config.clj:378-434`):
 
-**The door, exactly.** MCP keeps three tools. `eval_clj` in JVM mode stays as it is, for
-host inspection and bounded probes (B1 §3b). `submit` is new, about 30 lines: agent name
-plus source text → `submit-source!` → shown text per evaluation. The agent tool is about
-20 lines: create, list or retire, mapped to existing agent creation and `release-context!`.
-Lane branch-repl's MCP branch create/list/retire becomes this agent tool, since a branch
-without an agent has no custody to evaluate under. The SCI mode of `eval_clj` that
-evaluates without settling (`mcp.clj:482-528`) is deleted: its `defn` persists nothing and
-disappears when the call ends (break B3). A submitted run closes the way a model reply
-does (`seon.run/complete`). An outside agent's configuration names no provider, so a
-continuation that would generate refuses loudly and never pays silently. That behavior
-is proven, not assumed, in slice O1.
+| dial | check at the shared definition entrance |
+|---|---|
+| `:seon.config.eval/schema-present` | Every proposed function has `:malli/schema` |
+| `:seon.config.eval/schema-valid` | Its schema is well formed and fully namespaced |
+| `:seon.config.eval/test-present` | At least one current test reaches each proposed function |
+| `:seon.config.eval/test-first` | That test exists in the captured branch basis before the function change (test-first/TDD) |
 
-**What stays on files, and how it joins the same gate.** Four things stay on files:
-host-bound declarations, which are 830 of 4,820 functions spread over 159 namespaces and
-are a computed fact; schema resources, whose 3,373 rows have no `:seon.schema/file`
-destination yet (B1 §2a′ S6); new namespaces until the namespace→path rule exists; and
-non-Clojure files. The agent edits the file, then publishes the named paths onto **its
-own branch** (`publish!` to a held candidate, one-lifecycle commit 3), never onto
-default's. The resulting rows merge through the same `prepare-merge!` / `accept-merge!`.
-For a file-originated delta, write-back finds the file bytes already equal to the rows,
-so export is a digest comparison followed by the commit. Host-bound rows cannot run
-interpreted, so their gate runs compiled after the reload on default. That is
-`adopt-then-test!` (`cluster.clj:2728`), with `git revert` of the write-back commit on red.
-This is a weaker guarantee than the interpreted gate and is named as such (decision
-O-d below).
+Read the effective cluster row from the branch's supplied database at each submission,
+then carry that value through admission; model replies use the same check. A branch
+applies its sparse overlay to its inherited config row through `seon.config/apply!`
+and reads through `effective` (`src/seon/config.clj:725,754`); no second settings store,
+agent override or MCP flag. `derive-config-forms` (`src/seon/schema/edn.clj:62`) builds
+the composites. The acquisition point is this entrance, not graph arming.
 
-**Coordination without file holds.** A branch replaces a ledger row for program work.
-Two lanes may change one file on different branches; conflict is per declaration identity
-at merge (`three-way`), which is finer than a file. Write-back groups each accepted delta
-by file against its original bytes under a digest precondition, and the writer's expected
-head serializes accepts. The orchestrator's view is a query, never a file: open agent
-branches × `program/changed-identities` since each branch's base. The ledger keeps only
-file-path work (above) and non-program files.
+Declare `:seon.program/definition-warning` and `:seon.program/definition-refused-error`
+in the existing program schema family in O1c. Each flat value names
+`:seon.program/subject` (qualified function symbol), `:seon.program/check` (one of the
+four dial keys), `:seon.program/check-mode`, `:seon.program/check-basis` (commit id), `:seon.store/branch`,
+`:seon.program/check-path` (schema path when applicable), and
+`:seon.program/check-message`. Warning text: “<function>: <check> failed at <path>;
+accepted on <branch>; merge blocked until <remedy>.” The refusal extends
+`:seon.error/base`, uses the same diagnostic members, and names operation, expected
+shape and offending value; text says “definition refused” and no proposed row installs.
+These are new declared shapes, not claims of installed keys. Reuse the same diagnostics
+for REPL, root's diff and merge. Existing `seon.lint/finding` requires a file and models
+clj-kondo findings (`resources/seon/schemas/seon.lint.edn:1-25`), so it is not this value.
 
-**Staging without a worktree.** §2d step 2's "isolated staging at the expected source
-commit" is captured bytes, not a checkout (owner 2026-09-23: no worktrees). Read each
-touched file once (`capture-paths`), splice in memory in descending span order, run B1's
-analysis on those bytes, then write each file with `my.fs/write!` and its
-`:my.fs/precondition` expected digest. A lane's uncommitted edit to the same file fails
-the precondition and becomes a conflict task. Last, commit with `git commit --only --`
-the touched paths. The commit is made by the write-back operation; its trailer names the
-lane agent, the task and the merge commit M.
+`:warn` accepts the definition, preserving even an invalid schema as source data;
+it must not manufacture a valid contract or try to arm the malformed form. `:gate`
+refuses that definition before its body/effects or program write; other definitions
+remain available for repair. This needs the declaration producer and installer changed
+together, not merely a caught compiler exception. Malli's `schema` compiles the supplied
+form against the branch registry (`reference-code/malli/src/malli/core.cljc:2555`,
+HEAD pin `8725a8cb`); reuse its errors. Fully namespaced means domain schema references,
+map attribute keys and predicate/function symbols resolve to qualified identities;
+Malli grammar and built-ins such as `:=>`, `:cat`, `:int` remain legal. Check declaration
+facts at analysis, not with a second schema parser. Entry checking costs the proposed
+forms, their schema dependencies and reaching-test lookup, never the whole program.
 
-**Costs today and targets.** Branch 28–30 ms. Acquisition is refused today and costs
-1.3–1.7 s, proportional to the whole program: two digest maps over 4,820 rows plus a
-980 ms reverse closure of 275 overridden rows (breaks B1, B2 and B4). The target is 0 for
-an unchanged head and O(changed closure) otherwise. A `defn` evaluates in 77 ms; settling
-costs 0.7–0.8 s and installing 0.7 s. The install check still scans the store for a
-defining batch (5.6 s on default, break B6); the target is O(changed identities). Prepare
-measured 3.8 s and accept 1.2 s (nsa slice 4). The target for a leaf change is under
-1 s, and the run dominates.
+**Each change gets feedback.** After the ordinary agent path settles and installs a
+changed batch, it calls B4's `seon.test/run` with that batch's changed identities and
+captured branch execution value, as `my.test/check` already composes it
+(`src/my/test.clj:5-26`; `src/my/program.clj:162`). This trigger lives in the agent path,
+so inside and outside submissions both receive it; MCP only returns the answer.
+Use before/after dependencies for deletions and changed edges, include changed tests,
+and coalesce identities within the settled batch. Read-only evaluations and test-result
+writes do not trigger it. Run the reaching set, never a system-wide fallback; unknown
+selection is explicit. Each member executes on B4's isolated branch off that captured
+commit; results are recorded back to the submitting branch. Red does not undo a warned
+change. An empty set is a missing-test warning, not green evidence. Cost is changed
+closure plus selected bodies/recording; reuse only positively valid member evidence.
 
-**Braids removed.** (1) The loaded code no longer follows other lanes' disk bytes: an
-agent's change is rows on its own branch, and files change only through write-back of
-accepted bytes. That removes B1 §2a′ braid A and the 275-row lead observed. (2)
-Evaluation, persistence and context lifetime in the MCP-only SCI path become one entrance.
-(3) File ownership stops standing in for concurrency; identity conflicts replace it. (4)
-The acceptance gate moves out of ordinary thinking into an explicit merge (slice 6). (5)
-The adoption token no longer serializes publication; the writer's expected-head guard
-does. **Braid added:** an MCP call names an agent. Its one role is custody. It fails
-alone: an unknown agent refuses by name.
+**Root reviews, then accepts.** The orchestrator acts as root. Add one read composition,
+`my.program/diff`, over `program/changed-identities` and `program/three-way`
+(`src/seon/program.cljc:578,621`), exposed as branch `diff`; no review registry. It
+compares base B, branch C and destination H and returns changed declaration identities,
+per-declaration source diffs (including absent sides), conflicts, current schema/test
+warnings and latest reaching-test results with their tested commits/digests. Stale or
+missing results are labelled. Work follows changed identities and displayed sources;
+it neither tests nor writes. Root's branch `accept` calls the existing
+`prepare-merge!` / `accept-merge!` (`src/seon/cluster/source.clj:741,791`); `send-back`
+uses the existing task/message writer to deliver a reason to the author and leaves
+the branch editable. Write-back invokes §2d only for the accepted, fully tested delta.
 
-**Transition, ordered.** Until O1 lands, lanes edit files directly, and the hook keeps
-syntax lint while save-time publication and testing stay off (owner 2026-09-23).
+O3 begins with **acceptance correctness**, before additions/deletions. Capture immutable
+H/C/B; prepare forks exactly H into S, applies the proposal and derives **every current
+reaching test plus explicit task tests** for the combined program. B4's evidence owner
+compares this complete required set to positive current member evidence bound to H/C/S
+and the proposal. A caller-selected green subset is insufficient. Every function in the
+combined program has a well-formed, fully namespaced Malli schema and at least one test;
+all affected/task tests pass, and test-first obligations have basis evidence for the
+changed functions, regardless of the entry dials. Reuse unchanged contract/coverage
+proof by its actual inputs; missing inherited proof blocks merge, never becomes a
+whole-suite run. TDD here proves test existence before the changed definition, not a
+red-before-green history. A warned test-first violation is repaired by adding the test
+then resubmitting the function; history supplies the basis, not a new timestamp stamp.
+First regression: two required tests reach one replacement, one fails, a separate
+one-test run passes → accept refuses. Also prove missing task tests, stale evidence,
+moved H and modified S refuse. The writer still fences H as in §2c.
 
-| slice | change (≤ ~100 added src lines) | maps to | deletes |
-|---|---|---|---|
-| O0 | `:as-alias` is not a require (`fn.clj:258`) | issue `as-alias-recorded-as-a-require-refuses-interpreted-acquisition` | the false cycle that refuses every interpreted acquisition |
-| O1 | MCP `submit` and the agent tool over `submit-source!` and agent creation; the handle retained by `[branch agent]`; proof: a lane agent's `defn` persists on its branch, survives the next call, and a no-provider continuation refuses | B1 §3b (R3 bridge) + D1 §2a (lifecycle) | the commit-less SCI form (`mcp.clj:482-528`) and its branch plumbing (`:552-580`); branch-repl's bare-branch tools |
-| O2 | the install check keyed by the batch's changed identities | B2 / A2 c1 | the O(store) since-scan in `installation-covers-program-change?` |
-| O3 | merge admits additions and deletions (final surviving callers refuse); the issue is optional and the reaching tests required; a named accepter (root) | D1 slice 5 | `merge-base` (→ the fork's common-ancestor function); accept's evidence block → `seon.test` |
-| O4 | write-back of the accepted delta: captured-byte staging, B1 analysis, digest-fenced writes, path-limited commit, then `init --dev --changed` of exactly those paths | D1 slice 7 (§2d) | `verify-development-sources!` and its calls (loaded bytes are the exported bytes); the adoption token for program work |
-| O5 | file-path work publishes onto the lane's own branch and merges through O3 | one-lifecycle commit 3; B1 §2a′ S6 | save-time publication into default (`save-gate!` candidate `:cluster-default-candidate` for lanes) |
-| O6 | the ledger becomes the branch query, kept only for non-program files | orchestrator practice | ledger rows for `src/`/`test/` Clojure |
-| O7 | tool descriptions and the REPL skill (below) | B1 R8 | the skill's `eval_clj` SCI instructions |
-| — | retire the definition-time gate | D1 slice 6 (independent) | ≈ 300 lines in `turn.clj`/`sci/eval.clj` |
+Branch acceptance is not **exclusive JVM convergence**. B1's existing evaluation/adoption
+boundary excludes conflicting reloads and dependent evaluations through load → arm →
+record. A database expected-head guard cannot serialize Var mutations. If that boundary
+is unavailable, only the orchestrator integrates; affected execution remains unavailable
+after a failed reload until exact bytes, callable behavior and arming converge. An old
+record is not health. Prove interleaved adoptions, partial reload failure and an old
+branch's indirect call (review item 2); keep ordinary `require :reload`, no new loader.
 
-O0 first. O1 and O2 are file-disjoint and can run together. O3 then O4 make the loop close
-through git. O5 and O6 follow O4. O7 lands with O1 and is revised at O4.
+**Narrow write-back first.** O4 initially exports only interpreted function/test
+replacements with unambiguous existing file/span provenance. §2d's wider additions,
+deletions and declaration kinds follow after the two-branch loop. Hold each destination
+file through integration. Capture and stage bytes outside live source paths (no git
+worktree); run B1 analysis and B4 callable proof before any install. Close reload
+admission while installing the complete set; digest-check every file. After each file,
+recovery compares original, desired and actual bytes: desired means installed, original
+means pending, anything else refuses for root repair. Partial installation keeps reload
+closed; resume that same accepted delta, never reload the mixed set. Before a commit,
+verify the entire intended set; after a commit, reconcile its identity and bytes and
+resume publication/convergence without a duplicate commit. Commit path-limited, never
+push. File bytes, publication, arming, callable behavior and browser paint are separate
+observations. Green branch tests alone do not prove successful export.
 
-**What the tools and skill say.** `submit`: "Submit source as your agent's reply on its
-branch. Each form is evaluated, contracted definitions become program rows on your
-branch, and you get each evaluation's shown text. Nothing is written to files; files
-change only when an accepted merge is written back." `agent`: "Create or reuse your agent;
-it owns an isolated branch off the cluster head; every `submit` names it." `eval_clj`:
-"JVM inspection of the host; it defines nothing in any cluster's program." The REPL skill
-states the workflow: read rows, submit definitions, `my.test/check`, request merge, read
-the conflict, and never `init --dev` for program work after O4. Every claim cites its
-`file:line`.
+Host-bound declarations, schema resources, new namespaces without destination rules,
+and non-Clojure files stay on the file path with **whole-file holds**. Their captured
+staging publishes to the named branch, not default; program changes join the same §2c
+obligations, non-Clojure inputs join B4's declared input evidence. No early live-file
+edit or independent lane adoption. Host-bound proof uses B4's existing platform host
+before integration or is deferred; post-adoption tests and `git revert` cannot undo JVM
+classes/effects. A dirty required namespace/schema dependency defers only that
+integration. Keep digest verification and lint-only hooks during this transition.
 
-**Decisions for the owner (recommendation first).**
+**Costs belong to slices.** Historical timings below are not fresh measurements or
+justifications for slowness. Measure end-to-end leaf submission/export, closure sizes,
+allocations and retained memory; separately sub-second phases do not make their sum
+sub-second. The leaf overhead target is <1 s; selected bodies retain their declared
+bounds, so a broad reaching set has no unconditional sub-second promise.
 
-- **O-a identity.** (1, recommended) One ordinary agent row per lane on an isolated
-  branch, reached through `submit`. Guarantees the inside path exactly. Costs about
-  50 lines. Gives up bare branches without an agent. (2) Bare branches plus an MCP-side
-  settle. Cheap to reach, but it is a second persistence path, which the owner's ruling
-  rejects. (3) All lanes live on one shared candidate branch of default (the AGENTS
-  wording). No merge per lane, but lanes see each other's half-finished work, and
-  conflicts surface only at write-back.
-- **O-b accepter.** (1, recommended) The orchestrator accepts as root through the named
-  accept, and the owner accepts by exception. Latency is minutes; per-change human
-  review is given up. (2) The owner accepts every merge. Human review of every change,
-  at owner latency. (3) Automatic acceptance on a green gate. Fastest, but it gives up
-  the ruled explicit merge; rejected by §2c.
-- **O-c commit.** (1, recommended, as in §8) The write-back operation commits
-  path-limited right after acceptance, complete evidence and the isolated analysis. Costs
-  the changed files plus selected work. (2) The same, plus the platform tier per export.
-  Broader proof, but a separate JVM per export, tens of seconds. (3) Plus human approval.
-  Owner latency.
-- **O-d host-bound.** (1, recommended) File edit → the agent's own branch → accept →
-  write-back → compiled gate after reload, reverted on red. Honest, weaker guarantee:
-  red is caught after the files change. (2) A platform-tier fresh JVM gate per
-  host-bound merge. Stronger, but tens of seconds each and a second host. (3) Host-bound
-  changes are orchestrator-only. Simplest, but it gives up 17% of functions to outside
-  agents.
+| slice | measured defect → target work and time | existing owner; deletion / added-src budget |
+|---|---|---|
+| O0 | False `:as-alias` require edge refuses acquisition; fix producer, prove actual acquisition | B1 analysis (`src/seon/fn.clj:258`); delete false dependency, ≤10 |
+| O1a | Branch create/list/unlink, retained custody and loaded-code base with cluster facts | D1 §2a / B2 acquisition; replace bare-branch custody plumbing, ≤80 |
+| O1b | Branch-named submission with listener/run reconciliation, idempotent retry and terminal release | B1 §3b R3/R9 + B2 run writer; delete non-settling SCI evaluator, ≤100 |
+| O1c | Four dials and declared diagnostics at the shared entrance; warn/install semantics and automatic changed-batch test reply | D1 slice 6 + B2 settlement + B4 run; replace fixed definition gate, ≤100; activates only after O3 |
+| O1d | Namespace context and declared quality feedback, proportional to selected context | B2 context/render + B1 REPL + existing task writer; delete outside-only context assembly/instructions, ≤80 |
+| O2a | Acquisition 1.3–1.7 s: two whole-program digest maps plus reverse closure → unchanged-head compare and changed closure, <1 s | B2 §2a retained acquisition; delete per-call full-program derivation, ≤60 |
+| O2b | Settle 0.7–0.8 s → batch rows/report only, <1 s and reduce combined leaf latency | B2 settlement / D1 slice 6; delete pre-install candidate gate work after O3, ≤60 |
+| O2c | Install 0.7 s → changed roots/affected callers; install-check 5.6 s over store → supplied batch identities/report, <1 s combined | B2 install / B4 execution custody; delete `installation-covers-program-change?` store scan (`src/seon/sci/eval.clj:1169`), ≤60 |
+| O3a | Complete H/C/S required-set evidence; first failing-subset regression above | D1 slice 5 + B4 evidence owner; delete accept's green-subset predicate, ≤100 |
+| O3b | Root diff, named accept/send-back; current whole-program first reach index (≈0.7 s) reused by input, changed-delta review <1 s excluding bodies | D1 slice 5 + B1 bridge; delete owner-only raw JVM acceptance and duplicate evidence checks, ≤80 |
+| O4a | Captured replacement staging and canonical round trip, proportional to touched bytes/declarations | D1 slice 7 + B1 publication; replace function-only override export inventory, ≤100 |
+| O4b | Interrupted file-set recovery, path-limited commit, exclusive load/arm/record; leaf export overhead <1 s target, measure each phase | D1 slice 7 + B1 §2a′; delete independent lane adoption, not digest checks or convergence exclusion, ≤100 |
+| O5 | Later wider/file-origin branch publication with schema destinations and platform proof | D1 slices 5/7 + B1 §2a′ S6 + B4 platform; delete shared-candidate save publication for lanes; split by declaration owner, each ≤100 |
+| O6/O7 | Branch diff replaces program-only ledger rows; file holds remain; tool/REPL guidance follows installed behavior | D1 coordination + B1 R8; delete obsolete agent-tool/non-settling instructions; docs only |
+
+Budgets are added lines, not net estimates or permission to hide machinery in another
+slice; recount deletions before implementation. **Critical path:** writer/REPL health →
+O0 → O1a/b/d and O2 → O3 acceptance correctness → O1c activation → narrow O4 → two isolated
+branches edit, automatically test, review, merge, export, reload and call their changes.
+Do not retire the current definition gate before explicit acceptance is safe. O1c/O2b
+preparation waits for the same-file owner; additions/deletions, task renaming and
+nonessential profiling expansion wait for the demonstrated loop. O6/O7 ship with the
+interfaces they describe; no claimed source or runtime change from this specification.
+
+**Authority reconciliation and decisions.** `AGENTS.md:258-259` still says “Filesystem
+lanes (Codex, Claude) index into one shared candidate branch of default and are live
+agents there”. This contradicts the owner's per-branch ruling. The orchestrator replaces
+those two lines exactly with: “gate. Filesystem lanes (Codex, Claude) work through the
+shared agent REPL entrance on their own named branches; root reviews and explicitly
+accepts through the merge gate before write-back to files. Seon agents doing every
+update is the goal.” It also reconciles README §7's shared-candidate/guards-only wording
+and B1 §3b's old SCI evaluator row; this lane does not edit those authorities beyond
+the permitted cross-reference lines. The warn policy is an explicit branch-experiment
+exception to the current every-function-armed wording, never permission to merge an
+uncontracted function.
+
+- **O-a ruled:** branch interface; any agent row is internal custody, created/retired
+  with the branch. No outside-agent identity tool.
+- **O-b ruled:** the orchestrator acts as root, reviews the diff and accepts or sends
+  back a reason; green never auto-accepts.
+- **O-c ruled for this path:** after explicit acceptance and all required proof, §2d
+  writes the accepted bytes and commits path-limited. No second human approval step.
+- **O-d wider host-bound export remains open:** (1, recommended) defer it beyond the
+  interpreted replacement loop; smallest cost, gives up initial full-language editing;
+  (2) integrate B4's existing isolated platform proof before export, broader guarantee
+  at measured process cost; (3) keep host-bound work orchestrator-only under that proof,
+  same guarantee but no autonomous host-bound editing. Adopt-then-test is not a safe
+  rollback alternative. Process work over ten seconds still needs owner authorization.
 
 ## 3. Reading list
 
