@@ -127,3 +127,4 @@ Both status entrances observed PID 48902, archive `ce73846828a5cc32798ef630b5a57
 | E38: `src/seon/shell/jvm.clj` | 8 | 24 / 40 / -16; +0 | 1 / 22 | 22.478084 | `seon.shell.jvm-test` | None; raw Throwable map retained; process behavior unchanged |
 | E39: `src/seon/test/accretion.clj` | 2 | 6 / 10 / -4; +0 | 0 / 17 | 22.937167 | `seon.test.accretion-test` | None; syntax-quoted operation identities and surrounding assoc/merge preserved |
 | E40: `src/seon/test/runner.clj` | 6 | 18 / 29 / -11; +0 | 5 / 57 | 27.211208 | `seon.test.runner-test` | None; X retained; existing reach-entries message-only catch recorded as policy residue |
+| E41: `src/seon/turn.clj` | 8 | 25 / 40 / -15; +0 | 20 / 121 | 39.964583 | `seon.turn-test` | Removed generated blank require line; two X contexts retained |

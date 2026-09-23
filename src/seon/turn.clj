@@ -4,7 +4,7 @@
   Open means no closed-tx. Boot closes unfinished work; execution never
   resumes across a JVM restart. The agent graph advances open, call,
   evaluations, and close from database facts and rewakes only for more work."
-  (:require
+  (:require [seon.error.refusal]
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.edn :as edn]
@@ -279,10 +279,9 @@
     (cond
       (:seon.db/invalid-read opening-tx) opening-tx
       opening-tx (db/as-of database opening-tx)
-      :else {:seon.error/at (Date.) :seon.error/layer :seon.turn/evaluation
-       :seon.error/operation 'seon.turn/opening-db
-       :seon.error/message "The run has no opening datom."
-       :seon.error/data {::id id} :seon.turn/missing-opening-datom true})))
+      :else (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation 'seon.turn/opening-db
+             {:seon.error/message "The run has no opening datom."
+       :seon.error/data {::id id} :seon.turn/missing-opening-datom true}))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Transitions — pure functions OF THE MID-TRANSACTION DATABASE VALUE,
@@ -307,12 +306,10 @@
   [transition rule request]
   (let [message (str "run transition refused: " (name rule))]
     (throw (ex-info message
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer ::transition
-                     :seon.error/operation transition
-                     :seon.error/message message
+                    (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
+                     {:seon.error/message message
                      ::rule rule
-                     :seon.error/data {::request request}}))))
+                     :seon.error/data {::request request}})))))
 
 (defn- current-run
   "The run's current facts on `db`, or nil when no such run exists.
@@ -2051,15 +2048,13 @@
                                       (filter inert attributes)))))
                         evidence)]
     (when (and (seq offending) (not (issue-origin-read? database source)))
-      {:seon.error/at (Date.)
-        :seon.error/layer :seon.turn/evaluation
-        :seon.error/operation `system-turn
-        :seon.turn/generated-read-attributes offending
+      (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `system-turn
+       {:seon.turn/generated-read-attributes offending
         :seon.error/message "A generated context read depends on the agent's own turn-taking."
         :seon.error/member :seon.cluster.eval/source
         :seon.error/expected :seon.wake/context-inert
         :seon.error/offending (:seon.cluster.eval/source source)
-        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})})))
+        :seon.error/data (merge {:datahike.read/attributes offending} {:seon.error/layer :seon.turn})}))))
 
 (defn system-turn
   "Project the declared opening and every distinct retained read form.
@@ -2077,15 +2072,13 @@
                    (declared-sources handle database agent-id namespace-name))]
     (cond
       (nil? namespace-name)
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.turn/system
-        :seon.error/operation `system-turn
-        :seon.turn/rule ::agent-namespace-missing
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.turn/system `system-turn
+       {:seon.turn/rule ::agent-namespace-missing
         :seon.turn/refused-system-agent agent-id
         :seon.error/message "The system turn requires the agent's assigned namespace."
         :seon.error/member :seon.agent/id
         :seon.error/expected :seon.agent/id
-        :seon.error/data {:seon.error/layer :seon.turn}}
+        :seon.error/data {:seon.error/layer :seon.turn}})
 
       (:seon.turn/refused-system-agent declared)
       (assoc declared :seon.turn/refused-system-agent agent-id)
@@ -2260,14 +2253,12 @@
                       "Compaction requires an existing agent.")]
         (throw
          (ex-info message
-                  {:seon.error/at (Date.)
-                    :seon.error/layer :seon.turn/evaluation
-                    :seon.error/operation `compact!
-                    :seon.turn/compaction-agent-id agent-id
+                  (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation `compact!
+                   {:seon.turn/compaction-agent-id agent-id
                     :seon.error/message message
                     :seon.error/member :seon.agent/id
                     :seon.error/expected :seon.agent/id
-                    :seon.error/data {:seon.error/layer :seon.turn :seon.error/source (cond-> {} open-id (assoc :seon.turn/id open-id))}}))))
+                    :seon.error/data {:seon.error/layer :seon.turn :seon.error/source (cond-> {} open-id (assoc :seon.turn/id open-id))}})))))
     (mapv (fn [evaluation] [:db.fn/retractEntity evaluation])
           (db/q '[:find [?evaluation ...] :in $ ?agent
                   :where [?turn :seon.turn/agent ?agent]
@@ -4667,12 +4658,10 @@
     (when (or (and (seq done-calls)
                    (not (and last? (= form (first done-calls)) (= 1 (count done-calls)))))
               (and (disposition projection (:seon.sci.admit/value evaluation)) (not last?)))
-      {:seon.error/at (Date.)
-       :seon.error/layer :seon.turn/evaluation
-       :seon.error/operation 'seon.turn/disposition-rule-error
-       :seon.turn/invalid-disposition-source source
+      (seon.error.refusal/diagnostic (Date.) :seon.turn/evaluation 'seon.turn/disposition-rule-error
+       {:seon.turn/invalid-disposition-source source
        :seon.error/message "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."
-       :seon.error/data {:seon.cluster.eval/source source}})))
+       :seon.error/data {:seon.cluster.eval/source source}}))))
 
 (defn evaluate-sources
   "Evaluate ordered sources in one fork without settling or staging them.
@@ -5234,10 +5223,8 @@
           run-id (assoc :seon.turn/id run-id))
         diagnostic
         (cond->
-          {:seon.error/at (Date.)
-           :seon.error/layer :seon.agent/agent-graph
-           :seon.error/operation 'seon.turn/turn-completion-error
-           :seon.error/message (str "Agent " (pr-str agent-id)
+          (seon.error.refusal/diagnostic (Date.) :seon.agent/agent-graph 'seon.turn/turn-completion-error
+           {:seon.error/message (str "Agent " (pr-str agent-id)
                 (if run-id
                   (str " run " (pr-str run-id))
                   " with no observable open turn")
@@ -5255,7 +5242,7 @@
            :seon.error/member :seon.turn.loop/completion
            :seon.error/expected expected
            :seon.error/offending evidence
-           :seon.error/data (merge evidence {:seon.error/operation operation})}
+           :seon.error/data (merge evidence {:seon.error/operation operation})})
            run-id (assoc :seon.turn/id run-id))]
     diagnostic))
 
@@ -5348,10 +5335,8 @@
                   :seon.error/value]}
   [agent-id run-id refusal refusals bound]
   (cond->
-    {:seon.error/at (Date.)
-     :seon.error/layer :seon.agent/agent-graph
-     :seon.error/operation 'seon.turn/write-refusal-error
-     :seon.error/message (str "Agent " (pr-str agent-id)
+    (seon.error.refusal/diagnostic (Date.) :seon.agent/agent-graph 'seon.turn/write-refusal-error
+     {:seon.error/message (str "Agent " (pr-str agent-id)
           (if run-id (str " turn " (pr-str run-id)) " with no open turn")
           " had " refusals " consecutive turn writes refused (bound "
           bound "); the turn proc is parked and will not re-fire. Latest "
@@ -5361,7 +5346,7 @@
      :seon.config.agent/write-refusal-bound bound
      :seon.error/expected :seon.turn.loop/committed-write
      :seon.error/offending refusal
-     :seon.error/data {:seon.error/operation :seon.turn.loop/step}}
+     :seon.error/data {:seon.error/operation :seon.turn.loop/step}})
      run-id (assoc :seon.turn/id run-id)))
 
 (defn- offer-write-refusal-fault!
