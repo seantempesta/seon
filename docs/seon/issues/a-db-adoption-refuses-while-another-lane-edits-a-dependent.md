@@ -27,3 +27,12 @@ does not touch. Under one-file-one-lane, a `seon.db` lane cannot adopt while any
 dependent is held. Reloading those dependents would also load the other lane's
 uncommitted bytes into default. Separately, a refused attempt still spent
 25–66 s in a whole-program source refresh before refusing.
+
+## Sighting, lane cut-1.3f-41, 2026-09-23
+
+`bin/seon init --dev default --changed src/seon/schema/edn.clj`, pid 90963:
+attempt 1 took 69.7 s and attempt 2 took 180.6 s. Both were refused with
+"The source head changed before publication." (`:current-src`); the profile
+shows `seon.cluster/refresh-source!` x6 at 297.8 s inclusive and
+`seon.db/with-declarations` x164,780. Each refused attempt still paid a
+whole-program source refresh.

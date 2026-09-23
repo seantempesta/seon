@@ -17,7 +17,8 @@
   reads around the complete nested walk.
 
   Issue: docs/seon/issues/value-admission-resolves-the-declaration-population-per-node.md"
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.core.cache.wrapped :as cache]
+            [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -59,7 +60,7 @@
   worker JVM that acquired it once already would otherwise measure zero and
   read the retention as behaviour."
   []
-  (schema.edn/forget-packaged-population!)
+  (cache/seed @#'schema.edn/packaged-populations {})
   (reads-of schema.edn/packaged-forms))
 
 (def ^:private carrier-symbols

@@ -19,7 +19,8 @@
   resource seam, and assert the refusal's caller so neither rail is vacuous.
 
   Issue: docs/seon/issues/packaged-forms-rereads-every-schema-resource-per-call.md"
-  (:require [clojure.string :as str]
+  (:require [clojure.core.cache.wrapped :as cache]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.config :as config]
             [seon.print :as print]
@@ -43,7 +44,7 @@
   worker JVM that resolved it once already would otherwise measure zero and
   read the retention as behaviour."
   [thunk]
-  (schema.edn/forget-packaged-population!)
+  (cache/seed @#'schema.edn/packaged-populations {})
   (resource-reads thunk))
 
 (defn- one-population-reads []

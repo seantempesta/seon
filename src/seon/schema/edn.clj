@@ -13,7 +13,8 @@
   schema key and, for loaded forms, its source resource. This namespace
   reads classpath and in-memory data only; database installation belongs
   to cluster population."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.cache.wrapped :as cache]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [malli.core :as m]
@@ -367,41 +368,22 @@
                          (.listFiles (io/file url)))))
       [[(.toExternalForm url) -1 (.getLastModified (.openConnection url))]])))
 
-(defonce ^:private packaged-population-cache (atom nil))
+(def ^:private packaged-population-cache-size
+  "Populations retained, one per `[resource-url declaration-stamp]`: the
+  current authored files and the one before an edit; an older stamp derives
+  again. A race may derive one twice; the derivation is pure."
+  2)
+
+;; The same core.cache wrapped LRU `seon.db`'s projection memo uses.
+(defonce ^:private packaged-populations
+  (cache/lru-cache-factory {} :threshold packaged-population-cache-size))
 
 (defn- packaged-population
+  {:malli/schema [:=> [:cat] :map]}
   []
-  (let [resource-url (str (io/resource default-resource))
-        stamp (declaration-stamp)]
-    (locking packaged-population-cache
-      (let [cached @packaged-population-cache]
-        (if (and (= resource-url (::resource-url cached))
-                 (= stamp (::stamp cached)))
-          (::population cached)
-          (let [population (resource-population default-resource)]
-            (reset! packaged-population-cache
-                    {::resource-url resource-url ::stamp stamp
-                     ::population population})
-            population))))))
-
-(defn forget-packaged-population!
-  "Drop the retained packaged declaration population.
-
-  The next [[packaged-forms]] resolution then reads the schema resources again.
-
-  The population is retained under [[declaration-stamp]], so ordinary
-  declaration changes already miss and nothing needs this. It exists for a
-  measurement that must observe a FIRST resolution inside a JVM that has
-  already resolved one under the same stamp — the declaration-population
-  regressions count reads at the resource seam, and without an explicit
-  operation they would read the retention as behaviour and measure zero.
-  Returns true when a population was held."
-  {:malli/schema [:=> [:cat] :boolean]}
-  []
-  (locking packaged-population-cache
-    (let [held (some? @packaged-population-cache)]
-      (reset! packaged-population-cache nil)
-      held)))
+  (cache/lookup-or-miss packaged-populations
+                        [(str (io/resource default-resource)) (declaration-stamp)]
+                        (fn [_] (resource-population default-resource))))
 
 (defn declaration-digest
   "Stable digest of the merged schema declaration set."
