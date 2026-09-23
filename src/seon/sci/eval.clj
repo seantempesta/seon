@@ -2706,13 +2706,10 @@
               (env/carry-state
                (assoc ctx :seon.schema/projection projection)
                projection-state))]
-     ;; The listener is the optimizer, never the correctness boundary —
-     ;; an idle cluster notices a new supplied-default row without
-     ;; waiting for the next call's basis comparison. It needs the live
-     ;; connection, so a connectionless context simply has none.
+     ;; Call preparation catches up at invocation through its snapshot memo,
+     ;; keyed by the attribute revisions it reads; only the program identity
+     ;; observer needs the live connection.
      (when connection
-       (call-preparation/watch!
-        (get ctx call-preparation/carrier) connection projection)
        (watch-program-identity! connection))
      ctx))
 
@@ -2782,8 +2779,6 @@
        (install-function-contract!
         ctx (db/pull db '[*] [:seon.fn/sym function-symbol]) projection db))
      (when connection
-       (call-preparation/watch!
-        (get ctx call-preparation/carrier) connection projection)
        (watch-program-identity! connection))
      ctx)))
 
