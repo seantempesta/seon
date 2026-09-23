@@ -39,6 +39,20 @@
   :unused-value {:level :warning}
   :single-operand-comparison {:level :warning}
 
+  ;; A blocking wait belongs to `seon.await/await!`, which bounds it by a
+  ;; carried config fact and names the missing event on expiry; a monitor
+  ;; cannot be timed or interrupted at all (hangs research
+  ;; 2026-09-23 section 2). Warning, not error: the counted residue is
+  ;; converted by the slices that touch it, and an error here would block
+  ;; every edit of a file that still holds one.
+  :discouraged-var
+  {clojure.core.async/<!! {:message "Bare blocking take: await it through seon.await/await! under a carried bound."}
+   clojure.core.async/>!! {:message "Bare blocking put: await it through seon.await/await! under a carried bound."}
+   clojure.core.async/alts!! {:message "Bare blocking alts: await it through seon.await/await! under a carried bound."}
+   clojure.core/promise {:message "A promise is a completion without a bound: use the dependency's exit fact or a channel awaited through seon.await/await!."}
+   clojure.core/future {:message "A future is a thread nobody joins: submit to the Flow work launcher, or await it through seon.await/await!."}
+   clojure.core/locking {:message "A monitor cannot be timed or interrupted: serialize through a Flow proc or an atom."}}
+
   ;; === INFO LEVEL (suggestions) ===
   ;; These are style suggestions, not problems
 
@@ -59,6 +73,18 @@
  ;; everywhere else.
  :lint-as
  {seon.db.remote-contract-test/with-authority clj-kondo.lint-as/def-catch-all}
+
+ ;; The one bounded await owner is the only namespace allowed the bare forms.
+ :config-in-ns
+ {seon.await
+  {:linters
+   {:discouraged-var
+    {clojure.core.async/<!! {:level :off}
+     clojure.core.async/>!! {:level :off}
+     clojure.core.async/alts!! {:level :off}
+     clojure.core/promise {:level :off}
+     clojure.core/future {:level :off}
+     clojure.core/locking {:level :off}}}}}
 
  ;; Output format configuration
  :output
