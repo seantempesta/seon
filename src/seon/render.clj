@@ -11,7 +11,7 @@
   context and executes through `seon.sci.kernel`; there is no compiled renderer
   lane. A redefinition therefore changes the next call and a cold context
   re-derives the same symbol from its database program row."
-  (:require
+  (:require [seon.error.refusal]
             [clojure.string]
             [datahike.db :as datahike.db]
             [malli.core :as m]
@@ -141,14 +141,12 @@
             (or (when effective (agent-render-profile effective))
                 @default-agent-profile)))
         (let [observation
-              {:seon.error/at (java.util.Date.)
-               :seon.error/layer :seon.render/render
-               :seon.error/operation 'seon.render/request-profile
-               :seon.error/message "Rendering requires a carried profile or handed projection."
+              (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/request-profile
+               {:seon.error/message "Rendering requires a carried profile or handed projection."
                :seon.error/fix "Supply the expected member and repeat the requested operation."
                :seon.render/refused-member :seon.schema/projection
                :seon.error/expected [:or :seon.render/profile :seon.schema/handed-projection]
-               :seon.error/offending request}]
+               :seon.error/offending request})]
           observation))))
 
 (defn- target-profile
@@ -314,10 +312,8 @@
   {:malli/schema [:=> [:cat [:maybe :seon.render/namespace] :seon.render/output [:sequential :qualified-symbol]] :seon.render/ambiguous-error]}
   [namespace-name output candidate-symbols]
   (let [observation
-        {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.render/render
-         :seon.error/operation 'seon.render/ambiguity
-         :seon.error/message (str "More than one function in " namespace-name
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/ambiguity
+         {:seon.error/message (str "More than one function in " namespace-name
                              " accepts this value and returns " output ".")
          :seon.error/fix "Supply the expected member and repeat the requested operation."
          :seon.render/candidates (vec candidate-symbols)
@@ -326,7 +322,7 @@
          :seon.error/offending candidate-symbols
          :seon.error/data {:seon.render/namespace namespace-name
                            :seon.render/candidates (vec candidate-symbols)
-                           :seon.render/output output}}]
+                           :seon.render/output output}})]
     observation))
 
 (defn transacted
@@ -935,15 +931,13 @@
   (let [stable (unknown-stable-evidence request)
         observation
         (merge stable
-               {:seon.error/at (Date.)
-                :seon.error/layer :seon.render/invocation
-                :seon.error/operation 'seon.render/unknown
-                :seon.error/message "The selected renderer did not return an observation."
+               (seon.error.refusal/diagnostic (Date.) :seon.render/invocation 'seon.render/unknown
+                {:seon.error/message "The selected renderer did not return an observation."
                 :seon.error/fix "Inspect the renderer's refusal and repair its declared output."
                 :seon.error/member :seon.render/output
                 :seon.error/expected :seon.render/rendered
                 :seon.error/offending (:seon.error/value request)
-                :seon.error/data stable})]
+                :seon.error/data stable}))]
     observation))
 
 (defn- unknown-evidence-of
@@ -1346,14 +1340,12 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/request-error]}
   [unit]
   (let [observation
-        {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.render/render
-         :seon.error/operation 'seon.render/source-provenance-error
-         :seon.error/message "Default AI source requires an entity identity or stored evaluation result reference."
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/source-provenance-error
+         {:seon.error/message "Default AI source requires an entity identity or stored evaluation result reference."
          :seon.error/fix "Supply the expected member and repeat the requested operation."
          :seon.render/refused-member :seon.render.value/root
          :seon.error/expected :seon.render.walk/lookup
-         :seon.error/offending unit}]
+         :seon.error/offending unit})]
     observation))
 
 (defn render-form
@@ -1464,15 +1456,13 @@
                                                        requested-candidate)
                     requested-candidate
                     (let [observation
-                          {:seon.error/at (java.util.Date.)
-                           :seon.error/layer :seon.render/render
-                           :seon.error/operation 'seon.render/render-call
-                           :seon.error/message "The requested renderer is not an applicable candidate."
+                          (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/render-call
+                           {:seon.error/message "The requested renderer is not an applicable candidate."
                            :seon.error/fix "Supply the expected member and repeat the requested operation."
                            :seon.render/refused-member :seon.render.call/selected-producer
                            :seon.error/expected :compatible
                            :seon.error/offending requested-candidate
-                           :seon.render/selection-observation decision}]
+                           :seon.render/selection-observation decision})]
                       observation))
                   (:seon.render.selection/selected decision))]
             (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
