@@ -2535,6 +2535,40 @@
                         (assoc :seon.db/stored-value (:v datom)))))
                   page-datoms))))
 
+(defn- index-read-dependencies
+  "The dependency plan and index pattern of one read of `index` under the
+  prefix `components`: the attribute the prefix names, else every attribute.
+  A cursor or limit narrows the read inside this prefix, so the prefix's
+  pattern is a conservative cover."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value [:enum :eavt :aevt :avet] [:sequential :seon.schema/value]]
+    [:map [:datahike.read/dependency-plan :seon.db/read-dependency-plan]
+     [:seon.db/read-index-pattern :map]]]}
+  [database index components]
+  (let [pattern-keys (case index
+                       :eavt [:seon.db/pattern-entity :seon.db/pattern-attribute :seon.db/pattern-value]
+                       :aevt [:seon.db/pattern-attribute :seon.db/pattern-entity :seon.db/pattern-value]
+                       :avet [:seon.db/pattern-attribute :seon.db/pattern-value :seon.db/pattern-entity])
+        supplied (zipmap pattern-keys components)
+        attribute (some->> (:seon.db/pattern-attribute supplied)
+                           (db.utils/attr-info database) :ident)
+        entity (some->> (:seon.db/pattern-entity supplied)
+                        (db.utils/entid database))
+        value (:seon.db/pattern-value supplied)
+        value (if (and attribute (db.utils/ref? database attribute) (some? value))
+                (db.utils/entid database value)
+                value)]
+    {:datahike.read/dependency-plan
+     {:datahike.query.dependency/sources
+      [{:datahike.query.source/symbol '$
+        :datahike.query.source/argument-position 0
+        :datahike.query.source/attributes (if attribute #{attribute} :all)}]}
+     :seon.db/read-index-pattern
+     (cond-> {}
+       attribute (assoc :seon.db/pattern-attribute attribute)
+       entity (assoc :seon.db/pattern-entity entity)
+       (some? value) (assoc :seon.db/pattern-value value))}))
+
 (defn- datoms-call
   [database arguments]
   (if (and (map? database) (inst? (:seon.error/at database))
@@ -2551,27 +2585,8 @@
               options (first arguments)
               index (if (map? options) (:index options) options)
               components (if (map? options) (:components options) (rest arguments))
-              pattern-keys (case index
-                     :eavt [:seon.db/pattern-entity :seon.db/pattern-attribute :seon.db/pattern-value]
-                     :aevt [:seon.db/pattern-attribute :seon.db/pattern-entity :seon.db/pattern-value]
-                     :avet [:seon.db/pattern-attribute :seon.db/pattern-value :seon.db/pattern-entity])
-              supplied (zipmap pattern-keys components)
-              attribute (some->> (:seon.db/pattern-attribute supplied)
-                                 (db.utils/attr-info database) :ident)
-              entity (some->> (:seon.db/pattern-entity supplied)
-                              (db.utils/entid database))
-              value (:seon.db/pattern-value supplied)
-              value (if (and attribute (db.utils/ref? database attribute) (some? value))
-                      (db.utils/entid database value)
-                      value)
-              pattern (cond-> {}
-                        attribute (assoc :seon.db/pattern-attribute attribute)
-                        entity (assoc :seon.db/pattern-entity entity)
-                        (some? value) (assoc :seon.db/pattern-value value))
-              plan {:datahike.query.dependency/sources
-                    [{:datahike.query.source/symbol '$
-                      :datahike.query.source/argument-position 0
-                      :datahike.query.source/attributes (if attribute #{attribute} :all)}]}]
+              {plan :datahike.read/dependency-plan pattern :seon.db/read-index-pattern}
+              (index-read-dependencies database index components)]
           (append-read-evidence!
            (cond-> {:seon.db/db database
                     :seon.db/source-argument-position 0
@@ -2630,10 +2645,16 @@
           (let [page (decode-index-page declarations
                                         database
                                         (d/index-page database options))]
+            ;; The page reads one index prefix, so it depends on that
+            ;; prefix's attribute only. It carries no index pattern: a change
+            ;; under the prefix may leave the bounded page itself unchanged,
+            ;; and the recorded request replays to answer exactly that.
             (append-read-evidence!
              {:seon.db/db database
               :seon.db/source-argument-position 0
-              :datahike.read/dependency-plan :all
+              :datahike.read/dependency-plan
+              (:datahike.read/dependency-plan
+               (index-read-dependencies database (:index options) (:components options)))
               :seon.db/read-request {:seon.db/read-operation :index-page
                                      :seon.db/index-page-options options}
               :seon.db/read-result page})

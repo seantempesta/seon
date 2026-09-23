@@ -2256,3 +2256,23 @@
              "a write to another entity's value of the attribute leaves this pattern intact")
          (doc! flow :seon.ns/doc "The read value changed.")
          (is (false? (db/read-evidence-current? @connection evidence))))))))
+
+(deftest an-index-page-depends-on-its-prefix-attribute
+  (test-support/with-database
+   (fn [connection]
+     (let [captured (atom [])
+           doc! (fn [entity attribute text]
+                  (test-support/transacted! connection [[:db/add entity attribute text]]))]
+       (binding [db/*read-evidence-sink* captured]
+         (db/index-page @connection {:index :aevt :components [:seon.ns/doc]
+                                     :direction :forward :limit 10 :max-result-weight 100000}))
+       (let [evidence (db/read-evidence @captured)]
+         (is (= #{:seon.ns/doc}
+                (d/dependency-plan-attributes (:datahike.read/dependency-plan (first evidence)) 0)))
+         (doc! [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "An unrelated attribute changed.")
+         (is (true? (db/read-evidence-current? @connection evidence))
+             "a commit outside the prefix's attribute keeps the page current")
+         (let [on-page (:e (first (:datahike.index-page/datoms (:seon.db/read-result (first @captured)))))]
+           (doc! on-page :seon.ns/doc "A datom on the page changed."))
+         (is (false? (db/read-evidence-current? @connection evidence))
+             "a changed datom on the page makes it stale"))))))
