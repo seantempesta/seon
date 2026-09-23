@@ -1230,14 +1230,12 @@
     (candidate-forms)
     (let [caller (fallback-caller)
           diagnostic
-          {:seon.error/at (java.util.Date.)
-            :seon.error/layer :seon.schema/derivation
-            :seon.error/operation 'seon.schema/declaration-population
-            :seon.error/message "No declaration projection was handed to this schema operation."
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/derivation 'seon.schema/declaration-population
+           {:seon.error/message "No declaration projection was handed to this schema operation."
             :seon.schema/missing-projection true
             :seon.schema/refused-value nil
             :seon.schema/expected-value :seon.schema/projection
-            :seon.error/data {:seon.schema/caller caller}}]
+            :seon.error/data {:seon.schema/caller caller}})]
       (throw (ex-info (:seon.error/message diagnostic) diagnostic)))))
 
 (defn call-with-forms
@@ -1970,10 +1968,8 @@
     renderer :seon.render/function}
    {:seon.schema/keys [render-contract render-input render-contract-cause]}]
   (let [diagnostic
-        {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.schema/admission
-          :seon.error/operation 'seon.schema/render-contract-refusal!
-          :seon.schema/refused-value renderer
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/admission 'seon.schema/render-contract-refusal!
+         {:seon.schema/refused-value renderer
           :seon.schema/render-contract-cause render-contract-cause
           :seon.schema/expected-value schema-key
           :seon.error/message (str "Schema publication refused " schema-key ": " property
@@ -1986,7 +1982,7 @@
            :seon.render/property property
            :seon.render/function renderer
            :seon.fn/spec render-contract
-           :seon.fn/input render-input}}]
+           :seon.fn/input render-input}})]
     (throw (ex-info (:seon.error/message diagnostic) diagnostic))))
 
 (defn- assert-render-contracts!
@@ -3303,14 +3299,12 @@
                      :gen/elements [nil false {} :k]}]]
     :seon.schema/validation-refusal]}
   [db]
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.schema/derivation
-    :seon.error/operation 'seon.schema/refuse-projection-source
-    :seon.schema/refused-value db
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/derivation 'seon.schema/refuse-projection-source
+   {:seon.schema/refused-value db
     :seon.schema/expected-value :seon.db/database-value
     :seon.error/message "The program projection requires a Datahike database value; a projection with no forms is never derived from one that is not."
     :seon.error/member :seon.schema/database-value
-    :seon.error/data {:seon.schema/database-value db}})
+    :seon.error/data {:seon.schema/database-value db}}))
 
 (def projection-ranges
   "The declaration ranges `load-projection` reads, as [identity value identity-tx?].
@@ -3401,14 +3395,12 @@
          :keyword :string]
     :seon.schema/validation-refusal]}
   [schema-key selector-element cause message]
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.schema/derivation
-    :seon.error/operation 'seon.schema/pulled-selector-refusal
-    :seon.schema/refused-value selector-element
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/derivation 'seon.schema/pulled-selector-refusal
+   {:seon.schema/refused-value selector-element
     :seon.schema/expected-value :seon.schema/pull-selector-element
     :seon.error/message message
     :seon.error/data {:seon.schema/key schema-key
-     :seon.schema/pull-selector-element selector-element}})
+     :seon.schema/pull-selector-element selector-element}}))
 
 (defn- entity-entry-map
   "Map one entity schema's attributes to their Malli map entries."
