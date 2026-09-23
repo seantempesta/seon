@@ -233,7 +233,7 @@ revisions and measurement boundaries. Repeat the relevant case before implementa
 | Profiling microprobe | Approximately 40 ns timing-only increment; another attempted shape added 624 ns | Neither number proves final armed overhead, child-work attribution or concurrent recording |
 | Text-matched long-test allowances | 68,105,085 ms across 128 declarations | A source inventory, not measured runtime; indexed declarations must drive conversion |
 
-The ambition remains aggressive: **source ≤55,000 lines; tests ≤68,000 after the cut
+**Owner target, 2026-09-23: the codebase at 10,000 lines or below** ("I actually want this down to 10k or below … we can do that when we get the namespace agents running"); the figures below are the interim cut targets. Oversized files and functions get shrink lanes at every orchestrator check-in; shrink research includes web research for libraries that already do the work. The interim ambition: **source ≤55,000 lines; tests ≤68,000 after the cut
 and ≤45,000 after agents remove repeated setup; schemas ≤11,000; docs ≤35,000;
 shared instructions ≤250 lines.** These are targets, not a proven sum of lane estimates.
 Maintained correctness and a complete self-improvement loop decide acceptance.

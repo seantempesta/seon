@@ -79,7 +79,7 @@ by getting rid of redundant code. I don't want us to fall back and create all th
 again").** Every landing note reports its net src and test lines; a slice that grows src
 names what it deletes next or why nothing can go. Before writing a mechanism, search for
 the one that already exists — in the dependency or in Seon — and delete ours in its favour.
-Plan target: src ≤ 55,000 lines (README §5); measured 2026-09-23 against the plan baseline
+Owner target (2026-09-23): the whole codebase at 10,000 lines or below — "we are being really inefficient … not coding very clojure like … I actually want this down to 10k or below"; the deep shrink runs once namespace agents do, and until then oversized files and functions get shrink lanes at every check-in. Write Clojure: core functions, data transformations and library calls, not hand-built mechanisms. A lane whose job is shrinking does web research for a library that already does the work before writing any replacement. Interim plan target src ≤ 55,000 (README §5); measured 2026-09-23 against the plan baseline
 `f6216bd26`: src 90,086 → 84,928, test 98,862 → 91,854.
 
 **Algorithmic analysis and principal-engineering common sense in every design (owner,
