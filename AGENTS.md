@@ -568,7 +568,14 @@ Codex lanes use GPT-6 models only (owner 2026-09-23): `gpt-6-astra` at medium re
 writes PRDs/plan docs and diagnoses; `gpt-6-sol` implements from a written PRD or plan doc
 ("try out gpt 6 sol that's new"); Opus 5.5 implements and researches (Agent tool,
 `model: opus`) beside them. The orchestrator compares the pairings and keeps whichever
-writes the cleanest, least buggy, smallest code; no Fable lanes. Specs use verify / falsify / probe,
+writes the cleanest, least buggy, smallest code; no Fable lanes.
+**Every plan is reviewed before it is implemented (owner, 2026-09-23: "I want all plans to
+go through review before implementation by an opus agent").** A spec, design, slice plan or
+fix design goes to an independent `gpt-6-astra` review — a different training distribution,
+checking simplicity, dependency seams, correctness risks and contradictions with the laws —
+before any implementing lane starts; the implementer receives the reviewed plan and the
+review's findings, and the orchestrator rules on each finding first. A small bug fix whose
+design is one obvious change at a named seam is the only exception, stated in the launch. Specs use verify / falsify / probe,
 never adversarial verbs, which trip model safety filters. A launch cites the issue or
 plan entry it extends, one lane per defect class after a query, and the spec carries
 raw evidence paths, never an attribution. Report usage-limit stops and resume the same lane after owner
