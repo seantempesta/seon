@@ -2233,3 +2233,26 @@
         (is (not (contains? (:seon.schema.projection/forms committed) ::staged)))
         (is (identical? first-read second-read))
         (is (= 1 derivations) "repeated reads of one in-transaction value derive once")))))
+
+(deftest equal-revisions-prove-a-read-current-without-scanning-history
+  (test-support/with-database
+   (fn [connection]
+     (let [flow [:seon.ns/name 'seon.flow]
+           captured (atom [])
+           doc! (fn [entity attribute text]
+                  (test-support/transacted! connection [[:db/add entity attribute text]]))]
+       (binding [db/*read-evidence-sink* captured]
+         (db/datoms @connection :eavt flow :seon.ns/doc))
+       (let [evidence (db/read-evidence @captured)
+             scans (atom 0)
+             history d/history]
+         (doc! [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "An unrelated attribute changed.")
+         (with-redefs [d/history (fn [database] (swap! scans inc) (history database))]
+           (is (true? (db/read-evidence-current? @connection evidence))
+               "an unrelated write leaves the read's attribute revision equal"))
+         (is (zero? @scans) "equal revisions answer before any history scan")
+         (doc! [:seon.ns/name 'seon.db] :seon.ns/doc "Another entity's value changed.")
+         (is (true? (db/read-evidence-current? @connection evidence))
+             "a write to another entity's value of the attribute leaves this pattern intact")
+         (doc! flow :seon.ns/doc "The read value changed.")
+         (is (false? (db/read-evidence-current? @connection evidence))))))))

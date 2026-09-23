@@ -1118,32 +1118,38 @@
            plan :datahike.read/dependency-plan
            revision :datahike.read/revision
            :as evidence}]
-       (let [source (some #(when (= source-position (:datahike.query.source/argument-position %)) %)
-                          (:datahike.query.dependency/sources plan))
-             indexed (index-evidence-current database source revision)]
-        (if (some? indexed)
-          indexed
-          (or (and (not (false? (:datahike.read/cache-eligible? revision)))
+       ;; Cheapest proof first. Equal attribute revisions mean no commit since
+       ;; the read changed any attribute it depends on (Datahike advances one
+       ;; revision per changed attribute, `datahike/query.cljc:2568`), so the
+       ;; history scan could only agree; it runs when revisions differ, where
+       ;; another entity's write may still leave this read's patterns intact.
+       (or (and (not (false? (:datahike.read/cache-eligible? revision)))
                 (= revision (dependency-revision database plan source-position)))
-           (when (and (find evidence :seon.db/read-request)
-                      (or (find evidence :seon.db/read-result)
-                          (find evidence :seon.db/read-result-digest)))
-             (try
-               (let [replayed
-                     (replay-read database (:seon.db/read-request evidence))
-                     [replayable? result]
-                     (stable-read-result
-                      (:seon.db/read-request evidence)
-                      replayed)]
-                 (or (and (find evidence :seon.db/read-result)
-                          replayable?
-                          (= (:seon.db/read-result evidence) result))
-                     (when-let [expected
-                                (:seon.db/read-result-digest evidence)]
-                       (when-let [actual
-                                  (read-result-digest replayed)]
-                         (= expected actual)))))
-               (catch Throwable _ false)))))))
+           (let [source (some #(when (= source-position (:datahike.query.source/argument-position %)) %)
+                              (:datahike.query.dependency/sources plan))
+                 indexed (index-evidence-current database source revision)]
+             (if (some? indexed)
+               indexed
+               ;; A replay's declared failures are values (`q`, `pull` and
+               ;; `datoms` return their refusal), which compare unequal. A
+               ;; throw is not declared, so it propagates with its cause.
+               (when (and (find evidence :seon.db/read-request)
+                          (or (find evidence :seon.db/read-result)
+                              (find evidence :seon.db/read-result-digest)))
+                 (let [replayed
+                       (replay-read database (:seon.db/read-request evidence))
+                       [replayable? result]
+                       (stable-read-result
+                        (:seon.db/read-request evidence)
+                        replayed)]
+                   (or (and (find evidence :seon.db/read-result)
+                            replayable?
+                            (= (:seon.db/read-result evidence) result))
+                       (when-let [expected
+                                  (:seon.db/read-result-digest evidence)]
+                         (when-let [actual
+                                    (read-result-digest replayed)]
+                           (= expected actual))))))))))
      retained)))
 
 ;;; THE declaration population for ONE read operation. Every decode walker
