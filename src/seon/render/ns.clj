@@ -9,12 +9,10 @@
             [seon.db :as db]
             [malli.core :as m]
             [malli.registry :as mr]
-            [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.repl :as repl]
             [seon.render.block :as block]
-            [seon.render.route :as route]
-            [seon.render.hiccup :as hiccup]))
+            [seon.render.route :as route]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Concrete program-graph reads
@@ -413,18 +411,6 @@
 ;;; Bounded, whole-section assembly
 ;;; ---------------------------------------------------------------------------
 
-(defn- token-budget
-  [unit]
-  (some-> (get-in unit [:seon.render/profile
-                        :seon.render.profile/token-budget])
-          long
-          (max 1)))
-
-(defn- within-budget?
-  [text budget]
-  (or (nil? budget)
-      (<= (tokens/estimate text) budget)))
-
 (defn- omission-value
   [namespace-name profile-id offset requires-count definitions-count]
   (let [omitted (+ requires-count definitions-count)]
@@ -597,40 +583,6 @@
         items
         (compact-ai-text data items (count items))))))
 
-(defn- minimal-ai-text
-  [{::keys [namespace-name requires functions own-schemas owner-agent-id
-            profile-id]}]
-  (let [no-members? (and (empty? requires) (empty? functions)
-                         (empty? own-schemas))]
-    (str (when no-members? (str (empty-comment owner-agent-id) "\n"))
-         (pr-str
-          (cond-> [namespace-name]
-            (or (seq requires) (seq functions) (seq own-schemas))
-            (conj (omission-value namespace-name profile-id 0
-                                  (count requires)
-                                  (+ (count functions)
-                                     (count own-schemas)))))))))
-
-(defn- budgeted-ai
-  [data budget]
-  (if (or (nil? budget) (< (::distance data) 2))
-    (ai-text data)
-    (let [items (compact-ai-items data)
-          item-count (when-not (read-refusal? items) (count items))]
-      (if (read-refusal? items)
-        items
-        (let [render #(compact-ai-text data items %)
-              initial (render 0)]
-          (if-not (within-budget? initial budget)
-            (minimal-ai-text data)
-            (loop [included 0]
-              (let [next-count (inc included)
-                    candidate (when (<= next-count item-count)
-                                (render next-count))]
-                (if (and candidate (within-budget? candidate budget))
-                  (recur next-count)
-                  (render included))))))))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; HTML twin
 ;;; ---------------------------------------------------------------------------
@@ -778,58 +730,6 @@
          [:code (str (::namespace-name data))]]]]
     1 (full-html-view data included-count true)
     (compact-html-view data included-count)))
-
-(defn- minimal-html-view
-  [{::keys [namespace-name requires functions own-schemas owner-agent-id]}]
-  [:section {:class "seon-family-entry seon-namespace-entry"}
-   [:h2 [:code (str namespace-name)]]
-    [:p {:class "seon-namespace-elision"}
-    (if (or (seq requires) (seq functions) (seq own-schemas))
-      (omission-text
-       (count requires)
-       (+ (count functions) (count own-schemas)))
-      (empty-text owner-agent-id))]])
-
-(defn- html-within-budget?
-  [view budget]
-  (within-budget? (hiccup/->string view) budget))
-
-(defn- budgeted-html
-  [data budget]
-  (let [function-count (count (::functions data))
-        distance (::distance data)]
-    (cond
-      (or (nil? budget) (zero? distance))
-      (html-view data function-count)
-
-      (= 1 distance)
-      (let [render #(full-html-view data % false)
-            initial (render 0)]
-        (if-not (html-within-budget? initial budget)
-          (minimal-html-view data)
-          (loop [included 0]
-            (let [next-count (inc included)
-                  candidate (when (<= next-count function-count)
-                              (render next-count))]
-              (if (and candidate (html-within-budget? candidate budget))
-                (recur next-count)
-                (let [summary (render included)
-                      detailed (full-html-view data included true)]
-                  (if (html-within-budget? detailed budget)
-                    detailed
-                    summary)))))))
-
-      :else
-      (let [initial (html-view data 0)]
-        (if-not (html-within-budget? initial budget)
-          (minimal-html-view data)
-          (loop [included 0]
-            (let [next-count (inc included)
-                  candidate (when (<= next-count function-count)
-                              (html-view data next-count))]
-              (if (and candidate (html-within-budget? candidate budget))
-                (recur next-count)
-                (html-view data included)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Family defaults

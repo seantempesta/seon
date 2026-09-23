@@ -572,26 +572,6 @@
                                      (pull-width caps)
                                      (pull-width caps))))))))
 
-(defn membership-diff
-  "Changed, added, and removed members between two root acquisitions."
-  {:malli/schema [:=> [:cat :map :map] :map]}
-  [before after]
-  (let [before-members (:seon.render.walk/members before)
-        after-members (:seon.render.walk/members after)
-        before-order (:seon.render.walk/order before)
-        after-order (:seon.render.walk/order after)
-        added? #(not (contains? before-members %))
-        removed? #(not (contains? after-members %))
-        changed? #(and (contains? before-members %)
-                       (not= (:seon.render/value (get before-members %))
-                             (:seon.render/value (get after-members %))))]
-    {:seon.render.walk/changed
-     (into [] (comp (filter changed?) (map after-members)) after-order)
-     :seon.render.walk/added
-     (into [] (comp (filter added?) (map after-members)) after-order)
-     :seon.render.walk/removed
-     (into [] (comp (filter removed?) (map before-members)) before-order)}))
-
 (defn- forward-refs
   "`[attribute eid]` for every ref value the entity itself carries."
   [entity]
@@ -615,27 +595,6 @@
   (if (contains? entity :seon.ns/name)
     (if (= root-namespace-eid eid) 1 0)
     traversal-hops))
-
-(defn owning-namespace
-  "The one namespace explicitly named by the value or one of its direct refs.
-
-  This deliberately does not inspect keyword text. An entity with no explicit
-  namespace edge has no owning namespace at this boundary and therefore falls
-  through to its matching schema property and the structural floor."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value :map]
-    [:or :seon.render/namespace :nil]]}
-  [_database entity]
-  (let [names (cond-> (into #{}
-                            (keep (fn [[_attribute value]]
-                                    (cond
-                                      (map? value) (:seon.ns/name value)
-                                      (sequential? value)
-                                      (some :seon.ns/name value))))
-                            entity)
-                (:seon.ns/name entity) (conj (:seon.ns/name entity)))]
-    (when (= 1 (count names))
-      (first names))))
 
 (defn- acquired-namespace-name
   [acquisition member]

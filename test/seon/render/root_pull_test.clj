@@ -56,10 +56,6 @@
   [acquisition]
   (set (keys (:seon.render.walk/members acquisition))))
 
-(defn- changed-lookups
-  [diff kind]
-  (into #{} (map :seon.render.walk/lookup) (get diff kind)))
-
 (defn- within-event-backstop
   [f]
   (let [task (future (f))]
@@ -295,7 +291,7 @@
                    [::root-id ::node-id ::forward ::edge ::component ::value])
            "explicit component nesting keeps every concrete dependency")))))
 
-(deftest root-membership-ignores-undeclared-refs-and-diffs-components
+(deftest root-membership-ignores-undeclared-refs
   (support/with-database
    {:seon.test-support/extra-schema root-pull-schema}
    (fn [connection]
@@ -305,58 +301,21 @@
                            {:db/id "component"
                             ::node-id "component"
                             ::value "before"}])
-     (let [initial (acquire connection)]
+     (let [initial (member-lookups (acquire connection))]
        (testing "an undeclared forward ref remains an identity in the root value"
          (support/transacted! connection
                               [{::node-id "forward"}
                                {::root-id "root"
                                 ::forward [::node-id "forward"]}])
-         (let [with-forward (acquire connection)
-               added (walk/membership-diff initial with-forward)]
-           (is (not (contains? (member-lookups with-forward)
-                               [::node-id "forward"])))
+         (let [with-forward (acquire connection)]
+           (is (= initial (member-lookups with-forward)))
            (is (= "forward" (get-in with-forward
-                                    [:seon.render.walk/root ::forward ::node-id])))
-           (is (= #{}
-                  (changed-lookups added :seon.render.walk/added)))
-           (support/transacted! connection
-                                [[:db/retract [::root-id "root"] ::forward
-                                  [::node-id "forward"]]])
-           (let [without-forward (acquire connection)
-                 removed (walk/membership-diff with-forward without-forward)]
-             (is (= #{}
-                    (changed-lookups removed :seon.render.walk/removed))))))
-
-       (testing "an undeclared reverse ref neither adds nor removes a member"
-         (let [before-reverse (acquire connection)]
-           (support/transacted! connection
-                                [{::node-id "reverse"
-                                  ::edge [::root-id "root"]}])
-           (let [with-reverse (acquire connection)
-                 added (walk/membership-diff before-reverse with-reverse)]
-             (is (= #{}
-                    (changed-lookups added :seon.render.walk/added)))
-             (support/transacted! connection
-                                  [[:db/retract [::node-id "reverse"] ::edge
-                                    [::root-id "root"]]])
-             (let [without-reverse (acquire connection)
-                   removed
-                   (walk/membership-diff with-reverse without-reverse)]
-               (is (= #{}
-                      (changed-lookups removed
-                                       :seon.render.walk/removed)))))))
-
-       (testing "a component-only touch changes the component, not its root"
-         (let [before-component (acquire connection)]
-           (support/transacted! connection
-                                [[:db/add [::node-id "component"] ::value "after"]])
-           (let [after-component (acquire connection)
-                 changed
-                 (walk/membership-diff before-component after-component)]
-             (is (= #{[::node-id "component"]}
-                    (changed-lookups changed :seon.render.walk/changed)))
-             (is (empty? (:seon.render.walk/added changed)))
-             (is (empty? (:seon.render.walk/removed changed))))))))))
+                                    [:seon.render.walk/root ::forward ::node-id])))))
+       (testing "an undeclared reverse ref adds no member"
+         (support/transacted! connection
+                              [{::node-id "reverse"
+                                ::edge [::root-id "root"]}])
+         (is (= initial (member-lookups (acquire connection)))))))))
 
 (deftest supplied-root-acquisition-is-the-only-membership-read
   (support/with-database

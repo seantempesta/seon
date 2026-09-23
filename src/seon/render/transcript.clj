@@ -17,9 +17,7 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.error :as error]
-            [seon.print :as print]
             [seon.render :as render]
-            [seon.render.agent :as agent]
             [seon.render.block :as block]
             [seon.render.route :as route]
             [seon.render.value :as value]
@@ -845,26 +843,6 @@
                           ::selected-run-id run-id))]
       :else (missing-selected-run unit identities))))
 
-(defn render-session-ai
-  "Render the schema-declared agent session while status survives slice 1."
-  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
-  [unit]
-  (when-let [status (agent/agent-ai unit)]
-    (let [history (when (and (:seon.db/db unit)
-                             (:seon.sci.admit/caps unit))
-                    (render-ai unit))]
-      (str status (when (seq history) (str "\n" history))))))
-
-(defn render-session-html
-  "Render the schema-declared HTML agent session with stable transcript ids."
-  {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:maybe :seon.render/hiccup]]}
-  [unit]
-  (when-let [status (agent/agent-html unit)]
-    (if (and (:seon.db/db unit) (:seon.sci.admit/caps unit))
-      (conj status (render-html unit))
-      status)))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The history unit
 ;;;
@@ -949,44 +927,6 @@
                   :seon.render.profile/id :seon.render.profile/agent
                   :seon.print/requery-id
                   [:seon.agent/id agent-id]}))))))
-
-(defn- run-heading
-  [run]
-  (str "Run " (:seon.turn/id run)
-       (when-let [opened (get-in run [:seon.turn/opened-tx :db/txInstant])]
-         (str ", opened " (pr-str opened)))
-       (if-let [closed (get-in run [:seon.turn/closed-tx :db/txInstant])]
-         (str ", closed " (pr-str closed))
-         ", still open")
-       "."))
-
-(defn format-history-ai
-  "Format this agent's own history as the REPL session it was.
-
-  The bytes per entry are the run loop's own, so an error appears exactly as
-  the loop printed it rather than in a second error shape invented here."
-  {:malli/schema [:=> [:cat [:or :seon.render.transcript/history
-                             :seon.error/value]]
-                  [:or :string :seon.db/error-result]]}
-  [derived]
-  (if (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
-    derived
-    (let [runs (:seon.render.transcript/runs derived)
-          older (:seon.render.transcript/older-runs derived)]
-      (str/join
-       "\n\n"
-       (cond->
-        (if (seq runs)
-          (mapv (fn [run]
-                  (str/join
-                   "\n"
-                   (cond-> [(run-heading run)]
-                     :always
-                     (into (map :seon.render.history/bytes)
-                           (:seon.render.transcript/entries run)))))
-                runs)
-          ["No run of mine is recorded yet; this is my first episode."])
-         older (conj (print/render-elision-ai older)))))))
 
 (defn render-history-ai
   "The prompt is this concern's AI projection, so emit no duplicate text."

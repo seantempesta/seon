@@ -1090,7 +1090,6 @@
             derived (transcript/agent-history
                      {:seon.db/db database :seon.agent/id agent-id})
             runs (:seon.render.transcript/runs derived)
-            ai (transcript/format-history-ai derived)
             rows (db/pull-many
                   database
                   '[:db/id :seon.turn/id :seon.turn/opened-tx
@@ -1103,17 +1102,9 @@
         (testing "runs come back newest first"
           (is (= ["history-run-2" "history-run-1" "history-run-0"]
                  (mapv :seon.turn/id runs))))
-        (testing "the AI projection is the run loop's own bytes"
-          (is (str/includes? ai "Run history-run-2, opened "))
-          (is (str/includes? ai "=> (+ 2 1)\n#:seon.repl{:value 3")
-              "the actual namespace prompt and the stored result")
-          (is (< (.indexOf ai "history-run-2") (.indexOf ai "history-run-0"))
-              "newest first in the text as well"))
         (testing "the attribute's own AI projection emits no duplicate bytes"
-          ;; THE PROMPT IS THIS CONCERN'S AI PROJECTION. `format-history-ai`
-          ;; is what the turn loop renders; the declared `:seon.render/ai`
-          ;; pair deliberately emits nothing so a walk cannot print the same
-          ;; history a second time (`src/seon/render/transcript.clj:1043`).
+          ;; The declared `:seon.render/ai` pair deliberately emits nothing,
+          ;; so a walk cannot print the same history a second time.
           (is (= "" (transcript/render-history-ai rows database))))
         (testing "the HTML projection heads the same turns, newest first"
           (is (= [:h2 "Turns (3)"] (nth html 2)))
