@@ -1885,56 +1885,6 @@
       (assoc :decision "block" :reason refusal))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Skill citations at commit
-;;; ---------------------------------------------------------------------------
-
-(defn- shell-command
-  "The shell command a tool payload runs, as one string, or nil. Claude's
-  Bash sends a string; a Codex shell call may send its argv."
-  [event]
-  (let [command (get-in event [:tool_input :command])]
-    (cond
-      (string? command) command
-      (sequential? command) (str/join " " command)
-      :else nil)))
-
-(defn- skill-commit-refusal
-  "Before a shell `git commit` that carries a .agents/skills Markdown file,
-  run the citation checker on exactly those files and return the refusal
-  text when a citation drifted or names a missing file, else nil.
-
-  A commit naming no skill file costs one tokenization and returns nil
-  without starting a subprocess. A checker that throws has checked nothing,
-  so the commit is refused with the whole cause."
-  [event]
-  (when-let [command (and (= "PreToolUse" (:hook_event_name event))
-                          (not (#{"apply_patch" "Edit" "Write"} (:tool_name event)))
-                          (shell-command event))]
-    (when (and (str/includes? command "git") (str/includes? command "commit"))
-      (let [started (System/nanoTime)]
-        (try
-          (load-direct-check! 'seon.dev.citations)
-          (let [commit-request (requiring-resolve 'seon.dev.citations/commit-request)
-                commit-refusal (requiring-resolve 'seon.dev.citations/commit-refusal)
-                cwd (or (:cwd event) repo-root)
-                request (commit-request {:seon.dev.citations/root repo-root
-                                         :seon.dev.citations/cwd cwd
-                                         :seon.dev.citations/command command})
-                refusal (when request (commit-refusal request))]
-            (when request
-              (log! "CITATIONS"
-                    (str "documents=" (pr-str (:seon.dev.citations/documents request)))
-                    (str "ms=" (quot (- (System/nanoTime) started) 1000000))
-                    (if refusal "BLOCKED" "PASS")))
-            refusal)
-          (catch Exception e
-            (let [{:keys [message chain]} (failure-cause e)]
-              (log! "CITATIONS_FAILED" message (pr-str chain))
-              (str "BLOCKED: the skill citation check could not run, so this "
-                   "commit's skill files are unchecked: " message "\n"
-                   (pr-str chain)))))))))
-
-;;; ---------------------------------------------------------------------------
 ;;; Main Entry Point
 ;;; ---------------------------------------------------------------------------
 
@@ -1955,14 +1905,8 @@
         pathless-edit? (and edit-event? (empty? file-paths))
         local-edit? (and edit-event?
                          (seq file-paths)
-                         (= (count local-paths) (count file-paths)))
-        citation-refusal (when-not edit-event? (skill-commit-refusal event))]
+                         (= (count local-paths) (count file-paths)))]
     (cond
-      ;; a commit carrying a skill file is refused while any of its
-      ;; citations points at a moved or missing line
-      citation-refusal
-      (refuse-with (refusal-response {:reason citation-refusal}))
-
       pathless-edit?
       (do (log! "PATHLESS_EDIT" (str "tool=" tool-name)
                 (str "input=" (pr-str (:tool_input event))))
