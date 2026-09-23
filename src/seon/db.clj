@@ -1441,8 +1441,17 @@
       (construction-projection database)
 
       ;; An as-of view keys by its own declaration datoms, never its origin's.
+      ;; An uncommitted origin (the writer's in-transaction value) names them
+      ;; by its revision key and the time point: within one connection an
+      ;; attribute's revision advances with every datom it gains or loses
+      ;; (`datahike.db/advance-cache-context`, db.cljc:423), so the pair fixes
+      ;; the view's declaration datoms without reading them (25 ms per read
+      ;; before, lane-writer-cost-2-2026-09-23.md).
       as-of?
-      (if-let [view-key (as-of-key source)]
+      (if-let [view-key (or (as-of-key source)
+                            (when (:datahike.cache/connection-id (:cache-context (dbi/-origin source)))
+                              (assoc (projection-cache-key (dbi/-origin source))
+                                     ::as-of (dbi/-time-point source))))]
         (value-projection view-key source)
         (content-projection source))
 

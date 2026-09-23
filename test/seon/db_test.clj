@@ -2212,6 +2212,37 @@
         (is (identical? first-read second-read))
         (is (= 1 derivations) "repeated reads of one in-transaction value derive once")))))
 
+(deftest an-as-of-view-of-an-in-transaction-value-reuses-its-population
+  ;; The writer's `:db.fn/call` argument is uncommitted; the test recorder reads
+  ;; it as of the run's basis on every pull. Each such read re-read every
+  ;; declaration datom (17-26 ms) before its key named the view's revisions.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            basis (:max-tx database)
+            committed (db/carried-projection database)
+            staged (:db-after (d/with database
+                                      [[:db.fn/call #'turn/row-tx {}
+                                        {:seon.schema/key ::as-of-staged :seon.schema/form (pr-str :int)}]]))
+            views (mapv (fn [n] (db/as-of (:db-after (d/with database [{:seon.agent/id (str "as-of-view-" n)}])) basis))
+                        (range 21))
+            first-view (db/carried-projection (first views))
+            started (System/nanoTime)
+            later (mapv db/carried-projection (rest views))
+            elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+        (is (identical? committed first-view)
+            "an in-transaction value's as-of view reads the population it held at that point")
+        (is (every? #(identical? committed %) later))
+        (is (< elapsed-ms 50.0)
+            (str "twenty more views at one point share the first view's key (" elapsed-ms " ms)"))
+        (is (not (contains? (:seon.schema.projection/forms (db/carried-projection (db/as-of staged basis)))
+                            ::as-of-staged))
+            "a view before the value's own declaration write lacks it")
+        (is (contains? (:seon.schema.projection/forms
+                        (db/carried-projection (db/as-of staged (inc (long (:max-tx staged))))))
+                       ::as-of-staged)
+            "a view at the write holds it")))))
+
 (deftest equal-revisions-prove-a-read-current-without-scanning-history
   (test-support/with-database
    (fn [connection]
