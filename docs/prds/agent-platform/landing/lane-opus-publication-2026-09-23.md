@@ -220,3 +220,48 @@ reload.
   default (this docstring edit, reverted on disk since).
 - The MCP projection of that exception failed too: `seon.cluster/first-seon-frame refused
   trace at [99 2]: expected a string, got nil` (`cluster.clj:368`), a frame with no file.
+
+## Slice 3 landed: `b0d047021` (pid 60088, both changes loaded at boot)
+
+- Probe (JVM, `d/with`, nothing committed), callee `seon.id/digest`: docstring edit 0 caller
+  files (118 ms), body edit 0 (153 ms), `:seon.fn/inline?` change 29 files (9 ms).
+- `fn.clj` docstring publication, same edit as the parent row: 2,594 ms and 2,426 ms (parent
+  10,339 ms). Phases: analysis 1.1 s (clj-kondo over the 3,700-line file), rows 1.2 s
+  (reconcile transaction 0.7 s). No "analysis callers" phase.
+- The regression `test/seon/fn/caller_lint_test.clj` has NOT run: adopting it refused
+  "Source changed during development adoption" on `src/seon/cluster/source.clj` and
+  `test/seon/db_test.clj`, other lanes' dirty files reached through default's catch-up
+  (history since its adopted commit, `source.clj:310-323`). Both fn.clj publications also
+  reached publication and refused at the same adoption pre-check.
+
+## Next (queued, needs cluster.clj): the reload set per declaration
+
+Measured on pid 60088: 371 `clojure.core/def`, 8 `defmacro`, 4 `defprotocol`, 6 `defrecord`,
+7 `deftype`, 2 `defmulti`; every `defn`/`defn-` (4,390) has `:seon.fn/inline? false`.
+`compiled-into-callers` (`cluster.clj` above `declaration-reload-rule`, ~2180) lists
+`clojure.core/def`, so ANY def edit, e.g. a private constant set, reloads every dependent
+namespace. A plain def is Var-deref'd like a defn. Design (~10 lines, cluster.clj):
+- `def` leaves `compiled-into-callers`; a def seeds dependents only when its namespace also
+  declares a `defmacro` (a macro may read it at expansion): one query of
+  `:seon.fn/defined-by` over the namespace's rows, already read in `development-namespaces`.
+- `defmulti` is Var-indirected: `:seon.reload/var-indirection`.
+- `^:const` is inlined but has no stored fact today; the producer (`fn.clj` var row, near
+  `:seon.fn/constant?` at `fn.clj:676`) would declare it if clj-kondo's var-definition
+  analysis carries the meta. Verify before adding.
+Cost: per changed declaration, one lookup; no dependents for body/docstring/def edits.
+It removes the dependents half of the deadlock. The other half is adoption catching up
+other lanes' publications (their namespaces are reloaded from a disk that has moved on);
+loading the PUBLISHED bytes (a content blob per changed file, keyed by the file digest the
+row already stores, loaded with `Compiler/load`) removes it together with the
+check-then-reload window.
+
+## Resources and "exactly P"
+
+Yes, the rule fails for resources. Every publication builds its projection from
+`schema.edn/packaged-forms` (`schema/edn.clj:397`), which reads every file under
+`resources/seon/schemas/` from disk whatever `--changed` names (`cluster.clj:2860` in
+`refresh-source!`, `:1666` in `populate-source!`). The adopted schema declarations come
+from that published projection (`adopt-rows!` `declaration-changes`). So another lane's
+WIP resource rides any lane's publication. The fix at the owner: a partial publication's
+forms are the published commit's stored schema forms with only the requested resource paths
+read from disk, which is proportional to the changed resources.
