@@ -948,10 +948,11 @@
                    (remove #(contains? ids (:seon.issue/id %)) current)))))))
 
 (defn- adopt-selected!
-  "Transact the selected identities' rows, led by any writer-side guard."
+  "Transact the selected identities' rows after `tx-data` (a writer-side guard,
+  a caller's record), all in one transaction."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]
-         [:vector [:tuple [:= :db.fn/call] [:fn ifn?] :seon.source/expected-head]]]
+         :seon.db/tx-data]
     [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]}
   [connection source identities guards]
   (when (seq identities)
@@ -974,6 +975,9 @@
      [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]
     [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]
           :seon.source/expected-head]
+     [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]
+    [:=> [:cat :seon.db/connection :seon.db/database-value [:set :seon.issue/id]
+          :seon.source/expected-head :seon.db/tx-data]
      [:or :nil :seon.db/transaction-report :seon.db/error-result :seon.issue/citations-undeclared-error]]]}
   ([connection source]
    (let [rows (identity-rows source)]
@@ -983,8 +987,10 @@
   ([connection source identities]
    (adopt-selected! connection source identities []))
   ([connection source identities expected-head]
+   (adopt! connection source identities expected-head []))
+  ([connection source identities expected-head tx-data]
    (adopt-selected! connection source identities
-                    [[:db.fn/call registry/head-guard-tx expected-head]])))
+                    (into [[:db.fn/call registry/head-guard-tx expected-head]] tx-data))))
 
 (def ^:private tests-done-query
   "Nonempty tests all have positive green results on their current reach digest."

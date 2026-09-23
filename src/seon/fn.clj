@@ -3621,7 +3621,10 @@
                           ;; Rows derived from one published commit refuse at
                           ;; the writer once another publication moved its head.
                           expected-head (cons [:db.fn/call registry/head-guard-tx expected-head])
-                          true vec)}
+                          true vec
+                          ;; A caller's record of this write lands in the same
+                          ;; transaction, or not at all.
+                          (:seon.db/tx-data request) (#(into % (:seon.db/tx-data request))))}
                  process (assoc :tx-meta {:seon.db/process process})))
               :seon.fn/population)
              changed-identities (require-committed! (report-identities report)

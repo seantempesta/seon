@@ -2484,12 +2484,14 @@
   `published-database` onto `connection`, and answer the program identities.
 
   The one database half of adoption: development adoption hands it the cluster's
-  connection, the save gate its candidate's. Every write refuses once another
-  publication moves `current-src` (`expected-head`)."
+  connection and its adoption `record`, the save gate its candidate's and none.
+  `record` rides the LAST row write, so it lands exactly when the rows do.
+  Every write refuses once another publication moves `current-src`
+  (`expected-head`)."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/published
-                       :seon.reconcile/adopt-identities :seon.db/database-value]
+                       :seon.reconcile/adopt-identities :seon.db/database-value :seon.db/tx-data]
                   :seon.reconcile/adopt-identities]}
-  [connection published identities published-database]
+  [connection published identities published-database record]
   (let [previous-database (db/db connection)
         expected-head {:seon.source/branch source/current-branch
                        :seon.source/expected-commit-id (:seon.source/commit-id published)}
@@ -2504,10 +2506,12 @@
              forms
              #(require-committed!
                (db/transact! connection
-                             {:tx-data [[:db.fn/call registry/head-guard-tx expected-head]
-                                        [:db.fn/call
-                                         (fn [database]
-                                           (declaration-changes database published-projection))]]})
+                             {:tx-data (cond-> [[:db.fn/call registry/head-guard-tx expected-head]
+                                                [:db.fn/call
+                                                 (fn [database]
+                                                   (declaration-changes database published-projection))]]
+                                         (not (or (seq program-identities) (seq issue-identities)))
+                                         (into record))})
                {:seon.boot/population :seon.schema/declarations})))
         _ (when (seq program-identities)
             (report-source-progress! "development changed program rows")
@@ -2520,14 +2524,20 @@
                :seon.source/database published-database
                :seon.source/previous-database previous-database
                :seon.source/expected-head expected-head
-               :seon.reconcile/adopt-identities program-identities}
+               :seon.reconcile/adopt-identities program-identities
+               :seon.db/tx-data (if (seq issue-identities) [] record)}
               *source-progress!*))
              {:seon.boot/population :seon.fn/population}))
         _ (when (seq issue-identities)
             (report-source-progress! "development changed issues")
             (require-committed!
-             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities expected-head)
-             {:seon.boot/population :seon.issue/rows}))]
+             ((requiring-resolve 'seon.issue/adopt!) connection published-database issue-identities
+                                                     expected-head record)
+             {:seon.boot/population :seon.issue/rows}))
+        _ (when (and (seq record) (not-any? #(#{:seon.schema/key :seon.issue/id} (first %)) identities)
+                     (empty? program-identities))
+            (require-committed! (db/transact! connection {:tx-data record})
+                                {:seon.boot/population :seon.source/commit-id}))]
     program-identities))
 
 (defn- development-source-refresh!
@@ -2616,26 +2626,23 @@
            (when (arming-refused? effective arming-identities result)
              (refused! "Development JVM instrumentation did not restore contracts."
                        result)))))
-      (adopt-rows! connection published identities published-database)
+      ;; The record means indexing, reload and instrumentation succeeded; it
+      ;; rides the last row write, so rows and record land together or not.
+      ;; SCI acquires this database on first use; it does no work here.
+      (report-source-progress! "development rows and adoption record")
+      (adopt-rows! connection published identities published-database
+                   [[:db.fn/call adoption-guard-tx held-store cluster-ref
+                     prior-commit (:seon.source/commit-id published)]
+                    {:db/id cluster-ref
+                     :seon.source/commit-id (:seon.source/commit-id published)}
+                    {:db/id :db/current-tx
+                     :seon.test/adoption-cluster cluster-ref
+                     :seon.test/adoption-identities (set/difference (set changed-identities)
+                                                                   (set deleted-identities))
+                     :seon.test/adoption-inputs (set changed-paths)}])
       (let [database (db/db connection)]
         (env/advance-projection! (get ctx env/state-carrier)
                                  (db/basis-t database) (schema/projection-from-database database)))
-      ;; This fact means indexing, reload and instrumentation succeeded. SCI
-      ;; acquires this database on first use; it does no work during adoption.
-      (report-source-progress! "development adoption record")
-      (require-committed!
-       (db/transact! connection
-                     {:tx-data [[:db.fn/call adoption-guard-tx held-store cluster-ref
-                                 prior-commit (:seon.source/commit-id published)]
-                                {:db/id cluster-ref
-                                 :seon.source/commit-id
-                                 (:seon.source/commit-id published)}
-                                {:db/id :db/current-tx
-                                 :seon.test/adoption-cluster cluster-ref
-                                 :seon.test/adoption-identities (set/difference (set changed-identities)
-                                                                               (set deleted-identities))
-                                 :seon.test/adoption-inputs (set changed-paths)}]})
-       {:seon.boot/population :seon.source/commit-id})
       (when-let [channel (get-in instance
                                 [:seon.render.web/view
                                  :seon.render.web/runtime-eval-channel])]
@@ -2782,7 +2789,7 @@
             (if (empty? host-bound)
               (candidate-gate!
                (:seon.turn.loop/cluster instance) held-store branch
-               #(adopt-rows! (:seon.db/connection %) published identities published-database)
+               #(adopt-rows! (:seon.db/connection %) published identities published-database [])
                adopt!)
               (assoc (adopt-then-test! (:seon.turn.loop/cluster instance) identities host-bound adopt!)
                      :seon.source/candidate branch)))
