@@ -8,6 +8,7 @@
             [seon.db]
             [seon.eval]
             [seon.flow]
+            [seon.fn]
             [seon.id]
             [seon.issue]
             [seon.issue.detect]
@@ -451,3 +452,51 @@
                                :where [?e :seon.issue/id ?slug]]
                              d "probe-defect-typed-note"))
           "the invalid slug has no entity at all"))))))
+
+(clojure.test/deftest a-deleted-cited-file-leaves-uncited-text-in-one-incremental-index
+  ;; 2026-09-23: commit 8bc917872 deleted bin/test-fast, which ~30 notes cite.
+  ;; The program index retracted the file and left each citation component
+  ;; without its required `:seon.issue.citation/file`, so every incremental
+  ;; adoption refused. The component leaves in the file removal's transaction.
+  (seon.test-support/with-database
+   (fn [connection]
+     (let [path "resources/cited-then-deleted.edn"
+           manifest {:seon.fn.manifest/root "."
+                     :seon.fn.manifest/relative-roots []
+                     :seon.fn.manifest/artifacts []
+                     :seon.fn.manifest/identities []
+                     :seon.fn.manifest/digest (apply str (repeat 64 "c"))}
+           index! (fn [digests]
+                    (let [before (seon.db/db connection)]
+                      (seon.fn/index!
+                       {:seon.db/connection connection
+                        :seon.schema/projection (seon.db/carried-projection before)
+                        :seon.source/previous-database before
+                        :seon.fn/previous-manifest manifest
+                        :seon.fn/manifest manifest
+                        :seon.fn/changed-paths #{path}
+                        :seon.source/relative-file-digests digests})))
+           notes [{:seon.issue/path "docs/seon/issues/cites-a-deleted-file.md"
+                   :seon.issue/text (str "---\ntype: issue\nstatus: open\nseverity: cleanup\n---\n"
+                                         "# Cites a deleted file\n## Problem\nSee " path " for it.")}]
+           citations #(seon.db/q '[:find [?citation ...]
+                                   :where [?issue :seon.issue/id "cites-a-deleted-file"]
+                                          [?issue :seon.issue/files ?citation]]
+                                 (seon.db/db connection))
+           created (index! {path (apply str (repeat 64 "b"))})
+           cited (seon.issue/index! {:seon.db/connection connection :seon.issue/notes notes})]
+       (clojure.test/is (not (:seon.error/at created)) (pr-str created))
+       (clojure.test/is (empty? (:seon.issue/refusals cited)) (pr-str cited))
+       (clojure.test/is (= 1 (count (citations))))
+       (let [deleted (index! {})]
+         (clojure.test/is (not (:seon.error/at deleted)) (pr-str deleted))
+         (clojure.test/is (empty? (seon.db/q '[:find [?file ...] :in $ ?path
+                                               :where [?file :seon.fn.file/relative-path ?path]]
+                                             (seon.db/db connection) path)))
+         (clojure.test/is (empty? (citations))))
+       (let [again (seon.issue/index! {:seon.db/connection connection :seon.issue/notes notes})]
+         (clojure.test/is (empty? (:seon.issue/refusals again)) (pr-str again))
+         (clojure.test/is (empty? (citations)))
+         (clojure.test/is (= "Cites a deleted file"
+                             (:seon.issue/title (seon.db/pull (seon.db/db connection) [:seon.issue/title]
+                                                              [:seon.issue/id "cites-a-deleted-file"])))))))))

@@ -3182,6 +3182,16 @@
                 :else value))]
       (normalize-map (program/canonical-row row-shapes row)))))
 
+(defn- seek
+  "The datoms of one index seek; a refused read throws with its whole refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :keyword [:* :seon.schema/value]]
+                  :seon.db/datoms]}
+  [database index & components]
+  (let [found (apply db/datoms database index components)]
+    (when (:seon.error/at found)
+      (throw (ex-info (:seon.error/message found) found)))
+    found))
+
 (defn- reconcile-tx-in
   "Replace source definitions, owning rows by the shapes `row-shapes` carries."
   {:malli/schema
@@ -3195,6 +3205,16 @@
         entity (memoize #(db/pull database '[*] %))
         desired-identities (into #{} (map program/row-identity) rows)
         removed (remove desired-identities previous-identities)
+        ;; A note citing a removed file is uncited text. Its citation
+        ;; component's `:seon.issue.citation/file` is a required ref, so the
+        ;; component leaves in the removal's own transaction; one AVET seek per
+        ;; removed identity, never a scan of the notes.
+        uncited (when (get (:schema database) :seon.issue.citation/file)
+                  (for [[attribute value] removed
+                        removed-datom (seek database :avet attribute value)
+                        citation (seek database :avet :seon.issue.citation/file (:e removed-datom))]
+                    (:e citation)))
+        removed (into (vec removed) (sort uncited))
         desired (vec rows)]
     (loop [pending desired changes []]
       (if-let [row (first pending)]
@@ -3393,15 +3413,16 @@
                        [:enum :seon.fn/file :seon.lint/file]]
                   :seon.fn.file/identities]}
   [database paths file-attribute]
-  (let [identities (db/q '[:find ?attribute ?value
-                          :in $ [?path ...] ?file-attribute [?attribute ...]
-                          :where [?file :seon.fn.file/relative-path ?path]
-                                 [?entity ?file-attribute ?file]
-                                 [?entity ?attribute ?value]]
-                        database paths file-attribute program/identity-attributes)]
-    (when (:seon.error/at identities)
-      (throw (ex-info (:seon.error/message identities) identities)))
-    (vec identities)))
+  ;; Index seeks, proportional to the named files' declarations: the Datalog
+  ;; join on a variable file attribute took 990 ms for one 55-declaration file
+  ;; (these seeks: 15 ms, the same set).
+  (into [] (distinct)
+        (for [path paths
+              file (seek database :avet :seon.fn.file/relative-path path)
+              entity (seek database :avet file-attribute (:e file))
+              attribute program/identity-attributes
+              stored (seek database :eavt (:e entity) attribute)]
+          [attribute (:v stored)])))
 
 (defn file-rows
   "Read declarations or findings through file refs for only the named paths."
