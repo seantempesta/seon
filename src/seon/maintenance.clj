@@ -49,34 +49,28 @@
       (empty? projections) result
 
       (< 1 (count projections))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.maintenance/projection
-        :seon.error/operation 'seon.maintenance/result-entity
-        :seon.error/message "Maintenance requires one matching persistence producer."
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.maintenance/projection 'seon.maintenance/result-entity
+       {:seon.error/message "Maintenance requires one matching persistence producer."
         :seon.error/offending projections
         :seon.maintenance/matching-producer-count (count projections)
-        :seon.error/expected "one matching persistence producer"}
+        :seon.error/expected "one matching persistence producer"})
 
       :else
       (let [[schema-key projection] (first projections)]
         (try
           (if-let [producer (requiring-resolve projection)]
             (producer result)
-            {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.maintenance/projection
-        :seon.error/operation 'seon.maintenance/result-entity
-        :seon.error/message "Maintenance requires a resolving persistence producer."
+            (seon.error.refusal/diagnostic (java.util.Date.) :seon.maintenance/projection 'seon.maintenance/result-entity
+             {:seon.error/message "Maintenance requires a resolving persistence producer."
         :seon.error/offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection}
         :seon.maintenance/unresolved-producer projection
-        :seon.error/expected "a resolving persistence producer"})
+        :seon.error/expected "a resolving persistence producer"}))
           (catch Throwable cause
-            {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.maintenance/projection
-        :seon.error/operation 'seon.maintenance/result-entity
-        :seon.error/message "Maintenance requires a successful persistence projection."
+            (seon.error.refusal/diagnostic (java.util.Date.) :seon.maintenance/projection 'seon.maintenance/result-entity
+             {:seon.error/message "Maintenance requires a successful persistence projection."
         :seon.error/offending {:seon.schema/key schema-key :seon.maintenance/result-projection projection :seon.error/exception cause}
         :seon.maintenance/failed-producer projection
-        :seon.error/expected "a successful persistence projection"}))))))
+        :seon.error/expected "a successful persistence projection"})))))))
 
 (defn project-collect-result
   "Project one public collection value into queryable component facts."
@@ -249,14 +243,12 @@
               :seon.maintenance.receipt/id receipt-id
               :seon.maintenance.receipt/completed-at completed-at}
              (db/pull database collection-facts collection))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.maintenance/collection
-        :seon.error/operation 'seon.maintenance/last-collection-in
-        :seon.maintenance/uncollected-root managed-root
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.maintenance/collection 'seon.maintenance/last-collection-in
+       {:seon.maintenance/uncollected-root managed-root
         :seon.error/offending managed-root
         :seon.error/message "No completed maintenance receipt records a collection of this root."
         :seon.error/member :seon.operator/managed-root
-        :seon.error/expected :seon.operator.collect/managed-root})))
+        :seon.error/expected :seon.operator.collect/managed-root}))))
 
 (defn last-collection
   "When `managed-root` was last collected, and what that collection reclaimed.
@@ -721,13 +713,11 @@
            (ex-message failure))
       (str "Collection did not preserve and verify every recorded root."
            (unverified-root-clause result)))
-    {:seon.error/at (java.util.Date.)
-         :seon.error/layer ::operation
-         :seon.error/operation 'seon.maintenance/incomplete-collection!
-         :seon.error/message "Collection must preserve and verify every recorded root."
+    (seon.error.refusal/diagnostic (java.util.Date.) ::operation 'seon.maintenance/incomplete-collection!
+     {:seon.error/message "Collection must preserve and verify every recorded root."
          :seon.error/offending result
          :seon.operator.collect/result result
-         :seon.error/expected :seon.operator.collect/roots-verified?}
+         :seon.error/expected :seon.operator.collect/roots-verified?})
     failure)))
 
 (defn- inventory-facts
@@ -947,12 +937,10 @@
                        :seon.maintenance/collection-disabled-error]]}
   [{root :seon.operator/managed-root :as request}]
   (if-not (true? (:seon.config.maintenance/collect? request))
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer ::collection
-     :seon.error/operation 'seon.maintenance/collect!
-     :seon.error/message "Whole-store collection is disabled; it runs only when :seon.config.maintenance/collect? is true."
+    (seon.error.refusal/diagnostic (java.util.Date.) ::collection 'seon.maintenance/collect!
+     {:seon.error/message "Whole-store collection is disabled; it runs only when :seon.config.maintenance/collect? is true."
      :seon.error/member :seon.config.maintenance/collect?
-     :seon.maintenance/disabled-collection-flag :seon.config.maintenance/collect?}
+     :seon.maintenance/disabled-collection-flag :seon.config.maintenance/collect?})
     (attempt
      #(let [_ (refuse-misspelled-options! request)
             root (.getCanonicalPath (io/file root))
