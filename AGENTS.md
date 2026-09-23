@@ -246,8 +246,11 @@ reacquired from its branch head at turn start and cached by commit id.
 (`sci.eval/fork-cluster-ctx`), run under custody, unlink the branch
 (`registry/retire-branch!`) and let the retention sweep collect it. The runner calls
 the same functions an agent's evaluation calls; a test-side copy of any of them is a
-defect. Only the platform tier — declared destructive owners and host-bound changes —
-keeps a fresh JVM.
+defect. Only the platform tier — boot and everything that happens before the system is
+running, declared destructive owners and host-bound changes — keeps a fresh JVM
+(owner, 2026-09-23: "EVERYTHING ELSE NEEDS TO GO THROUGH THE MAIN JVM"). No lane creates
+a scratch root, probe JVM or fork-test JVM for anything else; a lane whose edit cannot
+reach the main JVM's hot path stops and reports the gap.
 
 **Merge carries program rows only, git-like, through the gate.** Non-conflicting rows
 land on an intermediate branch; conflicts stay there for the agent to fix, so the
