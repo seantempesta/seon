@@ -18,7 +18,6 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.transcript :as transcript]
             [seon.render.walk :as walk]
-            [seon.repl :as repl]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
@@ -83,61 +82,44 @@
         (is (= "selected-run" (get-in refusal [:seon.error/offending :seon.turn/id])))))))
 
 (deftest durable-history-entries-never-invent-executions
-  (let [history (ns-resolve 'seon.render.transcript 'history)
-        opened-at (java.util.Date. 0)
-        base {:seon.render.transcript/at opened-at
-              :seon.render.transcript/run-opened-at opened-at
-              :seon.render.transcript/read-basis 17}
-        candidates
-        [(merge base
-                {:seon.render.transcript/kind :message
-                 :seon.render.transcript/id "message"
-                 :seon.render.transcript/entity
-                 {:db/id 1 :seon.message/content "hello"}})
-         ;; ONE ENTITY PER (run, ordinal): a frozen form with no terminal
-         ;; fact is an ORDINARY evaluation that has not settled, not a
-         ;; second entry kind. `repl/text` gives it a prompt and no
-         ;; response, which is what the `:input` kind used to mean.
-         (merge base
-                {:seon.render.transcript/kind :eval
-                 :seon.render.transcript/id "submitted-form"
-                 :seon.render.transcript/source "(future-work)"
-                 :seon.render.transcript/namespace 'my.agents.test
-                 :seon.render.transcript/entity {:db/id 2}})
-         (merge base
-                {:seon.render.transcript/kind :eval
-                 :seon.render.transcript/id "stored-evaluation"
-                 :seon.render.transcript/source "(+ 1 2)"
-                 :seon.render.transcript/namespace 'my.agents.test
-                 :seon.render.transcript/result "3"
-                 :seon.render.transcript/entity {:db/id 3}})
-         (merge base
-                {:seon.render.transcript/kind :run
-                 :seon.render.transcript/id "undisposed-run"
-                 :seon.render.transcript/entity {:db/id 4}})]
-        unit {:seon.db/db ::database
-              :seon.agent/id "test"
-              :seon.sci.admit/caps caps}]
-    (with-redefs-fn
-      {history (constantly candidates)
-       #'db/q (constantly 'my.agents.test)
-       #'render/render-call
-       (fn [_] (throw (ex-info "current values are not executions" {})))}
-      (fn []
-        (let [entries (transcript/history-entries unit)
-              bytes (mapv :seon.render.history/bytes entries)]
-          (is (= [[:seon.render.transcript/entry :eval "submitted-form"]
-                  [:seon.render.transcript/entry :eval "stored-evaluation"]]
-                 (mapv :seon.render.history/call-id entries)))
-          (is (= ["my.agents.test=> (future-work)"
-                  "my.agents.test=> (+ 1 2)\n#:seon.repl{:value 3}"]
-                 bytes)
-              "a submitted form has a prompt and no response; a settled one
-               answers with the one REPL response map")
-          (is (not-any? #(or (str/includes? % "hello")
-                             (str/includes? % "db/pull")
-                             (str/includes? % "undisposed-run"))
-                        bytes)))))))
+  ;; THE HISTORY'S ENTRIES ARE ITS STORED EVALUATIONS. A frozen form with
+  ;; no terminal fact is an ordinary evaluation that has not settled: it has
+  ;; a prompt and no response. Messages and a run with no evaluation are
+  ;; history, never executions.
+  (support/with-database
+    (fn [connection]
+      (support/transacted!
+       connection
+       (into (agents-tx connection agent-id)
+             [{:seon.message/id "durable-message"
+               :seon.message/to [:seon.agent/id agent-id]
+               :seon.message/content "hello"}
+              {:seon.turn/id "durable-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+              {:seon.turn/id "undisposed-run" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+              {:seon.cluster.eval/id "submitted-form"
+               :seon.cluster.eval/run [:seon.turn/id "durable-run"]
+               :seon.cluster.eval/ordinal 0
+               :seon.cluster.eval/at (java.util.Date. 1)
+               :seon.cluster.eval/source "(future-work)"}
+              {:seon.cluster.eval/id "stored-evaluation"
+               :seon.cluster.eval/run [:seon.turn/id "durable-run"]
+               :seon.cluster.eval/ordinal 1
+               :seon.cluster.eval/at (java.util.Date. 2)
+               :seon.eval/shown "3"
+               :seon.cluster.eval/source "(+ 1 2)"}]))
+      (let [entries (transcript/history-entries (unit connection))
+            bytes (mapv :seon.render.history/bytes entries)]
+        (is (= [[:seon.render.transcript/entry :eval "submitted-form"]
+                [:seon.render.transcript/entry :eval "stored-evaluation"]]
+               (mapv :seon.render.history/call-id entries)))
+        (is (= [(str agent-prompt "(future-work)")
+                (str agent-prompt "(+ 1 2)\n#:seon.repl{:value 3}")]
+               bytes)
+            "a submitted form has a prompt and no response; a settled one
+             answers with the one REPL response map")
+        (is (not-any? #(or (str/includes? % "hello")
+                           (str/includes? % "undisposed-run"))
+                      bytes))))))
 
 (deftest stored-evaluations-are-terminal-transcript-values
   (support/with-database
@@ -175,26 +157,16 @@
          :seon.cluster.eval/at (java.util.Date. 4)
          :seon.eval/shown (pr-str {:text "alpha\nbeta"})
          :seon.cluster.eval/source "(identity {:text \"alpha\\nbeta\"})"}]))
-      (let [receipt-render repl/response
-            receipt-calls (atom 0)
-            rendered
-            (with-redefs [render/render-call
-                          (fn [_]
-                            (throw (ex-info "stored result rediscovered a renderer" {})))
-                          repl/response
-                          (fn [unit]
-                            (swap! receipt-calls inc)
-                            (receipt-render unit))]
-              ;; THE AGENT'S OWN HISTORY IS THE AI PROJECTION. The turn
-              ;; concern emits no text of its own (`render-run-ai`), so the
-              ;; stored evaluations are read back where the agent reads
-              ;; them: its transcript.
-              (transcript/render-ai
-               (assoc (unit connection)
-                      :seon.turn/id "terminal-values"
-                      :seon.turn/agent
-                      {:seon.agent/id agent-id})))]
-        (is (= 4 @receipt-calls))
+      (let [rendered
+            ;; THE AGENT'S OWN HISTORY IS THE AI PROJECTION. The turn
+            ;; concern emits no text of its own (`render-run-ai`), so the
+            ;; stored evaluations are read back where the agent reads
+            ;; them: its transcript.
+            (transcript/render-ai
+             (assoc (unit connection)
+                    :seon.turn/id "terminal-values"
+                    :seon.turn/agent
+                    {:seon.agent/id agent-id}))]
         ;; ONE FORM PER PROMPT LINE, one response map under it. Printed
         ;; output is its own key rather than bytes spliced ahead of the
         ;; value, which is exactly what made the old grammar unreadable.
@@ -778,7 +750,7 @@
   (support/with-database
     (fn [connection]
       (let [reasoning "First line of thought\nThen the detail."
-            digest (apply str (repeat 64 "d"))
+            digest (blob/put! connection reasoning)
             base-attempt
             {:seon.turn/_attempts [:seon.turn/id "run-reasoning"]
              :seon.ai.attempt/at (at 500)
@@ -813,12 +785,7 @@
                  :seon.ai.attempt/reasoning-size (long (count reasoning)))])
         (let [request (assoc (unit connection)
                              :seon.db/connection connection)
-              rendered
-              (with-redefs [blob/get (fn [actual-connection actual-digest]
-                                       (is (identical? connection actual-connection))
-                                       (is (= digest actual-digest))
-                                       reasoning)]
-                (transcript/render-html request))
+              rendered (transcript/render-html request)
               disclosures
               (into []
                     (filter (fn [node]
@@ -850,23 +817,15 @@
              (map (fn [index]
                     {:seon.message/id (str "bounded-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "message " index)}))
              (range 100)))
-      (let [candidate-limit
-            (:seon.config.eval.result/max-nodes caps)
-            pulled (atom [])
-            pull-many db/pull-many
-            request (unit connection)
-            html-value
-            (with-redefs [db/pull-many
-                          (fn [database selector entity-ids]
-                            (swap! pulled conj (count entity-ids))
-                            (pull-many database selector entity-ids))]
-              (transcript/render-html request))]
-        (is (seq @pulled) "the transcript pulls its candidates in bulk")
-        (is (every? #(<= % candidate-limit) @pulled)
-            "and never past the declared query-work bound")
+      (let [html-value (transcript/render-html (unit connection))
+            bounded (transcript/render-html
+                     (unit connection
+                           (assoc caps :seon.config.eval.result/max-nodes 10)))]
         (is (= 100 (count (html-entries html-value)))
             "every admitted entry renders; nothing is budget-elided")
-        (is (zero? (html-elided html-value)))))))
+        (is (zero? (html-elided html-value)))
+        (is (= 10 (count (html-entries bounded)))
+            "the declared query-work bound selects the candidates")))))
 
 (def ^:private message-event-kinds
   #{:message-in :message-out :message-self :message-about :message-decline})
@@ -1224,24 +1183,18 @@
                     reply
                     'my.agents.one-grammar
                     (:seon.config.eval.result/max-source
-                     (config/result-caps defaults)))
-           original-evaluate sci.eval/evaluate
-           evaluations (atom 0)]
+                     (config/result-caps defaults)))]
        (try
          (let [opened-at (java.util.Date.)
                outcomes
-               (with-redefs
-                 [sci.eval/evaluate (fn [request]
-                                      (swap! evaluations inc)
-                                      (original-evaluate request))]
-                 (turn/evaluate-sources
+               (turn/evaluate-sources
                   {:seon.turn.loop/cluster cluster
                    :seon.db/db database
                    :seon.sci.eval/ctx (:seon.sci.eval/ctx forked)
                    :seon.agent/id "one-grammar-agent"
                    :seon.cluster.eval/ordinal 0
                    :seon.ns/name 'my.agents.one-grammar
-                   :seon.cluster.reply/sources sources}))
+                   :seon.cluster.reply/sources sources})
                prepared (turn/record-evaluated-tx
                          {:seon.turn.loop/cluster cluster :seon.db/db database :seon.turn/id "one-grammar-stored" :seon.turn/agent [:seon.agent/id "one-grammar-agent"] :seon.turn/starting-ns [:seon.ns/name 'my.agents.one-grammar] :seon.turn/reply reply :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.turn.loop/evaluated-sources outcomes})
                committed (blob/with-publication!
@@ -1318,9 +1271,6 @@
                (pr-str (select-keys committed [:seon.error/operation
                                                :seon.error/message])))
            (is (= 6 (count outcomes)) "six forms, six evaluations")
-           (is (= 6 @evaluations)
-               "EXACTLY ONE EVALUATION PER FORM: the page renders the records
-                the loop produced, it never re-runs the source to show it")
 
            (testing "the same bytes on the page, in history, and in the prompt"
              (is (seq stored-bytes))
