@@ -13,8 +13,10 @@
             [clojure.datafy :as datafy]
             [clojure.test.check.generators :as gen]
             [seon.await :as await]
+            [seon.cluster.process :as process]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
@@ -184,6 +186,30 @@
 
 (schema.edn/load! {})
 
+(defn- stop-failed!
+  "Record a stop transition's throw as one core fault, loudly in both modes.
+  Flow's loop would absorb it and park forever on a control channel `stop`
+  already cleared (`core.async/.../flow/impl.clj:181,317-320`); returning the
+  state instead lets the loop exit, so the graph's join completes. A panic
+  (`:panic`, or the fault not stored) is this seam's declared case: the graph
+  is stopping anyway, so it is printed whole and the loop still exits."
+  {:malli/schema [:=> [:cat ::step-var :map :seon.error/throwable] :nil]}
+  [step-var args failure]
+  (try
+    (fault/fault! (env/of args) failure
+                  {:seon.error/layer :flow
+                   :seon.error/operation (symbol step-var)
+                   :seon.db.process/id (process/id (process/current-identity))})
+    (catch Throwable panic
+      (binding [*out* *err*]
+        (prn {:seon.error/message (ex-message panic)
+              :seon.error/operation (symbol step-var)
+              :seon.fault/recorded (:seon.fault/recorded (ex-data panic))
+              :seon.error/data {:panic (Throwable->map panic)
+                                :failure (Throwable->map failure)}})
+        (flush))))
+  nil)
+
 (defn var-process
   "Build one Flow proc launcher from a step VAR and a pinned workload.
   THE construction seam for every proc in the system (F0(a), the F1
@@ -223,12 +249,22 @@
    (env/refuse-absent-environment! args ::var-process)
    (let [launcher
          (flow/process
-          step-var
+          ;; every arity dispatches through the Var (hot reload); only a
+          ;; throwing stop transition is caught, so the loop still exits
+          (fn
+            ([] (step-var))
+            ([init-args] (step-var init-args))
+            ([state transition]
+             (if (= ::flow/stop transition)
+               (try (step-var state transition)
+                    (catch Throwable failure (stop-failed! step-var args failure) state))
+               (step-var state transition)))
+            ([state input message] (step-var state input message)))
           (assoc options :workload workload))]
      (reify
        core.protocols/Datafiable
        (datafy [_]
-         (datafy/datafy launcher))
+         (assoc (datafy/datafy launcher) :step (datafy/datafy step-var)))
 
        flow.spi/ProcLauncher
        (describe [_]
@@ -637,7 +673,7 @@
 
 (defn- work-launcher-proc
   [request]
-  (var-process #'work-launcher-step :io request))
+  (var-process (or (::launcher-step request) #'work-launcher-step) :io request))
 
 (def flow-workload-attributes
   "Flat config-singleton attributes consumed by the work launcher."
@@ -668,7 +704,7 @@
 
 (defn- work-launcher-graph-definition
   [{::keys [parallelism active-work queue-depth compute-executor
-            task-executor io-parallelism io-queue-depth io-submissions]
+            task-executor io-parallelism io-queue-depth io-submissions launcher-step]
     :as request}]
   (let [environment (env/of request)
         admission-buffer
@@ -683,13 +719,14 @@
       {:proc
        (work-launcher-proc
         (env/carry
-         {::parallelism parallelism
-          ::active-work active-work
-          ::admission-buffer admission-buffer
-          ::task-executor task-executor
-          ::io-parallelism io-parallelism
-          ::io-submissions io-submissions
-          ::io-admission-buffer io-admission-buffer}
+         (cond-> {::parallelism parallelism
+                  ::active-work active-work
+                  ::admission-buffer admission-buffer
+                  ::task-executor task-executor
+                  ::io-parallelism io-parallelism
+                  ::io-submissions io-submissions
+                  ::io-admission-buffer io-admission-buffer}
+           launcher-step (assoc ::launcher-step launcher-step))
          environment))
        :chan-opts
        {::compute-submission {:buf-or-n admission-buffer}
@@ -709,7 +746,7 @@
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher-request]
     :seon.flow/work-launcher]}
-  [{::keys [configuration] :as request}]
+  [{::keys [configuration launcher-step] :as request}]
   (let [environment (env/refuse-absent-environment!
                      request ::start-work-launcher!)
         configuration (required-launcher-configuration configuration)
@@ -740,14 +777,15 @@
          {::graph-definition
           (work-launcher-graph-definition
            (env/carry
-            {::parallelism parallelism
-             ::active-work active-work
-             ::queue-depth queue-depth
-             ::io-queue-depth io-queue-depth
-             ::io-parallelism io-parallelism
-             ::io-submissions io-submissions
-             ::compute-executor (:compute root-executors)
-             ::task-executor task-executor}
+            (cond-> {::parallelism parallelism
+                     ::active-work active-work
+                     ::queue-depth queue-depth
+                     ::io-queue-depth io-queue-depth
+                     ::io-parallelism io-parallelism
+                     ::io-submissions io-submissions
+                     ::compute-executor (:compute root-executors)
+                     ::task-executor task-executor}
+              launcher-step (assoc ::launcher-step launcher-step))
             environment))})]
     {::graph graph
      ::started started
@@ -1131,7 +1169,7 @@
   {:malli/schema
    [:=> [:catn [::request ::fault-committer-proc-request]] ::launcher]}
   [request]
-  (var-process #'fault-committer-step :io request))
+  (var-process (or (::committer-step request) #'fault-committer-step) :io request))
 
 (defn- monitor-graph
   [graph report-channel error-channel]
@@ -1196,14 +1234,14 @@
   "Drain the committer graph's own error channel on that graph's executor, so
   the graph's join also joins this reader: it ends when `flow/stop` closes
   the channel."
-  [^Executor executor error-channel]
+  [^Executor executor error-channel report-loss]
   (.execute
    executor
    ^Runnable
    (fn []
      (loop []
        (when-some [escaped (async/<!! error-channel)]
-         (report-committer-loss! escaped)
+         (report-loss escaped)
          (recur))))))
 
 (defn- fault-graph-definition
@@ -1225,7 +1263,8 @@
   {:malli/schema
    [:=> [:catn [::request ::error-fanout-request]] ::error-fanout]}
   [{::keys [graph started fault-buffer-capacity monitor-buffer-capacity
-            read-core-error-mode commit-fault! commit-drop! panic! projection]
+            read-core-error-mode commit-fault! commit-drop! panic! projection
+            committer-step report-loss]
     :as request}]
   (let [environment (env/refuse-absent-environment!
                      request ::start-error-fanout!)
@@ -1247,9 +1286,6 @@
         fault-channel
         (async/chan
          (counted-dropping-buffer fault-buffer-capacity))
-        ;; closed once the committer graph is joined; kept for branches whose
-        ;; schema still requires the member (accretion, retired later)
-        joined (async/promise-chan)
         {fault-graph ::graph
          executor ::executor}
         (start-graph!
@@ -1257,18 +1293,19 @@
           ::graph-definition
           (fault-graph-definition
            (env/carry
-            {::fault-channel fault-channel
-             ::completion joined
-             ::projection projection
-             ::read-core-error-mode read-core-error-mode
-             ::commit-fault! commit-fault!
-             ::commit-drop! commit-drop!
-             ::panic! panic!}
+            (cond-> {::fault-channel fault-channel
+                     ::projection projection
+                     ::read-core-error-mode read-core-error-mode
+                     ::commit-fault! commit-fault!
+                     ::commit-drop! commit-drop!
+                     ::panic! panic!}
+              committer-step (assoc ::committer-step committer-step))
             environment))
           ::joins
           {::fault-committer-error-join
            (fn [{::keys [started executor]}]
-             (join-fault-committer-errors! executor (:error-chan started)))}})
+             (join-fault-committer-errors! executor (:error-chan started)
+                                           (or report-loss #'report-committer-loss!)))}})
         monitor-view
         (monitor-graph
          graph monitor-report-channel monitor-error-channel)]
@@ -1285,8 +1322,6 @@
      ::monitor-report-channel monitor-report-channel
      ::monitor-error-channel monitor-error-channel
      ::fault-channel fault-channel
-     ::completion joined
-     ::committer-error-completion joined
      ::executor executor}))
 
 (defn join-error-fanout!
@@ -1326,7 +1361,7 @@
     [:or :nil :seon.await/timeout-error]]}
   [{::keys [fault-graph executor report-mult error-mult
             application-report-channel monitor-report-channel
-            monitor-error-channel fault-channel completion]}
+            monitor-error-channel fault-channel]}
    bound]
   (flow/stop fault-graph)
   (let [exited (join-graph!
@@ -1342,5 +1377,4 @@
     (doseq [channel [application-report-channel monitor-report-channel
                      monitor-error-channel]]
       (async/close! channel))
-    (when (and completion (nil? exited)) (async/close! completion))
     exited))

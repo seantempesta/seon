@@ -905,9 +905,7 @@
                (.acquireUninterruptibly release-provider)
                {:seon.error/message "The prelude stand-in released."})]
             (let [entry (arm-one! connection ctx routing
-                                         "provider-backstop" agent-id)
-                  fault-channel
-                  (:seon.agent/fault-channel @routing)]
+                                         "provider-backstop" agent-id)]
               (await-idle! (:seon.flow/started entry))
               (outside-trigger! connection agent-id
                                 "provider-backstop-message" "block")
@@ -925,15 +923,17 @@
                         ::unexpected-orderly-stop
                         (catch clojure.lang.ExceptionInfo failure
                           failure)))
-                    failure
+                    thrown
                     (test-support/await-event!
                      stopped
                      ::declared-turn-completion-backstop)
-                    fault
-                    (test-support/await-event!
-                     fault-channel
-                     ::provider-stop-core-fault
-                     #(= run-id (:seon.turn/id %)))]
+                    ;; one stored, delivered core fault (`seon.fault/fault!`):
+                    ;; under `:panic` the panic carries the receipt and its
+                    ;; cause is the declared failure
+                    receipt (:seon.fault/recorded (ex-data thrown))
+                    failure (if receipt (ex-cause thrown) thrown)]
+                (is (true? (:seon.fault/committed? receipt)) (pr-str (ex-data thrown)))
+                (is (= `agent/disarm! (:seon.error/operation receipt)))
                 (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
                 (is (= turn-completion-backstop-ms
                        (:seon.config.agent/turn-completion-backstop-ms
@@ -942,9 +942,6 @@
                        (:seon.agent/id (ex-data failure))))
                 (is (= run-id
                        (:seon.turn/id (ex-data failure))))
-                (is (= failure (::flow/ex fault)))
-                (is (= agent-id (:seon.agent/id fault)))
-                (is (= run-id (:seon.turn/id fault)))
                 (is (some? (agent/armed routing agent-id))
                     "a fired backstop fails closed and leaves stop retryable")
                 (is (= :seon.agent/graph-exited

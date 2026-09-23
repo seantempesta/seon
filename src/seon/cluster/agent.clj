@@ -80,6 +80,7 @@
             [seon.env :as env]
             [seon.issue.opening :as issue.opening]
             [seon.error :as error]
+            [seon.fault :as fault]
             [seon.repl :as repl]
             [seon.schema :as schema]
             [seon.program :as program]
@@ -1031,10 +1032,7 @@
                    :seon.cluster.wake/channel wake-ch
                    :seon.schedule/channel schedule-channel
                    :seon.turn.loop/completion completion
-                   :seon.agent/turn-backstop-state turn-backstop-state
-                   ;; closed at the join; kept for branches whose schema still
-                   ;; requires the member (accretion, retired later)
-                   :seon.agent/turn-stopped (async/promise-chan)}]
+                   :seon.agent/turn-backstop-state turn-backstop-state}]
         (swap! routing
                (fn [current]
                  (-> current
@@ -1077,31 +1075,23 @@
     run-id))
 
 (defn- turn-completion-failure!
-  "Publish and throw the loud failure for a graph that did not exit in bound."
-  {:malli/schema [:=> [:cat :seon.agent/routing :map [:maybe :seon.turn/id]
-                       [:int {:min 1}]]
-                  :nil]}
-  [routing entry run-id timeout-ms]
+  "Record (`seon.fault/fault!`) and throw the failure for a graph that did not exit in bound."
+  {:malli/schema [:=> [:cat :map [:maybe :seon.turn/id] [:int {:min 1}]] :nil]}
+  [entry run-id timeout-ms]
   (let [agent-id (:seon.agent/id entry)
         diagnostic
         (turn/turn-completion-error
          agent-id run-id timeout-ms :seon.agent/disarm :seon.agent/turn-completed
          [:seon.agent/graph-exited])
         failure (ex-info (:seon.error/message diagnostic) diagnostic)
-        fault
-        (cond->
-         {::flow/pid :seon.agent/turn
-          ::flow/status :stopping
-          ::flow/op :seon.agent/turn-completion-backstop
-          ::flow/ex failure
-          :seon.agent/id agent-id}
-          run-id (assoc :seon.turn/id run-id))]
-    (async/offer! (:seon.agent/fault-channel @routing) fault)
-    (binding [*out* *err*]
-      (println "SEON CORE FAULT (agent stop backstop):"
-               (ex-message failure)
-               (pr-str (ex-data failure)))
-      (flush))
+        handle (:seon.turn.loop/cluster entry)]
+    ;; one stored, delivered core fault; under `:panic` it throws the panic
+    ;; (cause: `failure`), under `:record` the refusal still throws
+    (fault/fault! (env/of handle) failure
+                  {:seon.error/layer :seon.agent/agent-graph
+                   :seon.error/operation `disarm!
+                   :seon.db.process/id (:seon.db.process/id handle)
+                   :seon.agent/id agent-id})
     (throw failure)))
 
 (defn- cancel-turn-backstop!
@@ -1195,7 +1185,7 @@
               :seon.await/diagnostic {:seon.error/layer :seon.agent/agent-graph
                                       :seon.error/operation `disarm!
                                       :seon.error/expected :seon.agent/graph-exited}}))
-        (turn-completion-failure! routing entry (open-turn! connection agent-id) timeout-ms)))
+        (turn-completion-failure! entry (open-turn! connection agent-id) timeout-ms)))
     (cancel-turn-backstop! entry)
     (record-interruption! entry)
     (swap! routing
@@ -1205,8 +1195,7 @@
                  (update :seon.agent/channels dissoc
                          (:seon.agent/eid entry)))))
     (async/close! (:seon.cluster.wake/channel entry))
-    (async/close! (:seon.turn.loop/completion entry))
-    (some-> (:seon.agent/turn-stopped entry) async/close!)))
+    (async/close! (:seon.turn.loop/completion entry))))
   nil)
 
 ;;; ---------------------------------------------------------------------------

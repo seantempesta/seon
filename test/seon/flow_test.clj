@@ -164,6 +164,46 @@
                                 :seon.await/diagnostic {:seon.error/layer :flow
                                                         :seon.error/operation ::idle-join}})))))
 
+;;; §5 gate 2: a stop transition that throws. Flow alone would park the loop
+;;; forever (impl.clj:317-320); `var-process` records the throw and returns
+;;; the state, so the loop exits and the join completes.
+(defn- throwing-stop-step
+  ([] {:ins {} :outs {} :workload :io})
+  ([args] args)
+  ([state transition]
+   (when (= ::flow/stop transition)
+     (throw (ex-info "gate-2 stop transition throws" {::gate 2})))
+   state)
+  ([state _input _message] [state nil]))
+
+(deftest a-throwing-stop-transition-is-one-stored-fault-and-a-completed-join
+  (test-support/with-database
+    (fn [connection]
+      (let [environment (test-support/environment "seon.flow-test" connection)
+            {::sut/keys [graph executor]}
+            (sut/start-graph!
+             {::sut/graph-definition
+              {:procs {::throwing-stop
+                       {:proc (sut/var-process #'throwing-stop-step :io
+                                               {:seon.env/environment environment})}}
+               :conns []}})
+            stderr (java.io.StringWriter.)
+            exited (binding [*err* stderr]
+                     (flow/stop graph)
+                     (sut/join-graph! {::sut/executor executor
+                                       :seon.await/bound (join-bound 2000)
+                                       :seon.await/diagnostic
+                                       {:seon.error/layer :flow
+                                        :seon.error/operation ::throwing-stop}}))
+            stored (db/q '[:find [?message ...]
+                           :where [?o :seon.error.occurrence/message ?message]]
+                         @connection)]
+        (is (nil? exited) (pr-str exited))
+        (is (.isTerminated ^java.util.concurrent.ExecutorService executor)
+            "no proc thread of the graph survives the throw")
+        (is (= 1 (count (filter #(str/includes? % "gate-2 stop transition throws") stored)))
+            (pr-str stored))))))
+
 (defn- install-test-work-launcher!
   [request]
   (let [launcher
@@ -672,17 +712,37 @@
         (.countDown release)
         (stop-test-work-launcher!)))))
 
+(def ^:private launcher-probe
+  "The latches the probed launcher step signals; nil passes through."
+  (atom nil))
+
+(defn- probed-launcher-step
+  ;; the production step, handed as the launcher's `::launcher-step`
+  ;; argument: default's own Var is never redefined
+  ([] (#'sut/work-launcher-step))
+  ([args] (#'sut/work-launcher-step args))
+  ([state transition]
+   (let [{:keys [resume-transition release-resume stop-transition]} @launcher-probe]
+     (when (and resume-transition (= ::flow/resume transition))
+       (.countDown ^CountDownLatch resume-transition)
+       (test-support/await-event! release-resume ::release-work-launcher-resume-transition))
+     (let [next-state (#'sut/work-launcher-step state transition)]
+       (when (and stop-transition (= ::flow/stop transition))
+         (.countDown ^CountDownLatch stop-transition))
+       next-state)))
+  ([state input-id message] (#'sut/work-launcher-step state input-id message)))
+
 (deftest launcher-stop-precedes-a-flood-of-ready-submissions
   (let [queue-depth 256
+        _ (reset! launcher-probe nil)
         launcher
         (install-test-work-launcher!
-         {::sut/configuration
+         {::sut/launcher-step #'probed-launcher-step
+          ::sut/configuration
           (assoc test-launcher-configuration
                  :seon.config.flow.compute/queue-depth queue-depth
                  :seon.config.flow.compute/concurrency 1)})
         graph (::sut/graph launcher)
-        step-var (ns-resolve 'seon.flow 'work-launcher-step)
-        original-step @step-var
         resume-transition (CountDownLatch. 1)
         release-resume (CountDownLatch. 1)
         stop-transition (CountDownLatch. 1)
@@ -708,26 +768,9 @@
              queued)
             test-support/event-backstop-seconds
             TimeUnit/SECONDS)
-      (alter-var-root
-       step-var
-       (constantly
-        (fn
-          ([]
-           (original-step))
-          ([args]
-           (original-step args))
-          ([state transition]
-           (when (= ::flow/resume transition)
-             (.countDown resume-transition)
-             (test-support/await-event!
-              release-resume
-              ::release-work-launcher-resume-transition))
-           (let [next-state (original-step state transition)]
-             (when (= ::flow/stop transition)
-               (.countDown stop-transition))
-             next-state))
-          ([state input-id message]
-           (original-step state input-id message)))))
+      (reset! launcher-probe {:resume-transition resume-transition
+                              :release-resume release-resume
+                              :stop-transition stop-transition})
       (flow/resume graph)
       (test-support/await-event!
        resume-transition
@@ -750,7 +793,7 @@
             "every completed submission delivers its result"))
       (finally
         (.countDown release-resume)
-        (alter-var-root step-var (constantly original-step))
+        (reset! launcher-probe nil)
         (stop-test-work-launcher!)))))
 
 (deftest starting-a-sibling-launcher-does-not-interrupt-accepted-work
@@ -844,8 +887,12 @@
             (stop-test-work-launcher!)))))))
 
 (defn- start-test-fanout!
-  [connection graph started fault-buffer-capacity monitor-buffer-capacity]
+  ([connection graph started fault-buffer-capacity monitor-buffer-capacity]
+   (start-test-fanout! connection graph started fault-buffer-capacity
+                       monitor-buffer-capacity {}))
+  ([connection graph started fault-buffer-capacity monitor-buffer-capacity overrides]
   (sut/start-error-fanout!
+   (merge
    {:seon.env/environment (test-support/environment "fault-test" connection)
     ::sut/graph graph
     ::sut/started started
@@ -859,7 +906,25 @@
       (throw
        (ex-info
         "The record-mode testbed unexpectedly selected panic."
-        {::fault fault})))}))
+        {::fault fault})))}
+    overrides))))
+
+(def ^:private committer-losses
+  "The channel the probed loss reporter offers to; nil drops."
+  (atom nil))
+
+(defn- failing-committer-step
+  ;; handed as `::committer-step`: every arity but transform is production's
+  ([] (#'sut/fault-committer-step))
+  ([request] (#'sut/fault-committer-step request))
+  ([state transition] (#'sut/fault-committer-step state transition))
+  ([_state _input _fault]
+   (throw (ex-info "committer wrapper failed"
+                   {:seon.test/committer-wrapper-failed true}))))
+
+(defn- probed-loss-report
+  [escaped]
+  (some-> @committer-losses (async/offer! escaped)))
 
 (deftest core-fault-fanout-commits-and-copies-without-competition
   (testing "one throwing step reaches durable facts and the monitor tap"
@@ -1008,31 +1073,21 @@
     (fn [connection]
       (let [{::keys [graph started] :as testbed} (source-testbed)
         losses (async/chan 1)
-        step-var (ns-resolve 'seon.flow 'fault-committer-step)
-        original-step @step-var
-        reporter-var (ns-resolve 'seon.flow 'report-committer-loss!)
-        fanout (start-test-fanout! connection graph started 2 2)]
+        _ (reset! committer-losses losses)
+        fanout (start-test-fanout! connection graph started 2 2
+                                   {::sut/committer-step #'failing-committer-step
+                                    ::sut/report-loss #'probed-loss-report})]
     (try
-      (with-redefs-fn
-        {step-var
-         (fn
-           ([] (original-step))
-           ([request] (original-step request))
-           ([state transition] (original-step state transition))
-           ([_state _input _fault]
-            (throw (ex-info "committer wrapper failed"
-                            {:seon.test/committer-wrapper-failed true}))))
-         reporter-var #(async/offer! losses %)}
-        (fn []
-          (async/>!! (:error-chan started) (synthetic-core-fault 0))
-          (let [escaped
-                (test-support/await-event!
-                 losses ::committer-last-resort
-                 #(= "committer wrapper failed"
-                     (ex-message (::flow/ex %))))]
-            (is (= ::sut/fault-committer (::flow/pid escaped)))
-            (is (= :step (::flow/op escaped))))))
+      (async/>!! (:error-chan started) (synthetic-core-fault 0))
+      (let [escaped
+            (test-support/await-event!
+             losses ::committer-last-resort
+             #(= "committer wrapper failed"
+                 (ex-message (::flow/ex %))))]
+        (is (= ::sut/fault-committer (::flow/pid escaped)))
+        (is (= :step (::flow/op escaped))))
       (finally
+        (reset! committer-losses nil)
         (sut/stop-error-fanout! fanout (join-bound 5000))
         (stop-source-testbed! testbed)
         (async/close! losses)))))))

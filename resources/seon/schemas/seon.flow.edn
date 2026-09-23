@@ -38,7 +38,6 @@
             [:=>
              [:cat :seon.error/recording-observation]
              :seon.flow/callback-result],
-            :completion :seon.flow/channel,
             :compute-timeout-ms [:int {:min 1}],
             :core-fault :map,
             :error-fanout
@@ -49,12 +48,11 @@
              [:seon.flow/monitor-report-channel :seon.flow/channel]
              [:seon.flow/monitor-error-channel :seon.flow/channel]
              [:seon.flow/fault-channel :seon.flow/channel]
-             ;; accretion: optional here, retired once no branch requires them
-             [:seon.flow/completion {:optional true} :seon.flow/channel]
-             [:seon.flow/committer-error-completion {:optional true} :seon.flow/channel]
              [:seon.flow/executor {:optional true} :seon.flow/executor]],
             :error-fanout-request
             [:map
+             [:seon.flow/committer-step {:optional true} :seon.flow/step-var]
+             [:seon.flow/report-loss {:optional true} :seon.flow/step-var]
              [:seon.flow/graph :seon.flow/graph]
              [:seon.flow/started
               [:map
@@ -81,7 +79,6 @@
             :fault-committer-proc-request
             [:map
              [:seon.flow/fault-channel :seon.flow/channel]
-             [:seon.flow/completion {:optional true} :seon.flow/channel]
              [:seon.flow/projection :seon.schema/projection]
              [:seon.flow/read-core-error-mode
               :seon.flow/read-core-error-mode]
@@ -173,7 +170,8 @@
             [:map
              [:seon.flow/configuration
               :seon.flow/launcher-configuration]
-             [:seon.env/environment :seon.env/environment]],
+             [:seon.env/environment :seon.env/environment]
+             [:seon.flow/launcher-step {:optional true} :seon.flow/step-var]],
             :work-result
             [:or
              [:map

@@ -180,7 +180,11 @@
   [environment failure context]
   (when (carried-receipt failure) (throw failure))
   (let [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
-         caps :seon.sci.admit/caps} environment
+         carried-caps :seon.sci.admit/caps} environment
+        ;; an agent's execution environment need not carry admission caps:
+        ;; derive them from the cluster's declared config, as boot does
+        caps (or carried-caps
+                 (config/result-caps (config/effective (db/db connection) cluster-name)))
         agent-id (:seon.agent/id context)
         throwable? (instance? Throwable failure)
         [fact outcome _ occurrence]
