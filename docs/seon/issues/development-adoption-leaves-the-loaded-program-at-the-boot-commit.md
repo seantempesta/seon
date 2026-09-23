@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: blocker
 created: 2026-09-23
 tags: [issue, sci, acquisition, adoption, reload]
@@ -37,3 +37,14 @@ namespace, the cluster context's loaded program names the adopted commit; an
 isolated acquisition immediately afterward installs zero interpreted rows for
 unchanged-since-adoption definitions and refuses nothing; one regression
 adopts, acquires, and asserts both.
+
+## Resolution (2026-09-23)
+
+Fixed by 03bd7cfc9 (M9): every acquisition reads the adopting cluster's live
+record through `::loaded-connection` (`src/seon/sci/eval.clj:862`) and
+`acquired-database?` treats a moved record as stale (`:2514`). Regression:
+`seon.sci.branch-execution-test/an-adoption-record-moves-the-loaded-program-every-acquisition-compares-against`
+(12 assertions, green on default, run a1835d5827a6). Live on default after a real
+adoption: loaded = record = published 6ab35966, 0 interpreted, 0 refused, 52 ms.
+The remaining live sightings are the rows-before-record window in adoption:
+[development-adoption-writes-program-rows-seconds-before-its-record](development-adoption-writes-program-rows-seconds-before-its-record.md).
