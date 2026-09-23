@@ -107,4 +107,5 @@ it armed" (contradicts `cc1f681b5`).
 
 ## Commits
 
-See the final report (ids filled at commit time).
+- `3cbf5a135` digest parity (fn.clj, program.cljc, this note).
+- the commit that adds this line: the backstop regression, not yet run green as a test.

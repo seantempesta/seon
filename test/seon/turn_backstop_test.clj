@@ -91,3 +91,50 @@
                 "The join reports the exact fault the observer published.")
             (is (str/includes? (ex-message failure) message))
             (is (= 200 (:seon.config.agent/turn-completion-backstop-ms (ex-data failure)))))))))))
+
+(deftest a-thrown-step-cancels-its-completion-backstop
+  ;; A process identity no request admits makes the pass throw after the
+  ;; backstop is armed; the step republishes the permit and cancels the bound.
+  ;; The bound (2 s) exceeds the throwing pass (the contract refusal measured
+  ;; 197 ms), so only a missed cancel can publish a fault inside the window.
+  (test-support/with-database
+   (fn [connection]
+     (with-open [faults (test-support/closeable (async/chan 1) async/close!)]
+       (let [ctx (test-support/fork-cluster-ctx connection)
+             backstop-state (atom nil)
+             backstop-ms 2000
+             armed (atom [])
+             completion (async/chan 1)
+             state {:seon.agent/id "thrown-step"
+                    :seon.turn.loop/cluster
+                    {:seon.db/connection connection
+                     :seon.cluster/name (:seon.cluster/name (test-support/execution-handle connection))
+                     :seon.db.process/id :not-a-process
+                     :seon.turn.loop/completion completion
+                     :seon.flow/executor
+                     (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
+                     :seon.agent/fault-channel @faults
+                     :seon.config.agent/turn-completion-backstop-ms backstop-ms
+                     :seon.agent/turn-backstop-state backstop-state}}]
+         ;; A waiting message gives the pass work, so it reaches `turn`.
+         (test-support/transacted!
+          connection (agent/creation-tx
+                      {:seon.agent/id "thrown-step" :seon.ns/name 'my.agents.thrown-step
+                       :seon.cluster/name (get-in state [:seon.turn.loop/cluster :seon.cluster/name])}))
+         (test-support/transacted!
+          connection [{:seon.message/id "thrown-step-wake" :seon.message/content "wake"
+                       :seon.message/to [:seon.agent/id "thrown-step"]}])
+         (add-watch backstop-state ::armed
+                    (fn [_ _ _ observer] (swap! armed conj (some? observer))))
+         (async/offer! completion :seon.agent/ready)
+         (is (thrown? Exception (turn/step state :seon.agent/episode :seon.agent/wake)))
+         (is (= [true false] @armed) "Armed after the permit, cleared by the throw.")
+         (is (= :seon.agent/ready (async/poll! completion)) "The permit is republished.")
+         ;; The whole bound passes with no fault: the await's timeout is the
+         ;; declared observation, its ex-data the evidence.
+         (let [observed (try (test-support/await-event! @faults ::backstop-fault
+                                                        (constantly true) (+ backstop-ms 200))
+                             (catch clojure.lang.ExceptionInfo absent (ex-data absent)))]
+           (is (= (+ backstop-ms 200) (::test-support/timeout-ms observed))
+               (str "No backstop fault follows the thrown step's own fault: "
+                    (pr-str observed)))))))))
