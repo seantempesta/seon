@@ -499,8 +499,9 @@ The orchestrator coordinates default replacement, shared exhaust and integration
 A bounded lane works directly, preserves other lanes' files and sessions, and
 follows its explicit stop boundary. Protected means concurrently edited only.
 Codex uses native collaboration; read the lane skill before `bin/codex-agent`.
-Use Astra low for bounded slices, medium for design/review, never high; Sol low for
-mechanical sweeps; Opus never for implementation. Specs use verify / falsify / probe,
+Opus 5.5 implements and researches (Agent tool, `model: opus`); Astra at medium reviews
+and writes PRDs/design, never high; no Fable lanes (owner 2026-09-23: "no more fable
+agents. use astra and opus agents from here out"). Specs use verify / falsify / probe,
 never adversarial verbs, which trip model safety filters. A launch cites the issue or
 plan entry it extends, one lane per defect class after a query, and the spec carries
 raw evidence paths, never an attribution. Report usage-limit stops and resume the same lane after owner

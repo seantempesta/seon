@@ -16,7 +16,7 @@ This directory contains the integrated plan and implementation specifications.
 Each spec states its design directly: the data flow, dependency source, ordered
 changes, probes and acceptance conditions. Research and review history are outside
 this directory. These are implementation instructions, not claims that the code
-has already changed. The [shared instructions](../../../../AGENTS.md) are active and Fable-reviewed;
+has already changed. The [shared instructions](../../../../AGENTS.md) are active;
 evergreen traps remain in the root instructions.
 
 ## 1. What becomes simpler
@@ -161,6 +161,7 @@ that platform. B2's context, turn, read-evidence and rendering work is the LAST 
 | 4 | **Turn, context, rendering, last:** B2's acquire-once/fork-retained context, one turn function, bounded completion, the walk as history, whole-view delivery | Private objects survive turns; an ordinary write installs 0 rows; one history; two tabs converge |
 
 Concurrency is bounded by file ownership alone (ruled 2026-09-22, restated 2026-09-23: no lane count, no test-JVM slot, no prober cap): any number of assignments run at once while their file sets are disjoint; one file has one lane at a time — no regions (owner 2026-09-23: "do a better job orchestrating so lanes don't cross streams"); the orchestrator's ledger `tmp/orchestrator/file-ownership.md` assigns every path, and work on a held file goes to its holder or waits for its release. The orchestrator fills every ready file-disjoint step at every check-in; it never queues a step behind a lane it does not depend on.
+No slice removes a safety mechanism before its replacement passes the
 specific proof in its spec. A retirement and all callers are one commit. Remove the
 superseded machinery in the same cut; do not keep dual implementations through an
 extended migration. Small loadable commits may record progress inside a cut; they do
@@ -208,12 +209,12 @@ rewrite preserves calls to the currently installed projection, acquisition and s
 owners until their listed replacement slices land; it does not require implementing
 steps 1.1–1.3 or 1.4/1.5 inside B1b. Those steps retain their dependency order.
 
-Assign models by the work: `gpt-5.6-sol` at low effort for fully specified
-conversions, deletions and caller updates; `gpt-6-astra` at low effort for bounded
-repairs that still require diagnosis; Astra at medium for architectural decisions
-and cut review. New assignments set the model and effort explicitly. A clear spec
+Assign models by the work (owner, 2026-09-23): Opus 5.5 implements and researches,
+through the Agent tool with `model: opus`; `gpt-6-astra` at medium reviews diffs and
+cuts and writes PRDs and designs; no Fable lanes. New assignments set the model and
+effort explicitly. A clear spec
 includes owned paths, the replacement seam, every caller to convert and concrete
-acceptance checks; Sol should not have to invent a missing design. No high-effort
+acceptance checks; the implementer should not have to invent a missing design. No high-effort
 implementation lanes. The orchestrator owns integration and reviews each cut.
 
 ## 5. Measurements and size
