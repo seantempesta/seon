@@ -313,23 +313,6 @@
   [store-dir]
   (reidentify-at! store-dir store-dir nil true))
 
-(defn reidentify-branches!
-  "Rewrite selected copied-store branch heads to match their new path.
-
-  This bounded form is for a caller that opens and branches only from the
-  selected heads. It deliberately does not rewrite retained commit records:
-  branching from an exact commit in this copy would therefore be invalid.
-  The caller must name every branch head that the copy will open.
-  Its work is proportional to selected heads rather than retained ancestry.
-  Full exports continue through [[reidentify!]], which rewrites every branch
-  head and reachable commit."
-  {:malli/schema
-   [:=> [:cat :seon.store/dir
-         [:set {:min 1} :seon.store/branch]]
-    :seon.store/dir]}
-  [store-dir branches]
-  (reidentify-at! store-dir store-dir (seq branches) false))
-
 (defn export!
   "Copy an open store to `<parent-dir>/store` as an independent store.
   Clone the source directory into `<parent-dir>/.store.<uuid>.tmp`

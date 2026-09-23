@@ -36,7 +36,6 @@
   (:require [clojure.core.cache.wrapped :as cache]
             [clojure.test.check.generators :as gen]
             [datahike.api :as d]
-            [datahike.core :as datahike]
             [datahike.db]
             [malli.core :as m]
             [malli.registry :as mr]
@@ -702,30 +701,6 @@
               derived
               (:seon.call-preparation/snapshot
                (swap! call-state adopt derived)))))))
-
-(defn watch!
-  "Register the eager listener for supplied-default changes.
-
-  An optimization only: it lets an idle cluster notice a new row without
-  waiting for the next invocation's basis comparison. This is a
-  system-side listener, not an agent-facing read, which is why it calls
-  Datahike directly (ruling #41 keeps listeners out of `seon.db`).
-  Returns the key Datahike registered it under."
-  {:malli/schema
-   [:=> [:cat :seon.call-preparation/state :seon.db/connection
-         :seon.schema/projection]
-    :keyword]}
-  [call-state connection projection]
-  (let [attributes (set (row-attributes))]
-    (datahike/listen!
-     connection
-     :seon.call-preparation/rows
-     (fn [report]
-       (when (some (comp attributes :a) (:tx-data report))
-         (let [derived (snapshot (:db-after report) projection)]
-           (when-not (or (:seon.db/invalid-read derived) (:seon.schema/expected-value derived))
-
-             (swap! call-state adopt derived))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Plan derivation — one Datalog query set over the P12 argument addresses

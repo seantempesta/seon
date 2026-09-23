@@ -494,28 +494,3 @@
                 :seon.schema/key   k
                 :seon.schema/definition v
                 :seon.schema/nilable-value-schema k})))))
-
-(defn assert-multi-segment-namespace!
-  "register!-time gate: reject attrs whose keyword NAMESPACE is
-   single-segment (`:workout/date`). Keyword namespaces are DOMAINS with
-   ≥2 segments — a single-segment namespace collides with code-namespace
-   roots and fragments the reuse surface. Throws a guiding `:user-input`
-   ex-info naming a corrected multi-segment example."
-  {:malli/schema [:=> [:cat :keyword] :nil]}
-  [k]
-  (let [ns-str (namespace k)]
-    (when (and ns-str (not (str/includes? ns-str ".")))
-      (throw (ex-info
-               (str "schema/register! " k ": single-segment keyword "
-                    "namespace " (pr-str ns-str) " is not allowed. "
-                    "Keyword namespaces are data DOMAINS and need ≥2 "
-                    "segments — e.g. :" ns-str "/" (name k) " → :kb."
-                    ns-str "/" (name k) " or :fitness." ns-str "/"
-                    (name k) ". FIRST inspect the installed schema: "
-                    "if an attr for this fact already exists, reuse "
-                    "its EXACT keyword instead of registering a new "
-                    "one.")
-               {:seon.schema/error :seon.schema/single-segment-namespace
-                :seon.schema/single-segment-namespace k
-                :seon.schema/key   k
-                })))))

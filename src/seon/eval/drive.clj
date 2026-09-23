@@ -1,7 +1,6 @@
 (ns seon.eval.drive
   "Run one bounded agent episode against an already-published source basis."
   (:require [clojure.core.async :as async]
-            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
@@ -423,31 +422,3 @@
           (registry/retire-branch!
            {:seon.store/store store
             :seon.store/branch (registry/cluster-branch cluster-name)}))))))
-
-(defn- qualified-name [value]
-  (if-let [owner (namespace value)]
-    (str owner "/" (name value))
-    (name value)))
-
-(defn- json-value [value]
-  (cond
-    (or (nil? value) (string? value) (boolean? value) (number? value)) value
-    (or (keyword? value) (symbol? value)) (qualified-name value)
-    (instance? Date value) (str (.toInstant ^Date value))
-    (map? value)
-    (into (sorted-map)
-          (map (fn [[item-key item]]
-                 [(if (or (keyword? item-key) (symbol? item-key))
-                    (qualified-name item-key)
-                    (str item-key))
-                  (json-value item)]))
-          value)
-    (set? value) (mapv json-value (sort-by pr-str value))
-    (sequential? value) (mapv json-value value)
-    :else (str value)))
-
-(defn run-sample-json!
-  "Run one sample and return its qualified JSON projection."
-  {:malli/schema [:=> [:cat :seon.eval.drive/sample-request] :string]}
-  [request]
-  (json/write-str (json-value (run-sample! request))))

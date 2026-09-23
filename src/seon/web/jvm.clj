@@ -207,22 +207,6 @@
             :my.web.body/blob (:seon.blob/digest stored)}
            :seon.blob/staged-write stored})))))
 
-(defn- read-blob
-  [connection digest size]
-  (let [output (ByteArrayOutputStream.)]
-    (loop [offset 0]
-      (when (< offset size)
-        (let [octets (blob/read-chunk connection digest offset io-buffer-bytes)]
-          (when-not octets
-            (throw
-             (ex-info "The captured response blob is unavailable."
-                      {:my.web/transport-failed true
-                       :seon.error/message
-                       "The captured response blob is unavailable."})))
-          (.write output ^bytes octets)
-          (recur (+ offset (alength ^bytes octets))))))
-    (.toByteArray output)))
-
 (defn- captured-octets
   [connection captured]
   (or (:seon.web.jvm/octet-array captured)
