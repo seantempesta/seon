@@ -63,7 +63,7 @@ supersede its obsolete workflow claims.
 
 ## How we work
 
-**Ask what the dependency already does before you build anything.** Read its source.
+**Ask what the dependency already does before you build anything.** Validation, contracts, schemas, instrumentation and error shapes start by reading `reference-code/malli/src/malli` (owner, 2026-09-23: "we keep redoing what they've already done") and cite the Malli function they use. Read its source.
 Datahike owns transactions and branches, Malli owns compiled schemas, SCI owns its
 contexts, core.async owns graph execution. Improve the maintained fork when that
 removes a parallel Seon mechanism. The best change deletes a mechanism.
