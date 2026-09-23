@@ -92,3 +92,4 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 | E24: `src/seon/plan.clj` | 2 | 8 / 11 / -3; +0 | 0 / 50 | 29.055334 | `seon.plan-test` | None; 22 unsupported expression contexts retained |
 | E25: `src/seon/render.clj` | 5 | 16 / 26 / -10; +0 | 4 / 50 | 28.856417 | `seon.render-simplification-test` | Removed generated blank require line; O/X literals retained to preserve evaluation order |
 | E26: `src/seon/render/data.clj` | 1 | 5 / 6 / -1; +0 | 1 / 15 | 23.361084 | `seon.render.data-test` | None; surrounding assoc and unsupported context retained |
+| E27: `src/seon/render/hiccup.clj` | 4 | 12 / 20 / -8; +0 | 3 / 17 | 24.18825 | `seon.render.hiccup-test` | None; all four admitted sites converted |
