@@ -1,6 +1,6 @@
 ---
 type: research
-status: audit complete; fix design awaits independent review and implementation
+status: audit complete; accepted review integrated; ordered implementation pending
 created: 2026-09-23
 tags: [agent-platform, clj-kondo, analysis, publication, fidelity]
 ---
@@ -277,151 +277,250 @@ reduction is not proof it was absent in memory. A plain export field would make
 this boundary reliable. `339573209` correctly prevents a load edge by reading
 source; replacing that parser with `:to` alone would reintroduce the defect.
 
-## Smallest complete fix design
+## Accepted design after independent review
 
-**Cost before code.** Additional declaration/usage projection should be
-O(D_changed + U_changed + K_changed), plus exact changed source bytes; storage
-O(changed declarations + distinct edges), or O(occurrences) for review choice 2. Resolver work uses kondo's existing dependency cache;
-revalidation covers changed files and affected callers. Unrelated database writes
-cause no analysis. The current adapter's nested span searches and gate-sets-in's
-global identity/relation setup are *not* proven linear/incremental by this design.
-The 12-second audit reduction is evidence against copying those scans.
+The orchestrator accepts every finding in
+[the independent review](astra-review-kondo-fidelity-2026-09-23.md), commit
+`8cdcb5710`. **Choice 1 is ruled: declaration identities and symbolic reach.**
+Occurrence components and full-export storage are out of scope, not pending
+implementation alternatives. The census and field ledger remain historical
+observations; the implementation contract below supersedes the original six
+unordered design changes and the narrower def-body owner-repair design.
 
-**Recommended scope: graph fidelity with declared set semantics.** Every resolved
-usage contributes an owner/target edge; repeated occurrences of the same edge
-coalesce because Datahike cardinality-many is a set. This is a documented
-transformation, not loss of reach. Every exported record must be accounted for as
-retained, deliberately projected, or explicitly unresolved/unsupported. This does
-not promise a lossless database copy of all kondo debugging fields.
+Kondo supplies values; the existing row constructors and writer compose them.
+Additional projection is O(changed definitions + usages + keywords), retaining
+O(declarations + distinct edges). Repeated uses coalesce under declared set
+semantics. No per-call analysis, second lint pass, cache, namespace pseudo-function
+or raw-export database is introduced. Existing repeated span searches and global
+selection setup remain separately measured costs, not claimed incremental work.
 
-Three concrete scope choices for the independent design review:
+### Ownership, selection and exceptional records
 
-| Choice | Guarantee | Cost / what it gives up |
-|---|---|---|
-| **1. Retain declaration owners and complete symbolic reach (recommended)** | Every definition identity represented; every resolved var usage contributes a real var/test/ns-owned edge; unresolved input is visible | Smallest existing-row conversion; changed-input cost. Gives up per-occurrence navigation and a lossless copy of raw analysis. |
-| 2. Add owned usage/declaration occurrence components | Also retains duplicate definitions, per-use positions, macro/dispatch and generated occurrence provenance | O(occurrences) extra storage and schema/consumer conversion; gives up full locals/Java tooling export unless separately admitted. Review before accepting that larger scope. |
-| 3. Model every exported analysis family as queryable facts | Full configured export fidelity, including locals and instance invocations | Hundreds of thousands of occurrence records in this census, broader schema and retention work. No present reach consumer justifies this cost; gives up the small repair. |
+Ordinary def/defonce initializer ownership comes directly from `:from` and
+`:from-var`. Retain these declaration identities without requiring arglists.
+Do not turn a declaration into an armable function, variadic analysis stub,
+callable UI entry or interpretable initializer. Make `:seon.fn/arglists` optional
+in its schema in the same loadable slice as its producer and affected consumers.
+Preserve honest binding/contract checks: a contracted callable factory result
+without supported source bindings must reach an explicit signature refusal,
+not manufactured arity evidence (`program.cljc:1066–1073`). Preserve loaded
+unchanged reuse; affected unsafe reconstruction refuses through the existing
+host-bound boundary without repeating initializer/defonce effects.
 
-Choice 1 fulfills the requested dependency-edge repair. Choice 2 is required only
-if “faithful” additionally means every occurrence is independently queryable.
-Neither choice may fabricate ownership, silently omit unknown usages, or call
-quoted references execution. Implement reviewed, loadable cuts; do not build an
-adapter framework to copy the entire export.
+One row represents one var identity, not each definition record. Coalesce a
+`declare` with its completing definition without changing the row identity or
+losing attached data. Competing bodies refuse by name. Generated constructor,
+protocol and type identities are classified by kondo's defining-form facts.
+A:443–482 also attributes quotes, Java and method/protocol bodies: keep existing
+dispatch reach until equivalence is proven. Choice 1 does **not** preserve both
+raw per-usage owner provenance and dispatch provenance. That would require the
+rejected occurrence-storage scope. Ordinary raw-owner retention must not erase
+method-body reach.
 
-1. **Every definition contributes to its declaration identity.** Replace
-   `function-definition?` as the row/owner admission condition in F:332,351,665.
-   Retain noncallable defs, defonce, protocol/type declarations and uninitialized
-   declarations. A declare plus later def contributes to ONE var identity, not
-   duplicate identity rows rejected by the writer: retain the completing definition
-   as its body and explicitly classify the earlier declaration as superseded.
-   Multiple competing bodies refuse rather than picking one silently. Keep
-   source/defining-form facts; distinguish generated declarations by `defined-by`,
-   not names. Do not manufacture `()` as evidence of zero arity. Make arglist
-   facts optional for declarations and keep actual arities separate from authored
-   display arglists. Audit callable-only consumers before widening their input.
+Unknown-namespace records are not all unresolved application vars. Use kondo's
+actual analysis families, fields and findings to separate Java/special-form/
+generated non-var records from unresolved vars. Name and count deliberate
+non-var exclusions. Preserve unresolved names in their diagnostics; genuinely
+unsupported completed admission refuses. Do not qualify unknown names, infer
+from spelling, add a parser, or blanket-refuse every record without a finding.
+Locationless/generated and method/protocol examples are required controls.
 
-2. **Every usage has a real owner and an honest target.** Use raw `:from` +
-   `:from-var` when present, with the retained var/test owner. For absent from-var,
-   attach the usage to the existing `:seon.ns/name` entity selected by `:from`,
-   retaining file/span provenance. Do not invent a callable `ns/init` Var.
-   Retain unknown-namespace/unresolved usages with their original name and
-   resolution diagnostic; they are not qualified resolved edges. Missing owning
-   namespace or unexpected owner mismatch refuses completed admission by name.
-   Explicitly retain raw ownership when implementation attribution also adds a
-   dispatch/protocol relationship; never silently overwrite provenance.
+**First consumer boundary: refuse incomplete selection.** At each reached target,
+seek incoming unresolved file/ns dependencies. If their dependent set is not
+proven, return the existing selection boundary's `:seon.test/selection-error`
+with `:seon.test/selection-refusal :seon.test/coverage-unknown`; never return a
+smaller successful vector. The reverse-closure boundary must carry a declared
+unknown through F `gate-set-in`/`gate-sets-in`/`gate-sets` and `seon.test/select`,
+not disguise it as `:seon.db/invalid-read-error`. A small optional error arm in
+`resources/seon/schemas/seon.fn.edn`'s reverse-closure/result contracts and the
+existing `resources/seon/schemas/seon.test.edn` selection error are the schema
+owners; convert all callers that currently assume a successful closure. The
+`:seon.test/reach-unknown` stored result marker is not itself a selection result.
 
-3. **Project all usages through the existing relation owner.** Broaden the
-   namespace row schema to admit the existing calls/references/call-arities
-   attributes, and broaden their consumers to accept namespace identities.
-   Reduce usages once into those sets; macro usages and non-call uses contribute
-   references, arity-bearing nonmacro calls contribute calls and call-arities.
-   Do not require the target declaration to exist before retaining its resolved
-   symbolic name. Keep declared invocation augmentation distinct from observed
-   lexical calls. Missing targets remain queryable and must satisfy the ordinary
-   publication/admission rules. Existing lint rows retain diagnostics/source
-   positions for unknown targets; an unresolvable usage without a diagnostic
-   must produce a named refusal, never fall through `keep`. Report input,
-   language-excluded, resolved, duplicate-edge and unresolved counts from this
-   reduction. This is operation evidence, not another durable cache or stamp.
-   Optional fields needed by real consumers (actual arities, defining form,
-   namespace alias load policy) accrete into their owning schemas. Locals,
-   instance invocations and other unused fields have an explicit exclusion policy
-   from the ledger; no claim of lossless raw export storage. If choice 2 is later
-   selected, use owned components, not occurrence UUIDs or a generic EDN blob;
-   Datahike already cascades components (`db/transaction.cljc:832–836`).
+Remove the same-file fallback from positive Datalog `tested`/test-first evidence
+and execution-selection joins together with that refusal. Complete graphs retain
+all real old paths and add initializer paths; incomplete graphs refuse rather
+than silently excluding formerly selected tests. “Selection widens, never
+excludes” does not require keeping fabricated positive coverage. No test ×
+unresolved-target cross product and no observed-reach shortcut. More selected
+tests are an acceptable correctness cost; measure edge count, selected identities,
+selection time/memory and execution cost separately.
 
-4. **Namespace ownership is not positive test coverage.** Namespace-level
-   dependency facts are queryable and feed load/invalidation dependency closure.
-   They do not mean every function/test in that namespace executed a top-level
-   expression. Remove the same-file-test fallback edges at F:1488 and F:1572;
-   when a reached namespace-level dependency lacks a proven dependent set,
-   coverage is unknown and admission refuses (smallest first option). Execution
-   selection may conservatively widen only with an explicit reason and no new
-   positive coverage edge. An unrelated test can never satisfy test-first through
-   that widening. Carry namespace owners through both Datalog and reverse-walk
-   consumers instead of converting them into fake functions.
+Namespace-owned edges eventually attach to the existing namespace entity, but
+F:1532/1565's walker admits qualified fn/test symbols, whereas namespace names
+are often unqualified. **The first slice does not widen that node contract.**
+It detects a reached file/ns unknown at the boundary above. The namespace slice
+stores existing symbolic relations on `seon.ns` and uses existing program identity
+pairs for internal owner lookups, preserving fn/test closure contracts. It still
+refuses where namespace dependents are unproven. Full namespace traversal is not
+required to land honest refusal. `:as-alias` remains a no-load binding.
 
-5. **Convert file and agent producers together.** F:1290 `source-rows` and
-   F:937 `analyzed-form` must retain the same eligible declaration ownership.
-   A submitted program form with no var may have a real supplied namespace owner;
-   otherwise refuse complete program admission. Disposable REPL evaluations
-   remain disposable. Broader declarations do not grant runtime callability or
-   safe reinitialization. F:916 and SCI consumers must mark/refuse unsafe affected
-   nonliteral initializer reconstruction until B2 proves it. Existing loaded
-   constant/function reuse must continue; do not replay defonce effects.
+`:seon.ns/source` stores the ns form, not every top-level expression. Namespace
+edges do not supply replayable top-level source, and an unchanged namespace
+digest does not prove unchanged top-level effects. Unknown executable dependencies
+refuse unsafe loaded reuse through B2's existing boundary.
 
-6. **Delete only proven duplicate work.** Remove arglists-based owner filtering,
-   owner-loss routing and same-file fabricated coverage. Replace F:2314's source
-   symbol scan and F:1402's metadata reread with exported facts after parity tests.
-   Keep minimal literal/var-quote/ns-binding parsing until the dependency exports
-   the missing fields at its existing producer; then remove those parses in the
-   same cut. Kondo does not provide runtime data invocation semantics or Malli
-   canonicalization, so those are not deletion claims. Keep schema resources and
-   loaded consumers in one incremental publication, with no from-zero boot.
+### Reanalysis, identities and evidence transition (P1-1)
 
-Proposed ownership for implementation: A, F, their canonical schema resources
-(fn/test/ns and any occurrence schema only if choice 2 is selected), existing program/callability and SCI
-consumers actually reached by widening, plus focused analyzer/indexer/selection
-regressions. Resource/source publication and consumer conversion require an
-independent review and exclusive file holds before implementation; this audit
-launches no implementing lane. No net-src saving is promised before that review.
-The owner-filter repair should be small; if lossless occurrence storage exceeds
-about 100 added implementation lines, stop and price a smaller schema/producer
-composition rather than build an adapter framework.
+Changing F/A's projection does not automatically reanalyze unchanged files:
+`cluster/source.clj:178–207` widens for analyzer configuration, not arbitrary
+producer edits. Publish producer/schema consumers, then **explicitly reproject
+the affected captured population on a branch of the live store through canonical
+publication**, reconcile complete rows, lint required callers, advance the
+published head and adopt through the normal target writer. Record the selected
+paths and authority: the canonical declared source roots/path population of that
+publication, captured with its bytes/config/resolution inputs. The old index
+cannot enumerate declarations it omitted, so one full declared population may
+be necessary. No arbitrary repository walk, touched-file trick or reset.
 
-## Regressions and acceptance boundary
+Before full-population migration, the small fixture must prove the installed
+publication entrance can force reanalysis despite equal file digests. If it
+cannot, fix that owner first (slice 4 below); do not invent an installed flag.
+Keep selective acceptance closed on unproven old analysis until migration and
+expanded-evidence validation complete. Use existing analysis/input evidence and
+the selection refusal, not a new durable migration stamp. Price elapsed time and
+memory using the committed B1 measurement script and selected input size; obtain
+owner authorization before an operation estimated above ten seconds. Reuse valid
+kondo resolution cache entries. This is a one-time analysis-semantics migration,
+never the steady-state edit path.
 
-- Publish three small source/test files through the canonical fixture: F,
-  `(def g (memoize F))`, and a separate test calling g. Assert retained owner,
-  reference path, actual selection, and an unrelated test remaining unselected.
-  Cover direct initializer calls, defonce/delay and map-held callbacks separately
-  as cases; graph facts do not prove replay safety.
-- Declare then define the same var; include protocol/type/record constructors,
-  defmulti and defmethod. Assert one var identity, explicit declare/definition coalescing,
-  correct defining-form/implementation attribution, no invented arglists, and
-  no collision. Competing definitions must refuse by name.
-- Two identical calls at different positions and two arities: input count two,
-  documented deduplicated reach pair, correct arity tuples. Include macro usage,
-  var quote, quoted data, unknown target and generated/locationless usage;
-  each is retained/classified or explicitly refused, never dropped silently.
-- Ownerless namespace expression in a separate file: queryable ownership,
-  coverage unknown/refusal, no fabricated positive coverage from unrelated tests.
-- Namespace binding parity: `:as` versus `:as-alias`, refer, rename, refer-all,
-  imports, CLJC branches; alias-only creates no load edge. Metadata parity includes
-  attr maps, trailing multi-arity attrs and namespaced metadata keywords.
-- Replace/remove an initializer reference in changed-file publication: old edge
-  retracts, new one appears, unchanged file analysis is reused.
-  Positive source digest proves even empty analysis; no empty-set completion stamp.
-- File/agent parity and SCI loaded-reuse versus unsafe affected-initializer refusal.
-  Do not replace these with an indexer-only green or enable unresolved completed
-  publication to make the test pass.
+Three identities must remain separate:
 
-Implementation verification uses one focused `seon.test/run` request per cut on
-its owned branch (`bin/test-check CLUSTER --ns ...`), real SCI, canonical fixtures,
-armed contracts and exact publication/adoption evidence. Root owns the cold gate.
-Measure parent/slice changed-file and changed-caller counts, elapsed time and
-memory; investigate >1 s and refuse unexplained regression >20% or 50 ms.
-This document provides static and read-only evidence only, not those future passes.
+| Population/change | Row identity | `program/definition-digest` expectation | Separate file signature / evidence |
+|---|---|---|---|
+| Unchanged callable/test with added calls/references/keywords | same | same: graph facts excluded | current expanded reach obligations must be compared with tested reach; own-digest equality cannot reuse insufficient green |
+| Unchanged literal with its existing semantic fields retained | same | same | existing controls stay stable |
+| Existing literal/defmulti whose manufactured `arglists "()"` is removed | same | intentionally changes | enumerate affected class and revalidate signature consumers |
+| Newly retained nonliteral def/defonce or generated declaration | new identity only where absent | new digest | new public symbols change namespace member in F:1378's per-file signature fingerprint |
+| Declare plus completing definition | same var identity, data preserved | digest of completing semantic definition; no artificial declare body | deterministic coalescing; competing bodies refuse |
+| Namespace with only added dependency edges | same | same if source/resolver meaning unchanged | public-symbol population may change file signature despite same ns digest; top-level replay remains unproven |
+| Resolver context or effective metadata correction | same | intentionally changes | current callers and tests revalidated |
+| Schema rows making arglists optional / adding ns edges or result arms | same schema-key identity | schema definition changes | participate in schema-reference invalidation and adoption |
+
+These are acceptance expectations, not measured results. Implementation records
+actual parent/slice digest pairs for each class and any exception before landing.
+`program.cljc:358–396` excludes calls, references, call-arities, keywords, writes,
+host-bound and analyzed-source facts. Do not add graph observations to its digest
+to force invalidation. Preserve file/agent equality from `3cbf5a135`.
+F:1378's per-file `declaration-digests` fingerprint is a different value; do not
+conflate it with definition identity. `seon.test/select`'s current reach/input
+comparison (including `runner/reach-digests`) must reject older insufficient
+green even when the test's own digest is unchanged; prove this, do not assume it.
+Schema adoption is a transaction on a live-store branch preserving rows/private
+data, not a from-zero boot. B1's historical RESET wording does not apply.
+
+### Ordered loadable slices and failing regressions
+
+Order is **S1/S4 integration prerequisite → 1 → 2 → 3 → 4 → 5 → 6 → 7 → 8**.
+Slices 6–7 are conditional deletions: a disproved equivalence closes that deletion
+candidate with evidence and retained owner, not a workaround. Every code slice
+has a **100-added-line ceiling including its regressions**; the allocations below
+are design budgets, not claims of measured diffs. Report actual added src, added
+test and net lines. If a coherent boundary does not fit, stop before production
+edits and return a smaller existing-owner composition; never split a schema from
+its consumer or publish a knowingly unsafe intermediate state. Fixture coverage
+is added in its slice, not deferred to a final green.
+
+| Slice | Complete loadable change / intended owners | Budget src+tests | Regression that fails without the change |
+|---|---|---:|---|
+| 1 — ordinary owners and honest refusal | F row admission/file-agent projection; fn optional-arglists and closure result schema; existing program/analyzer stub, SCI host-bound/callability consumers; test selection unknown boundary. Keep exceptional declaration categories explicitly incomplete; no namespace traversal or parser deletion. | 55+45 ≤100 | Canonical three-file F/memoized-g/test retains g and its F reference, selects real test but not unrelated test on complete graph; separate-file ownerless dependency returns coverage-unknown and cannot provide test-first coverage. Cases for direct initializer, defonce/delay/map, stable accepted controls, file/agent parity, unchanged loaded reuse and affected unsafe replay/signature refusal. Exact owner/edge assertions prevent all-test widening from passing. |
+| 2 — exceptional declaration identities | F coalescing/eligibility and existing safety consumers, same schemas; leave implementation reach equivalent | 45+55 ≤100 | Declare+definition retains one identity and attached data; competing definitions refuse. Type/record constructors, protocol var/methods and defmulti retain expected identities without fabricated callability. Defmethod/protocol-body and locationless/generated controls keep their existing reach; non-var unknowns remain valid while unresolved application vars stay diagnosed. |
+| 3 — namespace relation ownership | F namespace row projection, seon.ns schema and same closure boundary; identity-pair lookup only for namespace owners | 45+55 ≤100 | A top-level resolved usage is queryable on the namespace; reached uncertain dependency still refuses selection rather than disappearing. No qualified pseudo-function. Existing ordinary paths survive; alias-only binding has no load edge, and unknown top-level executable dependency cannot justify unsafe reuse. |
+| 4 — explicit migration and evidence | Existing source publication/reconciliation entrance if equal-digest force is missing; current selection/reach evidence owner only if proof exposes a gap | 50+50 ≤100 | On a live-store fixture branch, unchanged source bytes gain missing declarations/edges; old identities and private/agent data survive. Digest table expectations hold. An old green over the smaller graph is rejected despite equal test digest. Repeat with no changed inputs reuses valid work. This supplies the safe migration entrance; do not run the whole population yet. |
+| 5 — signature-scoped caller validation | F `signature-attributes`/`caller-files` and existing publication query; no new lint scheduler | 40+60 ≤100 | Initializer direct-call arity change finds its caller file; reference-only privacy change revalidates its holder; namespace-owned usage is included when its target signature matters. Body/doc/edge-only edits lint zero dependent files. Assert changed-file and caller-file identities separately. |
+| 6 — symbol-scan parity/deletion | F:2314 mentioned/known-symbol producer, using adapted usages plus separate schema-value inputs | 35+65 ≤100 | Before deleting scan, fixture expected resolved known-symbol sets agree for ordinary and alias-qualified quoted data, unresolved names and schema values. After deletion same expected set and publication result; a missing quoted/schema target fails independently of the removed implementation. If sets differ, retain scan and record semantic decision, no guessed replacement. |
+| 7 — metadata parity/deletion | F:1402 indexer digest input only; leave other signature consumers intact | 35+65 ≤100 | Effective metadata and file signature fingerprint agree for form/head/name metadata, leading/trailing attrs, private/doc/arglists overrides, namespaced keywords and reader branches. Then assert expected fingerprints after deletion. Equality or an explicitly reviewed semantic correction is required; field-name similarity is insufficient. |
+| 8 — migrate and prove adoption | Canonical publication operation from slice 4, no new production mechanism; owning landing evidence | 0+≤60 if a remaining adoption regression is needed | Authorized captured population reprojected, required callers linted, head advanced, target writer adopts; independently observe loaded behavior/arming and expanded test evidence. Exact removal/replacement retracts old initializer edge and adds new; unchanged files reuse valid inputs. No reset and no claim that code landing alone backfilled old rows. |
+
+Slice 1 is intentionally the coherent first boundary requested by the review,
+not a promise that its allocation has already been demonstrated. If inspection
+finds more than 55 source lines plus 45 test lines are needed, implementation
+must stop and reprice this boundary; reducing tests or deferring unsafe consumers
+is not an acceptable way to meet the ceiling. Slice 2 completes the remaining
+declaration families; choice 1 is complete only after namespace ownership,
+migration, caller validation and end-to-end evidence, not at slice 1's first green.
+
+Caller-lint dependency policy for slice 5: retain `b0d047021`'s transaction-report
+signature trigger. Direct calls read identity, actual/display arity, relevant
+contract and macro/private/inline/defining-form/constant status already selected
+by F:2344. Reference-only uses need target existence/name resolution, privacy and
+macro/semantic status where kondo consumes it; do not add argument-arity lint to
+an ordinary non-invocation reference. Test the actual kondo findings. Namespace
+resolution changes revisit affected bindings/usages through the existing owner.
+Extend calls-only file lookup to the necessary references/ns holders for these
+signature facts, not for every graph/body/docstring change. Missing/corrected
+bindings and target deletion remain explicit admission work.
+
+Retain A:496 literal/var-quote parsing, F:229 namespace binding parsing, method/
+protocol attribution, source binding extraction and Malli contract decomposition.
+Fixed/variadic counts cannot replace argument names, destructuring or the
+binding-to-contract join (`program.cljc:968,999,1066`). The field ledger's
+“re-derivation” labels are candidates for proof, not permission to delete these.
+
+### Combining slice 1 with the stopped b1-adoption remainder
+
+Read-only diff inspection confirms the held F remainder adds `reconcile-call`
+and `adoption-tx` near :3524, routes `index!` through the former, and removes
+request-supplied transaction-data concatenation. It does not fix admission at
+:332/665 or usage projection. `tmp/orchestrator/file-ownership.md` still holds
+F, cluster/issue consumers and adoption tests for the stopped b1-adoption lane.
+This document neither releases those paths nor resumes/messages that lane.
+
+**Orchestrator integrates and proves S1/S4 as its own prior slice.** Use its full
+held-file change and required regression, not a partial-hunk commit of F. Prove
+writer-head reconciliation, exact retractions, first adoption across changed
+adoption arity, and rows→load→arm→record failure semantics. Its current uncommitted
+compatibility is static evidence only, not a runtime pass. Price that prerequisite's
+whole added-src/test diff under the same small-slice rule before integration.
+
+Then transfer exact file ownership and base fidelity slice 1 on that landed
+commit. Its complete desired declaration/edge rows flow into `reconcile-call`;
+`adoption-tx` copies the published identities through the target's writer.
+Preserve expected-head guards, current-head reconciliation, source/agent data
+separation and exact removal. Do not restore the removed transaction hook,
+introduce another adoption writer or revert the stopped remainder. Combining
+means this producer→existing writer data flow and shared regression evidence,
+not concatenating two unproved dirty changes into one claimed green. Slice 1's
+publication fixture must exercise that integrated path and preserve unrelated
+agent/private state. Any S1/S4 failure belongs to that prerequisite owner.
+
+### Prior review rulings and proof boundary
+
+Pending-test admission remains D1: durable visibly pending tests may precede their
+callees, but admission/reacquisition must not compile or execute their bodies.
+Ordinary functions and completed publication remain strict. Pending tests cannot
+merge before resolution, arity/privacy and ordinary checks pass; typos remain
+visible. Preserve prior-basis test-first evidence and the same-batch negative case.
+No stub, new test-first detector, blanket `:warn`, or observed-reach replacement.
+
+Per implementation slice use canonical small fixtures, real SCI, armed contracts
+and one focused `seon.test/run` request via `bin/test-check CLUSTER --ns ...`.
+Root owns cold/platform proof. Compare the committed B1 measurement probe on
+parent/slice: files analyzed, caller files, added distinct edges, selected tests,
+selection latency/memory and execution time. Reverse reach follows reached edges
+plus installed global setup; any future all-test widening costs the eligible
+suite and cannot masquerade as positive coverage. Investigate >1 s; fix unexplained
+>20% or 50 ms regression. >10 s needs issue evidence and explicit authorization.
+No fixture rebuilds the entire source tree merely to prove one behavior.
+
+This update is documentation-only static integration of an accepted review.
+Foreign dirty src/test/dependency files are the implementation boundary; none was
+edited, tested, loaded, adopted, messaged or resumed. No new census, JVM, scratch
+store, worktree, test gate or push. Historical runtime/census measurements above
+remain historical. Local reads/checks and the document edit completed below one
+second per shell tool call; no runtime performance or implementation pass claimed.
+
+### Accepted finding → design change
+
+| Finding | Changed part |
+|---|---|
+| P1-1 | Added explicit equal-file-digest reanalysis/migration, three-identity digest table, schema-reference invalidation and old-green rejection; slices 4 and 8 and slice 1's optional-arglists conversion. |
+| P1-2 | Named coverage-unknown selection error and closure consumers; first slice refuses incomplete file/ns reach without broadening qualified-symbol nodes; slice 3 uses real namespace owners. Preserved conservative selection and top-level replay limits. |
+| P1-3 | Ruled choice 1 only; ordinary then exceptional owners in slices 1/2, no provenance components; retained dispatch reach, classified non-var unknowns, and added honest factory-signature/callability/replay boundaries. |
+| P1-4 | Signature-scoped caller matrix and slice 5; parity-gated deletions in slices 6/7; explicitly retained namespace/literal/quote parsing and binding/Malli analysis. |
+| Accepted prior findings | Kept three-file/unrelated-test controls, file/agent parity, unsafe replay refusal and D1 pending-test completion/test-first boundaries. |
+| First-slice/S1–S4 finding | Added ordered ≤100-line budgets including regressions, prerequisite integration/proof and exact desired-rows→reconcile-call→adoption-tx composition; no release of stopped lane's files. |
+
 
 ## Field-by-field export ledger
 
@@ -603,5 +702,15 @@ admission. Adapter-only retention is stated explicitly.
 
 Net production source **0** lines; tests **0** lines. Only this document is the
 landing artifact. Commit identity is supplied by the Git commit containing it.
+
+## Exact paragraph to fold into B1
+
+Destination: `docs/prds/agent-platform/plan/lane-b1-one-publication-path.md`,
+**“Graph fidelity before selective test execution”**, after its final paragraph
+and before §6. Add the paragraph below; it supersedes the narrower def-body
+owner-repair design without changing that section's declared-dispatch rules.
+This assignment does not edit B1 itself.
+
+> **Kondo declaration/usage fidelity (accepted review `8cdcb5710`; supersedes the def-body owner-repair design):** Implement choice 1 in the ordered, independently loadable, at-most-about-100-added-line slices (regressions included) in [the fidelity design](../../../research/agent-platform/kondo-analysis-fidelity-2026-09-23.md#ordered-loadable-slices-and-failing-regressions): first integrate and prove the stopped b1-adoption S1/S4 writer remainder; then (1) retain ordinary def/defonce owners with optional arglists, file/agent parity, honest signature/callability and unsafe-replay refusal, and coverage-unknown at the existing selection boundary instead of false same-file coverage; (2) coalesce declare/definition identities and retain generated families without losing method/protocol reach; (3) retain real namespace-owned symbolic relations, refusing unproven dependents rather than inventing qualified namespace functions; (4) prove explicit equal-file-digest reanalysis and expanded-evidence invalidation on a live-store branch; (5) extend signature-triggered caller validation only for the direct/reference/namespace dependencies those signatures affect; (6–7) delete symbol and metadata rereads only after semantic/fingerprint parity; and (8) perform the priced, authorized one-time captured-population migration through canonical publication, required caller lint, head advancement and normal adoption, observing load and arming separately. Preserve existing row identities and attached data; graph-only changes do not alter definition digests, while the separate file signature and current expanded test obligations may change, so an older insufficient green cannot be reused from equal test digest alone. Use desired rows with the integrated reconcile-call/adoption-tx writer path, never a second writer or the removed request transaction hook. Unknown namespace reach refuses successful narrowing and never provides positive tested/test-first evidence; namespace edges do not supply replayable top-level source. Keep binding/Malli analysis, literal/var-quote/ns-binding parsing and implementation attribution until equivalence is proved; classify kondo non-var/generated records rather than blanket-refusing unknown-namespace entries. No occurrence store, full-export database, new cache, extra initializer walk, reset or whole-program analysis on ordinary edits. The separate D1 visibly pending-test completion and prior-basis test-first rules remain binding; complete publication and merge remain strict.
 
 Co-Authored-By: gpt-6-astra (Codex)
