@@ -427,6 +427,8 @@ Four of them were re-examined with the owner on 2026-09-21 and stand, with numbe
 
 Authority: owner, 2026-09-23 (`59a908e55`); D1 §2e (`7523dd510`) and Astra plan review #2 distinguish acceptance from JVM convergence.
 
+**Ruled (owner, 2026-09-23): "We should be caching the sci context"; "we've measured much faster perf before with sci env loading"; context generation "should be ms … since we have a listener on the transaction log that can match specific entity ids, attributes and values".** The SCI base context is cached by the content it holds (the loaded program's definition digests), never by commit or basis, so an unrelated write is a cache hit (sub-millisecond); a program change forks the cached context (`sci/fork`, ~0.02 ms) and installs only the changed rows and their affected callers (milliseconds, proportional to the change), with the changed identities supplied by the transaction listener rather than a scan. Prompt/turn context generation follows the same rule: a pure function of explicit inputs, cached by the content it reads, invalidated only for the entities the listener reports changed. Whole-program rebuild on a head move (today `derive-base-ctx`, ~1.3 s) is a defect.
+
 A failed proof stops only its dependent production cut. It does not justify abandoning
 independent, already grounded work. Where a new design decision creates broad changes,
 bring three concrete options with guarantees and costs before editing production.
