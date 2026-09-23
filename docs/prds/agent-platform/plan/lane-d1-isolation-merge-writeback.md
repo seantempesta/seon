@@ -252,6 +252,14 @@ of unrelated edits.
 
 ### 2e. Outside agents take the same path
 
+**Owner ruling (2026-09-23), supersedes anything below that conflicts:** "stick with our git and datahike terms … Kinda like regular programming. You branch off the code that's loaded in an existing branch or default, you make changes through the repl which is targeting this same cluster / env, the changes trigger automatic tests that are affected by just those changes (not system wide), we have checks ensuring all functions have malli schemas, malli schemas are fully namespaced, tests are written for the function (at least one). I don't necessarily want to gate accepting a function that doesn't have a schema; more have the repl warn that it won't be allowed to be merged until all tests pass, all functions are spec'ed, all specs are well formed … This is mostly work for the seon agents code and the mcp tool is just putting them in that same environment." Therefore:
+1. **The interface is branches.** Every MCP call names its branch; tools create a branch off default's loaded code or any branch's head, list branches, and delete (unlink) one. No "agent" concept at the interface; if custody needs an agent row per branch, it is an implementation detail behind the branch name.
+2. **Code changes through the REPL on that branch**, in the same cluster environment Seon agents use; a `defn` persists as the branch's program rows and is live there immediately; undefining deletes it.
+3. **Each change triggers the tests reaching just that change** on that branch, automatically, with results in the reply — never a system-wide run.
+4. **Definition WARNS, merge GATES.** A function without a Malli schema, a schema not fully namespaced or not well formed, or a function with no test is still accepted; the reply warns that the branch cannot merge until it is fixed. (This replaces "a `defn` without `:malli/schema` is refused and never becomes a row" below.) The merge gate requires: every affected test green, every function spec'ed with a well-formed, fully namespaced schema, and at least one test per function.
+5. The work is Seon agents' own environment first; MCP only places outside agents in it.
+
+
 Owner (2026-09-23): "the goal is to switch over to SEON agents writing their own code
 within the system and I want our agents to have a way to do that"; "make it easy for our
 agents to use mcp tools or whatever to do things the way we want agents running inside it
