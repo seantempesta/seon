@@ -21,6 +21,7 @@
             [konserve.filestore :as filestore]
             [clojure.test.check.generators :as gen]
             [seon.db :as db]
+            [seon.fault :as fault]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
             [seon.schema :as schema]
@@ -573,4 +574,50 @@
   {:malli/schema [:=> [:cat :seon.store/connection-object] :nil]}
   [connection]
   (d/release connection)
+  nil)
+
+(defn- listener-failed!
+  "Record one failed listener hand-off on the cluster world captured at install.
+
+  Datahike already retired the failed registration by identity
+  (`reference-code/datahike/src/datahike/writer.cljc`, `retire-listener!`), so
+  this fault's own transaction cannot re-invoke it: no recursion. The stored
+  fault names the listener, its retirement and the commit it failed on; the
+  original is its cause. `fault!`'s panic (stored, or not stored when the
+  write failed) is this boundary's declared case: no graph owns a listener,
+  so it prints both throwables whole to stderr and returns, letting Datahike
+  notify the remaining listeners."
+  {:malli/schema [:=> [:cat :seon.env/environment :seon.db.process/id :map] :nil]}
+  [environment process {:keys [listener-key exception tx-report retired?]}]
+  (let [commit-id (get-in tx-report [:tx-meta :db/commitId])
+        failure (ex-info (str "Datahike listener " listener-key " failed on commit " commit-id)
+                         {::listener-key listener-key
+                          ::listener-retired? retired?
+                          ::commit-id commit-id
+                          ::basis-t (db/basis-t (:db-after tx-report))}
+                         exception)]
+    (try
+      (fault/fault! environment failure {:seon.error/layer :seon.db/listener
+                                         :seon.error/operation `listener-failed!
+                                         :seon.db.process/id process})
+      (catch Throwable panic
+        (binding [*out* *err*]
+          (prn {:seon.error/message (ex-message panic)
+                :seon.error/operation `listener-failed!
+                :seon.fault/recorded (:seon.fault/recorded (ex-data panic))
+                :seon.error/data {:panic (Throwable->map panic)
+                                  :suppressed (mapv Throwable->map (.getSuppressed panic))
+                                  :failure (Throwable->map failure)}})
+          (flush))))
+    nil))
+
+(defn listen-failures!
+  "Install the connection's listener-failure handler, capturing this cluster's world.
+  The Datahike fork's `notify-listeners!` reads `:listener-failure` from the
+  connection's meta, beside the `:listeners` registry `d/listen` swaps; one
+  per connection, a later install replaces it."
+  {:malli/schema [:=> [:cat :seon.env/environment :seon.db.process/id] :nil]}
+  [environment process]
+  (alter-meta! (:wrapped-atom (:seon.db/connection environment))
+               assoc :listener-failure #(listener-failed! environment process %))
   nil)

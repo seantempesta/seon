@@ -9,10 +9,13 @@
 
   Datahike settles the transaction promise BEFORE listener dispatch and
   catches each callback's exception independently
-  (`reference-code/datahike/src/datahike/writer.cljc:376-408`). A returned
-  transaction report therefore does not prove mailbox delivery. This owner
-  reports callback failures to the fault channel and never parks: delivery
-  uses `offer!`, with `(sliding-buffer 1)` coalescing payload-free wakes.
+  (`reference-code/datahike/src/datahike/writer.cljc`, `notify-listeners!`).
+  A returned transaction report therefore does not prove mailbox delivery.
+  A failed hand-off THROWS into Datahike, which retires the registration by
+  identity and hands the failure to the connection's handler
+  (`seon.cluster.store/listen-failures!`, one stored fault). Delivery never
+  parks: it uses `offer!`, with `(sliding-buffer 1)` coalescing payload-free
+  wakes.
 
   Ordinary commits only match and deliver. Declaration changes rederive
   the matcher from the report's database before dispatch; no callback
@@ -63,6 +66,7 @@
   (:require [clojure.core.async :as async]
             [datahike.api :as d]
             [datahike.db.utils :as db.utils]
+            [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]))
@@ -377,21 +381,18 @@
 (defn- deliver!
   "`offer!` one payload-free wake and classify the answer.
   `fenced?` is a zero-arg derived check invoked only after a closed
-  offer. Faults on `::refused` — one delivery decision and its refusal.
+  offer. Throws on `::refused` into Datahike's listener-failure path.
   Returns the delivery."
-  {:malli/schema [:=> [:cat :seon.flow/channel :seon.cluster.wake/key :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]] :seon.cluster.wake/delivery]}
-  [fault-channel key route channel fenced?]
+  {:malli/schema [:=> [:cat :seon.cluster.wake/key :seon.schema/value :seon.flow/channel [:=> [:cat] :boolean]] :seon.cluster.wake/delivery]}
+  [key route channel fenced?]
   (let [offered (async/offer! channel ::wake)
         outcome (delivery offered
                           (and (false? offered) (boolean (fenced?))))]
     (when (= ::refused outcome)
-      (async/offer! fault-channel
-                    (ex-info "a wake route refused delivery"
-                             {:seon.cluster.wake/undeliverable-wake key
-                              :seon.error/message
-                              "A wake route refused delivery."
-                              ::key key
-                              ::route route})))
+      (throw (ex-info "A wake route refused delivery."
+                      {:seon.cluster.wake/undeliverable-wake key
+                       ::key key
+                       ::route route})))
     outcome))
 
 (defn- wake-matchers
@@ -438,9 +439,10 @@
 (defn route!
   "Register the ROUTING wake handler on a connection (F1 4).
   The per-agent successor of `listen!`'s one-channel delivery, under
-  the SAME two absolute prohibitions (it never throws and never parks
-  — every delivery is `offer!` and the whole handler is one
-  try/catch).
+  one absolute prohibition: it never parks — every delivery is `offer!`.
+  A failure throws into Datahike, which retires this registration by
+  identity and records it through the connection's handler
+  (`seon.cluster.store/listen-failures!`).
 
   Compile schema recipients and runtime listen patterns by attribute at
   registration. Recompile from the report's `:db-after` when declarations,
@@ -481,9 +483,8 @@
   wake. There is no query, report payload, call-id routing, or second
   registration.
 
-  A route refusing delivery is a FAULT fact, exactly as in
-  `listen!` — a swallowed failure nobody hears about is an invisible
-  one. Only an exact mailbox route the agent owner derives as fenced is
+  A route refusing delivery THROWS and becomes a stored fault — a
+  swallowed failure nobody hears about is an invisible one. Only an exact mailbox route the agent owner derives as fenced is
   benign; a closed render route is still a failure. Coalescing on every
   `(sliding-buffer 1)` target is safe by the standing argument: a wake
   says only look, and the woken pass derives everything from facts.
@@ -496,7 +497,7 @@
            :seon.cluster.wake/fenced?
            :seon.cluster.wake/armer-channel :seon.cluster.wake/render-channel
            :seon.render.web/interest
-           :seon.cluster.wake/fault-channel :seon.cluster.wake/key]}]
+           :seon.cluster.wake/key]}]
   (when-let [refusal (or (declarations-refusal (d/db connection))
                          (arming-refusal (d/db connection)))]
     (throw (ex-info (:seon.error/message refusal) refusal)))
@@ -506,56 +507,51 @@
      connection
      key
      (fn [report]
-       (try
-         (let [published-interest @interest
-               render? (volatile! (= :all published-interest))]
-           ;; Rebuild once before dispatch, including deletions and changes
-           ;; in the same transaction as a matching datom.
-           (when (some (fn [datom]
-                         (let [attribute (:a datom)]
-                           (or (= "seon.wake" (namespace attribute))
-                               (= "seon.listen" (namespace attribute))
-                               (#{:seon.runtime/listens :seon.runtime/agent
-                                  :seon.agent/runtime :seon.schema/key :seon.schema/form}
-                                attribute))))
-                       (:tx-data report))
-             (vreset! matchers (wake-matchers (:db-after report)))
-             (vreset! arming (arming-attributes (:db-after report))))
-           (doseq [datom (:tx-data report)]
-             (let [attribute (:a datom)]
-               (when (and (not @render?)
-                          (contains? published-interest attribute))
-                 (vreset! render? true))
-               ;; AN AGENT CREATED WHILE THE CLUSTER RUNS IS ARMED BY THE
-               ;; SAME ARMER THAT ARMS BOOT-TIME AGENTS. Its creation
-               ;; asserts a declared arming attribute, so the armer takes
-               ;; one derive-all pass; there is no second arming path and
-               ;; no caller that arms its own agent.
-               (when (and (contains? @arming attribute) (:added datom))
-                 (async/offer! armer-channel ::wake))
-               (when-let [matcher (get @matchers attribute)]
-                 (doseq [agent-eid (into (if (::schema? matcher) #{(:v datom)} #{})
-                                        (keep #(% datom)) (::matches matcher))]
-                   (if-let [channel (get (channels) agent-eid)]
-                     (deliver! fault-channel key ::mailbox channel
-                               #(fenced? agent-eid channel))
-                     (async/offer! armer-channel ::wake))))))
-           (when @render?
-             (deliver! fault-channel key ::render render-channel
-                       (constantly false))))
-         (catch Throwable failure
-           (async/offer! fault-channel failure))))))
+       (let [published-interest @interest
+             render? (volatile! (= :all published-interest))]
+         ;; Rebuild once before dispatch, including deletions and changes
+         ;; in the same transaction as a matching datom.
+         (when (some (fn [datom]
+                       (let [attribute (:a datom)]
+                         (or (= "seon.wake" (namespace attribute))
+                             (= "seon.listen" (namespace attribute))
+                             (#{:seon.runtime/listens :seon.runtime/agent
+                                :seon.agent/runtime :seon.schema/key :seon.schema/form}
+                              attribute))))
+                     (:tx-data report))
+           (vreset! matchers (wake-matchers (:db-after report)))
+           (vreset! arming (arming-attributes (:db-after report))))
+         (doseq [datom (:tx-data report)]
+           (let [attribute (:a datom)]
+             (when (and (not @render?)
+                        (contains? published-interest attribute))
+               (vreset! render? true))
+             ;; AN AGENT CREATED WHILE THE CLUSTER RUNS IS ARMED BY THE
+             ;; SAME ARMER THAT ARMS BOOT-TIME AGENTS. Its creation
+             ;; asserts a declared arming attribute, so the armer takes
+             ;; one derive-all pass; there is no second arming path and
+             ;; no caller that arms its own agent.
+             (when (and (contains? @arming attribute) (:added datom))
+               (async/offer! armer-channel ::wake))
+             (when-let [matcher (get @matchers attribute)]
+               (doseq [agent-eid (into (if (::schema? matcher) #{(:v datom)} #{})
+                                      (keep #(% datom)) (::matches matcher))]
+                 (if-let [channel (get (channels) agent-eid)]
+                   (deliver! key ::mailbox channel
+                             #(fenced? agent-eid channel))
+                   (async/offer! armer-channel ::wake))))))
+         (when @render?
+           (deliver! key ::render render-channel
+                     (constantly false)))))))
   key)
 
 (defn unlisten!
   "Remove the wake handler.
-  Idempotent — removing an absent listener is
-  a no-op, because `::flow/stop` may arrive after a store release."
+  Idempotent — removing an absent listener is a no-op, and a RELEASED
+  connection (`::flow/stop` may arrive after a store release) holds no
+  listener, so it is the declared case skipped here."
   {:malli/schema [:=> [:cat :seon.cluster.wake/unlisten-request] :nil]}
   [{:keys [:seon.cluster.wake/connection :seon.cluster.wake/key]}]
-  (try
-    (d/unlisten connection key)
-    ;; stop may arrive after a release, and an absent listener is the
-    ;; state we wanted anyway
-    (catch Throwable _ nil))
+  (when (db/connection? connection)
+    (d/unlisten connection key))
   nil)

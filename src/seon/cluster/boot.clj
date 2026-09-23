@@ -116,6 +116,9 @@
              (assoc pre-graph-environment
                     :seon.flow/work-launcher work-launcher)))
            _ (env/replace-environment! projection-state environment)
+           ;; a failed listener hand-off is one stored fault on THIS world (N3)
+           _ (store/listen-failures!
+              environment (cluster/process-identity (process/current-identity)))
            instance (publish!
                      (assoc instance :seon.sci.eval/ctx
                             (-> bare-ctx
