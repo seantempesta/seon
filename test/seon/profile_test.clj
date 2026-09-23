@@ -165,6 +165,11 @@
           (is (= 3 (:seon.profile/calls grown))))
         (is (<= 6 (:seon.profile/total-ms grown)))
         (is (some #(re-find #"ms in seon\.profile-test/explained-" %) (:seon.profile/lines explanation)))
+        (is (re-find #"^OVER ONE SECOND"
+                     (first (:seon.profile/lines
+                             (profile/explain-slow (assoc mark :seon.profile/started-ns
+                                                          (- (System/nanoTime) 2000000000))))))
+            "over one second, the first line tells the agent the operation is its defect to fix")
         (is (nil? (profile/explain-slow (profile/begin)))
             "an operation within one second has nothing to explain"))
       (finally (ns-unmap 'seon.profile-test var-name)))))

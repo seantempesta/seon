@@ -232,12 +232,13 @@
     {:seon.profile/elapsed-ms elapsed-ms
      :seon.profile/growths ranked
      :seon.profile/lines
-     (if (seq ranked)
-       (into [(str elapsed-ms " ms elapsed; armed definitions by inclusive time"
-                   " (callers include callees; concurrent work included):")]
-             (map growth-line) ranked)
-       [(str elapsed-ms " ms elapsed; no armed definition accumulated a millisecond:"
-             " the time is in unarmed code or waiting.")])}))
+     (into [(str elapsed-ms " ms elapsed.")]
+           (if (seq ranked)
+             (into [(str "Armed definitions by inclusive time (callers include callees;"
+                         " concurrent work included):")]
+                   (map growth-line) ranked)
+             [(str "No armed definition accumulated a millisecond: the time is in"
+                   " unarmed code or waiting.")]))}))
 
 (defn explain-slow
   "The explanation when the operation `mark` began took over one second.
@@ -247,7 +248,15 @@
   {:malli/schema [:=> [:cat :seon.profile/mark] [:or :nil :seon.profile/explanation]]}
   [mark]
   (when (< slow-ms (quot (- (System/nanoTime) (:seon.profile/started-ns mark)) 1000000))
-    (explain mark 10)))
+    (let [explanation (explain mark 10)]
+      (update explanation :seon.profile/lines
+              #(into [(str "OVER ONE SECOND (" (:seon.profile/elapsed-ms explanation)
+                           " ms): this is your defect; fix it before continuing. Likely you"
+                           " over-engineered or are redoing work a dependency or an existing"
+                           " function already does better. Find what the top call's work is"
+                           " proportional to (the whole program? the store? the call count?)"
+                           " and remove it.")]
+                     (rest %))))))
 
 (defn- observation-line
   {:malli/schema [:=> [:cat :seon.profile/observation] :string]}
