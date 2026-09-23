@@ -30,7 +30,7 @@
   [:seon.profile/total-counter :seon.profile/total-counter]
   [:seon.profile/max-counter :seon.profile/max-counter]
   [:seon.profile/throw-counter :seon.profile/throw-counter]]
- :seon.profile/calls [:int {:min 0 :description "Completed calls, returns and throws."}]
+ :seon.profile/calls [:int {:min 0 :description "Completed calls: returns and throws both count."}]
  :seon.profile/total-ms [:int {:min 0 :description "Inclusive wall milliseconds."}]
  :seon.profile/mean-us [:int {:min 0}]
  :seon.profile/max-ms [:int {:min 0 :description "Lifetime maximum of one call, inclusive."}]

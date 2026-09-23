@@ -1,6 +1,6 @@
 ---
 type: landing
-status: fix adopted on pid 31476; heap gate pending default recovery
+status: landed c9870081f; heap gate passed on pid 55322; second retainer not reproduced
 created: 2026-09-23
 ---
 # Default heap retention: callables pinned by the projection holder
@@ -96,21 +96,58 @@ the projection is still alive.
 - No `:malli/schema` was touched (`compiled-wrapper`'s and `arm-var!`'s
   contracts are unchanged), so no contract compile was needed.
 
-## Heap gate
+## Heap gate (pid 55322, running from the checkout)
 
-PENDING. The first green request after adoption refused at context
-acquisition with `Node not found in storage` (address
-`6ab378a2-e7bb-47db-bf1a-b4ab302df8c8`, a node from about 06:58Z; full text in
-`tmp/opus-leak-fix/green.txt`). At that point default had about 240 MB free,
-with old 3.8 GB and humongous 6.4 GB. The 5 GB humongous `byte[]` rise
-happened during another lane's full-source refresh (`seon.cluster/full-source-refresh!`
-→ `seon.fn/analyze-rows` → kondo) at about 06:50Z. It stayed live after that
-refresh ended. That is a separate retainer, not this lane's. RESET NEEDED;
-reported to the orchestrator.
+`(seon.fs/source-directory)` returned `/Users/sean/src/seon`. Each cycle was
+run by `tmp/opus-leak-fix/gate.sh`, holding the adoption token throughout:
+1. Edit a comment in the regression file.
+2. `bin/seon init --dev default --changed test/seon/schema/registry_retention_test.clj`.
+3. `bin/test-check default --policy named --ns seon.schema.registry-retention-test --ns seon.fault-test`.
+4. `jcmd 55322 GC.run`, then `GC.heap_info`.
 
-Pre-fix test-only cycles on pid 31476 (after `jcmd GC.run`):
-1208 → 1200 → 1208 → 1200 MB old, then 1904 → 2008 → 2080 MB during
-concurrent lanes.
+| Cycle | Adopt | Request | Run | Old gen after GC |
+|---|---:|---:|---|---:|
+| baseline | — | — | — | 472 MB |
+| 1 | 2,498 ms | 6,868 ms | `0e4f9fb5454d` executed 4, pass 31 | 704 MB |
+| 2 | 2,222 ms | 5,522 ms | `e04c9b9057a7` executed 4, pass 31 | 672 MB |
+| 3 | 2,336 ms | 5,250 ms | `2e12843b43c2` executed 4, pass 31 | 680 MB |
+
+The heap is flat after the first cycle. Census after cycles 1 and 3: 1 distinct
+projection registry, 4 reachable option-registry generations, and 0 wrapper
+entries in projection holders (before the fix, pid 31476 had 3,074).
+An earlier run on pid 54364 does not count: that JVM ran from the
+`data/source/c9870081f…` archive, so its adoptions loaded nothing.
+
+## Second retainer (8.4 GB byte[] on pid 31476): not reproduced
+
+- `tmp/orchestrator/heap-2026-09-23/histo-0835.txt` shows 4,230,472 byte[]
+  (8.46 GB) against 4,225,552 Strings. That fits roughly 2 KB Strings plus
+  about 6.4 GB of humongous (≥4 MB) arrays.
+- Two adoptions on pid 55322 were measured by GC plus class histogram before
+  and after. Neither grew byte[]:
+  - a `src/seon/schema.clj` comment: 2,660 ms, byte[] 219.6 → 227.0 MB;
+  - a real description fix in `resources/seon/schemas/seon.profile.edn`:
+    5,949 ms, byte[] about 217 MB, old 928 → 968 MB.
+- Analysis classifies `:all` only on a `.clj-kondo` change
+  (`seon.cluster.source/classify-paths`). The 58.8 s full-refresh path did not
+  recur on the current publication code.
+- **One candidate GC root is proven: a long-lived prepl session's `*1`/`*2`/`*3`.**
+  Clojure's prepl `set!`s them after every eval
+  (`reference-code/clojure/src/clj/clojure/core/server.clj:236-238`), and
+  Seon's `resources/seon/operator/prepl.clj` runs that prepl for every MCP
+  session. Probe:
+  - Session `opus-leak-star1` returned a 64 MB vector of byte arrays.
+  - From another session, a WeakReference to that vector survived two
+    `System/gc`.
+  - After three more evals in `opus-leak-star1`, it was collected.
+  - Pid 31476 carried 14 idle MCP sessions (runtime_status). Each one retains
+    its last three results and `*e`.
+- That these sessions held the 8.4 GB is NOT proven. Pid 31476 is gone, and
+  `Thread.threadLocals` is closed to reflection (`java.base does not opens
+  java.lang`), so a live walk cannot reach session bindings.
+- If it recurs, the evidence to take is `jcmd <pid> GC.heap_dump` before any
+  restart. A candidate fix belongs to the MCP owner: close idle sessions, or
+  stop retaining `*2`/`*3`. It has not been made.
 
 ## Timings over one second
 
@@ -120,5 +157,8 @@ concurrent lanes.
 | `bin/seon init --dev default --changed` test file only | 4,647 ms | Same refresh path. |
 | Named request, retention test only (red) | 13,546 ms | DEFECT over 10 s: it built the projection from the snapshot and ran up to three full GCs. The test now uses `schema/current-projection`. |
 | Named request, fault-test (pre-fix baseline) | 3,117–8,288 ms | Request overhead (branch, context acquisition, recording). Owned by test-overhead. |
+| Heap-gate adopt (per cycle) | 2.2–2.5 s | Partial publication of one test file plus reload. It is not sub-second: `refresh-source!` and read-evidence work sit in the publication lane's issue. |
+| Heap-gate named request | 5.3–6.9 s | Branch, context acquisition, 4 executed tests and recording. The retention test's own `build-projection` fallback costs about 1.3 s of it. Owned by test-overhead. |
+| `seon.profile.edn` adoption | 5,949 ms | Schema resource publication. Profile shows a concurrent agent turn (`seon.turn/call-turn` 43 s) in the same window. |
 | Probe: reach over the projection LRUs | 20,178 ms | Diagnostic, bounded at 20 s. |
 | Probe: attribute-vars walk | over 120 s | DEFECT in my probe: reflective and unbounded. It was aborted by poisoning its own throwaway cache. The bounded version replaced it. |
