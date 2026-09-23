@@ -83,6 +83,9 @@
 
         ;; Foreground argv-vector subprocesses. Seon owns cwd policy,
         ;; environment overrides, stream capture, deadlines, and tree reaping.
+        ;; Fork seantempesta/process, branch seon-aot-guard: guards the pprint
+        ;; extension load during AOT, so the dependency class cache builds from
+        ;; committed inputs. Retire when upstream fixes.
         babashka/process {:local/root "reference-code/babashka-process"}
 
         ;; Lossless structural source selection and transformation. The edit
