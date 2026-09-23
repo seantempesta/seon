@@ -180,3 +180,126 @@ threads. The same 9 red members appeared before and after (runs `2d368affab6f`,
   origin's declaration presence.
 - `test/seon/db_test.clj` +31: one regression.
 - No RESET NEEDED.
+
+## Design: option 1, one node cache per store (ruled 2026-09-23; docs only, the fork is held)
+
+The orchestrator chose option 1. `reference-code/datahike` is held by the store-damage
+lane until its push lands; this section is the change to make once it is handed over.
+Pins: fork `2cc313a6`, upstream `replikativ/datahike` `upstream/main` (`7f39cccc`).
+
+### What upstream already does
+
+Upstream shipped this change as `d2b9e525`, "perf(index): share the node cache between
+connections to one store (#998)" (Weilbach, 2026-08-27). It is not in the fork:
+`git merge-base --is-ancestor d2b9e525 HEAD` is false.
+
+- **Where the cache lives.** It sits in the connection-registry entry, not in a global
+  keyed by store id (`upstream/main:src/datahike/connections.cljc:30-106`). Upstream
+  gives three reasons: a global needs an explicit drop that `delete-database` skipped,
+  and upstream measured 334 nodes of a deleted database pinned for the life of the
+  process; a failed connect left a global entry behind; and a rebound `*connections*`
+  must isolate.
+- **Sharing rule.** `sibling-cache` returns a live connection's or reservation's cache
+  when it has the same store and the same `:store-cache-size` threshold.
+  `acquire-node-cache!` does the sibling lookup and the reservation in one `swap!`, so
+  two branches connecting at once cannot build two caches.
+- **How storage gets it.** `di/node-cache-key` and `di/make-node-cache`
+  (`upstream/main:src/datahike/index/interface.cljc:22-33`). The connector assocs the
+  cache onto the raw store before building storage (`connector.cljc:381-384`).
+  `create-storage` takes `(or (get store di/node-cache-key) (di/make-node-cache …))`
+  (`persistent_set.cljc:662-671`).
+- **What is not shared.** Only the cache. `pending-writes`, `freed-set`, `freelist` and
+  `stats` stay per connection.
+- **Measured upstream** (6.44M datoms): a fresh branch's first query went from 12,569
+  node restores, 2,920 ms and 6,566 MB allocated to 0 restores and ~600 ms.
+
+### The fork change (port, not a new design)
+
+The fork's registry already shares one per-store resource, `:write-hooks`, through
+exactly this sibling pattern: `reserve-connection-opening!`
+(`src/datahike/connections.cljc:36-94`) finds a sibling entry with the same
+`:physical-store-key`, or makes a fresh atom. The node cache rides the same path:
+
+1. `src/datahike/index/interface.cljc`: add `node-cache-key` and
+   `make-node-cache [threshold]`. `make-node-cache` returns
+   `(atom (cache/lru-cache-factory {} :threshold threshold))` and must be pure, because
+   a `swap!` retry may call it and throw the result away. Upstream's docstrings come
+   across as-is.
+2. `connections.cljc` `reserve-connection-opening!`: take `threshold` and
+   `make-cache`. Inside the same `swap!` that picks `write-hooks`, pick `:node-cache`
+   from the first entry with an equal `:physical-store-key` and an equal `:threshold`,
+   or else `(make-cache)`. Store `:node-cache` and `:threshold` on the reservation, and
+   return `:node-cache` in the `:owner` result. `complete-connection-opening!` (`:98-111`)
+   copies both keys into the published entry, the same way it copies `:write-hooks`.
+   This keys on the fork's `physical-store-key` rather than upstream's bare store id,
+   the same choice the fork already made for `write-hooks`.
+3. `connector.cljc` `-connect-impl*` `:owner` (`:333-370`): right after
+   `ks/connect-store`, `(assoc raw-store dii/node-cache-key node-cache)`. All three
+   `ds/add-cache-and-handlers` calls read this one `raw-store`: the first build at `:337`,
+   the index-mismatch rebuild at `:351`, and the create-time-config adoption at `:366`.
+   All three therefore get the one cache. Branching factor and diff buffer only change
+   how nodes are decoded, and a cached entry is an already-decoded node keyed by its
+   address, so reusing the cache across these rebuilds is sound.
+4. `persistent_set.cljc` `create-storage` (`:458-466`): the cache argument becomes
+   `(or (get store di/node-cache-key) (di/make-node-cache (:store-cache-size config)))`.
+   Paths with no connection behind them (`create-database`, `database-exists?`) get a
+   private cache, as upstream does. Nothing else in `CachedStorage` changes.
+
+Size: about 25 fork src lines plus the upstream test, and no Seon src change.
+`seon.cluster.store/open-branch!` and every fixture, recording or acquisition branch
+already connect through `-connect-impl*`.
+
+### Bound, eviction, release
+
+- **Bound.** It stays the existing LRU threshold, `:store-cache-size`, default 1000
+  (`datahike/config.cljc:24`), now once per (store, threshold) instead of once per
+  connection. At 4,096-way nodes that is about 2.5 M datoms held for the whole store,
+  where the heap research counted 21 caches. No new dial.
+- **Eviction.** Unchanged LRU behaviour, now over one population. Address reuse is the
+  only way an address can name different bytes. It happens through the freelist, and
+  only when `[:online-gc :enabled?]` is set and the store has a single branch
+  (`online_gc.cljc:176-212`). Reuse already calls `wrapped/evict cache address`
+  (`persistent_set.cljc:421-422`), which on a shared atom evicts for every connection:
+  the correct semantics. Seon enables neither online GC nor `:crypto-hash?`. Addresses
+  are `squuid`s (`persistent_set.cljc:277-282`), unique per write. Offline collection
+  can leave a cached entry for an address nothing references any more. It is
+  unreachable through any root and ages out of the LRU.
+- **Nothing retained per connection.** A released connection's entry leaves the
+  registry (`release-connection-reference!` on the last reference,
+  `delete-connection!`, `fail-connection-opening!` for an abandoned open). The cache
+  is reachable only from entries and from the `CachedStorage` of database values still
+  alive. A database value that outlives its release, such as those held by
+  `seon.sci.eval/refusal-recording-cache` and `base-context-cache` in the research note,
+  then pins the one shared, bounded cache. Today it pins its own full cache. The Seon
+  holder fixes that note names remain wanted for the connection world they pin, but no
+  longer multiply index memory.
+- **Isolation.** Writes stay per connection. A node lands in the cache at `store`
+  (`persistent_set.cljc:423-425`) before its flush, but another connection can only
+  ask for that address through a root that names it, and a root is published only by
+  a commit or a merge.
+- **Cache pressure.** Default's agents and concurrent test branches now share 1,000
+  slots. Test branches start at recent commits of the same store and read mostly the
+  same addresses. Measure the hit rate after landing: sum `:reads` over
+  `(:stats (:storage store))` per request. `:store-cache-size` is a reopen setting, not
+  a creation-fixed one.
+
+### Regression
+
+- **Fork:** port `upstream/main:test/datahike/test/node_cache_test.clj`, all seven tests
+  (`cache-reservations-share-by-store-and-threshold`,
+  `rebound-connection-registries-isolate-node-caches`,
+  `non-connection-store-operations-do-not-reserve-a-cache`,
+  `failed-connect-abandons-its-cache-reservation`,
+  `invalidation-rejects-an-in-flight-connection`,
+  `invalidation-releases-exactly-the-connections-it-removes`,
+  `shared-cache-preserves-branch-write-isolation-and-reconnects`). Adapt the reservation
+  calls to `reserve-connection-opening!`.
+- **Seon** (`test/seon/db_test.clj`, one test): read an entity through the fixture's
+  connection, open a branch at that commit, read the same entity there, and assert
+  that the branch's `CachedStorage` `:reads` stayed 0 and its cache is `identical?` to
+  the parent's. Then release the branch and assert its connection id is gone from
+  `datahike.connections/*connections*` while the parent's cache is unchanged.
+- **Before/after probe to record** (the one this note used): the first
+  `seon.db/transact!` on a fresh branch connection, 200–215 ms today against ~40 ms
+  warm, with `:reads` 30 against the target 0. Also the live `CachedStorage` count
+  against distinct cache atoms in a heap walk of default after one 38-member request.
