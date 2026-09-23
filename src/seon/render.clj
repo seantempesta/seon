@@ -1606,7 +1606,12 @@
   (`reference-code/datahike/src/datahike/store.cljc:44`,
   `connector.cljc:376`). A branch unlinked and reopened under the same name
   is a new generation, so it shares nothing with the old one. A speculative
-  database value has no committed cache context; its scope is empty."
+  value (a `with` result, a transaction function's argument) keeps its
+  basis's connection and generation (`datahike.db/speculative-cache-context`,
+  `reference-code/datahike/src/datahike/db.cljc:444`), so it derives in its
+  branch's cache, where every entry is validated by its read evidence and a
+  speculative value never proves a committed read. A detached value (no
+  context) has an empty scope."
   {:malli/schema
    [:=> [:cat :seon.sci.eval/ctx]
     [:map

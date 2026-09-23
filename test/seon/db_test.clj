@@ -4,6 +4,7 @@
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
             [datahike.core :as datahike]
+            [datahike.db]
             [datahike.pull-api :as pull-api]
             [datahike.tools :as datahike.tools]
             [datahike.writer :as datahike.writer]
@@ -2192,7 +2193,8 @@
   (let [derive-projection schema/load-projection
         derivations (atom 0)
         result (with-redefs [schema/load-projection
-                             (fn [value] (swap! derivations inc) (derive-projection value))]
+                             (fn ([value] (derive-projection value))
+                               ([value base] (swap! derivations inc) (derive-projection value base)))]
                  (body))]
     [@derivations result]))
 
@@ -2227,7 +2229,10 @@
                                         {:seon.schema/key ::staged :seon.schema/form (pr-str :int)}]]))
             [derivations [first-read second-read]]
             (counting-derivations #(vector (db/carried-projection staged) (db/carried-projection staged)))]
-        (is (nil? (:cache-context staged)) "Datahike detaches the speculative value")
+        (is (nil? (datahike.db/committed-value-identity staged))
+            "the speculative value has no committed identity")
+        (is (false? (:datahike.cache/committed? (:cache-context staged)))
+            "its revision context is never committed")
         (is (contains? (:seon.schema.projection/forms first-read) ::staged)
             "its own declaration datoms select its population")
         (is (not (contains? (:seon.schema.projection/forms committed) ::staged)))

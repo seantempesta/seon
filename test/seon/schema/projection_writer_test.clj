@@ -2,6 +2,7 @@
   (:require [clojure.core.cache.wrapped :as cache]
             [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [datahike.db]
             [malli.core :as m]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -60,7 +61,8 @@
         ;; value, content); an empty cache is the cold start this counts from.
         (cache/seed cache {})
         (with-redefs [schema/load-projection
-                      (fn [value] (swap! derivations inc) (derive-projection value))]
+                      (fn ([value] (derive-projection value))
+                        ([value base] (swap! derivations inc) (derive-projection value base)))]
           (let [read! (fn [value] (swap! reads inc) (db/carried-projection value))
                 first-read (read! database)]
             (is (identical? first-read (read! database)))
@@ -93,14 +95,99 @@
             derive-projection schema/load-projection
             derivations (atom 0)]
         (cache/seed cache {})
-        (is (nil? (:cache-context database)))
+        (is (nil? (datahike.db/committed-value-identity database)))
         (with-redefs [schema/load-projection
-                      (fn [value] (swap! derivations inc) (derive-projection value))]
+                      (fn ([value] (derive-projection value))
+                        ([value base] (swap! derivations inc) (derive-projection value base)))]
           (let [left (db/carried-projection database)
                 right (db/carried-projection database)]
             (is (identical? left right)
                 "a value without committed identity is memoized by its declarations")
             (is (= 1 @derivations))))))))
+
+(defn- unrelated-write
+  "A `:db.fn/call` operation writing one row no projection derivation reads."
+  {:malli/schema [:=> [:cat :string] [:vector :seon.schema/value]]}
+  [message-id]
+  [:db.fn/call (fn [_] [{:seon.message/id message-id
+                         :seon.message/content "no declaration attribute"}])])
+
+;; #24q consumer (2026-09-23): Datahike gives a `with` value and a
+;; transaction function's argument the revision context its effective datoms
+;; derive (`datahike.db/speculative-cache-context`). Before, every such value
+;; fell to the declaration content key, one pass over the declaration datoms
+;; (~10 ms on default) per value; the revision key finds the basis's
+;; projection object unless the value wrote a declaration attribute.
+(deftest a-speculative-value-reuses-its-basis-projection-unless-it-writes-a-declaration
+  (support/with-database
+    (fn [connection]
+      (let [head (db/db connection)
+            committed (db/carried-projection head)
+            content-keys (atom 0)
+            content-key @#'seon.db/declaration-content-key
+            seen (atom nil)
+            derivation-bases (atom [])
+            derive-projection schema/load-projection
+            project! (fn [value] (reset! seen (db/carried-projection value)) [])]
+        (with-redefs [seon.db/declaration-content-key
+                      (fn [value] (swap! content-keys inc) (content-key value))
+                      schema/load-projection
+                      (fn ([value] (derive-projection value))
+                        ([value base] (swap! derivation-bases conj base) (derive-projection value base)))]
+          (let [unrelated (:db-after (d/with head [(unrelated-write "speculative-unrelated")]))]
+            (is (nil? (datahike.db/committed-value-identity unrelated)))
+            (is (identical? committed (db/carried-projection unrelated))
+                "a with value that wrote no declaration attribute reads its basis's projection"))
+          (d/with head [(unrelated-write "speculative-in-flight") [:db.fn/call project!]])
+          (is (identical? committed @seen)
+              "so does a transaction function's argument after an unrelated write")
+          (is (zero? @content-keys) "neither reads the declaration datoms")
+          (let [declared (:db-after (d/with head [(declaration-call ::speculative :int)]))
+                projection (db/carried-projection declared)]
+            (is (not (identical? committed projection)))
+            (is (contains? (:seon.schema.projection/forms projection) ::speculative)
+                "a written declaration misses to its own content")
+            (is (= 1 @content-keys))
+            (is (= 1 (count @derivation-bases)))
+            (is (identical? committed (first @derivation-bases))
+                "and derives by replacement from its basis's projection")))))))
+
+;; Cache-invalidation audit item 7 (2026-09-23): the value tier keyed a weak
+;; `ValueKey` whose equality died with its referent; core.cache's LRU kept the
+;; key a hit re-inserted, never the one it stored, so eviction never matched
+;; and the tier held 121-338 entries against its bound of 4, each retaining a
+;; whole projection.
+(deftest the-value-tier-honours-its-bound-and-releases-evicted-projections
+  (support/with-database
+    (fn [connection]
+      (let [head (db/db connection)
+            _ (db/carried-projection head)
+            value-cache @(ns-resolve 'seon.db 'value-projection-cache)
+            durable-cache @(ns-resolve 'seon.db 'projection-cache)
+            bound (:seon.db/value-cache-size db/projection-cache-policy)
+            _ (cache/seed value-cache {})
+            ;; Declaration datoms written directly: the tier's subject is the
+            ;; value, not the row writer (`turn/row-tx` costs ~400 ms each).
+            references
+            (vec (for [index (range (inc bound))]
+                   (let [staged (:db-after (d/with head [{:seon.schema/key
+                                                          (keyword "seon.schema.projection-writer-test"
+                                                                   (str "bounded-" index))
+                                                          :seon.schema/form (pr-str :int)}]))
+                         projection (db/carried-projection staged)]
+                     (is (identical? projection (db/carried-projection staged))
+                         "repeated reads of one speculative value hit the value tier")
+                     (java.lang.ref.WeakReference. projection))))]
+        (is (<= (count @value-cache) bound))
+        ;; Only the tiers retain these projections; release the durable one's
+        ;; content entries and collect.
+        (cache/seed durable-cache {})
+        (loop [attempt 0]
+          (System/gc)
+          (when (and (< attempt 3) (some? (.get ^java.lang.ref.WeakReference (first references))))
+            (recur (inc attempt))))
+        (is (nil? (.get ^java.lang.ref.WeakReference (first references)))
+            "an evicted value's projection is collectable")))))
 
 (deftest an-as-of-view-before-a-declaration-change-reads-the-older-population
   (support/with-database

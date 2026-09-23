@@ -1,6 +1,7 @@
 (ns seon.render-cache-test
   "The render cache belongs to the branch a context derives in."
   (:require [clojure.test :refer [deftest is testing]]
+            [datahike.api :as d]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.env :as env]
@@ -24,6 +25,14 @@
      :seon.render.web/root-agent-id "root"
      ::web/streams {}
      ::web/passes 0}))
+
+(defn- speculative-scope
+  "The branch scope of a ctx whose custody is a `with` value of `connection`'s head."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/connection]
+                  [:map-of :qualified-keyword :seon.schema/value]]}
+  [ctx connection]
+  (render/branch-scope
+   (assoc ctx :seon.sci.eval/custody {:seon.db/db (:db-after (d/with (db/db connection) []))})))
 
 (defn- root-package
   [ctx]
@@ -50,7 +59,9 @@
       (is (= (render/branch-scope parent-ctx)
              (select-keys (:cache-context @parent-connection)
                           [:datahike.cache/connection-id :datahike.cache/generation])))
-      (is (= parent-basis (:seon.render.package/basis-transaction parent-package))))
+      (is (= parent-basis (:seon.render.package/basis-transaction parent-package)))
+      (is (= (render/branch-scope parent-ctx) (speculative-scope parent-ctx parent-connection))
+          "a speculative value of the parent's head derives in the parent's branch"))
     ;; The fixture is the entrance's isolated fork of the serving parent,
     ;; acquired after the parent's cache existed.
     (let [fork (agent/acquire-context!
@@ -70,6 +81,8 @@
               fork-package (root-package fork-ctx)]
           (testing "the fork renders root on its own branch"
             (is (not= (render/branch-scope parent-ctx) (render/branch-scope fork-ctx)))
+            (is (= (render/branch-scope fork-ctx) (speculative-scope fork-ctx connection))
+                "a speculative value of the fork's head derives in the fork's branch")
             (is (not (identical? parent-cache (render/shared-cache fork-ctx))))
             (is (identical? (render/shared-cache fork-ctx) (render/shared-cache fork-ctx))
                 "one branch reuses its cache")

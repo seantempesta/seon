@@ -1087,7 +1087,14 @@
 
 (defn- index-evidence-current
   "An exact index check when historical datoms retain the read's dependencies.
-  Return no decision for a different database origin or discarded history."
+  Return no decision for a different database origin or discarded history.
+
+  A speculative value keeps its basis's connection and generation
+  (`datahike.db/speculative-cache-context`, datahike db.cljc:444), so a read
+  retained on that connection is checked against the speculative value's own
+  history, which holds its uncommitted datoms above the read's basis. That
+  answers whether the read still holds on this value; it never makes the value
+  committed evidence, because `dependency-revision` gives it no revision."
   [database source revision]
   (let [patterns (:seon.db/read-index-patterns source)
         basis (:seon.db/read-basis-t source)
@@ -1227,13 +1234,15 @@
    "Retain eight recent declaration populations under each of their three durable keys (a committed value's attribute revisions, its commit, and the declaration content itself) for active branches and retained reports; older populations derive again without retaining an unbounded compiled program population."
    ::value-cache-size 4
    ::value-cache-reason
-   "Retain the four most recent value objects, weakly, so the reads of one in-transaction value cost one lookup instead of one content key each; a burst of speculative values cannot evict the durable keys."})
+   "Retain the four most recent speculative revision keys and as-of points, so the reads of one in-transaction value that wrote a declaration cost one lookup instead of one content key each; a burst of speculative values cannot evict the durable keys, and an evicted value's projection is collectable."})
 
 ;; The same core.cache wrapped LRU used by datahike.schema-cache:8.
 (defonce ^:private projection-cache
   (cache/lru-cache-factory {} :threshold (::projection-cache-size projection-cache-policy)))
 
-;; The value tier of the same memo, in its own bound (`content-projection`).
+;; The value tier of the same memo, in its own bound (`value-projection`).
+;; Its keys are plain data (a speculative value's revision key, an as-of
+;; point), so core.cache's LRU evicts them by ordinary equality.
 (defonce ^:private value-projection-cache
   (cache/lru-cache-factory {} :threshold (::value-cache-size projection-cache-policy)))
 
@@ -1268,17 +1277,20 @@
 
   Two values holding these datoms derive the same projection whatever their
   connection, branch or committed identity, so this key hits across a new
-  connection at an equal commit, an in-transaction value inside a
-  `:db.fn/call` (Datahike clears its cache-context, `datahike/core.cljc:136`)
-  and an as-of view with its own rows. Datom equality ignores the
+  connection at an equal commit, an in-transaction value that wrote a
+  declaration (its fresh revision names no cached entry) and an as-of view
+  with its own rows. Datom equality ignores the
   transaction (`datahike/datom.cljc:106`), so each attribute's transactions
   ride beside its datoms. Unchanged datoms are the index's own objects, so
   equality is mostly `identical?`; the cost is one pass over these
   attributes (about 40k datoms, ~5 ms, in default on 2026-09-22; an as-of
   view adds its sort, 17-21 ms)."
   {:malli/schema
+   ;; The shape of each attribute's entry, not each of its ~30k datoms, which
+   ;; the index produced: validating every datom cost 148 ms per armed key
+   ;; (cache-invalidation audit, 2026-09-23).
    [:=> [:cat :seon.db/database-value]
-    [:vector [:tuple :qualified-keyword [:vector :seon.db/transaction-report-datom] [:vector :int]]]]}
+    [:vector [:tuple :qualified-keyword [:fn clojure.core/vector?] [:fn clojure.core/vector?]]]]}
   [database]
   (let [installed (dbi/-schema (schema-database database))]
     (mapv (fn [attribute]
@@ -1293,46 +1305,70 @@
               [attribute datoms (into [] (map :tx) datoms)]))
           schema/projection-attributes)))
 
-(deftype ^:private ValueKey [^int hash ^java.lang.ref.WeakReference reference]
-  ;; One database value object as a cache key, held weakly. A DB's own
-  ;; equality compares every datom when two hashes agree
-  ;; (`datahike/db.cljc:711`); the in-transaction value one `:db.fn/call`
-  ;; reads many times is one object, so identity is the exact, constant-time
-  ;; question. The weak reference lets that value be collected while its
-  ;; entry ages out of the LRU: the tier finds a projection, never keeps a
-  ;; database alive.
-  Object
-  ;; Reflexive even after collection, so the LRU can still evict the entry.
-  (equals [this other]
-    (or (identical? this other)
-        (and (instance? ValueKey other)
-             (let [value (.get reference)]
-               (and (some? value)
-                    (identical? value (.get ^java.lang.ref.WeakReference (.-reference ^ValueKey other))))))))
-  (hashCode [_] hash))
+(defn- revision-agreement
+  "How many members of a revision key `candidate` shares with `context`:
+  its connection, generation and conservative revision, and each declaration
+  attribute's revision."
+  {:malli/schema [:=> [:cat [:map-of :qualified-keyword :seon.schema/value]
+                       [:map-of :qualified-keyword :seon.schema/value]]
+                  :int]}
+  [context candidate]
+  (let [revisions (:datahike.cache/attribute-revisions context)
+        candidate-revisions (:datahike.cache/attribute-revisions candidate)]
+    (+ (count (filter #(= (get context %) (get candidate %))
+                      [:datahike.cache/connection-id :datahike.cache/generation
+                       :datahike.cache/conservative-revision]))
+       (count (filter #(= (get revisions %) (get candidate-revisions %))
+                      schema/projection-attributes)))))
 
-(defn projection-value-key?
-  "True for the projection memo's weak value-tier key."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (instance? ValueKey value))
+(defn- nearest-base
+  "The derived projection nearest `database`, the base its derivation replaces
+  from (`schema/load-projection`), or `{}` when none is derived yet.
 
-(defn- value-key
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:fn seon.db/projection-value-key?]]}
-  [database]
-  (ValueKey. (System/identityHashCode database) (java.lang.ref.WeakReference. database)))
-
-(defn- content-projection
-  "The projection of `database`'s declaration content, memoized by the value
-  object and then by that content."
+  Nearest is the committed revision key sharing the most declaration-attribute
+  revisions with `database`'s cache-context: its basis for a speculative value
+  (`datahike.db/speculative-cache-context` keeps every untouched revision) and
+  the previous commit for a committed one. Any base derives the same
+  projection; a near one recompiles only what differs. Only realized entries
+  are candidates, so no derivation waits on another."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
   [database]
-  @(cache/lookup-or-miss
-    value-projection-cache (value-key database)
-    (fn [_]
-      (delay
-       @(cache/lookup-or-miss projection-cache [::declaration-content (declaration-content-key database)]
-                              (fn [_] (delay (schema/load-projection database))))))))
+  (let [context (when (instance? DB database) (:cache-context database))
+        candidates (keep (fn [[k cell]] (when (and (map? k) (realized? cell)) [k cell]))
+                         @projection-cache)]
+    (if (seq candidates)
+      @(second (apply max-key #(revision-agreement (or context {}) (first %)) candidates))
+      {})))
+
+(defn- content-projection
+  "The projection of `database`'s declaration content, memoized by that
+  content. A miss derives from its `nearest-base`."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
+  [database]
+  @(cache/lookup-or-miss projection-cache [::declaration-content (declaration-content-key database)]
+                         (fn [_] (delay (schema/load-projection database (nearest-base database))))))
+
+(defn- value-projection
+  "The projection of a value whose `value-key` names its declaration content
+  exactly, memoized in the bounded value tier, then by content."
+  {:malli/schema [:=> [:cat [:or [:map-of :qualified-keyword :seon.schema/value]
+                                 [:tuple :qualified-keyword :uuid [:or :int :inst]]]
+                            :seon.db/database-value]
+                  :seon.schema/projection]}
+  [value-key database]
+  @(cache/lookup-or-miss value-projection-cache value-key
+                         (fn [_] (delay (content-projection database)))))
+
+(defn- as-of-key
+  "An as-of view's exact identity: its committed origin's commit and its time
+  point, which fix every datom it holds. Absent for an uncommitted origin."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:or :nil [:tuple :qualified-keyword :uuid [:or :int :inst]]]]}
+  [database]
+  (let [time-point (dbi/-time-point database)]
+    (when-let [identity (datahike.db/committed-value-identity (dbi/-origin database))]
+      (when (or (integer? time-point) (inst? time-point))
+        [::as-of (:datahike.value/commit-id identity) time-point]))))
 
 (defn- declares-program?
   "True when this value holds declaration rows its projection can derive from."
@@ -1358,7 +1394,9 @@
   "Derive this database value's projection, memoized by what it reads.
 
   A committed value keys by its declaration attributes' revisions, then by
-  its commit; any other value, and a miss, keys by the declaration datoms themselves
+  its commit. A speculative value reuses its basis's entry through the same
+  revision key when it wrote no declaration attribute. Any other value, and a
+  miss, keys by the declaration datoms themselves
   (`declaration-content-key`), so equal populations share one derivation
   across connections, branches and in-transaction values. An as-of view keys
   by its own declaration datoms: a view older than a declaration change sees
@@ -1377,7 +1415,9 @@
 
       ;; An as-of view keys by its own declaration datoms, never its origin's.
       as-of?
-      (content-projection source)
+      (if-let [view-key (as-of-key source)]
+        (value-projection view-key source)
+        (content-projection source))
 
       (datahike.db/committed-value-identity source)
       ;; Store the delay before forcing it: concurrent misses share the winning
@@ -1394,9 +1434,24 @@
              [::commit (:datahike.value/commit-id (datahike.db/committed-value-identity source))]
              (fn [_] (delay (content-projection source)))))))
 
-      ;; A speculative value (a report's db-after, a `:db.fn/call` argument)
-      ;; has no committed identity; its content key still finds an equal
-      ;; population instead of deriving the whole program on the writer.
+      ;; A speculative value (a report's db-after, a `:db.fn/call` argument,
+      ;; a `with` result) carries Datahike's revision context derived from its
+      ;; basis: untouched attributes keep the basis revision and each written
+      ;; attribute a fresh one (`datahike.db/speculative-cache-context`,
+      ;; `reference-code/datahike/src/datahike/db.cljc:444`). Its revision key
+      ;; therefore equals its basis's exactly when it wrote no declaration
+      ;; attribute, and it only reads that durable tier. Otherwise the fresh
+      ;; revisions name this value's declaration content alone, so the key
+      ;; memoizes it in the bounded value tier, never among the durable keys.
+      (:datahike.cache/connection-id (:cache-context source))
+      (let [revision-key (projection-cache-key source)]
+        (if (cache/has? projection-cache revision-key)
+          @(cache/lookup-or-miss projection-cache revision-key
+                                 (fn [_] (delay (content-projection source))))
+          (value-projection revision-key source)))
+
+      ;; A detached value (Datahike gives it no context: an `empty-db` or
+      ;; `load-entities` basis) keys by its declaration content alone.
       :else
       (content-projection source))))
 
@@ -3575,9 +3630,8 @@
                                ::by-callee (group-by (comp first second) edges)})))))]
     ;; Keyed by the datoms it reads. The writer's own `:db-before` carries no
     ;; committed identity (Datahike's writer loop threads each report's
-    ;; `:db-after`, `datahike/writer.cljc:118`, and `with` clears its
-    ;; cache-context, `datahike/core.cljc:136`), so neither revisions nor a
-    ;; commit id can name it; its datoms can. Datom equality compares e, a
+    ;; `:db-after`, `datahike/writer.cljc:118`, whose context is speculative,
+    ;; `datahike/db.cljc:444`), so no commit id can name it; its datoms can. Datom equality compares e, a
     ;; and v (`datahike/datom.cljc:106`), which is all the gate reads.
     @(cache/lookup-or-miss
       arity-base-cache
