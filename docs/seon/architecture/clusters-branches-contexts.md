@@ -19,9 +19,11 @@ supply the facts each operation reads.
 - **Branch**: a private line of commits off a cluster's head (`d/branch!`): a roster
   write, no copy, no environment. Not a git worktree; git worktrees are not used.
 - **Context**: the SCI world acquired from a database value's program rows.
-- **Program rows**: functions, tests, schemas, namespaces, render pairs, contracts and
-  their analysis facts — the shared thing that survives. Everything else (turns,
-  evaluations, messages, errors, tasks, results) is data: disposable, never merged.
+- **Program rows**: functions, tests, schemas, namespaces, render pairs, contracts,
+  their analysis facts and the test results tied to them (runs and members keyed by the
+  definition digests they exercised; owner 2026-09-23) — the shared thing that survives.
+  Everything else (turns, evaluations, messages, errors, tasks, evaluation results) is
+  data: disposable, never merged.
 - **Merge**: program rows from a branch onto a cluster's head, through the gate.
 - Retired words: "reload" as a system to start, "refork", "environment", "worktree".
   A reload is `require :reload` of changed namespaces and their dependents, nothing more.

@@ -213,9 +213,11 @@ pointer (`d/branch!`), never a copy and never an environment to start. The clust
 holds the pointer we advance. Many clusters and branches live in one JVM.
 
 **The program is rows on the branch; the JVM is derived.** Functions, tests, schemas,
-namespaces, render pairs, contracts and their analysis facts are the program — the
-shared thing that survives. Turns, evaluations, messages, errors, tasks and results are
-data: disposable, droppable for a fresh cluster, never merged. **[TARGET]** the
+namespaces, render pairs, contracts, their analysis facts and the test results tied to
+them (runs and members keyed by the definition digests they exercised; owner, 2026-09-23:
+"test results that are tied to the program graph are part of the program graph") are the
+program — the shared thing that survives. Turns, evaluations, messages, errors, tasks and
+evaluation results are data: disposable, droppable for a fresh cluster, never merged. **[TARGET]** the
 partition is one declared fact on each entity schema, so "program rows on a branch" is
 one query, never a hand list.
 
