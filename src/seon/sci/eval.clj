@@ -835,28 +835,29 @@
         true))))
 
 (defn- interpretation-error
-  "Refuse a row whose branch definition cannot execute in this context.
-  A refusal caused by a throwable carries its whole cause: class, root frame
-  and chain (`seon.error.refusal/chain`), each link's message and ex-data."
-  {:malli/schema [:function
-                  [:=> [:cat :qualified-symbol :string]
-                   :seon.sci.eval/interpretation-error]
-                  [:=> [:cat :qualified-symbol :string :seon.error/throwable]
-                   :seon.sci.eval/interpretation-error]]}
-  ([sym reason]
-   {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.sci.eval/program
-    :seon.error/operation 'seon.sci.eval/install-row!
-    :seon.error/message (str "Cannot interpret " sym ": " reason)
-    :seon.error/expected :seon.sci.eval/interpretable-definition
-    :seon.sci.eval/refused-function sym
-    :seon.sci.eval/interpretation-reason reason})
-  ([sym reason ^Throwable failure]
-   (let [frame (error.refusal/root-frame failure)]
-     (cond-> (assoc (interpretation-error sym reason)
-                    :seon.error/exception-class (symbol (.getName (class failure)))
-                    :seon.error/chain (error.refusal/chain failure))
-       frame (assoc :seon.error/frame frame)))))
+  "Refuse a row whose branch definition cannot execute in this context."
+  {:malli/schema [:=> [:cat :qualified-symbol :string]
+                  :seon.sci.eval/interpretation-error]}
+  [sym reason]
+  {:seon.error/at (java.util.Date.)
+   :seon.error/layer :seon.sci.eval/program
+   :seon.error/operation 'seon.sci.eval/install-row!
+   :seon.error/message (str "Cannot interpret " sym ": " reason)
+   :seon.error/expected :seon.sci.eval/interpretable-definition
+   :seon.sci.eval/refused-function sym
+   :seon.sci.eval/interpretation-reason reason})
+
+(defn- interpretation-failure
+  "Refuse a row whose interpretation threw, carrying the whole cause: class,
+  root frame and chain (`seon.error.refusal/chain`), each link's message and ex-data."
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable]
+                  :seon.sci.eval/interpretation-error]}
+  [sym ^Throwable failure]
+  (let [frame (error.refusal/root-frame failure)]
+    (cond-> (assoc (interpretation-error sym (or (ex-message failure) (.getName (class failure))))
+                   :seon.error/exception-class (symbol (.getName (class failure)))
+                   :seon.error/chain (error.refusal/chain failure))
+      frame (assoc :seon.error/frame frame))))
 
 (defn- loaded-source
   "The database whose adoption record names the JVM's loaded source commit.
@@ -1032,9 +1033,7 @@
                       (catch Throwable failure
                         (when (:seon.instrument/registration-observation (error/refusal failure))
                           (throw failure))
-                        (interpretation-error function-symbol
-                          (or (ex-message failure) (.getName (class failure)))
-                          failure)))))]
+                        (interpretation-failure function-symbol failure)))))]
           (if (map? result)
             (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
                                        (list 'quote (symbol (name function-symbol)))))
