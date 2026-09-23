@@ -35,14 +35,14 @@ confuse their individual guarantees: a cheap branch is not complete cluster
 startup, a distinct SCI env is not isolation from shared JVM roots, and an
 immutable test database does not prove which callable actually ran.
 
-A candidate executes only its assigned task on a cluster forked from one immutable
-shared commit. An explicit merge request freezes candidate, basis and shared
-commits, derives net definition changes, and validates the proposed combined
+A candidate executes only its assigned task on a named branch and retained context
+acquired from one immutable shared commit. An explicit merge request freezes candidate,
+basis and shared commits, derives net definition changes, and validates the proposed combined
 program on a scratch branch. B4 executes every required test against that exact
 program, preserving its evidence. The shared writer accepts only if the tested
 shared head is still current. Write-back stages the complete accepted file delta
-in an isolated checkout, verifies it with B1's file analyzer and callable proof,
-then integrates and publishes through the existing source owner.
+outside live source paths under whole-file holds, verifies it with B1’s file analyzer
+and callable proof, then integrates and publishes through the existing source owner.
 
 ## 1. Goals, costs and evidence boundary
 
@@ -208,9 +208,11 @@ verify it before automatic retirement; no new acceptance entity or result replay
 
 ### 2d. Write-back of the accepted delta
 
-Write-back consumes accepted definition changes at M: functions, tests, schemas,
-new namespaces, additions and deletions. `overrides` is a useful function-scoped
-post-publication check, not the export inventory (`program.cljc:43-77`).
+The complete write-back target consumes accepted definition changes at M: functions,
+tests, schemas, new namespaces, additions and deletions. The first §2e loop exports
+only existing interpreted function/test replacements with unambiguous provenance;
+wider export retains its separate prerequisites and platform proof. `overrides` is a
+useful function-scoped post-publication check, not the export inventory (`program.cljc:43-77`).
 
 1. Resolve original file/span provenance through existing declaration/history
    reads (`effect.clj:278-306`). An agent replacement may omit current file/span
@@ -334,9 +336,10 @@ affected-tests reach index read in reverse (a test on the branch whose recorded 
 the function's symbol — `my.program/tests-reaching`, `seon.fn/gate-sets`), never a new
 detector; this requires the index to record a test's call edge to a not-yet-defined symbol
 (to verify first — same class as the def-body gap, docs/research/agent-platform/def-body-index-gap-2026-09-23.md).
-Merge scope under this default: changed and new functions pass every check; inherited untouched
-gaps are reported in root's branch diff and do not block (orchestrator's reading of "strict";
-owner to confirm whole-program):
+The strict entry default does not settle merge coverage scope. The orchestrator’s
+changed/new-only reading remains the proposal in the scope decision below, pending
+owner confirmation; the current combined-program requirement remains in force.
+Authority: owner, 2026-09-23 (`eb709fcb8`), strict entry defaults; merge scope remains explicitly open.
 
 | dial | check at the shared definition entrance |
 |---|---|
@@ -527,16 +530,13 @@ choose an already-covered replacement for the exported demonstration and record 
 it does not prove the full TDD repair loop. No hidden grandfathering or whole-suite
 selection. O6/O7 ship with the interfaces they describe.
 
-**Authority reconciliation.** `AGENTS.md:257-260` now prescribes named branches; the
-old shared-candidate contradiction is resolved. Within this path, atomic database
-acceptance is distinct from exclusive load/arm/record, `host-eval` is JVM-only, and
-warned experimental branch definitions are the explicit exception to unconditional
-arming. §8's older open write-back choice applies only outside §2e; this path has no
-second approval step. The orchestrator must edit the remaining owning rows outside
-this lane's scope: README §7's shared-candidate clause, guards-only clause and
-unconditional-arming row. Required replacements are respectively the named-branch
-rule, exclusive JVM convergence and the branch warning exception; these are accepted
-corrections, not new decisions. B1 §3b's evaluator row is corrected here to JVM-only.
+**Authority reconciliation.** Filesystem lanes use named branches through the shared
+REPL entrance. Atomic database acceptance is distinct from exclusive load/arm/record;
+`host-eval` is JVM-only. Entry defaults to `:gate`; a branch configured to `:warn` may
+retain experimental definitions without a valid contract, while valid contracts stay
+armed. After root’s explicit acceptance and required proof, this path writes back and
+commits without a second approval step.
+Authority: owner, 2026-09-23 (`76deee3ff`, `215c32d9a`, `eb709fcb8`, `38863a0c8`).
 
 - **O-a ruled:** branch interface; any agent row is internal custody, created/retired
   with the branch. No outside-agent identity tool.
@@ -622,13 +622,13 @@ changed behavior and its adoption record; observe the candidate agent page.
 | 3 | Land candidate lifecycle and its required basis/request facts with all writers/readers. Mark incompatible persisted changes RESET NEEDED, batched with B1/B3/B4 by orchestrator |
 | 4 | Maintained Datahike public merge request delegates guard/transaction work and retains validation callback; fork tests, push fork and bump gitlink before dependent Seon deletion |
 | 5 | Compose explicit merge, full combined validation, B4 named obligations, immutable parent/evidence lineage, root conflicts and stale-head reconstruction. Prove red/unknown/unfinished never accepts |
-| 6 | Retire definition-time gate and superseded helpers with every caller/schema/test in the same slice. Preserve B2's writer-owned conflict-basis check at exact replacement and any unsuperseded candidate evaluation |
+| 6 | Replace the fixed definition-time candidate test gate with §2e’s configurable shared-entry checks (default `:gate`) and post-install affected-test feedback, only after O3 acceptance is proven; retire superseded helpers with every caller/schema/test in the same slice. Preserve B2's writer-owned conflict-basis check at exact replacement and any unsuperseded candidate evaluation |
 | 7 | Land accepted-delta export, isolated complete-file analysis, callable proof, controlled integration and resumable adoption; round-trip regressions land together |
 | 8 | Run §8 demonstration and record size/performance, REPL and browser evidence |
 
-Before each commit, prove the touched require graph loads in the authorized
-implementation harness; then use the running host's reload/adoption owner and
-verify a debug read/ordinary turn. Graph topology changes use existing lifecycle
+Before each commit, prove the touched behavior through the named branch and the
+authorized implementation harness. Lanes never self-adopt: the orchestrator uses the
+host’s reload/adoption owner at integration and verifies a debug read/ordinary turn. Graph topology changes use existing lifecycle
 completion. No lane stops/resets/restarts `default`. Recovery reset is the
 orchestrator's `bin/seon reset --force` (ruled 2026-09-23, README §7 "Schema change and reset": `reset --force` unlinks the cluster branch and forks a fresh one from the program rows, keeping every cache; `start --head` moves the JVM to committed HEAD keeping the store; `nuke --force` alone deletes the store, for a truly broken store), after preserving needed evidence: it
 loses disposable database turns/results/tasks and private/result objects, rather
@@ -696,8 +696,9 @@ The landing note `docs/prds/agent-platform/landing/lane-d1.md` must retain:
 5. Same-identity conflict routed once to existing root with both sources and B;
    identical repeat is idempotent, changed digest is not suppressed. Root's repair
    passes the conflict task's tests through the same explicit gate.
-6. Malformed admission refuses before any gate execution; a separately untested
-   candidate definition works locally but refuses by name at merge.
+6. Malformed admission refuses before any gate execution; a branch explicitly configured to `:warn` accepts an untested
+   candidate definition locally but refuses it by name at merge; default `:gate`
+   refuses it at entry.
 7. Both accepted deltas exported: original/staged file digests, exact source bytes,
    all affected identity digests, intended deletions, path-limited Git commit,
    publication/adoption commits, scoped `overrides` check and schema/test round trip.
@@ -713,13 +714,13 @@ proposed; conservative static reach plus task tests; structural conflict task fo
 root; moved shared head requires a new combined proof. No merge-critical roster,
 ten-merge approval counter, file exception or automatic settlement merge.
 
-**Write-back policy remains an owner choice.** Recommend automatic path-limited
-commit after explicit acceptance, complete required evidence, isolated file
-analysis and callable proof (cost: changed files plus selected work; gives up
-per-change human review). Alternatives are that same proof plus the platform
-tier per export (more execution, broader boot proof) or plus human approval
-(owner latency, human inspection). None substitutes old-root fallback green for
-execution of the proposal.
+**Write-back policy for §2e is settled:** root’s explicit acceptance plus complete
+required evidence, captured file analysis and callable proof authorizes path-limited
+write-back and commit, never push. No second approval or platform tier per ordinary
+export; file-only host-bound changes retain their required platform proof. Work is
+proportional to changed files and selected obligations; old-root fallback green never
+substitutes for execution of the proposal.
+Authority: owner, 2026-09-23 (`38863a0c8`); D1 §2e (`7523dd510`).
 
 **Addressability recommendation:** use the existing cluster-qualified candidate
 address (branch-local custody, explicit cluster selection). Shared-only addressing

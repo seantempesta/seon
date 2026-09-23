@@ -94,8 +94,21 @@ agent (`my.test`), for `bin/test-check`, and for the platform JVM. `select`
 | 12 | record | one `[:db.fn/call record-tx completion]` per member: counts, failure reports, began/ended, terminated, reach observation, tested basis | per test | cluster datoms | 1 tx | `record-tx` `runner.clj:3014`, `commit-results!` `:3145` minus staged writes |
 | 13 | tally | `(seon.test/tally db run-id)` renders `run-results` (`:3505`) through the schema pair; `bin/test-check` prints it | per request | text | O(members) | `print-recorded-tally!` `:4517` becomes a render |
 
-Nothing is cached between requests; nothing stores derived state except the
-member facts step 12 writes. Group admitted Vars through the existing namespace fixture owner: once fixtures run once per namespace, each fixtures per member. Preserve hooks and SCI resolution. JVM globals remain process-wide; keep current isolation and restoration for tests that mutate them. Admission on one branch does not exclude another branch or running agents. Existing host isolation/serialization remains until the cross-request and adoption proofs establish an equivalent boundary.
+Reuse crosses requests through content-keyed evidence and the existing derived caches.
+A latest admissible green member with matching current reach digest and input evidence
+reuses its recorded result and original provenance (`src/seon/test.clj:655`, `:835-868`;
+`src/seon/test/runner.clj:902`, `reach-digests`; landed `f3a4b33d9`). Missing evidence,
+loaded-source drift, a non-green/unfinished member or changed inputs do not reuse green.
+Today explicit reached seeds still veto reuse (`src/seon/test.clj:855`); O3a removes
+that veto only when the complete named obligation has content-valid evidence.
+The host walk `destructive-reach` memoizes through the carried projection’s LRU cache,
+keyed by program revisions plus revisions of declared edge attributes
+(`src/seon/test.clj:263-297`); a missing key walks again and an error evicts the entry.
+Neither cached reach nor past observed calls certify test completion or host isolation.
+These are source observations (2026-09-23), confirmed in committed HEAD as well as the
+working tree; `src/seon/test.clj` has unrelated in-flight edits. No runtime proof is claimed.
+
+Group admitted Vars through the existing namespace fixture owner: once fixtures run once per namespace, each fixtures per member. Preserve hooks and SCI resolution. JVM globals remain process-wide; keep current isolation and restoration for tests that mutate them. Admission on one branch does not exclude another branch or running agents. Existing host isolation/serialization remains until the cross-request and adoption proofs establish an equivalent boundary.
 
 Authority for O3a: D1 §2e (`7523dd510`), 2026-09-23; Astra D1 §2e review #1.
 
