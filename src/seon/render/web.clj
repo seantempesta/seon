@@ -725,15 +725,13 @@
                   :seon.render.web/request-error]}
   [message operation member expected offending cause evidence]
   (let [observation
-        (merge evidence {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.render.web/debug
-         :seon.error/operation operation
-         :seon.render.web/refused-member member
+        (merge evidence (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/debug operation
+                         {:seon.render.web/refused-member member
          :seon.error/message message
          :seon.error/fix "Repair the unavailable page input and repeat the observation."
          :seon.error/expected expected
          :seon.error/offending offending
-         :seon.render.web/refusal-reason cause})]
+         :seon.render.web/refusal-reason cause}))]
     observation))
 
 (defn- turn-function-result
@@ -752,15 +750,13 @@
     (if resolved
       (apply resolved arguments)
       (let [observation
-            {:seon.error/at (java.util.Date.)
-             :seon.error/layer :seon.render.web/render
-             :seon.error/operation 'seon.render.web/turn-function-result
-             :seon.error/message (str "Not yet available: " function)
+            (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/turn-function-result
+             {:seon.error/message (str "Not yet available: " function)
              :seon.error/fix "Supply the expected member and repeat the requested operation."
              :seon.render.web/function-unavailable function
              :seon.error/member :seon.fn/sym
              :seon.error/expected "a resolvable turn function"
-             :seon.error/data {:seon.render.web/arguments arguments}}]
+             :seon.error/data {:seon.render.web/arguments arguments}})]
         observation))))
 
 (defn- debug-turn-request
@@ -3152,15 +3148,13 @@
           result
           (or (first (cluster.agent/assigned-to (db/db connection) namespace-name))
               (let [observation
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer :seon.render.web/render
-                     :seon.error/operation 'seon.render.web/ensure-namespace-owner!
-                     :seon.error/message (str "The namespace owner for " namespace-name
+                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/ensure-namespace-owner!
+                     {:seon.error/message (str "The namespace owner for " namespace-name
                                                      " was not created.")
                      :seon.error/fix "Supply the expected member and repeat the requested operation."
                      :seon.render.web/refused-member :seon.ns/name
                      :seon.error/expected "a namespace with an assigned agent"
-                     :seon.error/offending namespace-name}]
+                     :seon.error/offending namespace-name})]
                 observation))))))
 
 (defn- create-owner-form
@@ -3472,14 +3466,12 @@
                    :seon.sci.eval/time-limit-ms
                    (:seon.config.eval/time-limit-ms service)}))
                  (let [observation
-                       {:seon.error/at (java.util.Date.)
-                        :seon.error/layer :seon.render.web/render
-                        :seon.error/operation 'seon.render.web/context-response
-                        :seon.error/message "Choose Run system turn, Virtual turn, or Compact."
+                       (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/context-response
+                        {:seon.error/message "Choose Run system turn, Virtual turn, or Compact."
                         :seon.error/fix "Supply the expected member and repeat the requested operation."
                         :seon.render.web/refused-member :seon.render/context-action
                         :seon.error/expected "system-turn, virtual-turn, or compact"
-                        :seon.error/offending params}]
+                        :seon.error/offending params})]
                    observation))]
     (if (:seon.render.web/refused-member result)
       {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
@@ -3524,14 +3516,12 @@
             (if-let [content (blob/get connection value-digest)]
               (value/artifact-value (value/read-artifact content))
               (let [observation
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer :seon.render.web/render
-                     :seon.error/operation 'seon.render.web/data-response
-                     :seon.error/message "No stored value has this digest."
+                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/data-response
+                     {:seon.error/message "No stored value has this digest."
                      :seon.error/fix "Supply the expected member and repeat the requested operation."
                      :seon.render.web/value-not-found value-digest
                      :seon.blob/digest value-digest
-                     :seon.error/expected "a stored value at the requested digest"}]
+                     :seon.error/expected "a stored value at the requested digest"})]
                 observation))
             (catch Throwable failure
               ;; The complete throwable goes to the cluster's fault
@@ -3548,16 +3538,14 @@
                            failure)})
                 (throw failure))
               (let [observation
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer :seon.render.web/render
-                     :seon.error/operation 'seon.render.web/data-response
-                     :seon.error/message (or (ex-message failure)
+                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/data-response
+                     {:seon.error/message (or (ex-message failure)
                                                                         "The stored value is unreadable.")
                      :seon.error/fix "Supply the expected member and repeat the requested operation."
                      :seon.render.web/value-unreadable value-digest
                      :seon.error/member :seon.blob/digest
                      :seon.error/expected "a readable stored value"
-                     :seon.error/data {:seon.render.web/page-exception-class (symbol (.getName (class failure)))}}]
+                     :seon.error/data {:seon.render.web/page-exception-class (symbol (.getName (class failure)))}})]
                 observation)))
 
           entity?

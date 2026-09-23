@@ -108,3 +108,13 @@ Hand work: E15 removed the script-generated blank require line and strengthened 
 All measured individual lane commands and REPL checks remained sub-second. The maximum recorded command was the E15 slice wrapper, **426.549 ms**, proportional to its selected file; the slowest packaged-contract check was E17, **64.851 ms**. Exact envelopes, file bases, generated rosters, residue and command timings remain under `tmp/error-constructor/E13-*` through `E30-*`. Runtime behavioral and performance proof belongs to the orchestrator's named namespaces above; static contract compilation is not that proof.
 
 Continuation scoped landing citation check: **1 document, 0 failures, 77 ms**.
+
+## Continuation from E31
+
+Authorized after triage `7f0c47053`: 32 of 43 reds pre-existing; 11 duration-only cases remain unattributed. The existing diagnostic constructs the same flat value from ordered header expressions and unchanged members; the smallest change is the reviewed caller conversion. Work stays proportional to member count and existing cause evidence, with no new mechanism or state.
+
+Both status entrances observed PID 48902, archive `ce73846828a5cc32798ef630b5a574f777646f30`, publication off, no replaced roots. All proof namespaces remain orchestrator obligations. No adoption or tests are authorized in this tranche. A separate throwaway-namespace parent/HEAD timing probe will isolate one constructor site without replacing default Vars.
+
+| Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
+|---|---:|---|---|---:|---|---|
+| E31: `src/seon/render/web.clj` | 6 | 18 / 30 / -12; +0 | 10 / 137 | 42.57925 | `seon.render.web-test` | None; five X contexts retained; dirty web test untouched |
