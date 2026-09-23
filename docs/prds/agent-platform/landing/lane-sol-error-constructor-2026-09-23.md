@@ -117,14 +117,99 @@ Both status entrances observed PID 48902, archive `ce73846828a5cc32798ef630b5a57
 
 | Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
 |---|---:|---|---|---:|---|---|
-| E31: `src/seon/render/web.clj` | 6 | 18 / 30 / -12; +0 | 10 / 137 | 42.57925 | `seon.render.web-test` | None; five X contexts retained; dirty web test untouched |
-| E32: `src/seon/run.clj` | 2 | 8 / 11 / -3; +0 | 0 / 11 | 22.805667 | `seon.run6-stall-test` | None |
-| E33: `src/seon/schedule.clj` | 7 | 20 / 35 / -15; +0 | 2 / 27 | 26.611 | `seon.schedule-test` | None; X retained; handler Throwable and cond-> evidence preserved |
-| E34: `src/seon/schema.clj` | 4 | 12 / 20 / -8; +0 | 32 / 86 | 38.005917 | `seon.schema-test` | None; raw Throwable and two X contexts retained; no schema declaration changed |
-| E35: `src/seon/sci/admit.clj` | 3 | 9 / 15 / -6; +0 | 0 / 25 | 23.446167 | `seon.sci.admit-test` | None; X retained; ex-info Throwable cause preserved |
-| E36: `src/seon/sci/eval.clj` | 13 | 37 / 63 / -26; +0 | 54 / 98 | 33.768125 | `seon.sci.eval-test` | None; three X contexts retained; Throwable causes and chain assoc preserved |
-| E37: `src/seon/sci/kernel.clj` | 5 | 13 / 25 / -12; +0 | 1 / 23 | 25.059625 | `seon.sci.eval-test` | None; X retained; existing diagnostic Throwable inputs preserved |
-| E38: `src/seon/shell/jvm.clj` | 8 | 24 / 40 / -16; +0 | 1 / 22 | 22.478084 | `seon.shell.jvm-test` | None; raw Throwable map retained; process behavior unchanged |
-| E39: `src/seon/test/accretion.clj` | 2 | 6 / 10 / -4; +0 | 0 / 17 | 22.937167 | `seon.test.accretion-test` | None; syntax-quoted operation identities and surrounding assoc/merge preserved |
-| E40: `src/seon/test/runner.clj` | 6 | 18 / 29 / -11; +0 | 5 / 57 | 27.211208 | `seon.test.runner-test` | None; X retained; existing reach-entries message-only catch recorded as policy residue |
-| E41: `src/seon/turn.clj` | 8 | 25 / 40 / -15; +0 | 20 / 121 | 39.964583 | `seon.turn-test` | Removed generated blank require line; two X contexts retained |
+| E31 (`037b6f2c3`): `src/seon/render/web.clj` | 6 | 18 / 30 / -12; +0 | 10 / 137 | 42.57925 | `seon.render.web-test` | None; five X contexts retained; dirty web test untouched |
+| E32 (`0d3fd8ae4`): `src/seon/run.clj` | 2 | 8 / 11 / -3; +0 | 0 / 11 | 22.805667 | `seon.run6-stall-test` | None |
+| E33 (`cd9120dff`): `src/seon/schedule.clj` | 7 | 20 / 35 / -15; +0 | 2 / 27 | 26.611 | `seon.schedule-test` | None; X retained; handler Throwable and cond-> evidence preserved |
+| E34 (`939547b2d`): `src/seon/schema.clj` | 4 | 12 / 20 / -8; +0 | 32 / 86 | 38.005917 | `seon.schema-test` | None; raw Throwable and two X contexts retained; no schema declaration changed |
+| E35 (`f89902914`): `src/seon/sci/admit.clj` | 3 | 9 / 15 / -6; +0 | 0 / 25 | 23.446167 | `seon.sci.admit-test` | None; X retained; ex-info Throwable cause preserved |
+| E36 (`e90b3c558`): `src/seon/sci/eval.clj` | 13 | 37 / 63 / -26; +0 | 54 / 98 | 33.768125 | `seon.sci.eval-test` | None; three X contexts retained; Throwable causes and chain assoc preserved |
+| E37 (`dea43b592`): `src/seon/sci/kernel.clj` | 5 | 13 / 25 / -12; +0 | 1 / 23 | 25.059625 | `seon.sci.eval-test` | None; X retained; existing diagnostic Throwable inputs preserved |
+| E38 (`82bd639fe`): `src/seon/shell/jvm.clj` | 8 | 24 / 40 / -16; +0 | 1 / 22 | 22.478084 | `seon.shell.jvm-test` | None; raw Throwable map retained; process behavior unchanged |
+| E39 (`bceda7a56`): `src/seon/test/accretion.clj` | 2 | 6 / 10 / -4; +0 | 0 / 17 | 22.937167 | `seon.test.accretion-test` | None; syntax-quoted operation identities and surrounding assoc/merge preserved |
+| E40 (`08010e0d1`): `src/seon/test/runner.clj` | 6 | 18 / 29 / -11; +0 | 5 / 57 | 27.211208 | `seon.test.runner-test` | None; X retained; existing reach-entries message-only catch recorded as policy residue |
+| E41 (`55f2a989a`): `src/seon/turn.clj` | 8 | 25 / 40 / -15; +0 | 20 / 121 | 39.964583 | `seon.turn-test` | Removed generated blank require line; two X contexts retained |
+
+### E31–E41 stopping receipt
+
+Reached the end of the FREE list: eleven slices, **64 sites**, **210 added / 318 removed** lines across source slice commits (190 source additions, 20 landing additions). Source **+190/−318 = −128**; tests **0**. All listed source files are clean and released. E41 removed the generated whitespace-only require line by hand; all other hand residue decisions retain the manifest's unsupported contexts/raw Throwable maps. E38's refreshed source yields 24 additions rather than the historical estimate of 31; admission used current hashes, not the old estimate. Held files and tests remain untouched.
+
+All lint runs have zero errors and all packaged-contract checks return `:findings []`. The maximum file-census command was E41, **426.124 ms**; maximum packaged check E31, **42.579 ms**. No lane operation exceeded one second. No tests, adoption, restart, push, cold gate or additional JVM ran. Dirty cluster/fn/instrument/issue/test owners and dependency forks remain the foreign shared-tree boundary. Current live profile slow operations belong to the orchestrator's prior test requests and are not this lane's timings. Existing cause-policy residue includes the runner reach-entries catch retaining only message evidence; this reviewed cut does not repair it. No RESET NEEDED was established.
+
+### Paired hot-site probe — measured regression, integration review required
+
+**The 20% threshold is exceeded at one converted refusal branch.** `seon.db/database-view` is the highest observed caller among the 140 converted owner candidates collected from slice diffs: 679 calls, ahead of environment-state 656 and construct 644. These are owner calls, not branch counters; unobserved owners cannot be ranked, and this does not establish which refusal is most frequent. Selection evidence is `tmp/error-constructor/hot-profile-counts.json`; the candidate list is `hot-candidates.edn`. The first candidate extraction mishandled namespace metadata and was corrected before measurement.
+
+Parent of E17: `c07e89393415d140900c3b36d6faa40442301ed8`. HEAD at measurement: `55f2a989a`. Source bytes came from `git show <commit>:src/seon/db.clj` into `hot-parent-db.clj` and `hot-head-db.clj`. The probe reads each actual database-view definition with the original namespace's alias/keyword resolution, qualifies its Var references without walking quoted data, and evaluates it as parent-database-view/head-database-view in `sol.error-constructor.hot`. Both copied entry functions are unarmed; their shared live callees, including diagnostic, retain their installed arming. This isolates the changed body under equal caller conditions, not the full installed caller's wrapper cost. No default Var is redefined. The initial probe incorrectly walked a quoted private symbol; the diagnostic contract refused it, and the probe was corrected before timing.
+
+Input is the same immutable live database value with only its copied config's `:keep-history?` set false, selecting the converted refusal branch. The live connection/config is unchanged; no database is written. Full returned values match except for independently allocated timestamps. Each sample performs 100 calls; 20 paired warmup calls precede five alternating-order samples. All input acquisition, compilation and equality checks are outside measured samples. There is no new cache; both copies share the live dependency/cache state, with no cache reset. Cache hit/miss counters are not supplied by this probe.
+
+| Sample | Parent ms / 100 calls | HEAD ms / 100 calls |
+|---|---:|---:|
+| 1 | 0.766875 | 1.134458 |
+| 2 | 0.774125 | 1.134542 |
+| 3 | 0.778792 | 1.166250 |
+| 4 | 0.753083 | 1.073375 |
+| 5 | 0.713125 | 1.132833 |
+| **Median** | **0.766875** | **1.134458** |
+
+Per-call median: **7.66875 µs → 11.34458 µs**, **+3.67583 µs / +47.9%**. A separate single-call profile comparison observed **0 parent diagnostic calls / 2 HEAD diagnostic calls**, matching the four-argument delegation through the map arity. That evidence identifies the additional armed construction path; it does not separately price validation versus map assembly. Full probe evaluation took **20 ms**; the counter comparison **62 ms**. Exact raw envelopes: `hot-probe-result.json`, `hot-diagnostic-calls.json` under `tmp/error-constructor/`.
+
+This is a measured local regression requiring a performance-owner decision before integration; it is not a green performance result. It does **not** attribute the eleven duration-only test reds: no reaching counts for this refusal branch during those tests or matched test/fixture timings are available. The reviewed E0 design explicitly requires delegation through the same constructor, and the triage prohibits speculative reversal/contract changes. No unreviewed constructor redesign was folded into these mechanical slices. The existing duration-attribution obligation in `docs/research/agent-platform/error-constructor-reds-2026-09-23.md` remains open with this additional evidence.
+
+Exact probe submitted through MCP, root `/Users/sean/src/seon`, cluster `default`, JVM mode, private session `sol-error-constructor-wave3`, namespace `sol.error-constructor.hot`: `(eval (read-string (slurp "/Users/sean/src/seon/tmp/error-constructor/hot-probe.clj")))`. The throwaway namespace was removed after measurement. The disposable probe follows verbatim:
+
+```clojure
+(let [owner (find-ns 'seon.db)
+      target (the-ns 'sol.error-constructor.hot)
+      read-owner (fn [path]
+                   (binding [*ns* owner]
+                     (with-open [r (java.io.PushbackReader. (clojure.java.io/reader path))]
+                       (loop []
+                         (let [form (read {:eof nil} r)]
+                           (cond
+                             (nil? form) (throw (ex-info "Missing owner" {:path path}))
+                             (and (seq? form) (= 'defn- (first form)) (= 'database-view (second form))) form
+                             :else (recur)))))))
+      install (fn [path name]
+                (let [form (read-owner path)
+                      qualified ((fn qualify [x]
+                              (if (and (seq? x) (= 'quote (first x))) x
+                                (clojure.walk/walk qualify
+                                 (fn [x]
+                                   (if (symbol? x)
+                                     (if-let [v (ns-resolve owner x)]
+                                       (if (var? v)
+                                         (let [s (symbol (str (ns-name (:ns (meta v)))) (str (:name (meta v))))]
+                                           (if (:private (meta v)) (list 'deref (list 'var s)) s))
+                                         x)
+                                       x)
+                                     x)) x)))
+                                 (drop 2 form))]
+                  (binding [*ns* target]
+                    (eval (list* 'defn name qualified)))))
+      before (install "/Users/sean/src/seon/tmp/error-constructor/hot-parent-db.clj" 'parent-database-view)
+      after (install "/Users/sean/src/seon/tmp/error-constructor/hot-head-db.clj" 'head-database-view)
+      database (seon.db/db (seon.cluster.boot/connection "default"))
+      input (assoc database :config (assoc (:config database) :keep-history? false))
+      invoke (fn [f] (f identity input []))
+      _ (assert (false? (datahike.db.interface/-temporal-index? input)))
+      a (invoke before) b (invoke after)
+      _ (assert (= (dissoc a :seon.error/at) (dissoc b :seon.error/at)))
+      _ (assert (:seon.db/invalid-read a))
+      _ (dotimes [_ 20] (invoke before) (invoke after))
+      measure (fn [f] (let [started (System/nanoTime)]
+                        (dotimes [_ 100] (invoke f))
+                        (/ (- (System/nanoTime) started) 1e6)))
+      rounds (mapv (fn [i] (if (even? i)
+                            (let [a (measure before) b (measure after)] [a b])
+                            (let [b (measure after) a (measure before)] [a b]))) (range 5))
+      median (fn [xs] (nth (sort xs) 2))]
+  {:site 'seon.db/database-view :calls-per-sample 100
+   :parent-ms (mapv first rounds) :head-ms (mapv second rounds)
+   :parent-median-ms (median (map first rounds))
+   :head-median-ms (median (map second rounds))
+   :equal-except-timestamp true :refusal a
+   :live-history-unchanged (= (:config database) (:config (seon.db/db (seon.cluster.boot/connection "default"))))})
+```
+
+E31–E41 scoped landing citation check: **1 document, 0 failures, 70 ms**.
