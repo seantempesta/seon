@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocking
 created: 2026-09-23
 tags: [issue, analyzer, clj-kondo, cache, tests]
@@ -43,3 +43,20 @@ it is excluded from the foreign check, or the fixture analyzes with an explicit
 cache root it owns, since a supplied root "belongs to its caller" (`:261-263`).
 The analyzer owner decides which. The fixture file `test/seon/fn_test.clj` and
 `src/seon/fn/analyzer.clj` are outside lane fixture-reds.
+
+## Resolution (2026-09-23, lane analyzer-tmp)
+
+`stale-cache-entries` marks an entry `::foreign` only when this analysis does
+not define its namespace (`(nil? current)`): the entry of a namespace this run
+defines at that path was just written from its bytes, and a mirror maps back to
+that path through `analyzed-source-path`. A leftover entry read by a run that
+does not define it is still foreign and deleted. Probes on default (JVM,
+`tmp.analyzer-tmp`): `seon.fn/rows` over a `tmp/` root threw in 570 ms before,
+returns 6 rows in 475 ms after; `stale-cache-entries` on the same entry answers
+`[::foreign]` for a non-defining run and `[]` for the defining run.
+`seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities`
+no longer throws here; it now reds later, in its evaluated half, on the
+identity-only namespace row class (see
+`turn-writers-upsert-bare-namespace-rows-without-a-definition-digest.md`,
+`source-rows` residue). Landing:
+`docs/prds/agent-platform/landing/lane-analyzer-tmp-2026-09-23.md`.

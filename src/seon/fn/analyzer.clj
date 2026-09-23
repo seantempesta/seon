@@ -254,7 +254,7 @@
   the file's own modification time is the stat check), when its source is gone
   or is the stdin buffer, when a namespace this analysis defines now lives in
   another file, or when its source sits inside the checkout outside every
-  declared source and dependency root. Jar entries are immutable by
+  declared source and dependency root and this analysis does not define it. Jar entries are immutable by
   coordinate. Each stale entry names its checkout source when it has one, so
   the caller can rebuild it.
 
@@ -304,7 +304,10 @@
                              (= "<stdin>" filename) ::stdin
                              (not (.isFile source)) ::source-absent
                              (and current (not= current path)) ::moved
-                             (and shared?
+                             ;; Foreign is a checkout file this run did not
+                             ;; lint: the entry for a namespace this run defines
+                             ;; at this path was just written from its bytes.
+                             (and shared? (nil? current)
                                   (str/starts-with? path prefix)
                                   (not (under? source-roots path))
                                   (not (under? dependency-roots path))) ::foreign
