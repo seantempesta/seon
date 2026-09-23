@@ -29,18 +29,19 @@
      {:seon.store/store opened
       :seon.store/branch :current-src})}))
 
-(defn- artifact-root!
+(defn- blob-root!
+  "Reference `digest` the way error evidence does: its occurrence blob row."
   [connection digest]
   (support/transacted!
           connection
-          [{:seon.dev.mcp.artifact/id digest
-            :seon.dev.mcp.artifact/digest digest}]))
+          [{:seon.error.occurrence/blob-digest digest
+            :seon.error/data-blob digest}]))
 
 (defn- rooted-digests
   [connection]
   (set
    (db/q '[:find [?digest ...]
-           :where [_ :seon.dev.mcp.artifact/digest ?digest]]
+           :where [_ :seon.error.occurrence/blob-digest ?digest]]
          @connection)))
 
 (defn- leave-orphan!
@@ -105,7 +106,7 @@
                         (future
                           (blob/with-publication!
                            connection [staged]
-                           #(artifact-root! connection first-digest)))]
+                           #(blob-root! connection first-digest)))]
                     (await! publication-requested :publication-queued)
                     (is (not (realized? publication)))
                     (is (not (contains? (rooted-digests connection)
@@ -131,7 +132,7 @@
                      (fn []
                        (.countDown root-entered)
                        (await! release-root :release-root-transaction)
-                       (artifact-root! connection second-digest))))]
+                       (blob-root! connection second-digest))))]
               (await! root-entered :publisher-entered-root-transaction)
               (with-redefs [gc-guard/acquire-sweep-permit!
                             (fn [store-id opts]
@@ -152,6 +153,14 @@
                   (support/await-event! publication :rooted-publication)
                   (support/await-event! collection :post-publication-collection)
                   (is (zero? (registry/collect! opened)))))))
+
+          (testing "an unreferenced blob is readable by digest until an explicit sweep collects it"
+            ;; MCP results are blob-only (owner ruling #19): no row roots them.
+            (let [unreferenced (blob/put! connection "an unreferenced MCP value")]
+              (is (= "an unreferenced MCP value" (blob/get connection unreferenced)))
+              (is (pos? (registry/collect! opened (Date.))))
+              (is (nil? (blob/get connection unreferenced))
+                  "a swept digest reads as absent; get_value refuses it as collected")))
 
           (testing "a crashed publication remains collectable"
             (let [staged (blob/stage! connection crash-content)]
