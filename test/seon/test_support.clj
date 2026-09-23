@@ -683,6 +683,41 @@
                    [:seon.turn/id turn-id])
           [:seon.turn/closed-tx :db/txInstant]))
 
+(defn namespace-row
+  "A namespace declaration exactly as an agent's `(ns name)` writes it.
+   `program/declaration-row` owns the row and derives its definition digest."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name] :seon.ns/ns]}
+  [database namespace-name]
+  (program/declaration-row
+   (db/carried-projection database)
+   {:seon.ns/name namespace-name
+    :seon.ns/source (pr-str (list 'ns namespace-name))}
+   :all :agent))
+
+(defn agent-tx
+  "Create one fixture agent through `seon.cluster.agent/creation-tx`.
+   The agent joins the one cluster the fixture database holds; its namespace
+   defaults to `my.agents.<agent-id>`."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :seon.agent/id]
+                   :seon.store/transaction-data]
+                  [:=> [:cat :seon.db/database-value :seon.agent/id :seon.ns/name]
+                   :seon.store/transaction-data]]}
+  ([database agent-id]
+   (agent-tx database agent-id (symbol (str "my.agents." agent-id))))
+  ([database agent-id namespace-name]
+   (agent/creation-tx
+    {:seon.agent/id agent-id
+     :seon.ns/name namespace-name
+     :seon.cluster/name
+     (or (seeded-cluster-name database)
+         (throw (ex-info "A fixture agent needs exactly one cluster in its database."
+                         {:seon.error/operation 'seon.test-support/agent-tx
+                          :seon.error/expected :seon.cluster/name
+                          :seon.error/offending
+                          (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]]
+                                database)})))})))
+
 (defn program-row
   "Analyze an explicit synthetic declaration through the production source path."
   [database identity source]
@@ -690,7 +725,7 @@
         [attribute declaration-symbol] identity
         rows (seon.fn/source-rows
               database (program/shapes-in projection)
-              {:seon.ns/name (symbol (namespace declaration-symbol))}
+              (namespace-row database (symbol (namespace declaration-symbol)))
               source (set (keys (:seon.schema.projection/forms projection))))]
     (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
         (throw (ex-info "The fixture source did not define the requested declaration."

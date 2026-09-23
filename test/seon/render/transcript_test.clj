@@ -26,6 +26,9 @@
 (def ^:private property-seed 2026073104)
 (def ^:private agent-id "transcript-agent")
 (def ^:private peer-id "transcript-peer")
+;; An agent's evaluations prompt in the namespace its creation assigned
+;; (`seon.test-support/agent-tx`: `my.agents.<agent-id>`).
+(def ^:private agent-prompt (str "my.agents." agent-id "=> "))
 (def ^:private caps
   (assoc (config/result-caps (support/effective-config))
          :seon.config.eval.result/max-depth 12
@@ -36,16 +39,20 @@
 
 (declare unit)
 
+(defn- agents-tx
+  "Create the fixture's agents through the owner's creation transaction."
+  [connection & agent-ids]
+  (into [] (mapcat #(support/agent-tx @connection %)) agent-ids))
+
 (deftest absent-bootstrap-trigger-does-not-pin-another-agents-message
   (support/with-database
    (fn [connection]
      (support/transacted!
       connection
-      [{:seon.agent/id agent-id}
-       {:seon.agent/id peer-id}
-       {:seon.message/id "unrelated-bootstrap-message"
+      (into (agents-tx connection agent-id peer-id)
+       [{:seon.message/id "unrelated-bootstrap-message"
         :seon.message/to [:seon.agent/id peer-id]
-        :seon.message/content "Only the peer should see this."}])
+        :seon.message/content "Only the peer should see this."}]))
      (is (= "Only the peer should see this."
             (:seon.message/content
              (db/pull @connection [:seon.message/content]
@@ -137,8 +144,8 @@
     (fn [connection]
       (support/transacted!
        connection
-       [{:seon.agent/id agent-id}
-        {:seon.turn/id "terminal-values" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+       (into (agents-tx connection agent-id)
+       [{:seon.turn/id "terminal-values" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "terminal-result"
          :seon.cluster.eval/run [:seon.turn/id "terminal-values"]
          :seon.cluster.eval/ordinal 0
@@ -167,7 +174,7 @@
          :seon.cluster.eval/ordinal 3
          :seon.cluster.eval/at (java.util.Date. 4)
          :seon.eval/shown (pr-str {:text "alpha\nbeta"})
-         :seon.cluster.eval/source "(identity {:text \"alpha\\nbeta\"})"}])
+         :seon.cluster.eval/source "(identity {:text \"alpha\\nbeta\"})"}]))
       (let [receipt-render repl/response
             receipt-calls (atom 0)
             rendered
@@ -191,15 +198,15 @@
         ;; ONE FORM PER PROMPT LINE, one response map under it. Printed
         ;; output is its own key rather than bytes spliced ahead of the
         ;; value, which is exactly what made the old grammar unreadable.
-        (is (str/includes? rendered "user=> (swap! executions inc)\n#:seon.repl{"))
+        (is (str/includes? rendered (str agent-prompt "(swap! executions inc)\n#:seon.repl{")))
         (is (str/includes? rendered ":out \"once\\n\""))
         (is (str/includes? rendered
-                           "user=> (throw (Exception. \"source error\"))"))
+                           (str agent-prompt "(throw (Exception. \"source error\"))")))
         (is (str/includes? rendered "stored error"))
         (is (str/includes? rendered ":error "))
-        (is (str/includes? rendered "user=> (identity \"alpha\\nbeta\")\n#:seon.repl{"))
+        (is (str/includes? rendered (str agent-prompt "(identity \"alpha\\nbeta\")\n#:seon.repl{")))
         (is (str/includes? rendered
-                           "user=> (identity {:text \"alpha\\nbeta\"})\n#:seon.repl{"))
+                           (str agent-prompt "(identity {:text \"alpha\\nbeta\"})\n#:seon.repl{")))
         (is (str/includes? rendered ":value {:text \"alpha\\nbeta\"}")
             "the stored node is what the value reads back as")
         (is (not (str/includes? rendered "t=17")))))))
@@ -333,14 +340,12 @@
   [connection]
   (support/transacted!
    connection
-   [{:seon.ns/name 'my.agents.transcript}
-    {:seon.agent/id agent-id
-     :seon.agent/namespace [:seon.ns/name 'my.agents.transcript]}
-    {:seon.agent/id peer-id}
-    {:seon.problems/id "problem-transcript"}
+   (into (into (support/agent-tx @connection agent-id 'my.agents.transcript)
+               (support/agent-tx @connection peer-id))
+    [{:seon.problems/id "problem-transcript"}
     {:seon.turn/id "run-result" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
     {:seon.turn/id "run-wait" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
-    {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}])
+    {:seon.turn/id "run-error" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]))
   (let [instants
         (mapv (fn [message]
                 (transaction-instant (support/transacted! connection [message])))
@@ -457,15 +462,15 @@
     (fn [connection]
       (support/transacted!
        connection
-       [{:seon.agent/id agent-id}
-        {:seon.turn/id "run-error-without-triage" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+       (into (agents-tx connection agent-id)
+       [{:seon.turn/id "run-error-without-triage" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-error-without-triage"
          :seon.cluster.eval/run
          [:seon.turn/id "run-error-without-triage"]
          :seon.cluster.eval/ordinal 0
          :seon.cluster.eval/at (at 1000)
          :seon.cluster.eval/error "No such namespace: missing.function"
-         :seon.cluster.eval/source "(missing.function/call)"}])
+         :seon.cluster.eval/source "(missing.function/call)"}]))
       (let [request (unit connection)
             ai (transcript/render-ai request)
             html-value (transcript/render-html request)
@@ -476,7 +481,7 @@
         ;; execution-error face rides `:error` inside the one response map,
         ;; so it can never be mistaken for a form the agent wrote.
         (testing "the AI projection presents the form and an execution error"
-          (is (str/includes? ai "user=> (missing.function/call)"))
+          (is (str/includes? ai (str agent-prompt "(missing.function/call)")))
           (is (str/includes? ai ":error \"Execution error"))
           (is (str/includes? ai "No such namespace: missing.function"))
           (is (not (str/includes? ai ":value "))
@@ -574,9 +579,9 @@
               (range 6)))]
     (support/transacted!
      connection
-     (into [{:seon.agent/id agent-id}
-            {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
-            {:db/id "bootstrap-message" :seon.message/id "task0001" :seon.message/to [:seon.agent/id agent-id] :seon.message/content (bootstrap/task-message)}]
+     (into (into (agents-tx connection agent-id)
+       [{:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
+            {:db/id "bootstrap-message" :seon.message/id "task0001" :seon.message/to [:seon.agent/id agent-id] :seon.message/content (bootstrap/task-message)}])
            cat
            [bootstrap-receipts messages]))))
 
@@ -600,7 +605,7 @@
             ;; response that answers it, so the ordering property is proven
             ;; over the one grammar rather than over a bare printed value.
             prompted (fn [ordinal]
-                       (str "user=> (identity " ordinal
+                       (str agent-prompt "(identity " ordinal
                             ")\n#:seon.repl{:value " ordinal))
             ai-positions
             (mapv #(.indexOf ai (prompted %)) (range bootstrap-count))
@@ -647,8 +652,8 @@
       (let [bootstrap-run-id (bootstrap/run-id agent-id)]
         (support/transacted!
          connection
-         [{:seon.agent/id agent-id}
-          {:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
+         (into (agents-tx connection agent-id)
+       [{:seon.turn/id bootstrap-run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx" :seon.turn/trigger "bootstrap-message"}
           {:seon.cluster.eval/id "bootstrap-receipt"
            :seon.cluster.eval/run [:seon.turn/id bootstrap-run-id]
            :seon.cluster.eval/ordinal 0
@@ -689,7 +694,7 @@
            :seon.cluster.eval/ordinal 1
            ;; every entry the history orders carries the instant it orders by
            :seon.cluster.eval/at (at 302)
-           :seon.cluster.eval/source "; proof comment"}])
+           :seon.cluster.eval/source "; proof comment"}]))
         (let [db @connection
               full (transcript/render-html (unit connection))
               visible (mapv :id (html-entries full))]
@@ -711,9 +716,8 @@
     (fn [connection]
       (support/transacted!
        connection
-       [{:seon.agent/id agent-id}
-        {:seon.agent/id peer-id}
-        ;; The message observes a subject token; no target entity is required.
+       (into (agents-tx connection agent-id peer-id)
+       [;; The message observes a subject token; no target entity is required.
         {:seon.message/id "about-test" :seon.message/from [:seon.agent/id agent-id] :seon.message/to [:seon.agent/id peer-id] :seon.message/about "target-fact" :seon.message/content "Inspect the test fact."}
         {:seon.turn/id "run-malformed" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
         {:seon.cluster.eval/id "eval-malformed"
@@ -725,12 +729,12 @@
          ;; so a stored fragment reaches the history exactly as stored
          ;; rather than through a second "malformed" face.
          :seon.eval/shown "{"
-         :seon.cluster.eval/source "("}])
+         :seon.cluster.eval/source "("}]))
       (let [ai (transcript/render-ai (unit connection))]
         ;; the message is the form that reads it, naming its own identity
         (is (str/includes? ai "(my.message/read "))
         (is (str/includes? ai "\"about-test\""))
-        (is (str/includes? ai "user=> ("))
+        (is (str/includes? ai (str agent-prompt "(")))
         (is (str/includes? ai ":value {"))
         (assert-no-session-narration ai)))))
 
@@ -738,9 +742,9 @@
   (support/with-database
     (fn [connection]
       (support/transacted! connection
-       [{:seon.agent/id agent-id}
-        {:seon.message/id "about-message" :seon.message/to [:seon.agent/id agent-id]
-         :seon.message/about "absent-subject" :seon.message/content "Inspect this."}])
+       (into (agents-tx connection agent-id)
+       [{:seon.message/id "about-message" :seon.message/to [:seon.agent/id agent-id]
+         :seon.message/about "absent-subject" :seon.message/content "Inspect this."}]))
       (let [basis-before (:max-tx @connection)
             rendered (transcript/render-ai (unit connection))]
         (is (str/includes? rendered "absent-subject"))
@@ -759,13 +763,13 @@
     (fn [connection]
       (let [shown "(0 1 #:seon.print{:elided 8388608})"]
         (support/transacted! connection
-                      [{:seon.agent/id agent-id}
-                       {:seon.turn/id "run-shown" :seon.turn/agent [:seon.agent/id agent-id]
+                      (into (agents-tx connection agent-id)
+       [{:seon.turn/id "run-shown" :seon.turn/agent [:seon.agent/id agent-id]
                         :seon.turn/opened-tx "datomic.tx"}
                        {:seon.cluster.eval/id "eval-shown"
                         :seon.cluster.eval/run [:seon.turn/id "run-shown"]
                         :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (at 1000)
-                        :seon.eval/shown shown :seon.cluster.eval/source "(range)"}])
+                        :seon.eval/shown shown :seon.cluster.eval/source "(range)"}]))
         (let [ai (transcript/render-ai (unit connection))]
           (is (str/includes? ai shown))
           (assert-no-session-narration ai))))))
@@ -783,11 +787,11 @@
              :seon.ai.attempt/settings-edn "{}"}]
         (support/transacted!
          connection
-         [{:seon.agent/id agent-id}
-          {:seon.turn/id "run-reasoning" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
+         (into (agents-tx connection agent-id)
+       [{:seon.turn/id "run-reasoning" :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}
           (assoc base-attempt
                  :seon.ai.attempt/id "reasoning-inline"
-                 :seon.ai.attempt/ordinal 0)])
+                 :seon.ai.attempt/ordinal 0)]))
         (let [before (full-agent-ai @connection)]
           (support/transacted!
            connection
@@ -841,7 +845,8 @@
     (fn [connection]
       (support/transacted!
        connection
-       (into [{:seon.agent/id agent-id}]
+       (into (into (agents-tx connection agent-id)
+       [])
              (map (fn [index]
                     {:seon.message/id (str "bounded-" index) :seon.message/to [:seon.agent/id agent-id] :seon.message/content (str "message " index)}))
              (range 100)))
@@ -976,8 +981,7 @@
           (support/with-database
             (fn [connection]
               (let [events (mapv generated-event (range) history)
-                    rows (into [{:seon.agent/id agent-id}
-                                {:seon.agent/id peer-id}]
+                    rows (into (agents-tx connection agent-id peer-id)
                                (mapcat generated-rows)
                                events)
                     ;; EVERY GENERATED MESSAGE IS ORDERED BY THIS INSTANT,
@@ -1020,7 +1024,7 @@
                                          (if (= :receipt-invalid
                                                 (:event-kind
                                                  (get events-by-id id)))
-                                           "user=> ("
+                                           (str agent-prompt "(")
                                            (str "(identity " source-index ")"))))))
                     visible-ids)
                    ;; Every entry roots the values it renders, so no reader
@@ -1110,7 +1114,8 @@
       (support/transacted!
        connection
        (into
-        [{:seon.agent/id agent-id}]
+        (into (agents-tx connection agent-id)
+       [])
         (mapcat
          (fn [ordinal]
            (let [run-id (str "history-run-" ordinal)]

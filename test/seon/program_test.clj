@@ -275,48 +275,35 @@
                                         cases)))))))
 
 (deftest digest-map-compares-two-fixture-branches-from-one-commit
+  ;; Two canonical fixtures are two isolated agents branched off the member's
+  ;; one captured commit; a nested fixture never sees its parent's writes.
   (test-support/with-database
-    (fn [connection]
-      (let [base-database (db/db connection)
-            base-map (program/digest-map base-database {:seon.program/max-datoms 1000000})
+    (fn [connection-a]
+      (let [base-map (program/digest-map (db/db connection-a) {:seon.program/max-datoms 1000000})
             [branch-identity head-identity]
-            (take 2 (sort-by pr-str (keys base-map)))
-            configuration (:config base-database)
-            source-branch (:branch configuration)
-            branch-a (keyword "seon.program-test" (str (name source-branch) "-a"))
-            branch-b (keyword "seon.program-test" (str (name source-branch) "-b"))]
+            (take 2 (sort-by pr-str (keys base-map)))]
         (is (every? some? [branch-identity head-identity]))
         ;; File and lint rows are derived and carry no definition digest.
         (is (not-any? #{:seon.lint/id :seon.fn.file/relative-path}
                       (map first (keys base-map))))
-        (d/branch! connection source-branch branch-a)
-        (try
-          (d/branch! connection source-branch branch-b)
-          (try
-            (let [connection-a (d/connect (assoc configuration :branch branch-a))
-                  connection-b (d/connect (assoc configuration :branch branch-b))]
-              (try
-                (test-support/transacted!
-                 connection-a [{(first branch-identity) (second branch-identity)
-                                :seon.program/definition-digest digest-a}])
-                (test-support/transacted!
-                 connection-b [{(first head-identity) (second head-identity)
-                                :seon.program/definition-digest digest-b}])
-                (let [branch-map (program/digest-map (db/db connection-a) {:seon.program/max-datoms 1000000})
-                      head-map (program/digest-map (db/db connection-b) {:seon.program/max-datoms 1000000})
-                      comparison (program/three-way base-map branch-map head-map)]
-                  (is (= #{branch-identity}
-                         (:seon.program/changed-on-branch comparison)))
-                  (is (= #{head-identity}
-                         (:seon.program/changed-on-head comparison)))
-                  (is (empty? (:seon.program/conflict comparison))))
-                (finally
-                  (d/release connection-a)
-                  (d/release connection-b))))
-            (finally
-              (d/delete-branch! connection branch-b)))
-          (finally
-            (d/delete-branch! connection branch-a)))))))
+        (test-support/transacted!
+         connection-a [{(first branch-identity) (second branch-identity)
+                        :seon.program/definition-digest digest-a}])
+        (let [branch-map (program/digest-map (db/db connection-a) {:seon.program/max-datoms 1000000})]
+          (test-support/with-database
+            (fn [connection-b]
+              (is (= base-map (program/digest-map (db/db connection-b) {:seon.program/max-datoms 1000000}))
+                  "the second fixture branches from the same commit")
+              (test-support/transacted!
+               connection-b [{(first head-identity) (second head-identity)
+                              :seon.program/definition-digest digest-b}])
+              (let [head-map (program/digest-map (db/db connection-b) {:seon.program/max-datoms 1000000})
+                    comparison (program/three-way base-map branch-map head-map)]
+                (is (= #{branch-identity}
+                       (:seon.program/changed-on-branch comparison)))
+                (is (= #{head-identity}
+                       (:seon.program/changed-on-head comparison)))
+                (is (empty? (:seon.program/conflict comparison)))))))))))
 
 (defn- one-event
   [source]
@@ -378,6 +365,12 @@
                                        (list binding nil)) bindings))))]
     (source-contract function-symbol spec forms source
                      (apply list bindings))))
+
+;; A synthetic schema row carries the digest its owner derives, as
+;; `seon.schema`'s canonical rows do (`seon.program/definition-digest`).
+(defn- with-definition-digest
+  [row]
+  (assoc row :seon.program/definition-digest (program/definition-digest row)))
 
 (defn- nested-maps
   [value]
@@ -441,7 +434,8 @@
             predicate-functions
             (:seon.schema.projection/predicate-functions projection)
             schema-row
-            (program/with-contract-facts
+            (with-definition-digest
+             (program/with-contract-facts
              {:seon.program/row
               {:seon.schema/key :sample/ambient
                :seon.schema/form ":int"
@@ -449,7 +443,7 @@
               :seon.program/compile-options compile-options
               :seon.program/predicate-functions predicate-functions
               :seon.program/schema-keys #{:sample/ambient}
-              :seon.program/schema-forms forms})
+              :seon.program/schema-forms forms}))
             positional-spec [:=> [:cat :sample/ambient] :sample/ambient]
             map-spec
             [:=> [:cat [:map [:sample/ambient :sample/ambient]]]
@@ -474,7 +468,7 @@
                  "(defn mapped [{:sample/keys [ambient]}] ambient)"
                  '([{:sample/keys [ambient]}]) map-spec)]
         (test-support/transacted! connection
-                                  [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
+                                  [(test-support/namespace-row (db/db connection) 'sample)
                                    schema-row positional mapped])
         (let [positional-address
               (db/q '[:find ?index ?binding-shape ?value-fingerprint
@@ -834,8 +828,7 @@
 (deftest identical-runtime-redeclaration-builds-no-datoms
   (test-support/with-database
     (fn [connection]
-      (test-support/transacted! connection [{:seon.ns/name 'sample
-                                             :seon.ns/source "(ns sample)"}])
+      (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
       (let [function-symbol 'sample/idempotent
             source "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
             row (merge (test-support/program-fn-row (db/db connection) function-symbol source)
@@ -867,8 +860,7 @@
                    "(defn redefined {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
             row-tx analyzed-row-tx
             declared-content (ns-resolve 'seon.turn 'declared-content)]
-        (test-support/transacted! connection [{:seon.ns/name 'sample
-                                               :seon.ns/source "(ns sample)"}])
+        (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
         (test-support/transacted! connection (row-tx (db/db connection) {} original))
         (let [current (db/pull @connection '[*]
                                [:seon.fn/sym function-symbol])
@@ -908,8 +900,7 @@
             (assoc original :seon.fn/source
                    "(defn unmeasured {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
             row-tx analyzed-row-tx]
-        (test-support/transacted! connection [{:seon.ns/name 'sample
-                                               :seon.ns/source "(ns sample)"}])
+        (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
         (test-support/transacted! connection (row-tx (db/db connection) {} original))
         (testing "a request with no run opened on nothing and claims nothing"
           (is (seq (row-tx (db/db connection) {} changed))))
@@ -918,7 +909,7 @@
                       #(row-tx (db/db connection) {:seon.turn/id "absent"}
                                changed))]
             (is (qualified-symbol? (:seon.error/operation data)))
-            (is (= :seon.turn/run-opening-basis-unreadable (:seon.turn/rule data))
+            (is (true? (:seon.turn/missing-opening-datom data))
                 "the refusal names the unreadable basis, not a concurrent definition")))
         (is (= (:seon.fn/source original)
                (:seon.fn/source
@@ -1137,8 +1128,7 @@
         (test-support/seed-cluster! connection "registration-test")
         (test-support/transacted!
          connection
-         (into [{:seon.ns/name 'my.agents.someone-else
-                 :seon.ns/source "(ns my.agents.someone-else)"}]
+         (into [(test-support/namespace-row (db/db connection) 'my.agents.someone-else)]
                (agent/creation-tx {:seon.agent/id "registration-test"
                                    :seon.ns/name namespace-name
                                    :seon.cluster/name "registration-test"})))
@@ -1147,7 +1137,7 @@
          (into [(test-support/program-fn-row (db/db connection) function-sym
                   "(defn same-name {:malli/schema [:=> [:cat] :int]} [] 1)")]
                (seon.fn/source-rows (db/db connection) (program/shapes)
-                                     {:seon.ns/name namespace-name}
+                                     (test-support/namespace-row (db/db connection) namespace-name)
                                      "(clojure.test/deftest same-name)" #{})))
         (test-support/transacted!
                      connection
