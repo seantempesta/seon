@@ -4973,22 +4973,25 @@
                 last-prepared (peek prepared)]
             (if-let [refusal (:refused-outcome settlement)]
               (report :error (count gated) refusal)
-              (do
-                (sci.eval/install-evaluated-rows!
-                 {:seon.sci.eval/ctx base-ctx
-                  :seon.sci.eval/agent-ctx ctx
-                  :seon.db/db (:db-after outcome)
-                  :seon.sci.eval/installations
-                  (into []
-                        (keep
-                         (fn [{evaluation :seon.sci.eval/evaluation}]
-                           (let [row (:seon.program/row evaluation)]
-                             (when (and row
-                                        (sci.eval/committed-row?
-                                         (:db-after outcome) row))
-                               {:seon.program/row row
-                                :seon.sci.eval/evaluation evaluation}))))
-                        gated)})
+              (let [installations
+                    (into []
+                          (keep
+                           (fn [{evaluation :seon.sci.eval/evaluation}]
+                             (let [row (:seon.program/row evaluation)]
+                               (when (and row
+                                          (sci.eval/committed-row?
+                                           (:db-after outcome) row))
+                                 {:seon.program/row row
+                                  :seon.sci.eval/evaluation evaluation}))))
+                          gated)]
+                ;; A batch that defined nothing installs nothing: the program
+                ;; check below it walks the store, so only a defining batch pays it.
+                (when (seq installations)
+                  (sci.eval/install-evaluated-rows!
+                   {:seon.sci.eval/ctx base-ctx
+                    :seon.sci.eval/agent-ctx ctx
+                    :seon.db/db (:db-after outcome)
+                    :seon.sci.eval/installations installations}))
                 (if (or (:seon.turn.loop/settled last-prepared)
                         (:seon.turn.loop/undisposed? last-prepared))
                   (report :closed (count gated))
