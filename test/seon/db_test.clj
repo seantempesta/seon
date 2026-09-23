@@ -1187,9 +1187,10 @@
              (is (= c (d/commit-id @candidate-connection)) "the merged parent is unchanged")))
          (finally (d/release candidate-connection) (d/delete-branch! connection candidate)))))))
 
-(deftest an-agent-write-that-does-not-deliver-refuses-at-the-declared-bound
-  ;; Ruling 1r (owner, 2026-09-18): the dial bounds AGENT/turn writes. The
-  ;; provenance user this transaction carries is what selects it.
+(deftest a-system-write-the-writer-never-acknowledges-returns-outcome-unknown-at-the-bound
+  ;; Every write, system writes included, is bounded by the declared dial
+  ;; (lane-flow-owns-running-machinery.md N3, R6): this write carries no agent
+  ;; provenance, and the real writer is held by a latch past the bound.
   (test-support/with-database
    (fn [connection]
      (let [cluster-name "bounded-write-deref"
@@ -1197,8 +1198,6 @@
            started (CountDownLatch. 1)
            release (CountDownLatch. 1)
            old-writer (:writer @connection)]
-       (test-support/transacted!
-        connection [{:seon.agent/id "bounded-write-deref-agent"}])
        (test-support/apply-config!
         connection cluster-name
         {:seon.config.db/write-time-limit-ms write-time-limit-ms})
@@ -1226,9 +1225,8 @@
                  outcome (future
                            (db/transact!
                             connection
-                            {:tx-data [{:seon.agent/id "bounded-write-deref-target"}]
-                             :tx-meta {:seon.db/user
-                                       [:seon.agent/id "bounded-write-deref-agent"]}}))]
+                            [[:db/add [:seon.fn/sym 'seon.db/transact!]
+                              :seon.fn/doc "bounded-write-deref-target"]]))]
              (test-support/await-event!
               started "the real Datahike writer to enter the blocked transaction")
              (let [refusal
@@ -1252,69 +1250,11 @@
               connection "the timed-out transaction to settle later"
               #(> (db/basis-t %) before))
              (is (= "bounded-write-deref-target"
-                    (:seon.agent/id
+                    (:seon.fn/doc
                      (db/pull @connection
-                              [:seon.agent/id]
-                              [:seon.agent/id "bounded-write-deref-target"])))
+                              [:seon.fn/doc]
+                              [:seon.fn/sym 'seon.db/transact!])))
                  "the unknown transaction may commit after the caller stops waiting"))
-           (finally
-             (.countDown release))))))))
-
-(deftest a-system-write-carries-no-per-write-bound
-  ;; Ruling 1r, the other half: "root access (system) for no limits, and then
-  ;; agents; if they fail, root can re-run whatever transaction it is." A write
-  ;; whose provenance names no agent waits for its own operation's lifecycle
-  ;; deadline; the database dial does not stop it. The same blocked writer that
-  ;; refuses an agent write above therefore does not refuse this one.
-  (test-support/with-database
-   (fn [connection]
-     (let [cluster-name "unbounded-system-write"
-           write-time-limit-ms 25
-           started (CountDownLatch. 1)
-           release (CountDownLatch. 1)
-           old-writer (:writer @connection)]
-       (test-support/apply-config!
-        connection cluster-name
-        {:seon.config.db/write-time-limit-ms write-time-limit-ms})
-       (test-support/await-event!
-        (datahike.writer/shutdown old-writer)
-        "the canonical fixture writer to stop before replacement")
-       (let [blocked-writer
-             (datahike.writer/create-writer
-              {:backend :self
-               :write-fn-map
-               {'transact!
-                (fn [database request]
-                  (.countDown started)
-                  (when-not (.await release
-                                    test-support/event-backstop-seconds
-                                    TimeUnit/SECONDS)
-                    (throw
-                     (ex-info "The test did not release its blocked writer."
-                              {:seon.test/event :blocked-writer-release})))
-                  (datahike.writing/transact! database request))}}
-              connection)]
-         (swap! (:wrapped-atom connection) assoc :writer blocked-writer)
-         (try
-           (let [outcome (future
-                           (db/transact!
-                            connection
-                            [{:seon.agent/id "unbounded-system-write-target"}]))]
-             (test-support/await-event!
-              started "the real Datahike writer to enter the blocked transaction")
-             (is (= ::still-waiting
-                    (deref outcome (* 40 write-time-limit-ms) ::still-waiting))
-                 "a system write is not refused at the agent dial")
-             (.countDown release)
-             (let [report (test-support/await-event!
-                           outcome "the unbounded system write to settle")]
-               (is ((schema/projection-validator (schema/handed-projection) :seon.db/transaction-report) report)
-                   "the system write settles as a report, never a bound refusal")
-               (is (= "unbounded-system-write-target"
-                      (:seon.agent/id
-                       (db/pull @connection
-                                [:seon.agent/id]
-                                [:seon.agent/id "unbounded-system-write-target"]))))))
            (finally
              (.countDown release))))))))
 
@@ -2081,26 +2021,6 @@
                 (:seon.db.read/invalid-pulled-result refusal)))
          (is (= {:seon.ns/name "my.message"} (:seon.error/offending refusal))))))))
 
-(deftest the-write-bound-derives-from-the-writes-own-provenance
-  ;; Ruling 1r (owner, 2026-09-18): root/system writes carry NO per-write
-  ;; timeout — their operation's own lifecycle deadline is the bound that
-  ;; reports — while agent/turn writes keep the short database dial. The
-  ;; decision is the `:seon.db/user` the transaction already carries; there is
-  ;; no second access-control mechanism.
-  (test-support/with-database
-   (fn [connection]
-     (let [database @connection]
-       (is (true? (@#'db/agent-provenance?
-                   database
-                   {:tx-meta {:seon.db/user [:seon.agent/id "any-agent"]}})))
-       (is (false? (@#'db/agent-provenance?
-                    database
-                    {:tx-meta {:seon.db/process
-                               [:seon.db.process/id "publication"]}}))
-           "a system process write carries no agent user and no per-write bound")
-       (is (false? (@#'db/agent-provenance? database {}))
-           "a write with no provenance user at all is a system write")))))
-
 (deftest turn-write-schema-does-not-include-error-observations
   (test-support/with-database
    (fn [connection]
@@ -2345,16 +2265,6 @@
            (doc! on-page :seon.ns/doc "A datom on the page changed."))
          (is (false? (db/read-evidence-current? @connection evidence))
              "a changed datom on the page makes it stale"))))))
-
-(deftest a-write-user-datahike-cannot-parse-names-no-agent
-  (test-support/with-database
-   (fn [connection]
-     (let [provenance? @#'seon.db/agent-provenance?
-           database (db/db connection)]
-       (doseq [user [[:seon.fn/doc "not unique"] [:a 1 2] "a-string" {:map 1} :no-such-ident]]
-         (is (false? (provenance? database {:tx-meta {:seon.db/user user}}))
-             (str "Datahike's declared unparseable entity id answers no agent: " (pr-str user))))
-       (is (true? (provenance? database {:tx-meta {:seon.db/user [:seon.agent/id "any"]}})))))))
 
 (defn- declare-entity!
   {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword] :map]}

@@ -4280,34 +4280,6 @@
                      (retention-snapshot after rules entities) actor)
     nil))
 
-(defn- agent-provenance?
-  "True when the write's own provenance metadata names an agent user.
-
-   Ruling 1r (owner, 2026-09-18 02:15-02:30Z): \"root access (system) for no
-   limits, and then agents\" — and \"we don't have access control in the
-   database explicitly but we have the user metadata so we can still write it
-   in\". So the per-write bound is decided here, by the `:seon.db/user` the
-   transaction already carries, and by nothing else. A write with no user
-   (a `:seon.db/process` publication, adoption, reseed, boot recovery or
-   collection) and a user that is not an agent are both system writes: their
-   own lifecycle deadline is the bound that reports."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value :map] :boolean]}
-  [database prepared]
-  (let [user (get-in prepared [:tx-meta :seon.db/user])]
-    (boolean
-     (when (some? user)
-       (if (and (sequential? user) (= :seon.agent/id (first user)))
-         true
-         ;; A user that is not an entity id Datahike can parse names no agent.
-         ;; Its declared unparseable cases (lookup-ref arity, a non-unique
-         ;; lookup attribute, any other shape) answer the supplied error code
-         ;; instead of raising (`datahike/db/utils.cljc:109-139`); every other
-         ;; failure propagates.
-         (let [eid (db.utils/entid database user ::unparseable-user)]
-           (when (number? eid)
-             (seq (d/datoms database :eavt eid :seon.agent/id)))))))))
-
 (defn- write-observation
   "Carry the actual refused request and immutable pre-write basis as data.
   Recorder admission owns its bounded stored projection."
@@ -4349,29 +4321,29 @@
                          request (if (map? request) request {:tx-data request})]
                      (assoc-in request [:tx-meta :datahike/validate-report]
                                (write-report-validator projection))))
-                  ;; Ruling 1r (2026-09-18): the bound derives from the write's
-                  ;; own provenance metadata, not from a second access-control
-                  ;; mechanism. An agent user keeps the short, loud dial; root
-                  ;; and system processes carry no per-write bound, because the
-                  ;; operation's own lifecycle deadline is the one that reports
-                  ;; and root can re-run a transaction an agent bound refused.
-                  agent-write? (agent-provenance? database prepared)
+                  ;; Every write, system writes included, is bounded by the
+                  ;; branch's dial (lane-flow-owns-running-machinery.md N3,
+                  ;; R6): a synchronous fault writer must never park forever.
                   write-time-limit-ms
-                  (when agent-write?
-                    (if (seq configured-bounds)
-                      (apply min configured-bounds)
-                      declared-bound))
+                  (if (seq configured-bounds)
+                    (apply min configured-bounds)
+                    declared-bound)
                   request
                   (schema.datahike/encode-transaction-in projection prepared)
+                  timeout (Object.)
+                  ;; One deadline covers admission and acknowledgement: the
+                  ;; writer's put! into its transaction queue runs inside the
+                  ;; go block whose promise this derefs
+                  ;; (datahike/writer.cljc:46-55, 393-402).
+                  started (System/nanoTime)
                   ;; Parents make it Datahike's merge: same fence and validator.
                   pending ((if (:parents request) d/merge-db! d/transact!) connection request)
-                  timeout (Object.)
-                  started (System/nanoTime)
                   report
                   (try
-                    (if write-time-limit-ms
-                      (deref pending write-time-limit-ms timeout)
-                      (deref pending))
+                    (deref pending
+                           (max 0 (- write-time-limit-ms
+                                     (quot (- (System/nanoTime) started) 1000000)))
+                           timeout)
                     (catch Throwable throwable
                       ;; Datahike's throwable-promise wraps the JDK timeout in
                       ;; ExceptionInfo. Preserve every delivered writer error.
@@ -4388,9 +4360,8 @@
                        :seon.store/branch (:branch (:config database))
                        :seon.config.db/write-time-limit-ms write-time-limit-ms
                        :seon.db/write-wait-elapsed-ms elapsed-ms
-                       ;; Ruling 1r: the refusal hands back the transaction so
-                       ;; root can re-run exactly what the agent bound stopped
-                       ;; waiting for.
+                       ;; The refusal hands back the transaction; the caller
+                       ;; must not retry it blindly (the outcome is unknown).
                        :seon.store/transaction transaction
                        :seon.db/transaction-outcome-unknown true}]
                   (diagnostic
@@ -4606,8 +4577,9 @@
   any datom lands) and `:parents`, immutable commit ids that make the write
   Datahike's multi-parent merge commit through the same validation.
 
-  Waiting for the Datahike writer is bounded by the branch's declared
-  :seon.config.db/write-time-limit-ms fact. If that bound fires, this returns
+  Every write, system writes included, is bounded by the branch's declared
+  :seon.config.db/write-time-limit-ms fact; one deadline covers writer
+  admission and acknowledgement. If that bound fires, this returns
   :seon.db/write-bound-exceeded with :seon.db/transaction-outcome-unknown
   true. The queued transaction is not cancelled and may still commit, so the
   caller must not assume rollback or retry it blindly.
