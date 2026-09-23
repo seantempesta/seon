@@ -41,3 +41,4 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 |---|---:|---|---|---:|---|---|
 | E1: `src/my/background.clj` | 1 | 3 / 5 / -2; 0 | 0 / 11 | 21.237083 | `my.background-test` | None |
 | E2: `src/my/program.clj` | 4 | 14 / 21 / -7; 0 | 1 / 27 | 27.987833 | `my.program-test` | X literal retained; existing read-result catch retains class/message/data but omits the cause chain (outside this cut) |
+| E3: `src/seon/agent.clj` | 1 | 4 / 5 / -1; 0 | 1 / 17 | 25.1875 | `seon.cluster.agent-identity-test` | Two O literals retained to preserve header evaluation order |

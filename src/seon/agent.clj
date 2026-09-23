@@ -1,7 +1,8 @@
 (ns seon.agent
   "Read the calling agent's own record components."
   (:refer-clojure :exclude [identity])
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [seon.ai :as ai]
             [seon.db :as db]
             [seon.config :as config]
@@ -138,10 +139,8 @@
                       [cluster-name defaults overrides attributes])]
     (cond
       refusal refusal
-      (nil? defaults) {:seon.error/at (java.util.Date.)
-                      :seon.error/layer :seon.agent/identity
-                      :seon.error/operation 'seon.agent/effective-settings
-                      :seon.error/message "The cluster configuration is absent."}
+      (nil? defaults) (seon.error.refusal/diagnostic (java.util.Date.) :seon.agent/identity 'seon.agent/effective-settings
+                       {:seon.error/message "The cluster configuration is absent."})
       :else
       (let [resolved (ai/settings defaults overrides)
             effective (select-keys resolved
