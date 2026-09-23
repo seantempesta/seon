@@ -351,12 +351,14 @@
 (defn- decoded-projection-event
   [event]
   (if (and (= :ret (:tag event)) (string? (:val event)))
-    (let [parsed (try
-                   (edn/read-string (:val event))
-                   (catch Throwable _ ::unreadable))]
-      (if (and (map? parsed) (contains? parsed :seon.dev.mcp/value))
-        (assoc event :val parsed)
-        event))
+    ;; An unreadable :val keeps its raw text beside the reader's failure.
+    (let [[parsed cause] (try [(edn/read-string (:val event))]
+                              (catch Throwable cause [nil cause]))]
+      (cond
+        cause (assoc event :seon.dev.mcp/reader-error
+                     (str (.getName (class cause)) ": " (ex-message cause)))
+        (and (map? parsed) (contains? parsed :seon.dev.mcp/value)) (assoc event :val parsed)
+        :else event))
     event))
 
 (defn- elision-value

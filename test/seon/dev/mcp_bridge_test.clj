@@ -775,3 +775,9 @@
           (* 1000 seon.test-support/event-backstop-seconds))))
       (clojure.test/is (= {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false} @seen))
       (finally (clojure.core.server/stop-server name)))))
+
+(deftest an-unreadable-prepl-value-keeps-its-raw-text-beside-the-reader-error
+  (let [event {:tag :ret :val "#object[java.lang.Object 0x1]" :ns "user"}
+        decoded ((bridge-var 'decoded-projection-event) event)]
+    (is (= "#object[java.lang.Object 0x1]" (:val decoded)) "the raw text is never replaced")
+    (is (string? (:seon.dev.mcp/reader-error decoded)) "the reader's failure rides beside it")))

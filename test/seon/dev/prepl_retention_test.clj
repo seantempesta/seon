@@ -1,7 +1,9 @@
 (ns seon.dev.prepl-retention-test
-  "A prepl session keeps no evaluation result once the result is returned."
+  "A prepl session keeps no evaluation result once the result is returned, and\n  answers every form exactly once even when its reply cannot be printed."
   (:require [clojure.core.server :as server]
+            [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]))
 
 (def result-reference (atom nil))
@@ -47,3 +49,41 @@
           (reset! result-reference (java.lang.ref.WeakReference. value#))
           (throw (ex-info "retained?" {:value value#}))))
       "*e does not keep the thrown value"))
+
+(defn- session-lines
+  "Send `forms` to one session of `seon.operator.prepl/io-prepl` started with
+  `valf` and return each form's :ret event, read as EDN."
+  [valf forms]
+  (let [server-name (str "prepl-reply-" (random-uuid))
+        listener (server/start-server
+                  {:name server-name :accept 'seon.operator.prepl/io-prepl
+                   :args [:cluster-name server-name :valf valf]
+                   :address "127.0.0.1" :port 0})]
+    (try
+      (with-open [socket (java.net.Socket. "127.0.0.1" (.getLocalPort listener))
+                  writer (io/writer socket)
+                  reader (java.io.PushbackReader. (io/reader socket))]
+        (.setSoTimeout socket 4000)
+        (doseq [form forms] (.write writer (str (pr-str form) "\n")))
+        (.flush writer)
+        (loop [rets []]
+          (if (= (count forms) (count rets))
+            rets
+            (let [event (edn/read reader)]
+              (recur (cond-> rets (= :ret (:tag event)) (conj event)))))))
+      (finally
+        (server/stop-server server-name)))))
+
+(deftest a-reply-that-cannot-be-printed-is-a-declared-error-and-the-session-answers-on
+  (let [throwing (fn [value _] (if (= :next value) (pr-str value) (throw (IllegalStateException. "cannot show"))))
+        [failed thrown answered] (session-lines throwing ['(+ 1 2)
+                                                     '(throw (ex-info "outer" {:k #'clojure.core/map}))
+                                                     :next])
+        failed-val (edn/read-string (:val failed))
+        thrown-val (edn/read-string (:val thrown))]
+    (is (true? (:exception failed)) "a value that cannot be shown is reported, as io-prepl does")
+    (is (= :print-eval-result (:clojure.error/phase failed-val)))
+    (is (str/includes? (:seon.error/message failed-val) "cannot show"))
+    (is (str/includes? (:seon.error/message thrown-val) "\"outer\"")
+        "the evaluation's own failure is shown beside the printer's")
+    (is (= ":next" (:val answered)) "the session answers the next form exactly once")))

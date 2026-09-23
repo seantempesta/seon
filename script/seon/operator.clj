@@ -171,13 +171,21 @@
              (when (and observe! (= :out (:tag event))) (observe! (:val event)))
              (when (= ::eof event) (fail! "PREPL closed without a terminal result; outcome unknown." advertisement))
              (if (= :ret (:tag event))
-               (if (:exception event)
-                 (fail! "PREPL evaluation failed." event)
-                 (try (edn/read-string (:val event))
-                      (catch Exception cause
-                        (throw (ex-info "Malformed PREPL result."
-                                        (diagnostic "Malformed PREPL result." event :refused cause)
-                                        cause)))))
+               ;; An unreadable :val keeps its raw text (the event) beside the
+               ;; reader's failure; it never replaces the text with the failure.
+               (let [[value cause] (try [(edn/read-string (:val event))]
+                                        (catch Exception cause [nil cause]))]
+                 (cond
+                   (:exception event)
+                   (fail! (or (and (map? value) (:seon.error/message value)) "PREPL evaluation failed.")
+                          (cond-> event
+                            (nil? cause) (assoc :val value)
+                            cause (assoc :seon.operator/reader-error (ex-message cause))))
+                   cause
+                   (throw (ex-info (str "Malformed PREPL result: " (ex-message cause))
+                                   (diagnostic "Malformed PREPL result." event :refused cause)
+                                   cause))
+                   :else value))
                (recur)))))))))
 
 (defn- operator-reply!
