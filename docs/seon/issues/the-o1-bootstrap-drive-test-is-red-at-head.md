@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocker
 tags: [issue, test, agent, turn-loop, bootstrap-drive, wave/live-drive-context]
 ---
@@ -73,3 +73,10 @@ Two `bin/test-fast` runs on this machine under slot contention, both with
 report). No cold `bin/test` run, no prepl evaluation, no live cluster
 inspection. Whether this is a recent regression or long-standing was not
 established: no bisection was done.
+
+## Resolution (lane cut-l1, 2026-09-23)
+
+`src/seon/bootstrap_drive.clj` and `test/seon/bootstrap_drive_test.clj` are deleted
+(cut analysis `e6f1c0e7a` §5): the namespace had no caller outside its own test and
+booted a scratch root per drive, which the one-JVM law forbids outside the platform
+tier. The red test leaves with its mechanism.
