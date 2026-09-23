@@ -4,7 +4,8 @@
    This namespace deliberately does not own durable runtime state. Ordinary
    Flow processes retain only disposable counters and handles. Flow channels
    carry scheduling and wake signals."
-  (:require [clojure.core.protocols :as core.protocols]
+  (:require [seon.error.refusal]
+            [clojure.core.protocols :as core.protocols]
             [clojure.core.async :as async]
             [clojure.core.async.flow :as flow]
             [clojure.core.async.flow.impl.graph :as flow.graph]
@@ -363,14 +364,12 @@
   {:malli/schema [:=> [:cat ::submission-id ::workload]
                   ::submission-capacity-error]}
   [submission-id workload]
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer ::submission
-    :seon.error/operation 'seon.flow/submission-capacity-error
-    :seon.flow/submission-capacity workload
+  (seon.error.refusal/diagnostic (java.util.Date.) ::submission 'seon.flow/submission-capacity-error
+   {:seon.flow/submission-capacity workload
     ::submission-id submission-id
     :seon.error/message "The bounded work submission queue is full."
     :seon.error/expected "available submission capacity"
-    :seon.error/data {::submission-id submission-id ::workload workload}})
+    :seon.error/data {::submission-id submission-id ::workload workload}}))
 
 (defn- refuse-compute-submission!
   [{::keys [submission-id result status]}]
@@ -693,13 +692,11 @@
       (throw
        (ex-info
         "The work launcher is not ready: required config facts are missing."
-        {:seon.error/at (java.util.Date.)
-          :seon.error/layer ::configuration
-          :seon.error/operation 'seon.flow/required-launcher-configuration
-          :seon.error/offending configuration
+        (seon.error.refusal/diagnostic (java.util.Date.) ::configuration 'seon.flow/required-launcher-configuration
+         {:seon.error/offending configuration
           :seon.error/message "The work launcher is not ready: required config facts are missing."
           ::missing-config-facts (vec missing)
-          :seon.error/expected flow-workload-attributes})))
+          :seon.error/expected flow-workload-attributes}))))
     selected))
 
 (defn- work-launcher-graph-definition
@@ -936,15 +933,13 @@
     (throw
      (ex-info
       "A compute submission must name its cluster's work launcher."
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer ::submission
-        :seon.error/operation 'seon.flow/submit!!
-        ::missing-launcher-submission (::submission-id submission)
+      (seon.error.refusal/diagnostic (java.util.Date.) ::submission 'seon.flow/submit!!
+       {::missing-launcher-submission (::submission-id submission)
         :seon.error/message "A compute submission must name its cluster's work launcher."
         :seon.error/member ::work-launcher
         :seon.error/expected ::work-launcher
         :seon.error/offending work-launcher
-        :seon.error/data {::submission-id (::submission-id submission)}})))
+        :seon.error/data {::submission-id (::submission-id submission)}}))))
   (env/refuse-absent-environment! submission ::submit!!)
   (let [{::keys [submission-id workload work-fn time-limit-ms] :as submission}
         (with-current-arm submission)
@@ -1032,14 +1027,12 @@
      (str "The core-fault channel overflowed and dropped "
           dropped-fault-count
           (if (= 1 dropped-fault-count) " fault." " faults."))
-     {:seon.error/at (java.util.Date.)
-       :seon.error/layer ::fault-channel
-       :seon.error/operation 'seon.flow/overflow-core-fault
-       :seon.error/message "The core-fault channel dropped faults because its buffer was full."
+     (seon.error.refusal/diagnostic (java.util.Date.) ::fault-channel 'seon.flow/overflow-core-fault
+      {:seon.error/message "The core-fault channel dropped faults because its buffer was full."
        ::dropped-fault-count dropped-fault-count
        ::dropped-fault-digest dropped-fault-digest
        ::dropped-fault dropped-fault
-       :seon.error/expected "capacity for every reported fault"})
+       :seon.error/expected "capacity for every reported fault"}))
     ::dropped-fault-count dropped-fault-count
     ::dropped-fault-digest dropped-fault-digest
     ::dropped-fault dropped-fault}
