@@ -17,7 +17,8 @@
 
   The trial that compares them is
   docs/prds/steward-platform/plan/issue-context-trials-2026-09-16.md."
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [seon.ai :as ai]
             [seon.db :as db]
             [seon.test :as test]
@@ -203,10 +204,8 @@
          "The system checks the detector after each turn and reports whether the issue is still open."]))
      (render-candidate (if (seq (:seon.test/syms link-row))
                          (candidate database issue-id) :bare) link-row))
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.issue/opening
-     :seon.error/operation 'seon.issue.opening/source
-     :seon.error/message (str "No current issue " issue-id)}))
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.issue/opening 'seon.issue.opening/source
+     {:seon.error/message (str "No current issue " issue-id)})))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The retrieval call candidate :minimal-retrieval offers
@@ -230,7 +229,5 @@
      :seon.issue/tests
      (mapv #(test/recorded-result database %)
            (:seon.test/syms link-row))}
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.issue/opening
-     :seon.error/operation 'seon.issue.opening/context
-     :seon.error/message (str "No current issue " issue-id)}))
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.issue/opening 'seon.issue.opening/context
+     {:seon.error/message (str "No current issue " issue-id)})))

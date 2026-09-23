@@ -87,3 +87,4 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 | E19: `src/seon/effect.clj` | 14 | 41 / 70 / -29; +0 | 3 / 29 | 25.0675 | `seon.effect-test` | None; unsupported expression retained |
 | E20: `src/seon/env.clj` | 10 | 30 / 50 / -20; +0 | 0 / 17 | 23.766875 | `seon.env-test` | None; complete member evidence and ex-info boundaries preserved |
 | E21: `src/seon/flow.clj` | 4 | 14 / 21 / -7; +0 | 6 / 41 | 26.661375 | `seon.flow-test` | None; four unsupported expression contexts retained; no graph change |
+| E22: `src/seon/issue/opening.clj` | 2 | 6 / 9 / -3; +0 | 0 / 15 | 26.119667 | `seon.issue-test` | None; dirty issue.clj untouched |
