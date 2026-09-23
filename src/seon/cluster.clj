@@ -47,6 +47,7 @@
             [seon.fn :as seon.fn]
             [seon.fs :as fs]
             [seon.instrument :as instrument]
+            [seon.profile :as profile]
             [seon.id :as id]
             [seon.test.cache :as test.cache]
             [seon.operator.runtime :as operator.runtime
@@ -261,7 +262,9 @@
 
 (defn project-next-prepl-value!
   "Mark the next PREPL return with explicit projection and read-only intent.
-  Unspecified intent conservatively announces possible runtime changes."
+  Unspecified intent conservatively announces possible runtime changes.
+  The mark also begins the evaluation's profile window: a return over one
+  second carries what the armed definitions did (`seon.profile/explain-slow`)."
   {:malli/schema [:function
                   [:=> [:cat] :nil]
                   [:=> [:cat [:or :boolean
@@ -272,9 +275,10 @@
   ([] (project-next-prepl-value! false))
   ([request]
    (.set mcp-projection
-         (if (map? request)
-           request
-           {:seon.dev.mcp/evaluation? request}))
+         (assoc (if (map? request)
+                  request
+                  {:seon.dev.mcp/evaluation? request})
+                :seon.profile/mark (profile/begin)))
    nil))
 
 (defn- consume-mcp-projection!
@@ -348,18 +352,11 @@
 
 (defn- mcp-projection-error
   {:malli/schema
-   [:function
-    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                      :seon.schema.admission/reason "The projection fallback describes an arbitrary value that failed projection."
-                      :gen/elements [nil false 0 "" :k [] {}]}]]
-     :seon.dev.mcp/projection-failed-result]
-    [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                      :seon.schema.admission/reason "The projection fallback describes an arbitrary value that failed projection."
-                      :gen/elements [nil false 0 "" :k [] {}]}]
-               :seon.error/throwable]
-     :seon.dev.mcp/projection-failed-result]]}
-  ([value]
-   (mcp-projection-error value nil))
+   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                     :seon.schema.admission/reason "The projection fallback describes an arbitrary value that failed projection."
+                     :gen/elements [nil false 0 "" :k [] {}]}]
+              :seon.error/throwable]
+    :seon.dev.mcp/projection-failed-result]}
   ([value failure]
    {:seon.dev.mcp/value
     (cond-> {:seon.error/at (java.util.Date.)
@@ -520,15 +517,20 @@
          (doseq [channel runtime-eval-channels]
            (async/offer! channel
                          :seon.render.web/runtime-eval)))
-       (admit/canonical-edn
-        (if (and projection (get projection :seon.dev.mcp/project? true))
-          (mcp-project cluster-name bootstrap-effective value
-                       (true? (:seon.dev.mcp/evaluation? projection)) exception?)
-          value))
-       (catch Throwable _
-         ;; Fixed semantic data never re-enters admission or a failed producer.
+       (let [explanation (some-> (:seon.profile/mark projection) profile/explain-slow)
+             projected (if (and projection (get projection :seon.dev.mcp/project? true))
+                         (mcp-project cluster-name bootstrap-effective value
+                                      (true? (:seon.dev.mcp/evaluation? projection)) exception?)
+                         value)]
+         (admit/canonical-edn
+          (if (and explanation (map? projected))
+            (assoc projected :seon.dev.mcp/profile explanation)
+            projected)))
+       (catch Throwable failure
+         ;; Fixed semantic data never re-enters admission or a failed producer;
+         ;; the failure's message rides with it instead of being dropped.
          (binding [*print-length* nil *print-level* nil]
-           (pr-str (mcp-projection-error value))))))))
+           (pr-str (mcp-projection-error value failure))))))))
 
 (defn mcp-io-prepl
   "Serve PREPL events with explicit exception status at MCP projection."
@@ -639,6 +641,10 @@
         (when ready
           (dissoc ready :seon.problems/problems))]
     (cond-> {:seon.dev.mcp/cluster cluster-name
+             ;; Cumulative inclusive timing of every armed definition in this
+             ;; JVM, one line each: the top five by total and by maximum, and
+             ;; the five slowest of those whose maximum exceeded one second.
+             :seon.dev.mcp/profile (profile/summary (profile/cells) 5)
              :seon.dev.mcp/health
              (if connection :observed :unknown)
              :seon.dev.mcp/flow
@@ -2275,6 +2281,86 @@
                  :seon.source/changed-paths changed})))
   nil)
 
+(defn definition-digests
+  "Definition digests of the named function symbols, or of every function row.
+
+  The armed wrapper's profiling cell carries its callable's digest; a symbol
+  without a digest row stays absent, so its cell's digest is unknown."
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.db/database-value] [:map-of :qualified-symbol :seon.program/definition-digest]]
+    [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
+     [:map-of :qualified-symbol :seon.program/definition-digest]]]}
+  ([database]
+   (into {} (db/q '[:find ?sym ?digest
+                    :where [?function :seon.fn/sym ?sym]
+                           [?function :seon.program/definition-digest ?digest]]
+                  database)))
+  ([database symbols]
+   (into {} (db/q '[:find ?sym ?digest
+                    :in $ [?sym ...]
+                    :where [?function :seon.fn/sym ?sym]
+                           [?function :seon.program/definition-digest ?digest]]
+                  database symbols))))
+
+(defn published-program
+  "The published source program's definition digests and program namespaces.
+
+  The loaded Vars derive from the files, which is what the published program
+  (`source/current`) indexes; a cluster branch may retain an older program.
+  Program namespaces are those whose file row lies under the `src/` source
+  root; test namespaces load when a test request needs them."
+  {:malli/schema [:=> [:cat :seon.store/store]
+                  [:map
+                   [:seon.profile/definition-digests :seon.profile/definition-digests]
+                   [:seon.cluster/program-namespaces [:vector :symbol]]]]}
+  [store]
+  (let [published (source/database store (:seon.source/commit-id (source/current store)))]
+    (try
+      {:seon.profile/definition-digests (definition-digests published)
+       :seon.cluster/program-namespaces
+       (vec (sort (db/q '[:find [?name ...]
+                          :where [?namespace :seon.ns/name ?name]
+                                 [?namespace :seon.fn/file ?file]
+                                 [?file :seon.fn.file/relative-path ?path]
+                                 [(clojure.string/starts-with? ?path "src/")]]
+                        published)))}
+      (finally (d/release-materialized-db published)))))
+
+(defn arm-host-program!
+  "Load the program namespaces and arm every contracted Var, once, at boot.
+
+  The loaded Vars derive from the files, so their contracts compile against the
+  files' own schema declarations (`schema.edn/packaged-forms`); each profiling
+  cell carries the digest the published program names for its symbol. A
+  registration error refuses the boot: a running program never runs with its
+  contracts silently unarmed."
+  {:malli/schema [:=> [:cat [:map
+                             [:seon.profile/definition-digests :seon.profile/definition-digests]
+                             [:seon.cluster/program-namespaces [:vector :symbol]]]
+                       :map [:or :nil :seon.flow/commit-fault!]]
+                  :seon.instrument/applied]}
+  [{digests :seon.profile/definition-digests namespaces :seon.cluster/program-namespaces}
+   effective commit-fault!]
+  (doseq [namespace-name namespaces]
+    (require namespace-name))
+  (let [projection (schema/declaration-projection (schema.edn/packaged-forms))
+        result (schema/call-with-projection
+                projection
+                #(instrument/apply!
+                  (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
+                           :seon.sci.admit/caps (config/result-caps effective)
+                           :seon.schema/projection projection
+                           :seon.profile/definition-digests digests}
+                    (:seon.config.error/max-evidence-bytes effective)
+                    (assoc :seon.config.error/max-evidence-bytes
+                           (:seon.config.error/max-evidence-bytes effective))
+                    commit-fault! (assoc :seon.flow/commit-fault! commit-fault!))))]
+    (when (or (:seon.instrument/registration-observation result)
+              (not (pos? (or (:seon.instrument/instrumented result) 0))))
+      (refused! "Boot JVM instrumentation did not arm the loaded program." result))
+    result))
+
 (defn- development-arming-identities
   "Reloaded Vars and functions whose contracts refer to changed schemas."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol] :seon.fn.file/identities]
@@ -2447,7 +2533,12 @@
                         (:seon.config.error/max-evidence-bytes effective)
                         :seon.schema/projection projection
                         :seon.instrument/changed-identities
-                        arming-identities})]
+                        arming-identities
+                        :seon.profile/definition-digests
+                        (definition-digests database
+                                            (into [] (comp (filter #(= :seon.fn/sym (first %)))
+                                                           (map second))
+                                                  arming-identities))})]
            (when (or (:seon.instrument/registration-observation result)
                      (and (= :panic (:seon.config/on-core-error effective))
                           (not (pos? (or (:seon.instrument/instrumented result) 0)))))
@@ -2503,7 +2594,10 @@
   ([root changed-paths development-cluster directory]
    (report-source-progress! "request accepted")
      (report-source-progress! "bootstrap configuration")
-     (let [instance (when development-cluster
+     (let [;; A publication over one second reports what the armed
+           ;; definitions did during it, in its progress and its result.
+           profile-mark (profile/begin)
+           instance (when development-cluster
                       (get @running-instances development-cluster))
            _ (when (and development-cluster (not instance))
                (refused! "Development updates require the named cluster to be running."
@@ -2522,16 +2616,22 @@
          (schema/call-with-projection
           (schema/declaration-projection (schema.edn/packaged-forms))
           (fn []
-            (let [published (full-source-refresh! root held-store roots)]
-              (if (:seon.error/at published)
-                published
-                (let [adoption (if instance
-                                 (development-source-refresh! held-store instance published changed-paths roots)
-                                 {:seon.source/reloaded-namespaces []
-                                  :seon.source/arming-identities #{}})]
-                  (if (:seon.error/at adoption)
-                    adoption
-                    (merge published adoption)))))))
+            (let [published (full-source-refresh! root held-store roots)
+                  result
+                  (if (:seon.error/at published)
+                    published
+                    (let [adoption (if instance
+                                     (development-source-refresh! held-store instance published changed-paths roots)
+                                     {:seon.source/reloaded-namespaces []
+                                      :seon.source/arming-identities #{}})]
+                      (if (:seon.error/at adoption)
+                        adoption
+                        (merge published adoption))))]
+              (if-let [explanation (profile/explain-slow profile-mark)]
+                (do (report-source-progress!
+                     (str "profile: " (str/join "\n  " (:seon.profile/lines explanation))))
+                    (assoc result :seon.profile/explanation explanation))
+                result))))
          (finally
            (release-root-store! store-dir))))))
 

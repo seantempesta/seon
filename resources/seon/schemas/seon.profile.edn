@@ -1,0 +1,95 @@
+;; Cumulative inclusive call timing on the armed wrappers (src/seon/profile.clj).
+;; Values only: nothing here is stored, so no Datahike attribute derives from it.
+{:seon.profile/sym [:qualified-symbol {:description "The installed callable's symbol."}]
+ :seon.profile/digest :seon.program/definition-digest
+ :seon.profile/definition-digests
+ [:map-of {:description "Installer-supplied digests of the callables it arms, by symbol."}
+  :qualified-symbol :seon.program/definition-digest]
+ :seon.profile/scope [:enum {:description "Host: a loaded Var's JVM wrapper, attributed to no cluster. Context: one SCI installation's wrapper."}
+                      :seon.profile/host :seon.profile/context]
+ :seon.profile/context [:string {:min 1 :description "The installer's name for the SCI context, when it supplied one."}]
+ :seon.profile/identity
+ [:map
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/digest {:optional true} :seon.profile/digest]
+  [:seon.profile/scope :seon.profile/scope]
+  [:seon.profile/context {:optional true} :seon.profile/context]]
+ :seon.profile/adder [:fn {:error/message "must be a java.util.concurrent.atomic.LongAdder"} seon.profile/adder?]
+ :seon.profile/accumulator [:fn {:error/message "must be a java.util.concurrent.atomic.LongAccumulator"} seon.profile/accumulator?]
+ :seon.profile/call-counter :seon.profile/adder
+ :seon.profile/total-counter :seon.profile/adder
+ :seon.profile/max-counter :seon.profile/accumulator
+ :seon.profile/throw-counter :seon.profile/adder
+ :seon.profile/cell
+ [:map
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/digest {:optional true} :seon.profile/digest]
+  [:seon.profile/scope :seon.profile/scope]
+  [:seon.profile/context {:optional true} :seon.profile/context]
+  [:seon.profile/call-counter :seon.profile/call-counter]
+  [:seon.profile/total-counter :seon.profile/total-counter]
+  [:seon.profile/max-counter :seon.profile/max-counter]
+  [:seon.profile/throw-counter :seon.profile/throw-counter]]
+ :seon.profile/calls [:int {:min 0 :description "Completed calls, returns and throws."}]
+ :seon.profile/total-ms [:int {:min 0 :description "Inclusive wall milliseconds."}]
+ :seon.profile/mean-us [:int {:min 0}]
+ :seon.profile/max-ms [:int {:min 0 :description "Lifetime maximum of one call, inclusive."}]
+ :seon.profile/throws [:int {:min 0}]
+ :seon.profile/observation
+ [:map
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/digest {:optional true} :seon.profile/digest]
+  [:seon.profile/scope :seon.profile/scope]
+  [:seon.profile/context {:optional true} :seon.profile/context]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/total-ms :seon.profile/total-ms]
+  [:seon.profile/mean-us :seon.profile/mean-us]
+  [:seon.profile/max-ms :seon.profile/max-ms]
+  [:seon.profile/throws :seon.profile/throws]]
+ :seon.profile/cells [:int {:min 0}]
+ :seon.profile/observed [:int {:min 0}]
+ :seon.profile/by-total [:vector :seon.profile/observation]
+ :seon.profile/by-max [:vector :seon.profile/observation]
+ :seon.profile/over-second [:vector :seon.profile/observation]
+ :seon.profile/report
+ [:map
+  [:seon.profile/cells :seon.profile/cells]
+  [:seon.profile/observed :seon.profile/observed]
+  [:seon.profile/by-total :seon.profile/by-total]
+  [:seon.profile/by-max :seon.profile/by-max]
+  [:seon.profile/over-second :seon.profile/over-second]]
+ :seon.profile/started-ns :int
+ :seon.profile/snapshot [:fn {:error/message "must be the counter snapshot seon.profile/begin takes"
+                              :description "Each live cell's call and total counts, keyed by its call counter."}
+                         seon.profile/snapshot?]
+ :seon.profile/mark
+ [:map
+  [:seon.profile/started-ns :seon.profile/started-ns]
+  [:seon.profile/snapshot :seon.profile/snapshot]]
+ :seon.profile/growth
+ [:map
+  [:seon.profile/sym :seon.profile/sym]
+  [:seon.profile/digest {:optional true} :seon.profile/digest]
+  [:seon.profile/scope :seon.profile/scope]
+  [:seon.profile/context {:optional true} :seon.profile/context]
+  [:seon.profile/calls :seon.profile/calls]
+  [:seon.profile/total-ms :seon.profile/total-ms]]
+ :seon.profile/elapsed-ms [:int {:min 0}]
+ :seon.profile/growths [:vector :seon.profile/growth]
+ :seon.profile/lines [:vector :string]
+ :seon.profile/explanation
+ [:map
+  [:seon.profile/elapsed-ms :seon.profile/elapsed-ms]
+  [:seon.profile/growths :seon.profile/growths]
+  [:seon.profile/lines :seon.profile/lines]]
+ :seon.profile/over-second-count [:int {:min 0}]
+ :seon.profile/by-total-lines [:vector :string]
+ :seon.profile/by-max-lines [:vector :string]
+ :seon.profile/over-second-lines [:vector :string]
+ :seon.profile/summary
+ [:map
+  [:seon.profile/observed :seon.profile/observed]
+  [:seon.profile/over-second-count :seon.profile/over-second-count]
+  [:seon.profile/by-total-lines :seon.profile/by-total-lines]
+  [:seon.profile/by-max-lines :seon.profile/by-max-lines]
+  [:seon.profile/over-second-lines :seon.profile/over-second-lines]]}

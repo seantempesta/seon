@@ -908,8 +908,8 @@
         (arm after-projection)
         (is (not (identical? before @candidate)))
         (is (identical? other-before @unrelated))
-        (is (not= (:seon.instrument/contract-digest (meta before))
-                  (:seon.instrument/contract-digest (meta @candidate))))
+        (is (not= (:seon.instrument/definitions (meta before))
+                  (:seon.instrument/definitions (meta @candidate))))
         (is (= {:seon.instrument-test/value "new"}
                (schema/call-with-projection
                 after-projection #(candidate {:seon.instrument-test/value "new"}))))
@@ -932,8 +932,8 @@
         caps (config/result-caps config/defaults)
         arm (fn []
               (#'instrument/arm-var! candidate contract projection projection caps)
-              {:seon.instrument/contract-digest
-               (:seon.instrument/contract-digest (meta @candidate))
+              {:seon.instrument/definitions
+               (:seon.instrument/definitions (meta @candidate))
                :seon.instrument-test/value (candidate "juniper")})]
     (try
       (is (map? (:seon.schema.projection/predicate-functions projection)))
@@ -943,7 +943,7 @@
                                   #'schema/*projection-state* nil}
                      (arm))]
           (is (= "juniper" (:seon.instrument-test/value cold)))
-          (is (= 64 (count (:seon.instrument/contract-digest cold))))
+          (is (seq (:seon.instrument/definitions cold)))
           (is (= bound cold))
           (is (thrown? Exception (candidate 42)))))
       (finally
@@ -1526,3 +1526,25 @@
     (is (= population (instrument/instrumented)))
     (is (= (count population) (:seon.instrument/registered applied)
            (:seon.instrument/instrumented applied)))))
+
+(deftest boot-arming-arms-every-loaded-contract-with-its-definition-digest
+  ;; Boot calls this owner once (`seon.cluster.boot/stand-cluster-runtime!`).
+  ;; e0577a6fb narrowed adoption to changed identities and left boot arming
+  ;; nothing, so a booted cluster ran with zero host wrappers; this regression
+  ;; asserts the wanted population on the canonical fixture's program.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           result (cluster/arm-host-program!
+                   {:seon.profile/definition-digests (cluster/definition-digests database)
+                    :seon.cluster/program-namespaces []}
+                   (assoc (test-support/effective-config) :seon.config/on-core-error :panic)
+                   nil)
+           armed (instrument/instrumented)
+           digests (cluster/definition-digests database ['seon.id/valid?])]
+       (is (= (count armed) (:seon.instrument/instrumented result)))
+       (is (= (instrument/armable (map ns-name (all-ns))) armed)
+           "every loaded contracted Var is armed, and nothing else")
+       (is (= (get digests 'seon.id/valid?)
+              (:seon.profile/digest (:seon.instrument/cell (meta @(requiring-resolve (quote seon.id/valid?))))))
+           "the host cell carries the function row's definition digest")))))

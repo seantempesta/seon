@@ -24,6 +24,7 @@
             [seon.fn.schema-shape :as schema-shape]
             [seon.error :as error]
             [seon.id]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -457,12 +458,25 @@
           [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
           [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
            [:seon.config.error/max-evidence-bytes {:optional true}
-            :seon.config.error/max-evidence-bytes]]]
+            :seon.config.error/max-evidence-bytes]
+           [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
+           [:seon.profile/context {:optional true} :seon.profile/context]]]
      :seon.instrument/callable]]}
   ([function-symbol spec-edn projection mode caps f]
    (wrap-interpreted function-symbol spec-edn projection mode caps f {}))
   ([function-symbol spec-edn projection mode caps f arm-request]
-  (let [original (original-interpreted f)]
+  (let [original (original-interpreted f)
+        callable-identity (merge {:seon.profile/sym function-symbol
+                                  :seon.profile/scope :seon.profile/context}
+                                 (when-let [digest (:seon.program/definition-digest arm-request)]
+                                   {:seon.profile/digest digest})
+                                 (select-keys arm-request [:seon.profile/context]))
+        prior (::cell (meta f))
+        cell (if (profile/reusable? prior callable-identity
+                                    (some-> f meta interpreted-original) original)
+               prior
+               (profile/cell callable-identity))
+        arm-request (dissoc arm-request :seon.program/definition-digest :seon.profile/context)]
     (when (and (= :record mode) (not (:seon.flow/commit-fault! arm-request)))
       (let [failure
             (registration-error
@@ -498,8 +512,11 @@
                                                (or (:seon.config.error/max-evidence-bytes arm-request)
                                                    (:seon.config.error/max-evidence-bytes
                                                     config/defaults)))))]
-        (with-meta wrapped
-          (assoc (meta wrapped) interpreted-original original))))))
+        ;; The compiled wrapper is shared through the projection cache; the
+        ;; timing layer is this installation's own, so its cell is too.
+        (profile/with-cell cell
+          (with-meta (fn [& arguments] (profile/timed (apply wrapped arguments)))
+            (assoc (meta wrapped) interpreted-original original ::cell cell)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The one operation
@@ -714,8 +731,16 @@
                          (keys definitions))))))
 
 (defn- arm-var!
-  {:malli/schema [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
-  [candidate authored projection bootstrap caps & [policy]]
+  {:malli/schema
+   [:function
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps] :seon.instrument/callable]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps [:or :nil :map]] :seon.instrument/callable]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.schema/projection :seon.sci.admit/caps [:or :nil :map] [:or :nil :seon.program/definition-digest]] :seon.instrument/callable]]}
+  ([candidate authored projection bootstrap caps]
+   (arm-var! candidate authored projection bootstrap caps nil nil))
+  ([candidate authored projection bootstrap caps policy]
+   (arm-var! candidate authored projection bootstrap caps policy nil))
+  ([candidate authored projection bootstrap caps policy digest]
   (alter-var-root
    candidate
    (fn [current]
@@ -723,33 +748,41 @@
        current
        (let [original (mi/-f->original current)
              function-symbol (var-symbol candidate)
+             callable-identity (cond-> {:seon.profile/sym function-symbol
+                                        :seon.profile/scope :seon.profile/host}
+                                 digest (assoc :seon.profile/digest digest))
+             prior (::cell (meta current))
+             cell (if (profile/reusable? prior callable-identity
+                                         (:malli.instrument/original (meta current)) original)
+                    prior
+                    (profile/cell callable-identity))
              contract (get (:seon.schema.projection/function-contracts projection)
                            function-symbol authored)
              definitions (contract-definitions projection contract)
-             contract-digest ((mi/-f->original seon.id/digest)
-                              64 [contract (schema/canonical-data-string definitions)])
              boot-wrapper (delay
                             (binding [*compiling-contract* true]
                               (compiled-wrapper bootstrap function-symbol
                                                 authored original caps policy)))]
-         (with-meta
+         (profile/with-cell cell
+          (with-meta
            (fn [& arguments]
              (if *compiling-contract*
                (apply original arguments)
-               (let [wrapped
-                     (binding [*compiling-contract* true]
-                       (if-let [projection (supplied-projection arguments)]
-                         (compiled-wrapper projection function-symbol
-                                           authored original caps policy)
-                         @boot-wrapper))]
-                 (apply wrapped arguments))))
+               (profile/timed
+                (let [wrapped
+                      (binding [*compiling-contract* true]
+                        (if-let [projection (supplied-projection arguments)]
+                          (compiled-wrapper projection function-symbol
+                                            authored original caps policy)
+                          @boot-wrapper))]
+                  (apply wrapped arguments)))))
            {:malli.instrument/original original
+            ::cell cell
             ::policy policy
             :seon.instrument/var candidate
             :seon.instrument/authored authored
             :seon.instrument/contract contract
-            :seon.instrument/definitions definitions
-            :seon.instrument/contract-digest contract-digest}))))))
+            :seon.instrument/definitions definitions}))))))))
 
 (defn- collect-contracts!
   "Read declarations from the program loaded into this JVM, without Malli's registry."
@@ -797,6 +830,7 @@
     max-evidence-bytes :seon.config.error/max-evidence-bytes
     commit-fault! :seon.flow/commit-fault!
     supplied-projection :seon.schema/projection
+    digests :seon.profile/definition-digests
     :as request}]
   (cond
     (and (= :record mode) (not (fn? commit-fault!)))
@@ -883,7 +917,8 @@
                   (throw (ex-info (:seon.error/message diagnostic)
                                   diagnostic failure)))))
             (when changed (alter-var-root candidate mi/-f->original))
-            (arm-var! candidate authored projection projection caps policy))
+            (arm-var! candidate authored projection projection caps policy
+                      (get digests (var-symbol candidate))))
           {:seon.instrument/registered (count contracts)
            :seon.instrument/instrumented (count (instrumented))})))))
 
@@ -996,7 +1031,8 @@
                                 (:seon.sci.admit/caps policy) policy)))
           (doseq [[candidate authored policy] pending]
             (arm-var! candidate authored projection projection
-                      (:seon.sci.admit/caps policy) policy)))))
+                      ;; A replaced definition's digest is unknown here.
+                      (:seon.sci.admit/caps policy) policy nil)))))
     replaced))
 
 

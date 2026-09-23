@@ -125,6 +125,7 @@
             [seon.program :as program]
             [seon.render :as render]
             [seon.render.value :as render.value]
+            [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.kernel :as kernel]
@@ -703,7 +704,11 @@
         (cond-> (select-keys @(::kernel/program-snapshot ctx)
                              [:seon.flow/commit-fault!])
           max-evidence-bytes
-          (assoc :seon.config.error/max-evidence-bytes max-evidence-bytes))))))
+          (assoc :seon.config.error/max-evidence-bytes max-evidence-bytes)
+          ;; The profiling cell's identity is the row it installs.
+          (:seon.program/definition-digest committed)
+          (assoc :seon.program/definition-digest
+                 (:seon.program/definition-digest committed)))))))
   nil)
 
 (declare install-declared-classes!)
@@ -2902,6 +2907,23 @@
       (assoc :seon.eval/renderer (:seon.render.call/selected-producer projection))
       record (assoc :seon.sci.admit/record record))))
 
+(defn- explained-evaluation
+  "Return `evaluation`, explained when it took over one second.
+
+  The explanation rides as `:seon.profile/explanation` and its lines are
+  appended to the evaluation's output, the text the agent is shown, so a slow
+  form always says what the armed definitions did during it."
+  {:malli/schema [:=> [:cat :seon.profile/mark :seon.sci.eval/evaluation]
+                  :seon.sci.eval/evaluation]}
+  [mark evaluation]
+  (if-let [explanation (profile/explain-slow mark)]
+    (let [output (:seon.cluster.eval/output evaluation)
+          lines (str/join "\n" (map #(str ";; " %) (:seon.profile/lines explanation)))]
+      (assoc evaluation
+             :seon.profile/explanation explanation
+             :seon.cluster.eval/output (if (seq output) (str output "\n" lines) lines)))
+    evaluation))
+
 (defn- success-evaluation
   [{admitted :seon.sci.eval/admitted
     caps :seon.sci.admit/caps
@@ -3084,7 +3106,10 @@
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error
     :as request}]
-  (let [;; A supplied ctx keeps its accumulated defs. The only replacement is
+  (let [;; The profile window opens before any work: an evaluation over one
+        ;; second returns what the armed definitions did (`seon.profile`).
+        profile-mark (profile/begin)
+        ;; A supplied ctx keeps its accumulated defs. The only replacement is
         ;; the environment state: each form receives a turn-scoped immutable
         ;; value, so call preparation cannot read the long-lived cluster value
         ;; and silently omit the agent/run/form members.
@@ -3165,6 +3190,8 @@
             (atom {:seon.schema/projection
                    (evaluation-projection
                     {:seon.sci.eval/ctx evaluation-ctx})}))]
+    (explained-evaluation
+     profile-mark
     (schema/call-with-projection-state
      projection-state
      (fn []
@@ -3443,7 +3470,7 @@
         (catch Throwable throwable
           (if @arm-state
             (throw throwable)
-            (failure-result throwable))))))))))))
+            (failure-result throwable)))))))))))))
 
 (defn fork-candidate-ctx
   "Fork one candidate through the generation-aware turn path.

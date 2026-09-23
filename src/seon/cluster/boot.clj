@@ -74,6 +74,13 @@
            arm-request {:seon.flow/commit-fault!
                         #(cluster/commit-fault! connection cluster-name process
                                         (config/result-caps boot-dials) %)}
+           ;; Every contracted Var this JVM has loaded is armed once here,
+           ;; with its profiling cell and definition digest; adoption later
+           ;; re-arms only changed identities (`cluster/refresh-source!`).
+           host-arming (cluster/arm-host-program!
+                        (cluster/published-program (:seon.store/store instance))
+                        boot-dials (:seon.flow/commit-fault! arm-request))
+           instance (publish! (assoc instance :seon.instrument/applied host-arming))
            bare-ctx
            (if base-ctx
              (sci.eval/fork-cluster-ctx
