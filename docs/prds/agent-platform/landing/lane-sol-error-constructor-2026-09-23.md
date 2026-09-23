@@ -45,3 +45,4 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 | E4: `src/seon/ai.clj` | 14 | 41 / 70 / -29; 0 | 0 / 42 | 27.304333 | `seon.ai-test` | Three C literals retained with attached comments; first also has interleaved header order. Existing extra-body catch keeps only its declared read-message |
 | E5: `src/seon/await.clj` | 1 | 3 / 5 / -2; 0 | 0 / 13 | 22.220208 | `seon.await-test` | None; existing merge order retained |
 | E6: `src/seon/background.clj` | 2 | 6 / 10 / -4; 0 | 0 / 12 | 24.328125 | `seon.background-test` | None |
+| E7: `src/seon/bootstrap.clj` | 4 | 12 / 20 / -8; 0 | 0 / 28 | 23.072166 | `seon.bootstrap-test` | One X literal retained; outer ex-info unchanged |
