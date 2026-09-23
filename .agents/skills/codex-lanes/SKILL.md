@@ -37,7 +37,7 @@ assuming it ran.
 
 `gpt-6-luna` does not exist ("not supported when using Codex with a ChatGPT
 account"); the cheap model is `gpt-5.6-luna`. Dials: `LANE_MODEL`,
-`LANE_EFFORT` (`bin/codex-agent:26`, `:54`).
+`LANE_EFFORT` (`bin/codex-agent:26`, `:55`).
 
 ## Writing a spec
 

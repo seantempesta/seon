@@ -18,7 +18,7 @@ Use `seon.db`. Its query and pull owners accept explicit immutable
 database values or agent-supplied defaults (`q`, `src/seon/db.clj:2245`;
 `pull`, `:2478`). Its transaction owner accepts an explicit connection or the
 agent's connection and returns errors as values (`transact!`,
-`src/seon/db.clj:4590`). A host JVM probe should supply explicit custody
+`src/seon/db.clj:4591`). A host JVM probe should supply explicit custody
 (`seon.db/call-with-custody`, `src/seon/db.clj:375`).
 
 Datahike accepts a transaction map with `:tx-data` and optional
@@ -224,7 +224,7 @@ it, and one Malli key cannot describe all three.
 
 **A map under a ref attribute in transaction data is a nested entity that
 links.** `explode` sees a map value under a ref attribute and emits
-`(assoc v (dbu/reverse-ref a-ident) eid)` (`db/transaction.cljc:759`) —
+`(assoc v (dbu/reverse-ref a-ident) eid)` (`db/transaction.cljc:760`) —
 the nested map with a reverse ref added. That map re-enters
 `entity-map->op-vec` (`:947`), a numeric `:db/id` resolves to itself, and
 the reverse ref becomes one `[:db/add e a n]`. So `{:db/id n}` pulled out
@@ -285,7 +285,7 @@ callback and sets the result to `:error`; an `Error` (not an `Exception`)
 closes the queues and rethrows, stopping the writer
 (`reference-code/datahike/src/datahike/writer.cljc:139-171`). The error
 branch neither enqueues a report nor advances the database — it
-`(recur old)` (`:203-204`) — so no datom from that transaction is
+`(recur old)` (`:205-206`) — so no datom from that transaction is
 committed, including operations processed before the throw. External
 side effects a transaction function performed are not database writes and
 are not undone.
@@ -293,7 +293,7 @@ are not undone.
 Return transaction data from a transaction function, never a refusal map:
 Datahike expects transaction data there. Seon's refusals are built with
 `seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:90`) and thrown,
-and `seon.db/transact!` (`src/seon/db.clj:4590`) reads the throwable back into
+and `seon.db/transact!` (`src/seon/db.clj:4591`) reads the throwable back into
 a flat `:seon.error` value in `transact-call`'s catch, through
 `seon.error.refusal/refusal` (`src/seon/db.clj:4409-4428`;
 `src/seon/error/refusal.clj:115`). Evidence and the final-report validation seam are in

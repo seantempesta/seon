@@ -97,7 +97,7 @@ loaded program; name the changed identities when you have them.
 
 For the selected development cluster, the complete JVM form is below.
 Choose the namespace to reload; the database supplies both the projection
-and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3412`;
+and instrumentation mode (`projection-from-database`, `src/seon/schema.clj:3359`;
 `effective`, `src/seon/config.clj:754`).
 
 ```clojure

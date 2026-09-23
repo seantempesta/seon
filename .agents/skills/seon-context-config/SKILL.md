@@ -26,9 +26,9 @@ for running consumers to fetch process environment state.
 ## Apply and inspect
 
 Use `bin/seon config apply [CLUSTER] PATH`; its parser is
-`script/seon/operator.clj:1319-1320`, `:1345-1352`, and the live operation is
+`script/seon/operator.clj:1352-1354`, `:1378-1382`, and the live operation is
 the `:config-apply` branch of `seon.cluster.boot/request!`
-(`src/seon/cluster/boot.clj:513-518`). `seon.config/apply!` compiles and
+(`src/seon/cluster/boot.clj:611-616`). `seon.config/apply!` compiles and
 reconciles the selected document (`src/seon/config.clj:725`); `effective`
 reads from the database (`:754`).
 

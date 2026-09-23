@@ -32,20 +32,20 @@ Recheck the named owners when changing them; update this table in the same slice
 
 | Rule | Installed enforcement | Author responsibility / limit |
 |---|---|---|
-| Exceeding the declared test duration fails | **Enforced on reported completion:** `duration-failures`, `src/seon/test/runner.clj:298`, emits an assertion failure at `:end-test-var`. A nonblank `:seon.test/long` reason AND positive `:seon.test/long-ms` are required to raise the ordinary bound. | Measure the operation, put the reason beside the number, and distinguish cold/warm work. The runner cannot validate the measurement's honesty. This elapsed-body check is not a hard kill or a complete accounting of namespace fixtures/child cleanup. |
-| An in-process request cannot wait forever | **Bounded observation with actual exit:** `bounded-result`, `src/seon/test.clj:132`, joins the body thread under the request remainder of `:seon.test/check-time-limit-ms`; a body still live is recorded unfinished and keeps its branch, and a watcher releases the branch only after the thread exits. `seon.test/run` (`:1581`) admits no further body after one. | SCI interrupts interpreted bodies at the per-test bound; a host call is not interruptible, so a live body can hold its branch until it returns. |
+| Exceeding the declared test duration fails | **Enforced on reported completion:** `duration-failures`, `src/seon/test/runner.clj:299`, emits an assertion failure at `:end-test-var`. A nonblank `:seon.test/long` reason AND positive `:seon.test/long-ms` are required to raise the ordinary bound. | Measure the operation, put the reason beside the number, and distinguish cold/warm work. The runner cannot validate the measurement's honesty. This elapsed-body check is not a hard kill or a complete accounting of namespace fixtures/child cleanup. |
+| An in-process request cannot wait forever | **Bounded observation with actual exit:** `bounded-result`, `src/seon/test.clj:132`, joins the body thread under the request remainder of `:seon.test/check-time-limit-ms`; a body still live is recorded unfinished and keeps its branch, and a watcher releases the branch only after the thread exits. `seon.test/run` (`:1584`) admits no further body after one. | SCI interrupts interpreted bodies at the per-test bound; a host call is not interruptible, so a live body can hold its branch until it returns. |
 | A refused fixture write stops setup | **Enforced when using `transacted!`:** `test/seon/test_support.clj:215` checks the real writer report and throws if no successful `:db-after` exists. `apply-config!` and `seed-cluster!` also check their production writer results (`:712`, `:731`). | Use these helpers. Calling `db/transact!` and discarding its returned refusal bypasses this setup check. Assert the subject-specific populated state too. |
 | Tests enter with production contracts | **Enforced by initialization:** `seon.test.arm/arm-contracts!`, `src/seon/test/arm.clj:163`, loads the derived program and verifies actual wrapper coverage against armable Vars. | A later reload removes wrappers. `seon.test/run` is not an automatic arming operation; after reload, use the installed arming owner with the correct carried projection and positively verify relevant entering wrappers. Never hand-pick a smaller fake program. |
 | Tests leave instrumentation intact | **Partially enforced:** `run-vars!` compares entering/exiting global state and adds errors (`src/seon/test/runner.clj:350`); `ambient-drift` checks wrapper membership, registrations, live clusters and SCI sizes (`:666`). | A before/after set cannot prove entry was already correct, same-cardinality changes are not the re-arm count's proof, and unchanged SCI size is not unchanged contents. Restore deliberate mutations with the canonical scope. Automatic repair does not excuse leakage. |
 | No hand-written production fixture maps | **Author rule, partially supported by validation:** the real writer checks schema validity. `program-fn-row` reads actual indexed artifacts or analyzes supplied source (`test/seon/test_support.clj:699`). | There is no general detector for a map's hand-written origin or semantic fidelity. Use canonical declaration/config/cluster helpers. A schema-valid invented row may still model the wrong world. Synthetic data is legitimate only when the subject needs it. |
-| No assertionless green | **Enforced:** `assertionless-failure`, `src/seon/test/runner.clj:281`, rejects executed tests with zero assertion evidence. `assert-check!`, `test/seon/test_support.clj:545`, requires a true property result and positive trial count. | One vacuous assertion can still pass. Prove meaningful inputs, subject presence and coverage. A reused recorded green is different from executing an assertionless test. |
+| No assertionless green | **Enforced:** `assertionless-failure`, `src/seon/test/runner.clj:282`, rejects executed tests with zero assertion evidence. `assert-check!`, `test/seon/test_support.clj:545`, requires a true property result and positive trial count. | One vacuous assertion can still pass. Prove meaningful inputs, subject presence and coverage. A reused recorded green is different from executing an assertionless test. |
 
 ## Canonical fixtures and custody
 
-A test is an isolated agent for one body. `seon.test/run` (`src/seon/test.clj:1581`)
+A test is an isolated agent for one body. `seon.test/run` (`src/seon/test.clj:1584`)
 acquires each member's own branch off the request's captured commit through
 `seon.cluster.agent/acquire-context!` and releases (unlinks) it through
-`release-context!` after the body exits (`member-result`, `:1407`). An agent (SCI)
+`release-context!` after the body exits (`member-result`, `:1410`). An agent (SCI)
 test's elided `seon.db` arities reach that branch; a host test body inherits no
 custody, and its fixtures find the member through the SCI arm governing its thread.
 
@@ -78,7 +78,7 @@ Store-global subjects use the existing `:seon.test-support/fresh-store?` route
 publication helpers (`:95`, `:114`), which publish the checkout into their own root, and
 declare `:seon.test/fixture-observation` explaining why a branch is insufficient: that
 declaration makes them platform-host members (`seon.test/isolated-members`,
-`src/seon/test.clj:1531`). Do not fabricate a manifest to get a green.
+`src/seon/test.clj:1534`). Do not fabricate a manifest to get a green.
 
 For pure derivation properties, immutable Datahike `with` values are admissible
 only with the same final-report validator in transaction metadata as the writer.
@@ -139,7 +139,7 @@ Do not weaken contracts, fake SCI, or restore an obsolete schema to make a test 
 
 During a cut use the installed focused authority, not a suite per commit:
 
-- `seon.test/run` (`src/seon/test.clj:1581`) is one request:
+- `seon.test/run` (`src/seon/test.clj:1584`) is one request:
   `{:seon.test/execution <agent context source or execution handle>
   :seon.test/recording-connection <connection holding that branch>
   :seon.test/policy :named|:incremental|:platform|:all}` plus optional
@@ -148,7 +148,7 @@ During a cut use the installed focused authority, not a suite per commit:
   runs every member on its own branch, records, and returns `:seon.test/passed?`,
   results, reuse, exclusions, pending/unfinished and per-member `:seon.test/timings`.
   Admission and release go in batches of at most `seon.test/batch-limit` members.
-  `seon.test/tally` (`:1851`) renders it. On a live cluster from the MCP eval tool:
+  `seon.test/tally` (`:1854`) renders it. On a live cluster from the MCP eval tool:
   `(let [h (:seon.turn.loop/cluster (get @seon.operator.runtime/running-instances "NAME"))]
   (seon.test/tally (seon.test/run {:seon.test/execution h
   :seon.test/recording-connection (:seon.db/connection h) :seon.test/policy :named
@@ -159,12 +159,12 @@ During a cut use the installed focused authority, not a suite per commit:
 - `bin/test [CLUSTER] [options]` is `bin/test-check` (`bin/test:19`). `bin/test
   --platform` (`bin/test:21`) boots the committed HEAD under a fresh operator root
   (`bin/seon --root R nuke --force`; a fallback to an older program refuses) and runs `bin/test-check --isolated`: one request
-  naming `seon.test/isolated-members` (`src/seon/test.clj:1531`: declared platform rows,
+  naming `seon.test/isolated-members` (`src/seon/test.clj:1534`: declared platform rows,
   members reaching a `:seon.fn/destroys` owner, file-backed fixtures), bounded by
-  `seon.test/declared-bound-ms` (`:1556`). It keeps the root as evidence when red.
+  `seon.test/declared-bound-ms` (`:1559`). It keeps the root as evidence when red.
   There are no worker JVMs, slots or published test bases. Lanes never run
   `--platform`. On a development root those members are excluded with that command
-  (`host-exclusions`, `:1372`); declared-long members are excluded unless the request
+  (`host-exclusions`, `:1375`); declared-long members are excluded unless the request
   opts in, and an exclusion is never green.
 
 Record actual program identity, arming precondition, execution/reuse counts,
