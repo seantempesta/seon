@@ -33,3 +33,25 @@ Wanted: removing a named schema member while any function contract or
 schema references it refuses at the declaration write with the typed
 retirement refusal naming each referrer; converting the referrers in the
 same publication is accepted.
+
+## Resolution (lane declaration-refusal, 2026-09-23)
+
+`seon.schema/refuse-unresolved-reference!` now refuses an undeclared reference
+at both compile owners (`projection-registry` for whole-population and
+function-contract builds, `direct-reference-keys-in` for
+`projection-with-schema`) with one flat refusal: `:seon.error/member` and
+`:seon.schema/missing-reference` name the missing key,
+`:seon.schema/invalid-schema` / `:seon.schema/undefined-contract` the naming
+schema / function, and `:seon.schema.blockers/schema-keys` /
+`function-symbols` every referrer; the Malli failure rides as the cause chain.
+It validates as `:seon.schema/invalid-schema-error` /
+`:seon.schema/undefined-contract-error` and, through `seon.db/transact!`, as a
+refused result rather than a `:panic` rethrow. Regressions:
+`seon.schema-test/retiring-a-referenced-member-names-every-referrer`,
+`seon.schema-test/an-undeclared-reference-refuses-as-the-declared-schema-refusal`.
+Evidence and limits: `docs/prds/agent-platform/landing/lane-declaration-refusal-2026-09-23.md`.
+
+Not done: the writer-level typed `:seon.program/deletion-refused-error`
+(1.3e, `db.clj`) for a contract-referenced member; the schema-owner refusal
+above is what reaches the writer today. `projection-without-schema`'s
+`:seon.schema/schema-in-use` refusal is still non-flat.

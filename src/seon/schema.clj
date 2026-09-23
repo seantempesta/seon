@@ -28,6 +28,8 @@
             [datahike.db.interface :as dbi]
             [datahike.db.utils :as db-utils]
             [seon.schema.internal :as internal]
+            [seon.error.refusal :as refusal]
+            [clojure.string :as str]
             [clojure.edn :as edn]
             [clojure.java.io :as io]))
 
@@ -451,6 +453,111 @@
 (defn- bound-forms [forms predicate-functions]
   (update-vals forms #(compilable-form % predicate-functions)))
 
+(defn- unresolved-reference-in
+  "The qualified registry key a failed compilation could not resolve, read
+   through the whole cause chain by the gate that owns the reading
+   (`seon.schema.internal/missing-schema-reference`); nil when the failure is
+   not an unresolved reference."
+  {:malli/schema [:=> [:cat :seon.error/throwable]
+                  [:or :nil :qualified-keyword]]}
+  [throwable]
+  (let [missing (or (some (comp :seon.schema/missing-reference ex-data)
+                          (take-while some? (iterate ex-cause throwable)))
+                    (#'internal/missing-schema-reference throwable))]
+    (when (qualified-keyword? missing) missing)))
+
+(defn- unresolved-reference-refusal
+  "The flat declared refusal for a declaration naming a schema no member of
+   the candidate population declares.
+
+   Names the refusing operation, the declaration being admitted (when one is),
+   the missing key, and every candidate declaration that names it directly;
+   the Malli failure survives whole as the cause chain."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.error/operation :seon.error/operation]
+               [:seon.schema/missing-reference :qualified-keyword]
+               [:seon.schema/definitions :map]
+               [:seon.error/throwable :seon.error/throwable]
+               [:seon.schema/key {:optional true} :seon.schema/key]]]
+    :seon.error/base]}
+  [{operation :seon.error/operation
+    missing :seon.schema/missing-reference
+    definitions :seon.schema/definitions
+    throwable :seon.error/throwable
+    declaration :seon.schema/key}]
+  (let [names-missing? (fn [definition]
+                         (boolean (some #{missing}
+                                        (tree-seq coll? seq definition))))
+        referrers (into (sorted-set-by (fn [a b] (compare (str a) (str b))))
+                        (keep (fn [[identity definition]]
+                                (when (names-missing? definition) identity)))
+                        definitions)
+        referrers (if (and declaration (empty? referrers))
+                    (conj referrers declaration)
+                    referrers)
+        schema-keys (into #{} (filter keyword?) referrers)
+        function-symbols (into #{} (filter qualified-symbol?) referrers)
+        referrer (first referrers)
+        schema-keys-in-order (filter keyword? referrers)]
+    (refusal/diagnostic
+     (cond->
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.schema/derivation
+       :seon.error/operation operation
+       :seon.error/message
+       (str "Schema reference " missing " is not declared in the candidate "
+            "projection; it is named by " (str/join ", " referrers)
+            (when (and declaration (not (contains? referrers declaration)))
+              (str " while admitting " declaration))
+            ". Declare " missing " in the same change, or convert every "
+            "referrer that names it.")
+       :seon.error/member missing
+       :seon.error/throwable throwable
+       :seon.schema/missing-reference missing
+       :seon.schema/missing-reference-namespace (namespace missing)
+       :seon.schema/refused-value (get definitions referrer)
+       :seon.schema/expected-value :seon.schema/registry-key
+       :seon.schema.blockers/schema-keys schema-keys
+       :seon.schema.blockers/function-symbols function-symbols}
+       ;; The declaration being admitted; a whole-population build admits
+       ;; every declaration, so its first naming schema is the offender.
+       (or declaration (first schema-keys-in-order))
+       (assoc :seon.schema/key (or declaration (first schema-keys-in-order)))
+       (seq schema-keys)
+       (assoc :seon.schema/invalid-schema
+              (if (contains? schema-keys declaration)
+                declaration
+                (first (filter keyword? referrers))))
+       (seq function-symbols)
+       (assoc :seon.schema/undefined-contract
+              (first (filter qualified-symbol? referrers)))))))
+
+(defn- refuse-unresolved-reference!
+  "Rethrow `throwable` as the declared unresolved-reference refusal when it is
+   one; any other failure propagates unchanged."
+  {:malli/schema
+   [:=> [:cat [:map
+               [:seon.error/operation :seon.error/operation]
+               [:seon.schema/definitions :map]
+               [:seon.error/throwable :seon.error/throwable]
+               [:seon.schema/key {:optional true} :seon.schema/key]]]
+    :nil]}
+  [{throwable :seon.error/throwable definitions :seon.schema/definitions
+    :as request}]
+  (let [data (ex-data throwable)]
+    (when (and (:seon.error/at data) (:seon.error/layer data)
+               (:seon.error/operation data))
+      ;; Already the declared refusal of a nested compilation.
+      (throw throwable))
+    (if-let [missing (unresolved-reference-in throwable)]
+      (if (contains? definitions missing)
+        (throw throwable)
+        (let [refusal (unresolved-reference-refusal
+                       (assoc request :seon.schema/missing-reference missing))]
+          (throw (ex-info (:seon.error/message refusal) refusal throwable))))
+      (throw throwable))))
+
 (defn- projection-registry
   "Compile one immutable generation serially, then seal its complete table.
 
@@ -493,13 +600,19 @@
             (when-let [definition (get prepared identity)]
               ((if (qualified-symbol? identity) m/function-schema m/schema)
                definition {:registry scope}))))]
-     (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
-       (internal/assert-compilable-schema!
-        forms identity (get forms identity) {:registry registry})
-       (internal/assert-non-nilable-value-schema!
-        forms identity (mr/schema registry identity)))
-     (doseq [identity (sort-by str (remove #(contains? retained %) (keys contracts)))]
-       (mr/schema registry identity))
+     (try
+       (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
+         (internal/assert-compilable-schema!
+          forms identity (get forms identity) {:registry registry})
+         (internal/assert-non-nilable-value-schema!
+          forms identity (mr/schema registry identity)))
+       (doseq [identity (sort-by str (remove #(contains? retained %) (keys contracts)))]
+         (mr/schema registry identity))
+       (catch Exception failure
+         (refuse-unresolved-reference!
+          {:seon.error/operation 'seon.schema/projection-registry
+           :seon.schema/definitions (merge {} forms contracts)
+           :seon.error/throwable failure})))
      (mr/fast-registry (mr/schemas registry)))))
 
 (defn canonical-definition
@@ -682,13 +795,27 @@
         (vals forms)))
 
 (defn- direct-reference-keys-in
-  [definition predicate-functions canonical-keys fallback]
+  "Canonical keys `definition` names directly, compiled against references
+   only. An undeclared reference refuses as the declared unresolved-reference
+   refusal naming `schema-key`."
+  {:malli/schema
+   [:=> [:cat :seon.schema/key :seon.schema/value :map [:set :keyword]
+         [:fn malli.registry/registry?]]
+    [:set :keyword]]}
+  [schema-key definition predicate-functions canonical-keys fallback]
   (let [registry-for-references
         (reference-registry canonical-keys fallback)]
-    (direct-references*
-     (m/schema (compilable-form definition predicate-functions)
-               {:registry registry-for-references})
-     canonical-keys)))
+    (try
+      (direct-references*
+       (m/schema (compilable-form definition predicate-functions)
+                 {:registry registry-for-references})
+       canonical-keys)
+      (catch Exception failure
+        (refuse-unresolved-reference!
+         {:seon.error/operation 'seon.schema/projection-with-schema
+          :seon.schema/key schema-key
+          :seon.schema/definitions {schema-key definition}
+          :seon.error/throwable failure})))))
 
 (declare canonical-data-string canonical-value-string)
 
@@ -2879,7 +3006,7 @@
               schema-key)
         direct-dependencies
         (direct-reference-keys-in
-         definition predicate-functions canonical-keys
+         schema-key definition predicate-functions canonical-keys
          (:seon.schema.projection/registry projection))
         old-dependencies
         (get (:seon.schema.projection/schema-dependencies projection)

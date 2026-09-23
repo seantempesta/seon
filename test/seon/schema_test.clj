@@ -15,12 +15,14 @@
             [seon.call-preparation :as call-preparation]
             [seon.config :as config]
             [seon.db]
+            [seon.error.refusal :as refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.internal :as schema.internal]
-            [seon.test-support :as test-support]))
+            [seon.test-support :as test-support]
+            [seon.turn :as turn]))
 
 (deftest preparation-preserves-loaded-var-schema-references
   (test-support/with-database
@@ -1580,3 +1582,92 @@
        (is (seq (:seon.schema.projection/forms
                  (schema/projection-from-database @connection)))
            "a real database still derives a populated projection")))))
+
+(defn- thrown-refusal
+  "The flat refusal `seon.db/transact!` classifies from `thunk`'s throw
+  (`seon.error.refusal/refusal`), or ::returned when nothing threw."
+  [thunk]
+  (try (thunk) ::returned
+       (catch clojure.lang.ExceptionInfo failure
+         (refusal/refusal failure))))
+
+(deftest an-undeclared-reference-refuses-as-the-declared-schema-refusal
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           options (:seon.schema.projection/compile-options projection)
+           refused (thrown-refusal
+                    #(schema/projection-with-schema
+                      projection ::undeclared-referrer [:vector ::never-declared]
+                      {:seon.schema.admission/source :agent}))]
+       (testing "the pure projection owner"
+         (is (= 'seon.schema/projection-with-schema (:seon.error/operation refused)))
+         (is (= ::undeclared-referrer (:seon.schema/invalid-schema refused)))
+         (is (= ::undeclared-referrer (:seon.schema/key refused)))
+         (is (= ::never-declared (:seon.error/member refused)))
+         (is (= ::never-declared (:seon.schema/missing-reference refused)))
+         (is (= [:vector ::never-declared] (:seon.schema/refused-value refused)))
+         (is (m/validate :seon.schema/invalid-schema-error refused options))
+         (is (m/validate :seon.error/base refused options))
+         (is (= {:schema ::never-declared :form ::never-declared}
+                (get-in (peek (:seon.error/chain refused)) [:seon.error/data :data]))
+             "Malli's own failure survives whole in the cause chain"))
+       (testing "the declaration writer refuses instead of raising"
+         (let [before (seon.db/db connection)
+               result (seon.db/transact!
+                       connection
+                       [[:db.fn/call #'turn/row-tx {}
+                         {:seon.schema/key ::undeclared-referrer
+                          :seon.schema/form (pr-str [:vector ::never-declared])}]])]
+           (is (true? (:seon.db/transaction-refused result)))
+           (is (= ::never-declared (:seon.error/member result)))
+           (is (= ::undeclared-referrer (:seon.schema/invalid-schema result)))
+           (is (= (:cache-context before)
+                  (:cache-context (seon.db/db connection))))))))))
+
+(deftest retiring-a-referenced-member-names-every-referrer
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           options (:seon.schema.projection/compile-options projection)
+           with-member (schema/projection-with-schema
+                        projection ::retired-member :int
+                        {:seon.schema.admission/source :agent})
+           with-user (schema/projection-with-schema
+                      with-member ::member-user [:vector ::retired-member]
+                      {:seon.schema.admission/source :agent})
+           contract [:=> [:cat ::retired-member] :int]
+           with-contracts
+           (reduce (fn [current function-symbol]
+                     (schema/projection-with-function-contract
+                      current function-symbol contract
+                      {:seon.schema.admission/source :agent}))
+                   with-user
+                   ['seon.schema-test/member-reader
+                    'seon.schema-test/member-writer])
+           forms (:seon.schema.projection/forms with-contracts)
+           contracts (:seon.schema.projection/function-contracts with-contracts)
+           started (System/nanoTime)
+           refused (thrown-refusal
+                    #(schema/build-projection
+                      (dissoc forms ::retired-member) contracts
+                      {:seon.schema/schema-admissions
+                       (:seon.schema.projection/schema-admissions with-contracts)
+                       :seon.schema/function-admissions
+                       (:seon.schema.projection/function-admissions with-contracts)}))
+           elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+       (is (= 'seon.schema/projection-registry (:seon.error/operation refused)))
+       (is (= ::retired-member (:seon.error/member refused)))
+       (is (= #{::member-user} (:seon.schema.blockers/schema-keys refused)))
+       (is (= '#{seon.schema-test/member-reader seon.schema-test/member-writer}
+              (:seon.schema.blockers/function-symbols refused)))
+       (is (= ::member-user (:seon.schema/invalid-schema refused)))
+       (is (= 'seon.schema-test/member-reader (:seon.schema/undefined-contract refused)))
+       (is (m/validate :seon.schema/invalid-schema-error refused options))
+       (is (m/validate :seon.schema/undefined-contract-error refused options))
+       (is (every? #(str/includes? (:seon.error/message refused) (str %))
+                   [::retired-member ::member-user 'seon.schema-test/member-reader
+                    'seon.schema-test/member-writer]))
+       (println "retirement refusal" {:elapsed-ms elapsed-ms
+                                      :forms (count forms)
+                                      :contracts (count contracts)})))))

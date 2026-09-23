@@ -522,9 +522,8 @@
 
 (defn- unresolved-candidate-reference
   [error projection forms]
-  (let [data (ex-data error)
-        reference (get-in data [:data :schema])]
-    (when (and (= :malli.core/invalid-schema (:type data))
+  (let [reference (:seon.schema/missing-reference (ex-data error))]
+    (when (and reference
                (contains? forms reference)
                (not= (get (:seon.schema.projection/forms projection)
                           reference ::absent)

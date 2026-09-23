@@ -14,6 +14,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
+            [seon.db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -478,3 +479,19 @@
                   (= {:optional true} properties))
                 overlay-entries)
         "agent absence means inheritance for every override")))
+
+(deftest staged-alias-admission-resolves-its-candidate-reference-first
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           admit @#'schema.edn/admit-changed-identities
+           forms (assoc (:seon.schema.projection/forms projection)
+                        ::staged-alias ::staged-base
+                        ::staged-base [:string {:min 1}])
+           admitted (admit projection forms [::staged-alias]
+                           {:seon.schema.admission/source :agent})
+           options (:seon.schema.projection/compile-options admitted)]
+       (is (= ::staged-base
+              (get-in admitted [:seon.schema.projection/forms ::staged-alias])))
+       (is (malli.core/validate ::staged-alias "x" options))
+       (is (not (malli.core/validate ::staged-alias "" options)))))))
