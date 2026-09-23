@@ -50,6 +50,19 @@
        :gen/gen seon.instrument/loaded-var-generator}
   clojure.core/var?]
 
+ :seon.instrument/replaced-var :qualified-symbol
+ :seon.instrument/root-class [:string {:min 1 :description "The class of the Var's current root, looked through the armed wrapper."}]
+ :seon.instrument/expected-class [:string {:min 1 :description "The class a defn in the Var's own namespace compiles to."}]
+ :seon.instrument/expected-file [:string {:min 1 :description "The function row's relative source path."}]
+ :seon.instrument/loaded-file [:string {:min 1 :description "The file the Var's current definition was loaded from."}]
+ :seon.instrument/replaced-root
+ [:map
+  [:seon.instrument/replaced-var :seon.instrument/replaced-var]
+  [:seon.instrument/root-class :seon.instrument/root-class]
+  [:seon.instrument/expected-class :seon.instrument/expected-class]
+  [:seon.instrument/expected-file :seon.instrument/expected-file]
+  [:seon.instrument/loaded-file {:optional true} :seon.instrument/loaded-file]]
+
  :seon.instrument/callable
  [:fn {:error/message "must be callable"
        :gen/schema [:=> [:cat] :nil]}

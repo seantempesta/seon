@@ -1549,6 +1549,21 @@
               (:seon.profile/digest (:seon.instrument/cell (meta @(requiring-resolve (quote seon.id/valid?))))))
            "the host cell carries the function row's definition digest")))))
 
+(deftest a-root-replaced-outside-a-reload-is-named
+  ;; `doubled` is this file's own defn: its compiled root and recorded file
+  ;; match the row, so nothing is reported until a redefinition replaces it.
+  (let [rows [['seon.instrument-test/doubled "test/seon/instrument_test.clj"]]]
+    (is (= [] (instrument/replaced-roots rows)))
+    (with-redefs [doubled (fn [n] n)]
+      (is (= [{:seon.instrument/replaced-var 'seon.instrument-test/doubled
+               :seon.instrument/expected-class "seon.instrument_test$doubled"
+               :seon.instrument/expected-file "test/seon/instrument_test.clj"}]
+             (mapv #(select-keys % [:seon.instrument/replaced-var
+                                    :seon.instrument/expected-class
+                                    :seon.instrument/expected-file])
+                   (instrument/replaced-roots rows)))))
+    (is (= [] (instrument/replaced-roots rows)) "restoring the root clears the report")))
+
 (deftest a-handed-projection-without-the-contracts-declarations-uses-the-loaded-ones
   ;; A cluster whose stored program predates a loaded schema resource hands a
   ;; projection lacking its keys; the host wrapper then validates against the

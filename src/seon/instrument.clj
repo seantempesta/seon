@@ -1059,6 +1059,41 @@
     replaced))
 
 
+(defn replaced-roots
+  "First-party Vars whose current root is not their own namespace's compile.
+
+  A `defn` compiles its root as the class `<munged ns>$<munged name>` and a
+  load records its file as the Var's `:file`. A root replaced outside a reload
+  (`alter-var-root`, `with-redefs`, `intern`, an evaluation in another
+  namespace) has another class; a redefinition loaded from another file keeps
+  the class name and records that file. `rows` pairs each `defn`/`defn-`
+  row's symbol with its relative source path; a Var this JVM has not loaded,
+  or whose root is not a compiled function, is not reported. The armed
+  wrapper is looked through to the function it wraps."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :qualified-symbol :string]]]
+                  [:vector :seon.instrument/replaced-root]]}
+  [rows]
+  (into []
+        (keep (fn [[function-symbol relative-path]]
+                (when-let [candidate (when (find-ns (symbol (namespace function-symbol)))
+                                       (find-var function-symbol))]
+                  (let [root (when (bound? candidate) (mi/-f->original @candidate))
+                        expected (str (clojure.lang.Compiler/munge (namespace function-symbol))
+                                      "$" (clojure.lang.Compiler/munge (name function-symbol)))
+                        loaded-file (:file (meta candidate))
+                        class-name (when (instance? clojure.lang.AFunction root)
+                                     (.getName (class root)))]
+                    (when (and class-name
+                               (or (not= expected class-name)
+                                   (not (and (string? loaded-file)
+                                             (.endsWith ^String relative-path ^String loaded-file)))))
+                      (cond-> {:seon.instrument/replaced-var function-symbol
+                               :seon.instrument/root-class class-name
+                               :seon.instrument/expected-class expected
+                               :seon.instrument/expected-file relative-path}
+                        (string? loaded-file) (assoc :seon.instrument/loaded-file loaded-file)))))))
+        rows))
+
 (def loaded-var-generator
   "A real Var from this owner for the loaded-Var contract."
   (gen/return #'apply!))

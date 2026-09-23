@@ -592,6 +592,23 @@
      "The cluster has no database connection; the remainder is not retrievable."
      :seon.blob/digest content-digest}))
 
+(defn- program-function-files
+  "Symbol and relative source path of every `defn`/`defn-` row in `database`.
+
+  Those two definers compile their root as the namespace's own function
+  class, which is what `instrument/replaced-roots` compares; `deftype`,
+  `defrecord` and `defprotocol` Vars compile inside an eval class."
+  {:malli/schema [:=> [:cat :seon.db/database-value]
+                  [:vector [:tuple :qualified-symbol :string]]]}
+  [database]
+  (vec (db/q '[:find ?sym ?path
+               :in $ [?definer ...]
+               :where [?function :seon.fn/defined-by ?definer]
+                      [?function :seon.fn/sym ?sym]
+                      [?function :seon.fn/file ?file]
+                      [?file :seon.fn.file/relative-path ?path]]
+             database '[clojure.core/defn clojure.core/defn-])))
+
 (defn mcp-runtime-observation
   "Derive health and Flow observations for one root-discovered cluster."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name] :map]}
@@ -621,6 +638,13 @@
              ;; JVM, one line each: the top five by total and by maximum, and
              ;; the five slowest of those whose maximum exceeded one second.
              :seon.dev.mcp/profile (profile/summary (profile/cells) 5)
+             ;; Loaded first-party Vars whose root is not their namespace's
+             ;; own compile: a redefinition outside a reload, named.
+             :seon.dev.mcp/replaced-roots
+             (if connection
+               (instrument/replaced-roots (program-function-files (db/db connection)))
+               {:seon.dev.mcp/replaced-roots-unknown
+                "The cluster has no database connection; replaced roots cannot be observed."})
              :seon.dev.mcp/health
              (if connection :observed :unknown)
              :seon.dev.mcp/flow
