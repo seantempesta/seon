@@ -73,3 +73,8 @@
 [submodule "reference-code/editscript"]
 	path = reference-code/editscript
 	url = https://github.com/juji-io/editscript
+[submodule "reference-code/superv.async"]
+	path = reference-code/superv.async
+	url = https://github.com/seantempesta/superv.async.git
+	branch = main
+	ignore = dirty

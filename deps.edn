@@ -29,11 +29,18 @@
                       org.replikativ/konserve]}
         org.replikativ/konserve
         {:git/url "https://github.com/seantempesta/konserve"
-         :git/sha "8cd9144f4338c1fbdb5e531bc996189d71a86fc5"
+         :git/sha "5b39fddd6ae58bae7d08880daecd1ad7242ea273"
          :exclusions [org.clojure/clojurescript
                       org.clojars.mmb90/cljs-cache
                       com.github.pkpkpk/cljs-node-io
                       com.github.pkpkpk/fress]}
+        ;; Our fork: go-try-/<?- carry every Throwable. Upstream passes an
+        ;; Error as a closed channel, which konserve and Datahike read as a
+        ;; successful write (docs/seon/issues/published-head-references-never-written-index-nodes.md).
+        org.replikativ/superv.async
+        {:git/url "https://github.com/seantempesta/superv.async"
+         :git/sha "501b42945693804fd3e57276cc2a07ed4fe1d602"
+         :exclusions [org.clojure/clojurescript]}
         org.replikativ/hasch
         {:mvn/version "0.4.100"
          :exclusions [org.clojure/clojurescript]}
@@ -148,7 +155,10 @@
    :jvm-opts ["--add-modules" "jdk.incubator.vector"
               "--enable-native-access=ALL-UNNAMED"
               "-XX:+UseG1GC" "-XX:MaxRAMPercentage=8"
-              "-XX:G1PeriodicGCInterval=30000"]}
+              "-XX:G1PeriodicGCInterval=30000"
+              ;; A heap failure ends the JVM instead of limping into the store.
+              "-XX:+ExitOnOutOfMemoryError"
+              "-XX:+HeapDumpOnOutOfMemoryError" "-XX:HeapDumpPath=data/heap"]}
 
   :build {:deps {io.github.clojure/tools.build {:mvn/version "0.10.5"}}
           :ns-default build}

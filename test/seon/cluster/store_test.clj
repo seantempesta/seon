@@ -18,7 +18,6 @@
             [datahike.api :as d]
             [konserve.core :as k]
             [konserve.filestore :as filestore]
-            [konserve.utils :as konserve.utils]
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.schema]
@@ -121,16 +120,52 @@
       (finally
         (test-support/delete-recursively! root)))))
 
-(deftest file-store-executes-ordered-multi-key-operations
-  (let [dir (fresh-dir)]
+;; Class regression for docs/seon/issues/published-head-references-never-written-index-nodes.md:
+;; an Error inside one konserve write (the production trigger was heap
+;; exhaustion) closed its go block's channel, the writer read nil as a
+;; durable write, and the connection advanced past nodes never stored.
+(deftest an-error-inside-one-store-write-fails-the-commit-and-keeps-the-prior-head
+  (let [dir (fresh-dir)
+        every-datom (fn [database]
+                      (reduce + (map #(count (d/datoms database %))
+                                     [:eavt :aevt :avet])))]
     (try
-      (let [opened (store/open-store! {:seon.store/dir dir})]
-        (try
-          (is (true? (konserve.utils/multi-key-capable?
-                      (:store @(:seon.store/connection-object opened))))
-              "the application pin exposes the filestore batch Datahike builds")
-          (finally
-            (store/release-store! opened))))
+      (let [opened (store/open-store! {:seon.store/dir dir})
+            connection (:seon.store/connection-object opened)
+            armed (atom true)]
+        (test-support/transacted! connection probe-schema)
+        (test-support/transacted! connection [{:seon.store.test/marker "before"}])
+        (let [before (d/commit-id @connection)
+              before-datoms (every-datom @connection)]
+          ;; A write hook runs inside konserve's own go block, after the
+          ;; value is stored: throwing there is an Error inside the write path.
+          (k/add-write-hook! (:store @connection) ::inject
+                             (fn [{written :key}]
+                               (when (and (uuid? written) (compare-and-set! armed true false))
+                                 (throw (AssertionError. "injected Error in one store write")))))
+          (is (thrown? Throwable
+                       (db/transact! connection [{:seon.store.test/marker "lost"}]))
+              "under :panic the failed commit throws to its caller")
+          (is (false? @armed) "the injected Error fired")
+          (is (= before (d/commit-id @connection))
+              "the connection stays at the prior head")
+          ;; Releasing a writer that shut down on the failure may re-raise
+          ;; that failure; any other outcome is a defect.
+          (let [release (try (store/release-store! opened) :released
+                             (catch Throwable failure failure))]
+            (is (or (= :released release)
+                    (some #(= "injected Error in one store write" (ex-message %))
+                          (take-while some? (iterate ex-cause release))))
+                (pr-str release)))
+          (let [reopened (store/open-store! {:seon.store/dir dir})]
+            (try
+              (let [database @(:seon.store/connection-object reopened)]
+                (is (= before (d/commit-id database)) "the disk head is the prior head")
+                (is (= before-datoms (every-datom database))
+                    "a fresh connection reads every node of that head")
+                (is (= #{"before"} (markers reopened))))
+              (finally
+                (store/release-store! reopened))))))
       (finally
         (test-support/delete-recursively! (str (io/file dir) "/.."))))))
 
