@@ -6,7 +6,8 @@
 
   Example:
   (my.program/breaks {:seon.program/subject 'seon.turn/open?})"
-  (:require [seon.db :as db]
+  (:require [seon.error.refusal]
+            [seon.db :as db]
             [clojure.set :as set]
             [seon.error :as error]
             [seon.fn :as function]
@@ -26,16 +27,14 @@
                  (:seon.program/blocked-subject (ex-data failure))
                  (:seon.program/read-operation (ex-data failure)))
            (ex-data failure)
-           {:seon.error/at (java.util.Date.)
-             :seon.error/layer :seon.program/read
-             :seon.error/operation 'my.program/read-result
-             :seon.error/message (str "Cannot read program facts: " (ex-message failure))
+           (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/read-result
+            {:seon.error/message (str "Cannot read program facts: " (ex-message failure))
              :seon.program/read-operation operation
              :seon.error/exception-class (symbol (.getName (class failure)))
              :seon.error/offending request
              :seon.error/expected :seon.program/breakage
              :seon.program/read-failure-message (or (ex-message failure) "Program fact read failed.")
-             :seon.program/read-exception-data (or (ex-data failure) {})}))))
+             :seon.program/read-exception-data (or (ex-data failure) {})})))))
 
 (defn- subject-identities [subject]
   (cond
@@ -60,13 +59,11 @@
                    :seon.program/identity [attribute value]
                    :seon.program/entities entities})))
             (subject-identities subject))
-      (let [refusal {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.program/read
-         :seon.error/operation 'my.program/locate
-         :seon.error/message (str "No program declaration names " subject ".")
+      (let [refusal (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/read 'my.program/locate
+                     {:seon.error/message (str "No program declaration names " subject ".")
          :seon.program/not-found subject
          :seon.error/expected (subject-identities subject)
-         :seon.error/data {:seon.db/basis-t (db/basis-t database)}}] (throw (ex-info (:seon.error/message refusal) refusal)))))
+         :seon.error/data {:seon.db/basis-t (db/basis-t database)}})] (throw (ex-info (:seon.error/message refusal) refusal)))))
 
 (defn- names-through
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-keyword :seon.schema/value :qualified-keyword] [:vector :seon.schema/value]]}
@@ -427,10 +424,8 @@
               :seon.db/connection connection
               :seon.cluster/name (:seon.boot/cluster-name environment)}
              (select-keys environment [:seon.store/store :seon.agent/context-state]))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.program/write
-        :seon.error/operation 'my.program/supplied-context
-        :seon.program/missing-context-members (into #{} (keep (fn [[member value]] (when-not value member)))
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write 'my.program/supplied-context
+       {:seon.program/missing-context-members (into #{} (keep (fn [[member value]] (when-not value member)))
               [[:my.program/executing-ctx ctx] [:my.program/base-ctx base]
                [:seon.db/connection connection]])
         :seon.error/message "Program mutation requires the executing SCI context, its cluster base and connection."
@@ -439,7 +434,7 @@
         :seon.error/offending (select-keys environment [:seon.agent/id])
         :seon.error/data {:my.program/executing? (boolean ctx)
                                          :my.program/base? (boolean base)
-                                         :my.program/connection? (boolean connection)}})))
+                                         :my.program/connection? (boolean connection)}}))))
 
 (defn overrides
   "Read current agent-admitted identities under an indexed src root.
@@ -461,14 +456,12 @@
                   :seon.program/mutation-refused-error]}
   [operation report affected]
   (merge
-   {:seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.program/write
-     :seon.error/operation 'my.program/refusal
-     :seon.program/blocked-subject (:seon.program/subject report)
+   (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write 'my.program/refusal
+    {:seon.program/blocked-subject (:seon.program/subject report)
      :seon.error/message (str "Cannot perform " operation " on " (:seon.program/subject report)
                               "; repair the named referrers first.")
      :seon.error/data report
-     :seon.error/expected :seon.program/change}
+     :seon.error/expected :seon.program/change})
    {:seon.program/affected affected
     :seon.program/plan (:seon.program/plan report)
     :seon.program/unknown (:seon.program/unknown report)}))
