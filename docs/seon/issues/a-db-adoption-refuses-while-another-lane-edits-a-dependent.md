@@ -36,3 +36,20 @@ attempt 1 took 69.7 s and attempt 2 took 180.6 s. Both were refused with
 shows `seon.cluster/refresh-source!` x6 at 297.8 s inclusive and
 `seon.db/with-declarations` x164,780. Each refused attempt still paid a
 whole-program source refresh.
+
+## Sighting, lane error-floor, 2026-09-23
+
+`bin/seon init --dev default --changed src/seon/render/value.clj src/seon/error/refusal.clj …`,
+pid 63253. `seon.error.refusal`'s dependents are most of the program, so any other
+lane's dirty file refuses it:
+
+| attempt | wall | refusal |
+|---|---|---|
+| 1 | 13.5 s | "Source changed during development adoption." `["src/seon/sci/eval.clj" "src/seon/cluster/store.clj"]` (leak-fix-2); `full-source-refresh!` 12.9 s ran before refusing |
+| 2 | 18.6 s | adopted (run by mistake without the token; see the error-floor landing note) |
+| 3 | 15.0 s | refused: 14 paths (fault, flow, cluster, fn, instrument, issue, test …); `full-source-refresh!` 14.3 s |
+| 4 | 1.2 s | refused: 9 paths |
+
+Each refusal is also recorded as a `:panic` core fault (signature `7cda6781…`,
+`seon.cluster.boot/request!`), although it is a declared adoption refusal, not a
+core fault.

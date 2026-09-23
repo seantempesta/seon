@@ -21,7 +21,6 @@
             [seon.fs :as fs]
             [seon.operator.runtime :refer [running-instances]]
             [seon.problems :as problems]
-            [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]))
@@ -284,13 +283,10 @@
   ([message offending cause throwable]
    ;; The outermost link's ex-data is usually the evidence itself; it is
    ;; carried once, as `:seon.error/offending`, never again inside the chain.
-   ;; This reply crosses the prepl, a wire: every carried value is shown text,
-   ;; rendered once by the value renderer under the AI profile, never a live
-   ;; handle printed whole.
-   (let [shown #(render.value/render-ai
-                 {:seon.render/value %
-                  :seon.render/profile (render/agent-render-profile config/defaults)
-                  :seon.render.call/id [:seon.error/offending]})]
+   ;; This reply crosses the prepl, a wire: every carried value is bounded text
+   ;; from the value renderer's projection-free core, never a live handle
+   ;; printed whole, and never a render that can fail with what it reports.
+   (let [shown render.value/bounded-text]
      (-> (refusal/diagnostic
           (assoc (diagnostic message (shown offending) cause) :seon.error/throwable throwable))
          (update :seon.error/chain
@@ -328,9 +324,8 @@
   (binding [*out* *err*]
     (prn {:seon.error/message "SEON CORE FAULT (uncaught, not stored)"
           :seon.error/operation `record-uncaught!
-          :seon.error/data (assoc evidence
-                                  :thread thread-name
-                                  :cause (Throwable->map throwable))})
+          :seon.error/data (assoc evidence :thread thread-name)})
+    (println (render.value/floor throwable))
     (flush))
   nil)
 
@@ -369,12 +364,12 @@
                                {:cluster cluster-name
                                 :signature (:seon.error/signature fact)
                                 :outcome (if (instance? Throwable outcome)
-                                           (Throwable->map outcome)
+                                           (render.value/floor outcome)
                                            outcome)})
           (= :panic mode)
           (binding [*out* *err*]
             (println "SEON CORE FAULT (dev panic, uncaught on" (str thread-name "):")
-                     (:seon.error/message fact) "[signature" (str (:seon.error/signature fact) "]"))
+                     "[signature" (str (:seon.error/signature fact) "]\n") (render.value/floor throwable))
             (flush))))))
   nil)
 
@@ -539,10 +534,9 @@
   (try
     (with-meta (edn/read-string (pr-str response)) (meta response))
     (catch Throwable cause
-      (diagnostic "Operator response contained non-EDN evidence."
-                  {:seon.operator/response (pr-str response)
-                   :seon.operator/reader-error (ex-message cause)}
-                  :non-edn-response cause))))
+      (diagnostic (str "Operator response contained non-EDN evidence.\n" (render.value/floor cause))
+                  (render.value/bounded-text response)
+                  :non-edn-response))))
 
 (defn- request-world
   "The world a failed request records in: the environment the failure carries,
@@ -672,12 +666,14 @@
                 dev (assoc :seon.boot/cluster-name dev)))))
         (refuse! "Unknown operator command." request)))
     (catch Throwable cause
-      (let [response (diagnostic (ex-message cause)
+      ;; A request this boundary refused is its declared case; every other
+      ;; failure is a core fault, shown first as the floor of its Throwable and
+      ;; recorded in the requested cluster.
+      (let [refused? (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
+            response (diagnostic (if refused? (ex-message cause) (render.value/floor cause))
                                  (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
                                  :operation-failed cause)]
-        ;; A request this boundary refused is its declared case; every other
-        ;; failure is a core fault, recorded in the requested cluster.
-        (if (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
+        (if refused?
           response
           (assoc response :seon.fault/recorded
                  (fault/fault! (request-world name cause) cause
