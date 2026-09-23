@@ -638,10 +638,7 @@
 (defn- compiled-wrapper
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
   [projection function-symbol authored original caps & [policy]]
-  ((mi/-f->original schema/projection-cache-value)
-   projection [::wrapper function-symbol authored original policy]
-   (fn []
-     (let [contract (get (:seon.schema.projection/function-contracts projection)
+  (let [contract (get (:seon.schema.projection/function-contracts projection)
                          function-symbol authored)
            retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
            bound (when-not retained
@@ -689,7 +686,7 @@
                                   :seon.error/declared-schema (:seon.error/declared-schema (meta value))})]
                     (if (= :seon.flow/committed (second outcome)) value
                         (throw (ex-info "Recording the instrumentation refusal failed." value failure))))
-                  (throw failure)))))))))
+                  (throw failure)))))))
 
 (defn- contract-definitions
   "Canonical declarations closed over by a function contract, following Malli refs."
@@ -776,7 +773,8 @@
              boot-wrapper (delay
                             (binding [*compiling-contract* true]
                               (compiled-wrapper bootstrap function-symbol
-                                                authored original caps policy)))]
+                                                authored original caps policy)))
+             supplied-wrapper (atom nil)]
          (profile/with-cell cell
           (with-meta
            (fn [& arguments]
@@ -791,12 +789,14 @@
                               ;; every schema it closes over. A cluster whose
                               ;; stored program predates the loaded files lacks
                               ;; them; the files' own declarations then decide.
-                              ((mi/-f->original schema/projection-cache-value)
-                               projection [::declared-wrapper function-symbol authored original policy]
-                               #(when (validates-loaded-contract? projection function-symbol
-                                                                  contract definitions)
-                                  (compiled-wrapper projection function-symbol
-                                                    authored original caps policy))))
+                              (when (validates-loaded-contract? projection function-symbol
+                                                                contract definitions)
+                                (if (identical? projection (first @supplied-wrapper))
+                                  (second @supplied-wrapper)
+                                  (let [wrapper (compiled-wrapper projection function-symbol
+                                                                  authored original caps policy)]
+                                    (reset! supplied-wrapper [projection wrapper])
+                                    wrapper))))
                             @boot-wrapper))]
                   (apply wrapped arguments)))))
            {:malli.instrument/original original

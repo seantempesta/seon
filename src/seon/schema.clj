@@ -558,20 +558,32 @@
           (throw (ex-info (:seon.error/message refusal) refusal throwable))))
       (throw throwable))))
 
-(defn- projection-registry
-  "Compile one immutable generation serially, then seal its complete table.
+(declare canonical-reference-graph)
 
-   Retained entries must be unaffected by the candidate's changes. All other
-   declarations close over prepared immutable definitions; a captured lazy
-   scope can only memoize those same answers, never consult current state."
+(defn- projection-registry
+  "Compile each declaration against only its direct compiled references.
+
+   A retained schema carries only its dependency nodes, so a later registry
+   can share it without keeping the rest of its former generation."
   {:malli/schema
    [:function
     [:=> [:cat :map :map] [:fn malli.registry/registry?]]
-    [:=> [:cat :map :map :map :map] [:fn malli.registry/registry?]]]}
+    [:=> [:cat :map :map :map :map] [:fn malli.registry/registry?]]
+    [:=> [:cat :map :map :map :map [:map-of :keyword [:set :keyword]]]
+     [:fn malli.registry/registry?]]]}
   ([forms predicate-functions]
    (projection-registry forms predicate-functions {} {}))
   ([forms predicate-functions contracts retained]
-   (let [definitions
+   (projection-registry forms predicate-functions contracts retained
+                        (canonical-reference-graph forms predicate-functions)))
+  ([forms predicate-functions contracts retained schema-dependencies]
+   (let [;; The first adoption after this change cannot reuse legacy nodes.
+         retained (select-keys retained (concat (keys forms) (keys contracts)))
+         retained (if (every? #(and (m/schema? %)
+                                    (true? (:seon.schema/scoped-registry?
+                                            (m/options %)))) (vals retained))
+                    retained {})
+         definitions
          (if (seq retained)
            (reduce
             (fn [changed population]
@@ -593,13 +605,55 @@
                  predicate-functions
                  (into #{} (mapcat predicate-symbols-in) (vals definitions)))
          prepared (bound-forms definitions predicate-functions)
+         canonical-keys (set (concat (keys forms) (keys contracts)))
+         bootstrap (mr/fast-registry
+                    (bound-forms
+                     (into {} (remove (comp qualified-keyword? key))
+                           forms) predicate-functions))
+         defaults (mr/composite-registry (m/default-schemas) bootstrap)
+         interim (mr/lazy-registry
+                  (mr/composite-registry (m/default-schemas) retained)
+                  (fn [identity scope]
+                    (when-let [definition (get prepared identity)]
+                      ((if (qualified-symbol? identity) m/function-schema m/schema)
+                       definition {:registry scope}))))
+         _ (doseq [identity (keys prepared)] (mr/schema interim identity))
+         compiled (atom retained)
+         compile-one
+         (fn compile-one [identity]
+           (or (get @compiled identity)
+               (when-let [definition (get prepared identity)]
+                 (let [dependencies
+                       (if (contains? forms identity)
+                         (get schema-dependencies identity #{})
+                         (direct-references*
+                          (mr/schema interim identity) canonical-keys))
+                       children (into {}
+                                      (map (fn [child] [child (compile-one child)]))
+                                      dependencies)
+                       schema (try
+                                ((if (qualified-symbol? identity) m/function-schema m/schema)
+                                 definition
+                                 {:registry (mr/composite-registry
+                                             defaults children)
+                                  :seon.schema/scoped-registry? true})
+                                (catch Exception failure
+                                  (throw (ex-info "Scoped schema compilation failed."
+                                                  {:seon.schema/identity identity}
+                                                  failure))))]
+                   (swap! compiled assoc identity schema)
+                   schema))))
          registry
-         (mr/lazy-registry
-          (mr/composite-registry (m/default-schemas) retained)
-          (fn [identity scope]
-            (when-let [definition (get prepared identity)]
-              ((if (qualified-symbol? identity) m/function-schema m/schema)
-               definition {:registry scope}))))]
+         (try
+           (mr/fast-registry
+            (into (into (mr/schemas defaults) retained)
+                  (map (fn [identity] [identity (compile-one identity)]))
+                  (keys prepared)))
+           (catch Exception failure
+             (refuse-unresolved-reference!
+              {:seon.error/operation 'seon.schema/projection-registry
+               :seon.schema/definitions (merge {} forms contracts)
+               :seon.error/throwable failure})))]
      (try
        (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
          (internal/assert-compilable-schema!
@@ -1366,7 +1420,7 @@
          dependencies (canonical-reference-graph forms predicates)
          _ (assert-acyclic-references!
             forms (keys forms) dependencies)
-         registry (projection-registry forms predicates)]
+         registry (projection-registry forms predicates {} {} dependencies)]
      (with-compiled-cache
       (with-predicate-functions
        {:seon.schema.projection/forms forms
@@ -2234,7 +2288,7 @@
                    (if reuse-declarations?
                      (select-keys (mr/schemas (:seon.schema.projection/registry supplied))
                                   (keys forms))
-                     {}))
+                     {}) schema-dependencies)
          options  {:registry registry}
          canonical-keys (set (keys forms))
          ordered-forms (sort-by key forms)
@@ -2553,7 +2607,8 @@
                        bindings)))
                  predicate-functions
                  predicate-symbols)
-         registry (projection-registry forms predicate-functions contracts {})
+         registry (projection-registry forms predicate-functions contracts {}
+                                       (:seon.schema.projection/schema-dependencies pure-data))
          options {:registry registry}]
      ;; Population policy was proved before publication. Runtime roots are
      ;; realized serially by the same construction owner as a fresh build.
@@ -2764,7 +2819,7 @@
    The changed declarations and their reverse closure over schema references
    recompile, validate and re-index; every other compiled schema is Malli's
    own retained object from `projection`'s registry (`projection-registry`
-   seeds the new lazy registry with them). Refs inside a retained schema
+   seeds the new registry with them). Refs inside a retained schema
    resolve through the registry it was compiled in, which is exactly why the
    closure must include every referrer of a changed key: nothing outside it
    names a changed definition. The result equals [[build-projection]] over
@@ -2901,7 +2956,8 @@
             (apply dissoc (mr/schemas old-registry)
                    (concat affected-keys removed-keys affected-fns removed-fns))
             registry
-            (projection-registry forms predicate-functions function-contracts retained)
+            (projection-registry forms predicate-functions function-contracts retained
+                                 schema-dependencies)
             old-function-dependencies
             (:seon.schema.projection/function-dependencies projection)
             function-dependencies
