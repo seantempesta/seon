@@ -38,8 +38,7 @@
             [seon.sci.eval :as sci.eval]
             [seon.render.web :as web]
             [seon.test-support :as test-support])
-  (:import [java.net ServerSocket Socket]
-           [java.util Date]
+  (:import [java.util Date]
            [java.util.concurrent CountDownLatch Executor]))
 
 (def ^:private test-environment
@@ -225,6 +224,23 @@
 (defn- arm-one!
   [connection ctx routing agent-id]
   (agent/arm! {:seon.turn.loop/cluster (handle connection ctx)
+               :seon.agent/id agent-id
+               :seon.agent/routing routing}))
+
+(defn- created-agent-tx
+  "The canonical creation of `agent-id` on `cluster-name`'s own branch."
+  [cluster-name agent-id]
+  (agent/creation-tx {:seon.agent/id agent-id
+                      :seon.ns/name (symbol (str "my.agents." agent-id))
+                      :seon.cluster/name cluster-name}))
+
+(defn- arm-in-cluster!
+  "Arm `agent-id` under a handle naming `cluster-name` explicitly.
+  The fixture branch inherits the executing cluster's rows, so a handle that
+  guessed its cluster from the config rows could name either one."
+  [connection ctx routing cluster-name agent-id]
+  (agent/arm! {:seon.turn.loop/cluster (assoc (handle connection ctx)
+                                              :seon.cluster/name cluster-name)
                :seon.agent/id agent-id
                :seon.agent/routing routing}))
 
@@ -798,7 +814,7 @@
                   :io-exec executor
                   :procs (select-keys (:procs definition) [:seon.agent/turn])
                   :conns [])))]
-      (let [entry (arm-one! connection ctx routing agent-id)
+      (let [entry (arm-in-cluster! connection ctx routing "withheld-turn" agent-id)
             turn-stopped (:seon.agent/turn-stopped entry)
             observed-stop
             (reify
@@ -848,8 +864,8 @@
                 agent-id "withheld-turn-0"
                 original-definition agent/graph-definition]
             (test-support/transacted! connection
-                                      [(config-row "withheld-turn" {})
-                                       {:seon.agent/id agent-id}])
+                                      (conj (created-agent-tx "withheld-turn" agent-id)
+                                            (config-row "withheld-turn" {})))
             (let [result (withheld-turn-trial
                           connection ctx routing original-definition agent-id)]
               (is (= 1 (:seon.cluster.agent-test/runnable-count result))
@@ -861,44 +877,124 @@
                   "Executing the admitted runnable completes disarm."))))))
     (is (= 1 @acquisitions))))
 
-(deftest disarm-has-a-declared-loud-turn-completion-backstop
+(defn- provider-backstop-config
+  [cluster-name turn-completion-backstop-ms]
+  (config-row
+   cluster-name
+   {:seon.config.agent/turn-completion-backstop-ms
+    turn-completion-backstop-ms
+    ;; The provider stand-in never reaches a network; a long provider
+    ;; allowance keeps the turn's own active bound out of the race, so the
+    ;; observed bound is disarm's declared one.
+    :seon.config.ai/timeout-ms 60000
+    :seon.config.ai.backup/model :seon.config/absent
+    :seon.config.ai.retry/maximum-retries 0
+    :seon.config.ai.retry/maximum-total-delay-ms 0
+    :seon.config.run/max-episode-runs 1}))
+
+(defn- open-run-id
+  [connection agent-id]
+  (db/q '[:find ?run-id .
+          :in $ ?agent-id
+          :where
+          [?agent :seon.agent/id ?agent-id]
+          [?run :seon.turn/agent ?agent]
+          [?run :seon.turn/id ?run-id]
+          (not [?run :seon.turn/closed-tx])]
+        @connection agent-id))
+
+(deftest ^{:seon.test/long "Measured 7,431-8,373 ms on a HEAD snapshot (2026-09-22): arming 1,495 ms, the turn's prelude before prompt acquisition 5,400 ms (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md), the interrupted disarm itself 1,405 ms."
+           :seon.test/long-ms 12000}
+  disarm-interrupts-an-in-flight-turn-and-records-it-interrupted
+  ;; Interrupted execution never resumes: an orderly stop while the turn is
+  ;; inside its prelude (prompt acquisition, where a live root turn spends
+  ;; most of its time before the provider call) interrupts the turn's
+  ;; thread, observes the proc's own stop transition well inside the
+  ;; declared bound, and leaves no open turn behind.
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory)
+            turn-completion-backstop-ms 5000
+            prelude-entered (CountDownLatch. 1)
+            never-released (CountDownLatch. 1)
+            interrupted (promise)
+            agent-id "prelude-interrupt"]
+        (test-support/transacted!
+         connection
+         (conj (created-agent-tx "prelude-interrupt" agent-id)
+               (provider-backstop-config "prelude-interrupt"
+                                         turn-completion-backstop-ms)))
+        (try
+          (with-redefs
+            [prompt/prompt
+             (fn [_database _request]
+               (.countDown prelude-entered)
+               (try
+                 (.await never-released)
+                 {:seon.error/message "The prelude stand-in was released."}
+                 (catch InterruptedException failure
+                   (deliver interrupted (.getName (Thread/currentThread)))
+                   (throw failure))))]
+            (let [entry (arm-in-cluster! connection ctx routing
+                                         "prelude-interrupt" agent-id)]
+              (await-idle! (:seon.flow/started entry))
+              (outside-trigger! connection agent-id
+                                "prelude-interrupt-message" "block")
+              (async/offer! (:seon.cluster.wake/channel entry) ::wake)
+              (test-support/await-event!
+               prelude-entered ::interruptible-prelude-entered)
+              (let [run-id (open-run-id connection agent-id)
+                    _ (is (string? run-id) "the turn is open before stop")
+                    started (System/nanoTime)
+                    result (agent/disarm! {:seon.agent/id agent-id
+                                           :seon.agent/routing routing})
+                    elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+                (is (nil? result))
+                (is (< elapsed-ms turn-completion-backstop-ms)
+                    "stop observes exit inside its declared bound")
+                (is (string? (deref interrupted 0 nil))
+                    "the in-flight prelude was interrupted, not awaited")
+                (is (nil? (open-run-id connection agent-id))
+                    "no turn is left open")
+                (is (some?
+                     (db/q '[:find ?closed .
+                             :in $ ?run-id
+                             :where [?run :seon.turn/id ?run-id]
+                             [?run :seon.turn/closed-tx ?closed]]
+                           @connection run-id)))
+                (is (nil? (agent/armed routing agent-id)))
+                (is (async.impl/closed?
+                     (:seon.cluster.wake/channel entry))))))
+          (finally
+            (.countDown never-released)
+            (disarm-all! routing)))))))
+
+(deftest ^{:seon.test/long "Measured 7,898 ms on a HEAD snapshot (2026-09-22), dominated by the turn's prelude before prompt acquisition (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md); the declared disarm bound here is 100 ms."
+           :seon.test/long-ms 12000}
+  disarm-has-a-declared-loud-turn-completion-backstop
+  ;; Host work that ignores the interrupt keeps its thread; disarm then
+  ;; fails loudly at its declared bound and stays retryable.
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
             turn-completion-backstop-ms 100
             provider-entered (CountDownLatch. 1)
-            release-provider (CountDownLatch. 1)
-            server (ServerSocket. 0)
-            server-finished
-            (future
-              (with-open [_peer (.accept server)]
-                (test-support/await-event!
-                 release-provider
-                 ::release-never-answering-provider)))
+            release-provider (java.util.concurrent.Semaphore. 0)
             agent-id "provider-backstop"]
         (test-support/transacted!
-                     connection
-                     [(agent-row agent-id)
-                      (config-row
-                       "provider-backstop"
-                       {:seon.config.agent/turn-completion-backstop-ms
-                        turn-completion-backstop-ms
-                        :seon.config.ai/timeout-ms 100
-                        :seon.config.ai.backup/model :seon.config/absent
-                        :seon.config.ai.retry/maximum-retries 0
-                        :seon.config.ai.retry/maximum-total-delay-ms 0
-                        :seon.config.run/max-episode-runs 1})])
+         connection
+         (conj (created-agent-tx "provider-backstop" agent-id)
+          (provider-backstop-config "provider-backstop"
+                                    turn-completion-backstop-ms)))
         (try
           (with-redefs
-            [ai/complete
-             (fn [_projection _request]
-               (with-open [client (Socket. "127.0.0.1"
-                                           (.getLocalPort server))]
-                 (.countDown provider-entered)
-                 (.read (.getInputStream client))
-                 {
-                  :seon.error/message "The local provider released."}))]
-            (let [entry (arm-one! connection ctx routing agent-id)
+            [prompt/prompt
+             (fn [_database _request]
+               (.countDown provider-entered)
+               (.acquireUninterruptibly release-provider)
+               {:seon.error/message "The prelude stand-in released."})]
+            (let [entry (arm-in-cluster! connection ctx routing
+                                         "provider-backstop" agent-id)
                   fault-channel
                   (:seon.agent/fault-channel @routing)]
               (await-idle! (:seon.flow/started entry))
@@ -908,15 +1004,7 @@
               (test-support/await-event!
                provider-entered
                ::never-answering-provider-entered)
-              (let [run-id
-                    (db/q '[:find ?run-id .
-                            :in $ ?agent-id
-                            :where
-                            [?agent :seon.agent/id ?agent-id]
-                            [?run :seon.turn/agent ?agent]
-                            [?run :seon.turn/id ?run-id]
-                            (not [?run :seon.turn/closed-tx])]
-                          @connection agent-id)
+              (let [run-id (open-run-id connection agent-id)
                     stopped
                     (future
                       (try
@@ -936,7 +1024,7 @@
                      ::provider-stop-core-fault
                      #(= run-id (:seon.turn/id %)))]
                 (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
-                (is (= (+ turn-completion-backstop-ms 100)
+                (is (= turn-completion-backstop-ms
                        (:seon.config.agent/turn-completion-backstop-ms
                         (ex-data failure))))
                 (is (= agent-id
@@ -948,10 +1036,7 @@
                 (is (= run-id (:seon.turn/id fault)))
                 (is (some? (agent/armed routing agent-id))
                     "a fired backstop fails closed and leaves stop retryable"))
-              (.countDown release-provider)
-              (test-support/await-event!
-               server-finished
-               ::never-answering-provider-released)
+              (.release release-provider)
               (test-support/await-event!
                (:seon.agent/turn-stopped entry)
                ::released-provider-turn-stopped)
@@ -970,8 +1055,7 @@
               (is (nil? (agent/armed routing agent-id))
                   "a successful retry removes the route exactly once")))
           (finally
-            (.countDown release-provider)
-            (.close server)
+            (.release release-provider)
             (disarm-all! routing)))))))
 
 (deftest turn-start-has-the-same-declared-loud-completion-backstop

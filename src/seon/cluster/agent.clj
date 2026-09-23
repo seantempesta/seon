@@ -89,7 +89,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.reader :as reader]
             [seon.schema.edn :as schema.edn])
-  (:import [java.util Date LinkedList]))
+  (:import [java.util Date LinkedList]
+           [java.util.concurrent.atomic AtomicReference]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -490,6 +491,43 @@
    [(update state :seon.agent/deliveries inc)
     {:seon.agent/episode [:seon.agent/wake]}]))
 
+(defn turn-step
+  "The agent graph's turn proc: `seon.turn/step`, marking its running thread.
+
+  Flow runs a transform on its proc's own loop thread
+  (`reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:305`).
+  For the extent of ONE transform this publishes that thread in the
+  handle's `:seon.agent/turn-thread` holder, which is exactly the work an
+  orderly stop may interrupt. On exit it clears the holder AND the thread's
+  interrupt status under the holder's monitor: a stop's interrupt that the
+  transform absorbed must never reach Flow's loop, where an interrupted
+  `alts!!` leaves its handler registered and would consume the queued
+  `::flow/stop` (`clojure/core/async.clj:356`). The other arities are
+  `seon.turn/step`'s own."
+  {:malli/schema [:function
+                  [:=> [:cat] [:map]]
+                  [:=> [:cat :map] :map]
+                  [:=> [:cat :map :keyword] :map]
+                  [:=> [:cat :map :keyword :seon.schema/value]
+                   [:tuple :map [:maybe [:map [::flow/report [:vector :seon.turn.loop/pass-report]]]]]]]}
+  ([] (turn/step))
+  ([args] (turn/step args))
+  ([state transition] (turn/step state transition))
+  ([state input message]
+   (let [^AtomicReference holder
+         (:seon.agent/turn-thread (:seon.turn.loop/cluster state))]
+     (if-not holder
+       (turn/step state input message)
+       (do
+         (locking holder (.set holder (Thread/currentThread)))
+         (try
+           (turn/step state input message)
+           (finally
+             (locking holder
+               (.set holder nil)
+               ;; the declared case: a stop's interrupt, already served
+               (Thread/interrupted)))))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; The ONE blueprint
 ;;; ---------------------------------------------------------------------------
@@ -522,7 +560,7 @@
                           environment))}
        :seon.agent/turn
        {:proc (seon.flow/var-process
-               #'turn/step :io
+               #'turn-step :io
                (env/carry {:seon.turn.loop/cluster handle
                            :seon.agent/id agent-id}
                           environment))
@@ -951,7 +989,8 @@
                                 :seon.agent/turn-backstop-state turn-backstop-state
                                 :seon.config.agent/turn-completion-backstop-ms
                                 turn-completion-backstop-ms
-                                :seon.agent/turn-stopped turn-stopped)
+                                :seon.agent/turn-stopped turn-stopped
+                                :seon.agent/turn-thread (AtomicReference.))
             {graph :seon.flow/graph started :seon.flow/started}
             (seon.flow/start-graph!
              {:seon.flow/graph-definition
@@ -984,75 +1023,162 @@
         (async/offer! wake-ch :seon.agent/wake)
         entry))))
 
+(defn- interrupt-turn!
+  "Interrupt the stopping agent's in-flight turn transform, if one runs.
+
+  INTERRUPTED EXECUTION NEVER RESUMES, so an orderly stop does not wait for
+  a turn to finish its provider call, evaluation wait or transaction wait.
+  Only a thread inside a transform is interrupted (`turn-step` publishes
+  it), under the holder's monitor, so the interrupt can never land after the
+  transform returned. A parked proc loop is never interrupted: it takes the
+  queued stop by itself. Interruption is a request, not termination; the
+  caller still awaits the proc's stop transition. True when a transform
+  was interrupted."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [entry]
+  (if-let [^AtomicReference holder
+           (:seon.agent/turn-thread (:seon.turn.loop/cluster entry))]
+    (locking holder
+      (if-let [^Thread thread (.get holder)]
+        (do (.interrupt thread) true)
+        false))
+    false))
+
+(defn- open-turn!
+  "The agent's open turn id, nil when none, throwing a refused read."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.agent/id]
+                  [:maybe :seon.turn/id]]}
+  [connection agent-id]
+  (let [run-id (turn/open-for-agent @connection [:seon.agent/id agent-id])]
+    (when (map? run-id)
+      (throw (ex-info "Disarm could not read the agent's open turn."
+                      (assoc run-id :seon.agent/id agent-id))))
+    run-id))
+
+(defn- turn-completion-failure!
+  "Publish and throw the loud failure for a turn that did not stop in bound."
+  {:malli/schema [:=> [:cat :seon.agent/routing :map [:maybe :seon.turn/id]
+                       [:int {:min 1}]]
+                  :nil]}
+  [routing entry run-id timeout-ms]
+  (let [agent-id (:seon.agent/id entry)
+        diagnostic
+        (turn/turn-completion-error
+         agent-id run-id timeout-ms :seon.agent/disarm :seon.agent/turn-completed
+         [:seon.agent/turn-stopped])
+        failure (ex-info (:seon.error/message diagnostic) diagnostic)
+        fault
+        (cond->
+         {::flow/pid :seon.agent/turn
+          ::flow/status :stopping
+          ::flow/op :seon.agent/turn-completion-backstop
+          ::flow/ex failure
+          :seon.agent/id agent-id}
+          run-id (assoc :seon.turn/id run-id))]
+    (async/offer! (:seon.agent/fault-channel @routing) fault)
+    (binding [*out* *err*]
+      (println "SEON CORE FAULT (agent stop backstop):"
+               (ex-message failure)
+               (pr-str (ex-data failure)))
+      (flush))
+    (throw failure)))
+
 (defn- await-turn-completion!
+  "Await the turn proc's stop transition within the declared disarm bound.
+
+  The bound is `:seon.config.agent/turn-completion-backstop-ms`, the dial
+  that declares orderly disarm. The active work's own allowance is not added:
+  `disarm!` has interrupted that work, so its provider schedule or
+  evaluation limit no longer describes the wait. An active turn bound that
+  fires first is joined, so one stuck turn reports one failure. Returns the
+  terminal stop value; a bound firing throws and leaves the entry armed so
+  disarm can be retried."
+  {:malli/schema [:=> [:cat :seon.agent/routing :map] :keyword]}
   [routing entry]
-  (let [turn-stopped (:seon.agent/turn-stopped entry)
-        {connection :seon.db/connection
-         process :seon.db.process/id}
-        (:seon.turn.loop/cluster entry)]
+  (let [turn-stopped (:seon.agent/turn-stopped entry)]
     (if-some [terminal (async/poll! turn-stopped)]
       terminal
       (let [agent-id (:seon.agent/id entry)
-            database @connection
-            run-id (turn/open-for-agent database [:seon.agent/id agent-id])
-            timeout-ms
-            (:seon.config.agent/turn-completion-backstop-ms
-             (:seon.turn.loop/cluster entry))
-            active-backstop-state (:seon.agent/turn-backstop-state entry)
-            active-backstop
-            (when active-backstop-state @active-backstop-state)]
-        (if active-backstop
-          (let [failure-channel (:seon.agent/failure-channel active-backstop)
-                [value selected]
-                (async/alts!! [turn-stopped failure-channel]
-                              :priority true)]
-            (if (= selected failure-channel)
-              (do
-                (compare-and-set! active-backstop-state active-backstop nil)
-                (if value
-                  (throw value)
-                  (await-turn-completion! routing entry)))
-              value))
-          (let [backstop (async/timeout timeout-ms)
-                [value selected]
-                (async/alts!! [turn-stopped backstop]
-                              :priority true)]
-            (if (= selected turn-stopped)
-              value
-              (let [failure
-                    (let [diagnostic
-                          (turn/turn-completion-error
-                           agent-id run-id timeout-ms :seon.agent/disarm :seon.agent/turn-completed
-                           [:seon.agent/turn-stopped])]
-                      (ex-info (:seon.error/message diagnostic) diagnostic))
-                    fault
-                    (cond->
-                     {::flow/pid :seon.agent/turn
-                      ::flow/status :stopping
-                      ::flow/op :seon.agent/turn-completion-backstop
-                      ::flow/ex failure
-                      :seon.agent/id agent-id}
-                      run-id (assoc :seon.turn/id run-id))]
-                (async/offer! (:seon.agent/fault-channel @routing) fault)
-                (binding [*out* *err*]
-                  (println "SEON CORE FAULT (agent stop backstop):"
-                           (ex-message failure)
-                           (pr-str (ex-data failure)))
-                  (flush))
-                (throw failure)))))))))
+            {connection :seon.db/connection
+             timeout-ms :seon.config.agent/turn-completion-backstop-ms}
+            (:seon.turn.loop/cluster entry)
+            run-id (open-turn! connection agent-id)
+            backstop (async/timeout timeout-ms)
+            failure-channel
+            (some-> (:seon.agent/turn-backstop-state entry)
+                    deref
+                    :seon.agent/failure-channel)]
+        (loop [ports (cond-> [turn-stopped]
+                       failure-channel (conj failure-channel)
+                       true (conj backstop))]
+          (let [[value selected] (async/alts!! ports :priority true)]
+            (cond
+              (= selected turn-stopped) value
+              (= selected backstop)
+              (turn-completion-failure! routing entry run-id timeout-ms)
+              ;; the active turn's own bound fired: join its failure
+              (some? value) (throw value)
+              ;; the active bound was cancelled by a completed pass
+              :else (recur (filterv #(not= % selected) ports)))))))))
+
+(defn- cancel-turn-backstop!
+  "Cancel the active turn bound an interrupted transform left armed.
+
+  An escaped transform deliberately leaves its bound armed so quiescence
+  cannot hide it (`seon.turn/arm-turn-completion-backstop!`). After an
+  orderly stop observed the proc's exit and records the interruption, that
+  bound would fire later as a second, false fault."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [entry]
+  (if-let [backstop (some-> (:seon.agent/turn-backstop-state entry) deref)]
+    (async/offer! (:seon.agent/cancel backstop) :seon.agent/interrupted)
+    false))
+
+(defn- record-interruption!
+  "Close the agent's open turn as interrupted once its proc has exited.
+
+  The same writer function boot recovery uses (`seon.turn/recover-call`):
+  inside the transaction it stamps unfinished evaluations and effects
+  interrupted and closes the turn; a turn the proc closed itself is a no-op.
+  Returns the interrupted turn id, or nil when no turn was open."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.turn/id]]}
+  [entry]
+  (let [agent-id (:seon.agent/id entry)
+        connection (:seon.db/connection (:seon.turn.loop/cluster entry))
+        run-id (open-turn! connection agent-id)]
+    (when run-id
+      (let [result (db/transact!
+                    connection
+                    (turn/recover-tx {:seon.turn/id run-id
+                                      :seon.turn/now (Date.)}))]
+        (when (or (:seon.error/at result)
+                  (:seon.db.write.attempt/request-id result)
+                  (:seon.db/invalid-read result)
+                  (:seon.schema/expected-value result))
+          (throw
+           (ex-info "Disarm could not record the interrupted turn."
+                    {:seon.error/message
+                     "Disarm could not record the interrupted turn."
+                     :seon.agent/id agent-id
+                     :seon.turn/id run-id
+                     :seon.error/data result})))
+        run-id))))
 
 (defn disarm!
   "Orderly stop of one agent's graph, idempotent.
-  Request stop and await the turn proc's stop acknowledgement before dropping
-  its routing entry or closing channels. An idle completion permit is not a
-  stop acknowledgement: Flow may already have selected the next wake. Only
-  the stop transition proves no later transform can write after cleanup.
-  The wait is bounded by the lesser of the evaluation time limit and the
-  construction-time completion backstop. A proc that never starts refuses
-  teardown loudly; it cannot report a successful stop while still queued.
-  If the loud backstop fires, its diagnostic names the agent and open turn and
-  the entry remains so disarm can be retried after the turn settles. Stop drops
-  conn contents —
+  Request stop, INTERRUPT the in-flight turn transform, and await the turn
+  proc's stop acknowledgement before dropping its routing entry or closing
+  channels. Interrupted execution never resumes: an in-flight provider call,
+  evaluation wait or transaction wait unwinds instead of running to its end,
+  and the open turn is then closed with its unfinished evaluations stamped
+  interrupted by the writer function boot recovery uses. An idle completion
+  permit is not a stop acknowledgement: Flow may already have selected the
+  next wake. Only the stop transition proves no later transform can write
+  after cleanup. The wait is bounded by the declared disarm allowance,
+  `:seon.config.agent/turn-completion-backstop-ms`. Host work that ignores
+  the interrupt keeps its thread until it returns; a proc that never starts
+  or never exits refuses teardown loudly, naming the agent and open turn, and
+  the entry remains so disarm can be retried. Stop drops conn contents —
   safe by the transport law; triggers are rows and survive.
 
   THE ORDER OF THE LAST STEPS IS LOAD-BEARING, not stylistic: completion is
@@ -1070,7 +1196,10 @@
   (locking routing
    (when-let [entry (armed routing agent-id)]
     (flow/stop (:seon.flow/graph entry))
+    (interrupt-turn! entry)
     (await-turn-completion! routing entry)
+    (cancel-turn-backstop! entry)
+    (record-interruption! entry)
     (swap! routing
            (fn [current]
              (-> current
