@@ -250,6 +250,54 @@
                     (db/pull (db/db connection) [:seon.turn/closed-tx]
                              [:seon.turn/id run-id])))))))))
 
+(deftest a-run-no-message-caused-settles-its-forms
+  (testing "a continuation run has no trigger, and its batch still settles"
+   (support/with-database
+    (fn [connection]
+      ;; The branch already carries the executing cluster; seeding another
+      ;; would cost a second config application for nothing this reads.
+      (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]]
+                               (db/db connection))
+            _ (checked-transact! connection
+                                 (agent/creation-tx {:seon.agent/id "continuer"
+                                                     :seon.ns/name 'my.agents.continuer
+                                                     :seon.cluster/name cluster-name}))
+            run-id "untriggered"
+            evaluation-id (id/evaluation run-id 0)
+            _ (checked-transact!
+               connection
+               [{:seon.turn/id run-id
+                 :seon.turn/agent [:seon.agent/id "continuer"]
+                 :seon.turn.work/situation :call
+                 :seon.turn/starting-ns [:seon.ns/name 'my.agents.continuer]
+                 :seon.turn/opened-tx "datomic.tx"}
+                {:seon.cluster.eval/id evaluation-id
+                 :seon.cluster.eval/at (java.util.Date.)
+                 :seon.cluster.eval/run [:seon.turn/id run-id]
+                 :seon.cluster.eval/ordinal 0
+                 :seon.cluster.eval/author :agent
+                 :seon.cluster.eval/ns [:seon.ns/name 'my.agents.continuer]
+                 :seon.cluster.eval/source "(+ 1 2)"}])
+            handle (support/cluster-handle
+                    {:seon.env/environment (support/environment cluster-name connection)
+                     :seon.db/connection connection
+                     :seon.cluster/name cluster-name
+                     :seon.db.process/id cluster/boot-process-identity
+                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)})
+            report (turn/turn {:seon.turn.loop/cluster handle
+                               :seon.turn.work/next {:seon.turn.work/situation :resume
+                                                     :seon.turn/id run-id
+                                                     :seon.agent/id "continuer"
+                                                     :seon.cluster.eval/ordinal 0}}
+                              (java.util.Date.))
+            shown (:seon.eval/shown
+                   (db/pull (db/db connection) [:seon.eval/shown]
+                            [:seon.cluster.eval/id evaluation-id]))]
+        ;; Without a trigger the run's request carried `:seon.message/trigger
+        ;; nil`, and `settle-batch!`'s contract refused the whole batch.
+        (is (#{:closed :released} (:seon.turn.loop/outcome report)) (pr-str report))
+        (is (= "3" shown) (pr-str shown)))))))
+
 (deftest compaction-refuses-an-open-turn-at-the-writer
   (support/with-database
    (fn [connection]

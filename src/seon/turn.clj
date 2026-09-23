@@ -4951,8 +4951,10 @@
                        :seon.agent/id agent-id
                        :seon.turn/id run-id
                        :seon.cluster.eval/ordinal ordinal
-                       :seon.sci.eval/evaluation evaluation
-                       :seon.message/trigger trigger}
+                       :seon.sci.eval/evaluation evaluation}
+                       ;; A run no message caused (a continuation) has no
+                       ;; trigger: stored absence is no key, never nil.
+                       trigger (assoc :seon.message/trigger trigger)
                        (and problem (not (:seon.turn.loop/phase-failed problem)))
                        (assoc :seon.problems/form-problem problem))))
                  gated)
