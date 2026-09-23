@@ -24,6 +24,7 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.program :as program]
             [seon.turn :as turn]
             [seon.cluster.prompt :as prompt]
 
@@ -171,14 +172,13 @@
 
   Every structural member and dial the declaration names is defaulted there
   from the shipped decisions; this adds only what this suite's world supplies
-  or varies."
-  [connection ctx]
+  or varies. The fixture branch inherits the executing cluster's config rows,
+  so the test names its own cluster."
+  [connection ctx cluster-name]
   (test-support/cluster-handle
   {:seon.env/environment @test-environment
    :seon.db/connection connection
-   :seon.cluster/name
-   (db/q '[:find ?cluster . :where [_ :seon.config/cluster ?cluster]]
-        @connection)
+   :seon.cluster/name cluster-name
    :seon.flow/work-launcher *work-launcher*
    :seon.flow/executor
    (cluster/projection-executor
@@ -221,40 +221,40 @@
            (async/chan (async/sliding-buffer 16)))
     routing))
 
+(defn- live-branch
+  "The branch the fixture connection holds: the live branch for its agents."
+  [connection]
+  (get-in (db/db connection) [:config :branch]))
+
 (defn- arm-one!
-  [connection ctx routing agent-id]
-  (agent/arm! {:seon.turn.loop/cluster (handle connection ctx)
+  [connection ctx routing cluster-name agent-id]
+  (agent/arm! {:seon.turn.loop/cluster (handle connection ctx cluster-name)
                :seon.agent/id agent-id
                :seon.agent/routing routing}))
 
 (defn- created-agent-tx
-  "The canonical creation of `agent-id` on `cluster-name`'s own branch."
-  [cluster-name agent-id]
+  "The canonical creation of `agent-id` for `cluster-name`, live on the fixture branch."
+  [connection cluster-name agent-id]
   (agent/creation-tx {:seon.agent/id agent-id
+                      :seon.agent/branch (live-branch connection)
                       :seon.ns/name (symbol (str "my.agents." agent-id))
                       :seon.cluster/name cluster-name}))
 
-(defn- arm-in-cluster!
-  "Arm `agent-id` under a handle naming `cluster-name` explicitly.
-  The fixture branch inherits the executing cluster's rows, so a handle that
-  guessed its cluster from the config rows could name either one."
-  [connection ctx routing cluster-name agent-id]
-  (agent/arm! {:seon.turn.loop/cluster (assoc (handle connection ctx)
-                                              :seon.cluster/name cluster-name)
-               :seon.agent/id agent-id
-               :seon.agent/routing routing}))
 
 (defn- agent-row
-  [agent-id]
+  [connection agent-id]
   {:seon.agent/id agent-id
+   :seon.agent/branch (live-branch connection)
    :seon.agent/namespace
-   {:seon.ns/name (symbol (str "my.agents." agent-id))}})
+   (let [row {:seon.ns/name (symbol (str "my.agents." agent-id))}]
+     (assoc row :seon.program/definition-digest (program/definition-digest row)))})
 
 (defn- create-generated-agent!
   [connection cluster-name agent-id]
   (cluster/ensure-entity!
    connection process
    {:seon.agent/id agent-id
+    :seon.agent/branch (live-branch connection)
     :seon.cluster/name cluster-name
     :seon.ns/name (symbol (str "my.agents." agent-id))}))
 
@@ -374,12 +374,12 @@
             events (database-events connection)
             source "(defn uncontracted [] 42)"
             function-symbol 'my.agents.contract-probe/uncontracted]
-        (test-support/transacted! connection [(config-row "contract-probe" {}) (agent-row "contract-probe")])
+        (test-support/transacted! connection [(config-row "contract-probe" {}) (agent-row connection "contract-probe")])
         (try
-          (arm-one! connection ctx routing "contract-probe")
+          (arm-one! connection ctx routing "contract-probe" "contract-probe")
           (let [submission
                 (agent/submit-source!
-                 {:seon.turn.loop/cluster (handle connection ctx)
+                 {:seon.turn.loop/cluster (handle connection ctx "contract-probe")
                   :seon.agent/routing routing
                   :seon.agent/id "contract-probe"
                   :seon.cluster.reply/text
@@ -424,11 +424,11 @@
                       "; Read a second value.\n(identity (+ 1 1))")]
         (test-support/transacted!
                      connection
-                     [(agent-row "source-agent")
+                     [(agent-row connection "source-agent")
                       (config-row "source-submission"
                                   {:seon.config.run/max-episode-runs 100})])
         (let [cluster-handle
-              (assoc (handle connection ctx)
+              (assoc (handle connection ctx "source-submission")
                      :seon.cluster.wake/channel armer-channel
                      :seon.turn.loop/completion armer-completion)
               armer-graph
@@ -443,7 +443,8 @@
                           (:seon.sci.eval/projection-state ctx))})]
           (test-support/transacted!
                        connection
-                       [{:seon.ns/name 'my.agents.source-agent-moved}
+                       [(let [row {:seon.ns/name 'my.agents.source-agent-moved}]
+                          (assoc row :seon.program/definition-digest (program/definition-digest row)))
                         {:seon.agent/id "source-agent"
                          :seon.agent/namespace
                          [:seon.ns/name 'my.agents.source-agent-moved]}])
@@ -577,7 +578,7 @@
             definition
             (agent/graph-definition
              {:seon.turn.loop/cluster
-              (assoc (handle connection ctx) :seon.flow/executor executor)
+              (assoc (handle connection ctx "executor-proof") :seon.flow/executor executor)
               :seon.agent/id "executor-proof"})]
         (is (identical? executor (:io-exec definition)))))))
 
@@ -589,7 +590,7 @@
             events (database-events connection)]
         (test-support/transacted!
                      connection
-                     [(assoc (agent-row "prompt-refusal-cap")
+                     [(assoc (agent-row connection "prompt-refusal-cap")
                              :seon.agent/settings {:seon.config.run/max-episode-runs 1})
                       (config-row "prompt-refusal-cap" {})])
         (try
@@ -602,7 +603,7 @@
                                            :seon.error/message "Prompt rendering refused."})))
                         ai/complete
                         (recording-completer requests (constantly "unused"))]
-            (let [entry (arm-one! connection ctx routing "prompt-refusal-cap")]
+            (let [entry (arm-one! connection ctx routing "prompt-refusal-cap" "prompt-refusal-cap")]
               (outside-trigger! connection "prompt-refusal-cap"
                                 "prompt-refusal-message" "derive context")
               (async/offer! (:seon.cluster.wake/channel entry) ::wake)
@@ -645,14 +646,14 @@
                                 (into [(config-row
                                         "trial"
                                         {:seon.config.run/max-episode-runs 100})]
-                                      (map agent-row)
+                                      (map (partial agent-row connection))
                                       agent-ids))
         (with-redefs [ai/complete
                       (recording-completer
                        ledger (fn [_] "(seon.run/complete \"done\")"))]
           (try
             (doseq [agent-id agent-ids]
-              (arm-one! connection ctx routing agent-id))
+              (arm-one! connection ctx routing "trial" agent-id))
             (wake/route! {:seon.cluster.wake/connection connection
                           :seon.cluster.wake/channels
                           (fn [] (agent/channels routing))
@@ -751,11 +752,11 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)]
-        (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a"}])
+        (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
         (try
           (is (false? (agent/fenced? routing "agent-a"))
               "an unarmed agent has no fence")
-          (let [entry (arm-one! connection ctx routing "agent-a")
+          (let [entry (arm-one! connection ctx routing "agent-a" "agent-a")
                 eid (:seon.agent/eid entry)
                 mailbox (:seon.cluster.wake/channel entry)
                 stale (async/chan)]
@@ -778,8 +779,8 @@
   (with-connection
     (fn [connection ctx]
       (let [routing (armory)
-            _ (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a"}])
-            entry (arm-one! connection ctx routing "agent-a")
+            _ (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
+            entry (arm-one! connection ctx routing "agent-a" "agent-a")
             eid (:seon.agent/eid entry)
             channel (:seon.cluster.wake/channel entry)
             observed (atom nil)
@@ -814,7 +815,7 @@
                   :io-exec executor
                   :procs (select-keys (:procs definition) [:seon.agent/turn])
                   :conns [])))]
-      (let [entry (arm-in-cluster! connection ctx routing "withheld-turn" agent-id)
+      (let [entry (arm-one! connection ctx routing "withheld-turn" agent-id)
             turn-stopped (:seon.agent/turn-stopped entry)
             observed-stop
             (reify
@@ -864,7 +865,7 @@
                 agent-id "withheld-turn-0"
                 original-definition agent/graph-definition]
             (test-support/transacted! connection
-                                      (conj (created-agent-tx "withheld-turn" agent-id)
+                                      (conj (created-agent-tx connection "withheld-turn" agent-id)
                                             (config-row "withheld-turn" {})))
             (let [result (withheld-turn-trial
                           connection ctx routing original-definition agent-id)]
@@ -921,7 +922,7 @@
             agent-id "prelude-interrupt"]
         (test-support/transacted!
          connection
-         (conj (created-agent-tx "prelude-interrupt" agent-id)
+         (conj (created-agent-tx connection "prelude-interrupt" agent-id)
                (provider-backstop-config "prelude-interrupt"
                                          turn-completion-backstop-ms)))
         (try
@@ -935,7 +936,7 @@
                  (catch InterruptedException failure
                    (deliver interrupted (.getName (Thread/currentThread)))
                    (throw failure))))]
-            (let [entry (arm-in-cluster! connection ctx routing
+            (let [entry (arm-one! connection ctx routing
                                          "prelude-interrupt" agent-id)]
               (await-idle! (:seon.flow/started entry))
               (outside-trigger! connection agent-id
@@ -983,7 +984,7 @@
             agent-id "provider-backstop"]
         (test-support/transacted!
          connection
-         (conj (created-agent-tx "provider-backstop" agent-id)
+         (conj (created-agent-tx connection "provider-backstop" agent-id)
           (provider-backstop-config "provider-backstop"
                                     turn-completion-backstop-ms)))
         (try
@@ -993,7 +994,7 @@
                (.countDown provider-entered)
                (.acquireUninterruptibly release-provider)
                {:seon.error/message "The prelude stand-in released."})]
-            (let [entry (arm-in-cluster! connection ctx routing
+            (let [entry (arm-one! connection ctx routing
                                          "provider-backstop" agent-id)
                   fault-channel
                   (:seon.agent/fault-channel @routing)]
@@ -1065,11 +1066,11 @@
             timeout-ms 100]
         (test-support/transacted!
                      connection
-                     [{:seon.agent/id agent-id}
+                     [{:seon.agent/id agent-id :seon.agent/branch (live-branch connection)}
                       (config-row
                        "lost-turn-permit"
                        {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
-        (let [cluster (assoc (handle connection ctx)
+        (let [cluster (assoc (handle connection ctx "lost-turn-permit")
                              :seon.turn.loop/completion (async/chan)
                              :seon.config.agent/turn-completion-backstop-ms
                              timeout-ms)
@@ -1100,7 +1101,7 @@
             timeout-ms 100
             completion (async/chan 1)
             fault-channel (async/chan 1)
-            cluster (assoc (handle connection ctx)
+            cluster (assoc (handle connection ctx "quiescent-failed-transform")
                            :seon.turn.loop/completion completion
                            :seon.agent/fault-channel fault-channel
                            :seon.agent/turn-backstop-state (atom nil)
@@ -1108,7 +1109,7 @@
                            timeout-ms)]
         (test-support/transacted!
                      connection
-                     [{:seon.agent/id agent-id}
+                     [{:seon.agent/id agent-id :seon.agent/branch (live-branch connection)}
                       (config-row
                        "quiescent-failed-transform"
                        {:seon.config.agent/turn-completion-backstop-ms timeout-ms})])
@@ -1158,7 +1159,7 @@
             events (database-events connection)]
         (test-support/transacted!
                      connection
-                     [(agent-row agent-id)
+                     [(agent-row connection agent-id)
                       (config-row
                        "install-gate-chain"
                        {:seon.config.agent/turn-completion-backstop-ms timeout-ms})
@@ -1180,7 +1181,7 @@
                         (throw (ex-info "install gate broke mid-opening"
                                         {:seon.test/install-gate-broke true})))}
             (fn []
-              (let [_ (arm-one! connection ctx routing agent-id)
+              (let [_ (arm-one! connection ctx routing "install-gate-chain" agent-id)
                     database
                     (await-database-state!
                      connection (:seon.cluster.agent-test/events events)
@@ -1219,10 +1220,11 @@
         (test-support/transacted! connection
                                   (agent/creation-tx
                                    {:seon.agent/id "declared-agent-inputs"
+                                    :seon.agent/branch (live-branch connection)
                                     :seon.cluster/name "declared-agent-inputs"
                                     :seon.ns/name 'my.agents.declared-agent-inputs}))
         (try
-          (let [entry (arm-one! connection ctx routing "declared-agent-inputs")
+          (let [entry (arm-one! connection ctx routing "declared-agent-inputs" "declared-agent-inputs")
                 report (await-idle! (:seon.flow/started entry))]
             (is (= "declared-agent-inputs" (:seon.agent/id report)))
             (is (true? (:seon.turn.loop/idle? report)))
@@ -1238,14 +1240,14 @@
       (let [routing (armory)
             ledger (atom [])]
         (test-support/transacted! connection
-                                [(agent-row "parked")
+                                [(agent-row connection "parked")
                                  (config-row "park-2026072812"
                                              {:seon.config.run/max-episode-runs 100})])
         (try
           (with-redefs [ai/complete
                         (recording-completer
                          ledger (fn [_] "(seon.run/complete \"done\")"))]
-            (let [entry (arm-one! connection ctx routing "parked")]
+            (let [entry (arm-one! connection ctx routing "park-2026072812" "parked")]
               (testing "the arm prime reports its completed idle pass"
                 (is (await-idle! (:seon.flow/started entry)))
                 (is (zero? (count @ledger)))
@@ -1284,7 +1286,7 @@
             provider-entered (CountDownLatch. 1)
             events (database-events connection)]
         (test-support/transacted! connection
-                                [(agent-row "pausable")
+                                [(agent-row connection "pausable")
                                  (config-row "pause-2026072813"
                                              {:seon.config.run/max-episode-runs 100})])
         (try
@@ -1294,7 +1296,7 @@
                           (.countDown provider-entered)
                           (test-support/await-event! release-provider ::release-provider)
                           {:seon.ai/text "(seon.run/complete \"done\")"})]
-            (let [entry (arm-one! connection ctx routing "pausable")
+            (let [entry (arm-one! connection ctx routing "pause-2026072813" "pausable")
                   graph (:seon.flow/graph entry)]
               (outside-trigger! connection "pausable"
                                 "m-2026072813-a" "slow work")
@@ -1386,8 +1388,8 @@
                      :seon.db.process/id process
                      :seon.turn.work/now (Date.)}]
         (test-support/transacted! connection
-                                [(agent-row "alice")
-                                 (agent-row "bob")
+                                [(agent-row connection "alice")
+                                 (agent-row connection "bob")
                                  (config-row "cap-2026072814"
                                              {:seon.config.run/max-episode-runs 3})])
         ;; episode 1: a human asks
@@ -1459,7 +1461,7 @@
     (fn [connection ctx]
       (let [original @#'seon.turn/step
             routing (armory)
-            base (handle connection ctx)
+            base (handle connection ctx "hot-2026072815")
             v2-ran (atom 0)
             wrap (fn [step]
                    (fn
@@ -1470,11 +1472,11 @@
                       (swap! v2-ran inc)
                       (step state input message))))]
         (test-support/transacted! connection
-                                [{:seon.agent/id "reloaded"}
+                                [{:seon.agent/id "reloaded" :seon.agent/branch (live-branch connection)}
                                  (config-row "hot-2026072815"
                                              {:seon.config.run/max-episode-runs 100})])
         (try
-          (let [entry (arm-one! connection ctx routing "reloaded")
+          (let [entry (arm-one! connection ctx routing "hot-2026072815" "reloaded")
                 ;; the CONTROL: an identically-shaped graph whose turn
                 ;; proc is built from the captured fn VALUE — hot
                 ;; reload must NOT reach it
@@ -1552,8 +1554,8 @@
             evaluation-sources (atom [])
             evaluate fixture-evaluate]
         (test-support/transacted! connection
-                                [(agent-row "midfold")
-                                 (agent-row "waiting")
+                                [(agent-row connection "midfold")
+                                 (agent-row connection "waiting")
                                  (config-row "restamp-2026072816"
                                              {:seon.config.run/max-episode-runs 100})])
         ;; the dead process's history: open+claim on an outside
@@ -1607,7 +1609,7 @@
 
                                                 :seon.turn/now (Date.)}))
                     (doseq [agent-id ["midfold" "waiting"]]
-                      (arm-one! connection ctx routing agent-id))
+                      (arm-one! connection ctx routing "restamp-2026072816" agent-id))
                     (await-database-state!
                      connection
                      (:seon.cluster.agent-test/events events)
@@ -1731,7 +1733,7 @@
                                              {:seon.config.run/max-episode-runs 100})])
       (let [routing (armory)
             armer-channel (async/chan (async/sliding-buffer 1))
-            armer-handle (assoc (handle connection ctx)
+            armer-handle (assoc (handle connection ctx "route-trial")
                                 :seon.cluster/name "route-trial"
                                 :seon.cluster.wake/channel armer-channel
                                 :seon.turn.loop/completion
@@ -1938,7 +1940,7 @@
       (let [routing (armory)
             ledger (atom [])]
         (test-support/transacted! connection
-                                [(agent-row "waiter")
+                                [(agent-row connection "waiter")
                                  (config-row "wait-2026072820"
                                              {:seon.config.run/max-episode-runs 100})])
         (try
@@ -1948,7 +1950,7 @@
             (let [events (database-events connection)
                   db
                   (try
-                    (arm-one! connection ctx routing "waiter")
+                    (arm-one! connection ctx routing "wait-2026072820" "waiter")
                     (outside-trigger! connection "waiter" "m-wait"
                                       "hold on")
                     (let [entry (agent/armed routing "waiter")]

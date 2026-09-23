@@ -784,9 +784,11 @@
   "Acquire a coherent execution handle without starting any graph.
 
   The ordinary arity reads the agent's explicit branch. Live execution borrows
-  the cluster connection. An isolation request allocates a fresh branch off
-  the captured commit (or current head); a named branch without isolation
-  selects an existing branch, as the MCP tool does. The existing context state
+  the handle's own connection: its branch is the live branch, read from the
+  connection value the handle carries, never re-derived from a cluster name.
+  An isolation request allocates a fresh branch off the captured commit (or
+  current head); a named branch without isolation selects an existing branch,
+  as the MCP tool does. The existing context state
   retains the handles and private SCI objects across evaluation boundaries."
   {:malli/schema
    [:function
@@ -800,7 +802,8 @@
    (let [contexts (:seon.agent/context-state handle)
          parent (:seon.db/connection handle)
          database (db/db parent)
-         live-branch (registry/cluster-branch (:seon.cluster/name handle))
+         ;; The handle carries its world: the branch its connection holds is live.
+         live-branch (get-in database [:config :branch])
          source-ctx (or (:seon.sci.eval/base-ctx handle)
                         (:my.program/base-ctx handle)
                         (:seon.sci.eval/ctx handle))
