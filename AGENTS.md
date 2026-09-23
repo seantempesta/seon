@@ -96,10 +96,9 @@ already does better.
 **No stamps (owner, 2026-09-23: "get rid of bullshit stamps; so much of what we are
 doing is already available in Datahike").** A value derived from a database value is a
 FUNCTION of that value, memoized with Clojure's tools (`clojure.core.cache`, keyed by
-Datahike's own `:cache-context` or commit id), never `vary-meta` stamped onto the value by
+the database's commit id), never `vary-meta` stamped onto the value by
 a writer, never threaded through a transaction as a candidate, never kept in an atom
-beside the connection. Identity comes from Datahike (commit id, `:cache-context`,
-attribute revisions) or the definition digest; lineage from `versioning.cljc`; time from
+beside the connection. Identity comes from Datahike's commit id or the definition digest; lineage from `versioning.cljc`; time from
 `history`/`as-of`; notification from `d/listen`; serialization from the writer. Before
 adding any of these, name the seam in `reference-code/` with `file:line`.
 
@@ -122,13 +121,13 @@ rejects a report that carries a slow operation without its number and its reason
 
 **Never redo valid cached work (owner, 2026-09-23: "we should never redo work that we
 have cached if the cache is still valid"; "link the caches so this doesn't happen").**
-Every derived result is keyed by its inputs' content (file digest, deps digest, commit id,
-`:cache-context`) and stored once, in the dependency's own cache where one exists. Every
+Every derived result is keyed by its inputs' content (file digest, deps digest, commit id)
+and stored once, in the dependency's own cache where one exists. Every
 root, snapshot, scratch store and test run links that shared cache instead of starting
 empty. A valid key means reuse, never recomputation; an invalid key recomputes only what
 the changed inputs reach. Misses are counted where they happen, never hidden.
-A derived value is keyed by WHAT IT READS — the attributes and their Datahike revisions,
-or the input content — never by "the commit changed": an unrelated write must cost the
+A derived value is keyed by WHAT IT READS — the input content, or the dependency's own upstream
+change tracking where it exists — never by "the commit changed": an unrelated write must cost the
 happy path nothing (owner, 2026-09-23: "We need the happy path to be fast and to
 accumulate data that is reused"). A read, render, probe or eval path never writes a
 transaction that invalidates derived state.
@@ -165,8 +164,10 @@ mechanism. Recognise them in your own next edit:
    a retirement while any program row still writes or references it.
 
 Underneath all four: the dependency's source was not the first read. SCI keeps a live
-env, Datahike has per-attribute revisions and branch heads, konserve has GC. Before
+env, Datahike has commit identity and branch heads, konserve has GC. Before
 building, name the seam in `reference-code/` that already does it, with `file:line`.
+A mechanism that exists only in OUR fork of a dependency is not the dependency's: check
+the seam exists upstream before calling it the library's, and prefer upstream's.
 
 ## The system
 
