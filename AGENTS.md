@@ -319,8 +319,9 @@ arbitrary host functions. Retain isolation where termination cannot be guarantee
 Every function, private included, admitted into a cluster’s program has a complete,
 well-formed, fully namespaced Malli contract and reaching-test coverage. On an
 experimental branch, the shared REPL entrance reads configurable schema/test/test-first
-checks: `:warn` (default) accepts a definition without a schema or test with a declared
-warning; `:gate` refuses it before evaluation. Nothing merges into a cluster’s program
+checks: `:gate` (the shipped default; owner: "start strict") refuses a definition before
+evaluation until its schema exists and is well formed and a test reaching it exists; `:warn`
+accepts it with a declared warning. Nothing merges into a cluster’s program
 without passing every check, regardless of entry policy. Every valid contract remains
 armed; a warned missing or malformed contract is never manufactured or replaced by a
 stale wrapper. Armed contracts prevent entry on invalid input and refuse invalid output.

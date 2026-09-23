@@ -24,7 +24,7 @@ composition. Every function named below exists at the cited line unless marked
 | **live turn** (agent on the cluster's branch) | context from the cluster head by commit id | forms under custody of the cluster connection | its writes ARE the head | nothing (the branch is the cluster) |
 | **isolated agent** (branch off the head) | branch! → open-branch! → fork-cluster-ctx | same | merge request | unlink after accept or abandon |
 | **test** (one body) | same three, off a captured commit | `run-test` under custody | record member facts on the recording connection | unlink |
-| **save-time gate** (a file edit by a filesystem agent) | `index!` the changed declarations into the candidate branch of default; acquire on it | the reaching tests, as above | green → advance default's rows, `require :reload` the changed namespaces + dependents; red → the failures back to the editor | the candidate branch persists (it is default's staging) |
+| **file-only change** (host-bound, schema, new namespace — D1 §2e; owner 2026-09-23: lanes work on their own named branches) | publish the named paths onto the lane's OWN branch; acquire on it | the reaching tests, as above | merges like any branch: root's named accept, then write-back; default advances only through that path | the lane's branch, unlinked after accept or abandon |
 | **merge** (isolated → cluster) | three-way diff by digest; non-conflicting rows transacted onto an intermediate branch; acquire on it | the reaching tests, as above | green + named accept → `force-branch!` with the expected commit (lineage via `merge!`) | unlink the intermediate and the source branch |
 
 One acquire, one evaluate, one release. The callers differ only in which commit they
