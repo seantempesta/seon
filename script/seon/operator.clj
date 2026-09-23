@@ -762,7 +762,14 @@
             ;; (`seon.test.cache/gitlink-digests`, `dependency-digest/dependency-pins`),
             ;; so a nuke published the checkout's gitlink pins, not the commit's.
             _ (spit (io/file staging dependency-digest/dependency-pins-file)
-                    (pins-text (gitlinks repository sha)))]
+                    (pins-text (gitlinks repository sha)))
+            ;; The same holds for the input inventory: `git ls-files --cached`
+            ;; inside the archive lists the enclosing checkout's index, so a
+            ;; file deleted there but still staged leaked into the commit's
+            ;; inputs. The archive carries its commit's exact paths, the
+            ;; inventory `seon.test.cache/input-paths` reads when present.
+            _ (spit (io/file staging "test-input-paths.txt")
+                    (command! ["git" "ls-tree" "-r" "-z" "--name-only" sha] repository 30000))]
         (fs/move staging target {:atomic-move true})
         {:seon.source/git-sha sha :seon.operator/source-root (.getCanonicalPath target)
          :seon.operator/source-built? true :seon.operator/submodules submodules})))))
