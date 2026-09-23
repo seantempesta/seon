@@ -94,14 +94,17 @@
   `:seon.error/chain`, the ROOT cause's first complete stack frame, and —
   when the observation states none — the root cause's message."
   {:malli/schema
-   [:=> [:cat [:map
+   [:function
+    [:=> [:cat [:map
                 [:seon.error/at :seon.error/at]
                 [:seon.error/layer :seon.error/layer]
                 [:seon.error/operation :seon.error/operation]
                 [:seon.error/message {:optional true} :seon.error/message]
                 [:seon.error/throwable {:optional true} :seon.error/throwable]]]
-    :seon.error/base]}
-  [{:seon.error/keys [throwable message] :as observation}]
+     :seon.error/base]
+    [:=> [:cat :seon.error/at :seon.error/layer :seon.error/operation :map]
+     :seon.error/base]]}
+  ([{:seon.error/keys [throwable message] :as observation}]
   (if throwable
     (let [links (chain throwable)
           frame (root-frame throwable)
@@ -112,6 +115,10 @@
         frame (assoc :seon.error/frame frame)
         (and (nil? message) root-message) (assoc :seon.error/message root-message)))
     observation))
+  ([at layer operation members]
+   (diagnostic (merge {:seon.error/at at :seon.error/layer layer
+                       :seon.error/operation operation}
+                      members))))
 
 (defn refusal
   "Deepest structural error in `ex-data`, retaining its exception message;

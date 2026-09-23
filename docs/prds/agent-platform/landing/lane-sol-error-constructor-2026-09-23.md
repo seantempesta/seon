@@ -1,0 +1,29 @@
+---
+type: landing
+status: in-progress
+created: 2026-09-23
+---
+
+# Reviewed error constructor cut
+
+The existing diagnostic preserves a supplied observation and derives whole-cause evidence only from its optional Throwable. The smallest composition adds a positional arity to that same Var, retaining literals outside the reviewed grammar; construction remains O(member count), with existing O(cause links + frames) Throwable work.
+
+Authority: `error-constructor-cut-manifest-2026-09-23.md`, reviewed and folded at `0f0d9f619`; user launch and ownership release supersede the stale ledger rows. Admission now holds exactly current dirty paths plus `test/seon/render/value_test.clj`. In `tmp/error-constructor/census.clj`, `held` is that one explicit path and `held?` is `(or (held f) (dirty f))`. Each selected census records the current ledger digest and whole-file hashes. The unchanged preview checks them; application verifies every roster before/after hash before writing any file.
+
+Malli seam: gitlink `8725a8cbd9d595f4a970ce53a2eefdbe7211b96d`, `reference-code/malli/src/malli/core.cljc:1210` open maps and `:2237` arity grouping. The dependency working tree is foreign and untouched. Contract compilation uses the existing `seon.contracts-compile-test/check`, absolute checkout paths, and the live carried projection only when its packaged forms match the checkout.
+
+## Verification boundary
+
+The user reserved adoption and proving tests for the orchestrator. No adoption, restart, test request, push, or additional JVM was run. The live JVM source root was `data/source/b66a654382d730debd05c40cb1d22558546c763f`, with publication off. Static contract checks read checkout bytes explicitly; they do not establish runtime adoption, constructor overhead, reaching coverage, or passing tests. Dirty stopped-lane source/test/dependency files remain foreign boundaries.
+
+Parent JVM probe: with explicit root `/Users/sean/src/seon`, cluster `default`, private session `sol-error-constructor`, call `(seon.error.refusal/diagnostic {:seon.error/at at :seon.error/layer :x/y :seon.error/operation 'a/b})` for `(java.util.Date. 0)`. Returned the exact three-member value; `(identical? at (:seon.error/at returned))` was true. Parent contract findings `[]`; combined probe/check 56.998 ms (prepl 70 ms). This is parent behavior only.
+
+E0 is split at existing owner boundaries because complete regression changes exceed the provisional 40-line allowance. E0a couples the helper to error-owner conversion and prose deletion; E0b carries blob conversion and its producer regression. Neither is a helper-only slice.
+
+| Slice | Sites | Src + / − / net | Test + / − / net | Kondo | Packaged contracts | Proving namespaces |
+|---|---:|---|---|---|---|---|
+| E0a | 4 | 20 / 44 / −24 | 60 / 31 / +29 | 0 errors, 74 existing warnings; 150 ms | `[]`, 110.274 ms | `seon.error.refusal-test`, `seon.error-test`, `seon.schema-test`, `seon.refusal-grammar-test` |
+
+E0a hand work: exact reviewed additive arity; extend both-entry whole-value/cause/domain tests, arm both entries under one projection in the producing-contract case, assert argument order/identity and original ex-info cause, and exercise actual `prepare` with overriding source evidence and its exact declared schema. The preview removed only `refusal-prose`, its obsolete test block, and converted its two renderer fixtures. Retained error-owner O/X literals preserve evaluation order and unsupported contexts. Existing cause-policy repairs are outside this mechanical cut. The +5 net E0a lines are regression evidence; source shrinks 24 lines. Later caller cuts repay this test growth before integration.
+
+Initial E0 selected census: 365.874 ms; preview admitted eight sites and four files, net −50 before helper/regressions. The required pre-residue lint found eight four-argument calls before the arity was added; final E0a lint has zero errors. No operation initiated by this lane exceeded one second so far. Cache hit/miss counters are not exposed by these static tools; the checker reuses an equal packaged projection through its existing candidate input.

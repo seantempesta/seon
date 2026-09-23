@@ -504,13 +504,11 @@
                           :seon.error/base)
                          ((schema/projection-validator projection declared-schema) observation))
             (throw (ex-info "The supplied error declaration does not validate its observation."
-                            {:seon.error/at at
-                             :seon.error/layer :seon.error/recording
-                             :seon.error/operation 'seon.error/prepare
-                             :seon.error/member :seon.error/declared-schema
+                            (seon.error.refusal/diagnostic at :seon.error/recording 'seon.error/prepare
+                             {:seon.error/member :seon.error/declared-schema
                              :seon.error/refused-schema declared-schema
                              :seon.error/expected declared-schema
-                             :seon.error/offending observation}))))
+                             :seon.error/offending observation})))))
 
 (defn prepare
   "Prepare one bounded fact under the producer-supplied named schema.
@@ -550,9 +548,8 @@
                      (stack-failing-function failure))
         frame (error.refusal/root-frame failure)
         chain (when failure (error.refusal/chain failure))
-        observation (merge (cond-> {:seon.error/at at
-                                    :seon.error/layer :seon.error/normalization
-                                    :seon.error/operation (or function 'seon.error/normalize)}
+        observation (merge (cond-> (seon.error.refusal/diagnostic at :seon.error/normalization (or function 'seon.error/normalize)
+                                    {})
                              class-name (assoc :seon.error/exception-class (symbol class-name))
                              frame (assoc :seon.error/frame frame)
                              chain (assoc :seon.error/chain chain))
@@ -728,11 +725,8 @@
     ;; Stored evidence that does not read is itself a reading error;
     ;; the diagnostic carries the failure's whole cause chain and frames.
     (catch Exception failure
-      (error.refusal/diagnostic
-       {:seon.error/at (or (:seon.error/at fact) (java.util.Date.))
-        :seon.error/layer :seon.error/reading
-        :seon.error/operation 'seon.error/fact-source
-        :seon.error/expected-key :seon.error/data-edn
+      (seon.error.refusal/diagnostic (or (:seon.error/at fact) (java.util.Date.)) :seon.error/reading 'seon.error/fact-source
+       {:seon.error/expected-key :seon.error/data-edn
         :seon.error/message (str "Stored error evidence could not be read: "
                                  (or (not-empty (ex-message failure))
                                      (.getName (class failure))))
@@ -1098,29 +1092,6 @@
                " Example: " (or example "No docstring example is available."))))
         problems))
       nil)))
-
-(defn refusal-prose
-  "`:seon.render/ai` — a refused transition and its atomic outcome."
-  {:malli/schema
-   [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
-  [error-value]
-  (let [fact (or (:seon.error/fact error-value) error-value)
-        source (if (:seon.error/data-edn fact)
-                 (fact-source fact)
-                 fact)
-        request (:seon.turn/request source)
-        transition (:seon.turn/transition source)
-        operation (or (some-> transition name) "transition")
-        run-id (or (:seon.turn/id request)
-                   (:seon.turn/id source)
-                   (second (:seon.error/run fact)))
-        rule (:seon.turn/rule source)]
-    (str "The " operation (when run-id (str " of " run-id))
-         " was refused atomically by " rule
-         ". Nothing from this " operation " committed. Re-read the run before"
-         " deciding whether a new transition is eligible."
-         (when (:seon.error/id fact)
-           (str " " (evidence-prose fact))))))
 
 (defn instrumentation-prose
   "`:seon.render/ai` — detailed steering for a validation failure."
@@ -1599,11 +1570,9 @@
     [:or :map :seon.error/base]]}
   [error]
   (if (some #(not (map? %)) (:seon.error/occurrences error))
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.error/reading
-     :seon.error/operation 'seon.error/latest-fact
-     :seon.error/expected-key :seon.error.occurrence/occurrence
-     :seon.error/message "Occurrence evidence was not acquired."}
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.error/reading 'seon.error/latest-fact
+     {:seon.error/expected-key :seon.error.occurrence/occurrence
+     :seon.error/message "Occurrence evidence was not acquired."})
     (if-let [occurrence (last (sort-by :seon.error.occurrence/last-at
                                     (:seon.error/occurrences error)))]
     (cond-> (merge (dissoc error :seon.error/occurrences)

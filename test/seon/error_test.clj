@@ -222,7 +222,15 @@
              :seon.error-test/context {:seon.error-test/retained true}}]
        (is ((schema/projection-validator (schema/handed-projection) :seon.agent/error)
             observation))
-       (is (= {:seon.error-test/retained true} (:seon.error-test/context observation)))))))
+       (is (= {:seon.error-test/retained true} (:seon.error-test/context observation)))
+       (let [at (:seon.error/at (request observation))
+             intermediate (error.refusal/diagnostic at :seon.error/normalization 'seon.error-test/check {})
+             prepared (error/prepare (request observation {:seon.error/declared-schema :seon.agent/error}))]
+         (is (= {:seon.error/at at :seon.error/layer :seon.error/normalization
+                 :seon.error/operation 'seon.error-test/check} intermediate))
+         (is (identical? at (:seon.error/at intermediate)))
+         (is (= observation (:seon.error/source prepared)))
+         (is (= :seon.agent/error (get-in prepared [:seon.error/fact :seon.error/declared-schema]))))))))
 
 (defn- cyclic-state
   "A proc state shaped like the run loop's, holding a live-object stand-in
@@ -1280,17 +1288,6 @@
                   :seon.error/message "The call violated its contract."})]
       (is (str/includes? prose "Contract violation in my.fs/read input"))
       (is (str/includes? prose "path 42"))))
-  (testing "refusal names the transition, rule, and atomic result"
-    (let [prose (error/refusal-prose
-                 {:seon.error/at #inst "2026-09-22T00:00:00Z"
-                  :seon.error/layer ::rendering
-                  :seon.error/operation 'seon.error-test/rendering
-                  :seon.turn/id "run-7"
-                  :seon.turn/rule :seon.turn/not-holder
-                  :seon.turn/transition :seon.turn/close
-                  :seon.error/message "The run is held elsewhere."})]
-      (is (str/includes? prose "close of run-7"))
-      (is (str/includes? prose "Nothing from this close committed"))))
   (testing "AI attempt prose exposes the decision attributes"
     (let [prose (error/ai-prose
                  {:seon.error/at #inst "2026-09-22T00:00:00Z"

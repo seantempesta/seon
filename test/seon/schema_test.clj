@@ -974,7 +974,7 @@
                [:map [:seon.error/message :seon.error/message]]
                :seon.schema-test/refused [:= true]
                :seon.schema-test/refused-error
-               [:and {:seon.render/ai 'seon.error/refusal-prose}
+               [:and {:seon.render/ai 'seon.error/render-ai}
                 :seon.error/refusal-value
                 [:map
                  [:seon.schema-test/refused
@@ -986,7 +986,7 @@
                  :seon.schema-test/refused-error)]
     (is (= #{:seon.schema-test/refused :seon.error/message}
            (:seon.schema/required-attrs row)))
-    (is (= 'seon.error/refusal-prose (:seon.render/ai row)))
+    (is (= 'seon.error/render-ai (:seon.render/ai row)))
     (is (= :seon.schema-test/refused-error
            (-> (schema/matching-shapes-in projection value)
                first

@@ -61,8 +61,15 @@
               (is (nil? (@entry (RuntimeException. "no data"))))
               (is (nil? (@entry nil)))))))))))
 
+(def ^:private constructors
+  [#'error.refusal/diagnostic
+   (fn [{:seon.error/keys [at layer operation] :as value}]
+     (error.refusal/diagnostic at layer operation
+       (dissoc value :seon.error/at :seon.error/layer :seon.error/operation)))])
+
 (deftest constructor-preserves-open-domain-maps
-  (doseq [value [{:seon.error/at (java.util.Date. 0)
+  (doseq [construct constructors
+          value [base {:seon.error/at (java.util.Date. 0)
                     :seon.error/layer :x/y
                     :seon.error/operation 'a/b
                     :x/member 1}
@@ -70,10 +77,13 @@
                                :seon.error/layer :x/y
                                :seon.error/operation 'a/b
                                :x/member 1)]]
-       (is (= value (error.refusal/diagnostic value)))))
+       (let [returned (construct value)]
+         (is (= value returned))
+         (is (identical? (:seon.error/at value) (:seon.error/at returned))))))
 
 (deftest constructor-consumes-only-the-throwable-input
-  (let [failure (doto (Exception. "specific cause")
+  (doseq [construct constructors
+          :let [failure (doto (Exception. "specific cause")
                      (.setStackTrace
                       (into-array StackTraceElement
                                   [(StackTraceElement. "example.Failure" "run" "failure.clj" 42)])))
@@ -82,7 +92,7 @@
                   :seon.error/operation 'a/b
                   :seon.error/cause [:seon.error/id "recorded-cause"]
                   :x/member {:x/detail "retained"}}
-           returned (error.refusal/diagnostic (assoc value :seon.error/throwable failure))]
+           returned (construct (assoc value :seon.error/throwable failure))]]
        (is (= (assoc value :seon.error/frame '[example.Failure run "failure.clj" 42]
                           :seon.error/exception-class 'java.lang.Exception
                           :seon.error/message "specific cause"
@@ -95,9 +105,9 @@
                      :seon.error/message "specific cause"
                      :seon.error/chain [{:seon.error/throwable-class "java.lang.Exception"
                                          :seon.error/message "specific cause"}])
-              (error.refusal/diagnostic (assoc value :seon.error/throwable failure))))
+              (construct (assoc value :seon.error/throwable failure))))
        (is (= "stated" (:seon.error/message
-                        (error.refusal/diagnostic
+                        (construct
                          (assoc value :seon.error/message "stated"
                                 :seon.error/throwable failure))))
            "A stated message is preserved; only an absent one derives from the root.")))
@@ -128,8 +138,13 @@
    :seon.error/operation 'a/b})
 
 (deftest a-wrapped-cause-is-recorded-whole
-  (let [returned (error.refusal/diagnostic (assoc observation :seon.error/throwable @wrapped))]
-    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+  (doseq [construct constructors
+          :let [returned (construct (assoc observation :seon.error/throwable @wrapped))]]
+    (is (= (assoc observation
+                  :seon.error/frame '[clojure.lang.Numbers ops "Numbers.java" 1095]
+                  :seon.error/exception-class 'clojure.lang.ExceptionInfo
+                  :seon.error/message "Keyword cannot be cast to Number"
+                  :seon.error/chain [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
              :seon.error/message "wrapper"
              :seon.error/data {:seon.probe/outer 2}
              :seon.error/frames '[[seon.probe$outer invokeStatic "probe.clj" 5]
@@ -137,8 +152,8 @@
             {:seon.error/throwable-class "clojure.lang.ExceptionInfo"
              :seon.error/message "Keyword cannot be cast to Number"
              :seon.error/data {:seon.probe/leaf 1}
-             :seon.error/frames '[[seon.probe$inner invokeStatic "probe.clj" 4]]}]
-           (:seon.error/chain returned))
+             :seon.error/frames '[[seon.probe$inner invokeStatic "probe.clj" 4]]}])
+           returned)
         "Every link keeps class, message, ex-data and only its first-party frames.")
     (is (= "Keyword cannot be cast to Number" (:seon.error/message returned))
         "The root message is what the reader is told.")
@@ -167,16 +182,21 @@
            caps (config/result-caps (test-support/effective-config))
            value {:seon.error/at (java.util.Date. 0) :seon.error/layer :x/y
                   :seon.error/operation 'a/b :x/member 1}
+           diagnostic (instrument/wrap-interpreted
+                       'seon.error.refusal/diagnostic
+                       (pr-str (:malli/schema (meta #'error.refusal/diagnostic)))
+                       projection :panic caps error.refusal/diagnostic)
            accepted (instrument/wrap-interpreted
-                     'x/accepted "[:=> [:cat :map] :x/y-error]"
-                     projection :panic caps error.refusal/diagnostic)
+                     'x/accepted "[:function [:=> [:cat :map] :x/y-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/y-error]]"
+                     projection :panic caps diagnostic)
            refused (instrument/wrap-interpreted
-                    'x/refused "[:=> [:cat :map] :x/z-error]"
-                    projection :panic caps error.refusal/diagnostic)]
-       (is (= value (accepted value)))
-       (let [result (test-support/refusal-data #(refused value))]
+                    'x/refused "[:function [:=> [:cat :map] :x/z-error] [:=> [:cat :inst :qualified-keyword :qualified-symbol :map] :x/z-error]]"
+                    projection :panic caps diagnostic)]
+       (doseq [args [[value] [(:seon.error/at value) :x/y 'a/b {:x/member 1}]]]
+        (is (= value (apply accepted args)))
+        (let [result (test-support/refusal-data #(apply refused args))]
          (is ((schema/projection-validator projection :seon.instrument/contract-error) result))
-         (is (= 'x/refused (:seon.error/operation result))))))
+         (is (= 'x/refused (:seon.error/operation result)))))))
 
 (deftest facade-is-retired-and-reader-refusal-is-a-literal
   (is (nil? (ns-resolve 'seon.error 'diagnostic)))
@@ -186,3 +206,15 @@
     (is (true? (:seon.cluster.reply/no-forms value)))
     (is (inst? (:seon.error/at value)))
     (is (= 'seon.cluster.reply/sources (:seon.error/operation value)))))
+
+(deftest positional-construction-evaluates-each-input-once-in-order
+  (let [seen (atom []) at (java.util.Date. 0)
+        input (fn [k value] (swap! seen conj k) value)
+        value (error.refusal/diagnostic (input :at at) (input :layer :x/y)
+                (input :operation 'a/b) (input :members {:x/member 1}))
+        cause (ex-info "cause" {}) error (ex-info "outer" value cause)]
+    (is (= [:at :layer :operation :members] @seen))
+    (is (= {:seon.error/at at :seon.error/layer :x/y
+            :seon.error/operation 'a/b :x/member 1} (ex-data error)))
+    (is (identical? at (:seon.error/at value)))
+    (is (identical? cause (ex-cause error)))))
