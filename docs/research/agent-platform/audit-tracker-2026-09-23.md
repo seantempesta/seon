@@ -299,3 +299,69 @@ concrete fix: 3 findings, in 3 rows** (#28, #33, #37). That makes 25 appended ro
 All reads were shell `cat`/`grep`/`git log` calls, each under one second. The whole
 trace took about 6 minutes of wall time before this note was written. No JVM, REPL or
 test ran. None of the trace's work is proportional to the program.
+
+## 11. Re-trace after compaction (2026-09-23, HEAD ad41853a0)
+
+Lane `plan-reconcile` re-derived every status that moved since `4ba68d6aa` from
+`git log` (subjects, `--stat`, `-S`), the landing notes and the issue notes; the fix
+schedule rows now carry the same states (`#n` below). Sections 1–10 are left as the
+point-in-time trace they were.
+
+### Statuses that changed
+
+| finding (section) | was | now |
+|---|---|---|
+| projection regression, cross-connection memo miss (§4, §6; #24i/#24j) | IN FLIGHT, bisect note absent | LANDED `55ddec16c` (config apply 36 s → 0.5 s; fixture p50 508 → 56 ms); bisect note `5e3f5cf20` |
+| fault-write cost 1.1 s in-transaction (§7 P4; #32, M3) | ORPHAN, gates #0 | LANDED `d32a6b2d7` (86–195 ms); re-verify inside M4 |
+| SCI context rebuilt per commit (§4 row 2; #12) | IN FLIGHT | LANDED `5f2aa93f4` (1,242 ms/3.58 GB → 13 ms/15 MB) |
+| receipts assert program call edges (§6 step 1; #24c(1)) | SCHEDULED | LANDED `f2e6285cc`; residue fn.clj:1001-1007 + fn_test with realities |
+| read currency: revision compare before history scan (§6 step 3) | SCHEDULED | LANDED `51af11aec` |
+| page re-derives every block on GET (§4 row 5; #18) | IN FLIGHT | LANDED `74262d86e` (290 → 4–29 ms); after-write and `/agent/root/debug` re-measure owed |
+| `index-page` reads every attribute (#24m) | SENT | LANDED `bfcce39ad` |
+| render cache shared across forks (#24l) | new | LANDED `66c113d93` |
+| stop hang during a provider wait (§8 D7; #0i) | IN FLIGHT | LANDED `ad63964fb` (30 s → 920 ms); stop during a prompt build re-measure owed; unbounded stop waits (#28) still open |
+| `runtime_status` crash (flow triage M7; #0a) | new | LANDED `24c42427a`; readiness problems union residue |
+| report validation per transaction (#24a) / arity gate (#24d) | SCHEDULED | LANDED `f4dd51d68` / `431821bfa` |
+| raw Malli refusal on schema retirement (#24b, #24n) | SCHEDULED | LANDED `68a98f797` (flat refusal); 1.3e writer-level refusal residue |
+| contract does not compile from zero (#0f, #0g) | new | LANDED `fa39b67b3`, `aed7bf955` (hook + class regression); coverage gaps → #56 |
+| C1 minimal profiling + boot arms nothing (§9 C1; #0b, #0c) | PLAN-ONLY | LANDED `ed62a3e06` (always on; 1,800/1,800 armed; explanation lines); unarmed-after-self-adoption issue → #52 |
+| nuke total, reset = fresh branch, rejoin (§2; #1, #15) | IN FLIGHT | LANDED `76b42f90f`, `9744c970d`; default nuked to `bfcce39ad` (`18a304d55`); reset re-measure owed |
+| move default to HEAD without a nuke (#1b) | new | LANDED `ddd9f8edf`, `e4f280e81` (landing `ad41853a0`); a move measured 54–185 s → #64–#67 |
+| schema changes adopt in place (#13) | IN FLIGHT | LANDED `3f273fe7c`, follow-up `f11e00e76` |
+| leaf publication whole-repository work (§4; #16) | IN FLIGHT | LANDED `ea9a4e3e9`, `a6fd07c8e`; hook adoptions still 9.6–35 s → #55 |
+| publication-lock P1-2 + `issue/adopt!` (§9; #6) | SCHEDULED | LANDED `40c9ebf5e`, `3c55bb0f6`, `4fd4a4128` |
+| commit-4 review P1s (§9; #8) | IN FLIGHT | LANDED `57f02fd5b`; P2s with commit 5 |
+| warm-restart 302 s hang in arm (§2; #17a) | IN FLIGHT | LANDED `5f2aa93f4` + `55ddec16c`; the refusal-recording cost itself (36 s) → #53 |
+| incremental adoption refuses owned-values plans (#17b) | TRIAGE | RESOLVED: bad contract `6bf3bde78`, fixed by `1819cdcd3` (m9 doc `c0fd1877c`) |
+| adoption leaves the loaded program at the boot commit (#9, M9) | SCHEDULED | IN FLIGHT m9-adoption (diagnosis `c0fd1877c`) |
+| one error route (§7; #0) | SCHEDULED, "waiting on the owner's option choice" | RULED: the minimal route with flow N1–N4 is the M4 slot after M9 (README §7 "Priority to namespace agents", §4 row 1.6; design `8e21d4bb5`; flow PRD final `5b137109a`); WAITING M9 + cluster.clj/boot.clj/datahike holders |
+| packaged-population cache vs the flow audit's KEEP (§1 rows 7-8; #41) | PLAN-ONLY, rule the conflict first | RULED core.cache, no lock (README §7); READY |
+| flow skill stale claims (§8; #27) | ORPHAN | still open, READY; joined by the 42 skill anchors of skills-citation-audit-2026-09-21 (#61) |
+
+### Found by this trace with no row, plan row, issue or commit (appended as #52–#62; #63–#67 from the orchestrator's move-to-head landing)
+
+#52 self-adoption of the instrumentation owner unarms 22 namespaces, and the owner's
+ask that incrementally entered functions (hook and SCI) are armed; #53 refusal recording
+30–120 s; #54 successful MCP eval reported as an exception (fixed `ed62a3e06`, residue
+with #19); #55 small hook adoptions 9.6–35 s (`with-declarations` storm); #56
+contracts-compile coverage gaps; #57 dependency class cache never matches on fresh
+roots; #58 agent-test fixture rows lack `:seon.agent/branch`; #59 turn fixture 40 s
+(re-measure); #60 status page raw error maps (untracked issue note, holder unconfirmed);
+#61 skills citation drift; #62 three orchestrator lane rules held only in a scratchpad.
+
+### Top 10 open items by priority (replaces the Summary list for current use)
+
+1. **M9 / #9** adoption correctness — RUNNING m9-adoption; it gates M4.
+2. **#0 + #0e (M4)** the minimal error route with flow N1–N4 — design final; waits on M9 and the cluster.clj/boot.clj/datahike holders.
+3. **#2 / #0d / #0h** 1.3d commit 5, bounded release, stale-green selection — RUNNING realities-commit-5; unblocks #22, #35, #50, #51.
+4. **#52** incrementally entered functions armed (hook and SCI) — forward to wrapper-profiling.
+5. **#55 + #53** publication and refusal-recording seconds (9.6–35 s adoptions, 36 s refusal tx) — db.clj/error.clj halves READY.
+6. **#63** comment-only publication refused — cluster.clj, wrapper-profiling.
+7. **#27 + #61** stale skills (high priority by AGENTS.md) — READY.
+8. **#28 / #29** unbounded stop waits; the launcher-fault stop gap — wait on cluster.clj / boot.clj, or fold into N2.
+9. **#14 + #64–#67** resume and move-to-head in seconds (ready 12.4 s unchanged; move 54–185 s) — class cache, change check, re-index of already-loaded files.
+10. **#24q / #24r / #24s / #24u** Datahike fn-call revisions, incremental declaration, arity snapshot, cache-invalidation audit — RUNNING.
+
+Timings for this re-trace: every read was a shell `git log`/`grep`/`sed` call under one
+second; one Python pass rewrote the schedule's state cells (under one second). No JVM,
+REPL or test ran.
