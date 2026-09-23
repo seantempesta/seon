@@ -5,6 +5,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.writer]
             [datahike.writing]
+            [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -37,8 +38,10 @@
   [connection signature]
   (let [database (db/db connection)]
     {:row (db/pull database '[:seon.error/exception-class
-                              {:seon.error/occurrences [:seon.error.occurrence/count
-                                                        :seon.error/data-edn]}]
+                              {:seon.error/occurrences
+                               [:seon.error.occurrence/count
+                                {:seon.error.occurrence/data-blob
+                                 [:seon.error.occurrence/blob-digest]}]}]
                    [:seon.error/signature signature])
      :woken (set (db/q '[:find [?to ...] :in $ ?signature
                          :where [?message :seon.message/about ?signature]
@@ -60,9 +63,11 @@
        (is (string? (:seon.error.occurrence/id receipt)))
        (is (= 'clojure.lang.ExceptionInfo (:seon.error/exception-class row)))
        (is (= 1 (:seon.error.occurrence/count occurrence)))
-       (testing "the stored evidence keeps the hidden root cause"
-         (is (str/includes? (str (:seon.error/data-edn occurrence)) "inner root cause")
-             (pr-str occurrence)))
+       (testing "the stored evidence (its content blob) keeps the hidden root cause"
+         (let [digest (get-in occurrence [:seon.error.occurrence/data-blob
+                                          :seon.error.occurrence/blob-digest])]
+           (is (string? digest) (pr-str occurrence))
+           (is (str/includes? (str (blob/get connection digest)) "inner root cause"))))
        (testing "the writer wakes the configured responsible agent (root by default)"
          (is (= "root" (:seon.config.error/escalate-to
                         (config/effective (db/db connection) "fault-record"))))

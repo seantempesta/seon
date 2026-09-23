@@ -1,6 +1,6 @@
 ---
 type: landing
-status: UNPROVEN on default: proof owed after the checkout restart
+status: landed; seon.fault-test green on default (pid 24835); incremental proof incomplete (environment reds, see Proof)
 created: 2026-09-23
 tags: [agent-platform, errors, M4, fault]
 ---
@@ -115,3 +115,47 @@ UNPROVEN on default: proof owed after the checkout restart (adoption, the named
 `seon.fault-test` request, the incremental request over `seon.fault/fault!`,
 `seon.fault/record!`, `seon.cluster.boot/request!`, `seon.cluster.boot/record-uncaught!`,
 and the packaged contract compile of `fault.clj`, `boot.clj`, `seon.fault.edn`).
+
+## Proof on default (pid 24835, from the checkout, HEAD with `83bac0e78`)
+
+HEAD loaded `seon.fault` at boot, but the program rows had no `seon.fault` or
+`seon.fault-test` rows (`bin/test-check --ns seon.fault-test` refused "no eligible
+tests"), so the lane's paths were adopted explicitly:
+`bin/seon init --dev default --changed <7 paths>`: **11,521 ms — over ten seconds, a
+defect not caused by this slice**: `seon.fn/index!` 6,760 ms and `adopt-rows!` 6,982 ms
+(4 `transact!` 6,264 ms) over 7 changed files; proportional to the changed files'
+analysis plus the adoption transaction, which should be sub-second (routed to the
+publication/adoption owner; orchestrator to fold into the adoption-cost issue).
+
+| op | wall | result |
+|---|---|---|
+| named `seon.fault-test`, run `aa8b8c99ea24` | 11,720 ms | 26 pass / 1 fail: the inline `data-edn` is over its bound (7,851 bytes, `:over-bound`); the whole evidence is in the occurrence's content blob, so the test's expectation was wrong (retired assumption) and now reads the blob |
+| re-adopt `test/seon/fault_test.clj` | 3,726 ms | — |
+| named `seon.fault-test`, run `342a52fc2e19` | 10,405 ms | **3 executed, 28 pass, 0 fail, passed? true** |
+| incremental over `seon.fault/fault!`, `record!`, `policy`, `seon.cluster.boot/request!`, `record-uncaught!`, `stand-cluster-runtime!`, `seon.cluster/arm-agents!` (runs `751b2d3b9709`, `ca7a7af8fb33`) | 121,760 ms | the request deadline stopped it after 64 executed members: 32 red, of which 22 are fixture writes refused for a required `:seon.agent/branch` (the concurrent agent-tx fixture sweep, `d7b3930ff`); 64 more members "Not started". Not a proof. |
+| named `seon.cluster.fault-message-test` + `seon.instrument-test`, run `009cf7d70d0c` | 124,840 ms | fault-message-test green (12 assertions); instrument-test red from the environment — "Cannot interpret seon.cluster.reload-measure/-main: Host-bound declaration …" and `:malli.core/invalid-schema` — and 30 members not started. `stored-error-pull-remains-data-through-an-armed-function` (the converted `record!` caller at `instrument_test.clj:1153`) was among the not-started. |
+
+The over-ten-second test requests are the test runner's per-request cost plus a
+selection proportional to everything `request!`/`arm-agents!` reach; this slice
+added no work to them. Their reds are neither this slice's nor attributed further.
+
+**Fault-write timing, this commit vs parent** (same probe, fixture branch off
+`cluster-default`, released and unlinked): `record!` first 215.4 ms (parent 404.0),
+repeat 71.0 ms (parent 122.4), other 84.0 ms (parent 115.9); one `fault!` under
+default's `:panic` dial 109.5 ms, receipt `committed? true`, `policy :panic`. No
+slowdown. (Different JVM and a freshly rebuilt store; this is not a same-JVM A/B.)
+
+**Contracts.** `seon.contracts-compile-test/check` over `fault.clj`, `cluster/boot.clj`,
+`cluster.clj` against default's carried projection (which holds the adopted
+`seon.fault.edn`): 0 findings, 21.7 ms. Building the PACKAGED projection from the
+checkout (`packaged-projection`) currently refuses for every caller:
+`:malli.core/invalid-schema {:schema :inst}` at `schema.clj:611` — out of scope,
+reported to the orchestrator.
+
+**Heap (G1 old gen, `jcmd 24835 GC.heap_info`).** Before the first request: 648 MB;
+after the adoption: 984 MB; after the green named run: 1,176 MB; after the incremental
+request: 2,160 MB; after the instrument request: 2,424 MB; at the end: 2,896 MB.
+Old gen grew about 2.2 GB across these five requests and did not come back down
+between them.
+
+RESET NEEDED: no.
