@@ -259,7 +259,11 @@
                     renames (or (:rename options) {})
                     referred (if (vector? (:refer options))
                                (:refer options) [])]
-                (cond-> (update context :requires conj target)
+                ;; `:as-alias` without `:as` only creates the namespace
+                ;; (clojure `load-lib`, core.clj:6074-6078): no load edge.
+                (cond-> context
+                  (or (:as options) (not (:as-alias options)))
+                  (update :requires conj target)
                   require-alias (assoc-in [:aliases require-alias] target)
                   (seq referred)
                   (update :refers into
