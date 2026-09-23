@@ -109,11 +109,44 @@ Justifications for rows over 1 s:
 - Members left open by a JVM exit are not closed: recovery closes turns only.
   The four currently open runs on default stay open until their members run
   again. They now affect only the failed-tests family.
-- **Follow-up NOT done (stopped; decision needed).** The orchestrator asked
-  for the instrument refusal to carry shown text instead of the raw offending
-  value. See the final report for the three options. Nothing was changed.
+- The instrument follow-up was ruled option 1 and landed at the wire (below).
+  `src/seon/instrument.clj` was released without further change.
 - Other lanes' file seen broken during this lane: the hook reported
   `test/seon/namespace_agent_loop_test.clj:104:230` unmatched bracket. This
   lane did not touch that file.
 
 RESET NEEDED: no.
+
+## Follow-up: refusals cross the prepl as shown text (`a85bf004b`)
+
+`seon.cluster.boot/diagnostic` (4-arity) renders `:seon.error/offending` once
+through `seon.render.value/render-ai` under
+`(seon.render/agent-render-profile seon.config/defaults)`. Each chain link's
+`ex-data` becomes `:seon.error/shown`; raw `:seon.error/data` is dropped. The
+armed wrapper still keeps the live object. Src +17/−6.
+
+- Probe: a map holding default's connection plus 100k items rendered in
+  5.4 ms to 423 chars. The elision shows `:seon.print/omitted 99968`,
+  `:seon.print/requery-refusal "the value has no result handle"` (a wire
+  reply has no result handle).
+- Regression:
+  `seon.cluster.boot-reply-test/a-refused-request-carries-its-large-evidence-as-bounded-shown-text`,
+  run `04201739eb94`: pass 6, fail 0, error 0, passed? true, 58,340 ms.
+  - The request itself is over 10 s because of admission cost, already filed
+    as the admit-run issue above.
+  - The test body is inside its 5 s bound.
+- `bin/seon status`, before: 2.01 / 3.22 / 2.11 s. After: 4.28 / 7.41 / 5.55 s,
+  and 5.47 / 5.46 / 5.31 / 4.70 s at load average 26.
+  - The change is not on the success path: `diagnostic` runs only for a
+    refusal.
+  - The difference tracks machine load, not this code. It is proportional to
+    `mcp-runtime-observation` (problems 1.8 s included).
+- Other raw printers (follow-ups, not edited):
+  - `src/seon/cluster/boot.clj:536`: `readable-response` pr-strs any response
+    whole, including a non-diagnostic refusal such as the `published` error
+    returned at `boot.clj:653`.
+  - `resources/seon/operator/prepl.clj:16`: the io-prepl `prn` of every event.
+  - `bin/test-check:80`, `:97`, `:125`: `pr-str result`.
+  - `bin/test-check:133`: `pr-str (ex-data cause)`.
+  - `script/seon/dev/mcp.clj:570`, `:629`, `:850`: exception `ex-data` in MCP
+    eval failures.
