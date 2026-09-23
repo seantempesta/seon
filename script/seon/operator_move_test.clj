@@ -80,10 +80,15 @@
         source (fs/path root "data" "source")
         holder (atom nil)]
     (try
-      (doseq [sha ["kept" "held" "old"]] (fs/create-dirs (fs/path source sha)))
+      (doseq [sha ["kept" "held" "old"]] (fs/create-dirs (fs/path source sha "reference-code")))
+      ;; Archived pins: one linked by the kept archive, one by nothing.
+      (fs/create-dirs (fs/path source "pins" "reference-code-a" "linked-pin"))
+      (fs/create-dirs (fs/path source "pins" "reference-code-a" "stale-pin"))
+      (fs/create-sym-link (fs/path source "kept" "reference-code" "a")
+                          (fs/canonicalize (fs/path source "pins" "reference-code-a" "linked-pin")))
       (fs/create-dirs outside)
       (spit (str (fs/path outside "f")) "outside")
-      (fs/create-sym-link (fs/path source "old" "reference-code") outside)
+      (fs/create-sym-link (fs/path source "old" "reference-code" "b") outside)
       (spit (str (fs/path root "data" "store")) "store")
       ;; A live process naming `held` as its program, as a launched JVM does.
       (reset! holder (.start (ProcessBuilder.
@@ -92,7 +97,10 @@
       (let [result (#'operator/prune-archives!
                     (str root) (str (fs/canonicalize (fs/path source "kept"))))]
         (is (= ["old"] (:seon.operator/pruned result)))
-        (is (= #{"kept" "held"} (set (:seon.operator/retained result))))
+        (is (= #{"kept" "held"} (set (:seon.operator/retained result))) "pins is not an archive")
+        (is (= ["reference-code-a/stale-pin"] (:seon.operator/pruned-pins result)))
+        (is (fs/exists? (fs/path source "pins" "reference-code-a" "linked-pin"))
+            "a pin a retained archive links survives")
         (is (= "outside" (slurp (str (fs/path outside "f")))) "a link's target survives")
         (is (= "store" (slurp (str (fs/path root "data" "store"))))))
       (finally

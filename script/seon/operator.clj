@@ -632,19 +632,40 @@
                            path))))
            (str/split-lines status))}))
 
-(defn- prepares-build-products?
-  "Whether the dependency at `directory` declares tools.deps preparation."
+(defn- unprepared-build-products?
+  "Whether the dependency at `directory` declares tools.deps preparation
+  (`:deps/prep-lib`) whose `:ensure` output is not yet present."
   {:malli/schema [:=> [:cat :string] :boolean]}
   [directory]
-  (let [manifest (io/file directory "deps.edn")]
-    (boolean (and (.isFile manifest)
-                  (contains? (edn/read-string (slurp manifest)) :deps/prep-lib)))))
+  (let [manifest (io/file directory "deps.edn")
+        preparation (when (.isFile manifest) (:deps/prep-lib (edn/read-string (slurp manifest))))]
+    (boolean (and preparation (not (.exists (io/file directory (:ensure preparation))))))))
+
+(def ^:private pinned-directory
+  "Where a root keeps each gitlink pin archived once (its bytes and prepared
+  build products), for every commit archive whose checkout is not at that pin."
+  "data/source/pins")
+
+(defn- pinned-checkout!
+  "The directory holding `path` at `pin`, archived from its checkout once:
+  staged, then atomically moved (its existence is completion)."
+  {:malli/schema [:=> [:cat :string :string :string :string] :string]}
+  [root repository path pin]
+  (let [target (io/file root pinned-directory (str/replace path "/" "-") pin)]
+    (when-not (.isDirectory target)
+      (let [staging (io/file (.getParentFile target)
+                             (str pin ".staging-" (.pid (java.lang.ProcessHandle/current))))]
+        (fs/delete-tree staging)
+        (extract-archive! (str (io/file repository path)) pin staging)
+        (fs/move staging target {:atomic-move true})))
+    (.getCanonicalPath target)))
 
 (defn committed-source!
   "A commit's program (HEAD by default) as a directory of committed bytes,
   built once per commit. Each gitlink is the checked-out submodule when it is
-  at the commit's pin with unmodified tracked bytes, else an archive of the pin;
-  tools.deps prepares an archived pin only when it declares `:deps/prep-lib`."
+  at the commit's pin with unmodified tracked bytes, else a link to that pin
+  archived once per root (`pinned-checkout!`); tools.deps prepares an
+  archived pin only while its declared `:deps/prep-lib` output is absent."
   {:malli/schema [:function
                   [:=> [:cat :string] :map]
                   [:=> [:cat :string :string] :map]]}
@@ -674,13 +695,16 @@
                         (do (io/make-parents placed)
                             (fs/create-sym-link placed (.getCanonicalFile checkout))
                             {:path path :pin pin :placed :linked})
-                        (do (extract-archive! checkout pin placed)
-                            {:path path :pin pin :placed :archived
-                             :index-pin (get index-pins path)
-                             :prepared? (prepares-build-products? (str placed))}))))
+                        (let [pinned (pinned-checkout! root repository path pin)]
+                          (io/make-parents placed)
+                          (fs/create-sym-link placed pinned)
+                          {:path path :pin pin :placed :archived
+                           :index-pin (get index-pins path)
+                           :prepared? (unprepared-build-products? pinned)}))))
                   (gitlinks repository sha))
-            ;; An archived pin that declares preparation has no build products
-            ;; yet (e.g. http-kit's compiled Java); tools.deps prepares them.
+            ;; An archived pin that declares preparation lacks its build
+            ;; products until tools.deps prepares them (e.g. http-kit's and
+            ;; datahike's compiled Java), once per pin.
             _ (when (some :prepared? submodules)
                 (command! ["clojure" "-X:deps" "prep" ":aliases" "[:dev :test]"] staging 300000))]
         (fs/move staging target {:atomic-move true})
@@ -961,20 +985,38 @@
 
 (defn- prune-archives!
   "Delete this root's committed archives other than `kept` that no live
-  process names as its program; deletion never follows a link."
+  process names as its program, then every archived pin no remaining archive
+  links; deletion never follows a link."
   {:malli/schema [:=> [:cat :string :string] :map]}
   [root kept]
   (let [held (held-sources)
+        pins (io/file root pinned-directory)
         archives (filter #(and (.isDirectory ^java.io.File %)
+                               (not= (.getCanonicalPath pins) (.getCanonicalPath ^java.io.File %))
                                (not (str/includes? (.getName ^java.io.File %) ".staging-")))
                          (or (.listFiles (io/file root "data/source")) []))
         {pruned true retained false}
         (group-by #(and (not= kept (.getCanonicalPath ^java.io.File %))
                         (not (contains? held (.getCanonicalPath ^java.io.File %))))
-                  archives)]
-    (doseq [archive pruned] (fs/delete-tree archive))
+                  archives)
+        _ (doseq [archive pruned] (fs/delete-tree archive))
+        linked (into #{}
+                     (comp (mapcat #(or (.listFiles (io/file ^java.io.File % "reference-code")) []))
+                           (filter #(fs/sym-link? (fs/path ^java.io.File %)))
+                           (map #(str (fs/read-link (fs/path ^java.io.File %)))))
+                     retained)
+        stale-pins (into []
+                         (comp (mapcat #(or (.listFiles ^java.io.File %) []))
+                               (filter #(.isDirectory ^java.io.File %))
+                               (remove #(str/includes? (.getName ^java.io.File %) ".staging-"))
+                               (remove #(contains? linked (.getCanonicalPath ^java.io.File %))))
+                         (or (.listFiles pins) []))]
+    (doseq [pin stale-pins] (fs/delete-tree pin))
     {:seon.operator/pruned (mapv #(.getName ^java.io.File %) pruned)
-     :seon.operator/retained (mapv #(.getName ^java.io.File %) retained)}))
+     :seon.operator/retained (mapv #(.getName ^java.io.File %) retained)
+     :seon.operator/pruned-pins (mapv #(str (.getName (.getParentFile ^java.io.File %)) "/"
+                                             (.getName ^java.io.File %))
+                                       stale-pins)}))
 
 (defn move-to-head!
   "Replace the root's JVM with one whose program is committed HEAD (a drill
@@ -992,8 +1034,10 @@
         root (:seon.operator/managed-root request)
         repository (committed-repository)
         source (committed-source! root (get request :seon.source/revision "HEAD"))
+        archive-ms (elapsed-ms began)
         source-root (:seon.operator/source-root source)
         shared (share-caches! repository source-root (gitlinks repository (:seon.source/git-sha source)))
+        share-ms (- (elapsed-ms began) archive-ms)
         ;; tools.deps computes the archive's classpath once, into its own
         ;; `.cpcache`, while the old JVM still serves.
         _ (command! ["clojure" "-Spath" "-M:dev:test"] source-root runtime-probe-bound-ms)
@@ -1023,7 +1067,10 @@
         adopt-ms (elapsed-ms began-adopt)
         adopted? (and ready? (not (:seon.error/message adoption)))
         pruned (when adopted? (prune-archives! root source-root))
-        phases {:seon.operator/source-ms source-ms :seon.operator/down-ms down-ms
+        phases {:seon.operator/source-ms source-ms :seon.operator/archive-ms archive-ms
+                :seon.operator/share-ms share-ms
+                :seon.operator/classpath-ms (- source-ms archive-ms share-ms)
+                :seon.operator/down-ms down-ms
                 :seon.operator/launch-ms launch-ms
                 :seon.boot/ready-ms (get-in value [:seon.boot/readiness :seon.boot/ready-ms])
                 :seon.operator/adopt-ms adopt-ms
