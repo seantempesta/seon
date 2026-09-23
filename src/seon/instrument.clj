@@ -512,8 +512,8 @@
                                                (or (:seon.config.error/max-evidence-bytes arm-request)
                                                    (:seon.config.error/max-evidence-bytes
                                                     config/defaults)))))]
-        ;; The compiled wrapper is shared through the projection cache; the
-        ;; timing layer is this installation's own, so its cell is too.
+        ;; The compiled wrapper and its timing cell belong to this
+        ;; installation alone; the projection never retains the callable.
         (profile/with-cell cell
           (with-meta (fn [& arguments] (profile/timed (apply wrapped arguments)))
             (assoc (meta wrapped) interpreted-original original ::cell cell)))))))
@@ -638,58 +638,55 @@
 (defn- compiled-wrapper
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value :seon.instrument/callable :seon.sci.admit/caps [:? [:or :nil :map]]] :seon.instrument/callable]}
   [projection function-symbol authored original caps & [policy]]
-  ((mi/-f->original schema/projection-cache-value)
-   projection [::wrapper function-symbol authored original policy]
-   (fn []
-     (let [contract (get (:seon.schema.projection/function-contracts projection)
-                         function-symbol authored)
-           retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
-           bound (when-not retained
-                   (bind-contract-predicates
-                    projection
-                    ((mi/-f->original schema/compilable-form)
-                     contract
-                     ((mi/-f->original schema/predicate-functions-in) projection))))
-           caps (assoc caps
-                       :seon.config.eval.result/max-bytes
-                       (:seon.config.error/max-evidence-bytes policy))
-           options {:registry (mr/composite-registry
-                               (:seon.schema.projection/registry projection)
-                               (mr/var-registry))}
-           compiled (or retained (m/schema bound options))
-           arities (mapv m/-function-info (m/-function-schema-arities compiled))
-           refusal? ((mi/-f->original schema/projection-cache-value)
-                     projection ::refusal-validator
-                     #((mi/-f->original schema/projection-validator) projection :seon.instrument/refusal-result))
-           marker (Object.)
-           reject! (fn [declared-schema value]
-                     (when-not (refusal? value)
-                       (throw (ex-info "Instrumentation constructed an invalid refusal." value)))
-                     (throw (ex-info (:seon.error/message value)
-                                     (with-meta value {::boundary marker
-                                                       :seon.error/declared-schema declared-schema}))))
-           wrapped
-           (m/-instrument
-            {:schema compiled :scope #{:input :output :guard}
-             :report (fn [kind data]
-                       (binding [*compiling-contract* true]
-                         (reject! (if (= :malli.core/invalid-arity kind)
-                                    :seon.instrument/arity-error :seon.instrument/contract-error)
-                                  (boundary-refusal projection caps kind
-                                                    (assoc data :fn-name function-symbol) arities))))}
-            original options)]
-       (fn [& arguments]
-         (try (apply wrapped arguments)
-              (catch clojure.lang.ExceptionInfo failure
-                (if (and (= :record (:seon.config/on-core-error policy))
-                         (identical? marker (::boundary (meta (ex-data failure)))))
-                  (let [value (ex-data failure)
-                        outcome ((:seon.flow/commit-fault! policy)
-                                 {:seon.error/source value
-                                  :seon.error/declared-schema (:seon.error/declared-schema (meta value))})]
-                    (if (= :seon.flow/committed (second outcome)) value
-                        (throw (ex-info "Recording the instrumentation refusal failed." value failure))))
-                  (throw failure)))))))))
+  (let [contract (get (:seon.schema.projection/function-contracts projection)
+                      function-symbol authored)
+        retained (mr/schema (:seon.schema.projection/registry projection) function-symbol)
+        bound (when-not retained
+                (bind-contract-predicates
+                 projection
+                 ((mi/-f->original schema/compilable-form)
+                  contract
+                  ((mi/-f->original schema/predicate-functions-in) projection))))
+        caps (assoc caps
+                    :seon.config.eval.result/max-bytes
+                    (:seon.config.error/max-evidence-bytes policy))
+        options {:registry (mr/composite-registry
+                            (:seon.schema.projection/registry projection)
+                            (mr/var-registry))}
+        compiled (or retained (m/schema bound options))
+        arities (mapv m/-function-info (m/-function-schema-arities compiled))
+        refusal? ((mi/-f->original schema/projection-cache-value)
+                  projection ::refusal-validator
+                  #((mi/-f->original schema/projection-validator) projection :seon.instrument/refusal-result))
+        marker (Object.)
+        reject! (fn [declared-schema value]
+                  (when-not (refusal? value)
+                    (throw (ex-info "Instrumentation constructed an invalid refusal." value)))
+                  (throw (ex-info (:seon.error/message value)
+                                  (with-meta value {::boundary marker
+                                                    :seon.error/declared-schema declared-schema}))))
+        wrapped
+        (m/-instrument
+         {:schema compiled :scope #{:input :output :guard}
+          :report (fn [kind data]
+                    (binding [*compiling-contract* true]
+                      (reject! (if (= :malli.core/invalid-arity kind)
+                                 :seon.instrument/arity-error :seon.instrument/contract-error)
+                               (boundary-refusal projection caps kind
+                                                 (assoc data :fn-name function-symbol) arities))))}
+         original options)]
+    (fn [& arguments]
+      (try (apply wrapped arguments)
+           (catch clojure.lang.ExceptionInfo failure
+             (if (and (= :record (:seon.config/on-core-error policy))
+                      (identical? marker (::boundary (meta (ex-data failure)))))
+               (let [value (ex-data failure)
+                     outcome ((:seon.flow/commit-fault! policy)
+                              {:seon.error/source value
+                               :seon.error/declared-schema (:seon.error/declared-schema (meta value))})]
+                 (if (= :seon.flow/committed (second outcome)) value
+                     (throw (ex-info "Recording the instrumentation refusal failed." value failure))))
+               (throw failure)))))))
 
 (defn- contract-definitions
   "Canonical declarations closed over by a function contract, following Malli refs."
@@ -776,7 +773,8 @@
              boot-wrapper (delay
                             (binding [*compiling-contract* true]
                               (compiled-wrapper bootstrap function-symbol
-                                                authored original caps policy)))]
+                                                authored original caps policy)))
+             supplied-wrapper (atom nil)]
          (profile/with-cell cell
           (with-meta
            (fn [& arguments]
@@ -791,12 +789,19 @@
                               ;; every schema it closes over. A cluster whose
                               ;; stored program predates the loaded files lacks
                               ;; them; the files' own declarations then decide.
-                              ((mi/-f->original schema/projection-cache-value)
-                               projection [::declared-wrapper function-symbol authored original policy]
-                               #(when (validates-loaded-contract? projection function-symbol
-                                                                  contract definitions)
-                                  (compiled-wrapper projection function-symbol
-                                                    authored original caps policy))))
+                              ;; This installation keeps only its latest
+                              ;; projection's wrapper: the projection never
+                              ;; retains the callable, its policy or its world.
+                              (let [[seen wrapper] @supplied-wrapper]
+                                (if (identical? projection seen)
+                                  wrapper
+                                  (let [wrapper (when (validates-loaded-contract?
+                                                       projection function-symbol
+                                                       contract definitions)
+                                                  (compiled-wrapper projection function-symbol
+                                                                    authored original caps policy))]
+                                    (reset! supplied-wrapper [projection wrapper])
+                                    wrapper))))
                             @boot-wrapper))]
                   (apply wrapped arguments)))))
            {:malli.instrument/original original
