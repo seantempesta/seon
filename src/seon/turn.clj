@@ -3409,6 +3409,7 @@
 
 (defn- phase
   "Return one phase's value, translating a host failure to flat data.
+  An InterruptedException propagates unchanged.
 
   Callback results are polymorphic and unchecked here; the callback's own
   contract owns them. This boundary does not promise a phase-failed member
@@ -3421,6 +3422,10 @@
   [operation]
   (try
     (operation)
+    ;; An interrupt is the stop's sentinel, not a phase failure: it passes
+    ;; through before anything is recorded, so the stopping owner observes it.
+    (catch InterruptedException interrupted
+      (throw interrupted))
     (catch Throwable failure
       (with-meta
        (merge {:seon.error/at (java.util.Date.)
