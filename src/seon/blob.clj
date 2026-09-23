@@ -74,13 +74,11 @@
       (throw
        (ex-info
         "Blob threshold is not a positive integer."
-        {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.blob/storage
-          :seon.error/operation 'seon.blob/binary-threshold
-          :seon.error/offending threshold
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.blob/storage 'seon.blob/binary-threshold
+         {:seon.error/offending threshold
           :seon.blob/threshold-attribute :seon.config.eval.result/blob-threshold
           :seon.error/message "Blob threshold is not a positive integer."
-          :seon.error/expected :pos-int})))
+          :seon.error/expected :pos-int}))))
     (Math/toIntExact (long threshold))))
 
 (defn- stage-file!
@@ -151,16 +149,14 @@
       (throw
        (ex-info
         "Stored blob does not match its digest and size."
-        {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.blob/storage
-          :seon.error/operation 'seon.blob/verify-stored!
-          :seon.error/offending actual
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.blob/storage 'seon.blob/verify-stored!
+         {:seon.error/offending actual
           :seon.blob/stored-content-mismatch content-digest
           :seon.error/message "Stored blob does not match its digest and size."
           :seon.blob/digest content-digest
           :seon.blob/size expected-size
           :seon.blob/actual actual
-          :seon.error/data {:seon.blob/expected-size expected-size}}))))
+          :seon.error/data {:seon.blob/expected-size expected-size}})))))
   nil)
 
 (defn- staged-write
@@ -260,16 +256,14 @@
           (throw
            (ex-info
             "Blob input stream made no progress."
-            {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.blob/storage
-          :seon.error/operation 'seon.blob/stage-binary!
-          :seon.error/offending read-count
+            (seon.error.refusal/diagnostic (java.util.Date.) :seon.blob/storage 'seon.blob/stage-binary!
+             {:seon.error/offending read-count
           :seon.blob/input-stalled total-size
           :seon.error/message "Blob input stream made no progress."
           :seon.blob/size total-size
           :seon.error/member :seon.blob/input-stream
           :seon.error/expected "a positive read or EOF"
-          :seon.error/data {:seon.blob/size total-size}}))
+          :seon.error/data {:seon.blob/size total-size}})))
 
           :else
           (let [prefix-count (min read-count (- threshold prefix-size))
@@ -392,12 +386,10 @@
         (throw
          (ex-info
           "Blob content does not match its digest."
-          {:seon.error/at (java.util.Date.)
-          :seon.error/layer :seon.blob/storage
-          :seon.error/operation 'seon.blob/get
-          :seon.error/offending actual
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.blob/storage 'seon.blob/get
+           {:seon.error/offending actual
           :seon.blob/content-digest-mismatch content-digest
           :seon.error/message "Blob content does not match its digest."
           :seon.blob/digest content-digest
-          :seon.blob/actual-digest actual})))
+          :seon.blob/actual-digest actual}))))
       (String. ^bytes octets StandardCharsets/UTF_8))))
