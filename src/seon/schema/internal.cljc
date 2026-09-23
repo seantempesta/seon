@@ -17,7 +17,7 @@
 
 (defn- reference-id
   "A ref name together with the options carrying its resolving registry."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]]
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]]
                   [:maybe [:tuple :map [:or :keyword :string :symbol]]]]}
   [compiled]
   (when (m/-ref-schema? compiled)
@@ -26,7 +26,7 @@
 
 (defn- same-scoped-schema?
   "Compare compiled children in their captured scopes, including local refs."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?] [:fn malli.core/schema?]] :boolean]}
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?] [:fn 'malli.core/schema?]] :boolean]}
   [left right]
   (letfn [(same? [left right seen]
             (cond
@@ -52,9 +52,9 @@
 
 (defn- entity-maps
   "Only maps reached through entity aliases, wrappers and conjunction arms."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]
                            [:set [:tuple :map [:or :keyword :string :symbol]]]]
-                  [:vector [:fn malli.core/schema?]]]}
+                  [:vector [:fn 'malli.core/schema?]]]}
   [compiled active]
   (let [reference (reference-id compiled)]
     (when (and reference (contains? active reference))
@@ -70,8 +70,8 @@
 
 (defn entity-entries
   "Ordered compiled map entries with inherited requiredness and conflict checks."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]]
-                  [:vector [:tuple :seon.schema/value [:maybe :map] [:fn malli.core/schema?]]]]}
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]]
+                  [:vector [:tuple :seon.schema/value [:maybe :map] [:fn 'malli.core/schema?]]]]}
   [compiled]
   (let [entries (into [] (mapcat m/children) (entity-maps compiled #{}))
         merged
@@ -92,7 +92,7 @@
 
 (defn entity-properties
   "Entity-map properties followed by the selected root's explicit properties."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:maybe :map]]}
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]] [:maybe :map]]}
   [compiled]
   (when-let [maps (seq (entity-maps compiled #{}))]
     (not-empty (merge (apply merge (map m/properties maps))
@@ -100,13 +100,13 @@
 
 (defn entity-schema?
   "Whether compiled entity composition reaches a map, including an empty map."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] :boolean]}
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]] :boolean]}
   [compiled]
   (boolean (seq (entity-maps compiled #{}))))
 
 (defn extends-schema?
   "Follow only compiled alias and conjunction edges in their captured scopes."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?] :qualified-keyword] :boolean]}
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?] :qualified-keyword] :boolean]}
   [compiled ancestor]
   (letfn [(extends? [node seen]
             (let [node-id (or (reference-id node) node)]
@@ -382,7 +382,7 @@
 
 (defn map-required-attrs
   "Required keys of a compiled entity composition, excluding Malli's default."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:maybe [:vector :keyword]]]}
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]] [:maybe [:vector :keyword]]]}
   [compiled]
   (not-empty
    (vec (sort-by str

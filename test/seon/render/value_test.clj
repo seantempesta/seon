@@ -6,6 +6,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [malli.registry :as mr]
             [seon.ai.tokens :as tokens]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
@@ -379,21 +380,29 @@
 
 (deftest declared-producers-still-have-absolute-precedence
   (support/with-database
+   {:seon.test-support/extra-schema
+    [{:seon.schema/key :fixture/declared-producer
+      :seon.schema.admission/source :core
+      :seon.schema/form
+      (pr-str [:map {:seon.render/ai 'seon.error/render-ai
+                     :seon.render/html 'seon.error/render-html}
+               [:my.message/no-recipient [:= true]]
+               [:seon.error/message :string]])}]}
    (fn [connection]
      (let [failure {:my.message/no-recipient true
                     :seon.error/message "A recipient is required."}
            request (render-request connection failure)
-           declared-row {:seon.schema/key :fixture/declared-producer
-                         :seon.render/ai 'fixture/render-ai
-                         :seon.render/html 'fixture/render-html}]
-       (with-redefs [schema/matching-shapes-in
-                     (fn [_projection _value] [declared-row])]
-         (is (= 'fixture/render-ai
-                (#'seon.render/producer request
-                 :seon.render/ai :seon.render/ai)))
-         (is (= 'fixture/render-html
-                (#'seon.render/producer request
-                 :seon.render/html :seon.render/html))))))))
+           projection (schema/projection-from-database (db/db connection))]
+       (is (some? (mr/schema (:seon.schema.projection/registry projection)
+                             :fixture/declared-producer)))
+       (is (some #(= :fixture/declared-producer (:seon.schema/key %))
+                 (schema/matching-shapes-in projection failure)))
+       (is (= 'seon.error/render-ai
+              (#'seon.render/producer request
+               :seon.render/ai :seon.render/ai)))
+       (is (= 'seon.error/render-html
+              (#'seon.render/producer request
+               :seon.render/html :seon.render/html)))))))
 
 (deftest registered-floor-elisions-do-not-invent-a-result-handle
   (support/with-database
