@@ -33,7 +33,6 @@
         (support/transacted! connection [[:db.fn/call #'observe-program-write ::result-write basis]])
         (is (string? digest) (pr-str digest))
         (is (false? (::result-write @observed)) "a result write is no program write")
-        (is (= digest (runner/program-digest (db/db connection))))
         (support/transacted!
          connection
          [[:db/add [:seon.fn/sym 'seon.id/digest] :seon.fn/doc "Another changed declaration."]

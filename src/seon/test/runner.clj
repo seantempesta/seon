@@ -1,7 +1,6 @@
 (ns seon.test.runner
   "Capture test Var results in this JVM and commit them as per-member facts."
   (:require [seon.error.refusal]
-            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -687,21 +686,6 @@
               drift-directions)]
     set-drift))
 
-(defn- program-fact
-  {:malli/schema [:=> [:cat :seon.program/shapes [:maybe :map]] [:maybe :map]]}
-  [row-shapes pulled]
-  (let [row (program/canonical-row row-shapes (dissoc pulled :db/id))
-        [attribute] (program/row-identity row)]
-    (when (and attribute
-               (get row (:seon.program/source-attribute (program/shape row-shapes attribute))))
-      (walk/postwalk
-       (fn [value]
-         (cond
-           (map? value) (into (sorted-map-by #(compare (pr-str %1) (pr-str %2))) value)
-           (set? value) (vec (sort-by pr-str value))
-           :else value))
-       row))))
-
 (def ^:private reach-attributes
  [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references :seon.fn/keywords
   :seon.test/sym :seon.test/source :seon.test/subject
@@ -947,65 +931,6 @@
       (into program/identity-attributes)
       (conj :seon.source/digest)))
 
-(defn- derive-program-digest
-  "Identify the tested program from its source seal and the program rows
-  written since it. An unchanged publication keeps its exact snapshot digest.
-  Each row written since the seal contributes its identity and its producer's
-  `:seon.program/definition-digest` (absent: a digest of its program fact;
-  retracted: nothing), so the cost follows the rows written since the seal:
-  no as-of read, and no printing of whole rows. Result-only writes touch no
-  program attribute."
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.test.run/program-digest :seon.test.run/unavailable-error]]}
-  [database]
-  (try
-   (let [read! (fn [value message]
-                 (when (and (map? value) (:seon.error/at value) (:seon.error/layer value)
-                            (:seon.error/operation value))
-                   (throw (ex-info message value)))
-                 value)
-         seals (read! (db/q '[:find ?digest ?t :where [_ :seon.source/digest ?digest ?t]] database)
-                      "Cannot read the tested source identity.")
-         _ (when (> (count seals) 1)
-             (throw (ex-info "The tested program has multiple source seals." {})))
-         [digest basis] (first seals)
-         _ (when-not digest
-             (throw (ex-info "The tested program has no source snapshot identity." {})))
-         projection (or (db/carried-projection database) (schema/handed-projection))
-         changed (db/since (db/history database) basis)
-         entities (if (= basis (db/basis-t database))
-                    []
-                    (read! (db/q '[:find [?entity ...] :in $ [?attribute ...]
-                                   :where [?entity ?attribute]]
-                                 changed (vec (program-digest-read-attributes projection)))
-                           "Cannot identify changes since the source identity."))
-         rows (if (seq entities)
-                (read! (db/q '[:find ?entity ?attribute ?value ?definition
-                               :in $ [?entity ...] [?attribute ...]
-                               :where [?entity ?attribute ?value]
-                                      [(get-else $ ?entity :seon.program/definition-digest "") ?definition]]
-                             database entities program/identity-attributes)
-                       "Cannot read tested program rows.")
-                [])
-         undigested (into [] (keep (fn [[entity _ _ definition]] (when (= "" definition) entity))) rows)
-         row-shapes (when (seq undigested) (program/shapes-in projection))
-         facts (zipmap undigested
-                       (map #(some->> (program-fact row-shapes %) vector (id/digest 64))
-                            (read! (db/pull-many database '[*] undigested) "Cannot read tested program rows.")))
-         entries (->> rows
-                      (keep (fn [[entity attribute value definition]]
-                              (when-let [content (if (= "" definition) (get facts entity) definition)]
-                                [(pr-str [attribute value]) content])))
-                      sort vec)]
-     (if (empty? entries) digest (id/digest 64 [digest entries])))
-   (catch Exception failure
-     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/provenance
-      :seon.error/operation 'seon.test.runner/program-digest
-      :seon.test.run/unavailable true
-      :seon.test.run/provenance-failure (or (ex-message failure) (.getName (class failure)))
-      :seon.error/data (or (ex-data failure) {})
-      :seon.error/message (str "Test provenance unavailable: " (ex-message failure))})))
-
 (defn program-written-since?
   "Whether any datom of an attribute the program digest reads was written after
   `basis-t` on `database`'s lineage: O(datoms since `basis-t`). A value with no
@@ -1021,64 +946,42 @@
                             (or (db/carried-projection database) (schema/handed-projection)))))]
     (if (and (map? written) (:seon.error/at written)) written (some? written))))
 
-(def program-digest-cache-policy
-  "Bound the program digests one projection retains independently of the number of commits."
-  {::program-digest-cache-size 16
-   ::program-digest-cache-reason
-   "Retain eight recent tested programs under each of their two keys (the program attributes' revisions and the commit) for the cluster branch and the member branches a request forks; an older program derives again."})
-
-(defn- program-digest-revision-key
-  "The part of Datahike's cache-context the digest depends on.
-
-  Datahike advances one attribute revision per changed attribute and the
-  conservative revision on a schema or unknown change
-  (`datahike.query/advance-query-cache-context`); a result write touches no
-  program attribute and keeps this key, so the admission and recording
-  commits of one request read the digest their selection derived."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection] [:vector :seon.schema/value]]}
-  [database projection]
+(defn program-revisions
+  "Datahike's revisions of every attribute a program row carries, with the
+  value's connection, generation and conservative revision
+  (`datahike.db/advance-cache-context`, `reference-code/datahike/src/datahike/db.cljc:423`):
+  equal keys name equal program rows, whatever else was written between them.
+  Nil for a value with no committed context."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil [:vector :seon.schema/value]]]}
+  [database]
   (let [context (:cache-context database)]
-    [::revisions
-     (:datahike.cache/connection-id context)
-     (:datahike.cache/generation context)
-     (:datahike.cache/conservative-revision context)
-     (select-keys (:datahike.cache/attribute-revisions context)
-                  (schema/projection-cache-value
-                   projection ::program-digest-read-attributes
-                   #(program-digest-read-attributes projection)))]))
+    (when (:datahike.cache/committed? context)
+      (let [projection (db/carried-projection database)]
+        [(:datahike.cache/connection-id context) (:datahike.cache/generation context)
+         (:datahike.cache/conservative-revision context)
+         (select-keys (:datahike.cache/attribute-revisions context)
+                      (schema/projection-cache-value
+                       projection ::program-digest-read-attributes
+                       #(program-digest-read-attributes projection)))]))))
 
 (defn program-digest
-  "The tested program's digest at `database`: a function of its source seal
-  and program rows ([[derive-program-digest]]), memoized by their identity.
-
-  A committed value keys by Datahike's revisions of the attributes the digest
-  reads, then by its commit (a member branch at an already-derived commit), in
-  the memo the value's projection holds (`schema/projection-cache-value`), the
-  holder `seon.call-preparation` uses. A speculative, as-of or history value
-  derives. A refusal is returned, never retained."
+  "The tested program's identity: the digest of the commit the tests read.
+  Datahike derives the commit id from the committed value's content
+  (`create-commit-id`, `reference-code/datahike/src/datahike/writing.cljc:363`); reuse across
+  commits is decided per member by its stored reach digest, never by this.
+  A value with no commit (the writer's in-transaction value, an as-of or
+  history view) has no program identity: the typed refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.test.run/program-digest :seon.test.run/unavailable-error]]}
   [database]
-  (let [committed (db/committed-value-identity database)
-        projection (when (:datahike.value/commit-id committed)
-                     (db/carried-projection database))
-        memo (when projection
-               (schema/projection-cache-value
-                projection ::program-digest-memo
-                #(cache/lru-cache-factory
-                  {} :threshold (::program-digest-cache-size program-digest-cache-policy))))]
-    (if-not (instance? clojure.lang.IAtom memo)
-      (derive-program-digest database)
-      (let [commit-key [::commit (:datahike.value/commit-id committed)]
-            revision-key (program-digest-revision-key database projection)
-            derivation (fn [_] (delay (derive-program-digest database)))
-            digest @(cache/lookup-or-miss
-                     memo revision-key
-                     (fn [_] (delay @(cache/lookup-or-miss memo commit-key derivation))))]
-        (when (map? digest)
-          (cache/evict memo commit-key)
-          (cache/evict memo revision-key))
-        digest))))
+  (if-let [commit (:datahike.value/commit-id (db/committed-value-identity database))]
+    (id/digest 64 [(str commit)])
+    {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/provenance
+     :seon.error/operation 'seon.test.runner/program-digest
+     :seon.test.run/unavailable true
+     :seon.test.run/provenance-failure "The tested value has no commit."
+     :seon.error/data {:seon.test.run/basis-t (db/basis-t database)}
+     :seon.error/message "Test provenance unavailable: the tested value has no commit."}))
 
 (defn provenance
   "Capture immutable test custody before execution.
@@ -1187,7 +1090,8 @@
                       :seon.test.member/completed-tx :seon.test.member/terminated-tx
                       :seon.test.member/pass-count :seon.test.member/fail-count
                       :seon.test.member/error-count :seon.test.member/began?
-                      :seon.test.member/ended? :seon.test.member/error]
+                      :seon.test.member/ended? :seon.test.member/error
+                      :seon.test.member/reach-digest]
                      (vec current)))))))
 
 (defn- worker-identity [database worker]
@@ -1312,7 +1216,7 @@
                   :seon.store/transaction-data]}
   [database {run :seon.test.run/provenance results :seon.test.runner/results
              worker :seon.test.member/worker claim :seon.test.member/claim-tx
-             terminated? :seon.test.run/terminated?}]
+             terminated? :seon.test.run/terminated? reach :seon.test/reach-digests}]
   (let [run-id (:seon.test.run/id run)
         operation 'seon.test.runner/record-tx
         members (into {} (map (juxt :seon.test.member/symbol identity))
@@ -1428,7 +1332,12 @@
                                       :seon.test.member/completed-tx "datomic.tx")
                          (seq report-ids)
                          (assoc :seon.test.member/failures
-                                (set (map #(vector :seon.test.report/id %) report-ids)))))
+                                (set (map #(vector :seon.test.report/id %) report-ids)))
+                         ;; The content this execution tested: reuse compares it
+                         ;; with the current reach, on any branch or lineage.
+                         (string? (get reach (:seon.test.member/symbol member)))
+                         (assoc :seon.test.member/reach-digest
+                                (get reach (:seon.test.member/symbol member)))))
                  (and terminated? (not (:seon.test.member/terminated-tx member)))
                  (conj [:db/add eid :seon.test.member/terminated-tx "datomic.tx"]))))
            prepared))))
@@ -1718,7 +1627,8 @@
              :seon.test/run-basis-t (:seon.test.run/basis-t run)
              :seon.test/run-at (:seon.test.run/at run)
              :seon.test/run [:seon.test.run/id (:seon.test.run/id run)]
-             :seon.test.member/completed-tx (:seon.test.member/completed-tx member)})
+             :seon.test.member/completed-tx (:seon.test.member/completed-tx member)}
+                   (select-keys member [:seon.test.member/reach-digest]))
       (seq reports) (assoc :seon.test.failure/reports (mapv #(dissoc % :db/id) reports)
                           :seon.test/failure-message
                           (str/join "\n\n" (map (requiring-resolve 'seon.test/failure-text) reports))))))

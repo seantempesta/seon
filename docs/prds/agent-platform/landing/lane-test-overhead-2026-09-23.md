@@ -79,3 +79,39 @@ regression is green; the long-marked admission tests green. Parent-vs-commit num
 for the same probe come from different JVMs (90963, 28202 parent; 31476, 55322 commit)
 because default was replaced three times during the lane. Contracts of touched
 functions compiled only through their adoption on a warm projection.
+
+## Slice 2 — content-keyed member evidence; the seal-based digest deleted
+
+Algorithm: reuse of a green member compares its stored `:seon.test.member/reach-digest`
+(the content digest of its static closure, written at recording) with the current
+reach digest, one batched read per request: O(candidates), no as-of view, valid on any
+branch or lineage. An unknown digest (members recorded before this slice) executes.
+`verified?` compares the same pair. The program digest is the digest of the tested
+commit (`create-commit-id`, datahike `writing.cljc:363`), O(1); `derive-program-digest`,
+its memo, cache policy, revision key and `program-fact` are deleted, so no runner code
+reads the source seal any more. `test.clj` still reads the seal's test-input digest
+(`select`, `admit-run`, `verified?`) for the B1 c6 cut.
+
+Host exclusions: 726 ms was PER REQUEST — each request re-walked the destructive owners'
+reverse closure through `gate-sets`, including the whole-program
+`seon.fn/declared-reference-edges` query. `destructive-reach` is now memoized by
+`runner/program-revisions` (Datahike's revisions of the program attributes) plus the
+revisions of the data attributes declared edges read (`:seon.fn/invokes` holders,
+`:seon.fn/reference-to` keys): first call 728 ms, then 27 ms, and 31 ms after two
+result commits (pid 63253). It now follows program changes, not requests.
+
+Proof on default pid 63253 (checkout; slice loaded at boot, `:seon.test.member/reach-digest`
+installed as `db.type/string`):
+
+| operation | wall | why over 1 s |
+|---|---|---|
+| regression `seon.test.admission-digest-test` (`d9febaf6848f`), then reused (`b67c04e78405`) | 4,618 ms, then 861 ms | the body (4 assertions over three fixture transactions) |
+| one-member named `seon.config-test/optional-setting-flags-assert-only-true`, first request after adoption | 3,630 ms, body 1,551 ms | the first request at a new program derives host reach (728 ms) and reach once |
+| same request, reused | 88 ms, 84 ms | — |
+| affected namespaces, first then second (`4936dadde226`, `328062e6c554`) | 7,679 ms, then 3,903 ms with 3 reused by content | bodies; the two `test-provenance-test` reds are the owner's fixture writes (retired assumption, routed) |
+| phases (warm): select 118, admission 45, digest 0, reach 0, `program-written-since?` 121 ms | — | — |
+| heap old gen | 3,672 MB before, 3,408 MB after | — |
+
+My regression's "a result write keeps the digest" assertion was a retired assumption
+(the digest now follows the commit) and is removed; `program-written-since?` carries it.
+Sizes: src `runner.clj` +41 −131, `test.clj` +46 −37, schema +3 −1: net src −81.

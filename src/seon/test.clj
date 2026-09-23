@@ -1,6 +1,7 @@
 (ns seon.test
   "One test request on the agent execution lifecycle, and the recorded evidence it reads."
   (:require
+            [clojure.core.cache.wrapped :as cache]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
@@ -265,14 +266,35 @@
   Membership is the shared `:seon.fn/calls` derivation `seon.fn/tests-reaching`,
   walked from each owner `destroyers` names."
   [database]
-  (let [owners (destroyers database)]
-    (if (and (map? owners) (contains? owners :seon.error/at) (contains? owners :seon.error/layer) (contains? owners :seon.error/operation))
-      owners
-      (let [by-owner (functions/gate-sets database (sort (keys owners)))]
-        (if (:seon.db/invalid-read by-owner)
-          by-owner
-          (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
-                  {} (sort by-owner)))))))
+  (let [walk (fn []
+                 (let [owners (destroyers database)]
+                   (if (:seon.error/at owners)
+                     owners
+                     (let [by-owner (functions/gate-sets database (sort (keys owners)))]
+                       (if (:seon.db/invalid-read by-owner)
+                         by-owner
+                         (reduce (fn [reached [owner tests]] (reduce #(assoc %1 %2 owner) reached tests))
+                                 {} (sort by-owner)))))))
+        program (runner/program-revisions database)
+        ;; The walk also reads the data attributes declared edges name
+        ;; (`:seon.fn/invokes` holders, `:seon.fn/reference-to` keys).
+        edge-attributes (when program
+                          (db/q '[:find [?attribute ...]
+                                  :where (or [_ :seon.fn/invokes ?attribute]
+                                             (and [?declaration :seon.fn/reference-to :seon.fn/sym]
+                                                  [?declaration :seon.schema/key ?attribute]))]
+                                database))
+        memo-key (when (and program (vector? edge-attributes))
+              [program (select-keys (get-in database [:cache-context :datahike.cache/attribute-revisions])
+                                    edge-attributes)])
+        memo (when memo-key
+               (schema/projection-cache-value (db/carried-projection database) ::destructive-reach
+                                              #(cache/lru-cache-factory {} :threshold 4)))]
+    (if-not memo
+      (walk)
+      (let [reach @(cache/lookup-or-miss memo memo-key (fn [_] (delay (walk))))]
+        (when (:seon.error/at reach) (cache/evict memo memo-key))
+        reach))))
 
 (defn- destructive-paths
   "Shortest named call path from every name reaching `owner-symbol` down to it.
@@ -617,7 +639,8 @@
                      :seon.test.member/completed-tx :seon.test.member/terminated-tx
                      :seon.test.member/began? :seon.test.member/ended?
                      :seon.test.member/pass-count :seon.test.member/fail-count
-                     :seon.test.member/error-count :seon.test.member/error])
+                     :seon.test.member/error-count :seon.test.member/error
+                     :seon.test.member/reach-digest])
             one (fn [entity attribute] (first (get-in facts [entity attribute])))
             sources source-ids
             input-digest (when (= 1 (count sources))
@@ -793,7 +816,6 @@
                                        (and (#{:platform :all :full} policy) (one entity :seon.test/platform)) (conj :platform))]
                          (if (seq reasons) (assoc result symbol reasons) result)))
                      (sorted-map) eligible)
-            digest (selection-read! (runner/program-digest database))
             latest (reduce
                     (fn [result run-eid]
                       (reduce (fn [result member]
@@ -816,35 +838,24 @@
                                loaded-drift? {}
                                (and (= :incremental policy) (not work?)) eligible
                                :else reasons)
-            changed-program-candidates
-            (into {} (keep (fn [[test-symbol _]]
-                             (when-let [[run-eid member] (get latest test-symbol)]
-                               (when (and (green? member)
-                                          (not (reached test-symbol))
-                                          (or (nil? supplied-basis)
-                                              (= supplied-basis (one run-eid :seon.test.run/basis-t)))
-                                          (not= digest (one run-eid :seon.test.run/program-digest)))
-                                 [test-symbol (one run-eid :seon.test.run/basis-t)]))))
-                  reuse-candidates)
-            current-reach (when (seq changed-program-candidates)
-                            (selection-read! (runner/reach-digests database (vec (keys changed-program-candidates)))))
-            recorded-reach
-            (reduce-kv (fn [result tested-basis entries]
-                         (merge result
-                                (selection-read!
-                                 (runner/reach-digests (db/as-of database tested-basis)
-                                                       (mapv first entries)))))
-                       {} (group-by val changed-program-candidates))
+            ;; Reuse is content-keyed: a green member's stored reach digest
+            ;; against the current one, one batched read (B4 §2a). A member
+            ;; recorded without it is unknown and executes.
+            current-reach (let [greens (into [] (keep (fn [[test-symbol _]]
+                                                        (when-let [[_ member] (get latest test-symbol)]
+                                                          (when (and (green? member) (one member :seon.test.member/reach-digest))
+                                                            test-symbol))))
+                                             reuse-candidates)]
+                            (if (seq greens) (selection-read! (runner/reach-digests database greens)) {}))
             reused (into (sorted-map)
                          (keep (fn [[test-symbol _]]
                                  (when-let [[run-eid member] (get latest test-symbol)]
                                    (when (and (green? member)
                                               (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
                                               (not (reached test-symbol))
-                                              (or (= digest (one run-eid :seon.test.run/program-digest))
-                                                  (and (string? (get current-reach test-symbol))
-                                                       (= (get current-reach test-symbol)
-                                                          (get recorded-reach test-symbol)))))
+                                              (string? (get current-reach test-symbol))
+                                              (= (get current-reach test-symbol)
+                                                 (one member :seon.test.member/reach-digest)))
                                      [test-symbol
                                       {:seon.test/sym test-symbol :seon.test/unchanged true
                                        :seon.test/run-basis-t (one run-eid :seon.test.run/basis-t)
@@ -1349,17 +1360,15 @@
        (let [inputs (db/q '[:find [?digest ...]
                             :where [_ :seon.source/test-input-digest ?digest]] database)
              current (runner/reach-digests database [test-symbol])
-             tested (runner/reach-digests
-                     (db/as-of database (:seon.test.run/basis-t result)) [test-symbol])
              present (db/pull database [:seon.test/source :seon.test/fixture-observation]
                               [:seon.test/sym test-symbol])]
-         (or (first (filter :seon.error/at [inputs current tested present]))
+         (or (first (filter :seon.error/at [inputs current present]))
              (boolean
               (and (:seon.test/source present)
                    (not (:seon.test/fixture-observation present))
                    (= #{(:seon.test.run/input-digest result)} (set inputs))
                    (string? (get current test-symbol))
-                   (= (get current test-symbol) (get tested test-symbol)))))))))
+                   (= (get current test-symbol) (:seon.test.member/reach-digest result)))))))))
   ([database test-symbol program-digest]
    (let [result (recorded-result database test-symbol)]
      (cond

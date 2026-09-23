@@ -16,6 +16,7 @@
  :seon.test.member/terminated-tx [:and {:description "Transaction observing execution termination. Completion after a bound alone does not assert this fact. Optional ref sweeps with its transaction, leaving termination unknown."} :seon.db/ref]
  :seon.test.member/failures [:set {:description "Signature-keyed failing reports observed in this execution; no pass report entities. Optional peer refs sweep with report deletion."} :seon.db/ref]
  :seon.test.member/error [:and {:description "Boundary failure preventing normal member completion, when present. Optional peer ref sweeps with the error."} :seon.db/ref]
+ :seon.test.member/reach-digest [:and {:description "The test's reach digest as this execution tested it: the content of its static closure (sources, specs, named schemas), so reuse compares it with the current reach on any branch or lineage. Absent: unknown, never reuse."} :seon.test/reach-digest]
  :seon.test.member/member
  [:map {:seon.db/attributes true}
   [:seon.test.member/symbol :seon.test.member/symbol]
@@ -32,4 +33,5 @@
   [:seon.test.member/began? {:optional true} :seon.test.member/began?]
   [:seon.test.member/ended? {:optional true} :seon.test.member/ended?]
   [:seon.test.member/failures {:optional true} :seon.test.member/failures]
-  [:seon.test.member/error {:optional true} :seon.test.member/error]]}
+  [:seon.test.member/error {:optional true} :seon.test.member/error]
+  [:seon.test.member/reach-digest {:optional true} :seon.test.member/reach-digest]]}
