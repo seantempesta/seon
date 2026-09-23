@@ -76,7 +76,7 @@ catch also `offer!`s a bare `Throwable` and drops the offer's answer
 `docs/seon/issues/the-wake-router-queries-on-the-writer-thread-and-drops-its-own-fault.md`.
 
 A refused transaction does not wake: dispatch is gated on `(map? tx-report)`
-(`writer.cljc:400`). Reasserting an identical value produces no datom, so
+(`writer.cljc:403`). Reasserting an identical value produces no datom, so
 attribute-driven routing produces no wake. Consumers must not depend on a
 "write attempt" that the database does not report.
 

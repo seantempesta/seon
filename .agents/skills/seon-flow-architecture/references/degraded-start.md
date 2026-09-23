@@ -9,8 +9,8 @@ tags: [reference, flow]
 Use this runbook when a scratch cluster fails during startup, especially while
 other lanes are changing the shared tree. Do not restart, stop or mutate
 another lane's cluster to obtain a cleaner signal; lanes never stop, refork or
-reset `default` (`AGENTS.md:411-412`). A boot longer than ten seconds needs the
-owner's explicit authorization (`AGENTS.md:89-90`).
+reset `default` (`AGENTS.md:438`). A boot longer than ten seconds needs the
+owner's explicit authorization (`AGENTS.md:113-114`).
 
 ## 1. Separate launch failure from degraded boot
 
@@ -30,7 +30,7 @@ in that JVM is reachable, ask the owning function for the same answer:
  (get @seon.operator.runtime/running-instances "scratch-name"))
 ```
 
-`readiness` (`src/seon/cluster/boot.clj:343-358`) returns the advertisement,
+`readiness` (`src/seon/cluster/boot.clj:441-456`) returns the advertisement,
 `:seon.boot/missing-layers` (each required layer absent from the instance), the
 agent count, `seon.problems/problems` and `:seon.boot/ready-ms`. The registry
 atom is `resources/seon/operator/runtime.clj:11`.
@@ -94,7 +94,7 @@ remains.
 `bin/seon start <name>` does **not** promise a new JVM. When the operator
 finds any live process under its root, it asks that JVM to start the cluster;
 only a root with no live process launches `clojure -M:dev:test` in a new
-process (`request!`, `script/seon/operator.clj:1281-1285`; `launch-child!`,
+process (`request!`, `script/seon/operator.clj:1312-1318`; `launch-child!`,
 `:501-568`, called by `launch!` `:570`).
 
 A long-lived JVM can therefore still hold old Var roots even when the checkout
