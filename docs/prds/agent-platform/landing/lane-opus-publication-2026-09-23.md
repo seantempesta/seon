@@ -1,6 +1,6 @@
 ---
 type: landing
-status: three of four fixes landed; fix 3 stopped on a held path (fn.clj)
+status: fixes 1, 3, 4 and the source-directory refusal landed; fix 2 (monitor) reverted by ruling
 created: 2026-09-23
 tags: [agent-platform, lane-b1, publication, adoption, save-gate]
 ---
@@ -116,3 +116,74 @@ two test requests with other lanes working; consistent with the open registry-re
 - Earlier default (pid 28202) had every MCP value and every operator diagnostic refused
   ("seon.print/fit refused node ... expected must be a print node"); it cleared with the restart.
 - No RESET NEEDED.
+
+## Follow-up (orchestrator rulings after the 08:40Z nuke; pid 55322 from the checkout)
+
+| commit | change | src net |
+|---|---|---|
+| `e1dfa0b74` | revert `986cdc521` (monitor): README 1.3f keeps Datahike's expected head as the only fence | -9 |
+| `ca9587817` | a `--changed` path outside `seon.fs/source-directory` refuses naming both; a requested input neither on disk nor published refuses | +9 |
+| `68f769a4a` | fix 3, option A: `adopt-rows!` hands the record to its last row write; `seon.fn/index!` appends a request's `:seon.db/tx-data` to its one transaction; `seon.issue/adopt!` gains a tx-data arity | +16 |
+
+Source-directory refusal: the archive case (relative paths from `bin/seon`) is closed only
+when the operator sends canonical paths. NEEDED in `script/seon/operator.clj:1371` (not this
+lane's path): `(mapv #(.getCanonicalPath (io/file %)) (next args))`, as `bin/test-check:65`
+already does. Until then a relative path resolves inside the JVM's directory and still passes.
+
+Fix 3 proof: default's adoption of `cluster.clj fn.clj issue.clj adoption_record_test.clj`
+wrote tx 536871078 carrying the record and 354 row datoms. The first attempt failed: the
+adopter's own `adopt-rows!` Var was replaced by the reload mid-adoption (old caller, new
+arity, "argument count of 4") and wrote nothing. A self-adoption hazard of reload-before-write,
+visible only when the adoption code's own signature changes. The retry converged in 1.64 s.
+`:seon.db/tx-data` (declared `:seon.store/transaction-data`) is the request member, so no new
+schema key; `:seon.fn/index-request` in `seon.fn.edn` does not list it (open map) — declaring
+it there belongs to that resource's holder.
+
+Tests: run `c617763e7516` (serialize ns, 2 tests, 4 pass, 2.6 s); run `95473e0e89ba`
+(`adoption-record-test`, `save-gate-test`, `publication-serialize-test`, include-long):
+5 executed, 1 reused, 37 pass, 0 fail, 23.5 s. Contracts of cluster.clj, fn.clj, issue.clj
+compile against the packaged projection: 0 refusals, 298 ms.
+
+Changed test symbols in `:seon.test/changed` select themselves: `selection-seeds` resolves a
+test symbol (`test.clj:520`), `requested-reached` seeds `gate-sets` with it (`test.clj:702-705`),
+and the reverse walk puts every seed in `seen` (`fn.clj:1535-1548`), so `tests ∩ seen`
+(`fn.clj:1550`) contains it. Probe: a test seed returned exactly itself (1 of 1); the gate
+regression's replacement test ran only through `:seon.test/changed`.
+
+### Why a `--changed` adoption costs seconds (measured, not fixed)
+
+`full-source-refresh!` is the one publication function for every request, not a whole-tree
+path. Progress timestamps (`tmp/opus-publication-phases.clj`, `*source-progress!*` bound):
+
+| request | total | analysis (capture + clj-kondo) | program rows (contract rows + reconcile tx) | adoption |
+|---|---|---|---|---|
+| 4 paths, comment line each (`source.clj issue.clj fn.clj` + a test) | 2,888 / 2,895 ms | 1,280 ms | 1,044 ms (reconcile tx 565 ms) | 231 ms |
+| `cluster.clj`, comment line | 3,573 ms | 1,425 ms | 1,000 ms | 694 ms (concurrent root turn) |
+
+Triggers of the larger runs: (a) caller lint. `seon.fn/caller-files` (`fn.clj:2340-2380`) takes
+EVERY `:seon.fn/sym` in the transaction report, so a body or docstring edit of a widely called
+function re-lints all its direct caller files. B1 step 9 wants only signature/contract/binding
+datoms (a docstring edit ⇒ empty). The 9.95 s `cluster.clj` adoption spent 4.2 s in
+`analyzed-artifacts` for that reason. Cost ∝ callee fan-out of every changed row, not of
+changed signatures. (b) clj-kondo analysis of each changed file whole: ~1.3 s for a 3,700-line
+file. Cost ∝ file size. (c) `with-declarations` ×18–27 k per request inside row derivation.
+No resource edit or dirty dependent was involved in these runs. A dirty dependent now refuses
+before reload (`1f114bdec`).
+
+Smaller design for the losing publication: the loser's analysis depends only on its captured
+bytes, not on the head. On the `:stale-branch-head` refusal from `source/publish!`,
+`full-source-refresh!` can re-run `publish!` once with the SAME analyzed rows against the new
+head (new expected commit, new previous database; `reconcile-tx-in` already diffs inside the
+writer). It re-analyzes nothing unless the new head changed one of its own paths' stored
+digests. Then the loser costs its own declarations' transaction.
+
+Check-then-reload window: `verify-development-sources!` reads the bytes, then
+`require :reload` (`cluster.clj` `load-development-definitions!`) reads the disk again. What
+closes it is to load the bytes that were checked: read each reloaded file once, compare that
+byte array's digest with the published digest, and load it with
+`clojure.lang.Compiler/load(Reader, sourcePath, sourceName)`
+(`reference-code/clojure/src/jvm/clojure/lang/Compiler.java:8194`, pin `b18d3adc`; `load-reader`
+at `core.clj:4105`). That replaces `require :reload` for the adoption set and needs no
+candidate branch. 1.4c's candidate branch closes it for rows, not for loaded Vars.
+
+Heap: old gen 1,648 MB on pid 55322 after these runs.
