@@ -609,9 +609,8 @@
         :seon.error/offending request
         :seon.issue/unresolved-detector detector
         :seon.error/expected "a resolving detector Var"}))
-        subjects (if-let [root (:seon.fn.file/relative-root request)]
-                   (detect database {:seon.fn.file/relative-root root})
-                   (detect database))
+        scope (select-keys request [:seon.fn.file/relative-root :seon.fn/sym])
+        subjects (if (seq scope) (detect database scope) (detect database))
         _ (when (and (map? subjects) (:seon.error/at subjects)
            (:seon.error/layer subjects) (:seon.error/operation subjects)) ; debt: database and detector reads still declare generic seon.db/error-result.
 
@@ -629,54 +628,59 @@
                  :namespaces (into {} (db/q '[:find ?name ?e :where [?e :seon.ns/name ?name]] database))}]
     (mapv #(subject-row database context %) subjects)))
 
+(defn generate-subject-call
+  "Write one detector finding against the issue the writer holds now. A new
+  subject opens; a held one takes the generator's facts, prose only when it
+  holds none; a `:resolved` finding resolves a held issue and nothing else."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [:seon.issue/id :seon.issue/id] [:seon.issue/status :seon.issue/status]]]
+                  :seon.db/tx-data]}
+  [database row]
+  (let [held (db/pull database '[*] [:seon.issue/id (:seon.issue/id row)])]
+    (cond
+      (= :resolved (:seon.issue/status row))
+      (if held
+        (let [desired (cond-> row (not (:seon.issue/resolved-tx held))
+                        (assoc :seon.issue/resolved-tx "datomic.tx"))]
+          (replacement-tx held desired (set (keys desired))))
+        [])
+      ;; The generator owns exactly what it decides plus the resolution fact,
+      ;; so a worker's tests, agent and edited prose are never touched by a run.
+      held (let [desired (apply dissoc row (filter #(contains? held %) generated-prose))]
+             (replacement-tx held desired (conj (set (keys desired)) :seon.issue/resolved-tx)))
+      :else [(assoc row :seon.issue/opened (java.util.Date.))])))
+
 (defn generate
-  "Derive issue facts for one detector's current subjects.
+  "Derive one detector's findings once, outside the writer, as one
+  `generate-subject-call` per finding that changes the database.
   The detector is an ordinary read resolved from its program entity; its
   subjects each carry one installed identity attribute, which with the detector
-  is the issue identity. Status, severity, the detector and the subject ref are
-  decided every run; the prose only when the issue holds none. A subject the
-  detector no longer yields is resolved, and one it yields again is reopened —
-  the entity and its identity survive both."
+  is the issue identity. A subject the detector no longer yields is resolved,
+  and one it yields again is reopened — the entity and its identity survive both."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/detector :seon.fn/sym]
                         [:seon.fn.file/relative-root {:optional true} :seon.fn.file/relative-root]
                         [:seon.issue/severity :seon.issue/severity]]]
                   :seon.db/tx-data]}
   [database request]
-  (let [detector (:seon.issue/detector request)
-        program (:db/id (db/pull database [:db/id] [:seon.fn/sym detector]))
+  (let [program (:db/id (db/pull database [:db/id] [:seon.fn/sym (:seon.issue/detector request)]))
         rows (detector-rows database request)
         yielded (into #{} (map :seon.issue/id) rows)
-        stored (into {}
-                     (map (fn [entity]
-                            (let [row (db/pull database '[*] entity)] [(:seon.issue/id row) row])))
-                     (if-let [root (:seon.fn.file/relative-root request)]
-                       (db/q '[:find [?e ...] :in $ ?detector ?root :where
-                               [?e :seon.issue/detector ?detector]
-                               [?e :seon.issue/functions ?function]
-                               [?function :seon.fn/file ?file]
-                               [?file :seon.fn.file/relative-root ?root]] database program root)
-                       (db/q '[:find [?e ...] :in $ ?detector :where [?e :seon.issue/detector ?detector]]
-                             database program)))]
-    (into (vec (mapcat
-                (fn [row]
-                  (if-let [held (get stored (:seon.issue/id row))]
-                    (let [desired (apply dissoc row (filter #(contains? held %) generated-prose))]
-                      ;; The generator owns exactly what it decides plus the
-                      ;; resolution fact, so a worker's tests, agent and edited
-                      ;; prose are never touched by a run.
-                      (replacement-tx held desired
-                                      (conj (set (keys desired)) :seon.issue/resolved-tx)))
-                    [(assoc row :seon.issue/opened (java.util.Date.))]))
-                rows))
-          (mapcat (fn [held]
-                    (when-not (contains? yielded (:seon.issue/id held))
-                      (let [desired (cond-> {:seon.issue/id (:seon.issue/id held)
-                                             :seon.issue/status :resolved}
-                                      (not (:seon.issue/resolved-tx held))
-                                      (assoc :seon.issue/resolved-tx "datomic.tx"))]
-                        (replacement-tx held desired (set (keys desired))))))
-                  (vals stored)))))
+        stored (if-let [root (:seon.fn.file/relative-root request)]
+                 (db/q '[:find [?id ...] :in $ ?detector ?root :where
+                         [?e :seon.issue/detector ?detector] [?e :seon.issue/id ?id]
+                         [?e :seon.issue/functions ?function]
+                         [?function :seon.fn/file ?file]
+                         [?file :seon.fn.file/relative-root ?root]] database program root)
+                 (db/q '[:find [?id ...] :in $ ?detector :where
+                         [?e :seon.issue/detector ?detector] [?e :seon.issue/id ?id]]
+                       database program))]
+    (into []
+          (comp (filter #(seq (generate-subject-call database %)))
+                (map (fn [row] [:db.fn/call #'generate-subject-call row])))
+          (concat rows
+                  (for [issue-id (sort stored) :when (not (contains? yielded issue-id))]
+                    {:seon.issue/id issue-id :seon.issue/status :resolved})))))
 
 (defn- generated-report [database request]
   (let [program (:db/id (db/pull database [:db/id] [:seon.fn/sym (:seon.issue/detector request)]))
@@ -699,14 +703,19 @@
   [{connection :seon.db/connection :as call}]
   (let [request (dissoc call :seon.db/connection)
         database (db/db connection)
+        ;; A declared issue refusal is the caller's answer; any other failure
+        ;; re-surfaces whole.
         delta (try (generate database request)
-                   (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+                   (catch clojure.lang.ExceptionInfo error
+                     (if (= :seon.issue/request (:seon.error/layer (ex-data error)))
+                       (ex-data error)
+                       (throw error))))]
     (cond
       (and (map? delta) (:seon.error/at delta)
            (:seon.error/layer delta) (:seon.error/operation delta)) ; debt: database and detector reads still declare generic seon.db/error-result.
  delta
       (empty? delta) (assoc (generated-report database request) :seon.issue/forms 0)
-      :else (let [report (db/transact! connection [[:db.fn/call #'generate request]])]
+      :else (let [report (db/transact! connection delta)]
               (if (and (map? report) (:seon.error/at report)
            (:seon.error/layer report) (:seon.error/operation report)) ; debt: database and detector reads still declare generic seon.db/error-result.
 
@@ -997,7 +1006,9 @@
   [database reference]
   (let [row (db/pull database
                      '[:db/id :seon.issue/id :seon.issue/tests :seon.issue/severity
-                       {:seon.issue/detector [:seon.fn/sym]}] reference)]
+                       {:seon.issue/detector [:seon.fn/sym]} {:seon.issue/functions [:seon.fn/sym]}]
+                     reference)
+        functions (:seon.issue/functions row)]
     (cond
       (seq (:seon.issue/tests row))
       (let [result (db/q tests-done-query database (:db/id row))]
@@ -1010,8 +1021,11 @@
       (get-in row [:seon.issue/detector :seon.fn/sym])
       (not-any? #(= (:seon.issue/id row) (:seon.issue/id %))
                 (detector-rows database
-                               {:seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
-                                :seon.issue/severity (:seon.issue/severity row)}))
+                               (cond-> {:seon.issue/detector (get-in row [:seon.issue/detector :seon.fn/sym])
+                                        :seon.issue/severity (:seon.issue/severity row)}
+                                 ;; One subject: the detector checks it alone.
+                                 (= 1 (count functions))
+                                 (assoc :seon.fn/sym (:seon.fn/sym (first functions))))))
 
       :else false)))
 
@@ -1251,7 +1265,7 @@
       (status {:seon.db/db (:db-after report) :seon.issue/id (:seon.issue/id request)}))))
 
 (defn add-tx
-  "Author a new issue inside the writer; existing identities refuse."
+  "Author a new issue inside the writer under an identity minted once."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:map [:seon.issue/title :seon.issue/title]
                         [:seon.issue/problem :seon.issue/problem]
@@ -1261,33 +1275,23 @@
                         [:seon.agent/id :seon.agent/id]]]
                   :seon.db/tx-data]}
   [database request]
-  (let [subject (sort-by pr-str (:seon.issue/functions request))
-        issue-id (id/id [(:seon.issue/title request) subject])]
-    (when (db/pull database [:seon.issue/id] [:seon.issue/id issue-id])
-      (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/add-tx
-        :seon.error/message "Issue operation requires a new title and subject identity."
-        :seon.error/offending request
-        :seon.issue/existing-issue-id issue-id
-        :seon.error/expected "a new title and subject identity"}))
-    (when-not (db/pull database [:seon.agent/id] [:seon.agent/id (:seon.agent/id request)])
-      (refuse! {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/add-tx
-        :seon.error/message "Issue operation requires an existing author agent."
-        :seon.error/offending request
-        :seon.issue/missing-author-id (:seon.agent/id request)
-        :seon.error/expected "an existing author agent"}))
-    (require-test-refs! database (:seon.issue/tests request))
-    [(assoc (select-keys request [:seon.issue/title :seon.issue/problem :seon.issue/severity
-                                 :seon.issue/functions :seon.issue/tests])
-            :seon.issue/id issue-id :seon.issue/status :open
-            :seon.issue/created-by [:seon.agent/id (:seon.agent/id request)]
-            :seon.issue/opened (java.util.Date.))]))
+  (when-not (db/pull database [:seon.agent/id] [:seon.agent/id (:seon.agent/id request)])
+    (refuse! {:seon.error/at (java.util.Date.)
+      :seon.error/layer :seon.issue/request
+      :seon.error/operation 'seon.issue/add-tx
+      :seon.error/message "Issue operation requires an existing author agent."
+      :seon.error/offending request
+      :seon.issue/missing-author-id (:seon.agent/id request)
+      :seon.error/expected "an existing author agent"}))
+  (require-test-refs! database (:seon.issue/tests request))
+  [(assoc (select-keys request [:seon.issue/title :seon.issue/problem :seon.issue/severity
+                               :seon.issue/functions :seon.issue/tests])
+          :db/id "authored" :seon.issue/id (id/id) :seon.issue/status :open
+          :seon.issue/created-by [:seon.agent/id (:seon.agent/id request)]
+          :seon.issue/opened (java.util.Date.))])
 
 (defn add!
-  "Author an issue using title and function refs as its stable identity."
+  "Author an issue; the writer mints its identity and the report returns it."
   {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                              [:seon.agent/id :seon.agent/id]
                              [:seon.issue/title :seon.issue/title]
@@ -1295,14 +1299,16 @@
                              [:seon.issue/severity :seon.issue/severity]
                              [:seon.issue/functions {:optional true} :seon.issue/functions]
                              [:seon.issue/tests {:optional true} :seon.issue/tests]]]
-                  [:or :map :seon.db/error-result :seon.issue/already-exists-error :seon.issue/no-author-error :seon.issue/not-a-test-error :seon.issue/not-found-error]]}
+                  [:or :map :seon.db/error-result :seon.issue/no-author-error :seon.issue/not-a-test-error :seon.issue/not-found-error]]}
   [{connection :seon.db/connection :as request}]
   (let [report (db/transact! connection [[:db.fn/call #'add-tx (dissoc request :seon.db/connection)]])]
     (if (and (map? report) (:seon.error/at report)
            (:seon.error/layer report) (:seon.error/operation report)) ; debt: database and detector reads still declare generic seon.db/error-result.
  report
-      (status {:seon.db/db (:db-after report)
-               :seon.issue/id (id/id [(:seon.issue/title request) (sort-by pr-str (:seon.issue/functions request))])}))))
+      (let [database (:db-after report)]
+        (status {:seon.db/db database
+                 :seon.issue/id (:seon.issue/id (db/pull database [:seon.issue/id]
+                                                         (get (:tempids report) "authored")))})))))
 
 (defn guard-call
   "Validate an additive issue-test request inside the serial writer."

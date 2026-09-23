@@ -321,8 +321,12 @@
                          :seon.issue/problem "Record creator authority."
                          :seon.issue/severity :cleanup :seon.issue/tests #{a}
                          :seon.agent/id "retention-creator"}
-                authored-id (seon.id/id ["Authored retention" ()])]
-            (is (:db-after (db/transact! connection [[:db.fn/call #'seon.issue/add-tx request]])))
+                report (db/transact! connection [[:db.fn/call #'seon.issue/add-tx request]])
+                ;; The writer mints the identity once; the title never derives it.
+                authored-id (:seon.issue/id (db/pull (:db-after report) [:seon.issue/id]
+                                                     (get (:tempids report) "authored")))]
+            (is (:db-after report) (pr-str report))
+            (is (string? authored-id))
             (is (= "retention-creator"
                    (get-in (db/pull (db/db connection)
                              '[{:seon.issue/created-by [:seon.agent/id]}]
