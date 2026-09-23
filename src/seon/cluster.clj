@@ -2565,6 +2565,11 @@
         changed-identities (adoption-identities program-identities)
         deleted-identities (filterv #(empty? (db/pull published-database '[*] %)) changed-identities)
         namespaces (development-namespaces previous-database published-database changed-identities)]
+    ;; `require :reload` reads the disk, so every namespace it will reload must
+    ;; hold its published bytes FIRST: another lane's unpublished edit to a
+    ;; dependent never enters this JVM. The check after reload catches an
+    ;; edit that lands during it.
+    (verify-development-sources! published-database (fs/source-directory) namespaces)
     (report-source-progress! "development loaded definitions")
     ;; Clojure reload leaves removed interns behind. Remove only definitions
     ;; whose identity is absent from the published database.
