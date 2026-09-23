@@ -1671,3 +1671,129 @@
        (println "retirement refusal" {:elapsed-ms elapsed-ms
                                       :forms (count forms)
                                       :contracts (count contracts)})))))
+
+(defn- comparable-projection
+  "Everything a projection answers, with compiled schemas as their forms.
+
+  The registry, compile options and compiled-cache holder are runtime objects
+  whose identity differs per construction; their content is the form of every
+  declaration they compile."
+  [projection]
+  (let [registry (:seon.schema.projection/registry projection)]
+    (-> projection
+        (dissoc :seon.schema.projection/registry
+                :seon.schema.projection/compile-options
+                :seon.schema.projection/compiled)
+        (assoc ::compiled-forms
+               (into {}
+                     (map (fn [member] [member (m/form (mr/schema registry member))]))
+                     (concat (keys (:seon.schema.projection/forms projection))
+                             (keys (:seon.schema.projection/function-contracts projection))))))))
+
+(deftest an-incremental-projection-equals-its-full-build
+  (test-support/with-database
+   (fn [connection]
+     (let [projection (schema/projection-from-database (seon.db/db connection))
+           forms (:seon.schema.projection/forms projection)
+           contracts (:seon.schema.projection/function-contracts projection)
+           options (#'schema/population-options projection)
+           outcome (fn [thunk]
+                     (let [started (System/nanoTime)
+                           result (try {:projection (thunk)}
+                                       (catch clojure.lang.ExceptionInfo failure
+                                         {:refusal (select-keys (ex-data failure)
+                                                                [:seon.error/operation
+                                                                 :seon.error/member
+                                                                 :seon.schema/error])
+                                          :message (ex-message failure)}))]
+                       (assoc result :ms (/ (- (System/nanoTime) started) 1e6))))
+           compare-derivations
+           (fn [label base target-forms target-contracts target-options & [built]]
+             (let [full (if built
+                          {:projection built :ms 0}
+                          (outcome #(schema/build-projection
+                                     target-forms target-contracts target-options)))
+                   derived (outcome #(schema/build-projection
+                                      target-forms target-contracts
+                                      (assoc target-options :seon.schema/projection base)))]
+               (testing label
+                 (if (:projection full)
+                   (is (= (comparable-projection (:projection full))
+                          (some-> (:projection derived) comparable-projection))
+                       "the derivation equals the whole build")
+                   (is (= (:message full) (:message derived))
+                       "the derivation refuses as the whole build refuses")))
+               {:label label :full-ms (:ms full) :derived-ms (:ms derived)
+                :projection (:projection derived)}))
+           reverse-edges (:seon.schema.projection/reverse-schema-dependencies projection)
+           function-edges (:seon.schema.projection/reverse-function-dependencies projection)
+           schema-keys (vec (sort (filter qualified-keyword? (keys forms))))
+           leaves (filterv #(and (empty? (get reverse-edges %)) (empty? (get function-edges %)))
+                           schema-keys)
+           referenced (filterv #(seq (get reverse-edges %)) schema-keys)
+           function-symbols (vec (sort (keys contracts)))
+           random (java.util.Random. 20260923)
+           pick (fn [members] (nth members (.nextInt random (count members))))
+           with-property (fn [form]
+                           (if (and (vector? form) (keyword? (first form)))
+                             (if (map? (second form))
+                               (update form 1 assoc ::probe true)
+                               (into [(first form) {::probe true}] (rest form)))
+                             [:and {::probe true} form]))
+           leaf (pick leaves)
+           replaced (pick referenced)
+           function-symbol (pick function-symbols)]
+       (is (seq leaves) "the packaged population has leaf declarations")
+       (is (seq referenced) "the packaged population has referenced declarations")
+       (is (identical? projection
+                       (schema/build-projection
+                        forms contracts (assoc options :seon.schema/projection projection)))
+           "an unchanged population is its own derivation")
+       (let [removed (compare-derivations
+                      [:removed-declaration leaf] projection
+                      (dissoc forms leaf) contracts
+                      (update options :seon.schema/schema-admissions dissoc leaf))
+             timings
+             [removed
+              ;; Back from the removal: the whole build is the loaded projection.
+              (compare-derivations
+               [:new-declaration leaf] (:projection removed) forms contracts options
+               (dissoc projection :seon.schema.projection/definition-strings))
+              (compare-derivations
+               [:replaced-declaration replaced
+                (count (schema/dependent-schema-keys projection #{replaced}))]
+               projection (update forms replaced with-property) contracts options)
+              (compare-derivations
+               [:replaced-contract function-symbol] projection
+               forms (update contracts function-symbol with-property) options)
+              (compare-derivations
+               [:agent-readmission replaced] projection forms contracts
+               (assoc-in options [:seon.schema/schema-admissions replaced]
+                         {:seon.schema.admission/source :agent}))
+              (compare-derivations
+               [:undeclared-reference] projection
+               (assoc forms ::undeclared-referrer [:vector ::never-declared])
+               contracts options)
+              (compare-derivations
+               [:cycle replaced] projection
+               (assoc forms replaced
+                      [:and (first (sort (get reverse-edges replaced)))
+                       (get forms replaced)])
+               contracts options)]]
+         (println "incremental projection" (mapv #(dissoc % :projection) timings)))
+       (testing "a committed declaration derives from the prior projection"
+         (d/transact
+          connection
+          [{:seon.schema/key ::incremental-declaration
+            :seon.schema/form (pr-str [:map [:seon.agent/id :seon.agent/id]])
+            :seon.schema.admission/source :core}])
+         (let [database (seon.db/db connection)
+               started (System/nanoTime)
+               derived (schema/load-projection database projection)
+               derived-ms (/ (- (System/nanoTime) started) 1e6)
+               started (System/nanoTime)
+               full (schema/load-projection database)
+               full-ms (/ (- (System/nanoTime) started) 1e6)]
+           (is (= (comparable-projection full) (comparable-projection derived)))
+           (is (contains? (:seon.schema.projection/forms derived) ::incremental-declaration))
+           (println "incremental load-projection" {:derived-ms derived-ms :full-ms full-ms})))))))
