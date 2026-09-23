@@ -52,6 +52,12 @@ This draft synthesizes eight research notes (evidence at the end) and the owner'
    no reply to a user's question, wrong syntax, a failing contract — the refusal explains the
    correct form as data and the agent is prompted again, bounded by the task's budget
    (exhaustion is loud and resumable).
+   **Escape hatch (owner):** when an agent believes the task itself is wrong, or that it finished
+   another, more correct way, it asks root. That request is itself a task for root
+   (`seon.task/root-decision`, subject = the original task and the agent's branch, with the
+   agent's argument as a message). Root may revise the task (its `delivers`/`done-when`, the only
+   way frozen tests change, with the reason recorded), merge the branch directly, or send it back.
+   Root's ordinary end-of-task review is the same task type.
    Mistakes are allowed; context grows by demonstrated need, because each refusal pulls in the
    docs and must-reads of what was refused.
 7. **Standard Clojure first.** `defn` + docstring + metadata, `deftest`, Malli schemas in EDN.
