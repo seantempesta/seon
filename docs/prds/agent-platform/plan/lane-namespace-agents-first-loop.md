@@ -309,7 +309,7 @@ No namespace GET or create-owner POST is necessary to watch these facts.
 
 - **File write-back:** accepted rows persist on the ordinary cluster's branch and
   are interpreted there. Files/default and Git are unchanged. This demonstrates a
-  database program fix, not export/reindex survival; D1 §2d remains open.
+  database program fix, not export/reindex survival; [D1 file export and recovery](lane-d1-isolation-merge-writeback.md#7-stage-6--file-export-and-recovery) remains open.
 - **Conflicts as root tasks:** report the existing three-way conflict identities
   and retain C/S. Owner repairs through the same path; no auto-resolution or
   `seon.task` adapter. First success uses one non-conflicting subject.

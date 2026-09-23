@@ -114,7 +114,7 @@ request (C6). `P` absent means pathless discovery (step 2b).
 
 | # | Step | Data in → out | Carried | Seam (file:line) | Proportional to |
 |---|---|---|---|---|---|
-| 1 | serialize | branch acceptance uses the writer’s expected-head guard; exclusive JVM convergence holds the existing evaluation/adoption boundary through load → arm → record, excluding conflicting reloads and dependent evaluations (D1 §2e). Until that exclusion is proven, one orchestrator integration caller adopts; lanes never self-adopt. A failed reload keeps affected execution unavailable until bytes, callable behavior and arming converge | store / existing evaluation-adoption boundary | `versioning.cljc:323`; `cluster.clj:2451`; §2a′ | touched declarations and required dependents |
+| 1 | serialize | branch acceptance uses the writer’s expected-head guard; exclusive JVM convergence holds the existing evaluation/adoption boundary through load → arm → record, excluding conflicting reloads and dependent evaluations ([D1 JVM convergence](lane-d1-isolation-merge-writeback.md#8-stage-7--jvm-convergence)). Until that exclusion is proven, one orchestrator integration caller adopts; lanes never self-adopt. A failed reload keeps affected execution unavailable until bytes, callable behavior and arming converge | store / existing evaluation-adoption boundary | `versioning.cljc:323`; `cluster.clj:2451`; §2a′ | touched declarations and required dependents |
 | 2a | capture (explicit `P`) | read each path's bytes ONCE → `{path {bytes digest}}`; directories are gitlinks → pinned commit | value | `source.clj:109` `path-digests` (keeps its directory case) | \|P\| |
 | 2b | discover (no `P`) | declared input roots walked → current path set (`input-roots`, `input-paths` moved into `source.clj`) vs stored `:seon.fn.file/relative-path` rows: added, removed, differing digest | value | `test/cache.clj:45`, `:154` (moved); `source.clj:125` `stored-path-digests` | \|inputs\| ≈ 791 |
 | 3 | compare | seek each captured path's stored digest on the published commit VALUE; `changed` = differing/absent; `removed` = stored, not on disk. Empty ⇒ skip to step 11 with the current commit id | value | `source.clj:125`, `:139` `current`; `versioning.cljc:469` `commit-as-db` | \|P\| pulls |
@@ -176,7 +176,7 @@ the reload leaves loaded code no row describes. Steps 13–17 become six parts, 
 | capture | read each named path's bytes once (`source/capture-paths`, `source.clj:104`) | \|P\| bytes | a missing or outside path refuses by name (`ca9587817`) |
 | publish | rows for exactly those bytes on `current-src` (steps 2–11, unchanged) | changed files | stale head or refused rows leave `current-src` unmoved |
 | adopt rows | ONE transaction on the cluster branch: `head-guard-tx`, schema declarations, `reconcile-tx-in`, `issue/adopt-tx` — schema operations first, since a transaction applies schema datoms before later operations (`D/db/transaction.cljc:466`); `seon.fn/index!`'s `:seon.db/tx-data` (`fn.clj:3620`) moves before the reconcile operation | touched identities | refused ⇒ branch unchanged, JVM untouched |
-| load | make the loaded Vars equal the adopted rows with ordinary `require :reload` under the existing evaluation/adoption boundary (D1 §2e) | changed declarations (+ macro/const referrers by `:seon.fn/references`; 17 type/protocol rows keep the namespace closure; `defmulti` is `ns-unmap`ped first as for deleted symbols, `cluster.clj:2598-2605`) | a compile failure is a core fault; record R is not health; affected execution stays unavailable until bytes, callable behavior and arming converge |
+| load | make the loaded Vars equal the adopted rows with ordinary `require :reload` under the existing evaluation/adoption boundary ([D1 JVM convergence](lane-d1-isolation-merge-writeback.md#8-stage-7--jvm-convergence)) | changed declarations (+ macro/const referrers by `:seon.fn/references`; 17 type/protocol rows keep the namespace closure; `defmulti` is `ns-unmap`ped first as for deleted symbols, `cluster.clj:2598-2605`) | a compile failure is a core fault; record R is not health; affected execution stays unavailable until bytes, callable behavior and arming converge |
 | arm | `instrument/apply!` over the loaded Vars (step 16) | changed Vars | as load |
 | record | its own guarded transaction after load and arm: `adoption-guard-tx` (prior = R), `:seon.source/commit-id` C, `:seon.test/adoption-*` (step 17 as written) | 1 | refused ⇒ a newer convergence owns the record |
 
@@ -196,21 +196,21 @@ has none today); from zero still reads everything. The other runtime `packaged-f
 | slice | change | files | est. src | regression (wanted behaviour) |
 |---|---|---|---|---|
 | S1 | `def` leaves `compiled-into-callers` | `cluster.clj` | 0 / −1 | a private `def` edit in a namespace with dependents reloads only that namespace |
-| S3 | keep `require :reload` and digest verification; D1 §2e holds file-only destinations through integration and defers integration when a required namespace/schema dependency is dirty; branch REPL edits reach files only through accepted write-back | `cluster.clj`, existing source owner | no new loader | a dirty required dependency defers integration without loading unpublished bytes; a `defmethod`-only edit loads after controlled integration |
+| S3 | keep `require :reload` and digest verification; [D1 file export and recovery](lane-d1-isolation-merge-writeback.md#7-stage-6--file-export-and-recovery) holds file-only destinations through integration and defers integration when a required namespace/schema dependency is dirty; branch REPL edits reach files only through accepted write-back | `cluster.clj`, existing source owner | no new loader | a dirty required dependency defers integration without loading unpublished bytes; a `defmethod`-only edit loads after controlled integration |
 | S4 | rows → load → arm → record; rows in one transaction; `save-gate!` (`:2759`) converted in the slice | `cluster.clj`, `fn.clj`, `issue.clj` | +15 / −45 | an adoption changing `adopt-rows!`'s own arity succeeds the first time; a declaration that fails to compile leaves record R, rows C, one stored fault, and the next adoption converges |
-| S5 | exclusive load → arm → record through the existing evaluation/adoption boundary; interim: one orchestrator integration caller, lanes never self-adopt (D1 §2e) | `cluster.clj`, existing adoption boundary | reprice the existing seam before code if exclusion is missing | interleaved adoptions, partial reload failure and an old branch’s indirect call cannot report healthy convergence from a stale record |
+| S5 | exclusive load → arm → record through the existing evaluation/adoption boundary; interim: one orchestrator integration caller, lanes never self-adopt ([D1 JVM convergence](lane-d1-isolation-merge-writeback.md#8-stage-7--jvm-convergence)) | `cluster.clj`, existing adoption boundary | reprice the existing seam before code if exclusion is missing | interleaved adoptions, partial reload failure and an old branch’s indirect call cannot report healthy convergence from a stale record |
 | S6 | named resources only; optional `:seon.schema/file` | `fn.clj`, `cluster.clj`, `seon.schema.edn` | +20 / −5 | an unnamed dirty resource does not reach the published projection |
 
 Probe inside S3/S4 before code: the rows-ahead window (target < 100 ms for a `defn` edit);
 residue top-level forms with no row (75 `declare`, 69 `defonce`, 26 `defmethod`, 41
 `schema.edn/load!`, …) need a change signal that a comment-only edit does not trip; an
 `accrete-schema-population!` purge inside the one rows transaction on a branch of default.
-**Settled:** reload is `require :reload`; the record follows load and arm. D1 §2e
+**Settled:** reload is `require :reload`; the record follows load and arm. [D1 JVM convergence](lane-d1-isolation-merge-writeback.md#8-stage-7--jvm-convergence)
 avoids the dirty-dependent window by keeping lane changes on named branches until
 accepted write-back, holding the complete destination files and deferring integration
 when a required dependency is dirty. Database acceptance and exclusive JVM convergence
 remain separate proofs; guards alone do not establish the latter.
-Authority: owner, 2026-09-23 (`59a908e55`, “Don't create some broken loading shit”); D1 §2e (`7523dd510`) and Astra plan review #2.
+Authority: owner, 2026-09-23 (`59a908e55`, “Don't create some broken loading shit”); [D1 JVM convergence](lane-d1-isolation-merge-writeback.md#8-stage-7--jvm-convergence) (`7523dd510`) and Astra plan review #2.
 
 ### 2b. The reset's cold path
 
@@ -260,7 +260,7 @@ Line counts are estimates, not constraints. B1b §0 records guarantees kept and 
 | the hook's OWN lint (`run-clj-kondo` `:250-292` with `--cache false`, `validate-clojure-edit`/`validate-schema-edit`/`findings-feedback`/`clj-kondo-feedback` `:779-960`, `docstring-feedback` `:1046`, `run-schema-admission` `:483-537` with its child-JVM fallback) — a second analysis path in Babashka beside the JVM's | **one prospective-edit request** (deep review win 4): the hook sends `{path prospective-bytes}` to the live JVM, which lints through `analyzer/analyze` over `::sources` with the project cache, admits schema resources through A1-9's pure `admit`, and checks docstrings from program facts; the hook parses the event, sends, prints. `bin/seon-hook` ≈ 150 lines, plus `reconstruct-patched-file` `:538-760` (220) only while an `apply_patch` payload lacks the resulting file, plus the asynchronous Gemini review batch `:1166-1462` (≈ 300, unchanged, counted separately). No live JVM ⇒ the hook refuses with the exact `bin/seon start` command (**ruled 2026-09-21**; no Babashka fallback, one lint path). Proof: a syntax error refused by the JVM's findings; a `cat >` write caught by the pathless request |
 | `.claude/seon-hook.edn` `:current-source {:enabled false}` | do not restore general save-time publication. Enable only a file-only branch-targeted gate after consumer conversion, required platform proof and measured adoption cost; observe a staged named-file change and a new file through explicit acceptance, write-back and exclusive convergence. Ordinary lane edits stay on their named REPL branches; hook lint remains available |
 
-Authority for hook scope: owner, 2026-09-23 (`59a908e55`, `76deee3ff`); D1 §2e, branch edits and controlled write-back.
+Authority for hook scope: owner, 2026-09-23 (`59a908e55`, `76deee3ff`); [D1 file export and recovery](lane-d1-isolation-merge-writeback.md#7-stage-6--file-export-and-recovery), branch edits and controlled write-back.
 
 ### 2e. clj-kondo cache correctness
 
@@ -389,7 +389,7 @@ and chain (D3). The target:
 |---|---|---|
 | bridge | JSON-RPC ⇄ prepl; one connection per call is the proposal pending the README §7 transport decision (0.47–0.70 ms incl. connect); checks the answer's request id (mismatch → `:seon.dev.mcp/desync`, connection dropped); `tools/call` on a future (`stdout-lock` already serializes writes, `mcp.clj:807`); discovery = advertisement + exact `(pid, start-instant)` (`operator.clj:106-131`), no health observation per call (today ~105 ms) | `script/seon/dev/mcp.clj` (889 → ≈ 360) |
 | wire | print prepl events; a print failure is an answer, never a throw (Clojure's `io-prepl`, CLJ-2620, `server.clj:275-289`); exit check that cannot throw; no `ns-resolve` of `seon.cluster` | `resources/seon/operator/prepl.clj` |
-| evaluator | `seon.repl/host-eval`: JVM-only inspection, one form in a named namespace; branch SCI submission uses the shared durable agent entrance in D1 §2e O1, never a direct MCP evaluator; value/error rendered once with prepl `:ms` and the C1 directive over one second | `src/seon/repl.clj`; D1 §2e owns shared submission |
+| evaluator | `seon.repl/host-eval`: JVM-only inspection, one form in a named namespace; branch SCI submission uses the shared durable agent entrance in [D1 REPL entry](lane-d1-isolation-merge-writeback.md#3-stage-2--writing-code-at-the-repl) (O1a–d), never a direct MCP evaluator; value/error rendered once with prepl `:ms` and the C1 directive over one second | `src/seon/repl.clj`; [D1 REPL entry](lane-d1-isolation-merge-writeback.md#3-stage-2--writing-code-at-the-repl) owns shared submission |
 | renderer | the shown text: `seon.render.value/render-ai` under the compiled profile `(render/agent-render-profile seon.config/defaults)`; proportional to the shown window (2.1 ms for a 2×10⁵ vector that admission spends 385 ms printing to 8 MB today, 1.5 ms for `(range)`) | exists |
 
 Properties: an error answer is B3 §2a's shown text (every link's class, message and `ex-data`,
@@ -423,7 +423,7 @@ src + script + resources ≈ −830, tests ≈ −900.
 | R6 | operator and boot wire: D6, D9, bounded `operator.clj:1437` | `script/seon/operator.clj`, `boot.clj` | +15 / −5 | `bin/seon init` on a misplaced schema attribute prints the attribute message first; a reply holding a Var reads as EDN (D5) |
 | R7 | interrupt on timeout (README §7, ruled): thread named `seon.repl/<request-id>`, `.interrupt` via `Thread/getAllStackTraces`; SCI's interrupt hook in SCI mode | `repl.clj`, `mcp.clj` | +20 | a `Thread/sleep`-blocked form ends with `InterruptedException` at the bound; a CPU loop reports "interrupt requested; outcome unknown" |
 | R8 | rewrite `.agents/skills/repl/SKILL.md` MCP section, every claim `file:line` | skill | docs | — |
-| R9 | **Branch-named outside REPL**, [D1 Stages 1–3](lane-d1-isolation-merge-writeback.md#3-stage-2--writing-code-at-the-repl) O1: extend branch create/list/unlink; submit through `submit-source!` with shared configurable entry checks, automatic reaching-test results and durable run reconciliation; root diff/accept/send-back follows O3. Supersedes the evaluator row’s SCI arm: `host-eval` is JVM-only; delete non-settling SCI evaluation, no agent tool | `mcp.clj`, shared agent/run owners | O1a–d budgets in D1 | warned definitions persist; gated definitions refuse; retry reconciles one run; every call names its branch |
+| R9 | **Branch-named outside REPL**, [D1 REPL entry](lane-d1-isolation-merge-writeback.md#3-stage-2--writing-code-at-the-repl) O1: extend branch create/list/unlink; submit through `submit-source!` with shared configurable entry checks, automatic reaching-test results and durable run reconciliation; root diff/accept/send-back follows O3. Supersedes the evaluator row’s SCI arm: `host-eval` is JVM-only; delete non-settling SCI evaluation, no agent tool | `mcp.clj`, shared agent/run owners | O1a–d budgets in D1 | warned definitions persist; gated definitions refuse; retry reconciles one run; every call names its branch |
 
 Order R1 → R2 → R3 → R4/R5 → R6 → R7 → R8. Closes on landing:
 `mcp-exception-projection-is-opaque-after-the-kind-removal.md`,
@@ -434,10 +434,10 @@ Order R1 → R2 → R3 → R4/R5 → R6 → R7 → R8. Closes on landing:
 `a-missing-required-dial-kills-every-io-prepl-connection.md`. **Settled:** delete `get_value` and blob-stored MCP results; return a declared error
 value rendered through the one total bounded printer, also used by the wire/error floor.
 Interrupt on timeout; if termination is unconfirmed, report outcome unknown and retain
-execution custody. Branch submission uses D1 §2e’s durable run reconciliation, never
+execution custody. Branch submission uses [D1 REPL entry](lane-d1-isolation-merge-writeback.md#3-stage-2--writing-code-at-the-repl)’s durable run reconciliation, never
 replays source on disconnect. **Open (owner):** one transport connection per call versus
 retained sessions; neither option may discard the branch’s retained context or run identity.
-Authority: README §7, owner/orchestrator rulings of 2026-09-23; D1 §2e (`7523dd510`).
+Authority: README §7, owner/orchestrator rulings of 2026-09-23; [D1 REPL entry](lane-d1-isolation-merge-writeback.md#3-stage-2--writing-code-at-the-repl) (`7523dd510`).
 
 ## 4. REPL protocol
 
@@ -502,7 +502,7 @@ the same commit.
 | 9 | reset cold path: tempid = identity print for submitted rows, keywords inside the map, `index-tempids` deleted; the §2b attribution probe recorded FIRST | −120 | `init-zero` row and the phase table |
 | 10 | one progress argument; `:seon.config.source/phase-bounds-ms`; the nine mechanisms and the publication-phase bounds deleted; `test/runner.clj:60` converted; script re-homed and its grep rewritten | ≈ −200 | each phase fires as a typed error under a 1 ms bound |
 | 11 | [B1b — operator and boot rewrite](lane-b1b-operator-and-boot-rewrite.md): replacement client/boot/store admission, tool and surviving-maintenance caller conversion, old files and superseded tests removed in one slice; temporary tool/boot breakage permitted inside the slice | measure deletions, moves and new code separately; ~900 is not a ceiling | B1b’s eight scratch-root drills; tools restored; orchestrator restarts `default` once |
-| 12 | hook: syntax/Markdown/docstring lint; only file-only changes send a branch-targeted request under §2d / D1 §2e; queue/worker/result files deleted | ≈ −350, remeasure after narrowing | staged file change → branch proof → explicit accept → write-back → exclusive convergence; browser observed separately |
+| 12 | hook: syntax/Markdown/docstring lint; only file-only changes send a branch-targeted request under §2d / [D1 file export and recovery](lane-d1-isolation-merge-writeback.md#7-stage-6--file-export-and-recovery); queue/worker/result files deleted | ≈ −350, remeasure after narrowing | staged file change → branch proof → explicit accept → write-back → exclusive convergence; browser observed separately |
 | 13 | activate only the file-only gate after §2d’s proof; general lane save publication remains disabled | measure | one file-only hook event, no automatic default adoption |
 | 14 | `publication-base!` and the `test.cache` base callers (after B4 lands) | −49 | B4 seam |
 
@@ -538,7 +538,7 @@ selection sets after this proof; no reduction is promised from the existing coun
 
 | Candidate | Probe | Decides |
 |---|---|---|
-| ordinary `require :reload` after D1 §2e controlled write-back; retain digest verification | edit a required dependency between capture and integration | integration defers; no unpublished bytes load, no replacement loader or removal of digest checks |
+| ordinary `require :reload` after [D1 file export and recovery](lane-d1-isolation-merge-writeback.md#7-stage-6--file-export-and-recovery); retain digest verification | edit a required dependency between capture and integration | integration defers; no unpublished bytes load, no replacement loader or removal of digest checks |
 | schema declarations and rows in ONE transaction on reset (`rschema` updates as schema datoms are added, `transaction.cljc:539-615`) | transact `[attr-decl {row}]` on a scratch branch | collapses the cold path's ordered transactions |
 | the pathless request replacing the hook's bb walk | `path-digests` over 791 paths | ≤ 150 ms retires `bin/seon-hook:1688-1819` |
 | clj-kondo `:parallel` with per-file groups (fork: `group-id` per explicit file) | fidelity diff, then time | 15.4 s → ? only with equal output |
