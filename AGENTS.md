@@ -14,8 +14,8 @@ Correct a false current claim in the same commit as the change that exposed it.
 
 ## Start here
 
-Read [the agent-platform plan](docs/prds/agent-platform/plan/README.md), your implementation spec, named authorities and the
-nearest `AGENTS.md` end to end. Plans describe targets; verify current behavior.
+Read your assignment, the authorities it names and the nearest `AGENTS.md` end to
+end. Plans describe targets; verify current behavior.
 Read Git history before designing: earlier implementations are evidence, not baggage.
 Read the vendored dependency seam and its first-party caller before adding code.
 Record its pinned revision, source location, guarantee, supplied inputs,
@@ -35,31 +35,27 @@ then test the smaller algorithm. Record exact forms, values and timings.
 Edit the owner in place, verify publication/adoption or hot reload, repeat the probe.
 Name which path the evidence exercised; browser paint needs its own observation.
 
-During the refactor, [plan §6](docs/prds/agent-platform/plan/README.md#6-implementation-proof-and-recovery)
-owns verification cadence: focused installed REPL/test requests within a cut;
+Verification cadence: focused installed REPL/test requests within a cut;
 platform and affected integration once at its completion. No suite per edit or
 commit. A deleted mechanism's tests leave with it; replacement behavior tests land
-by the cut's end. The work is deep cuts in the plan's ruled order, each confirmed at
+by the cut's end. Work lands as deep cuts in the ruled order, each confirmed at
 the REPL and landed as one loadable slice; a red test is then asked three questions —
 does it test deleted machinery (delete it), a retired assumption (fix the
 expectation), or wanted behavior of a surviving seam (fix the owner) — and never
-triaged wholesale into lanes (README §6, "forest, not trees"). HEAD loads and the named REPL probe answers. Report the exact
+triaged wholesale into lanes ("forest, not trees"). HEAD loads and the named REPL probe answers. Report the exact
 verification boundary; unavailable evidence is not a pass.
 The [testing skill](.agents/skills/clojure-testing/SKILL.md) distinguishes installed
-commands and enforcement from B4 targets. Never pretend a planned API is installed.
+commands and enforcement from planned targets. Never pretend a planned API is installed.
 Gate inputs are DECLARED (`seon.test.cache/input-roots`): a documentation edit never
 publishes and never widens a gate; a tool that behaves otherwise is fixed first.
 
 Evidence, changed paths, commit ids, sizes and verification limits belong in the
-owning landing note under `docs/prds/agent-platform/landing/`. No publication-path
-slice lands without its clock row from the committed measurement script
-(`docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh`). Commit measurement
+owning landing note. No publication-path slice lands without its clock row from the
+committed publication measurement script. Commit measurement
 scripts; disposable probes live in repository `tmp/`, reusable checks in `test/`.
 Load [data-oriented-clojure](.agents/skills/data-oriented-clojure/SKILL.md) before
 Clojure design/edits; use the matching REPL, testing, datahike, data-modeling and
-flow skills for their boundaries. The orchestrator also reads
-[TRANSFER_PROMPT](docs/TRANSFER_PROMPT.md); this file and current owner rulings
-supersede its obsolete workflow claims.
+flow skills for their boundaries.
 
 ## How we work
 
@@ -80,8 +76,7 @@ again").** Every landing note reports its net src and test lines; a slice that g
 names what it deletes next or why nothing can go — the `commit-msg` hook refuses a
 src-growing commit without a `Src-growth:` trailer saying so. Before writing a mechanism, search for
 the one that already exists — in the dependency or in Seon — and delete ours in its favour.
-Owner target (2026-09-23): the whole codebase at 10,000 lines or below — "we are being really inefficient … not coding very clojure like … I actually want this down to 10k or below"; the deep shrink runs once namespace agents do, and until then oversized files and functions get shrink lanes at every check-in. Write Clojure: core functions, data transformations and library calls, not hand-built mechanisms. A lane whose job is shrinking does web research for a library that already does the work before writing any replacement. Interim plan target src ≤ 55,000 (README §5); measured 2026-09-23 against the plan baseline
-`f6216bd26`: src 90,086 → 84,928, test 98,862 → 91,854.
+Owner target (2026-09-23): the whole codebase at 10,000 lines or below — "we are being really inefficient … not coding very clojure like … I actually want this down to 10k or below"; the deep shrink runs once namespace agents do, and until then oversized files and functions get shrink lanes at every check-in. Write Clojure: core functions, data transformations and library calls, not hand-built mechanisms. A lane whose job is shrinking does web research for a library that already does the work before writing any replacement.
 
 **Algorithmic analysis and principal-engineering common sense in every design (owner,
 2026-09-23).** Every design and spec states, before code: what each operation's cost is
@@ -106,9 +101,7 @@ a writer, never threaded through a transaction as a candidate, never kept in an 
 beside the connection. Identity comes from Datahike (commit id, `:cache-context`,
 attribute revisions) or the definition digest; lineage from `versioning.cljc`; time from
 `history`/`as-of`; notification from `d/listen`; serialization from the writer. Before
-adding any of these, name the seam in `reference-code/` with `file:line`; the audit
-`docs/research/agent-platform/dependency-already-does-it-audit-2026-09-23.md` lists the
-ones already built by hand and their deletions.
+adding any of these, name the seam in `reference-code/` with `file:line`.
 
 **Seconds, not minutes.** Work longer than ten seconds requires explicit owner
 authorization, including boot and initial indexing. Investigate costs above a couple
@@ -119,7 +112,7 @@ Use the dependency's cache; do not place a second cache beside it. Measure memor
 **Everything that is not sub-second must be justified (owner, 2026-09-23: "by design most
 ops should be sub second"; "I want us to always be aware how long things are taking with
 clear instructions that everything that's not sub second must be justified").** Timings are
-always visible: the armed wrapper profiles every contracted call (C1), and every lane times
+always visible: the armed wrapper profiles every contracted call, and every lane times
 every operation it runs — boot, publication, test run, probe, reload, transaction. Any
 operation over ONE second carries a written justification beside its number: what the work
 is proportional to and why it cannot be sub-second. An unjustified one is a defect. Over ten
@@ -169,7 +162,7 @@ mechanism. Recognise them in your own next edit:
 4. **Retiring without converting.** `:seon.error/kind` left the schema with 730 live
    writers and surfaced only when a reset built a store without it. A retirement and
    every caller are one loadable slice, proven at the write: the schema writer refuses
-   a retirement while any program row still writes or references it (1.3e).
+   a retirement while any program row still writes or references it.
 
 Underneath all four: the dependency's source was not the first read. SCI keeps a live
 env, Datahike has per-attribute revisions and branch heads, konserve has GC. Before
@@ -226,7 +219,7 @@ cluster's program rows (the indexer's output) and its loaded namespaces (`requir
 output) both derive from the files on disk and are recomputed when a file changes. A
 JVM holds one set of compiled Vars, so default alone runs compiled; a branch whose
 program rows differ interprets those rows and their affected callers in its own SCI
-context and binds the compiled Var for everything else (**[TARGET]** B2 §2a). A
+context and binds the compiled Var for everything else (**[TARGET]**). A
 declaration SCI cannot interpret is **host-bound**, a computed per-declaration fact
 (**[TARGET]**); it changes only through the files and an override of it refuses by name.
 
@@ -258,7 +251,7 @@ reach the main JVM's hot path stops and reports the gap.
 land on an intermediate branch; conflicts stay there for the agent to fix, so the
 problem shrinks; the combined program is tested in a context forked from that branch;
 green reaching tests plus contracts is the gate; a named accept by root or the owner
-advances the cluster pointer (**[TARGET]** D1). Write-back to the files is the same
+advances the cluster pointer (**[TARGET]**). Write-back to the files is the same
 gate. Filesystem lanes (Codex, Claude) index into one shared candidate branch of
 default and are live agents there; Seon agents doing every update is the goal.
 
@@ -406,10 +399,10 @@ Use the [data guide](docs/seon/architecture/data-modeling-guide.md) for details.
 
 Errors are declared flat data, deduplicated by distinguishing content through the
 one identity owner. Occurrences are components. Do not add undeclared map copies.
-Shown text and live result handles have different durability; follow B3's explicit
+Shown text and live result handles have different durability; follow the explicit
 storage decision before deleting an existing durable representation.
 
-**Target, B3/D1/D2:** one `seon.task` family holds linked work facts and an optional assigned agent.
+**Target:** one `seon.task` family holds linked work facts and an optional assigned agent.
 Responsibility comes from namespace refs and is independent of routing. The task
 writer handles repeated triggers; start validates a real done condition and creates
 the agent and first turn atomically. Tests/detectors must exist and provide positive
@@ -417,7 +410,7 @@ current evidence; absence never means done. Conversations derive from messages a
 use an actual reply condition. Agents are archived, never retracted. Budget exhaustion
 is loud and resumable, with the same task and agent identity.
 
-**Target, D1:** candidate work has its own branch and SCI context. Explicit shared admission requires
+**Target:** candidate work has its own branch and SCI context. Explicit shared admission requires
 contracts, the task tests and every test reaching changed functions on the combined
 program; missing coverage refuses by name. Private experiments remain possible.
 The writer checks the tested head. Same-identity conflicts become root tasks.
@@ -536,14 +529,14 @@ that stops it. They are evergreen because they are habits of attention, not of c
    "waiting for lane X" is not a reason unless X changes the step's files or spec.
 3. **Parking a lane on a question the plan answers.** Lanes stop with three options;
    several were answered by an existing ruling. Rule: rule in the same check-in from
-   §7 and the model, with the citation; a genuinely new decision goes to the owner at
+   the standing rulings and the model, with the citation; a genuinely new decision goes to the owner at
    once with priced options; a lane never waits across a check-in.
 4. **Accepting "HEAD loads" for a schema change.** Five writers off the canonical path
    were invisible on a warm JVM and refused a from-zero boot one after another. Rule
    (owner, 2026-09-23: "a schema change should not require a from scratch boot.
    Period."): a schema change is proven INCREMENTALLY — its declaration transaction
    applied on a branch of a live store, with the writer refusing a retirement while
-   writers survive (1.3e). A schema change that cannot be adopted incrementally is a
+   writers survive. A schema change that cannot be adopted incrementally is a
    publication defect to fix, never a reason to boot from zero.
 
 Underneath all four: the coordinator's job is the big picture — dependencies, files,
