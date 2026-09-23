@@ -25,19 +25,16 @@ Launch as a harness-tracked background command, BARE (never piped, no
 redirect), one lane per shell. Confirm the launch with `status` before
 assuming it ran.
 
-## Models (from `~/.codex/models_cache.json`, 2026-09-17)
+## Models (from `~/.codex/models_cache.json`, codex-cli 0.156.1, 2026-09-23)
 
-| `LANE_MODEL` | Efforts (default) | Use for |
+| `LANE_MODEL` | Efforts (default) | Use for (owner 2026-09-23) |
 |---|---|---|
-| `gpt-6-astra` (launcher default) | low, medium, high, xhigh, max, ultra (medium) | the hardest implementation and design review; `LANE_EFFORT=high` for modeling and architecture, `low` ("astra light") for well-bounded slices |
-| `gpt-5.6-sol` | low … ultra (low) | the reliable implementation workhorse — owner 2026-09-17: at least as competent as Opus; use for ordinary implementation lanes |
-| `gpt-5.6-terra` | low … ultra (medium) | balanced everyday coding |
-| `gpt-5.6-luna` | low, medium, high, xhigh, max (medium) | fast and cheap: probes, mechanical edits, verification passes |
-| `gpt-5.5` | low … xhigh (medium) | previous generation; no reason to pick it |
+| `gpt-6-astra` (launcher default) | low … max, ultra (medium) | review, PRDs/plan docs, diagnosing problems (medium; never high for implementation) |
+| `gpt-6-sol` | low … max, ultra (medium) | implementation from a written PRD or plan doc — owner: "try out gpt 6 sol that's new"; compare against Opus lanes on clean, small, bug-free code |
+| `gpt-6-luna` | low … max (medium) | fast and cheap: probes, mechanical edits |
 
-`gpt-6-luna` does not exist ("not supported when using Codex with a ChatGPT
-account"); the cheap model is `gpt-5.6-luna`. Dials: `LANE_MODEL`,
-`LANE_EFFORT` (`bin/codex-agent:26`, `:55`).
+Only the GPT-6 versions are used (owner 2026-09-23). Dials: `LANE_MODEL`,
+`LANE_EFFORT` (`bin/codex-agent:26`, `:54-55`).
 
 ## Writing a spec
 
