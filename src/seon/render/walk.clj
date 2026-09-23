@@ -938,11 +938,9 @@
         evaluations (cond
                       (:seon.db/invalid-read agent) agent
                       (nil? agent-id)
-                      {:seon.error/at (java.util.Date.)
-                       :seon.error/layer :seon.render.walk/history
-                       :seon.error/operation 'seon.render.walk/history
-                       :seon.error/message "The history lookup does not name an agent."
-                       :seon.render/refused-member :seon.render.walk/lookup}
+                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/history 'seon.render.walk/history
+                       {:seon.error/message "The history lookup does not name an agent."
+                       :seon.render/refused-member :seon.render.walk/lookup})
                       :else
                       (if-let [selector (:seon.db/pull-selector request)]
                         (evaluation/of-agent database agent-id selector)
