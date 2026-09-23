@@ -20,6 +20,8 @@
             [seon.fs :as fs]
             [seon.operator.runtime :refer [running-instances]]
             [seon.problems :as problems]
+            [seon.render :as render]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]))
 
@@ -278,12 +280,21 @@
   ([message offending cause throwable]
    ;; The outermost link's ex-data is usually the evidence itself; it is
    ;; carried once, as `:seon.error/offending`, never again inside the chain.
-   (update (refusal/diagnostic
-            (assoc (diagnostic message offending cause) :seon.error/throwable throwable))
-           :seon.error/chain
-           (fn [links]
-             (mapv #(if (= offending (:seon.error/data %)) (dissoc % :seon.error/data) %)
-                   links)))))
+   ;; This reply crosses the prepl, a wire: every carried value is shown text,
+   ;; rendered once by the value renderer under the AI profile, never a live
+   ;; handle printed whole.
+   (let [shown #(render.value/render-ai
+                 {:seon.render/value %
+                  :seon.render/profile (render/agent-render-profile config/defaults)
+                  :seon.render.call/id [:seon.error/offending]})]
+     (-> (refusal/diagnostic
+          (assoc (diagnostic message (shown offending) cause) :seon.error/throwable throwable))
+         (update :seon.error/chain
+                 (fn [links]
+                   (mapv #(cond-> (dissoc % :seon.error/data)
+                            (and (contains? % :seon.error/data) (not= offending (:seon.error/data %)))
+                            (assoc :seon.error/shown (shown (:seon.error/data %))))
+                         links)))))))
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :string :map] :nil]}
