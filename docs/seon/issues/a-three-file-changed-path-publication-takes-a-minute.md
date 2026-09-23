@@ -24,3 +24,9 @@ interval has not been split up. `issue-indexing-at-publication-costs-13-seconds.
 covers one part that runs on every changed-path publication. Wanted: phase lines
 for capture, compare, lint, index and transaction, and a cost that grows with
 the changed declarations, not with the whole program.
+
+Sighting 2026-09-23 (lane render-cache-per-branch): on a scratch root booted from the
+working tree, `(seon.cluster/refresh-source! root [src/seon/render.clj
+test/seon/render_cache_test.clj] "default")` took 12,206 ms, reloaded only
+`seon.render-cache-test` (render.clj was unchanged since boot) and re-armed 3
+identities. One new test file, twelve seconds.

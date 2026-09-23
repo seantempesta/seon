@@ -49,3 +49,9 @@ every read. Datahike already identifies the value (commit id,
 
 Regression: a stop during prompt acquisition of a real (unstubbed) prompt
 returns within one second and leaves no open turn.
+
+Sighting 2026-09-23 (lane render-cache-per-branch, scratch root, no provider key): four
+messages to `root` transacted from the MCP JVM woke one turn; the armed profile shows
+`seon.turn/open-turn` → `system-turn` at 11,312 ms inclusive (under it
+`seon.cluster.agent/acquire-context!` x2 5,204 ms, `seon.db/with-declarations` x2395
+6,215 ms) before the provider call refused for the missing key.

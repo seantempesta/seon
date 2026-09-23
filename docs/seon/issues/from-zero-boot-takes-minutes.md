@@ -72,3 +72,9 @@ Sighting 2026-09-23 (lane runtime-status-crash, read-only): default PID 70720,
 started 2026-09-22T21:47:19Z, readiness reports `:seon.boot/ready-ms 106787`
 (107 s) with `:seon.boot/recovered-runs 0`. Whether that start was from zero
 or a resume is not recorded in readiness; no phase breakdown was available.
+
+Sighting 2026-09-23 (lane render-cache-per-branch, [landing](../../prds/agent-platform/landing/lane-render-cache-per-branch-2026-09-23.md)):
+`bin/seon --root tmp/render-cache-root start` on the working tree over HEAD `b2b10271b`
+(fresh empty root) took 97.05 s wall, `:seon.boot/ready-ms 70206`; the
+dependency-class cache reported `:miss :no-matching-cache` (the working-tree
+`deps.edn` differs from every filled cache), so every dependency compiled from source.

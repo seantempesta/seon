@@ -1595,19 +1595,55 @@
                      [(render-cost-fact request selected output rendered)]))
                 rendered))))))))
 
-(defn shared-cache
-  "The cluster environment's shared, disposable render evidence cache.
+(def ^:private branch-scope-keys
+  [:datahike.cache/connection-id :datahike.cache/generation])
 
-  Allocate once through the environment's existing replacement reference.
-  Every caller carries that same reference; no process registry or worker
-  owns the cached values. Publication never holds a lock while deriving."
+(defn branch-scope
+  "The Datahike connection a ctx derives render values in, as Datahike names it.
+
+  `:datahike.cache/connection-id` is `[store-id branch]` and
+  `:datahike.cache/generation` is that connection's opening
+  (`reference-code/datahike/src/datahike/store.cljc:44`,
+  `connector.cljc:376`). A branch unlinked and reopened under the same name
+  is a new generation, so it shares nothing with the old one. A speculative
+  database value has no committed cache context; its scope is empty."
+  {:malli/schema
+   [:=> [:cat :seon.sci.eval/ctx]
+    [:map
+     [:datahike.cache/connection-id {:optional true}
+      [:vector {:min 2} [:or :uuid :string :keyword]]]
+     [:datahike.cache/generation {:optional true} :uuid]]]}
+  [ctx]
+  (let [custody (:seon.sci.eval/custody ctx)
+        database (if-let [connection (:seon.db/connection custody)]
+                   @connection
+                   (:seon.db/db custody))]
+    (select-keys (:cache-context database) branch-scope-keys)))
+
+(defn shared-cache
+  "The render evidence cache of the branch this ctx derives in.
+
+  The cache rides the context's environment reference, and a `sci/fork` onto
+  another branch copies that environment (`seon.sci.eval/fork-cluster-ctx`).
+  The cache therefore records the branch scope it was derived in, and a ctx
+  whose `branch-scope` differs never reads or writes it: it allocates its own
+  cache in its own environment reference. A fixture branch cannot replace the
+  parent's `::packages`, and the fork's entries die with its context. Forks
+  on the same branch share one cache. No registry beside the context holds
+  it. Publication never holds a lock while deriving."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.render/cache]}
   [ctx]
-  (let [state (:seon.sci.eval/projection-state ctx)]
-    (or (:seon.render/cache @state)
-        (:seon.render/cache
-         (swap! state #(if (:seon.render/cache %) %
-                          (assoc % :seon.render/cache (atom {}))))))))
+  (let [state (:seon.sci.eval/projection-state ctx)
+        scope (branch-scope ctx)
+        own? (fn [cache]
+               (and cache (= scope (select-keys @cache branch-scope-keys))))
+        current (:seon.render/cache @state)]
+    (if (own? current)
+      current
+      (:seon.render/cache
+       (swap! state #(if (own? (:seon.render/cache %))
+                       %
+                       (assoc % :seon.render/cache (atom scope))))))))
 
 (defn acquire-context!
   "Fold saved shown text into the agent's context.

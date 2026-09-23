@@ -79,3 +79,10 @@ above (a thrown `ex-info` in jvm mode projects as the declared error value
 carrying class, message and the offending value as a `result/e<id>`
 reference) is still owed; it must also construct this fallback diagnostic
 and assert it validates.
+
+Sighting 2026-09-23 (lane render-cache-per-branch): a jvm-mode MCP eval whose value was a
+successful `refresh-source!` summary map (`{:seon.source/commit-id …, :ms 12206.3,
+:arming 3}`) returned an instrument refusal instead: `seon.cluster/mcp-projection-error`
+was called with `failure` nil (caller `cluster.clj:366`), so the projection fallback
+itself refused its own contract and the evaluation reported an exception although the
+form succeeded.
