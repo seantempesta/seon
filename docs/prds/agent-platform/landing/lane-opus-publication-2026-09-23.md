@@ -187,3 +187,36 @@ at `core.clj:4105`). That replaces `require :reload` for the adoption set and ne
 candidate branch. 1.4c's candidate branch closes it for rows, not for loaded Vars.
 
 Heap: old gen 1,648 MB on pid 55322 after these runs.
+
+## Hazard: a reload replaces the adopter mid-adoption
+
+`development-source-refresh!` reloads namespaces (`require :reload`) BEFORE it writes rows.
+When the adoption's own code is among the reloaded namespaces, the frames still running are
+the old functions but every Var they call next is new. On 2026-09-23 the first adoption of
+`68f769a4a` failed exactly so: the old caller invoked the reloaded `adopt-rows!` with four
+arguments against its new five-argument arity, wrote nothing, and left the JVM on new code
+with default's rows and record old. A retry converged because the new code was then running.
+Any adoption that changes the signature of a function the adoption path itself calls
+(`cluster.clj`, `fn.clj`, `issue.clj`, `source.clj`) meets this. Closing it is the same
+seam as the check-then-reload window: publish and write first from the loaded code, then
+load the checked bytes (`Compiler/load`), or run the adoption from values captured before
+reload.
+
+## Slice 3 (caller lint, operator paths): BLOCKED at adoption, 2026-09-23 ~14:00Z
+
+- `src/seon/fn.clj` `caller-files`: selects only callees with a datom on a signature
+  attribute (`:seon.fn/sym arglists arities spec private? macro? inline? defined-by constant?`
+  or an arity component, mapped to its owner in both values). Regression written:
+  `test/seon/fn/caller_lint_test.clj` (docstring and body edits of `seon.id/digest` select
+  `#{}`; an `:seon.fn/inline?` change selects its callers). NOT run; NOT committed.
+- `script/seon/operator.clj:1371`: `--changed` paths canonicalized. NOT committed.
+- Parent measurement: one docstring edit in `fn.clj` (`gate-sets`), published with the loaded
+  (old) `caller-files`: `full-source-refresh!` 10,339 ms (comment-only edit of the same file
+  measured 1.3 s analysis). The adoption then refused: `development-source-refresh! refused
+  instance at [:seon.flow/error-fanout :seon.flow/executor]` (`cluster.clj:2872`), i.e. the
+  loaded `cluster.clj` (m4-n1's in-flight edit) requires an instance key the running
+  instance lacks. Every `--dev default` adoption refuses until that instance is rebuilt:
+  RESET NEEDED (or the m4-n1 lane's restart). `current-src` is one publication ahead of
+  default (this docstring edit, reverted on disk since).
+- The MCP projection of that exception failed too: `seon.cluster/first-seon-frame refused
+  trace at [99 2]: expected a string, got nil` (`cluster.clj:368`), a frame with no file.
