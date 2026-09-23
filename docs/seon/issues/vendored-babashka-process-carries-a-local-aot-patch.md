@@ -1,6 +1,7 @@
 ---
 type: issue
-status: open
+status: closed
+closed: 2026-09-23 (2ff62cc0c: submodule points at seantempesta/process seon-aot-guard e83ec5c; retire when upstream fixes)
 severity: cleanup
 tags: [issue, runtime, dependency]
 ---
