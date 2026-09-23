@@ -978,21 +978,29 @@
   that carries a skill file, or nil: {::root ::documents ::worktree-paths}.
 
   The commit's files are its pathspecs' changes against HEAD, or, with no
-  pathspec, the staged files (plus tracked changes under -a). Those files
-  are read as they stand; every other target at HEAD."
+  pathspec, the staged files (plus tracked changes under -a). A pathspec
+  the shell has yet to expand (`$paths`, a glob) makes every changed or
+  staged skill file a document. Those files are read as they stand; every
+  other target at HEAD."
   {:malli/schema [:=> [:cat [:map [::root :string] [::cwd :string] [::command :string]]]
                   [:maybe #'check-request-schema]]}
   [{::keys [root cwd command]}]
   (when-let [arguments (commit-arguments (shell-words command))]
-    (let [specs (->> (pathspecs arguments)
+    (let [words (pathspecs arguments)
+          ;; `$paths`, a glob or a substitution expands only in the shell:
+          ;; the commit's files are then unknown here, so every changed or
+          ;; staged skill file is checked rather than none
+          unexpanded? (some (fn [w] (some #{\$ \* \? \[ \{ \`} w)) words)
+          specs (->> (if unexpanded? [".agents/skills"] words)
                      (map #(str (fs/normalize (fs/absolutize (fs/path cwd %)))))
                      (filter #(fs/starts-with? % root))
                      (mapv #(let [r (str (fs/relativize root %))] (if (= "" r) "." r))))
           all? (some #{"-a" "--all"} arguments)
           files (if (seq specs)
-                  (into (git-names root (into ["HEAD" "--"] specs))
-                        ;; a new file the command names is committed too
-                        (filter #(fs/regular-file? (fs/path root %)) specs))
+                  (cond-> (into (git-names root (into ["HEAD" "--"] specs))
+                                ;; a new file the command names is committed too
+                                (filter #(fs/regular-file? (fs/path root %)) specs))
+                    unexpanded? (into (git-names root ["--cached"])))
                   (cond-> (git-names root ["--cached"])
                     all? (into (git-names root ["HEAD"]))))
           files (vec (distinct files))

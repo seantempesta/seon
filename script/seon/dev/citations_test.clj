@@ -157,6 +157,9 @@
                   (request "cd x && git commit --only -m \"a b\" -- .agents/skills/demo/SKILL.md"))))
           (git! root "add" ".agents/skills/demo/SKILL.md")
           (is (= [".agents/skills/demo/SKILL.md"]
+                 (::citations/documents (request "git commit --only -m m -- $paths")))
+              "a pathspec only the shell expands checks every changed skill file")
+          (is (= [".agents/skills/demo/SKILL.md"]
                  (::citations/documents (request "git commit -q -m staged")))))
         (let [commit "git commit --only -m m -- .agents/skills/demo/SKILL.md"]
           (is (nil? (citations/commit-refusal (request commit))))
