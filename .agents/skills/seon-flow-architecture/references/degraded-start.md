@@ -59,10 +59,10 @@ or open socket alone.
 ## 2. Inspect the advertisement before touching lifecycle
 
 The per-cluster advertisement is `<bootstrap-root>/<cluster-name>/prepl.edn`
-(`cluster-paths`, `src/seon/cluster.clj:732-749`); the operator reads
+(`cluster-paths`, `src/seon/cluster.clj:765-782`); the operator reads
 `<operator-root>/data/clusters/*/prepl.edn` (`script/seon/operator.clj:106-119`).
 Boot writes it once the store stands (`src/seon/cluster/boot.clj:164-167`),
-and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:2977`). JVM
+and `serve!` rewrites it with the web URL (`src/seon/cluster.clj:3019`). JVM
 process identity is only `(pid, start-instant)`
 (`src/seon/cluster/process.clj:1-7`).
 
@@ -82,7 +82,7 @@ exact `-Dseon.operator.root=<root>` JVM argument, never a command substring
 A file's mere presence is not proof of a live cluster: an advertisement counts
 only when its `(pid, start-instant)` matches a live process
 (`matching-handle`, `script/seon/operator.clj:93-104`;
-`seon.cluster/read-advertisement`, `src/seon/cluster.clj:3542`). A JVM that the
+`seon.cluster/read-advertisement`, `src/seon/cluster.clj:3584`). A JVM that the
 scan finds but whose endpoint is unreadable makes `status` fail with "An
 exact-root JVM is alive but its endpoint is unavailable."
 (`script/seon/operator.clj:211-218`). The scratch cluster did not survive only

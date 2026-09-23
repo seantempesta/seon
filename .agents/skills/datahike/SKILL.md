@@ -15,10 +15,10 @@ than a remembered commit.
 ## Explicit values and transaction authority
 
 Use `seon.db`. Its query and pull owners accept explicit immutable
-database values or agent-supplied defaults (`q`, `src/seon/db.clj:2208`;
-`pull`, `:2441`). Its transaction owner accepts an explicit connection or the
+database values or agent-supplied defaults (`q`, `src/seon/db.clj:2245`;
+`pull`, `:2478`). Its transaction owner accepts an explicit connection or the
 agent's connection and returns errors as values (`transact!`,
-`src/seon/db.clj:4553`). A host JVM probe should supply explicit custody
+`src/seon/db.clj:4590`). A host JVM probe should supply explicit custody
 (`seon.db/call-with-custody`, `src/seon/db.clj:375`).
 
 Datahike accepts a transaction map with `:tx-data` and optional
@@ -62,15 +62,15 @@ deletion policy property; required-ness already is one. Every swept datom is
 written through `transact-retract-datom` (`db/transaction.cljc:814-820`), so
 it lands in the report's `:tx-data`. Seon wires a final-report validator into
 every admitted `transact!`: `transact-call` puts `write-report-validator` under
-`:tx-meta :datahike/validate-report` (`src/seon/db.clj:4311-4314`). Datahike
+`:tx-meta :datahike/validate-report` (`src/seon/db.clj:4348-4351`). Datahike
 calls it once and throws `:transaction/validation-rejected` on any non-nil
 return, aborting the whole transaction (`validate-report`,
 `db/transaction.cljc:1224-1234`, invoked at `:1295`).
 `write-report-error` computes `affected` as the distinct `:e` over attempted
-**and** effective tx-data (`src/seon/db.clj:4021-4028`) — which therefore
+**and** effective tx-data (`src/seon/db.clj:4058-4065`) — which therefore
 includes every entity the sweep touched — and re-validates each one's whole
 resulting row against the schemas its identities select
-(`write-entity-error`, `:3288`).
+(`write-entity-error`, `:3325`).
 So:
 
 - the swept ref is **required** in the referrer's entity schema → the referrer
@@ -80,7 +80,7 @@ So:
 
 `write-entity-error` skips an entity retracted to nothing — coordinated deletion
 is valid. Final owning-value validation (`write-owned-values-error`,
-`src/seon/db.clj:3335`) discovers roots
+`src/seon/db.clj:3372`) discovers roots
 from before and after, expands complete EAVT children, and validates each owned
 child through its relation's `:seon.db/component-schema`. Identity-less unowned
 rows, missing children, cycles, multiple owners and exhausted
@@ -88,7 +88,7 @@ rows, missing children, cycles, multiple owners and exhausted
 The projection carries the declared bootstrap bound (`with-compiled-cache`,
 `src/seon/schema.clj:374-381`); the final callback reads asserted configuration
 from the report's final database (`write-report-validator`,
-`src/seon/db.clj:4102-4116`).
+`src/seon/db.clj:4139-4153`).
 
 State the lifecycle consequence in the attribute's docstring: **cascade**
 (component), **sweep** (optional ref), **refuse** (required ref in a validated
@@ -113,7 +113,7 @@ updates and retained nodes even after the current entity disappears.
 all-snapshots erasure guarantee.** The purge operations require history
 (`db/transaction.cljc:1102-1148`) and route through
 `transact-purge-datom` (`:821-830`). Older retained commits/branches can still
-reach the old index nodes. `gc.cljc:22-81` marks current AND temporal roots of
+reach the old index nodes. `reference-code/datahike/src/datahike/gc.cljc:22-81` marks current AND temporal roots of
 retained commits; GC does not prune datoms from a retained head's history.
 Specify branch/commit retention separately from temporal retention. A reset
 does not preserve a historical query route to the discarded store.
@@ -157,8 +157,8 @@ the same database state unless **the looking is its own positive fact**.
 Do not encode an event in the cardinality of a collection, and do not
 repair it with a submission-time-only check: the whole-entity write
 validator rebuilds the row from the resulting datoms
-(`seon.db/write-entity-value`, `src/seon/db.clj:3265`;
-`write-entity-error`, `:3288`), where the empty collection is already
+(`seon.db/write-entity-value`, `src/seon/db.clj:3302`;
+`write-entity-error`, `:3325`), where the empty collection is already
 gone, so a submission-only check is a pre-read the authority re-decides.
 
 ## Three dependency behaviours that report nothing when they fire
@@ -293,9 +293,9 @@ are not undone.
 Return transaction data from a transaction function, never a refusal map:
 Datahike expects transaction data there. Seon's refusals are built with
 `seon.error.refusal/diagnostic` (`src/seon/error/refusal.clj:90`) and thrown,
-and `seon.db/transact!` (`src/seon/db.clj:4553`) reads the throwable back into
+and `seon.db/transact!` (`src/seon/db.clj:4590`) reads the throwable back into
 a flat `:seon.error` value in `transact-call`'s catch, through
-`seon.error.refusal/refusal` (`src/seon/db.clj:4372-4391`;
+`seon.error.refusal/refusal` (`src/seon/db.clj:4409-4428`;
 `src/seon/error/refusal.clj:115`). Evidence and the final-report validation seam are in
 [the write-admission study](../../../docs/prds/steward-platform/research/write-admission-2026-09-17.md).
 
@@ -342,7 +342,7 @@ Datahike writes nodes/schema/commit before the mutable branch head
 order; backend-wide atomicity is not universal
 (`reference-code/konserve/src/konserve/core.cljc:435-464`). GC roots are the
 branch roster and reachable commit/index roots, plus the explicit reachable
-extension (`gc.cljc:22-81`, `:144-167`). Merely holding an old database value
+extension (`reference-code/datahike/src/datahike/gc.cljc:22-81`, `:144-167`). Merely holding an old database value
 does not register a GC root. The sweep removes unmarked store objects older
 than the writer safe point, not history datoms still reachable from the head
 (`reference-code/konserve/src/konserve/gc.cljc:25-33`).
@@ -399,8 +399,8 @@ two encodings, which the next writer can put out of step. Do not add one.
 
 For fixture operations use `seon.test-support/with-database`, which
 runs the body on an isolated branch of the executing test's database
-(`test/seon/test_support.clj:705-724`), and write through
-`transacted!` (`:285`) so a refused write fails the test instead of
+(`test/seon/test_support.clj:643-662`), and write through
+`transacted!` (`:215`) so a refused write fails the test instead of
 reading as absence. Do not build a small hand-rostered schema to
 impersonate production.
 
@@ -417,7 +417,7 @@ calls every registered callback with the WHOLE transaction report
 - **it is in-process and per connection.** Another JVM's transaction against
   the same store delivers nothing here.
 - **it has no replay.** Register before deriving current work, and recover
-  from facts after disconnect/restart (`core.cljc:200-218`).
+  from facts after disconnect/restart (`reference-code/datahike/src/datahike/core.cljc:200-218`).
 - **commits may batch transactions.** `writer.cljc:220-259` substitutes the
   batch's committed database into each report's `:db-after`; per-transaction
   `:tx-data` stays separate. Do not use that report's after-value as if it
@@ -443,7 +443,7 @@ stored pattern entity.
 ## Temporal values and read evidence
 
 `seon.db/history`, `as-of`, and `since` preserve explicit and
-agent-default forms (`src/seon/db.clj:2808`, `:2821`, `:2835`).
+agent-default forms (`src/seon/db.clj:2845`, `:2858`, `:2872`).
 Datahike's `as-of` predicate includes the time point;
 `since` excludes it (`reference-code/datahike/src/datahike/db.cljc:142-152`).
 Because deletion is retraction, these are how the past is read: a
@@ -455,8 +455,8 @@ without database values or read payloads by default
 (`src/seon/db.clj:914`). Read-result retention is explicit for
 process-local semantic replay. `read-evidence-current?` compares
 revisions and may replay supported reads to compare their results
-(`:1115`). Query execution captures evidence through the dependency's
-evidence-carrying path (`seon.db/q`, `:2208`).
+(`:1149`). Query execution captures evidence through the dependency's
+evidence-carrying path (`seon.db/q`, `:2245`).
 
 These are the existing mechanisms to inspect before adding a refresh
 index or cache.

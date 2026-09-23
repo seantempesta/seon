@@ -17,7 +17,7 @@ A computation receives its environment, immutable database value,
 schema projection, and render profile. Capture one database value for
 one pure derivation; don't reread a connection at each leaf. The public
 database functions accept explicit inputs and return boundary errors
-(`q`, `src/seon/db.clj:2208`; `pull`, `:2441`; `transact!`, `:4553`).
+(`q`, `src/seon/db.clj:2245`; `pull`, `:2478`; `transact!`, `:4590`).
 
 Use `seon.db` for first-party database work. Agent elision is an
 evaluation service, not permission for a JVM caller to omit custody.

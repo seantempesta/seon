@@ -69,8 +69,8 @@ Do not flatten the roles below into "the executor":
 | graph or work | executor it receives | source |
 |---|---|---|
 | each agent graph | `:io-exec` = the handle's `:seon.flow/executor` | `src/seon/cluster/agent.clj:579-580` |
-| the cluster graph (armer, render) | `:io-exec` = the same handle executor | `src/seon/cluster.clj:3305` |
-| that handle executor | `seon.cluster/projection-executor`: root `:io`, binding the cluster's projection state around each task | `src/seon/cluster.clj:3265-3280`, assigned `:3328-3337` |
+| the cluster graph (armer, render) | `:io-exec` = the same handle executor | `src/seon/cluster.clj:3347` |
+| that handle executor | `seon.cluster/projection-executor`: root `:io`, binding the cluster's projection state around each task | `src/seon/cluster.clj:3307-3322`, assigned `:3370-3379` |
 | the fault-committer graph | `:io-exec` = `seon.flow/projection-executor` over root `:io` | `src/seon/flow.clj:1123-1135`, `:1183-1189` |
 | the work-launcher graph | `:compute-exec` = root `:compute`, and no `:io-exec` | `src/seon/flow.clj:616-654` |
 | launcher compute and I/O submissions | root `:io` as the task executor | `src/seon/flow.clj:685-701`, dispatched `:530-556` |

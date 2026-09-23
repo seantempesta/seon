@@ -49,7 +49,7 @@ Current proof:
 
 - the one blueprint, `graph-definition`, with its mailbox, turn and schedule
   procs (`src/seon/cluster/agent.clj:535-581`);
-- the derive-all armer, `armer-step` (`src/seon/cluster/agent.clj:1234`); and
+- the derive-all armer, `armer-step` (`src/seon/cluster/agent.clj:1240`); and
 - the measured parked-proc cost, about 8.5 KB and one virtual thread per idle
   graph
   (`git show 215447c46^:docs/prds/sci-execution-runtime/research/flow-mechanics-2026-07-28.md`,
@@ -80,7 +80,7 @@ stamped interrupted, then graphs are rebuilt and the agent adapts from
 durable facts.
 
 Read `recover-call` (`src/seon/turn.clj:1650-1672`), its caller
-`recover-runs!` (`src/seon/cluster.clj:2728`), and the boot position: recovery
+`recover-runs!` (`src/seon/cluster.clj:2770`), and the boot position: recovery
 runs before config application and before any agent arms
 (`src/seon/cluster/boot.clj:59-69`). The database records what settled; an
 interrupted receipt is evidence for the next agent decision, not authority for
@@ -100,7 +100,7 @@ The transport law divides values by recovery need (`AGENTS.md:164-166`):
 
 Current examples are the sliding-one agent wake channel
 (`src/seon/cluster/agent.clj:124-128`), the cluster's sliding-one armer,
-stream, render and pages channels (`src/seon/cluster.clj:3325-3348`), and
+stream, render and pages channels (`src/seon/cluster.clj:3367-3390`), and
 counted-dropping fault observation (`src/seon/flow.clj:966-1003`). The fault
 tap is the one example the error policy rejects (`AGENTS.md:285-289`); see
 [wakes and faults](wakes-and-faults.md#fault-fan-out).
@@ -118,7 +118,7 @@ armed routing map. There is no `:type`, `:kind`, active-set row, or status
 flag.
 
 The derivation is explicit in the routing map (`routing`,
-`src/seon/cluster/agent.clj:586`) and the armer (`armer-step`, `:1234`). The
+`src/seon/cluster/agent.clj:586`) and the armer (`armer-step`, `:1240`). The
 data-model rules are maintained in
 [the data guide](../../../../docs/seon/architecture/data-modeling-guide.md).
 

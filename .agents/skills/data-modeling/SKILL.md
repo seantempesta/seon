@@ -64,7 +64,7 @@ that produced it.
 The tell for a misfiled token is machinery that exists only to survive a
 rename or a republish: a `:seon.fn/reference-to` annotation whose whole job is
 telling a reader how to recover the name from a ref
-(`resources/seon/schemas/seon.fn.edn:17`, read by `src/seon/fn.clj:1467`), a
+(`resources/seon/schemas/seon.fn.edn:17`, read by `src/seon/fn.clj:1462`), a
 preservation pass that strips and re-resolves refs across a publication, a
 sibling attribute storing the same name as a value beside the ref. Every one of those is a name-observation
 wearing a ref.
@@ -110,7 +110,7 @@ yield id-only maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`
 Obtain the complete value under the declared work bound or refuse.
 Every owned relation declares `:seon.db/component-schema`; the final writer
 validates those typed values as well as the root (`write-owned-values-error`,
-`src/seon/db.clj:3335`). The config schema declares
+`src/seon/db.clj:3372`). The config schema declares
 `:seon.config.db/validation-node-limit`
 (`resources/seon/schemas/seon.config.db.edn:1`), carried by
 projection acquisition and shared across writers; there is no per-constructor
@@ -209,4 +209,4 @@ Program identity tombstones are RETIRED by owner ruling 2026-09-16
 past is a temporal query; `src/` carries no tombstone mechanism.
 The final report refuses identity removal or rename when surviving symbol
 observers still name it; repairs are judged in the same final database
-(`removed-definition-error`, `src/seon/db.clj:3879`; `deletion-error`, `:3939`).
+(`removed-definition-error`, `src/seon/db.clj:3916`; `deletion-error`, `:3976`).

@@ -24,7 +24,7 @@ Acquire process-local resources in that lifecycle and release them
 through its existing completion path.
 
 The dependency documents that `:io` should not do extended computation
-and `:compute` must not block (`flow.clj:200-202` at the same path).
+and `:compute` must not block (`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:200-202`).
 Its default I/O executor uses virtual threads when available; default
 compute and mixed executors are cached platform pools
 (`reference-code/core.async/src/main/clojure/clojure/core/async/impl/dispatch.clj:71-96`).
@@ -40,7 +40,7 @@ join on proc exit
 Require a proc-published completion when the caller needs an exit proof.
 
 The step description's `:ping-map-fn` defaults to identity
-(`flow.clj:191` at the dependency path above). Supply a deliberate
+(`reference-code/core.async/src/main/clojure/clojure/core/async/flow.clj:191`). Supply a deliberate
 data projection; never expose a whole context or connection by accident.
 A missing ping response is unknown, not healthy.
 
@@ -88,7 +88,7 @@ evaluation (`system-turn`, `src/seon/turn.clj:2055`). Include generated and
 agent-written reads, never writes or effects (`AGENTS.md:373-375`).
 
 Datahike evidence capture and validity live in `seon.db/read-evidence`
-(`src/seon/db.clj:914`) and `seon.db/read-evidence-current?` (`:1115`).
+(`src/seon/db.clj:914`) and `seon.db/read-evidence-current?` (`:1149`).
 Extend the one mechanism in place rather than introducing a central
 dispatcher, block-specific refresh handlers, or another cache.
 
