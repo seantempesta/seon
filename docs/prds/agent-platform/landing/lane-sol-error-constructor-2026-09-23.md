@@ -46,3 +46,4 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 | E5: `src/seon/await.clj` | 1 | 3 / 5 / -2; 0 | 0 / 13 | 22.220208 | `seon.await-test` | None; existing merge order retained |
 | E6: `src/seon/background.clj` | 2 | 6 / 10 / -4; 0 | 0 / 12 | 24.328125 | `seon.background-test` | None |
 | E7: `src/seon/bootstrap.clj` | 4 | 12 / 20 / -8; 0 | 0 / 28 | 23.072166 | `seon.bootstrap-test` | One X literal retained; outer ex-info unchanged |
+| E8: `src/seon/call_preparation.clj` | 5 | 15 / 25 / -10; 0 | 3 / 40 | 24.954542 | `seon.call-preparation-test` | One X literal retained; supply catch still carries its original Throwable as offending evidence |

@@ -205,16 +205,14 @@
   [{default-key :seon.call-preparation/key
     supplier :seon.call-preparation/supplier-symbol
     schema-key :seon.call-preparation/schema-key} reason data]
-  {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.call-preparation/call
-  :seon.error/operation 'seon.call-preparation/incoherent
-  :seon.error/message (str "The supplied default " default-key " is not admissible: " reason)
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.call-preparation/call 'seon.call-preparation/incoherent
+   {:seon.error/message (str "The supplied default " default-key " is not admissible: " reason)
   :seon.call-preparation/incoherent-key default-key
   :seon.call-preparation/supplier-symbol supplier
   :seon.call-preparation/schema-key schema-key
   :seon.call-preparation/coherence-expectation reason
   :seon.error/data (assoc data :seon.call-preparation/key default-key)
-  :seon.error/offending data})
+  :seon.error/offending data}))
 
 (defn- coherent-supplier
   "Prove one row against the program graph, or refuse it as a value.
@@ -1186,10 +1184,8 @@
   {:malli/schema [:=> [:cat :seon.fn/sym :seon.call-preparation/slot :seon.schema/value]
                   :seon.call-preparation/unavailable-error]}
   [sym slot cause]
-  {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.call-preparation/call
-  :seon.error/operation 'seon.call-preparation/unavailable
-  :seon.error/message (str "Cannot call " sym ": " (:seon.call-preparation/key slot)
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.call-preparation/call 'seon.call-preparation/unavailable
+   {:seon.error/message (str "Cannot call " sym ": " (:seon.call-preparation/key slot)
         " is unavailable. "
         (or (:seon.error/message cause)
             "Its supplier produced no value."))
@@ -1208,7 +1204,7 @@
             (:seon.call-preparation/entry-key slot))
      (map? cause)
      (assoc :seon.call-preparation/cause cause))
-  :seon.error/expected "an available supplied default"})
+  :seon.error/expected "an available supplied default"}))
 
 
 
@@ -1251,16 +1247,14 @@
                             :seon.error/offending resolved)))
       (let [produced (try (resolved environment)
                           (catch Throwable cause
-                            {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.call-preparation/call
-  :seon.error/operation 'seon.call-preparation/supply
-  :seon.error/message (or (ex-message cause) "The supplier threw.")
+                            (seon.error.refusal/diagnostic (java.util.Date.) :seon.call-preparation/call 'seon.call-preparation/supply
+                             {:seon.error/message (or (ex-message cause) "The supplier threw.")
   :seon.call-preparation/thrown-supplier symbol-name
   :seon.error/exception-class (symbol (.getName (class cause)))
   :seon.error/offending cause
   :seon.error/data {:seon.call-preparation/supplier-symbol
                               symbol-name}
-  :seon.error/expected "a returned supplied value"}))
+  :seon.error/expected "a returned supplied value"})))
             valid? (get (:seon.call-preparation/validators current)
                         default-key)]
         (cond
@@ -1272,10 +1266,8 @@
           (or (nil? valid?) (valid? produced)) produced
 
           :else
-          {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.call-preparation/call
-  :seon.error/operation 'seon.call-preparation/supply
-  :seon.error/message (str symbol-name " produced a value that is not "
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.call-preparation/call 'seon.call-preparation/supply
+           {:seon.error/message (str symbol-name " produced a value that is not "
                 (:seon.call-preparation/schema-key
                  (get (:seon.call-preparation/supplied-defaults current)
                       default-key))
@@ -1287,7 +1279,7 @@
   :seon.error/offending produced
   :seon.error/data {:seon.fn/sym sym
             :seon.call-preparation/key default-key
-            :seon.call-preparation/supplier-symbol symbol-name}})))))
+            :seon.call-preparation/supplier-symbol symbol-name}}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The consumer seam
@@ -1405,10 +1397,8 @@
         (nil? answer) arguments
 
         (:seon.call-preparation/ambiguous? answer)
-        {:seon.error/at (java.util.Date.)
-  :seon.error/layer :seon.call-preparation/call
-  :seon.error/operation 'seon.call-preparation/prepare
-  :seon.error/message (str "Cannot call " sym " with " supplied
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.call-preparation/call 'seon.call-preparation/prepare
+         {:seon.error/message (str "Cannot call " sym " with " supplied
               " arguments: more than one derived call shape fits that count, "
               "so which positions were named is not determined. Pass the "
               "declared arguments in full.")
@@ -1419,7 +1409,7 @@
                         :seon.schema/arguments arguments}
   :seon.error/expected "one uniquely determined argument placement"
   :seon.call-preparation/candidates (:seon.call-preparation/candidates answer)
-  :seon.call-preparation/offending-arguments arguments}
+  :seon.call-preparation/offending-arguments arguments})
 
         :else
         (let [refusal (volatile! nil)
