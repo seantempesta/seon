@@ -152,7 +152,11 @@
                   (.countDown release-root)
                   (support/await-event! publication :rooted-publication)
                   (support/await-event! collection :post-publication-collection)
-                  (is (zero? (registry/collect! opened)))))))
+                  ;; A second pass over a live store need not sweep zero
+                  ;; (`registry/collect!` docstring); what must hold is that the
+                  ;; rooted blob survives it.
+                  (registry/collect! opened (Date.))
+                  (is (= second-content (blob/get connection second-digest)))))))
 
           (testing "an unreferenced blob is readable by digest until an explicit sweep collects it"
             ;; MCP results are blob-only (owner ruling #19): no row roots them.

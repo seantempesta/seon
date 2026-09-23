@@ -371,16 +371,27 @@
                      [?schema :seon.schema/key ?schema-key]
                      [?schema :seon.schema/form ?form]]
                    db))
+        ;; An attribute's VALUE is a digest when its form resolves, through
+        ;; schema references, an `:and` with a digest child, or an `:or` whose
+        ;; every alternative is one, to
+        ;; `:seon.blob/digest`. A map, collection or entity schema that merely
+        ;; contains a digest member is not: its stored values are entity ids
+        ;; (component refs), which the sweep must never read as digests.
         digest-schema?
         (fn digest-schema? [form seen]
           (cond
             (= :seon.blob/digest form) true
             (and (keyword? form)
                  (not (contains? seen form)))
-            (when-let [referenced (get forms form)]
-              (digest-schema? referenced (conj seen form)))
-            (coll? form)
-            (boolean (some #(digest-schema? % seen) form))
+            (boolean
+             (when-let [referenced (get forms form)]
+               (digest-schema? referenced (conj seen form))))
+            (and (vector? form) (= :and (first form)))
+            (boolean (some #(digest-schema? % seen) (remove map? (rest form))))
+            (and (vector? form) (= :or (first form)))
+            (let [alternatives (remove map? (rest form))]
+              (boolean (and (seq alternatives)
+                            (every? #(digest-schema? % seen) alternatives))))
             :else false))]
     (into []
           (keep (fn [[attribute form]]

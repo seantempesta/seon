@@ -1588,3 +1588,16 @@
                    (schema/call-with-projection handed #(candidate {::value "one"})))
           "the loaded declarations still refuse an invalid input")
       (finally (ns-unmap 'seon.instrument-test var-name)))))
+
+(deftest an-adoption-that-changes-no-definition-is-not-an-arming-failure
+  ;; #63: a comment-only or pin-only publication has no arming identities, so
+  ;; arming nothing under :panic is the wanted outcome, not a refusal.
+  (let [refused? #'cluster/arming-refused?
+        panic {:seon.config/on-core-error :panic}
+        none {:seon.instrument/registered 0 :seon.instrument/instrumented 0}]
+    (is (false? (refused? panic #{} none)) "comment-only or pin-only change adopts")
+    (is (true? (refused? panic #{[:seon.fn/sym 'seon.id/valid?]} none))
+        "a changed definition that armed nothing still refuses")
+    (is (false? (refused? {:seon.config/on-core-error :record}
+                          #{[:seon.fn/sym 'seon.id/valid?]} none)))
+    (is (true? (refused? panic #{} {:seon.instrument/registration-observation {}})))))

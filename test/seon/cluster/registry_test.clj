@@ -182,6 +182,22 @@
         (is (= content (blob/get (:seon.store/connection-object opened) digest))
             "current references remain live when historical datoms are absent")))))
 
+(deftest only-digest-valued-attributes-are-swept-as-blob-references
+  ;; A ref or symbol attribute whose PROPERTIES name a schema containing a
+  ;; digest (a component entity, a row schema) stores entity ids and symbols;
+  ;; reading those as digests refused every sweep of a store holding error
+  ;; evidence (`referenced-blobs` returned 41112, 2026-09-23).
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           attributes (set (#'registry/blob-digest-attributes database))]
+       (is (contains? attributes :seon.error.occurrence/blob-digest))
+       (is (contains? attributes :seon.error/data-blob))
+       (is (not (contains? attributes :seon.agent/runtime))
+           "a component ref naming an entity schema is not a digest")
+       (is (not (contains? attributes :seon.test/sym))
+           "a row identity naming its row schema is not a digest")))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Pure derivation
 ;;; ---------------------------------------------------------------------------

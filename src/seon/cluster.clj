@@ -2361,6 +2361,20 @@
       (refused! "Boot JVM instrumentation did not arm the loaded program." result))
     result))
 
+(defn- arming-refused?
+  "True when a development adoption's arming failed.
+
+  A registration error always refuses. Under `:panic`, arming nothing refuses
+  only when something was to be armed: a publication that changes no
+  definition (a comment, a submodule pin) has no arming identities (#63)."
+  {:malli/schema [:=> [:cat :map :seon.reconcile/adopt-identities :map] :boolean]}
+  [effective arming-identities result]
+  (boolean
+   (or (:seon.instrument/registration-observation result)
+       (and (= :panic (:seon.config/on-core-error effective))
+            (seq arming-identities)
+            (not (pos? (or (:seon.instrument/instrumented result) 0)))))))
+
 (defn- development-arming-identities
   "Reloaded Vars and functions whose contracts refer to changed schemas."
   {:malli/schema [:=> [:cat :seon.db/database-value [:set :symbol] :seon.fn.file/identities]
@@ -2539,12 +2553,7 @@
                                             (into [] (comp (filter #(= :seon.fn/sym (first %)))
                                                            (map second))
                                                   arming-identities))})]
-           ;; Refuse only when something was to be armed: a publication that
-           ;; changes no definition (a comment, a submodule pin) arms nothing.
-           (when (or (:seon.instrument/registration-observation result)
-                     (and (= :panic (:seon.config/on-core-error effective))
-                          (seq arming-identities)
-                          (not (pos? (or (:seon.instrument/instrumented result) 0)))))
+           (when (arming-refused? effective arming-identities result)
              (refused! "Development JVM instrumentation did not restore contracts."
                        result)))))
       ;; This fact means indexing, reload and instrumentation succeeded. SCI
