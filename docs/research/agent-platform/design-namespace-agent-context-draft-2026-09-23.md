@@ -41,13 +41,17 @@ This draft synthesizes eight research notes (evidence at the end) and the owner'
    re-rendered.
 6. **The system is defined within itself; outcomes are data, not agent whims** (owner,
    2026-09-23). Any agent may do anything inside its own SCI context and branch — a hundred
-   scratch functions and queries are fine. What counts is only the value it submits, which
-   must satisfy the task's declared output schema, plus the definitions that value names.
-   Everything else is discarded with the branch. Requirements are stated in the same language
-   as everything else (Malli schemas and tests), never as permissions on agent behaviour.
-   When the submission is missing or invalid — no reply to a user's question, wrong syntax,
-   an output that fails its schema — the refusal explains the correct form as data and the
-   agent is prompted again, bounded by the task's budget (exhaustion is loud and resumable).
+   scratch functions and queries are fine. **An agent's SCI environment is scratch by default;
+   only what the task defines is merged back** (owner): the task's `:seon.task/delivers`
+   symbols plus the changed definitions they reach, and its `done-when` tests. Everything else
+   is discarded with the branch. Success is only `deftest`: every `done-when` test green on the
+   merged head, a missing symbol being a red test (TDD by construction). Requirements are stated
+   in the same language as everything else (schemas, functions, tests), never as permissions on
+   agent behaviour. Root reviews the diff, as a different model family, to stop cheating;
+   `done-when` test digests are frozen when the task is created. While a `done-when` test is red —
+   no reply to a user's question, wrong syntax, a failing contract — the refusal explains the
+   correct form as data and the agent is prompted again, bounded by the task's budget
+   (exhaustion is loud and resumable).
    Mistakes are allowed; context grows by demonstrated need, because each refusal pulls in the
    docs and must-reads of what was refused.
 7. **Standard Clojure first.** `defn` + docstring + metadata, `deftest`, Malli schemas in EDN.
@@ -133,7 +137,7 @@ link keys are new, and `seon.task` replaces issue, plan-step and error-work life
                         [:seon.task/instructions {:optional true} :string] ; case-specific only
                         [:seon.task/subject {:optional true} :seon.db/ref]  ; e.g. the error
                         [:seon.task/done-when [:set :qualified-symbol]]     ; tests that must pass
-                        [:seon.task/output :qualified-keyword]    ; schema the submission must satisfy
+                        [:seon.task/delivers [:set :qualified-symbol]] ; the only definitions that merge (+ what they reach)
                         [:seon.task/parent {:optional true} :seon.db/ref]]} ; the task that created it
 
 ;; context is a vector of comment + form, the same grammar the REPL reads
