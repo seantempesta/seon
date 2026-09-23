@@ -460,47 +460,81 @@ handle))}}
     (fn [_connection server _context]
       (is (= 404 (.statusCode (fetch server "/nope")))))))
 
+(defn- unowned-namespace
+  "A corpus namespace with no assigned agent at `db`: `seon.flow` when free.
+
+  The fixture branches the cluster head, whose namespaces may already have
+  owners, so a test that needs an unowned page names one this way."
+  [db]
+  (let [names (sort (db/q '[:find [?name ...] :where [_ :seon.ns/name ?name]] db))
+        free (remove #(seq (cluster.agent/assigned-to db %)) names)]
+    (or (some #{'seon.flow} free) (first free))))
+
+(deftest a-get-of-an-unowned-namespace-page-never-writes
+  ;; 24w: the GET used to create the owner agent, which then ran paid
+  ;; provider turns. A read path never writes a transaction.
+  (with-server
+    (fn [connection server _context]
+      (let [namespace-name (unowned-namespace @connection)
+            commit-before (db/commit-id @connection)
+            basis-before (:max-tx @connection)
+            known (fetch server (str "/ns/" namespace-name))]
+        (is (= 200 (.statusCode known)))
+        (is (= commit-before (db/commit-id @connection))
+            "the head commit id is unchanged")
+        (is (= basis-before (:max-tx @connection))
+            "no transaction was committed")
+        (is (= [] (cluster.agent/assigned-to @connection namespace-name))
+            "no agent was created")
+        (is (str/includes? (.body known) "id=\"create-namespace-owner\"")
+            "the page offers the explicit create control")
+        (is (str/includes? (.body known)
+                           (str "action=\"/agent/" namespace-name "/context\"")))))))
+
 (deftest namespace-routes-admit-by-reader-and-existing-corpus-row
   (with-server
-    (fn [connection server context]
-      (is (nil? (cluster.agent/steward-of @connection 'seon.flow)))
-      (let [known (fetch server "/ns/seon.flow")
-            owner (cluster.agent/steward-of @connection 'seon.flow)
-            basis-after-known (:max-tx @connection)]
-        (is (= 200 (.statusCode known)))
-        (is (str/includes? (.body known) "data-walk-path=\"[]\"")
-            "the canonical namespace page renders its owner's HTML walk
-            (narration face retired; structural root marker instead)")
-        (is (= "seon.flow" owner))
-        (is (= [process]
-               (db/q '[:find [?process-id ...]
-                      :in $ ?agent-id
-                      :where
-                      [?agent :seon.agent/id ?agent-id ?tx]
-                      [?tx :seon.db/process ?process]
-                      [?process :seon.db.process/id ?process-id]]
-                    @connection owner))
-            "first-touch ensure carries the existing creation provenance")
-        (is (= 200 (.statusCode (fetch server "/ns/seon.flow/debug"))))
-        (is (= basis-after-known (:max-tx @connection))
-            "debug and repeat visits resume the existing owner untouched"))
+    (fn [connection server _context]
+      (testing "the explicit POST creates the owner once, with its provenance"
+        (let [namespace-name (unowned-namespace @connection)
+              route (str "/agent/" namespace-name "/context")
+              created (post-form server route "action=create-owner")
+              owner (cluster.agent/steward-of @connection namespace-name)
+              basis-after-create (:max-tx @connection)]
+          (is (= 303 (.statusCode created)) (.body created))
+          (is (= (str "/ns/" namespace-name)
+                 (.orElse (.firstValue (.headers created) "location") nil)))
+          (is (= (str namespace-name) owner))
+          (is (= [process]
+                 (db/q '[:find [?process-id ...]
+                        :in $ ?agent-id
+                        :where
+                        [?agent :seon.agent/id ?agent-id ?tx]
+                        [?tx :seon.db/process ?process]
+                        [?process :seon.db.process/id ?process-id]]
+                      @connection owner))
+              "creation carries the existing creation provenance")
+          (is (= 303 (.statusCode (post-form server route "action=create-owner"))))
+          (is (= basis-after-create (:max-tx @connection))
+              "a repeated create resumes the existing owner untouched")))
+      (is (= 404 (.statusCode (post-form server "/agent/nonexistent.thing/context"
+                                         "action=create-owner")))
+          "creation refuses a namespace with no corpus row")
+      ;; The head commit id is the whole-store witness; decoding every
+      ;; datom to count them cost seconds and proved nothing more.
       (doseq [path ["/ns/nonexistent.thing" "/ns/123bad"]]
-        (let [datoms-before (count (db/datoms @connection :eavt))
-              basis-before (:max-tx @connection)
+        (let [commit-before (db/commit-id @connection)
               response (fetch server path)]
           (is (= 404 (.statusCode response)) path)
-          (is (= datoms-before (count (db/datoms @connection :eavt)))
-              (str path " wrote no datoms"))
-          (is (= basis-before (:max-tx @connection))
+          (is (= commit-before (db/commit-id @connection))
               (str path " committed no transaction")))))))
 
 (deftest canonical-debug-inspects-without-creating-a-namespace-owner
   (with-server
     (fn [connection server _context]
-      (let [namespace-name 'seon.flow
+      (let [namespace-name (unowned-namespace @connection)
             basis-before (:max-tx @connection)
             response (fetch server
-                            (str "/ns/seon.flow/debug?subject="
+                            (str "/ns/" namespace-name "/debug?subject="
                                  (java.net.URLEncoder/encode
                                   (pr-str [:seon.ns/name namespace-name])
                                   "UTF-8")
@@ -513,8 +547,8 @@ handle))}}
         (is (nil? (cluster.agent/steward-of @connection namespace-name))
             "inspection does not create an agent")
         (is (str/includes? body "id=\"debug-inspection-header\""))
-        (is (str/includes? body "viewer</span><code>seon.flow"))
-        (is (str/includes? body "subject</span><code>[:seon.ns/name seon.flow]"))
+        (is (str/includes? body (str "viewer</span><code>" namespace-name)))
+        (is (str/includes? body (str "subject</span><code>[:seon.ns/name " namespace-name "]")))
         (is (str/includes? body "debug=true")
             "the existing feed receives the experiment request")))))
 

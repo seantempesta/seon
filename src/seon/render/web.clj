@@ -3130,8 +3130,12 @@
        db))
 
 (defn- ensure-namespace-owner!
+  "Create the namespace's owner agent unless one is assigned; its id or refusal.
 
-  {:malli/schema [:=> [:cat [:map [:seon.store/connection-object :seon.db/connection] [:seon.db.process/id :seon.db.process/id]] :seon.render/namespace] [:or :map :seon.render.web/request-error :seon.agent/error :seon.db/error-result]]}
+  A WRITE, reached only from the explicit create-owner POST
+  (`context-response`). A page GET never calls it: a read path never writes a
+  transaction, and the agent it creates runs provider turns (issue 24w)."
+  {:malli/schema [:=> [:cat [:map [:seon.store/connection-object :seon.db/connection] [:seon.db.process/id :seon.db.process/id]] :seon.render/namespace] [:or :seon.agent/id :seon.render.web/request-error :seon.agent/error :seon.db/error-result]]}
   [{connection :seon.store/connection-object
     process :seon.db.process/id}
    namespace-name]
@@ -3158,6 +3162,23 @@
                      :seon.error/expected "a namespace with an assigned agent"
                      :seon.error/offending namespace-name}]
                 observation))))))
+
+(defn- create-owner-form
+  "`:seon.render/html` — the explicit control that creates a namespace's agent.
+
+  A plain form POST to the agent context route; the created agent's id is the
+  namespace name, so the route id names both. The response redirects to the
+  namespace page, which then renders the new owner."
+  {:malli/schema [:=> [:cat :seon.render/namespace] :seon.render/hiccup]}
+  [namespace-name]
+  [:form {:id "create-namespace-owner"
+          :class "seon-debug-header"
+          :method "post"
+          :action (route/path ::route/agent-context {:id (str namespace-name)})}
+   [:input {:type "hidden" :name "action" :value "create-owner"}]
+   [:div [:span "agents"] [:code "none assigned"]]
+   [:button {:type "submit"}
+    (str "Create an agent for " namespace-name " (it starts taking turns)")]])
 
 (def ^:private namespace-walk-options
   {:depth 2})
@@ -3343,6 +3364,8 @@
         [[:section {:class "seon-debug"
                     :data-signals__ifmissing
                     "{showEverything:true,selectedUnit:''}"}
+          (when-let [unowned (::unowned-namespace service)]
+            (create-owner-form unowned))
           [:header {:id "debug-inspection-header" :class "seon-debug-header"}
            [:div [:span "viewer"] [:code (pr-str viewer-namespace)]]
            [:div [:span "subject"]
@@ -3379,12 +3402,13 @@
         (debug-response service namespace-name
                         (first (cluster.agent/assigned-to (db/db connection) namespace-name))
                         request)
-        (let [owner (ensure-namespace-owner! service namespace-name)]
-          (if (string? owner)
-            (page-response service owner)
-            {:status 500
-             :headers {"content-type" "text/plain; charset=utf-8"}
-             :body (:seon.error/message owner)}))))))
+        ;; A GET NEVER WRITES (24w). An owned namespace renders its first
+        ;; assigned agent's page; an unowned one renders the agentless
+        ;; namespace inspection with the explicit create control.
+        (if-let [owner (first (cluster.agent/assigned-to (db/db connection) namespace-name))]
+          (page-response service owner)
+          (debug-response (assoc service ::unowned-namespace namespace-name)
+                          namespace-name nil request))))))
 
 (defn- agent-alias-response
   [{connection :seon.store/connection-object :as service} debug? request]
@@ -3412,11 +3436,29 @@
                (assoc :seon.message/inbound-content
                       (get params "content"))))))
 
-(defn- context-response
+(defn- create-owner-response
+  "The explicit owner creation: one agent for the namespace the route id names.
+
+  Redirects to the namespace page on success; refusals are 422 values."
   {:malli/schema [:=> [:cat :seon.render.web/service :map] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
-  [service request]
-  (let [params (decode-form request)
-        action (case (get params "action")
+  [{connection :seon.store/connection-object :as service} request]
+  (let [namespace-name (some-> (get-in request [:path-params :id]) route-namespace)]
+    (if-not (and namespace-name (namespace-exists? (db/db connection) namespace-name))
+      (not-found request)
+      (let [owner (ensure-namespace-owner! service namespace-name)]
+        (if (string? owner)
+          {:status 303
+           :headers {"location" (route/path ::route/namespace {:namespace (str namespace-name)})}
+           :body nil}
+          {:status 422
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body (pr-str owner)})))))
+
+(defn- context-action-response
+  "One ordinary turn operation requested from the page's context controls."
+  {:malli/schema [:=> [:cat :seon.render.web/service :map [:map-of :string :string]] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
+  [service request params]
+  (let [action (case (get params "action")
                  "system-turn" :system-turn
                  "virtual-turn" :virtual-turn
                  "compact" :compact
@@ -3443,6 +3485,17 @@
       {:status 422 :headers {"content-type" "text/plain; charset=utf-8"}
        :body (pr-str result)}
       {:status 204 :headers {} :body nil})))
+
+(defn- context-response
+  "The agent context route: the explicit create-owner action or a turn operation.
+
+  The form body is a stream, so it is decoded once here."
+  {:malli/schema [:=> [:cat :seon.render.web/service :map] [:map [:status :int] [:headers [:map-of :string :string]] [:body [:or :nil :string]]]]}
+  [service request]
+  (let [params (decode-form request)]
+    (if (= "create-owner" (get params "action"))
+      (create-owner-response service request)
+      (context-action-response service request params))))
 
 (defn- feed-response
   [service request]
