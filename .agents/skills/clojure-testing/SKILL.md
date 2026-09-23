@@ -158,7 +158,7 @@ During a cut use the installed focused authority, not a suite per commit:
   sends that request over the cluster's prepl; exit 0 only when `passed?`.
 - `bin/test [CLUSTER] [options]` is `bin/test-check` (`bin/test:19`). `bin/test
   --platform` (`bin/test:21`) boots the committed HEAD under a fresh operator root
-  (`bin/seon --root R reset --force`) and runs `bin/test-check --isolated`: one request
+  (`bin/seon --root R nuke --force`; a fallback to an older program refuses) and runs `bin/test-check --isolated`: one request
   naming `seon.test/isolated-members` (`src/seon/test.clj:1525`: declared platform rows,
   members reaching a `:seon.fn/destroys` owner, file-backed fixtures), bounded by
   `seon.test/declared-bound-ms` (`:1550`). It keeps the root as evidence when red.

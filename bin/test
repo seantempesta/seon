@@ -7,7 +7,7 @@
 #       --test NS/TEST, --ns NS, --changed NS/SYM, --policy P, --include-long,
 #       --time-limit-ms N. Each member runs on its own branch of the cluster.
 #   bin/test --platform
-#       The isolated host: boot the checkout under a fresh operator root
+#       The isolated host: boot committed HEAD under a fresh operator root
 #       (tmp/test-runs/platform-*), run the declared platform rows, the members
 #       reaching a :seon.fn/destroys owner and the file-backed fixtures there as
 #       ONE request, then stop that JVM. The root is deleted when green and kept
@@ -34,9 +34,16 @@ trap stop_host EXIT HUP INT TERM
 
 started=$(date +%s)
 echo "bin/test --platform: booting the isolated host under $root" >&2
-if ! bin/seon --root "$root" reset --force >"$root/boot.log" 2>&1; then
+# A nuke builds the root's program from committed HEAD. When HEAD does not
+# reach readiness it boots an older program and says so: that host would test
+# another program, so the request refuses it.
+if ! bin/seon --root "$root" nuke --force >"$root/boot.log" 2>&1; then
   echo "bin/test --platform: the isolated host did not boot; evidence kept in $root/boot.log" >&2
   tail -n 20 "$root/boot.log" >&2
+  exit 1
+fi
+if grep -q ':seon.operator/fallback-from' "$root/boot.log"; then
+  echo "bin/test --platform: HEAD did not boot; the host fell back to an older program; evidence kept in $root/boot.log" >&2
   exit 1
 fi
 booted=$(date +%s)
