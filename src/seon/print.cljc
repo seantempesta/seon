@@ -1128,14 +1128,6 @@
 
     node))
 
-(defn enrich-elisions
-  "Replace every admission marker with a declared structural elision value."
-  {:malli/schema
-   [:=> [:cat :seon.print/node :seon.render.profile/profile]
-    :seon.print/node]}
-  [node profile]
-  (enrich-node node profile []))
-
 (declare fit-node)
 
 (defn- fit-entry

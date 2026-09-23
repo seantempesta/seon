@@ -324,12 +324,6 @@
   (map (fn [[style token]] [:span {:class (str "seon-syntax-" style)} token])
        (syntax-tokens source)))
 
-(defn render-emission-ai
-  "The exact emission bytes paired with the colourised session rendition."
-  {:malli/schema [:=> [:cat :seon.repl/emission] :string]}
-  [emission]
-  (text emission))
-
 (defn render-emission-html
   "Colourise one emission without changing a single character of `text`.
   The prompt, input and response have separate visual roles. Declared AI

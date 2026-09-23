@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: cleanup
 tags: [issue, sci, admit, dead-code, shown-text, vocabulary]
 created: 2026-09-16
@@ -56,3 +56,9 @@ graph rather than a text search:
 
 Out of scope for the transcript/web-debug reds lane, which owned the test
 expectations rather than the admission namespace.
+
+## Resolution (lane cut-l1, 2026-09-23)
+
+`restorable-node` and `opaque-result-faces` (its only reader) are deleted from
+`src/seon/sci/admit.clj`; `rg` over src, test, script, resources and the indexed
+`:seon.fn/calls`/`:seon.fn/references` rows on `default` found no caller.

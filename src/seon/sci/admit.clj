@@ -36,8 +36,7 @@
   projection failures panic or degrade to markers according to
   `:seon.config/on-core-error`. Admission opens no resources and writes no
   durable state."
-  (:require [clojure.edn :as edn]
-            [clojure.test.check.generators :as gen]
+  (:require [clojure.test.check.generators :as gen]
             ;; sci.lang and sci.impl.types are loaded for their deftypes:
             ;; the class literals below do not exist until their defining
             ;; namespace has loaded, and a require is how that is stated.
@@ -596,15 +595,6 @@
   (when (keyword? (:seon.sci.admit/reason admitted))
     (select-keys admitted [:seon.sci.admit/reason :seon.sci.admit/bytes])))
 
-(def ^:private opaque-result-faces
-  ;; A node whose face kept only a name or a class NEVER held the value.
-  ;; Ruling 59c: a handle that resolves to a description of a value the agent
-  ;; cannot use is worse than no handle, because it answers `(count result/e7)`
-  ;; with a lie instead of an unresolved symbol.
-  #{::print/var ::print/type ::print/class ::print/object
-    ::print/failed ::print/throwable ::print/truncated-string
-    ::print/elided ::print/projected ::print/pruned})
-
 (defn- unserializable-root?
   "True when the walk produced no data for the value, only a description.
 
@@ -618,24 +608,6 @@
     (or (= ::print/failed face)
         (and (= ::print/object face)
              (nil? (::print/value node))))))
-
-(defn restorable-node
-  "One settled evaluation's print node, when its value survives the node.
-
-  Nil for a node that kept only a name, for an unreadable node, and for an
-  evaluation that stored none. The question `is this value reachable again?`
-  is asked HERE, of the node itself, so nobody has to remember the answer in
-  a flag beside it. There is no second question about windows any more: a
-  value is stored faithfully or it is missing, and a missing evaluation
-  stores no node at all."
-  {:malli/schema [:=> [:cat [:maybe :string]] [:maybe :map]]}
-  [serialized]
-  (when (string? serialized)
-    (let [node (try (edn/read-string serialized) (catch Throwable _ nil))]
-      (when (and (map? node)
-                 (::print/face node)
-                 (not (contains? opaque-result-faces (::print/face node))))
-        node))))
 
 (defn result-handle
   "The symbol naming one evaluation's value: `result/e<evaluation id>`.
