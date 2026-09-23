@@ -263,3 +263,30 @@ Tests on scratch `root` after adoption + restart: run `ebc9ad6898f3` (7 instrume
   capture keyed by (path, size, mtime) → digest in `seon.cluster.source` (not my file).
 - `81e620d4b` 24z: page-cache signal from post-evaluation evidence (`Var/rev` +
   namespace mappings identity), mark 236 µs, only for non-read_only evaluations.
+
+## P0 stability and directive (fourth follow-ups)
+
+- `ea048d617` resume reads a published commit whose contracts name a deleted predicate:
+  `schema/projection-from-rows` gives such stored predicates (namespace loaded, Var
+  gone) a callable that refuses by name; boot's digest comparison reads raw and
+  includes deleted files. +34 ms per projection build (3,394 schemas, 1,939
+  contracts). Regression `a-stored-declaration-naming-a-deleted-predicate-stays-readable`
+  (run `9e17e91fffb3`). Scratch `root-p0` (booted at `9f39ae83d`, resumed from a HEAD
+  archive): the predicate refusal is gone; readiness then refused on HEAD's own data —
+  `test/seon/cluster/publication_declared_schema_test.clj:20` quotes the deleted
+  `seon.test.runner/run!`, and two issue notes cite deleted files — reported to the
+  orchestrator. Archives inside the repo enumerate inputs through the parent checkout's
+  index (`test/cache.clj:35-37`) unless they carry `test-input-paths.txt`.
+- `27c08129d` the >1 s explanation opens with the owner's directive; verbatim SCI output:
+  `;; OVER ONE SECOND (3204 ms): this is your defect; fix it before continuing. ...`
+- `480807ce9` `call-preparation/hook` per-call reads through definitions: 30,000 SCI calls
+  of `seon.id/valid?` 3,182 ms → 943 ms warm (31 µs per call). Remaining per call:
+  `seon.db/carry-projection-state` inside `db/db` (~13 µs, db.clj) and SCI interpretation.
+
+| Operation | ms | Note |
+|---|---:|---|
+| Scratch from zero at 9f39ae83d | 112,520 (ready 82,714) | from-zero publication; DEFECT |
+| Resume at HEAD archive (refused runs) | 34,382–102,440 | publication of the changed files; DEFECT |
+| Hook adoption of schema.clj / call_preparation.clj | 31,872 / 38,827 | reloads 90 / 56 namespaces; DEFECT |
+| Test run after adoption (hung, then refused) | 154,630 | acquisition-refusal recording (M9); DEFECT |
+| seon.profile-test | 13,859 | 5 members |
