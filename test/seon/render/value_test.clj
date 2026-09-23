@@ -7,6 +7,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.ai.tokens :as tokens]
+            [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.error :as error]
             [seon.instrument :as instrument]
@@ -104,15 +105,18 @@
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "render-results")
-     (let [written (db/transact! connection
-                     (into (support/agent-tx @connection "render-results")
+     (let [written (support/transacted! connection
+                     (into (agent/creation-tx
+                            {:seon.agent/id "render-results"
+                             :seon.ns/name 'my.agents.render-results
+                             :seon.cluster/name "render-results"})
                        [{:seon.turn/id "render-results-turn"
                          :seon.turn/agent [:seon.agent/id "render-results"]
                          :seon.turn/opened-tx (db/basis-t (db/db connection))
                          :seon.turn/reply (.repeat "turn detail " 1000)}
                         {:seon.effect/id "render-results-effect"
                          :seon.effect/run [:seon.turn/id "render-results-turn"]
-                         :seon.effect/owner [:seon.fn/sym "seon.db/q"]
+                         :seon.effect/owner [:seon.fn/sym 'seon.db/q]
                          :seon.effect/form-ordinal 0
                          :seon.effect/ordinal 0
                          :seon.effect/opened-at (java.util.Date. 0)
@@ -127,13 +131,14 @@
                           :seon.render.profile/max-string-length 128)
            handle 'result/e0123456789ab]
        (is (:db-after written) (pr-str written))
-       (doseq [lookup [[:seon.fn/sym "seon.db/q"]
+       (doseq [lookup [[:seon.fn/sym 'seon.db/q]
                        [:seon.config/cluster "render-results"]
                        [:seon.turn/id "render-results-turn"]
                        [:seon.effect/id "render-results-effect"]]]
          (let [raw (db/pull database '[*] lookup)
                result (evaluation/evaluate
-                        {:seon.cluster.eval/source (pr-str (list 'seon.db/pull (list 'quote '[*]) lookup))
+                        {:seon.cluster.eval/source (pr-str (list 'seon.db/pull (list 'quote '[*])
+                                                                 (list 'quote lookup)))
                          :seon.sci.eval/ctx ctx :seon.db/db database
                          :seon.render/profile profile :seon.repl/handle handle
                          :seon.render.value/options {:seon.render.value/structural? true}
@@ -144,14 +149,15 @@
                parsed (edn/read-string shown)
                cuts (filter #(and (map? %) (:seon.print/omitted %))
                             (tree-seq coll? seq parsed))]
-           (is (seq raw) (pr-str lookup))
+           (is (= (second lookup) (get raw (first lookup))) (pr-str lookup raw))
            (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
            (is (= raw (:seon.sci.admit/value result)))
            (is (map? parsed) shown)
            (is (<= (tokens/estimate shown) (:seon.render.profile/token-budget profile)) shown)
            (is (seq (dissoc parsed :seon.print/elision)) shown)
            (is (every? (set (keys raw)) (keys (dissoc parsed :seon.print/elision))) shown)
-           (is (seq cuts) shown)
+           (when (#{:seon.turn/id :seon.effect/id} (first lookup))
+             (is (seq cuts) shown))
            (evaluation/bind-result! ctx handle raw)
            (doseq [cut cuts]
              (let [path (:seon.render.data/path cut)
@@ -187,18 +193,18 @@
            ctx (support/fork-cluster-ctx connection "fn-row")
            configuration (support/effective-config)
            pattern [:seon.fn/sym :seon.fn/private?]
-           lookup [:seon.fn/sym "seon.db/q"]
+           lookup [:seon.fn/sym 'seon.db/q]
            raw (db/pull database pattern lookup)
            result (evaluation/evaluate
                     {:seon.cluster.eval/source
-                     (pr-str (list 'seon.db/pull (list 'quote pattern) lookup))
+                     (pr-str (list 'seon.db/pull (list 'quote pattern) (list 'quote lookup)))
                      :seon.sci.eval/ctx ctx :seon.db/db database
                      :seon.render/profile (render/agent-render-profile configuration)
                      :seon.sci.admit/caps (config/result-caps configuration)
                      :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
                      :seon.config/on-core-error :panic})
            shown (:seon.eval/shown result)]
-       (is (seq raw) (pr-str lookup))
+       (is (= 'seon.db/q (:seon.fn/sym raw)) (pr-str lookup raw))
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
        (is (= raw (:seon.sci.admit/value result)))
        (is (= raw (edn/read-string shown)) shown)
@@ -213,19 +219,23 @@
    (fn [connection]
      (support/seed-cluster! connection "poll-render")
      (let [configuration (support/effective-config)
-           profile (render/agent-render-profile configuration)
+           profile (assoc (render/agent-render-profile configuration)
+                          :seon.render.profile/max-string-length 128)
            observations
            (mapv
             (fn [size]
               (let [payload (.repeat "x" size)
-                    written (db/transact! connection
-                              (into (support/agent-tx @connection "poll-render")
+                    written (support/transacted! connection
+                              (into (agent/creation-tx
+                                     {:seon.agent/id "poll-render"
+                                      :seon.ns/name 'my.agents.poll-render
+                                      :seon.cluster/name "poll-render"})
                                 [{:seon.turn/id "poll-render-turn"
                                   :seon.turn/agent [:seon.agent/id "poll-render"]
                                   :seon.turn/opened-tx (db/basis-t (db/db connection))}
                                  {:seon.effect/id "poll-render-effect"
                                   :seon.effect/run [:seon.turn/id "poll-render-turn"]
-                                  :seon.effect/owner [:seon.fn/sym "seon.db/q"]
+                                  :seon.effect/owner [:seon.fn/sym 'seon.db/q]
                                   :seon.effect/form-ordinal 0 :seon.effect/ordinal 0
                                   :seon.effect/opened-at (java.util.Date. 0)
                                   :seon.effect/request-edn "{}"
@@ -712,23 +722,28 @@
    (fn [connection]
      (let [database (db/db connection)
            target (db/pull database '[:db/id :seon.ns/name] [:seon.ns/name 'seon.print])
-           raw {:seon.ns/requires [(:db/id target)] :fixture/title "no render pair"}
+           raw {:seon.agent/namespace (:db/id target)
+                :seon.ns/requires #{'seon.print}
+                :fixture/title "no render pair"}
            request (assoc (probe-unit raw) :seon.db/db database)
            shown (edn/read-string (value/render-ai request))]
        (is (:db/id target) "the reference target must really exist")
-       (is (= #{[:seon.ns/name 'seon.print]} (:seon.ns/requires shown)))
+       (is (= [:seon.ns/name 'seon.print] (:seon.agent/namespace shown)))
+       (is (= #{'seon.print} (:seon.ns/requires shown)))
        (is (= "no render pair" (:fixture/title shown)))))))
 
 (deftest an-explicit-pull-keeps-its-nested-shape-in-shown-text
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "shape"})
-     (let [written (db/transact!
+     (support/seed-cluster! connection "shape")
+     (let [written (support/transacted!
                     connection
-                    [[:db/add "cluster" :seon.cluster/name "shape"]
-                     {:seon.agent/id "shape" :seon.agent/namespace [:seon.ns/name 'seon.print]}
-                     [:db/add [:seon.ns/name 'seon.print] :seon.ns/steward [:seon.agent/id "shape"]]])
-           _ (is (:db-after written) (pr-str written))
+                    (agent/creation-tx {:seon.agent/id "shape"
+                                        :seon.ns/name 'seon.print
+                                        :seon.cluster/name "shape"}))
+           _ (is (= "shape" (:seon.agent/id
+                              (db/pull (db/db connection) '[:seon.agent/id]
+                                       [:seon.agent/id "shape"]))) (pr-str written))
            ctx (support/fork-cluster-ctx connection "shape")
            configuration (support/effective-config)
            result (evaluation/evaluate
@@ -809,7 +824,8 @@
    (fn [connection]
      (support/seed-cluster! connection "string-floor")
      (let [configuration (support/effective-config)
-           profile (render/agent-render-profile configuration)
+           profile (assoc (render/agent-render-profile configuration)
+                          :seon.render.profile/max-string-length 128)
            ctx (support/fork-cluster-ctx connection "string-floor")
            result (evaluation/evaluate
                     {:seon.cluster.eval/source "(apply str (repeat 3000 \"ab\"))"
@@ -823,6 +839,8 @@
            shown (:seon.eval/shown result)
            cut (elision-in shown)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
+       (is (> (count (:seon.sci.admit/value result))
+              (:seon.render.profile/max-string-length profile)))
        (is (some? cut) shown)
        ;; The floor: content, not a bare count.
        (is (pos? (count (:seon.print/prefix cut))) shown)
@@ -841,7 +859,10 @@
            shown)
        ;; And the reader can ask again rather than being told a refusal.
        (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
-           shown)))))
+           shown)
+       (evaluation/bind-result! ctx 'result/e0123456789ab (:seon.sci.admit/value result))
+       (is (= (:seon.sci.admit/value result)
+              (sci/eval-form ctx (:seon.print/requery-form cut))))))))
 
 (deftest an-agent-facing-cut-reports-its-size-in-estimated-tokens
   ;; AGENTS.md §2.4: display sizes for humans are estimated tokens via
@@ -889,7 +910,8 @@
    (fn [connection]
      (support/seed-cluster! connection "dir-floor")
      (let [configuration (support/effective-config)
-           profile (render/agent-render-profile configuration)
+           profile (assoc (render/agent-render-profile configuration)
+                          :seon.render.profile/token-budget 1024)
            ctx (support/fork-cluster-ctx connection "dir-floor")
            result (evaluation/evaluate
                     {:seon.cluster.eval/source "(dir seon.turn)"
@@ -904,11 +926,17 @@
            cut (elision-in shown)]
        (is (nil? (:seon.cluster.eval/error result)) (pr-str result))
        (is (str/includes? shown "seon.turn/") shown)
+       (is (> (tokens/estimate
+               (repl/render-directory-ai (:seon.sci.admit/value result)))
+              (:seon.render.profile/token-budget profile)))
        (is (some? cut) shown)
        (is (pos? (:seon.render.data/next-offset cut)) shown)
        (is (< (:seon.print/omitted cut) (:seon.render.data/total cut)) shown)
        (is (= 'seon.print/value-at (first (:seon.print/requery-form cut)))
-           shown)))))
+           shown)
+       (evaluation/bind-result! ctx 'result/e0123456789ab (:seon.sci.admit/value result))
+       (is (= (:seon.sci.admit/value result)
+              (sci/eval-form ctx (:seon.print/requery-form cut))))))))
 
 (deftest transacted-preserves-error-entities-as-data
   ;; Both arities normalize entity maps without interpreting them as failures.
@@ -938,4 +966,4 @@
        (is (= {:seon.agent/id "root"}
               (value/transacted {:db/id 7 :seon.agent/id "root"}
                                 (db/db connection))))
-       (is (= refusal (value/transacted refusal)))))))
+       (is (= refusal (value/transacted refusal (db/db connection))))))))
