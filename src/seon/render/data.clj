@@ -8,7 +8,8 @@
   routes both hand their selected value to that floor.
 
   Crash walk: pure. A kill loses only a cursor carried by the URL."
-  (:require [clojure.edn :as edn]
+  (:require [seon.error.refusal]
+            [clojure.edn :as edn]
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema.edn :as schema.edn]))
@@ -111,13 +112,11 @@
                   :seon.render.data/observation-error]}
   [operation member message offending]
   (assoc
-   {:seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.render.data/observation
-     :seon.error/operation operation
-     :seon.error/message message
+   (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.data/observation operation
+    {:seon.error/message message
      :seon.error/expected "an existing subject and a continuation from the same snapshot, entity, and direction"
      :seon.error/offending offending
-     :seon.error/data {member offending}}
+     :seon.error/data {member offending}})
    :seon.render.data/refused-member member
    :seon.error/offending offending
    :seon.error/fix "Acquire the subject again and use the continuation returned by that observation."))
