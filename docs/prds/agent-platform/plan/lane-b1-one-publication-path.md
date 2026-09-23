@@ -387,7 +387,7 @@ and chain (D3). The target:
 |---|---|---|
 | bridge | JSON-RPC ⇄ one prepl connection per call (0.47–0.70 ms incl. connect); checks the answer's request id (mismatch → `:seon.dev.mcp/desync`, connection dropped); `tools/call` on a future (`stdout-lock` already serializes writes, `mcp.clj:807`); discovery = advertisement + exact `(pid, start-instant)` (`operator.clj:106-131`), no health observation per call (today ~105 ms) | `script/seon/dev/mcp.clj` (889 → ≈ 360) |
 | wire | print prepl events; a print failure is an answer, never a throw (Clojure's `io-prepl`, CLJ-2620, `server.clj:275-289`); exit check that cannot throw; no `ns-resolve` of `seon.cluster` | `resources/seon/operator/prepl.clj` |
-| evaluator | `seon.repl/host-eval`: one form in a named namespace (JVM) or context (SCI arm = today's `sci-evaluation-form` template, `mcp.clj:480-528`, as ordinary code calling `seon.sci.eval/evaluate`); value and error rendered once; `:ms` from prepl (`server.clj:233-235`) and the C1 directive over one second | `src/seon/repl.clj` (+≈105) |
+| evaluator | `seon.repl/host-eval`: JVM-only inspection, one form in a named namespace; branch SCI submission uses the shared durable agent entrance in D1 §2e O1, never a direct MCP evaluator; value/error rendered once with prepl `:ms` and the C1 directive over one second | `src/seon/repl.clj`; D1 §2e owns shared submission |
 | renderer | the shown text: `seon.render.value/render-ai` under the compiled profile `(render/agent-render-profile seon.config/defaults)`; proportional to the shown window (2.1 ms for a 2×10⁵ vector that admission spends 385 ms printing to 8 MB today, 1.5 ms for `(range)`) | exists |
 
 Properties: an error answer is B3 §2a's shown text (every link's class, message and `ex-data`,

@@ -275,6 +275,8 @@ row and cannot run tests (dated evidence, break B5). No cluster start or program
 If custody requires an agent row, create it behind the branch name, retain its handle
 in the existing context state, and archive it when the branch is unlinked. Release the
 handle only after owned work terminates; unlink uses `registry/retire-branch!`, not GC.
+O1a also proves §2a’s one-agent arming: acquisition alone is not graph startup;
+unrelated inherited agents remain unarmed and effects/faults stay on the branch.
 
 The branch REPL (`submit`, branch + source + request identity) calls
 `seon.cluster.agent/submit-source!` (`src/seon/cluster/agent.clj:606`), the same entrance
@@ -296,17 +298,29 @@ finish through ordinary run completion; a continuation that needs a provider ref
 by name. Prove these lifecycle semantics, including disconnect after admission, before
 calling the door complete; a fifty-line estimate is not that proof.
 
+Closed-run facts prove durable settlement, not installation or test completion.
+Successful submit completion joins the owned execution's actual exit, observed
+installation result and automatic test request's terminal evidence. Reconciliation
+reports settled-but-installation/feedback-unconfirmed explicitly and never replays
+source. Post-settlement core failure follows the ordinary fault route. At
+`system-run-call` (`src/seon/turn.clj:712-741`), bind request identity to the branch
+incarnation and frozen source/namespace: different input under the same identity
+refuses; concurrent identical retries share the admitted run. Prove disconnect just
+after settlement, installation failure and direct retraction, not only happy closure.
+
 **Start from the namespace context.** Add one REPL function `my.program/context` taking
-the branch's execution value and namespace, returning exactly the context a Seon agent
-working there receives. Compose `seon.context`, the existing prompt selection owner and
-`seon.render.ns/render-ai` (`src/seon/context.clj:1-42`;
-`src/seon/render/ns.clj:795`); no outside-agent context builder. Every outside lane starts
-there and reports missing, unhelpful or wrong context when it must look elsewhere.
-Declare that feedback on the ordinary task/issue value, naming the namespace, branch
-commit and context version/selection inputs, with the observed deficiency and requested
-context. Route it to the context owner through the existing task writer so tuning has
-queryable evidence. O1d owns this B2 composition and B1 REPL exposure; its result is
-rendered context, not a stored live evaluation result.
+the branch's execution value and namespace. Use its internal custody agent and ordinary
+prompt request with explicit namespace, immutable database, selection inputs (including
+budget/calibration) and render profile. Delegate to `seon.cluster.prompt/prompt`
+(`src/seon/cluster/prompt.clj:419-435`) and its existing render/acquisition path; return
+that rendered-context value and basis/contribution evidence. If assignment must change,
+use its ordinary writer before deriving context; the context read never mutates it.
+Prove equality with the inside-agent result under identical inputs. No concatenated
+namespace rendering, handwritten outside instructions or new context-version counter.
+Every outside lane starts there and reports missing, unhelpful or wrong context when
+it must look elsewhere. Declare feedback on the ordinary task/issue value, referencing
+the namespace, basis and contribution inputs plus deficiency and requested context;
+route it to the context owner. O1d owns this B2 composition and B1 REPL exposure.
 
 **Entry policy is data; merge policy is unconditional.** The config-schema search found
 no matching check dial: `resources/seon/schemas/seon.config.eval.edn:1` declares the
@@ -342,11 +356,19 @@ These are new declared shapes, not claims of installed keys. Reuse the same diag
 for REPL, root's diff and merge. Existing `seon.lint/finding` requires a file and models
 clj-kondo findings (`resources/seon/schemas/seon.lint.edn:1-25`), so it is not this value.
 
-`:warn` accepts the definition, preserving even an invalid schema as source data;
-it must not manufacture a valid contract or try to arm the malformed form. `:gate`
-refuses that definition before its body/effects or program write; other definitions
-remain available for repair. This needs the declaration producer and installer changed
-together, not merely a caught compiler exception. Malli's `schema` compiles the supplied
+`:warn` accepts the definition. O1c separates stored authored contract data from
+compilable contract input at the existing declaration/projection/install owners.
+One derivation governs initial installation, reacquisition and B4 test forks: a warned
+function remains callable without manufacturing a contract or compiling its malformed
+form. Replacing a valid contract with an invalid one must remove the old wrapper;
+repair restores the real wrapper everywhere. `:gate` refuses before evaluation and
+leaves both program rows and callable roots unchanged. Prove submission, next call,
+fresh context acquisition, test fork, repair and merge refusal in one lifecycle
+regression. Authored-form compilation errors are declared agent diagnostics; failures
+inside valid core execution or recording remain core faults with full cause/delivery.
+No broad acquisition catch turns core faults into warnings. Split schema/config
+preparation from the atomic producer/consumer conversion if O1c exceeds its line cap.
+Malli's `schema` compiles the supplied
 form against the branch registry (`reference-code/malli/src/malli/core.cljc:2555`,
 HEAD pin `8725a8cb`); reuse its errors. Fully namespaced means domain schema references,
 map attribute keys and predicate/function symbols resolve to qualified identities;
@@ -360,7 +382,9 @@ captured branch execution value, as `my.test/check` already composes it
 (`src/my/test.clj:5-26`; `src/my/program.clj:162`). This trigger lives in the agent path,
 so inside and outside submissions both receive it; MCP only returns the answer.
 Use before/after dependencies for deletions and changed edges, include changed tests,
-and coalesce identities within the settled batch. Read-only evaluations and test-result
+collect identities from ordinary program writer reports for the submission, including
+direct `my.program/ns-unmap!` retractions, and coalesce once before the named request.
+The returned definition-row/installations vector alone is not the change inventory. Read-only evaluations and test-result
 writes do not trigger it. Run the reaching set, never a system-wide fallback; unknown
 selection is explicit. Each member executes on B4's isolated branch off that captured
 commit; results are recorded back to the submitting branch. Red does not undo a warned
@@ -379,21 +403,35 @@ it neither tests nor writes. Root's branch `accept` calls the existing
 uses the existing task/message writer to deliver a reason to the author and leaves
 the branch editable. Write-back invokes §2d only for the accepted, fully tested delta.
 
-O3 begins with **acceptance correctness**, before additions/deletions. Capture immutable
-H/C/B; prepare forks exactly H into S, applies the proposal and derives **every current
-reaching test plus explicit task tests** for the combined program. B4's evidence owner
-compares this complete required set to positive current member evidence bound to H/C/S
-and the proposal. A caller-selected green subset is insufficient. The required set is found by the existing affected-tests selection, never new code (owner: "don't reinvent the wheel we already have efficient code for finding the test diffs … I mean the affected tests"): accept calls `seon.test/select` (`src/seon/test.clj:554`) read-only on the tested commit with the merge delta as `:seon.test/changed`, and requires nothing left to run and no exclusions; the hand-built `uncovered`/`gate-sets` loop in `accept-merge!` is deleted. Every function in the
+**O3a is the first implementation slice**, at the existing B4 selector/evidence owner
+`seon.test/select` (`src/seon/test.clj:576`), after its current file holder releases it.
+Capture immutable H/C/B; prepare forks exactly H into S and applies the proposal. A
+named request includes the merge delta, explicit task identities, cluster custody and
+all required eligibility, including declared-long members. The existing graph owner
+derives every current reaching test plus task tests; compare each member's content/input
+evidence. An explicitly changed seed does not invalidate evidence for that exact
+content: reuse the stored `:seon.test.member/reach-digest` landed in `f3a4b33d9`
+(`src/seon/test.clj:846-858`), fixing the unconditional reached-seed exclusion there.
+No required member disappears through eligibility. The evidence-bearing value names
+immutable tested S and the same proposal; it does not replace S's execution program.
+A refusal is not an empty selection. Only a complete result with every required member
+positively covered and no remaining/excluded member permits acceptance. Keep this in
+B4's existing owner; delete accept's `uncovered`/`gate-sets` subset loop in the same
+loadable slice, never rebuild the dependency walk in D1. Preserve H's writer fence and
+H/C/S proposal binding. Every function in the
 combined program has a well-formed, fully namespaced Malli schema and at least one test;
 all affected/task tests pass, and test-first obligations have basis evidence for the
 changed functions, regardless of the entry dials. Reuse unchanged contract/coverage
 proof by its actual inputs; missing inherited proof blocks merge, never becomes a
-whole-suite run. TDD here proves test existence before the changed definition, not a
+whole-suite run. The scope choice below is open; until ruled otherwise this combined-program
+requirement remains intact. TDD here proves test existence before the changed definition, not a
 red-before-green history. A warned test-first violation is repaired by adding the test
 then resubmitting the function; history supplies the basis, not a new timestamp stamp.
 First regression: two required tests reach one replacement, one fails, a separate
 one-test run passes → accept refuses. Also prove missing task tests, stale evidence,
-moved H and modified S refuse. The writer still fences H as in §2c.
+moved H and modified S refuse. Positive case: the full required set is green and
+acceptance selection executes/writes nothing. Include a disconnected explicit task
+test, a long reaching test and absent evidence; an empty/refused result cannot pass.
 
 Branch acceptance is not **exclusive JVM convergence**. B1's existing evaluation/adoption
 boundary excludes conflicting reloads and dependent evaluations through load → arm →
@@ -404,8 +442,9 @@ record is not health. Prove interleaved adoptions, partial reload failure and an
 branch's indirect call (review item 2); keep ordinary `require :reload`, no new loader.
 
 **Narrow write-back first.** O4 initially exports only interpreted function/test
-replacements with unambiguous existing file/span provenance. §2d's wider additions,
-deletions and declaration kinds follow after the two-branch loop. Hold each destination
+replacements with unambiguous existing file/span provenance. Wider function/schema/
+new-namespace export follows the two-branch loop; required test additions are a
+prerequisite as described below. Hold each destination
 file through integration. Capture and stage bytes outside live source paths (no git
 worktree); run B1 analysis and B4 callable proof before any install. Close reload
 admission while installing the complete set; digest-check every file. After each file,
@@ -416,6 +455,18 @@ verify the entire intended set; after a commit, reconcile its identity and bytes
 resume publication/convergence without a duplicate commit. Commit path-limited, never
 push. File bytes, publication, arming, callable behavior and browser paint are separate
 observations. Green branch tests alone do not prove successful export.
+
+O4b retains accepted M, expected source base and the complete original/desired file
+set through the existing source/Git staging authority **before the first live move**.
+On process restart, `seon.cluster.boot` and `seon.cluster.source` (B1's bootstrap/
+publication owners) reconcile that pending accepted export before loading or admitting
+evaluation against the affected checkout. Missing reconstruction evidence leaves
+execution unavailable and the host REPL reachable. Never start from partial files or
+replay definition effects; resume the same export/commit without a D1 journal or second
+completion registry. Prove interruption after the first of two installs and resumption
+in a new process under separately authorized platform proof; caught I/O failure also
+has an in-process proof. Reprice B1's seam before code if existing convergence/bootstrap
+admission cannot supply this within O4b's cap.
 
 Host-bound declarations, schema resources, new namespaces without destination rules,
 and non-Clojure files stay on the file path with **whole-file holds**. Their captured
@@ -434,41 +485,49 @@ bounds, so a broad reaching set has no unconditional sub-second promise.
 
 | slice | measured defect → target work and time | existing owner; deletion / added-src budget |
 |---|---|---|
-| O0 | False `:as-alias` require edge refuses acquisition; fix producer, prove actual acquisition | B1 analysis (`src/seon/fn.clj:258`); delete false dependency, ≤10 |
+| O3a **first** | Complete content-valid named selection/evidence. Historical prepare 3,837 ms includes run 3,003 ms; measure selection, admission, bodies, recording and release separately; non-body overhead <1 s proportional to changed/reached work, bodies retain numeric bounds; every >1 s phase names its reason | D1 slice 5 + B4 `seon.test/select`; delete reached-seed reuse veto and accept’s subset loop, ≤100 |
+| O0 | Verify/adopt the current holder’s `:as-alias` correction (`src/seon/fn.clj:262-267`); commit and acquisition evidence still owed | B1 analysis; false edge deletion belongs to that holder, no competing edit |
 | O1a | Branch create/list/unlink, retained custody and loaded-code base with cluster facts | D1 §2a / B2 acquisition; replace bare-branch custody plumbing, ≤80 |
 | O1b | Branch-named submission with listener/run reconciliation, idempotent retry and terminal release | B1 §3b R3/R9 + B2 run writer; delete non-settling SCI evaluator, ≤100 |
 | O1c | Four dials and declared diagnostics at the shared entrance; warn/install semantics and automatic changed-batch test reply | D1 slice 6 + B2 settlement + B4 run; replace fixed definition gate, ≤100; activates only after O3 |
-| O1d | Namespace context and declared quality feedback, proportional to selected context | B2 context/render + B1 REPL + existing task writer; delete outside-only context assembly/instructions, ≤80 |
+| O1d | Namespace context and feedback, proportional to selected context; derivation/render <1 s within the leaf budget | B2 context/render + B1 REPL + existing task writer; delete outside-only context assembly/instructions, ≤80 |
 | O2a | Acquisition 1.3–1.7 s: two whole-program digest maps plus reverse closure → unchanged-head compare and changed closure, <1 s | B2 §2a retained acquisition; delete per-call full-program derivation, ≤60 |
 | O2b | Settle 0.7–0.8 s → batch rows/report only, <1 s and reduce combined leaf latency | B2 settlement / D1 slice 6; delete pre-install candidate gate work after O3, ≤60 |
 | O2c | Install 0.7 s → changed roots/affected callers; install-check 5.6 s over store → supplied batch identities/report, <1 s combined | B2 install / B4 execution custody; delete `installation-covers-program-change?` store scan (`src/seon/sci/eval.clj:1169`), ≤60 |
-| O3a | Complete H/C/S required-set evidence; first failing-subset regression above | D1 slice 5 + B4 evidence owner; delete accept's green-subset predicate, ≤100 |
 | O3b | Root diff, named accept/send-back; current whole-program first reach index (≈0.7 s) reused by input, changed-delta review <1 s excluding bodies | D1 slice 5 + B1 bridge; delete owner-only raw JVM acceptance and duplicate evidence checks, ≤80 |
-| O4a | Captured replacement staging and canonical round trip, proportional to touched bytes/declarations | D1 slice 7 + B1 publication; replace function-only override export inventory, ≤100 |
-| O4b | Interrupted file-set recovery, path-limited commit, exclusive load/arm/record; leaf export overhead <1 s target, measure each phase | D1 slice 7 + B1 §2a′; delete independent lane adoption, not digest checks or convergence exclusion, ≤100 |
+| O4a | Captured replacement staging and canonical round trip, proportional to touched bytes/declarations; analysis <1 s within the leaf export budget | D1 slice 7 + B1 publication; replace function-only override export inventory, ≤100 |
+| O4b | Interrupted file-set recovery, path-limited commit, exclusive load/arm/record; leaf export overhead <1 s target, measure each phase | D1 slice 7 + B1 §2a′ (`cluster/source.clj`, `cluster/boot.clj` restart admission); delete independent lane adoption, not digest checks or convergence exclusion, ≤100 |
 | O5 | Later wider/file-origin branch publication with schema destinations and platform proof | D1 slices 5/7 + B1 §2a′ S6 + B4 platform; delete shared-candidate save publication for lanes; split by declaration owner, each ≤100 |
 | O6/O7 | Branch diff replaces program-only ledger rows; file holds remain; tool/REPL guidance follows installed behavior | D1 coordination + B1 R8; delete obsolete agent-tool/non-settling instructions; docs only |
 
-Budgets are added lines, not net estimates or permission to hide machinery in another
-slice; recount deletions before implementation. **Critical path:** writer/REPL health →
-O0 → O1a/b/d and O2 → O3 acceptance correctness → O1c activation → narrow O4 → two isolated
-branches edit, automatically test, review, merge, export, reload and call their changes.
-Do not retire the current definition gate before explicit acceptance is safe. O1c/O2b
-preparation waits for the same-file owner; additions/deletions, task renaming and
-nonessential profiling expansion wait for the demonstrated loop. O6/O7 ship with the
-interfaces they describe; no claimed source or runtime change from this specification.
+Budgets are added lines, not net estimates or permission to hide machinery elsewhere.
+**Implementation starts with O3a** after its file holder releases it; O1a/b preparation
+may proceed independently on free files. Runtime proof still requires writer/REPL
+health and O0 verification. Then O1a/b/d + O2a/c → proven O3 acceptance → O1c/O2b
+activation → narrow O4 → two isolated branches edit, test, review, merge, export,
+reload and call. Never retire definition gating or activate warned definitions before
+acceptance is proven. Task renaming and nonessential profiling expansion wait.
 
-**Authority reconciliation and decisions.** `AGENTS.md:258-259` still says “Filesystem
-lanes (Codex, Claude) index into one shared candidate branch of default and are live
-agents there”. This contradicts the owner's per-branch ruling. The orchestrator replaces
-those two lines exactly with: “gate. Filesystem lanes (Codex, Claude) work through the
-shared agent REPL entrance on their own named branches; root reviews and explicitly
-accepts through the merge gate before write-back to files. Seon agents doing every
-update is the goal.” It also reconciles README §7's shared-candidate/guards-only wording
-and B1 §3b's old SCI evaluator row; this lane does not edit those authorities beyond
-the permitted cross-reference lines. The warn policy is an explicit branch-experiment
-exception to the current every-function-armed wording, never permission to merge an
-uncontracted function.
+Before the demonstration, query inherited contract/coverage readiness and assign each
+missing prerequisite to existing namespace-agent contract/coverage work. The current
+combined-program gate stays intact pending the one scope decision below. New reaching
+tests needed for entry/TDD repair are required work: prove their branch admission and
+acceptance before claiming repair works. O3a can prove its predicate on canonical
+fixtures while a real merge honestly refuses. If O4 cannot persist needed test additions,
+choose an already-covered replacement for the exported demonstration and record that
+it does not prove the full TDD repair loop. No hidden grandfathering or whole-suite
+selection. O6/O7 ship with the interfaces they describe.
+
+**Authority reconciliation.** `AGENTS.md:257-260` now prescribes named branches; the
+old shared-candidate contradiction is resolved. Within this path, atomic database
+acceptance is distinct from exclusive load/arm/record, `host-eval` is JVM-only, and
+warned experimental branch definitions are the explicit exception to unconditional
+arming. §8's older open write-back choice applies only outside §2e; this path has no
+second approval step. The orchestrator must edit the remaining owning rows outside
+this lane's scope: README §7's shared-candidate clause, guards-only clause and
+unconditional-arming row. Required replacements are respectively the named-branch
+rule, exclusive JVM convergence and the branch warning exception; these are accepted
+corrections, not new decisions. B1 §3b's evaluator row is corrected here to JVM-only.
 
 - **O-a ruled:** branch interface; any agent row is internal custody, created/retired
   with the branch. No outside-agent identity tool.
@@ -476,12 +535,28 @@ uncontracted function.
   back a reason; green never auto-accepts.
 - **O-c ruled for this path:** after explicit acceptance and all required proof, §2d
   writes the accepted bytes and commits path-limited. No second human approval step.
-- **O-d wider host-bound export remains open:** (1, recommended) defer it beyond the
-  interpreted replacement loop; smallest cost, gives up initial full-language editing;
-  (2) integrate B4's existing isolated platform proof before export, broader guarantee
-  at measured process cost; (3) keep host-bound work orchestrator-only under that proof,
-  same guarantee but no autonomous host-bound editing. Adopt-then-test is not a safe
-  rollback alternative. Process work over ten seconds still needs owner authorization.
+- **O-d first-loop scope:** host-bound export is deferred; existing platform proof
+  remains required before broader integration. This slice makes no new host-bound
+  guarantee or authorization for a long process proof.
+
+**One open owner decision — merge contract/coverage scope** (engineering estimates,
+not measured runtime):
+
+1. **Changed functions only (recommended).** Changed functions must have a valid,
+   fully namespaced schema and ≥1 test; inherited untouched gaps appear in root's
+   branch diff without blocking. Keeps every affected/task test obligation. Cost:
+   approximately half a day for the scoped predicate and regressions inside O3a;
+   gives up a guarantee that the entire inherited population meets the policy.
+2. **Every function in the combined program (current ruling).** Strong whole-program
+   guarantee; narrow merges block until inherited gaps close. The dated baseline is
+   roughly 3,000 uncontracted and 433 untested functions, not a current census. Cost:
+   census plus a multi-day namespace-agent repair campaign, priced per current gaps;
+   gives up the near-term narrow merge milestone while that work remains.
+3. **A per-cluster scope dial.** Declare changed-only versus whole-program policy,
+   preserving an unconditional gate within the selected scope. Cost: roughly one day
+   for the dial, effective-config consumption and both-policy regressions, plus the
+   population repair cost wherever whole-program is selected. Gives up one uniform
+   cross-cluster guarantee and adds policy surface. Do not implement it before a ruling.
 
 ## 3. Reading list
 
