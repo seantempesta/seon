@@ -785,15 +785,6 @@
              #{}))]))
      forms))))
 
-(defn- reference-candidate-keys
-  "Population keys plus qualified keywords Malli may classify as refs."
-  [forms]
-  (into (into #{} (filter keyword?) (keys forms))
-        (comp
-         (mapcat #(tree-seq coll? seq %))
-         (filter qualified-keyword?))
-        (vals forms)))
-
 (defn- direct-reference-keys-in
   "Canonical keys `definition` names directly, compiled against references
    only. An undeclared reference refuses as the declared unresolved-reference
@@ -821,12 +812,6 @@
 
 (defn- portable-string-hash [s]
   (.hashCode ^String s))
-
-(defn canonical-data-fingerprint
-  "Portable content fingerprint for ordinary data."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Canonical projection encoding handles heterogeneous EDN data, including nil, literals and nested collections; unsupported runtime objects are reported as noncanonical projection data.", :gen/elements [nil false 0 "" :k [] {}]}]] :int]}
-  [value]
-  (portable-string-hash (canonical-data-string value)))
 
 (defn- framed [tag payload]
   (str tag (count payload) ":" payload))
@@ -1821,17 +1806,6 @@
   (update-candidate-forms! merge forms)
   (candidate-forms))
 
-(defn form-string
-  "Canonical, full EDN encoding of registered schema `k`, or nil when absent.
-
-   Registration already proves the value round-trips, so this never truncates
-   or replaces runtime objects with display placeholders. This is the durable
-   `:seon.schema/form` value."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]]
-                  [:maybe :string]]}
-  [k]
-  (some-> (get (candidate-forms) k) pr-str))
-
 (declare compose-projection-data materialize-projection)
 
 (def ^:private render-declaration-properties
@@ -2551,68 +2525,6 @@
       :seon.schema.projection/pure-predicate-symbols
       (:seon.schema.projection/pure-predicate-symbols composed)}
      keyed)))
-
-(def ^:private projection-delta-identities
-  {:seon.schema.projection/forms :schema
-   :seon.schema.projection/schema-admissions :schema
-   :seon.schema.projection/schema-dependencies :schema
-   :seon.schema.projection/shape-rows :schema
-   :seon.schema.projection/function-admissions :function
-   :seon.schema.projection/function-source-admissions :function
-   :seon.schema.projection/function-contracts :function
-   :seon.schema.projection/function-dependencies :function})
-
-(defn maintain-projection-delta
-  "Update one complete divergence delta by the identities changed in a commit.
-
-   Unlike [[projection-delta]], this function never walks either projection
-   population. Each changed identity performs a fixed number of keyed lookups;
-   serialization cost is therefore bounded by the complete divergence value,
-   not by the verified release population."
-  {:malli/schema
-   [:=> [:catn [::base :map]
-                [::divergence-delta :map]
-                [::projection :map]
-                [:seon.schema/changed-schema-keys [:set :keyword]]
-                [:seon.schema/changed-function-symbols [:set :symbol]]]
-    :map]}
-  [base divergence composed changed-schema-keys changed-function-symbols]
-  (let [base (projection-pure-data base)
-        composed (projection-pure-data composed)
-        update-identity
-        (fn [delta projection-key identity]
-          (let [base-values (get base projection-key {})
-                composed-values (get composed projection-key {})
-                changed? (and (contains? composed-values identity)
-                              (not= (get composed-values identity)
-                                    (get base-values identity)))
-                next-values
-                (cond-> (get delta projection-key (sorted-map))
-                  changed?
-                  (assoc identity (get composed-values identity))
-
-                  (not changed?)
-                  (dissoc identity))]
-            (if (seq next-values)
-              (assoc delta projection-key next-values)
-              (dissoc delta projection-key))))
-        maintained
-        (reduce-kv
-         (fn [delta projection-key identity-class]
-           (reduce
-            (fn [result identity]
-              (update-identity result projection-key identity))
-            delta
-            (case identity-class
-              :schema changed-schema-keys
-              :function changed-function-symbols)))
-         divergence
-         projection-delta-identities)]
-    (assoc maintained
-           :seon.schema.projection/artifact-exports
-           (:seon.schema.projection/artifact-exports composed)
-           :seon.schema.projection/pure-predicate-symbols
-           (:seon.schema.projection/pure-predicate-symbols composed))))
 
 (defn materialize-projection
   "Rematerialize registry/options over preproved pure projection data."
@@ -3794,27 +3706,6 @@
        (update :seon.schema/function-source-admissions
                assoc function-symbol admission))))
 
-(defn activate-projection!
-  "Return an already validated projection.
-
-   A live cluster publishes this value through its own `::projection-state`;
-   the schema namespace retains no process-global active generation."
-  {:malli/schema [:=> [:catn [::projection :map]] :map]}
-  [projection]
-  projection)
-
-(defn activate!
-  "Validate and atomically activate a complete `{schema-key form}` set.
-
-   The candidate is fully built before the declaration collector changes. Existing canonical function contracts are revalidated
-   against the replacement schema population. Returns the activated projection."
-  {:malli/schema [:=> [:catn [::forms :map]] :map]}
-  [forms]
-  (when-let [admit (some-> (find-ns 'seon.schema.edn)
-                           (ns-resolve 'admit))]
-    (admit {:seon.schema/forms forms}))
-  (build-projection forms))
-
 (defn current-projection
   "The evaluation-local disposable projection, or nil outside one delta."
   {:malli/schema [:=> [:cat] [:maybe :map]]}
@@ -3833,15 +3724,6 @@
   {:malli/schema [:=> [:cat] [:vector :map]]}
   []
   (:seon.schema.projection/catalog (build-projection (candidate-forms))))
-
-(defn current-keys
-  "Snapshot of all currently-registered schema keywords.
-
-   Used by detect-and-tee in eval-batch! for atom-diff schema detection (before vs
-   after an eval reveals what the form registered)."
-  {:malli/schema [:=> [:cat] [:set :keyword]]}
-  []
-  (set (keys (candidate-forms))))
 
 (defn snapshot
   "Immutable `{schema-key form}` snapshot for one eval transition."
@@ -3941,27 +3823,6 @@
     (reset! candidate (:seon.schema.delta/before before)))
   nil)
 
-(defn register-all!
-  "Register multiple schemas at once from keyword/definition pairs.
-
-   Returns the set of registered keywords. Throws if an odd
-   number of arguments is provided.
-
-   Example:
-     (register-all!
-       ::user-id    :uuid
-       ::user-name  [:string {:min 1}]
-       ::user-email [:string {:min 5}])"
-  {:malli/schema [:=> [:catn [:seon.schema/kvs [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli's repeated concatenation enforces complete keyword/definition pairs; there is no additional cross-pair relation.", :gen/elements [[]]} [:cat :keyword :seon.schema/definition]]]] [:set :keyword]]}
-  [& kvs]
-  ;; NOTE: each kv pair is a [registry-key form] pair; the variadic slot
-  ;; can't enumerate them, hence `[:* :any]`.
-  (assert (even? (count kvs)) "register-all! requires pairs of [key schema]")
-  (let [pairs (partition 2 kvs)]
-    (doseq [[k v] pairs]
-      (register! k v))
-    (set (map first pairs))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Introspection
 ;;; ---------------------------------------------------------------------------
@@ -4030,12 +3891,6 @@
   {:malli/schema [:=> [:cat ::projection] [:vector :qualified-keyword]]}
   [projection]
   (@schema-datahike-database-attributes-in projection))
-
-(defn registered?
-  "Check if a schema keyword is registered."
-  {:malli/schema [:=> [:catn [::registry-key ::registry-key]] :boolean]}
-  [k]
-  (contains? (candidate-forms) k))
 
 (defn schema-definition
   "The raw definition for a registered schema, or nil if not registered.
@@ -4313,18 +4168,6 @@
            vec))
     []))
 
-(defn candidate-shapes
-  "Bounded diagnostic schema window from the activated projection.
-
-   Examines at most [[shape-input-key-limit]] map entries and
-   [[shape-candidate-limit]] indexed schema references. Structural candidates
-   outside either window may be omitted, so rows never assert validity.
-   Candidate declarations do not affect the result after activation."
-  {:malli/schema [:=> [:catn [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
-  [value]
-  (let [projection (shape-projection)]
-    (candidate-shapes-in projection value)))
-
 (defn matching-shapes-in
   "All schemas in explicit `projection` that validate `value`."
   {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:vector :map]]}
@@ -4354,45 +4197,6 @@
   (let [projection (shape-projection)]
     (matching-shapes-in projection value)))
 
-(defn explain-shape-in
-  "Explain `value` against `schema-key` in explicit `projection`."
-  {:malli/schema [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]}
-  [projection schema-key value]
-  (when-not (contains? (:seon.schema.projection/shape-rows projection)
-                       schema-key)
-    (throw (ex-info (str "Unknown projected map schema " schema-key ".")
-                    {:seon.schema/error :seon.schema/unknown-shape
-                     :seon.schema/key schema-key
-                     :seon.schema/unknown-shape schema-key})))
-  ((projection-explainer projection schema-key) value))
-
-(defn explain-shape
-  "Explain `value` against one activated structural schema.
-
-   Returns nil when valid and Malli explanation data when invalid. The schema
-   key must name a row returned by [[candidate-shapes]]; an unknown key is a
-   caller defect and throws before compiling against any other registry."
-  {:malli/schema [:=> [:catn [:seon.schema/registry-key :seon.schema/registry-key] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :seon.schema/explanation]]}
-  [schema-key value]
-  (let [projection (shape-projection)]
-    (explain-shape-in projection schema-key value)))
-
-(defn schemas-in-namespace
-  "The `{keyword definition}` map of schemas registered under `ns-name`.
-
-   `ns-name` is a namespace symbol, e.g. `seon.agent`."
-  {:malli/schema [:=> [:catn [::namespace-name ::namespace-name]] :map]}
-  [ns-name]
-  (into {}
-        (filter (fn [[k _]] (= (some-> k namespace symbol) ns-name)))
-        (candidate-forms)))
-
 ;;; ---------------------------------------------------------------------------
 ;;; Development Helpers
 ;;; ---------------------------------------------------------------------------
-
-(defn clear-all!
-  "Return packaged schemas; declarations are database facts, not mutable state."
-  {:malli/schema [:=> [:cat] :map]}
-  []
-  (registered-schemas))
