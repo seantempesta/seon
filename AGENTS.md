@@ -255,8 +255,9 @@ land on an intermediate branch; conflicts stay there for the agent to fix, so th
 problem shrinks; the combined program is tested in a context forked from that branch;
 green reaching tests plus contracts is the gate; a named accept by root or the owner
 advances the cluster pointer (**[TARGET]**). Write-back to the files is the same
-gate. Filesystem lanes (Codex, Claude) index into one shared candidate branch of
-default and are live agents there; Seon agents doing every update is the goal.
+gate. Filesystem lanes (Codex, Claude) work through the shared agent REPL entrance on
+their own named branches; root reviews and explicitly accepts through the merge gate
+before write-back to files. Seon agents doing every update is the goal.
 
 ## Think like a principal Clojure developer (owner, 2026-09-23: "Install the simple made easy and other hickey clojure mindset"; "Patient, wants to experiment in the REPL until they are sure they understand the data flows and how the functions react")
 
