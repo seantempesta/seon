@@ -262,20 +262,27 @@ advances the cluster pointer (**[TARGET]** D1). Write-back to the files is the s
 gate. Filesystem lanes (Codex, Claude) index into one shared candidate branch of
 default and are live agents there; Seon agents doing every update is the goal.
 
-## Simple made easy — the Clojure mindset (owner, 2026-09-23: "Install the simple made easy and other hickey clojure mindset")
+## Think like a principal Clojure developer (owner, 2026-09-23: "Install the simple made easy and other hickey clojure mindset"; "Patient, wants to experiment in the REPL until they are sure they understand the data flows and how the functions react")
 
-Rich Hickey's words are the review vocabulary here; paraphrased, with today's evidence.
+Before every design, recall how a principal Clojure developer — or Rich Hickey — would approach it, and state it in one or two lines at the top of your plan or landing note: what the system already does here, what the data flow is, and the smallest composition that improves it. Rich Hickey's ideas are the review vocabulary, paraphrased.
 
-- **Simple is not easy.** Simple = one fold: one role, one concept, one reason to change. Easy = near at hand, familiar. Complexity is *complecting*: braiding independent things so neither can be understood, changed or fail alone. It is objective — count the braids. Every design and every review names the braids it adds or removes; "it was the easiest place to put it" is how a braid starts.
-- **Design is taking things apart.** Before adding, ask what two concerns this code ties together and separate them. Seen 2026-09-23: a REPL eval that also invalidates web page caches and opens a profiling window (`cluster.clj:260-318`, a ThreadLocal hand-off between two calls); publication that analyzes, reads every schema resource from disk, reloads and writes rows in separate steps that can half-happen (`schema/edn.clj:397`, `cluster.clj:2860`); error reporting that renders through the projection it is reporting broken.
-- **Values, not places.** State complects value with time. A value never changes; an identity is a succession of values; time is the order of those values. Datahike already is this (commit ids, `as-of`, `history`, branches) — use it instead of atoms, mirrors and caches that remember a place. A derived thing is a function of a value (see "No stamps").
-- **Information is data.** Use plain maps of namespaced keys and the dependency's own data; never hide information behind a bespoke object, protocol or accessor layer. A function of data composes; a mechanism does not.
-- **Grow by accretion, never by breakage.** Add optional keys, new names for new semantics; relax requirements, never tighten them in place (Spec-ulation). A slice that makes a running system's existing values invalid is breakage (seen 2026-09-23: a required `:seon.flow/executor` refused every adoption into the running instance; the fix was an optional member).
-- **Queues decomplect who from when.** Flow graphs and channels separate the producer from the consumer's timing; a hidden call-order dependency between two functions is the braid a queue or an explicit argument removes.
-- **Situated programs fail.** A long-running system meets partial failure constantly; the simple answer is that each part fails ALONE and LOUDLY, and never damages its neighbours. A failure that silently corrupts durable state (2026-09-23: a commit reported success while nothing reached disk under heap exhaustion) or blinds diagnosis is the worst braid there is.
-- **Hammock first.** State the problem, what is known and unknown, and read the dependency's source before writing code. A lane that refutes the stated cause did its job.
+**Temperament.**
+- **Patient, REPL first.** Explore at the REPL until you understand the data flow and how each function reacts to real values: call the owner, inspect the whole value, try the smaller expression. Write code only once you could predict its result. Guessing, then patching the guess, is the failure mode.
+- **Hammock time.** State the problem, what is known and unknown, and what the system and its dependencies already do, before writing anything. Most good changes are found in the reading: the seam that already exists, the mechanism that can be deleted. A lane that refutes the stated cause did its job.
+- **Improve what is there without exploding it.** Ask what the running system already does and how to make that better; a new mechanism beside an old one is the last resort, never the first.
 
-Reviewer's check, every diff: which concerns does this code braid, and which does it un-braid? What is each part's one role? Could any part fail alone?
+**Code.**
+- **Small functions, composed.** A long function means it is not written correctly yet: it is doing several jobs. Pull out each job as a function of data and compose them. Reusable core ideas — plain maps, sequence functions, `reduce`, transducers, the dependency's own API — beat bespoke machinery.
+- **Never force the square peg.** If a change needs a workaround, an exemption, a special case or a patch somewhere else to make it fit, the design is wrong: stop, return to the data flow, and find the composition that fits. Breaking something and patching it elsewhere is how every duplicate mechanism here was built.
+- **Simple is not easy.** Simple = one fold: one role, one concept, one reason to change. Easy = near at hand, familiar. Complexity is *complecting* — braiding independent things so neither can be understood, changed or fail alone. It is objective: count the braids. Design is taking things apart.
+- **Values, not places.** State complects value with time. A value never changes; an identity is a succession of values. Datahike already is this (commit ids, `as-of`, `history`, branches) — use it instead of atoms, mirrors and caches that remember a place. A derived thing is a function of a value.
+- **Information is data.** Plain maps of namespaced keys and the dependency's own data; never hide information behind a bespoke object, protocol or accessor layer.
+- **Grow by accretion, never breakage.** Add optional keys and new names for new semantics; never tighten a requirement in place. A change that invalidates a running system's existing values is breakage.
+- **Queues decomplect who from when.** A hidden call-order dependency between two functions is a braid that an explicit argument or a channel removes.
+- **Situated programs fail.** Each part fails alone and loudly and never damages its neighbours; a failure that silently corrupts durable state or blinds diagnosis is the worst braid there is.
+- **The library first.** Read the dependency's source before building; the dependency usually does it already, better.
+
+Reviewer's check, every diff: what did the author learn at the REPL before writing it? Which concerns does it braid or un-braid? What is each part's one role? Is any function long enough to be several? Did it bend something to fit, or patch elsewhere?
 
 ## Five design laws
 
