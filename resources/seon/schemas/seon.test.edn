@@ -185,12 +185,6 @@
   :seon.db/invalid-read-error :seon.schema/missing-projection-error
   :seon.db.write/error :seon.db.write/validation-refusal
   :seon.instrument/contract-error]
- :seon.test/reuse-request
- [:map [:seon.db/db :seon.db/database-value]
-  [:seon.test/identity :seon.test/identity]
-  [:seon.test/run-basis-t {:optional true} :seon.test/run-basis-t]]
- :seon.test/reuse-result
- [:or :seon.test/result [:= :seon.test/execution-required] :seon.error/value]
  :seon.test/declared-root
  [:string {:min 1
            :description "The operator root the caller genuinely holds; absent means this JVM's own declaration is read."}]
