@@ -988,6 +988,100 @@ handle))}}
             (is (= 1 @calls)
                 "unchanged debug reads reuse the retained observation")))))))
 
+(deftest an-unchanged-head-re-derives-no-block-and-an-input-change-re-derives-its-block
+  ;; The page key is the program and the committed value, never the database
+  ;; object the context snapshot last advanced to (census row A2). `acquire!`
+  ;; advances that object on every same-program acquisition. The page's own
+  ;; agent: every fork of one cluster context shares its render cache, so a
+  ;; live `root` page in the hosting JVM would share this page's entry.
+  (with-server
+    (fn [connection server context]
+      (support/transacted! connection
+                           (cluster.agent/creation-tx
+                            {:seon.agent/id "page-key"
+                             :seon.cluster/name "web-test"
+                             :seon.ns/name 'my.agents.page-key}))
+      (let [counts (atom {:evidence 0 :derivations 0 :candidates []})
+            evidence-current? db/read-evidence-current?
+            page-result (web-private 'page-result)
+            candidates (web-private 'candidate-call-ids)
+            read-attributes (web-private 'read-attributes)
+            observe (fn [] (let [before @counts]
+                             (is (= 200 (.statusCode (fetch server "/agent/page-key"))))
+                             (let [after @counts]
+                               {:evidence (- (:evidence after) (:evidence before))
+                                :derivations (- (:derivations after) (:derivations before))
+                                :re-derived (reduce + (map first (drop (count (:candidates before))
+                                                                       (:candidates after))))
+                                ;; re-derived blocks whose read evidence names
+                                ;; its attributes (not a whole-index `:all` read)
+                                :attribute-bound (reduce + (map second (drop (count (:candidates before))
+                                                                             (:candidates after))))
+                                ;; retained calls handed to the candidate check
+                                :retained (reduce + (map #(nth % 2) (drop (count (:candidates before))
+                                                                          (:candidates after))))})))
+            acquire! #(sci.eval/acquire! {:seon.sci.eval/ctx (:ctx context)
+                                          :seon.db/db @connection})]
+        (with-redefs-fn
+          {#'db/read-evidence-current?
+           (fn [database retained]
+             (swap! counts update :evidence inc)
+             (evidence-current? database retained))
+           #'web/page-result
+           (fn [request]
+             (swap! counts update :derivations inc)
+             (page-result request))
+           #'web/candidate-call-ids
+           (fn [calls database confirmed?]
+             (let [ids (candidates calls database confirmed?)]
+               (swap! counts update :candidates conj
+                      [(count ids)
+                       (count (remove #(= :all (read-attributes (get calls %))) ids))
+                       (count calls)])
+               ids))}
+         (fn []
+          (acquire!)
+          (is (= 1 (:derivations (observe))) "the first GET derives the page")
+          (is (= {:evidence 0 :derivations 0 :re-derived 0 :attribute-bound 0}
+                 (dissoc (observe) :retained))
+              "an unchanged head asks no read evidence and derives no block")
+          (support/transacted!
+           connection
+           ;; A data row (not program: a namespace edit re-acquires the program)
+           ;; that no root page block reads.
+           [{:seon.cluster/name "render.web.page-key-unrelated"
+             :seon.cluster/config
+             (:db/id (:seon.cluster/config
+                      (db/pull @connection [{:seon.cluster/config [:db/id]}]
+                               [:seon.cluster/name "web-test"])))}])
+          (acquire!)
+          (let [unrelated (observe)]
+            (is (pos? (:evidence unrelated))
+                "a new commit checks the retained evidence instead of discarding it")
+            ;; A whole-index read (`seon.db/index-page` captures `:all`) is
+            ;; a candidate after any commit; every attribute-bound block stays.
+            (is (pos? (:retained unrelated))
+                "the acquisition keeps the program key, so the retained calls survive")
+            (is (= 0 (:attribute-bound unrelated))
+                "an acquisition after an unrelated write keeps every attribute-bound block")
+            (is (< (:re-derived unrelated)
+                   (count (get-in @(render/shared-cache (:ctx context))
+                                  [::web/calls "page-key"])))
+                "an unrelated write re-derives only whole-index reads"))
+          (is (= {:evidence 0 :derivations 0 :re-derived 0 :attribute-bound 0}
+                 (dissoc (observe) :retained))
+              "the checked commit is itself an unchanged head")
+          (support/transacted!
+           connection
+           [{:seon.ns/name 'my.agents.page-key :seon.ns/doc "page-key-marker"}])
+          (let [changed (observe)]
+            (is (= 1 (:derivations changed)) "a block input change derives the page")
+            (is (pos? (:attribute-bound changed))
+                "the block whose read attribute changed is a candidate")
+            (is (< (:re-derived changed) (count (get-in @(render/shared-cache (:ctx context))
+                                                        [::web/calls "page-key"])))
+                "only the changed blocks re-derive; the rest stay retained"))))))))
+
 (deftest debug-compatible-candidate-discloses-retained-read-dependencies
   (let [rendered
         ((web-private 'debug-read-dependencies-html)
@@ -1058,16 +1152,20 @@ handle))}}
                 (is (= 1 (:observation before)))
                 (is (pos? (:discovery before))
                     "the initial page selects a render function for its units")
-                (is (pos? (:invocation before))
-                    "the initial comparison executes its applicable render functions")
-                ;; An entity NO acquisition derives interest in: no identity,
-                 ;; no listened attribute, no join. A bystander agent row mints
-                 ;; a half-agent beside the real creation path (peer issue
-                 ;; an-unrelated-fixture-transaction-mints-a-half-agent).
+                ;; Invocations are content-keyed in the cache every fork of
+                ;; this cluster context shares, so a JVM that rendered this
+                ;; subject before answers the initial comparison from it.
+                ;; A data row NO acquisition derives interest in: no identity,
+                ;; no listened attribute, no join. A bystander agent row mints
+                ;; a half-agent beside the real creation path (peer issue
+                ;; an-unrelated-fixture-transaction-mints-a-half-agent).
                 (support/transacted!
-                        connection
-                        [{:seon.ns/name 'render.web.unrelated
-                          :db/doc "An unrelated fact on an entity nothing derives interest in."}])
+                 connection
+                 [{:seon.cluster/name "render.web.unrelated"
+                   :seon.cluster/config
+                   (:db/id (:seon.cluster/config
+                            (db/pull @connection [{:seon.cluster/config [:db/id]}]
+                                     [:seon.cluster/name "web-test"])))}])
                 (is (< pass-before (settle-render! context)))
                 (is (= before @counts)
                     "the database wake reuses observation, discovery, and invocation")
@@ -1075,7 +1173,7 @@ handle))}}
                   (support/transacted!
                           connection
                           [{:seon.ns/name 'seon.flow
-                            :seon.ns/doc "debug-cache-relevant"}])
+                            :seon.ns/doc (str "debug-cache-relevant-" (random-uuid))}])
                   (is (< pass-after-unrelated (settle-render! context)))
                   (is (= 2 (:observation @counts)))
                   (is (> (:discovery @counts) (:discovery before))

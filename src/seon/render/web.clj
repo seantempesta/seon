@@ -1982,15 +1982,41 @@
     interest))
 
 (defn- candidate-call-ids
-  [calls database]
+  "The retained calls `database` may no longer satisfy.
+
+  `confirmed?` states that every retained call was already derived or checked
+  current at this exact committed value (`render/same-committed-database?`),
+  so its read evidence is a function of that value and is not asked again. A
+  source preview with no output stays a candidate either way."
+  {:malli/schema [:=> [:cat [:map-of :seon.render.call/id :seon.render.call/entry]
+                       :seon.db/database-value :boolean]
+                  [:set :seon.render.call/id]]}
+  [calls database confirmed?]
   (into #{}
         (keep (fn [[call-id call]]
                 (when (or (and (:seon.render.call/source call)
                                (nil? (:seon.render.call/output call)))
-                          (not (true? (db/read-evidence-current?
-                                       database (:seon.render.call/read-evidence call)))))
+                          (and (not confirmed?)
+                               (not (true? (db/read-evidence-current?
+                                            database (:seon.render.call/read-evidence call))))))
                   call-id)))
         calls))
+
+(defn- program-key
+  "What the page's code is: the context's acquired program and the adopted
+  source commit, never the database value the snapshot last advanced to.
+
+  `acquire!` swaps the newest `:seon.db/db` into the snapshot on every
+  same-program acquisition (`src/seon/sci/eval.clj` `acquire!`); keying on it
+  discarded every retained call at each acquisition. The remaining members
+  change exactly when a program is acquired or a definition installed."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value]
+                  [:tuple [:or :nil :map]
+                   [:or [:vector :seon.source/commit-id] :seon.db/error-result]]]}
+  [handle database]
+  [(some-> handle :seon.sci.eval/ctx :seon.sci.kernel/program-snapshot deref
+           (dissoc :seon.db/db))
+   (render/source-generation database)])
 
 (defn- root-call-id
   [projection registration-key]
@@ -2078,7 +2104,12 @@
                      [:seon.turn/reply-size :seon.turn/closed-tx])))))
 
 (defn- derive-page
-  [handle database streams profile registration-key retained-values derive-all? invalidate-calls?]
+  "One page at `database`: derive the blocks whose retained calls are
+  candidates, or return the retained calls alone."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map
+                       [:or :seon.agent/id [:tuple [:= ::debug-tab] :map]] :map :boolean :boolean :boolean]
+                  :map]}
+  [handle database streams profile registration-key retained-values derive-all? invalidate-calls? confirmed?]
   (let [connection (:seon.db/connection handle)
         caps (:seon.sci.admit/caps handle)
         debug? (and (vector? registration-key)
@@ -2091,7 +2122,7 @@
         captured-invocations (atom {})]
     (if debug?
       (let [retained (get-in retained-values [::calls registration-key] {})
-            candidates (candidate-call-ids retained database)
+            candidates (candidate-call-ids retained database confirmed?)
             package (get-in retained-values [::packages registration-key])]
         ;; A join marker shares the newest-only interest channel with database
         ;; and evaluation wakes. A missing exact package is the durable level
@@ -2111,7 +2142,7 @@
            :seon.render/captured-calls retained
            :seon.render/captured-invocations retained-invocations}))
       (let [retained (get-in retained-values [::calls registration-key] {})
-            candidates (candidate-call-ids retained database)
+            candidates (candidate-call-ids retained database confirmed?)
             call-id (root-call-id :seon.render/html registration-key)
             request
             (cond-> {:seon.db/db database
@@ -2163,14 +2194,37 @@
              :seon.render/captured-calls calls
              :seon.render/captured-invocations retained-invocations}))))))
 
+(defn- newer-page?
+  "True when the retained page was derived at a later value of this same
+  branch. Every fork of a cluster context shares one render cache, so a basis
+  from another branch's connection orders nothing here."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/database-value] :seon.db/database-value]
+                  :boolean]}
+  [retained database]
+  (let [lineage #(:datahike.value/connection-id (db/committed-value-identity %))]
+    (boolean
+     (and retained
+          (= (lineage retained) (lineage database))
+          (> (long (db/basis-t retained)) (long (db/basis-t database)))))))
+
 (defn- derive-page!
-  "Derive on this caller, sharing immutable call evidence with every reader."
+  "Derive on this caller, sharing immutable call evidence with every reader.
+
+  Retained calls are keyed on the program (`program-key`) and confirmed by the
+  committed value they were last derived or checked at: an unchanged head asks
+  no read evidence and derives no block."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value :map :map
+                       [:or :seon.agent/id [:tuple [:= ::debug-tab] :map]] :boolean :boolean]
+                  :map]}
   [handle database streams profile registration-key derive-all? invalidate-calls?]
   (let [cache (render/shared-cache (:seon.sci.eval/ctx handle))
         retained @cache
-        program [(some-> handle :seon.sci.eval/ctx :seon.sci.kernel/program-snapshot deref)
-                 (render/source-generation database)]
+        program (program-key handle database)
         changed-code? (not= program (get-in retained [::programs registration-key]))
+        confirmed? (and (not changed-code?)
+                        (some? (get-in retained [::page-databases registration-key]))
+                        (render/same-committed-database?
+                         (get-in retained [::page-databases registration-key]) database))
         retained (if changed-code?
                    (-> retained
                        (update ::calls dissoc registration-key)
@@ -2178,18 +2232,18 @@
                    retained)
         result (derive-page handle database streams profile registration-key retained
                             (or derive-all? changed-code?)
-                            (or invalidate-calls? changed-code?))
+                            (or invalidate-calls? changed-code?)
+                            confirmed?)
         result (if (::retained-only? result)
                  (merge (get-in retained [::page-results registration-key]) result)
-                 result)
-        basis (db/basis-t database)]
+                 result)]
     (swap! cache
            (fn [current]
-             (if (> (long (get-in current [::page-bases registration-key] -1)) basis)
+             (if (newer-page? (get-in current [::page-databases registration-key]) database)
                current
                (-> current
-                   (assoc-in [::page-bases registration-key] basis)
                    (assoc-in [::programs registration-key] program)
+                   (assoc-in [::page-databases registration-key] database)
                    (assoc-in [::page-results registration-key] result)
                    (assoc-in [::calls registration-key] (:seon.render/captured-calls result))
                    (assoc-in [::fragments registration-key] (:seon.render.web/fragments result))
@@ -2247,7 +2301,7 @@
            (fn [retained]
              (-> retained
                  (update ::packages select-keys watched)
-                 (dissoc ::page-results ::calls ::fragments))))
+                 (dissoc ::page-results ::calls ::fragments ::page-databases))))
     state))
 
 (defn- failed-page-result
@@ -2437,7 +2491,7 @@
                          ::streams streams
                          ::profile profile))]
     [(assoc (dissoc state ::packages ::fragments ::calls ::invocations
-                           ::ai-calls ::ai-entries ::page-results ::page-bases
+                           ::ai-calls ::ai-entries ::page-results ::page-databases
                            ::context-bases ::context-programs ::programs)
             ;; DERIVED, NOT ACCUMULATED: only the pages that failed THIS pass
             ;; carry a signature, so a page that starts rendering again drops
@@ -2530,7 +2584,7 @@
                                      :seon.render/retained-calls (dissoc retained root-call)
                                      :seon.render/candidate-call-ids
                                      (candidate-call-ids (dissoc retained root-call)
-                                                         (:seon.db/db request))
+                                                         (:seon.db/db request) false)
                                      :seon.render/captured-calls calls))))]
              (cond
                reusable?
