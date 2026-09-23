@@ -674,6 +674,30 @@
          (is (not (db/read-evidence-current? @connection evidence))
              "a depended attribute revision makes the retained read stale"))))))
 
+(deftest a-retained-read-whose-plan-names-no-source-is-answered-by-replay
+  ;; A declared `:all` dependency plan carries no source at the evidence's
+  ;; position; currency falls through to replay instead of handing the index
+  ;; check a nil source (docs/seon/issues/read-evidence-currency-hands-a-nil-source-to-index-evidence.md).
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "evidence-all")
+     (let [captured (atom [])]
+       (binding [db/*read-evidence-sink* captured]
+         (db/q '[:find ?e . :where [?e :seon.cluster/name "evidence-all"]] @connection))
+       (let [evidence (db/read-evidence
+                       (mapv #(-> % (assoc :datahike.read/dependency-plan :all)
+                                  (dissoc :seon.db/read-index-patterns))
+                             @captured))]
+         (test-support/transacted!
+          connection [[:db/add [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "unrelated"]])
+         (is (true? (db/read-evidence-current? @connection evidence))
+             "an unchanged result replays equal")
+         (test-support/transacted!
+          connection
+          [[:db/add [:seon.cluster/name "evidence-all"] :seon.cluster/name "evidence-renamed"]])
+         (is (false? (db/read-evidence-current? @connection evidence))
+             "a changed result replays unequal"))))))
+
 (deftest collection-bound-query-evidence-covers-every-input-attribute
   (test-support/with-database
    (fn [connection]

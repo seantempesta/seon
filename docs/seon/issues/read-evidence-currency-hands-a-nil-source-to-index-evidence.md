@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 created: 2026-09-23
 tags: [issue, database, read-evidence, turn, backstop, profile, agent-platform]
@@ -93,3 +93,16 @@ in default's C1 profile. The plan status audit reported it
 - The profile line reads "call-with-projection-state max 600 s" for any
   long-lived io Runnable. That misattribution goes away when step 1.4 deletes the
   ambient projection transport (`projection-executor`); see the plan README §4.
+
+## Resolution (lane m4-write-bound, 2026-09-23)
+
+- `read-evidence-current?` calls `index-evidence-current` only when a source was
+  found; a plan without one (the declared `:all` plan) falls through to replay.
+- REPL reproduction on default pid 90963 (throwaway ns `m4-write-bound.probe`,
+  `nil-source-probe`: a real `seon.db/q` capture with its plan set to `:all`, one
+  unrelated commit on a disposable `d/branch!`): parent threw the stored fault's exact
+  message, "seon.db/index-evidence-current refused source at []: expected a map, got
+  nil … (db.clj:1174)", in 2.7 ms; fixed answers `true` by replay in 5.5 ms.
+- Regression: `seon.db-test/a-retained-read-whose-plan-names-no-source-is-answered-by-replay`
+  (equal result → true, renamed cluster → false), green in run `deb20e255a9d`.
+- The optional backstop/`println` items above stay open for their owner (`turn.clj`).

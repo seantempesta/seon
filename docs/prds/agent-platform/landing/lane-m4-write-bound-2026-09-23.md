@@ -157,3 +157,20 @@ attributes) is built only on refusal. Cost now O(1) per lookup ref.
   seon.cluster.source/dependency-digests must change through the loaded source files"
   (my.program/turn tests). No lookup-ref or attribute-installed message appears in the
   output. The 121 s run is the runner defect filed above.
+
+## Follow-up B: nil source in read currency (orchestrator follow-up)
+
+Closes `docs/seon/issues/read-evidence-currency-hands-a-nil-source-to-index-evidence.md`
+(its turn.clj backstop items stay with their owner). `read-evidence-current?` takes
+the index check only when a source was found; `:all` plans replay.
+
+- Reproduced before the fix (exact stored message, 2.7 ms throw); fixed: `true` by
+  replay, 5.5 ms. The source-present path gains one `when`; not separately timed on
+  the parent.
+- Adoption `bin/seon init --dev default --changed src/seon/db.clj test/seon/db_test.clj`:
+  first attempt, 22 s (whole-program refresh; same filed class).
+- `bin/test-check default --policy named --test seon.db-test/a-retained-read-whose-plan-names-no-source-is-answered-by-replay --test seon.db-test/retained-read-evidence-invalidates-only-on-a-depended-attribute`
+  → run `deb20e255a9d`: new regression green; the neighbour errors at its bare
+  `{:seon.agent/id …}` fixture write (required `:seon.agent/branch`), a cross-file
+  class filed as `docs/seon/issues/fixture-agent-rows-lack-the-required-agent-branch.md`.
+  One earlier attempt was refused at admission ("inconsistent evidence"), 12 s.

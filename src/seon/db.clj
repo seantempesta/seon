@@ -1171,7 +1171,7 @@
                 (= revision current))
            (let [source (some #(when (= source-position (:datahike.query.source/argument-position %)) %)
                               (:datahike.query.dependency/sources plan))
-                 indexed (index-evidence-current database source revision current)]
+                 indexed (when source (index-evidence-current database source revision current))]
              (if (some? indexed)
                indexed
                ;; A replay's declared failures are values (`q`, `pull` and
