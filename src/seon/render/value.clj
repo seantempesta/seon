@@ -27,6 +27,109 @@
   (delay (requiring-resolve 'seon.render/project-node)))
 
 
+;;; THE PROJECTION-FREE TOTAL CORE: bounded text of any value and any Throwable,
+;;; for when the projection, profile or admission below is what broke. Rules:
+;;; (1) only clojure.core data prints (EDN scalars and Vars), `clojure.lang` collections walked to
+;;; `:items` members and `:depth` levels (a lazy seq realizes a chunk at most);
+;;; (2) every other object prints as `#object[Class 0xidentity-hash]`, never
+;;; through its print-method, toString or deref; (3) a writer refuses output
+;;; past the limit. Compiled caps, never read from the database.
+
+(def ^:private text-limits
+  ;; Measured 2026-09-23, armed on default: a three-link chain holding a
+  ;; 1e6-char string, a 1e5 vector, (range), an atom and a throwing toString
+  ;; renders 1,339 chars in 345 us.
+  {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 6 :suppressed 3 :floor-chars 8192})
+
+(def ^:private text-full
+  (doto (Exception. "bounded text limit reached") (.setStackTrace (make-array StackTraceElement 0))))
+
+(defn- datum
+  "`x` as clojure.core data at most `level` collections deep (rules 1 and 2):
+  `...` marks a cut collection or its omitted members."
+  {:malli/schema [:=> [:cat :seon.schema/value :int] :seon.schema/value]}
+  [x level]
+  (let [items (:items text-limits)]
+    (cond
+      (or (nil? x) (boolean? x) (number? x) (string? x) (char? x) (ident? x) (var? x)
+          (uuid? x) (instance? java.util.Date x)) x
+      (not (and (coll? x) (.startsWith (.getName (class x)) "clojure.lang.")))
+      (symbol (str "#object[" (.getName (class x)) " 0x" (Integer/toHexString (System/identityHashCode x)) "]"))
+      (zero? level) '...
+      :else (let [walk #(datum % (dec level))
+                  members (cond-> (mapv (if (map? x) (fn [[k v]] [(walk k) (walk v)]) walk) (take items x))
+                            (> (bounded-count (inc items) x) items) (conj (if (map? x) ['... '...] '...)))]
+              (cond (map? x) (into {} members) (vector? x) members
+                    (set? x) (set members) :else (apply list members))))))
+
+(defn bounded-text
+  "`value` as at most `limit` characters (rule 3 over `datum`); `…` marks the
+  limit, `#unprintable[value-class failure-class]` a value whose printing throws."
+  {:malli/schema [:function [:=> [:cat :seon.schema/value] :string]
+                  [:=> [:cat :seon.schema/value [:int {:min 1}]] :string]]}
+  ([value] (bounded-text value (:chars text-limits)))
+  ([value limit]
+   (let [out (StringBuilder.)
+         put (fn [^String s]
+               (let [room (- limit (.length out))]
+                 (.append out s 0 (int (min room (.length s))))
+                 (when (> (.length s) room) (throw text-full))))
+         writer (proxy [java.io.Writer] []
+                  (write ([x] (put (cond (string? x) x (int? x) (str (char x)) :else (String. ^chars x))))
+                         ([x off len] (put (if (string? x) (subs x off (+ off len)) (String. ^chars x (int off) (int len))))))
+                  (flush []) (close []))]
+     (try
+       (binding [*print-length* nil *print-level* nil *print-meta* false *print-readably* true
+                 *print-dup* false *print-namespace-maps* false]
+         (print-method (datum value (:depth text-limits)) writer))
+       (str out)
+       (catch Throwable failure
+         (str out (if (identical? failure text-full) "…"
+                    (str "#unprintable[" (.getName (class value)) " " (.getName (class failure)) "]"))))))))
+
+(defn- causes
+  "`throwable` and its causes, outermost first, each once, at most `:links`."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :seon.error/throwable]]}
+  [throwable]
+  (loop [link throwable seen []]
+    (if (or (nil? link) (= (:links text-limits) (count seen)) (some #(identical? link %) seen))
+      seen
+      (recur (.getCause ^Throwable link) (conj seen link)))))
+
+(defn- link-lines
+  "One link's lines: class and message, ex-data entries, first-party frames and
+  suppressed throwables; a link whose accessors throw prints its class and the failure's."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :string]]}
+  [^Throwable link]
+  (let [{:keys [entries frames suppressed]} text-limits
+        frame (fn [^StackTraceElement f]
+                [(symbol (.getClassName f)) (symbol (.getMethodName f)) (str (.getFileName f)) (long (.getLineNumber f))])]
+    (try
+      (into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
+            (concat
+             (for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
+             (when (> (bounded-count (inc entries) (ex-data link)) entries) ["  … further ex-data entries"])
+             (for [[class-name _ file line] (take frames (filter refusal/first-party-frame? (map frame (.getStackTrace link))))]
+               (str "  at " (clojure.lang.Compiler/demunge (str class-name)) " (" file ":" line ")"))
+             (for [^Throwable other (take suppressed (.getSuppressed link))]
+               (str "  suppressed " (.getName (class other)) ": " (bounded-text (ex-message other))))))
+      (catch Throwable failure
+        [(str (.getName (class link)) " #unprintable[" (.getName (class failure)) "]")]))))
+
+(defn floor
+  "An unhandled Throwable as bounded text from the Throwable alone, one block
+  of `link-lines` per cause. The leaf an error's rendering degrades to, never a
+  stored member."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
+  [throwable]
+  (let [chain (causes throwable)
+        text (str/join "\n" (concat (mapcat (fn [position link]
+                                              (cond-> (link-lines link) (pos? position) (update 0 #(str "caused by " %))))
+                                            (range) chain)
+                                    (when (and (= (:links text-limits) (count chain)) (ex-cause (peek chain)))
+                                      ["… further causes"])))]
+    (if (> (count text) (:floor-chars text-limits)) (str (subs text 0 (:floor-chars text-limits)) "…") text)))
+
 (defn transacted
   "Restore a pulled entity to its transaction shape.
 
@@ -457,7 +560,7 @@
         [{:seon.print/face :seon.print/keyword
           :seon.print/value :seon.error/message}
          {:seon.print/face :seon.print/string
-          :seon.print/value (or (ex-message failure) "The value projection failed.")}]]})))
+          :seon.print/value (floor failure)}]]})))
 
 (defn- breadcrumbs
   [unit path]

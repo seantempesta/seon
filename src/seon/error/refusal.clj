@@ -4,11 +4,12 @@
 (def ^:private machinery-namespace-prefixes
   ;; DERIVED FROM WHAT THESE FRAMES ARE, exactly as
   ;; `seon.instrument/caller-frame` derives its own: the host, the
-  ;; language, the contract library, core.async's dispatch, and the fault
-  ;; machinery are what CAUGHT the failure. None of them is a place to go
+  ;; language, the contract library, core.async's dispatch, the fault
+  ;; machinery and the operator's prepl wire are what CAUGHT the failure. None of them is a place to go
   ;; and edit, and naming one routes the fault to the steward of the
   ;; checker instead of the steward of the code that broke.
-  ["clojure." "java." "jdk." "sun." "malli." "seon.error" "seon.instrument"])
+  ["clojure." "java." "jdk." "sun." "malli." "seon.error" "seon.instrument"
+   "seon.operator."])
 
 (def ^:private first-party-namespace-prefixes
   ;; The program's own namespaces: the ones an agent can open and edit.
@@ -51,7 +52,7 @@
                    file (long (.getLineNumber frame))])))
         (.getStackTrace throwable)))
 
-(defn- first-party-frame?
+(defn first-party-frame?
   "Whether a frame belongs to a first-party function (`seon.*`/`my.*`,
   outside the fault machinery)."
   {:malli/schema [:=> [:cat :seon.error/frame] :boolean]}
