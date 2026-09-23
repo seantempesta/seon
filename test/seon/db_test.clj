@@ -2182,3 +2182,54 @@
          (doseq [member [":datahike.budget/name" ":datahike.budget/observed"
                          ":datahike.budget/allowed" "seon.db/pull"]]
            (is (str/includes? text member))))))))
+
+;; A projection is a function of the declaration datoms it reads. Two values
+;; holding the same datoms are the same population whatever their connection,
+;; branch or committed identity, so they share one derivation.
+(defn- counting-derivations
+  {:malli/schema [:=> [:cat [:=> [:cat] :seon.schema/value]] [:tuple :int :seon.schema/value]]}
+  [body]
+  (let [derive-projection schema/load-projection
+        derivations (atom 0)
+        result (with-redefs [schema/load-projection
+                             (fn [value] (swap! derivations inc) (derive-projection value))]
+                 (body))]
+    [@derivations result]))
+
+(deftest equal-declaration-content-shares-one-projection-across-values
+  (test-support/with-database
+    (fn [outer]
+      (let [committed (db/carried-projection (db/db outer))]
+        (test-support/with-database
+          (fn [inner]
+            (let [[derivations [branch in-transaction]]
+                  (counting-derivations
+                   #(let [started (System/nanoTime)
+                          branch (db/carried-projection (db/db inner))]
+                      [[branch (/ (- (System/nanoTime) started) 1e6)]
+                       (db/carried-projection (:db-after (d/with (db/db inner) [])))]))]
+              (is (= (d/commit-id (db/db outer)) (d/commit-id (db/db inner)))
+                  "both fixtures branch off the executing commit")
+              (is (identical? committed (first branch))
+                  "a new branch at an equal commit reads the committed population")
+              (is (< (second branch) 50.0) "and does not derive it")
+              (is (identical? committed in-transaction)
+                  "an in-transaction value with the same declarations reads it too")
+              (is (zero? derivations)))))))))
+
+(deftest an-in-transaction-declaration-derives-its-population-once
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            committed (db/carried-projection database)
+            staged (:db-after (d/with database
+                                      [[:db.fn/call #'turn/row-tx {}
+                                        {:seon.schema/key ::staged :seon.schema/form (pr-str :int)}]]))
+            [derivations [first-read second-read]]
+            (counting-derivations #(vector (db/carried-projection staged) (db/carried-projection staged)))]
+        (is (nil? (:cache-context staged)) "Datahike detaches the speculative value")
+        (is (contains? (:seon.schema.projection/forms first-read) ::staged)
+            "its own declaration datoms select its population")
+        (is (not (contains? (:seon.schema.projection/forms committed) ::staged)))
+        (is (identical? first-read second-read))
+        (is (= 1 derivations) "repeated reads of one in-transaction value derive once")))))
