@@ -151,14 +151,15 @@
              before (db/db connection)
              acquisition (eval/acquire! {:seon.sci.eval/ctx live :seon.db/db before})
              environment @(:env live)
-             digest (id/sha-256 [(.getBytes "program-revision-probe" "UTF-8")])
+             ;; A declared data-partition row: a note the fixture's root agent holds.
              _ (support/transacted! connection
-                 [{:seon.dev.mcp.artifact/id digest
-                   :seon.dev.mcp.artifact/digest digest}])
+                 [{:my.note/id "program-revision-probe"
+                   :my.note/agent [:seon.agent/id "root"]
+                   :my.note/content "A commit that writes no program row."}])
              data (db/db connection)
              reused (measured #(eval/acquire! {:seon.sci.eval/ctx live :seon.db/db data}))]
          (is (not= (db/commit-id before) (db/commit-id data))
-             "the artifact row is a real commit")
+             "the note is a real commit")
          (is (identical? acquisition (:value reused))
              "a commit writing no program row returns the acquired program")
          (is (identical? environment @(:env live))
@@ -261,9 +262,10 @@
   "What one acquisition compared against, what it interpreted and what it refused."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :map]}
   [ctx]
-  (let [acquired (eval/acquired-program ctx)]
-    {:loaded (db/commit-id (:seon.sci.eval/loaded-database
-                            @(:seon.sci.kernel/program-snapshot ctx)))
+  (let [acquired (eval/acquired-program ctx)
+        snapshot @(:seon.sci.kernel/program-snapshot ctx)]
+    {:loaded (db/commit-id (:seon.sci.eval/loaded-database snapshot))
+     :interpreted (set (:seon.sci.eval/interpreted snapshot))
      :interpreted-count (:seon.sci.eval/interpreted-count acquired)
      :refused (into #{} (map :seon.sci.eval/refused-function)
                     (:seon.test/acquisition-refusals acquired))}))
@@ -309,7 +311,10 @@
                              :baseline baseline :unadopted unadopted :adopted adopted}))
            (is (= edited-commit (:loaded adopted))
                "the loaded program is the commit the record names")
-           (is (= (:interpreted-count baseline) (:interpreted-count adopted)))
+           (is (contains? (:interpreted unadopted) subject))
+           (is (not (contains? (:interpreted adopted) subject))
+               "the adopted row runs compiled")
+           (is (<= (:interpreted-count adopted) (:interpreted-count baseline)))
            (is (= #{} (:refused adopted)) "the adopted row is compiled, so nothing refuses")
            (on-branch connection adopted-db :m9-adoption-isolated
             (fn [child]
@@ -318,7 +323,7 @@
                           (eval/projection-state (db/db child) (db/carried-projection (db/db child))))]
                 (println "M9-ADOPTION-ISOLATED-MS"
                          (:ms (measured #(eval/acquire! {:seon.sci.eval/ctx fork :seon.db/db (db/db child)}))))
-                (is (= (select-keys adopted [:loaded :interpreted-count :refused])
+                (is (= (select-keys adopted [:loaded :interpreted :interpreted-count :refused])
                        (acquisition-view fork))
                     "an isolated branch at the head compares against the cluster's record"))))
            (on-branch connection before :m9-adoption-stable
