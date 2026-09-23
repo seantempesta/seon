@@ -245,10 +245,8 @@
               [:seon.render.block/name block-name])
             (identity-address unit))]
     (if-not root-address
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.render.value/identity
-        :seon.error/operation 'seon.render.value/node-id
-        :seon.error/message "A rendered value root requires a caller-supplied block id."
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.value/identity 'seon.render.value/node-id
+       {:seon.error/message "A rendered value root requires a caller-supplied block id."
         :seon.error/fix "Supply :seon.render.call/id, :seon.render.value/root, or an entity identity."
         :seon.render.value/root-description (pr-str (select-keys unit [:seon.agent/id :seon.render.call/id
                                    :seon.render.value/root :db/id
@@ -256,7 +254,7 @@
         :seon.error/member :seon.render.value/root
         :seon.error/expected "a caller-supplied block or entity identity"
         :seon.error/offending unit
-        :seon.error/data {:seon.agent/id (:seon.agent/id unit) :seon.render.data/path path}}
+        :seon.error/data {:seon.agent/id (:seon.agent/id unit) :seon.render.data/path path}})
       (str "seon-value-"
            (id/digest 24 [(:seon.agent/id unit) root-address path])))))
 
@@ -342,15 +340,13 @@
        :seon.render.value/more? false})
     (catch Throwable failure
       {:seon.render.value/window
-       {:seon.error/at (java.util.Date.)
-         :seon.error/layer :seon.render.value/window
-         :seon.error/operation 'seon.render.value/window
-         :seon.error/message (or (ex-message failure) "Window realization failed.")
+       (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.value/window 'seon.render.value/window
+        {:seon.error/message (or (ex-message failure) "Window realization failed.")
          :seon.error/fix "Inspect the source value and request a realizable window."
          :seon.render.value/window-offset offset
          :seon.error/expected "a realizable value window"
          :seon.error/offending value
-         :seon.error/data {:seon.render.value/offset offset}}
+         :seon.error/data {:seon.render.value/offset offset}})
        :seon.render.value/steps []
        :seon.render.value/offset offset
        :seon.render.value/shown 0

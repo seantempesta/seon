@@ -94,3 +94,4 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 | E26: `src/seon/render/data.clj` | 1 | 5 / 6 / -1; +0 | 1 / 15 | 23.361084 | `seon.render.data-test` | None; surrounding assoc and unsupported context retained |
 | E27: `src/seon/render/hiccup.clj` | 4 | 12 / 20 / -8; +0 | 3 / 17 | 24.18825 | `seon.render.hiccup-test` | None; all four admitted sites converted |
 | E28: `src/seon/render/transcript.clj` | 3 | 9 / 15 / -6; +0 | 9 / 85 | 31.097458 | `seon.render.transcript-test` | None; complete selection and runtime evidence retained |
+| E29: `src/seon/render/value.clj` | 2 | 6 / 10 / -4; +0 | 2 / 29 | 24.629458 | `seon.render.value-test` | None; explicitly held value_test.clj untouched; existing window catch policy retained |
