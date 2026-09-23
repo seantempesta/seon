@@ -12,7 +12,7 @@
 	ignore = dirty
 [submodule "reference-code/babashka-process"]
 	path = reference-code/babashka-process
-	url = https://github.com/seantempesta/process.git
+	url = https://github.com/babashka/process.git
 	ignore = dirty
 [submodule "reference-code/core.async"]
 	path = reference-code/core.async

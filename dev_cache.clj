@@ -2,6 +2,7 @@
   "Refreshes the source-preferred development class cache."
   (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
+            [clojure.java.shell :as shell]
             [clojure.string :as str]
             [clojure.tools.build.api :as b])
   (:import [java.io RandomAccessFile]
@@ -136,11 +137,18 @@
            (spit ~result (str (pr-str rows#) "\n")))))))
 
 (defn- compile-form
+  "The child-JVM form that loads `rows` in order with `*compile-files*` bound,
+  so each namespace compiles once, when first loaded. `compile` would reload a
+  namespace an earlier row already loaded, redefining its protocols under the
+  classes that implement them."
+  {:malli/schema [:=> [:cat [:vector [:map [:seon.dev-cache/namespace :symbol]]] :string]
+                  seq?]}
   [rows staging]
-  `(binding [*compile-path* ~staging]
+  `(binding [*compile-path* ~staging
+             *compile-files* true]
      (doseq [namespace-name# ~(mapv (comp str :seon.dev-cache/namespace)
                                     rows)]
-       (compile (symbol namespace-name#)))))
+       (require (symbol namespace-name#)))))
 
 (defn- run-child!
   [basis form failure-message rejected-path]
@@ -413,8 +421,22 @@
   [transition]
   (with-file-lock "reference" reference-lock-file transition))
 
+(defn- assert-submodule-checkouts!
+  []
+  ;; An archive carries recorded pins, not a git work tree.
+  (when (.exists (io/file ".git"))
+    (let [{:keys [exit out err]} (shell/sh "git" "submodule" "status" "--" "reference-code")
+          mismatches (filter #(contains? #{\+ \- \U} (first %))
+                             (str/split-lines out))]
+      (when (or (not (zero? exit)) (seq mismatches))
+        (throw (ex-info "Reference-code checkout differs from its gitlink."
+                        {:seon.dev-cache/exit exit
+                         :seon.dev-cache/mismatches (vec mismatches)
+                         :seon.dev-cache/error err}))))))
+
 (defn- refresh!
   []
+  (assert-submodule-checkouts!)
   (let [started (System/nanoTime)
         basis (b/create-basis {:project "deps.edn" :aliases [:dev]})
         dependency-input-digest (dependency-configuration-digest ".")
@@ -467,6 +489,7 @@
 (defn ensure-cache
   "Reuse matching dependency classes, rebuilding under the lock when inputs changed."
   [_]
+  (assert-submodule-checkouts!)
   ;; A published cache directory is immutable and a rebuild only ever admits
   ;; a NEW directory, so a valid cache is a hit without the rebuild lock: a
   ;; peer's cold build cannot invalidate it and must not be waited out.
