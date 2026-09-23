@@ -30,3 +30,29 @@ Until then, an archive-booted `default` rejoins the files with an ordinary
 once HEAD's from-zero defect
 ([gitlink pins](gitlink-pins-refuse-every-from-zero-publication.md)) no longer
 blocks the working-tree publication.
+
+## 2026-09-23: `bin/seon start --head` states it; the refusal is the holder's hunk
+
+`bin/seon start --head` (lane move-to-head, `script/seon/operator.clj`
+`move-to-head!`) runs `default` from `<root>/data/source/<sha>` and says so: its
+result and `bin/seon status` carry `:seon.operator/source-root`,
+`:seon.operator/hook-publication :off` and the reason, and the CLI prints
+`HOOK-PUBLICATION off: ...` on stderr. Re-observed in a scratch JVM booted from
+`08a3227df`: `(seon.fs/relative-path (seon.fs/source-directory)
+"/Users/sean/src/seon/src/seon/await.clj")` answers
+`"../../../../../src/seon/await.clj"`.
+
+Exact change for the holder of `src/seon/cluster.clj`, in `refresh-source!`'s
+4-arity before `acquire-root-store!` (probed in that JVM: a working-tree path
+answers true, an archive path and a relative path false):
+
+```clojure
+outside (filterv #(let [relative (fs/relative-path directory %)]
+                    (or (= ".." relative) (str/starts-with? relative "../")))
+                 changed-paths)
+_ (when (seq outside)
+    (refused! (str "Changed paths lie outside this JVM's source directory " directory
+                   "; its program is a committed archive and the working tree is not"
+                   " published into it. `bin/seon down && bin/seon start` rejoins the files.")
+              {:seon.fn/root directory :seon.source/changed-paths outside}))
+```
