@@ -383,7 +383,7 @@ O3 begins with **acceptance correctness**, before additions/deletions. Capture i
 H/C/B; prepare forks exactly H into S, applies the proposal and derives **every current
 reaching test plus explicit task tests** for the combined program. B4's evidence owner
 compares this complete required set to positive current member evidence bound to H/C/S
-and the proposal. A caller-selected green subset is insufficient. Every function in the
+and the proposal. A caller-selected green subset is insufficient. The required set is found by the existing affected-tests selection, never new code (owner: "don't reinvent the wheel we already have efficient code for finding the test diffs … I mean the affected tests"): accept calls `seon.test/select` (`src/seon/test.clj:554`) read-only on the tested commit with the merge delta as `:seon.test/changed`, and requires nothing left to run and no exclusions; the hand-built `uncovered`/`gate-sets` loop in `accept-merge!` is deleted. Every function in the
 combined program has a well-formed, fully namespaced Malli schema and at least one test;
 all affected/task tests pass, and test-first obligations have basis evidence for the
 changed functions, regardless of the entry dials. Reuse unchanged contract/coverage
