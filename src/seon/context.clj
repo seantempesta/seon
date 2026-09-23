@@ -41,7 +41,8 @@
   no attempt, a plain interrupted run; kill between capture and attempt
   — capture with no attempt row, evidence the call may never have
   fired; kill after — today's attempt-row story. Nothing re-executes."
-  (:require [seon.ai.tokens :as tokens]
+  (:require [seon.error.refusal]
+            [seon.ai.tokens :as tokens]
             [seon.turn :as turn]
             [seon.db :as db]
             [seon.id :as id]
@@ -64,14 +65,12 @@
                   :seon.context/selection-refused-error]}
   [rule request evidence]
   (assoc
-   {:seon.error/at (java.util.Date.)
-     :seon.error/layer ::selection
-     :seon.error/operation 'seon.context/selection-refusal
-     :seon.context/selection-agent-id (:seon.agent/id request)
+   (seon.error.refusal/diagnostic (java.util.Date.) ::selection 'seon.context/selection-refusal
+    {:seon.context/selection-agent-id (:seon.agent/id request)
      :seon.error/offending request
      :seon.error/message "Select terminal evaluations from an existing agent's closed turn with an available contribution identity."
      :seon.error/expected "An existing agent's closed run with terminal evaluations and an available contribution identity."
-     :seon.error/data evidence}
+     :seon.error/data evidence})
    ::selection-refused rule))
 
 (defn selection
