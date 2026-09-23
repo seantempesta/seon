@@ -7,7 +7,8 @@
   Failed and stale builds leave the previously published head untouched.
   Scratch branches are retired after publication and no connection to
   `:current-src` is opened or retained."
-  (:require [clojure.java.io :as io]
+  (:require [seon.error.refusal]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.cluster.process :as cluster.process]
@@ -406,16 +407,14 @@
                         [:current-commit :uuid]]]
                   :seon.source/publication-error]}
   [operation data]
-  {:seon.error/at (java.util.Date.)
-   :seon.error/layer :seon.source/publication
-   :seon.error/operation operation
-   :seon.error/message "The source head changed before publication."
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/publication operation
+   {:seon.error/message "The source head changed before publication."
    :seon.error/expected (:expected-current-commit data)
    :seon.error/offending (:current-commit data)
    :seon.error/data data
    :seon.source/branch (:branch data)
    :seon.source/expected-commit-id (:expected-current-commit data)
-   :seon.source/commit-id (:current-commit data)})
+   :seon.source/commit-id (:current-commit data)}))
 
 (defn- stale-publication-error
   "Translate Datahike's stale-head refusal once; unrelated failures propagate."
@@ -449,14 +448,12 @@
                             :seon.test.run/callers-at-head :seon.source/test-selection-request])
                 missing (vec (remove #(get-in projection [:seon.schema.projection/forms %]) required))
                 result (if (seq missing)
-                         {:seon.error/at (java.util.Date.)
-                           :seon.error/layer :seon.test/recording
-                           :seon.error/operation 'seon.cluster.source/record-results!
-                           :seon.error/message "The published recording authority predates snapshot result admission. The orchestrator must publish the converged schema before fast recording can be enabled."
+                         (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.cluster.source/record-results!
+                          {:seon.error/message "The published recording authority predates snapshot result admission. The orchestrator must publish the converged schema before fast recording can be enabled."
                            :seon.error/expected required
                            :seon.error/offending missing
                            :seon.error/data {:seon.source/commit-id expected}
-          :seon.test.run/branch current-branch}
+          :seon.test.run/branch current-branch})
                          (schema/call-with-projection
                         projection
                         #(if (contains? completion :seon.test.runner/results)
@@ -532,13 +529,11 @@
   (try
     (test.cache/test-input-digest directory (test.cache/input-digests directory))
     (catch Exception failure
-      (let [refusal {:seon.error/at (java.util.Date.)
-                      :seon.error/layer :seon.source/publication
-                      :seon.error/operation 'seon.cluster.source/publish!
-                      :seon.error/message "The publication input inventory is unavailable."
+      (let [refusal (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/publication 'seon.cluster.source/publish!
+                     {:seon.error/message "The publication input inventory is unavailable."
                       :seon.error/expected :snapshot-input-inventory
                       :seon.error/offending directory
-                      :seon.error/data {:seon.source/inventory-failure (str (ex-message failure))}}]
+                      :seon.error/data {:seon.source/inventory-failure (str (ex-message failure))}})]
         (throw (ex-info (:seon.error/message refusal) refusal failure))))))
 
 (defn publish!
@@ -804,9 +799,9 @@
         tested (commit-database held-store e-id)
         head (db/db (:seon.db/connection source))
         refuse (fn [message offending]
-                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.source/merge
-                  :seon.error/operation 'seon.cluster.source/accept-merge! :seon.error/message message
-                  :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s})]
+                 (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
+                  {:seon.error/message message
+                  :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s}))]
     (try
       (let [run (db/pull tested [:seon.test.run/branch :seon.test.run/tested-branch :seon.test.run/basis-t]
                          [:seon.test.run/id run-id])

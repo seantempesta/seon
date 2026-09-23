@@ -50,3 +50,4 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 | E9: `src/seon/cluster/agent.clj` | 2 | 8 / 11 / -3; 0 | 18 / 42 | 27.579083 | `seon.cluster.agent-test` | None |
 | E10: `src/seon/cluster/process.clj` | 4 | 12 / 20 / -8; 0 | 2 / 16 | 21.845958 | `seon.cluster.boot-test` | None; platform loadability and affected integration remain orchestrator proof |
 | E11: `src/seon/cluster/prompt.clj` | 1 | 5 / 6 / -1; 0 | 0 / 19 | 23.590542 | `seon.cluster.prompt-test` | One O literal retained to preserve header evaluation order |
+| E12: `src/seon/cluster/source.clj` | 4 | 14 / 19 / -5; 0 | 7 / 32 | 24.780792 | `seon.cluster.source-test` | One X literal retained; input-inventory ex-info preserves original cause. Publication clock and parent/child probe deferred to orchestrator |
