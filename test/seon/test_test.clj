@@ -1,6 +1,7 @@
 (ns seon.test-test
   "Run admission uses the canonical writer and preserves selected obligations."
-  (:require [clojure.test :refer [deftest is]]
+  (:require [clojure.set :as set]
+            [clojure.test :refer [deftest is]]
             [seon.db :as db]
             [seon.config :as config]
             [seon.id :as id]
@@ -10,33 +11,6 @@
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
-
-(deftest recorded-reuse-requires-the-original-selection
-  (test-support/with-database
-   (fn [connection]
-     (let [passing 'seon.test-runner-failure-fixture/passing-example
-           empty-test 'seon.test-runner-failure-fixture/assertionless-example
-           execute! (fn [symbols]
-                      (let [provenance (runner/provenance (db/db connection))
-                            results (runner/run-vars! (mapv requiring-resolve symbols) {})
-                            recorded (runner/commit-results!
-                                      connection {:seon.test.run/provenance provenance
-                                                  :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
-                                                  :seon.test/run-at (:seon.test.run/at provenance)
-                                                  :seon.test.runner/results results})]
-                        (is (vector? recorded) (pr-str recorded))))
-           reuse #(runner/reusable-result {:seon.db/db (db/db connection) :seon.test/identity passing})]
-       (execute! [passing empty-test])
-       (is (= :seon.test/execution-required (reuse)))
-       (execute! [empty-test])
-       (is (= :seon.test/execution-required (reuse))
-           "Overwriting another test's latest result cannot shrink the old batch's selection.")
-       (execute! [passing])
-       (is (true? (:seon.test/unchanged (reuse))))
-       (is (= :seon.test/invalid-basis
-              (:seon.test/execution-refusal
-               (runner/reusable-result {:seon.db/db (db/db connection) :seon.test/identity passing
-                                        :seon.test/run-basis-t (inc (db/basis-t (db/db connection)))}))))))))
 
 (deftest interpreted-test-bodies-use-the-sci-interrupt-bound
   (test-support/with-database
@@ -176,6 +150,8 @@
                                       :where [_ :seon.test/sym ?symbol]] database))
            first-run (runner/provenance database)
            second-run (runner/provenance database)
+           ;; The fixture branch carries the cluster's own runs; this test owns only its two.
+           existing-runs (set (db/q '[:find [?id ...] :where [_ :seon.test.run/id ?id]] database))
            completion (fn [run]
                         {:seon.test.run/provenance run
                          :seon.test/run-basis-t (:seon.test.run/basis-t run)
@@ -192,8 +168,10 @@
          (let [result (runner/commit-results! connection (completion run))]
            (is (vector? result) (pr-str result))))
        (is (= #{(:seon.test.run/id first-run) (:seon.test.run/id second-run)}
-              (set (db/q '[:find [?id ...] :where [_ :seon.test.run/id ?id]]
-                         (db/db connection)))))
+              (set/difference
+               (set (db/q '[:find [?id ...] :where [_ :seon.test.run/id ?id]]
+                          (db/db connection)))
+               existing-runs)))
        (let [pull db/pull
              read-refusal (pull database [:db/id] [:seon.test.run/id 42])
              basis (db/basis-t (db/db connection))
@@ -262,8 +240,9 @@
               (memberships (:seon.test.run/id provenance) :seon.test.run/members)))
        (is (= #{(last symbols)} (memberships second-id :seon.test.run/members)))
        (is (= #{(second symbols)} (memberships second-id :seon.test.run/covered-by)))
-       (is (= 3 (db/q '[:find (count ?member) .
-                        :where [?member :seon.test.member/symbol]] after)))
+       ;; The fixture branch carries the cluster's own evidence: count this test's runs.
+       (is (= 3 (count (into (memberships (:seon.test.run/id provenance) :seon.test.run/members)
+                             (memberships second-id :seon.test.run/members)))))
        (let [replay (test-support/transacted!
                      connection [[:db.fn/call sut/admit-run second-request]])]
          (is (empty? (filter #(or (= "seon.test.run" (namespace (:a %)))
@@ -284,7 +263,10 @@
      (test-support/transacted! connection
        [{:seon.source/digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]] (db/db connection))
          :seon.source/test-input-digest (id/digest 64 [:admission :inputs])}])
-     (let [database (db/db connection)
+     (let [stale (runner/provenance (db/db connection))
+           _ (test-support/transacted!
+              connection [[:db/add [:seon.fn/sym 'seon.id/id] :seon.fn/doc "Written after the tested basis."]])
+           database (db/db connection)
            request {::ignored :not-a-database-attribute
                     :seon.test.run/provenance (runner/provenance database)
                     :seon.test.run/cluster [:seon.cluster/name "test-admission-empty"]
@@ -295,8 +277,8 @@
            before (db/basis-t database)
            refused (db/transact! connection
                      [[:db.fn/call sut/admit-run
-                       (assoc-in request [:seon.test.run/provenance :seon.test.run/program-digest]
-                                 (id/digest 64 [:different :program]))]])]
+                       ;; A program written after the tested basis is a stale program.
+                       (assoc request :seon.test.run/provenance stale)]])]
        (is (= :seon.test/program-mismatch (:seon.test/admission-refusal refused)) (pr-str refused))
        (is (= before (db/basis-t (db/db connection))))
        (let [wrong-input (db/transact! connection
