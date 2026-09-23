@@ -208,39 +208,3 @@
              :seon.config.ai/prompt-token-budget budget}
       band (assoc :seon.ai.tokens/relative-error band
                   :seon.ai.tokens/upper-bound upper-bound))))
-
-(defn- rounded
-  "`value` rounded to `places` decimals, as a portable printable number."
-  [value places]
-  (let [scale (double (reduce * 1.0 (repeat places 10)))]
-    (/ (double (Math/round (* (double value) scale))) scale)))
-
-(defn report-sentence
-  "Say one estimate, its basis, and its margin in a readable sentence.
-
-  The human-visible form of a [[budget-report]]. Used by the budget
-  refusal, the near-limit note, and anything else that shows a size, so
-  a reader is never left guessing which basis produced a number."
-  {:malli/schema [:=> [:cat :seon.ai.tokens/budget-report] :string]}
-  [report]
-  (let [{:seon.ai.tokens/keys [estimated basis chars-per-token sample-count
-                               relative-error upper-bound]
-         budget :seon.config.ai/prompt-token-budget} report]
-    (str estimated " estimated tokens against a " budget "-token budget, "
-         (case basis
-           :seon.ai.tokens/observed
-           (str "calibrated at " (rounded chars-per-token 2)
-                " characters per token from " sample-count
-                " recorded provider usage facts (worst observed miss "
-                (rounded (* 100.0 relative-error) 1)
-                "%, so as much as " upper-bound " tokens)")
-
-           :seon.ai.tokens/shipped-prior
-           (str "using the shipped measured prior of "
-                (rounded chars-per-token 2)
-                " characters per token from " sample-count
-                " recorded provider prompt samples; no local usage exists"
-                " yet, so no error band is asserted")
-
-           (str "on the legacy uncalibrated " (long chars-per-token)
-                "-characters-per-token fallback")))))

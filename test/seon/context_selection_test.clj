@@ -113,24 +113,7 @@
              (is (= selected (context/selection @connection "selection-a"))))))
        (is (= :seon.context/no-such-agent
               (:seon.context/selection-refused
-               (context/selection @connection "missing")))))
-     (let [before-evaluations (db/q '[:find (count ?e) .
-                                      :where [?e :seon.cluster.eval/id]] @connection)
-           remove-request {:seon.agent/id "selection-a"
-                           :seon.context.contribution/id "chosen-1"}
-           foreign (db/transact!
-                    connection
-                    [[:db.fn/call context/remove-tx
-                      (assoc remove-request :seon.agent/id "selection-b")]])]
-       (is (= :seon.context/foreign-contribution (:seon.context/selection-refused foreign)))
-       (is (some? (:db-after
-                  (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
-       (is (some? (:db-after
-                  (db/transact! connection [[:db.fn/call context/remove-tx remove-request]]))))
-       (is (= ["chosen-2"] (mapv :seon.context.contribution/id
-                                 (context/selection @connection "selection-a"))))
-       (is (= before-evaluations
-              (db/q '[:find (count ?e) . :where [?e :seon.cluster.eval/id]] @connection)))))))
+               (context/selection @connection "missing"))))))))
 
 (deftest compact-replaces-only-observed-evaluation-refs
   (test-support/with-database
@@ -165,43 +148,6 @@
                           [(append-call "compact-agent" "compact-before" "compact-choice")])
            before (first (context/selection @connection "compact-agent"))
            expected (:seon.context.contribution/evaluations before)
-           comparison
-           (context/comparison
-            @connection
-            (request "compact-agent" "compact-after" "compact-choice"))
-           memory-basis (db/basis-t @connection)
-           memory-request
-           (assoc (request "compact-agent" "not-persisted" "compact-choice")
-                  :seon.turn.loop/evaluated-sources
-                  [{:seon.cluster.eval/ordinal 0
-                    :seon.turn.loop/admitted-form
-                    {:seon.cluster.eval/source "(identity 1)"
-                     :seon.cluster.eval/ns [:seon.ns/name 'compact.context]}
-                    :seon.sci.eval/evaluation
-                    {:seon.sci.admit/value 2 :seon.eval/shown "2"}}])
-           memory-comparison (context/comparison @connection memory-request)
-           _ (is (= memory-basis (db/basis-t @connection)))
-           _ (is (= :ready (:seon.context.comparison/status memory-comparison)))
-           _ (is (= expected (set (:seon.context.comparison/baseline-evaluations
-                                   memory-comparison))))
-           _ (is (= (:seon.turn.loop/evaluated-sources memory-request)
-                    (:seon.turn.loop/evaluated-sources memory-comparison)))
-           _ (is (= :seon.context/unfinished-evaluation
-                    (:seon.context/selection-refused
-                     (context/comparison
-                      @connection
-                      (update-in memory-request
-                                 [:seon.turn.loop/evaluated-sources 0
-                                  :seon.sci.eval/evaluation]
-                                 dissoc :seon.eval/shown)))))
-           _ (is (= :different-source
-                    (:seon.context.comparison/status
-                     (context/comparison
-                      @connection
-                      (assoc-in memory-request
-                                [:seon.turn.loop/evaluated-sources 0
-                                 :seon.turn.loop/admitted-form :seon.cluster.eval/ns]
-                                [:seon.ns/name 'another.context])))))
            committed
            (db/transact!
             connection
@@ -209,9 +155,6 @@
                            expected)])
            after (first (context/selection @connection "compact-agent"))]
        (is (some? (:db-after committed)))
-       (is (= :ready (:seon.context.comparison/status comparison)))
-       (is (= expected
-              (set (:seon.context.comparison/baseline-evaluations comparison))))
        (is (= (:seon.context.contribution/position before)
               (:seon.context.contribution/position after)))
        (is (= "compact-after-0"

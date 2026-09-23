@@ -68,9 +68,7 @@
         (is (< miss 0.02) "the shipped prior corrects the measured 19.2% miss")
         (is (= :seon.ai.tokens/within (:seon.ai.tokens/verdict report))
             "the measured first-turn prompt is well within the budget")
-        (is (not (contains? report :seon.ai.tokens/upper-bound)))
-        (is (str/includes? (tokens/report-sentence report) "measured prior")
-            "the first-turn number must name its evidence basis")))))
+        (is (not (contains? report :seon.ai.tokens/upper-bound)))))))
 
 (deftest a-calibrated-estimate-predicts-the-provider-within-its-own-band
   (let [calibration (tokens/calibrate (observations observed-usage))]
@@ -123,6 +121,4 @@
       (is (< (:seon.ai.tokens/estimated report) budget))
       (is (> (:seon.ai.tokens/upper-bound report) budget))
       (is (= :seon.ai.tokens/near-limit (:seon.ai.tokens/verdict report)))
-      (is (str/includes? (tokens/report-sentence report) "worst observed miss")
-          "the note must carry the margin, not only the point estimate")
       (is (pos? band)))))
