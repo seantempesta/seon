@@ -63,7 +63,8 @@
   untouched. A kill leaves no listener (the process is gone), the
   channel's contents are discarded (`flow/impl.clj:174-183`), and the
   next boot's injected wake re-derives everything from facts."
-  (:require [clojure.core.async :as async]
+  (:require [seon.error.refusal]
+            [clojure.core.async :as async]
             [datahike.api :as d]
             [datahike.db.utils :as db.utils]
             [seon.db :as db]
@@ -228,32 +229,26 @@
         unindexed (unindexed-listened-attributes database)]
     (cond
       (empty? listened)
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.cluster.wake/declarations
-       :seon.error/operation 'seon.cluster.wake/declarations-refusal
-       :seon.error/message
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/declarations-refusal
+       {:seon.error/message
        (str "No attribute declares :seon.wake/listen, so nothing can ever "
             "wake an agent on this database.")
-       :seon.cluster.wake/attributes #{}}
+       :seon.cluster.wake/attributes #{}})
 
       (empty? inside)
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.cluster.wake/declarations
-       :seon.error/operation 'seon.cluster.wake/declarations-refusal
-       :seon.error/message
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/declarations-refusal
+       {:seon.error/message
        (str "No attribute declares :seon.wake/inside, so every wake would "
             "count as arriving from outside the agent and refill its turn "
             "bound.")
-       :seon.cluster.wake/attributes listened}
+       :seon.cluster.wake/attributes listened})
 
       (seq unindexed)
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.cluster.wake/declarations
-       :seon.error/operation 'seon.cluster.wake/declarations-refusal
-       :seon.error/message
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/declarations-refusal
+       {:seon.error/message
        (str "A listened attribute is not in the :avet index, so its wakes "
             "read as absent: " (pr-str (vec (sort unindexed))))
-       :seon.cluster.wake/attributes unindexed})))
+       :seon.cluster.wake/attributes unindexed}))))
 
 (defn arming-refusal
   "The refusal that says no declaration can ever arm a created agent, or nil.
@@ -274,14 +269,12 @@
                   [:maybe :seon.error/value]]}
   [database]
   (when (empty? (arming-attributes database))
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer :seon.cluster.wake/declarations
-     :seon.error/operation 'seon.cluster.wake/arming-refusal
-     :seon.error/message
+    (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.wake/declarations 'seon.cluster.wake/arming-refusal
+     {:seon.error/message
      (str "No attribute declares :seon.wake/arms, so an agent created while "
           "this cluster runs would never be armed and its derivable work "
           "would read as an idle cluster until the next boot.")
-     :seon.cluster.wake/attributes #{}}))
+     :seon.cluster.wake/attributes #{}})))
 
 (defn agent-wake-datoms
   "Every wake datom addressed to one agent, newest index entry first.

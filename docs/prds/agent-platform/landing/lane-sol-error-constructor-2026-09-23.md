@@ -79,3 +79,4 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 | Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
 |---|---:|---|---|---:|---|---|
 | E13: `src/seon/cluster/status.clj` | 1 | 5 / 6 / -1; +0 | 1 / 50 | 64.458709 | `seon.cluster.status-test` | None |
+| E14: `src/seon/cluster/wake.clj` | 4 | 14 / 21 / -7; +0 | 2 / 20 | 29.618417 | `seon.cluster.wake-test` | None; listened/arming declarations and queries unchanged |
