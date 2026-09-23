@@ -258,6 +258,8 @@ of unrelated edits.
 3. **Each change triggers the tests reaching just that change** on that branch, automatically, with results in the reply — never a system-wide run.
 4. **Definition WARNS, merge GATES.** A function without a Malli schema, a schema not fully namespaced or not well formed, or a function with no test is still accepted; the reply warns that the branch cannot merge until it is fixed. (This replaces "a `defn` without `:malli/schema` is refused and never becomes a row" below.) The merge gate requires: every affected test green, every function spec'ed with a well-formed, fully namespaced schema, and at least one test per function.
 5. The work is Seon agents' own environment first; MCP only places outside agents in it.
+6. **Root reviews and merges; the orchestrator acts as root (owner: "I want you to act as root checking the diffs for changes an agent has made on their branch and for us to build out that experience of merging it into the main cluster codebase and then if all tests are passing persisting to the files").** This rules O-b below. Root's experience, built as part of this section: a **branch diff** — the declarations changed since the branch's base (`program/changed-identities`, three-way against the cluster head), each with its source diff, its schema/test warnings and the reaching tests' latest results on that branch; then **accept** (merge through §2c into the cluster's branch, the gate enforcing item 4) or **send back** with a reason the branch's author sees; then **write-back** (§2d) persists the accepted delta to the files and commits, only when every required test passed.
+
 
 
 Owner (2026-09-23): "the goal is to switch over to SEON agents writing their own code
