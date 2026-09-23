@@ -82,3 +82,4 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 | E14: `src/seon/cluster/wake.clj` | 4 | 14 / 21 / -7; +0 | 2 / 20 | 29.618417 | `seon.cluster.wake-test` | None; listened/arming declarations and queries unchanged |
 | E15: `src/seon/config.clj` | 2 | 7 / 11 / -4; +9 | 8 / 46 | 34.138 | `seon.config-test` | Removed generated blank require line; strengthened both conditional-evidence cases to whole values, replacing stale message expectation; 16 X literals retained |
 | E16: `src/seon/context.clj` | 1 | 5 / 6 / -1; +0 | 1 / 20 | 26.494667 | `seon.context-test` | None; subsequent assoc remains outside construction |
+| E17: `src/seon/db.clj` | 4 | 11 / 20 / -9; +0 | 17 / 129 | 64.850583 | `seon.db-test` | K/X literals and raw Throwable map retained; existing diagnostic flattened |

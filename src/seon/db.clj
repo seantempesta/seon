@@ -193,15 +193,13 @@
    [:=> [:cat :qualified-symbol :seon.schema/key :seon.schema/value :string :map]
     :seon.schema/validation-refusal]}
   [operation expected value message evidence]
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.db/acquisition
-    :seon.error/operation operation
-    :seon.error/message message
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/acquisition operation
+   {:seon.error/message message
     :seon.db/invalid-read true
     :seon.db/refused-read-operation operation
     :seon.schema/expected-value expected
     :seon.schema/refused-value value
-    :seon.error/data (merge evidence {:seon.error/layer :database-read})})
+    :seon.error/data (merge evidence {:seon.error/layer :database-read})}))
 
 (defn- dependency-error
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.db/error-result]}
@@ -1245,14 +1243,12 @@
   (binding [*out* *err*]
     (println "WARN seon.db/projection-fallback caller=" operation
              "missing-projection count=1; supply the operation's projection."))
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.schema/projection
-    :seon.error/operation 'seon.db/projection-fallback
-    :seon.error/message "This operation requires a carried schema projection."
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.schema/projection 'seon.db/projection-fallback
+   {:seon.error/message "This operation requires a carried schema projection."
     :seon.db/invalid-read true
     :seon.db/refused-read-operation operation
     :seon.schema/expected-value :seon.schema/projection
-    :seon.schema/refused-value {:seon.db/operation operation}})
+    :seon.schema/refused-value {:seon.db/operation operation}}))
 
 (def projection-cache-policy
   "Bound retained compiled projections independently of the number of commits."
@@ -2737,10 +2733,8 @@
     (not (dbi/-temporal-index? database))
     (do
       (append-database-evidence! database :all)
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.db/database-read
-        :seon.error/operation 'seon.db/database-view
-        :seon.error/message "The database does not retain temporal indices."
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/database-read 'seon.db/database-view
+       {:seon.error/message "The database does not retain temporal indices."
         :seon.db/invalid-read true
         :seon.db/refused-read-operation 'seon.db/database-view
         :seon.config/error-key :seon.config.db/keep-history?
@@ -2748,7 +2742,7 @@
         :seon.error/expected [:= true]
         :seon.error/offending false
         :seon.error/data (merge {::operation ::temporal-read
-                          :seon.config.db/keep-history? false} {:seon.error/layer :database-read :seon.error/source {:seon.config.db/keep-history? false}})})
+                          :seon.config.db/keep-history? false} {:seon.error/layer :database-read :seon.error/source {:seon.config.db/keep-history? false}})}))
 
     :else
     (try
@@ -2993,11 +2987,8 @@
         (try
           [(unique-conflict database data) nil]
           (catch Throwable lookup
-            [nil (error.refusal/diagnostic
-                  {:seon.error/at (java.util.Date.)
-                   :seon.error/layer :seon.db/database-read
-                   :seon.error/operation 'seon.db/unique-conflict
-                   :seon.error/message (or (ex-message lookup) (.getName (class lookup)))
+            [nil (seon.error.refusal/diagnostic (java.util.Date.) :seon.db/database-read 'seon.db/unique-conflict
+                  {:seon.error/message (or (ex-message lookup) (.getName (class lookup)))
                    :seon.error/throwable lookup})]))]
     (write-observation
      database transaction
