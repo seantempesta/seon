@@ -68,6 +68,12 @@ Datahike owns transactions and branches, Malli owns compiled schemas, SCI owns i
 contexts, core.async owns graph execution. Improve the maintained fork when that
 removes a parallel Seon mechanism. The best change deletes a mechanism.
 
+**Small or wrong (owner, 2026-09-23: "please don't make anything too complicated. If
+you're writing hundreds of lines of code to do things it's the wrong way to do it").** A
+slice that adds more than about a hundred lines is presumed the wrong design: stop before
+writing it and report the smaller alternative — the dependency seam, the deletion, the one
+call-site conversion. Net line count is not the test; added machinery is.
+
 **No stamps (owner, 2026-09-23: "get rid of bullshit stamps; so much of what we are
 doing is already available in Datahike").** A value derived from a database value is a
 FUNCTION of that value, memoized with Clojure's tools (`clojure.core.cache`, keyed by
