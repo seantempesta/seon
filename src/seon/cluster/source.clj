@@ -17,6 +17,7 @@
             [seon.error :as error]
             [seon.fn :as fn]
             [seon.fs :as fs]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.test.cache :as test.cache]
             [seon.schema :as schema]
@@ -698,3 +699,141 @@
         (catch Throwable failure
           (retire-scratch! store scratch failure)
           (stale-publication-error 'seon.cluster.source/publish! failure)))))))
+
+(defn- refused
+  "A comparison refusal of this owner's merge operations."
+  {:malli/schema [:=> [:cat :seon.program/missing-evidence :string :map] :seon.program/digest-map-refusal]}
+  [missing message members]
+  (assoc (program/digest-map-refusal missing message members) :seon.error/operation 'seon.cluster.source/prepare-merge!))
+
+(defn- merge-base
+  "The nearest commit both `branch` and `head` reach: alternate parent walks
+  over stored commits, O(commits since the fork). More than `bound` visited
+  commits or an unavailable one refuses by name."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.db/database-value :seon.db/database-value
+                       :seon.program/max-datoms]
+                  [:or :seon.db/database-value :seon.program/digest-map-refusal]]}
+  [store branch head bound]
+  (loop [queues (mapv #(conj clojure.lang.PersistentQueue/EMPTY (db/commit-id %)) [branch head])
+         seen [#{} #{}] side 0 visited 0]
+    (let [other (- 1 side) commit (peek (queues side))
+          stored (when (and commit (not ((seen other) commit)) (<= visited bound))
+                   (commit-database store commit))]
+      (cond
+        (and commit ((seen other) commit)) (commit-database store commit)
+        (every? empty? queues) (refused :seon.program/history "The branches share no commit." {})
+        (nil? commit) (recur queues seen other visited)
+        (nil? stored) (refused :seon.program/read-bound "The merge base is unavailable within its commit bound."
+                               {:seon.program/max-datoms bound :seon.error/offending commit})
+        :else (recur (update (update queues side pop) side into
+                             (try (get-in stored [:meta :datahike/parents])
+                                  (finally (d/release-materialized-db stored))))
+                     (update seen side conj commit) other (inc visited))))))
+
+(defn- replacement
+  "Exact replacement transaction data onto `onto` for `delta`'s rows in `from`."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
+                  [:or :seon.db/tx-data :seon.error/value]]}
+  [from onto delta]
+  (let [rows (fn/published-index-rows from (vec delta))]
+    (if (vector? rows) (fn/reconcile-tx onto rows (vec delta)) rows)))
+
+(defn prepare-merge!
+  "Test `candidate`'s function and test replacements since its merge base with
+  `source`'s head H on a fresh branch S of H through the save gate, with the
+  issue's tests, and answer the proposal `accept-merge!` takes. A conflict
+  answers the three-way value; an addition, deletion or empty delta refuses."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id]
+                  [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+                        [:seon.test/passed? :boolean] [:seon.source/tally :string]
+                        [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+                   :seon.program/three-way :seon.error/value]]}
+  [source held-store candidate issue]
+  (let [bound {:seon.program/max-datoms 10000}
+        head (db/db (:seon.db/connection source))
+        c-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch candidate})
+        branch (commit-database held-store c-id)
+        base (merge-base held-store branch head 10000)
+        ;; Only what the candidate changed can merge or conflict; H's
+        ;; transaction numbers are another lineage's.
+        changed (if (:seon.error/at base) base (program/changed-identities base branch bound))
+        maps (when (set? changed)
+               (mapv #(program/digest-map % (assoc bound :seon.program/identities changed)) [base branch head]))
+        three (when (and maps (not-any? :seon.error/at maps)) (apply program/three-way maps))
+        delta (:seon.program/changed-on-branch three)
+        tx (when (seq delta) (replacement branch head delta))
+        subject (db/pull branch [:db/id {:seon.issue/tests [:seon.test/sym]}] [:seon.issue/id issue])
+        refuse #(refused :seon.program/scope %1 {:seon.error/offending %2})]
+    (try
+      (cond
+        (not (set? changed)) changed
+        (not three) (some #(when (:seon.error/at %) %) maps)
+        (seq (:seon.program/conflict three)) three
+        (some seq ((juxt :seon.program/added :seon.program/retracted) three))
+        (refuse "Only replacements of existing functions and tests merge here." three)
+        (empty? delta) (refuse "The candidate changes nothing the head lacks." three)
+        (:seon.error/at tx) tx
+        (not (:db/id subject)) (refuse "The issue is absent on the candidate." issue)
+        :else
+        (let [s (keyword (str "merge-" (id/id)))
+              write! (fn [execution]
+                       (let [written (db/transact! (:seon.db/connection execution) {:tx-data tx})]
+                         (when (:seon.error/at written) (throw (ex-info "The merge delta was refused." written)))
+                         (into delta (map #(vector :seon.test/sym (:seon.test/sym %))) (:seon.issue/tests subject))))
+              gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (constantly #{}))
+              run (:seon.source/gate-run gate)]
+          (if (:seon.error/at run) run
+              (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
+                     :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
+                     :datahike/expected-basis-t (db/basis-t head) :parents #{c-id}))))
+      (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch])))))
+
+(defn accept-merge!
+  "Merge exactly the program tested by `prepare-merge!`'s proposal into
+  `source`: the named run on S complete, every member green, every replaced
+  function reached by one, and S's program unwritten since. The writer
+  refuses a moved head (expected basis-t) before any datom lands; the merge
+  commit's parents add the candidate and S's head."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store
+                       [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+                        [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]]
+                  [:or :seon.db/transaction-report :seon.source/test-evidence-error :seon.error/value]]}
+  [source held-store {s :seon.source/candidate run-id :seon.test.run/id basis :datahike/expected-basis-t
+                      merged :parents}]
+  (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})
+        tested (commit-database held-store e-id)
+        head (db/db (:seon.db/connection source))
+        refuse (fn [message offending]
+                 {:seon.error/at (java.util.Date.) :seon.error/layer :seon.source/merge
+                  :seon.error/operation 'seon.cluster.source/accept-merge! :seon.error/message message
+                  :seon.error/offending offending :seon.source/refused-test-run run-id :seon.test.run/branch s})]
+    (try
+      (let [run (db/pull tested [:seon.test.run/branch :seon.test.run/tested-branch :seon.test.run/basis-t]
+                         [:seon.test.run/id run-id])
+            results ((requiring-resolve 'seon.test.runner/run-results) tested run-id)
+            members (into {} (db/q '[:find ?m ?sym :in $ ?id :where [?r :seon.test.run/id ?id]
+                                     (or [?r :seon.test.run/members ?m] [?r :seon.test.run/covered-by ?m])
+                                     [?m :seon.test.member/symbol ?sym]] tested run-id))
+            green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
+            green (set (vals (select-keys members green-ids)))
+            ;; S forked from H at `basis`: comparable on S's own lineage.
+            delta (program/changed-identities basis tested {:seon.program/max-datoms 10000})
+            uncovered (when (set? delta)
+                        (for [[a f] delta :when (= :seon.fn/sym a)
+                              :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f))
+            tx (when (seq delta) (replacement tested head delta))]
+        (cond
+          (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
+          (refuse "The named run was not recorded on the tested branch." run)
+          (:seon.error/at results) results
+          (or (empty? members) (not-every? green-ids (keys members)))
+          (refuse "Every member of the named run must be green." (vec (vals (apply dissoc members green-ids))))
+          (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
+          (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
+          (not (set? delta)) delta
+          (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
+          (:seon.error/at tx) tx
+          (empty? tx) (refuse "The destination already holds the tested rows." (vec delta))
+          :else (db/transact! (:seon.db/connection source)
+                              {:tx-data tx :datahike/expected-basis-t basis :parents (conj merged e-id)})))
+      (finally (d/release-materialized-db tested)))))

@@ -394,7 +394,7 @@
      (id/digest 64 [(schema/canonical-data-string parts)]))))
 
 #?(:clj
-   (defn- digest-map-refusal
+   (defn digest-map-refusal
      "The typed unknown `digest-map` answers when its evidence is incomplete."
      {:malli/schema [:=> [:cat :seon.program/missing-evidence :string :map]
                      :seon.program/digest-map-refusal]}
@@ -576,13 +576,14 @@
 
 #?(:clj
    (defn changed-identities
-     "Declarations whose digest `database` asserted or retracted after `base`,
+     "Declarations whose digest `database` asserted or retracted after `base`
+  (a value, or a basis-t on `database`'s own lineage),
   deleted ones named by history: `digest-map`'s scoping identities. Only
   functions and tests may change; another or no family, missing history and
   more than `:seon.program/max-datoms` changed entities refuse by name.
   Datahike indexes no transaction prefix: this walks the digest's history."
      {:malli/schema
-      [:=> [:cat :seon.db/database-value :seon.db/database-value
+      [:=> [:cat [:or :seon.db/database-value :seon.db/basis-t] :seon.db/database-value
             [:map [:seon.program/max-datoms :seon.program/max-datoms]]]
        [:or :seon.program/identity-set :seon.program/digest-map-refusal]]}
      [base database {:seon.program/keys [max-datoms]}]
@@ -594,7 +595,7 @@
            past (history database)
            entities (if (:seon.error/at past) past
                       (q '[:find [?e ...] :where [?e :seon.program/definition-digest]]
-                         (since past (basis-t base))))
+                         (since past (if (int? base) base (basis-t base)))))
            rows (if (:seon.error/at entities) entities
                   (q '[:find ?e ?a ?v :in $ [?e ...] [?a ...] :where [?e ?a ?v]]
                      past entities (vec (:seon.program/compared-families
