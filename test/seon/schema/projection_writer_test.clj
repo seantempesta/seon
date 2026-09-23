@@ -4,7 +4,9 @@
             [datahike.api :as d]
             [datahike.db]
             [malli.core :as m]
+            [seon.cluster.agent :as agent]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.schema :as schema]
             [seon.test-support :as support]
             [seon.turn :as turn]))
@@ -188,6 +190,34 @@
             (recur (inc attempt))))
         (is (nil? (.get ^java.lang.ref.WeakReference (first references)))
             "an evicted value's projection is collectable")))))
+
+;; 24ad (2026-09-23): a committed read that hit its revision key never stored
+;; the commit key, so a new branch at that commit (a new connection, so a new
+;; revision key) fell to the declaration content, one pass over ~30k datoms.
+(deftest a-new-branch-at-an-equal-commit-reads-the-held-projection
+  (let [member (support/execution-handle nil)
+        parent (env/carry-state member (:seon.sci.eval/projection-state (:seon.sci.eval/ctx member)))
+        connection (:seon.db/connection parent)
+        _ (db/carried-projection (db/db connection))
+        committed (:db-after (support/transacted!
+                              connection
+                              [{:seon.message/id "projection-writer-equal-commit"
+                                :seon.message/to [:seon.agent/id "root"]
+                                :seon.message/content "no declaration attribute"}]))
+        held (db/carried-projection committed)
+        content-keys (atom 0)
+        content-key @#'seon.db/declaration-content-key]
+    ;; The fork's acquisition reads its head's projection too, so the count
+    ;; spans it.
+    (with-redefs [seon.db/declaration-content-key
+                  (fn [value] (swap! content-keys inc) (content-key value))]
+      (let [fork (agent/acquire-context! parent nil {:seon.agent/isolate? true
+                                                     :seon.cluster.registry/from (db/commit-id committed)})]
+        (try
+          (is (identical? held (db/carried-projection (db/db (:seon.db/connection fork))))
+              "the branch's first read finds the commit's projection")
+          (is (zero? @content-keys) "without reading the declaration datoms")
+          (finally (agent/release-context! fork)))))))
 
 (deftest an-as-of-view-before-a-declaration-change-reads-the-older-population
   (support/with-database

@@ -1427,14 +1427,16 @@
       ;; miss (a new connection or branch) tries the commit, which names one
       ;; value in every connection (`datahike/writing.cljc:363`), then the
       ;; declaration content.
-      @(cache/lookup-or-miss
-        projection-cache (projection-cache-key source)
-        (fn [_]
-          (delay
-           @(cache/lookup-or-miss
-             projection-cache
-             [::commit (:datahike.value/commit-id (datahike.db/committed-value-identity source))]
-             (fn [_] (delay (content-projection source)))))))
+      ;; A revision hit also stores its cell under the commit, so a new branch
+      ;; at an equal commit hits too; Datahike's query cache keys committed
+      ;; values the same way (fork `684d3290`). Both key kinds share the bound.
+      (let [commit-key [::commit (:datahike.value/commit-id (datahike.db/committed-value-identity source))]
+            cell (cache/lookup-or-miss
+                  projection-cache (projection-cache-key source)
+                  (fn [_] (cache/lookup-or-miss
+                           projection-cache commit-key
+                           (fn [_] (delay (content-projection source))))))]
+        @(cache/lookup-or-miss projection-cache commit-key (fn [_] cell)))
 
       ;; A speculative value (a report's db-after, a `:db.fn/call` argument,
       ;; a `with` result) carries Datahike's revision context derived from its

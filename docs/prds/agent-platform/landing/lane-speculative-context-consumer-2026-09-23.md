@@ -173,3 +173,21 @@ both. `publication-validation-test/changed-call-facts-still-refuse-an-invalid-ar
 A first run on the old snapshot (`tmp/scc-src`, before `2f0aab203`) threw NPE at the call
 site: `requiring-resolve` of the absent `report-snapshot` returned nil — the schema resource
 rule's analogue for Vars: this hunk needs call_preparation.clj at or after `2f0aab203`.
+
+## Commit 3: a revision hit stores its commit key (24ad Seon half)
+
+With Datahike's query cache keyed by `[store-id commit-id]` (fork `684d3290`, gitlink
+`2f0c63d9a`), `carried-projection`'s committed branch now stores the revision-tier cell under
+`[::commit id]` too, so a new branch at a commit first read through a revision hit reads the
+held projection. Both key kinds share the durable bound (24).
+
+Regression `a-new-branch-at-an-equal-commit-reads-the-held-projection` (projection_writer_test):
+an unrelated commit is read (revision hit), a fork is acquired at it, and the fork's
+acquisition and first read compute no declaration content key. Parent (`67438cdf4`'s db.clj
+by `load-file`) run `f55bcd127e1a`: red at :219 `(not (zero? 1))`; mine run `cbc3e75ef0a0`
+(adopted, armed) and `9fb137dc2895`: 58/58 green, 8 members.
+
+Hot path (alternating loads): committed revision hit 12.7 / 12.3 µs parent, 13.1 / 11.8 µs
+mine (n=20,000); fork acquisition at the head 53-75 ms parent, 54-83 ms mine (n=3 each): no
+change beyond noise. Adoption `init --dev --changed` db.clj + test: 57.7 s (**defect >10 s**,
+`full-source-refresh!` 36.0 s, same adoption class as above).
