@@ -53,3 +53,11 @@ lane's dirty file refuses it:
 Each refusal is also recorded as a `:panic` core fault (signature `7cda6781…`,
 `seon.cluster.boot/request!`), although it is a declared adoption refusal, not a
 core fault.
+
+## Sighting (lane cut-l1, 2026-09-23, pid 5070)
+
+The same class, for a deletion lane that touched none of the refused files. `bin/seon init --dev
+default --changed` over 13 src and 4 test paths refused with "Source changed during development
+adoption" in **10.84 s** and later in 1.57 s. The offense named other lanes' dirty files:
+`src/seon/fault.clj`, `src/seon/db.clj`, `src/seon/instrument.clj`,
+`test/seon/cluster/reload_per_declaration_test.clj` and `test/seon/cluster/def_reload_test.clj`.
