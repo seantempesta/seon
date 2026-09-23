@@ -141,7 +141,7 @@ beside it.
 
 ### N1. The fork error hook, terminal protocol, bounded control admission, and `:xform` refused
 
-**Fact first: there is no Seon fork of core.async.** `.gitmodules:17-19` points at
+**Ruled 2026-09-23 (owner: "I don't think we should be forking core.async"): no core.async fork.** The stop/join half of N1b/N2 is Flow's own `:io-exec` seam: each graph gets its own `ExecutorService`, stop is `flow/stop` → `.shutdown` → `.awaitTermination` under one deadline, `isTerminated` answers restart ([research](../../../research/agent-platform/flow-stop-join-idiomatic-2026-09-23.md), `04e00fc23`). The error-hook half of N1a is redesigned against that same seam before any implementation; the fork text below is superseded wherever it asks for a core.async change. **Superseded fact: there is no Seon fork of core.async.** `.gitmodules:17-19` points at
 `https://github.com/clojure/core.async.git`; Datahike is already the personal fork
 (`git@github.com:seantempesta/datahike.git`). Step one is a fork under the same account,
 the gitlink repointed, pushed without asking (owner rule: personal forks push when a fix
