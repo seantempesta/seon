@@ -222,3 +222,22 @@ Tests on scratch `root` after adoption + restart: run `ebc9ad6898f3` (7 instrume
 | Hook adoption of 9 files | 14,026 | `development-source-refresh!` 13,170 ms; DEFECT |
 | Test runs | 16,638–27,825 | selection-admission + acquisition per request |
 | Hung test runs after adoption | 150,090 / 162,320 | acquisition refusal recording in the writer; DEFECT (M9) |
+
+## Second follow-ups
+
+- `7b66c924e` blob_publication_test roots via the error-occurrence blob row; adds the
+  unreferenced-blob-until-sweep scenario. Not observed green: the test is red at its
+  first unchanged scenario on the parent too (`:orphan-blob-batch-fixed` latch not
+  seen in 20 s; 148,396 ms parent / 157,726 ms converted, dominated by a from-zero
+  publication of its fixture root — DEFECT >10 s).
+- New defect found (not my file): `seon.cluster.registry/collect!` on a store holding
+  error-occurrence blobs refuses — `referenced-blobs` returns entity ids
+  (`refused return value at [41112] … got an integer 41112`, `registry.clj:466`):
+  `blob-digest-attributes` counts the ref attribute `:seon.error.occurrence/data-blob`
+  as a digest. So no explicit sweep runs on such a store; the MCP blob-only ruling's
+  "swept digest refuses as collected" is unreachable until the registry owner fixes it.
+- `seon.dev.mcp.artifact.edn` NOT retired: `test/seon/sci/branch_execution_test.clj:156`
+  (M9) still writes it.
+- `59d8cc6a6` #63: comment-only adoption 5,043 ms, 0 reloaded; unchanged adoption
+  1,634 ms (publication of zero files; `full-source-refresh!` digest walk).
+- 24z (page-cache signal from post-eval evidence) not started.
