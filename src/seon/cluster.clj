@@ -2539,8 +2539,11 @@
                                             (into [] (comp (filter #(= :seon.fn/sym (first %)))
                                                            (map second))
                                                   arming-identities))})]
+           ;; Refuse only when something was to be armed: a publication that
+           ;; changes no definition (a comment, a submodule pin) arms nothing.
            (when (or (:seon.instrument/registration-observation result)
                      (and (= :panic (:seon.config/on-core-error effective))
+                          (seq arming-identities)
                           (not (pos? (or (:seon.instrument/instrumented result) 0)))))
              (refused! "Development JVM instrumentation did not restore contracts."
                        result)))))
