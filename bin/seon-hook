@@ -531,6 +531,97 @@
     (str "schema admission failed: "
          (:seon.hook.analysis/reason analysis))))
 
+;;; ---------------------------------------------------------------------------
+;;; Contract compilation (the from-zero publication path, per changed file)
+;;; ---------------------------------------------------------------------------
+
+;; Owner: `seon.contracts-compile-test/check`. A `:malli/schema` a warm JVM
+;; accepts can refuse a fresh store's first publication (an anonymous
+;; `[:fn #(...)]`, a bare `:vector`); the check reads the changed file's
+;; contracts statically and compiles each against the checkout's packaged
+;; projection in the live root JVM, so the edit is refused at write time
+;; instead of by a minutes-long scratch boot.
+
+(def ^:private contract-checker-path
+  "test/seon/contracts_compile_test.clj")
+
+(defn- contract-source-path?
+  "True for a JVM source file under the checkout's src/ or test/."
+  [file-path]
+  (when-let [absolute (absolute-file-path file-path)]
+    (let [lower (str/lower-case absolute)]
+      (and (or (str/ends-with? lower ".clj") (str/ends-with? lower ".cljc"))
+           (some #(str/starts-with? absolute (str (root-file %) java.io.File/separator))
+                 ["src" "test"])))))
+
+(defn- run-contract-compile
+  "Compile every contract the files declare, in the live root JVM.
+
+  The checker is loaded from this checkout on every call: the live JVM may run
+  a published snapshot whose classpath has no copy of it, or an older one.
+  No live root is `:unavailable`, never a pass."
+  [{:seon.hook/keys [file-paths prospective-content]}]
+  (if-not (get-in (load-config) [:contract-compile :enabled] true)
+    {:seon.hook.analysis/status :skipped
+     :seon.hook.analysis/findings []
+     :seon.hook.analysis/reason "contract compile check disabled by hook config"}
+    (try
+      (let [absolute-paths (mapv absolute-file-path file-paths)
+            request (if prospective-content
+                      {:seon.contracts-compile-test/root repo-root
+                       :seon.contracts-compile-test/sources
+                       {(first absolute-paths) prospective-content}}
+                      {:seon.contracts-compile-test/root repo-root
+                       :seon.contracts-compile-test/paths absolute-paths})
+            form (pr-str
+                  `(do (load-file ~(str (root-file contract-checker-path)))
+                       (mapv (fn [finding#]
+                               (-> (select-keys finding# [:filename :row :col :level
+                                                          :type :message])
+                                   (assoc :seon.hook/chain
+                                          (pr-str (:seon.contracts-compile-test/chain
+                                                   finding#)))))
+                             ((resolve 'seon.contracts-compile-test/check)
+                              (assoc '~request
+                                     :seon.contracts-compile-test/candidate
+                                     (seon.db/carried-projection
+                                      (seon.db/db
+                                       (seon.cluster.boot/connection
+                                        ~(get-in (load-config) [:current-source :cluster] "default")))))))))
+            live (operator/live-root-value!
+                  (str (root-file (get-in (load-config) [:current-source :root] ".")))
+                  form)
+            findings (:seon.operator/value live)]
+        (cond
+          (not (:seon.operator/live-process? live))
+          {:seon.hook.analysis/status :unavailable
+           :seon.hook.analysis/reason
+           "no live root JVM answers, so no contract was compiled"}
+
+          (vector? findings)
+          {:seon.hook.analysis/status :available
+           :seon.hook.analysis/findings findings}
+
+          :else
+          {:seon.hook.analysis/status :unavailable
+           :seon.hook.analysis/reason
+           (str "the contract check returned no findings vector: "
+                (pr-str findings))}))
+      (catch Exception error
+        (let [{:keys [message chain]} (failure-cause error)]
+          {:seon.hook.analysis/status :unavailable
+           :seon.hook.analysis/reason message
+           :seon.hook.analysis/chain chain})))))
+
+(defn- contract-compile-refusal
+  "The refusal text for contract findings, or nil when every contract compiles."
+  [heading findings]
+  (when (seq findings)
+    (str heading
+         " (a fresh store refuses these at its first publication; use a "
+         "declared schema or a named, registered predicate):\n"
+         (format-clj-kondo-findings findings))))
+
 (declare clip-feedback load-direct-check!)
 
 (defn- reconstruct-exact-edit
@@ -852,6 +943,60 @@
                       (format-clj-kondo-findings errors))}
 
                 :else nil))))))))
+
+(defn- validate-contract-edit
+  "Block a reconstructed Clojure edit whose contracts do not compile."
+  [event]
+  (let [file-path (get-file-path event)]
+    (when (and (= (:hook_event_name event) "PreToolUse")
+               (contract-source-path? file-path))
+      (let [reconstruction (reconstruct-file-content event)]
+        ;; An unreconstructable edit is already blocked by the clj-kondo
+        ;; validator, which names the reconstruction failure.
+        (when (= :available (:seon.hook.reconstruction/status reconstruction))
+          (let [started (System/nanoTime)
+                analysis (run-contract-compile
+                          {:seon.hook/file-paths [file-path]
+                           :seon.hook/prospective-content
+                           (:seon.hook.reconstruction/source reconstruction)})
+                errors (filterv #(= :error (:level %))
+                                (:seon.hook.analysis/findings analysis))]
+            (log! "CONTRACT_COMPILE" "pre" file-path
+                  (name (:seon.hook.analysis/status analysis))
+                  (str "errors=" (count errors))
+                  (str "ms=" (quot (- (System/nanoTime) started) 1000000))
+                  (str (:seon.hook.analysis/reason analysis)))
+            (when (seq errors)
+              {:decision "block"
+               :reason (contract-compile-refusal
+                        "BLOCKED: this edit declares contracts that do not compile"
+                        errors)})))))))
+
+(defn- contract-compile-feedback
+  "Post-edit contract findings for the landed files, and unavailability named."
+  [event]
+  (let [paths (->> (event-file-paths event)
+                   (filter contract-source-path?)
+                   (filter #(some-> % absolute-file-path io/file .isFile))
+                   vec)]
+    (when (and (= (:hook_event_name event) "PostToolUse") (seq paths))
+      (let [started (System/nanoTime)
+            analysis (run-contract-compile {:seon.hook/file-paths paths})
+            errors (filterv #(= :error (:level %))
+                            (:seon.hook.analysis/findings analysis))]
+        (log! "CONTRACT_COMPILE" "post" (str/join "," paths)
+              (name (:seon.hook.analysis/status analysis))
+              (str "errors=" (count errors))
+              (str "ms=" (quot (- (System/nanoTime) started) 1000000))
+              (str (:seon.hook.analysis/reason analysis)))
+        {:seon.hook.contract/refusal
+         (contract-compile-refusal
+          "REFUSED: the landed file declares contracts that do not compile"
+          errors)
+         :seon.hook.contract/feedback
+         (when (= :unavailable (:seon.hook.analysis/status analysis))
+           (str "ADVISORY — contract compile check unavailable: "
+                (:seon.hook.analysis/reason analysis)))}))))
 
 (defn- findings-feedback
   "Format blocking findings first and cap the advisory finding tail."
@@ -1818,7 +1963,10 @@
                   lint-blocked
                   (when (get-in config [:lint :enabled] true)
                     (some validate-clojure-edit path-events))
-                  blocked (or schema-blocked lint-blocked)]
+                  contract-blocked
+                  (when-not (or schema-blocked lint-blocked)
+                    (some validate-contract-edit path-events))
+                  blocked (or schema-blocked lint-blocked contract-blocked)]
               (if blocked
                 (do
                   (log! "CLOJURE_BLOCK" (:reason blocked))
@@ -1833,14 +1981,19 @@
                                 (docstring-feedback path-event config)])
                              path-events)
                   lint (clj-kondo-feedback event config)
+                  contract (when-not (:seon.hook.lint/refusal lint)
+                             (contract-compile-feedback event))
                   feedback
                   (into [(:seon.hook.lint/feedback lint)
+                         (:seon.hook.contract/feedback contract)
                          (:seon.hook.schema-admission/feedback
                           schema-admission)]
                         feedback)
                   _ (schedule-gemini-review! event config)
                   derived (derived-write-feedback event config)
-                  refusal (or (:seon.hook.lint/refusal lint) (:seon.hook/refusal derived))
+                  refusal (or (:seon.hook.lint/refusal lint)
+                              (:seon.hook.contract/refusal contract)
+                              (:seon.hook/refusal derived))
                   feedback
                   (cond-> (vec feedback)
                     (and (str/blank? refusal)
