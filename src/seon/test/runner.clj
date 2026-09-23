@@ -1069,12 +1069,20 @@
    :seon.test.run/basis-t (db/basis-t database)
    :seon.test.run/branch (get-in database [:config :branch])})))
 
+(def ^:private report-position-attributes
+  ;; Where a claim was reported: the facts `failure-identity` leaves out of
+  ;; the captured signature, which covers the claim's content (type, message,
+  ;; expected, actual, event signature).
+  [:seon.test.failure/line :seon.test.failure/reported-file :seon.test.failure/contexts])
+
 (defn report-row
   "The stored report for one captured failure of `test-symbol`.
 
-  Its identity is every fact it stores: the same claim reported from a moved
-  line is another report, never a conflict with the earlier one, and an equal
-  report is the same entity."
+  Its identity is the captured signature and the position it was reported
+  at: the same claim reported from a moved line is another report, never a
+  conflict with the earlier one, while other content under an unchanged
+  signature at the same position is the same identity with different facts,
+  which the recorder refuses as a report conflict."
   {:malli/schema [:=> [:cat [:vector :qualified-keyword] :seon.test/sym :map]
                   [:map [:seon.test.report/id :string]
                    [:seon.test.report/symbol :seon.test/sym]]]}
@@ -1082,7 +1090,9 @@
   (let [report (into (sorted-map)
                      (assoc (select-keys failure report-attributes)
                             :seon.test.report/symbol test-symbol))]
-    (assoc report :seon.test.report/id (id/id [test-symbol report]))))
+    (assoc report :seon.test.report/id
+           (id/id [test-symbol (:seon.test/failure-identity report)
+                   (into (sorted-map) (select-keys report report-position-attributes))]))))
 
 (defn- execution-refusal! [operation run-id kind expected observed]
   (let [failure (assoc {:seon.error/at (java.util.Date.)

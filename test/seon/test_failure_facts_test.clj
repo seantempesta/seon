@@ -242,7 +242,8 @@
 
 (deftest a-claim-reported-at-a-moved-line-records-another-report
   ;; A report's id once named only its claim, so an edit that moved a failing
-  ;; assertion gave the new report the stored report's id with other facts:
+  ;; assertion gave the new report the stored report's id with other facts
+  ;; (docs/seon/issues/moving-a-failing-assertion-conflicts-with-its-immutable-report.md):
   ;; the recorder refused the whole request with :seon.test/report-conflict
   ;; and left every later member pending (run df397c67dcc7, 2026-09-23).
   (let [attributes [:seon.test/failure-identity :seon.test.failure/type
@@ -261,6 +262,10 @@
     (is (= at-12 (runner/report-row attributes s (failure 12)))
         "an equal report is the same entity")
     (is (= 12 (:seon.test.failure/line at-12)))
+    (let [forged (runner/report-row attributes s (assoc (failure 12) :seon.test.failure/type :error))]
+      (is (= (:seon.test.report/id at-12) (:seon.test.report/id forged))
+          "other content under an unchanged signature at one position is that report's identity")
+      (is (not= at-12 forged) "so the recorder's comparison refuses it as a report conflict"))
     (is (nil? (find at-12 :seon.test.failure/file))
         "only declared report attributes are stored")))
 
