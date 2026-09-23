@@ -1,6 +1,6 @@
 ---
 type: landing
-status: in-progress
+status: awaiting-orchestrator-proof
 created: 2026-09-23
 ---
 
@@ -22,8 +22,8 @@ E0 is split at existing owner boundaries because complete regression changes exc
 
 | Slice | Sites | Src + / − / net | Test + / − / net | Kondo | Packaged contracts | Proving namespaces |
 |---|---:|---|---|---|---|---|
-| E0a | 4 | 20 / 44 / −24 | 60 / 31 / +29 | 0 errors, 74 existing warnings; 150 ms | `[]`, 110.274 ms | `seon.error.refusal-test`, `seon.error-test`, `seon.schema-test`, `seon.refusal-grammar-test` |
-| E0b | 4 | 12 / 20 / −8 | 19 / 0 / +19 | 0 errors/warnings; 23 ms | `[]`, 27.582 ms | `seon.blob-error-test` (also retain `seon.blob-test` corruption coverage) |
+| E0a `bab838388` | 4 | 20 / 44 / −24 | 60 / 31 / +29 | 0 errors, 74 existing warnings; 150 ms | `[]`, 110.274 ms | `seon.error.refusal-test`, `seon.error-test`, `seon.schema-test`, `seon.refusal-grammar-test` |
+| E0b `2efb85875` | 4 | 12 / 20 / −8 | 19 / 0 / +19 | 0 errors/warnings; 23 ms | `[]`, 27.582 ms | `seon.blob-error-test` (also retain `seon.blob-test` corruption coverage) |
 
 E0a hand work: exact reviewed additive arity; extend both-entry whole-value/cause/domain tests, arm both entries under one projection in the producing-contract case, assert argument order/identity and original ex-info cause, and exercise actual `prepare` with overriding source evidence and its exact declared schema. The preview removed only `refusal-prose`, its obsolete test block, and converted its two renderer fixtures. Retained error-owner O/X literals preserve evaluation order and unsupported contexts. Existing cause-policy repairs are outside this mechanical cut. The +5 net E0a lines are regression evidence; source shrinks 24 lines. Later caller cuts repay this test growth before integration.
 
@@ -39,15 +39,30 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 
 | Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
 |---|---:|---|---|---:|---|---|
-| E1: `src/my/background.clj` | 1 | 3 / 5 / -2; 0 | 0 / 11 | 21.237083 | `my.background-test` | None |
-| E2: `src/my/program.clj` | 4 | 14 / 21 / -7; 0 | 1 / 27 | 27.987833 | `my.program-test` | X literal retained; existing read-result catch retains class/message/data but omits the cause chain (outside this cut) |
-| E3: `src/seon/agent.clj` | 1 | 4 / 5 / -1; 0 | 1 / 17 | 25.1875 | `seon.cluster.agent-identity-test` | Two O literals retained to preserve header evaluation order |
-| E4: `src/seon/ai.clj` | 14 | 41 / 70 / -29; 0 | 0 / 42 | 27.304333 | `seon.ai-test` | Three C literals retained with attached comments; first also has interleaved header order. Existing extra-body catch keeps only its declared read-message |
-| E5: `src/seon/await.clj` | 1 | 3 / 5 / -2; 0 | 0 / 13 | 22.220208 | `seon.await-test` | None; existing merge order retained |
-| E6: `src/seon/background.clj` | 2 | 6 / 10 / -4; 0 | 0 / 12 | 24.328125 | `seon.background-test` | None |
-| E7: `src/seon/bootstrap.clj` | 4 | 12 / 20 / -8; 0 | 0 / 28 | 23.072166 | `seon.bootstrap-test` | One X literal retained; outer ex-info unchanged |
-| E8: `src/seon/call_preparation.clj` | 5 | 15 / 25 / -10; 0 | 3 / 40 | 24.954542 | `seon.call-preparation-test` | One X literal retained; supply catch still carries its original Throwable as offending evidence |
-| E9: `src/seon/cluster/agent.clj` | 2 | 8 / 11 / -3; 0 | 18 / 42 | 27.579083 | `seon.cluster.agent-test` | None |
-| E10: `src/seon/cluster/process.clj` | 4 | 12 / 20 / -8; 0 | 2 / 16 | 21.845958 | `seon.cluster.boot-test` | None; platform loadability and affected integration remain orchestrator proof |
-| E11: `src/seon/cluster/prompt.clj` | 1 | 5 / 6 / -1; 0 | 0 / 19 | 23.590542 | `seon.cluster.prompt-test` | One O literal retained to preserve header evaluation order |
-| E12: `src/seon/cluster/source.clj` | 4 | 14 / 19 / -5; 0 | 7 / 32 | 24.780792 | `seon.cluster.source-test` | One X literal retained; input-inventory ex-info preserves original cause. Publication clock and parent/child probe deferred to orchestrator |
+| E1 `7582fff03`: `src/my/background.clj` | 1 | 3 / 5 / -2; 0 | 0 / 11 | 21.237083 | `my.background-test` | None |
+| E2 `1f6295e60`: `src/my/program.clj` | 4 | 14 / 21 / -7; 0 | 1 / 27 | 27.987833 | `my.program-test` | X literal retained; existing read-result catch retains class/message/data but omits the cause chain (outside this cut) |
+| E3 `9848f98f7`: `src/seon/agent.clj` | 1 | 4 / 5 / -1; 0 | 1 / 17 | 25.1875 | `seon.cluster.agent-identity-test` | Two O literals retained to preserve header evaluation order |
+| E4 `c47da5ccc`: `src/seon/ai.clj` | 14 | 41 / 70 / -29; 0 | 0 / 42 | 27.304333 | `seon.ai-test` | Three C literals retained with attached comments; first also has interleaved header order. Existing extra-body catch keeps only its declared read-message |
+| E5 `6314ef453`: `src/seon/await.clj` | 1 | 3 / 5 / -2; 0 | 0 / 13 | 22.220208 | `seon.await-test` | None; existing merge order retained |
+| E6 `a59ebd7e3`: `src/seon/background.clj` | 2 | 6 / 10 / -4; 0 | 0 / 12 | 24.328125 | `seon.background-test` | None |
+| E7 `1bb9a1e71`: `src/seon/bootstrap.clj` | 4 | 12 / 20 / -8; 0 | 0 / 28 | 23.072166 | `seon.bootstrap-test` | One X literal retained; outer ex-info unchanged |
+| E8 `4a5cea540`: `src/seon/call_preparation.clj` | 5 | 15 / 25 / -10; 0 | 3 / 40 | 24.954542 | `seon.call-preparation-test` | One X literal retained; supply catch still carries its original Throwable as offending evidence |
+| E9 `8acaaefeb`: `src/seon/cluster/agent.clj` | 2 | 8 / 11 / -3; 0 | 18 / 42 | 27.579083 | `seon.cluster.agent-test` | None |
+| E10 `56513e23a`: `src/seon/cluster/process.clj` | 4 | 12 / 20 / -8; 0 | 2 / 16 | 21.845958 | `seon.cluster.boot-test` | None; platform loadability and affected integration remain orchestrator proof |
+| E11 `d942eeb27`: `src/seon/cluster/prompt.clj` | 1 | 5 / 6 / -1; 0 | 0 / 19 | 23.590542 | `seon.cluster.prompt-test` | One O literal retained to preserve header evaluation order |
+| E12 `d49b574be`: `src/seon/cluster/source.clj` | 4 | 14 / 19 / -5; 0 | 7 / 32 | 24.780792 | `seon.cluster.source-test` | One X literal retained; input-inventory ex-info preserves original cause. Publication clock and parent/child probe deferred to orchestrator |
+
+
+## Stop and handoff
+
+Stopped immediately after E12: fourteen source slices, 51 sites; cumulative commit additions 302 (248 src/test and 54 landing-note lines), removals 313. Source +169/−281 = **−112**; tests +79/−31 = **+48**; src/test **−64**. This documentation receipt is separate from the stopped production cut. E13 is `src/seon/cluster/status.clj`; no E13 or later source was edited. All owned paths were committed and released; unrelated dirty paths were preserved.
+
+The source/proof paths are the two E0 groups in the manifest, plus `test/seon/blob_error_test.clj`, and each path in the table above. No manual residue conversion widened the admitted A set. Hand work was confined to E0's arity and regressions. Existing tests are proving requests, not positive reaching evidence; complete-value coverage of every converted branch and profiling both constructor entries are still required during integration. The publication-owner slice needs its committed measurement-script clock row and identical parent/child probe at that boundary. No RESET NEEDED was established.
+
+Timings: all recorded lane commands and REPL checks were sub-second. E1–E12 maximum measured command was E4 census, **220.630 ms**, proportional only to that file's parsed bytes; maximum constructor-file packaged check was E0a **110.274 ms**. Per-command timings and raw contract envelopes, including exact forms, are retained in `tmp/error-constructor/`. The first status request briefly observed no cluster during external process replacement; subsequent `bin/seon status` and the private REPL session observed pid 42146 alive. No runtime restart was performed by this lane.
+
+Existing swallowing/error-policy residue found in touched files is retained under the manifest's prohibition on widening into cause-policy repair: `my.program/read-result` keeps message/class/data but no chain; `seon.ai/extra-body` and `stream-fold` reduce caught failures to message evidence, the stream sink catch returns nil (`src/seon/ai.clj:868`), and `seon.cluster.process/process-start-instant` catches Throwable and returns nil (`src/seon/cluster/process.clj:85`). The converted source-inventory ex-info still carries its original Throwable cause. No new catch was introduced.
+
+The tool-triggered repository Markdown audit reported 46 findings, with surfaced examples citing obsolete dependency pins in other landing notes; its full output was elided. That repository-wide audit is not a pass for this cut. The scoped citation check for this landing is recorded separately below.
+
+Scoped landing citation check: `bb script/seon/dev/citations.clj docs/prds/agent-platform/landing/lane-sol-error-constructor-2026-09-23.md` — **1 document, 0 failures, 74 ms**.
