@@ -1,11 +1,13 @@
 (ns seon.owned-value-test
   (:require [malli.core] [clojure.test :refer [deftest is]]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [seon.db :as db]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as evaluation]
+            [seon.test.accretion :as accretion]
             [seon.test-support :as support]))
 
 (defn- with-owned-tree [f]
@@ -27,6 +29,14 @@
      {::support/extra-schema
       (schema.datahike/malli->datahike-schema-in projection [::id ::key ::value ::extra ::children])}
      (fn [connection]
+       ;; The writer derives its projection from the value's declaration rows
+       ;; (9b8c5b405), so the test's own declarations are rows, not a handed
+       ;; projection.
+       (support/transacted!
+        connection
+        (mapv (partial accretion/schema-row forms)
+              (schema/canonical-schema-rows
+               projection (into {} (filter #(= (namespace ::id) (namespace (key %)))) forms))))
        (db/carry-connection-projection-state!
         connection (evaluation/projection-state @connection projection))
        (f connection)))))
@@ -145,3 +155,38 @@
          (@#'seon.db/report-identity-attributes report)
          changed)
         (is (contains? @changed :seon.fn/sym) (pr-str @changed))))))
+
+(deftest new-entities-find-their-owners-without-an-index-seek
+  ;; An entity id beyond :db-before's max-eid was referenced by nothing
+  ;; before, so the owning walk reads its owners from the report's own
+  ;; datoms. Work stays proportional to the transaction, not to the store.
+  (with-owned-tree
+    (fn [connection]
+      (let [search dbi/search
+            datoms dbi/datoms
+            seeks (atom 0)
+            components #{::children}]
+        ;; Either reverse lookup form: a search pattern [nil attribute entity]
+        ;; or an AVET read [attribute entity].
+        (with-redefs [dbi/search
+                      (fn [database pattern]
+                        (when (and (nil? (first pattern)) (components (second pattern)))
+                          (swap! seeks inc))
+                        (search database pattern))
+                      dbi/datoms
+                      (fn [database index components-arg]
+                        (when (and (= :avet index) (components (first components-arg)) (second components-arg))
+                          (swap! seeks inc))
+                        (datoms database index components-arg))]
+          (support/transacted! connection
+                               (mapv #(hash-map ::id (str "fresh" %) ::children [{::value %}]) (range 50))))
+        (is (zero? @seeks) "no reverse seek for owners of entities new in this report")
+        (is (= 50 (count (filter #(.startsWith ^String (:v %) "fresh")
+                                 (db/datoms (db/db connection) :avet ::id)))))
+        (is (.contains ^String (:seon.error/message
+                                (refuses-without-change connection
+                                                        [{:db/id "child" ::value 1}
+                                                         {::id "fresh-a" ::children ["child"]}
+                                                         {::id "fresh-b" ::children ["child"]}]))
+                       "multiple-component-owners")
+            "new entities still refuse a shared child")))))

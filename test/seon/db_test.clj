@@ -2286,3 +2286,24 @@
          (is (false? (provenance? database {:tx-meta {:seon.db/user user}}))
              (str "Datahike's declared unparseable entity id answers no agent: " (pr-str user))))
        (is (true? (provenance? database {:tx-meta {:seon.db/user [:seon.agent/id "any"]}})))))))
+
+(defn- declare-entity!
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword] :map]}
+  [connection schema-key]
+  (test-support/transacted!
+   connection
+   [[:db.fn/call #'turn/row-tx {}
+     {:seon.schema/key schema-key :seon.schema/form (pr-str [:map])}]]))
+
+(deftest a-declaration-write-parses-only-the-declarations-it-wrote
+  (test-support/with-database
+   (fn [connection]
+     (let [render-check @#'seon.db/write-render-target-error
+           rendered (atom [])]
+       (with-redefs [seon.db/write-render-target-error
+                     (fn ([database] (swap! rendered conj :all) (render-check database))
+                         ([database declarations] (swap! rendered conj (count declarations))
+                          (render-check database declarations)))]
+         (declare-entity! connection ::rendered))
+       (is (= [1] @rendered) "the render gate reads the one written declaration")))))
+

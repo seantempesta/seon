@@ -3330,16 +3330,59 @@
                                                   #(charge! phase %))]
                     (vswap! rows assoc cache-key value)
                     value))))
+        ;; The component attributes that can reference anything in each
+        ;; phase: installed there and holding at least one datom, paired with
+        ;; the attribute Datahike's own index search takes (its reverse lookup
+        ;; in `retract-entity`, `datahike/db/transaction.cljc:998-1011`).
+        ;; Refs are always AVET-indexed (`datahike/db/utils.cljc:312`), so
+        ;; each owner question is one seek per such attribute, never a scan.
+        new-after (:max-eid before)
+        new-owner-edges (reduce (fn [edges datom]
+                                  (if (and (:added datom) (components (:a datom))
+                                           (> (long (:v datom)) (long new-after)))
+                                    (update edges (:v datom) (fnil conj #{}) [(:e datom) (:a datom)])
+                                    edges))
+                                {} (:tx-data report))
+        owner-attributes
+        (memoize
+         (fn [database]
+           (into []
+                 (keep (fn [attribute]
+                         (when (and (get (dbi/-schema database) attribute)
+                                    (first (d/datoms database :aevt attribute)))
+                           [attribute (if (db.utils/attr-has-ref? database attribute)
+                                        (dbi/-ref-for database attribute)
+                                        attribute)])))
+                 components)))
         owners-of (fn [phase database entity-id]
                   (let [cache-key [phase entity-id]]
                     (charge! phase entity-id)
                     (if-let [entry (find @owners cache-key)]
                       (val entry)
-                      (let [value (into [] (mapcat #(map (fn [datom]
-                                                         (charge! phase (:e datom))
-                                                         [(:e datom) (:a datom)])
-                                                        (d/datoms database :avet % entity-id)))
-                                        (filter #(get (dbi/-schema database) %) components))]
+                      (let [value
+                            (if (> (long entity-id) (long new-after))
+                              ;; An entity id beyond `:db-before`'s max-eid did
+                              ;; not exist before, so nothing referenced it
+                              ;; there, and after only this report's own
+                              ;; component datoms can: no index seek.
+                              (if (= phase :before)
+                                []
+                                (let [order (zipmap (map first (owner-attributes database)) (range))]
+                                  ;; The order an index seek would give:
+                                  ;; attribute order, then owner id.
+                                  (into []
+                                        (keep (fn [[owner attribute]]
+                                                (when (first (d/datoms database :eavt owner attribute entity-id))
+                                                  (charge! phase owner)
+                                                  [owner attribute])))
+                                        (sort-by (fn [[owner attribute]] [(get order attribute Long/MAX_VALUE) owner])
+                                                 (get new-owner-edges entity-id)))))
+                              (into [] (mapcat (fn [[attribute searched]]
+                                                 (map (fn [datom]
+                                                        (charge! phase (:e datom))
+                                                        [(:e datom) attribute])
+                                                      (dbi/search database [nil searched entity-id]))))
+                                    (owner-attributes database)))]
                         (vswap! owners assoc cache-key value)
                         value))))
         owning-ancestors (fn [phase database seeds]
@@ -3550,8 +3593,20 @@
   (arity-mismatches-with q database (carried-projection database)))
 
 (defn- write-render-target-error
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.error/base]]}
-  [database]
+  "Render declarations naming functions absent from `database`.
+  With `declarations`, only those `[key form]` rows are read; without, every
+  schema row is."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value] [:or :nil :seon.error/base]]
+                  [:=> [:cat :seon.db/database-value [:sequential [:tuple [:or :keyword :symbol :string] :string]]]
+                   [:or :nil :seon.error/base]]]}
+  ([database]
+   (write-render-target-error
+    database
+    (vec (d/q '[:find ?key ?form :where
+                [?schema :seon.schema/key ?key]
+                [?schema :seon.schema/form ?form]] database))))
+  ([database declarations]
   (let [missing
         (into []
               (mapcat
@@ -3565,10 +3620,7 @@
                                 :seon.render/property property
                                 :seon.render/function renderer})))
                          [:seon.render/ai :seon.render/html]))))
-              (sort-by first
-                       (d/q '[:find ?key ?form :where
-                              [?schema :seon.schema/key ?key]
-                              [?schema :seon.schema/form ?form]] database)))]
+              (sort-by first declarations))]
     (when (seq missing)
       (diagnostic
        {::transaction-refused true
@@ -3578,7 +3630,7 @@
         :seon.error/operation 'seon.db/transact!
         :seon.error/member :seon.schema/form
         :seon.error/expected :seon.fn/sym
-        :seon.error/offending missing}))))
+        :seon.error/offending missing})))))
 
 (defn- removed-definition-error
   "Check surviving names against the identities removed by an admitted change.
@@ -3756,9 +3808,26 @@
      (write-deletion-error before database affected identity-attrs)
      (write-owned-values-error projection report attribute-plans identity-attrs
                                changed-identity-attributes)
-     (when (some (comp #{:seon.schema/form :seon.schema/key :seon.fn/sym} :a)
-                 (:tx-data report))
-       (write-render-target-error database))
+     ;; A render target breaks only by a declaration this report wrote or a
+     ;; function it removed. Written rows are read alone; a removed function
+     ;; can be named by any row, so that report reads them all.
+     (let [tx-data (:tx-data report)]
+       (if (some #(and (= :seon.fn/sym (:a %)) (not (:added %))
+                       (not (db.utils/entid database [:seon.fn/sym (:v %)])))
+                 tx-data)
+         (write-render-target-error database)
+         (when-let [written (seq (into #{}
+                                       (comp (filter #(and (:added %) (#{:seon.schema/form :seon.schema/key} (:a %))))
+                                             (map :e))
+                                       tx-data))]
+           (write-render-target-error
+            database
+            (into []
+                  (keep (fn [entity]
+                          (let [schema-key (:v (first (d/datoms database :eavt entity :seon.schema/key)))
+                                form (:v (first (d/datoms database :eavt entity :seon.schema/form)))]
+                            (when (and schema-key form) [schema-key form]))))
+                  written)))))
      ;; Arity admission depends on declarations, their owned children, shared
      ;; shapes and supplied defaults. The owning-value walk already found
      ;; every changed root on both sides, including swept/deleted children.
@@ -3829,20 +3898,30 @@
                                            (when-let [creator (first (sort-by :tx (filter :added
                                                                             (d/datoms history :eavt entity authority))))]
                                              [entity (:v creator)]))) entities))]
-           (mapv
-            (fn [entity]
-              (let [values (into #{} (map :v) (d/datoms database :eavt entity attribute))]
-                [[attribute entity]
-                 {:seon.db/entity (d/pull database identities entity)
-                  :seon.db/values values
-                  :seon.db/value-identities
-                  (into {} (map (fn [value] [value (d/pull database identities value)])) values)
-                  :seon.db/active? (boolean (activated entity))
-                  :seon.db/assignment (into #{} (map :v) (d/datoms database :eavt entity activation))
-                  :seon.db/creator (get creators entity)
-                  :seon.db/current-creator
-                  (when (and authority (db.utils/entid database authority))
-                    (:v (first (d/datoms database :eavt entity authority))))}]))
+           ;; An entity holding none of the rule's facts on this side has no
+           ;; entry: `retention-check` reads an absent entry exactly as one with
+           ;; no values, assignment, activation or creators, so only entities
+           ;; that carry the rule pay for their identity pulls.
+           (into []
+            (keep
+             (fn [entity]
+               (let [values (into #{} (map :v) (d/datoms database :eavt entity attribute))
+                     assignment (into #{} (map :v) (d/datoms database :eavt entity activation))
+                     active? (boolean (activated entity))
+                     creator (get creators entity)
+                     current-creator
+                     (when (and authority (db.utils/entid database authority))
+                       (:v (first (d/datoms database :eavt entity authority))))]
+                 (when (or (seq values) (seq assignment) active? creator current-creator)
+                   [[attribute entity]
+                    {:seon.db/entity (d/pull database identities entity)
+                     :seon.db/values values
+                     :seon.db/value-identities
+                     (into {} (map (fn [value] [value (d/pull database identities value)])) values)
+                     :seon.db/active? active?
+                     :seon.db/assignment assignment
+                     :seon.db/creator creator
+                     :seon.db/current-creator current-creator}]))))
             entities)))
        (filter #(and (get (dbi/-schema database) (:seon.db/attribute %))
                      (get (dbi/-schema database) (:seon.db/activation %)))
@@ -3867,8 +3946,8 @@
                                   (not= (:seon.db/creator prior)
                                         (:seon.db/current-creator current)))
           changed-assignment? (and (:seon.db/active? prior)
-                                   (not= (:seon.db/assignment prior)
-                                         (:seon.db/assignment current)))]
+                                   (not= (:seon.db/assignment prior #{})
+                                         (:seon.db/assignment current #{})))]
       (when (or (and active? (seq (:seon.db/values prior))
                      (empty? (:seon.db/values current)))
                 (and active? (not authorized?) (or (seq removed) (seq erased) changed-assignment?))
@@ -3898,6 +3977,12 @@
   (let [before (:db-before report)
         after (:db-after report)
         rules (retention-rules projection)
+        rule-attributes (into #{} (mapcat (juxt :seon.db/attribute :seon.db/activation :seon.db/authority)) rules)
+        new-after (:max-eid before)
+        ;; An entity beyond `:db-before`'s max-eid had no facts before; it
+        ;; carries a rule's facts after only through this report's datoms.
+        carrying (into #{} (comp (filter #(rule-attributes (:a %))) (map :e)) (:tx-data report))
+        affected (remove #(and (> (long %) (long new-after)) (not (carrying %))) affected)
         entities (into (set affected)
                        (for [database [before after]
                              {attribute :seon.db/attribute} rules
