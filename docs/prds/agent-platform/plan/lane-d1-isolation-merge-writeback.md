@@ -326,8 +326,17 @@ route it to the context owner. O1d owns this B2 composition and B1 REPL exposure
 no matching check dial: `resources/seon/schemas/seon.config.eval.edn:1` declares the
 deadline and `seon.config.test.edn:1` the auto-check count. O1c adds these four leaves to
 `seon.config.eval.edn`, each `[:enum {:seon.config/dial true} :warn :gate]`, with an
-explicit shipped default `:warn` through `seon.config/default-decisions`
-(`src/seon/config.clj:378-434`):
+explicit shipped default `:gate` through `seon.config/default-decisions`
+(`src/seon/config.clj:378-434`) — owner, 2026-09-23: "okay we can start strict and see how it
+goes. schemas defined first, functions need at least one test written before the function is
+written (we use our test finding code to detect this?)". Test-first is detected by the existing
+affected-tests reach index read in reverse (a test on the branch whose recorded calls include
+the function's symbol — `my.program/tests-reaching`, `seon.fn/gate-sets`), never a new
+detector; this requires the index to record a test's call edge to a not-yet-defined symbol
+(to verify first — same class as the def-body gap, docs/research/agent-platform/def-body-index-gap-2026-09-23.md).
+Merge scope under this default: changed and new functions pass every check; inherited untouched
+gaps are reported in root's branch diff and do not block (orchestrator's reading of "strict";
+owner to confirm whole-program):
 
 | dial | check at the shared definition entrance |
 |---|---|
