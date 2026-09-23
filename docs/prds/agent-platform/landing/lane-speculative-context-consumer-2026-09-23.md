@@ -148,3 +148,28 @@ branch tries `[::commit commit-id]`, which names one value in every connection
 (`equal-declaration-content-shares-one-projection-across-values`, green).
 
 RESET NEEDED: no. Default was never touched.
+
+## Commit 2: the writer's arity gate reads the report's snapshot (#24s hunk)
+
+The hunk from `lane-arity-snapshot-2026-09-23.md`: `arity-verdict` takes the report and calls
+`seon.call-preparation/report-snapshot` (`call_preparation.clj:636`), which reads the committed
+`:db-before`'s memo when the report changed no snapshot read attribute.
+`arity-mismatches-with` keeps `snapshot` (whole value, memoized).
+
+Proof: new scratch source `tmp/scc-src2` (`git archive 2f0c63d9a` + db.clj; datahike fork
+`684d3290`), same root, `start scc` 125.4 s (ready 91.5 s). Parent = `ec1b53b38`'s db.clj by
+`load-file`, alternating (median of 8, ms):
+
+| probe | parent | mine |
+|---|---|---|
+| arity refusal: `my.agent/branch` gains call arity `[seon.cluster.registry/cluster-branch 5]` | 440 / 393 | 139 / 189 |
+| ordinary transact (one message row) | 74 / 87 | 83 / 71 |
+
+Both return one mismatch. Tests (13 members incl. `seon.publication-validation-test` long
+tier): mine run `273874b655c2` 86 pass, 1 error; parent `c99210f09fb2` identical. The error is
+`db-test/arity-components-and-callers-are-checked-in-the-final-state`, the pre-existing
+`docs/seon/issues/fixture-namespace-rows-lack-the-required-definition-digest.md` class, on
+both. `publication-validation-test/changed-call-facts-still-refuse-an-invalid-arity` green.
+A first run on the old snapshot (`tmp/scc-src`, before `2f0aab203`) threw NPE at the call
+site: `requiring-resolve` of the absent `report-snapshot` returned nil — the schema resource
+rule's analogue for Vars: this hunk needs call_preparation.clj at or after `2f0aab203`.

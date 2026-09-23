@@ -60,6 +60,8 @@
   (delay (requiring-resolve 'seon.error/render-html)))
 (defonce ^:private call-preparation-snapshot
   (delay (requiring-resolve 'seon.call-preparation/snapshot)))
+(defonce ^:private call-preparation-report-snapshot
+  (delay (requiring-resolve 'seon.call-preparation/report-snapshot)))
 (defonce ^:private call-preparation-plan-for
   (delay (requiring-resolve 'seon.call-preparation/plan-for)))
 
@@ -3722,13 +3724,18 @@
                  ::bounds bounds}))))))))
 
 (defn- arity-verdict
-  "Refuse or report the candidates whose prepared arities also refuse."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map]
+  "Refuse or report the candidates whose prepared arities also refuse.
+
+  The call-preparation snapshot is the report's (`report-snapshot`): a report
+  that changed none of its read attributes reads its committed `:db-before`'s
+  memo instead of deriving the whole program on the speculative value."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection
+                       :seon.db/transaction-report :map]
                   [:or :seon.fn/arity-mismatch-report :seon.db/error-result]]}
-  [database projection {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
+  [database projection report {candidates ::candidates bounds ::bounds checked ::checked edges ::edges}]
   (let [candidates (vec candidates)
         snapshot (when (seq candidates)
-                   (@call-preparation-snapshot database projection))
+                   (@call-preparation-report-snapshot report projection))
         refusal (or (when (error-value? snapshot) snapshot)
                     (first (:seon.call-preparation/refusals snapshot)))]
     (or refusal
@@ -4075,7 +4082,7 @@
        (let [comparison (report-arity-comparison report)
              result (if (error-value? comparison)
                       comparison
-                      (arity-verdict database projection comparison))
+                      (arity-verdict database projection report comparison))
              mismatches (:seon.fn/arity-mismatches result)]
          (if (and (map? result) (inst? (:seon.error/at result))
              (qualified-keyword? (:seon.error/layer result))
