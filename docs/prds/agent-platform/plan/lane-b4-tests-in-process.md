@@ -191,6 +191,290 @@ Boot-from-zero uses an isolated runner host with the explicitly identified check
 
 Both record settled members through the existing recorder on the named durable authority, carrying the execution commit/program/input evidence. Retain that evidence before removing disposable storage. If the evidence remains in a retained tested commit instead, D1 must prove it is still queryable by run identity after scratch retirement under the declared retention policy. Printing a tally and deleting its only facts does not satisfy this contract. One subprocess denotes the runner host; boot tests may own children. Lanes never reset `default`.
 
+### §2f Tests are the real system with their own data
+
+The agent system already owns declarations, acquired values, contracts and execution.
+Compose those owners: prepare a real world once, pass its immutable values to readers,
+and acquire one independent branch/context for each writer. Do not construct a second system in fixtures.
+
+**Authority and status.** The opening owner ruling (`e5f649f94`), the subsequent
+schema-injection instruction, and README §7's advance-in-place ruling (`1af25b4e8`)
+own this section. It adopts the [simplicity research](../../../research/agent-platform/test-simplicity-research-2026-09-23.md)
+with one correction: **A1's installed-per-function armed wrapper supplies arguments;
+`seon.call-preparation` and SCI's call-preparation hook retire under fork-audit S12(a).**
+Do not extend that retiring namespace, supplier-row family or hook for tests.
+This is a design awaiting independent review, not implementation approval or a claim
+that typed test injection, shared read worlds or effect substitution is installed.
+The [census and read-only evidence](../../../research/agent-platform/test-worlds-2026-09-23.md)
+separate the running archive from the moving checkout.
+This section supersedes earlier B4 prescriptions for a branch per *reader*, test-authored
+fixture acquisition, replacement Vars, reset-based schema proof and a new fork at every
+context advance. Existing confinement stays until its replacement proves the same boundary.
+
+**The author interface.** Keep normal `clojure.test/deftest`, `is` and `testing` for
+zero-argument tests. Stock `deftest` does not bind an argument vector. An injected test
+is an ordinary `defn`, a complete `:malli/schema`, and the single proposed metadata key
+`:seon.test/world`. That key names plain world data and identifies the function as a
+test for the canonical declaration producer. It does not create a second function body.
+For example (target author syntax):
+
+```clojure
+(def program-world [])
+
+(deftest arithmetic
+  (is (= 4 (+ 2 2))))
+
+(defn program-is-present
+  {:seon.test/world 'example.tests/program-world
+   :malli/schema [:=> [:cat :seon.db/database-value] :nil]}
+  [database]
+  (is (seq (seon.db/q '[:find [?s ...] :where [_ :seon.fn/sym ?s]] database)))
+  nil)
+```
+
+`[]` means the captured program and inherited facts, never an empty store. Parameter
+names do not determine injection. `:catn` can name slots; the database value schema
+is `:seon.db/database-value`, while `:seon.db/db` is a request/slot key. Admit the
+zero-argument test contract through the existing declaration producer. For typed tests,
+extend that producer and `resolve-test` together; keep one canonical definition identity
+and existing `:seon.test/sym` discovery. Extend the existing invocation/report owner to
+call the armed function with its prepared arguments. Do not set `:test true`, redefine
+a host Var or introduce a custom `deftest` macro to satisfy `clojure.test/test-var`.
+Preserve assertion counts, nested `testing`, fixtures/hooks during conversion, failure
+causes and assertionless-test refusal.
+
+**Injection is the ordinary armed call.** At installation A1 compiles the function's
+Malli signature once against its branch projection and attaches supplied-value access
+inside the same wrapper used by agent calls. `seon.instrument/wrap-interpreted`
+(`src/seon/instrument.clj:447`) and `install-function-contract!`
+(`src/seon/sci/eval.clj:699`) are the inspected seams; host-callable installation must
+use the same argument semantics. Use Malli `schema`, `type`, `children`, `form` and
+its compiled validators, not a new schema parser. Name-based supplied defaults preserve
+explicit arguments and refuse absent, invalid or ambiguous supplies before the body.
+Preparation reads the execution's explicit environment once; invocation does not scan
+program facts, reconstruct a projection or walk an object graph. Do not close a shared
+wrapper over one member's connection. Its resource access follows the admitted execution
+value through the existing agent execution boundary, including owned asynchronous work.
+
+| Requested schema / slot | Supplied real value and required ownership |
+|---|---|
+| `:seon.db/database-value` | Prepared immutable database, matching projection, captured once for this body; no writable custody. |
+| `:seon.db/connection` | Member's private descendant of the prepared committed head. Asking for both db and conn supplies their same entry basis; later reads use the connection explicitly. |
+| `:seon.agent/execution-handle` | Actual acquired agent handle, branch and independent SCI context; write-capable, with owned graphs only when requested. |
+| Named `:seon.agent/id` | Actual identity returned by the preparation agent's creation owner; never guessed from all agents/clusters. |
+| Proposed value schema `:seon.test/world` | Immutable subject refs, explicit scope and captured db; no hidden connection, graph, atom or live result. |
+| Proposed completion callable / declared capability | Contracted external-effect implementation from the execution environment; stateful scripts allocate member-owned state. Resource ownership comes from the capability declaration, not its name. |
+
+Fixed, unambiguous resource signatures are the first supported typed-test interface;
+unknown unions, variadic supplies and unresolved capabilities refuse naming test, slot
+and schema. Do not tighten ordinary agent arities globally. New world/capability value
+schemas and supplied-value declarations join A1's normal schema population. There is no
+B4 injection registry, resource resolver or dependency-injection framework.
+
+**Worlds and initial data.** A world is immutable EDN: ordinary quoted agent forms or
+existing owner request maps. One loader at the agent acquisition/submission owner
+reduces those requests through the real writers under custody. B4 calls it; it is also
+usable when an agent needs initial data. Example: a world can contain
+`'(my.note/add! {:my.note/id "subject" :my.note/content "original"})`. Tests needing
+agents, schemas, functions, messages and turns use these same owners:
+
+| Need | Owner path; what the loader must retain |
+|---|---|
+| Agent / cluster scope | `agent/creation-tx` plus ordinary checked transaction/acquisition; explicit cluster and **member branch** supplied by the handle, not the constructor's live-branch default. Real cluster/config writers when another cluster is the subject. |
+| Schema, namespace, test or function | Canonical schema declaration writer and D1's settling REPL entrance (`agent/submit-source!` → settlement → installation); analyzed source, real digests, contracts and reaching evidence. Private MCP `def` alone is not publication. |
+| Message / task | `my.message/send` / `cluster.message/send!`, current task/issue writers and start; return actual identities. No fabricated messages, assignments or successful test receipts. |
+| Turn / effect | Ordinary agent arm, submission, flow, settlement and fault route; only requested agents run. No recovery of inherited graphs or open turns. |
+
+The execution request supplies cluster identity explicitly; normal authors neither invent
+cluster names nor infer a singleton. A multi-cluster world names its intended scope as
+ordinary data. The loader returns writer-produced identities, allowing scoped queries
+or positive before/after assertions despite inherited agents, errors and usage samples.
+Configure rendering, clock/seed and effects explicitly where the behavior needs them.
+A refused preparation ends that member before its body; retain the offending request
+and full diagnostic. Partial preparation is not cached as a completed world.
+
+A world `def` is author convenience, not durable private state. At declaration admission,
+resolve its reference and preserve immutable world EDN, normalized resolver inputs and
+content digest with the admitted test program. Extend the existing declaration/evidence
+schemas, with namespace/reference edges to its real dependencies. Reject non-data
+worlds. Fresh acquisition and restart must resolve the same content without a live Var.
+Generated properties generate requests/forms with a fixed seed, not production rows.
+
+**Share reads; fork writes; advance at boundaries.** The logical model is a one-body
+agent in the real system. A reader borrows the prepared immutable world without a new
+database branch. Its agent entrance carries a frozen read basis and **no writable
+connection**, including elided calls; missing custody refuses. A typed signature alone
+cannot prove that host code is pure: combine it with current declared call/capability
+reach. Unknown dynamic effects refuse sharing; they do not silently receive a connection.
+A private SCI context is still required when evaluation could mutate namespaces/private
+state; share data, never mutable SCI objects. A proven pure callable can use the retained
+read context serially; parallel use requires independent execution state and attribution.
+
+Each writer branches once from the prepared world's **committed** head through
+`registry/branch!` → `store/open-branch!` inside `agent/acquire-context!`, and obtains
+one `sci/fork` through the existing context owner. Repoint db, environment and effects
+once. Subsequent evaluations keep that same context: transaction-listener changes install
+only changed rows and affected callers, unmap retractions, and advance program identity
+at the boundary. No per-turn fork, source reindex or full-program rebuild. A retained
+prepared context must not advance out from under consumers of its old program; finish
+borrowers first or retain their independent context. SCI does not deep-copy embedded atoms.
+
+For pure transaction derivations use Datahike `d/with` via the ordinary `seon.db` owner
+(target public seam), with **the same final-report validator and projection as writes**.
+Reuse `write-report-validator`; do not copy it into test support. Real constructor
+transaction data and deliberate attribute changes are valid inputs. No branch/open/unlink
+per immutable property trial. An uncommitted `:db-after` is not a branchable commit.
+These tests prove transformation/validation; listeners, serialization, persistence,
+recovery and effects require the real writer. Effectful transaction functions cannot
+be made pure by calling `with`.
+
+**Cache and prepare before bodies.** Extend the existing agent acquisition/cache owner,
+using its bounded `clojure.core.cache` policy and Datahike retention, not a B4 world registry.
+A prepared world holds an immutable value, a retained committed head for writers and its
+acquired program context. Cache by world EDN/resolver content, writer and supplied-function
+definitions, schema/config/resource dependencies, external scripts, seed/clock and actual
+base read evidence. Commit ids record provenance/retention, not blanket invalidation.
+World preparation and each body's read evidence are distinct: a global body query may
+observe an inherited fact that no seed writer read. §2a green reuse must include both.
+
+Reuse across a changed base cannot return an old whole database while claiming it is the
+new captured world. Prove the relevant base observations equivalent (including absence
+and broad queries), or prepare against the new basis with reused dependency artifacts.
+Until that proof exists, restrict prepared-data reuse to the exact captured basis and
+report cross-basis reuse as unimplemented. Program-context reuse still follows definition
+content. Missing evidence is never a hit. Valid cached entries are reused, not rebuilt.
+Cache hits never share response cursors, running graphs or mutable private values.
+Retain needed commits until consumers exit; eviction uses existing release/unlink and
+retention, never a per-test GC sweep or a cached naked connection.
+
+The existing `seon.test/run` first reuses valid completed green, then groups remaining
+worlds by content, prepares each missing world once, and acquires writer branches before
+bodies start. Prepare the whole required set logically; use existing admission batches
+for open handles, so thousands of cases do not require thousands of simultaneous graphs.
+Preparation failure records a failure for each dependent obligation. Start independent
+bodies through existing bounded agent execution only after preparation, retaining current
+serialization until cross-member/cross-request attribution and isolation are proved.
+No new scheduler. Include preparation, admission, body, recording and release in the
+request deadline. Actual exit precedes release; unfinished work retains its owned handle.
+
+**Only external effects get test versions.** The model completion function is an argument
+in the ordinary agent environment, supplied by the wrapper with the production contract.
+Turn tests can script completion values; provider parser tests supply transport bytes and
+run the real parser. Shell/web tests use declared external capability implementations at
+`seon.effect`'s handler boundary; request validation, dispatch, bounds, durable results
+and failure delivery remain real. The current `turn.clj:4525` calls `ai/complete` directly
+and `effect.clj:740` resolves a host handler: environment injection there is a prerequisite,
+not an installed promise. Convert that production seam before its test callers. An absent
+test effect refuses before execution; it never falls through to a paid/network effect.
+Internal database, schema, analyzer, contract, turn and SCI functions are never replaced.
+Contracted scripted state belongs to one member, is reset by new acquisition, and is not
+stored in world data. Script and callable digests participate in ordinary test evidence.
+
+**Platform is determined by the subject.** Keep one runner. Its exceptional host covers
+boot and operations before readiness, destructive process/store owners, and unconfined
+host-bound changes. Installed `seon.test/isolated-members` derives the exact current set:
+non-fixture `:seon.test/platform` rows union non-fixture `:seon.test/fixture-observation`
+rows union current destructive reach, minus fixture material. At the observed live basis
+this is **151 = 80 tagged + 52 fixture-observation + 19 destructive-only** (first two
+sets disjoint), not the historical 110. This includes old fixture-caused exclusions;
+convert those after proving confinement instead of treating all 151 as inherently platform.
+Store-wide GC/blob mechanics need an independent real store; they never mutate the
+shared store. They remain on their classified host until their resource owner proves
+safe confinement. No empty store substitutes for a post-boot agent world. A schema
+change is proved incrementally, not by resetting. Orchestrator owns cold/platform proof;
+lanes use a focused `seon.test/run` on their branch, never a new test JVM or `bin/test` gate.
+
+**Enforcement and its limits.** The loader accepts declared writer requests/forms, never
+a generic `:tx-data` bundle of literal program rows. Retire that fixture entry when its
+callers convert. The database writer validates final values; it cannot identify the
+origin of a schema-valid map. At the existing analyzer/declaration admission seam, refuse
+resolved `with-redefs`, `with-redefs-fn`, `alter-var-root` and equivalent system-Var
+mutation for non-platform tests; refuse raw store/fixture acquisition and production-row
+construction reaching fixture-write sinks. Use resolved call/dataflow facts, not regex or
+a ban on every identity-bearing map. Request maps, expected values, renderer inputs and
+explicit malformed inputs sent to the boundary under test remain legitimate data.
+Negative writer tests assert refusal and unchanged state; malformed rows never become
+initial worlds. No author waiver promotes an ordinary test to platform.
+
+Static checks do not prove arbitrary dynamic provenance or JVM purity. Unknown reaches
+refuse shared execution; runtime writer/effect boundaries enforce custody. Strict D1
+schema-present/schema-valid/test-present/test-first entry applies to agent-authored tests
+and helpers too; default `:gate`, branch warnings only as D1 permits, merge unconditional.
+Prove the ordinary declaration order admits a test referring to its not-yet-defined subject
+without demanding an infinite test-for-a-test chain. A gap is a D1 producer/admission defect,
+not permission for fabricated passing tests or a B4-only waiver.
+
+**Cost and proof targets (not measurements).** Let A be requested arguments, W unique
+missing world forms, D their changed datoms/declarations, E affected dependency edges,
+M selected members and B writer members. No step adds a whole-program scan per member.
+
+| Operation | Work / target | Deciding proof |
+|---|---|---|
+| Compile supplied-value access | O(A + referenced schema dependencies) on installation/change; O(A) per invocation, <1 ms warm | Explicit args win; missing/ambiguous supplies refuse; host and SCI indirect calls obey same contract. |
+| Prepare and cache world | O(W + D + E + writer/index validation); hit checks actual dependency evidence, <1 ms warm; small miss <100 ms | Equal content builds once; changed constructor/schema/script/seed invalidates; unrelated recording does not rebuild program. Prove cross-basis data equivalence before enabling it. |
+| Reader / writer acquire | Reader reuses value; writer head/roster/index work plus one context fork/affected install; <1 s complete setup | Two readers same immutable input, zero writable custody; two writers independent, no inherited graph starts, cached context unchanged. |
+| Speculative property | O(trials × delta/index/validation work), zero branch operations; tiny delta target <1 ms | Ancestor unchanged; valid and invalid cases agree with real writer; fixed-seed shrinking retained. |
+| Execute / record / release | Body's work + O(M) member evidence and owned resources; typical whole test <1 s | Member-specific assertions/faults under concurrency; record failure cannot be green; actual exit before unlink; retained heap returns to bounded cache population. |
+
+Report first/warm p50/p95, allocations/retained heap, cache misses, transactions, forks,
+installed rows and phase/end-to-end times. Existing five-second test bound is a failure
+limit, not a speed target. Every >1 s operation names its armed functions, cost driver and
+why it cannot be sub-second; unjustified work is fixed. >10 s needs authorization and an
+issue. Hot-path slices compare identical parent/current probes; >20% or 50 ms regression
+is a defect. Historical ~0.02 ms SCI fork does not price acquisition/arming.
+
+**Migration and deletions, in order.** First land A1's reviewed wrapper supply seam and
+D1/B2's acquisition/entry semantics; B4 is a caller. No implementation starts on this
+section until independent review. Each numbered item is split into loadable slices of
+≤about 100 **added** implementation lines; caller sweeps use one script per rule and
+whole-file holds. Schema producers and loaded consumers land together, incrementally.
+The census counts are candidate tokens/maps, not automatically replaceable calls.
+
+| Order | Conversion and census | Proof before deleting the old path |
+|---|---|---|
+| 1 — author/prepare seam | Admit typed `defn` + durable world content; wrapper receives prepared values; one real-writer loader. Separate admission, loader and evidence slices, each ≤100. | Plain `deftest` unchanged; candidate-only failing typed test runs its candidate body; preparation refusal prevents body; contract remains armed. |
+| 2 — R1 (24 historical reds) | Convert real seed writers first: namespace/function/test/schema literal candidates **351/118/59/66**; `agent-tx` tokens **107**, `agents-tx` **32**. Scripts replace known seed shapes with writer forms, never add placeholder digests. | Incremental schema accretion preserves canonical creation; returned subject exists. Remove literal constructors, `namespace-row`/`program-row`/`program-fn-row` fixture paths after their last caller; retain the production analyzer. |
+| 3 — R2 (16) | Replace singleton scope and global-empty assertions with supplied world refs/before-values; **172** `seed-cluster!` and **17** `apply-config!` tokens are a review inventory. | Add unrelated agents/errors/usage and a second cluster; same scoped result. Delete `seeded-cluster-name` and cluster-name boilerplate; production config writers stay. |
+| 4 — R3 (13) | Request acquired db/conn/handle instead of callbacks and hand-built contexts: **958** `with-database`, **232** fixture `fork-cluster-ctx` tokens. External seam conversions remove **263** `with-redefs`, **65** `with-redefs-fn`, **21** `alter-var-root` tokens where substituting dependencies. | Real SCI/custody, direct and indirect changed contract, no nested fixture branch, no system-root mutation. Retain only classified tests whose actual subject is host instrumentation or process/store isolation. |
+| 5 — R4 (12) | Fixed render/config/clock inputs, current result/error contracts, world/effect inputs in existing reuse evidence. | Exact diagnostic/behavior, changed relevant input reruns, unrelated recording reuses, interrupted work never green. Delete obsolete contract copies and mutable-default expectations. |
+| 6 — finish cut | Enable proved read sharing/parallelism, validated `with`, enforce migrated fixture sinks and delete their last helpers; each owner conversion ≤100. | Focused real requests per slice; once at cut end orchestrator runs affected integration/platform proof and measures size/heap/latency. |
+
+For every red ask the three questions: deleted machinery (delete its test with it),
+retired assumption (correct the assertion), or surviving behavior (fix its owner).
+R1–R4's **65** identities are not 65 predicted passes. The root-cause report establishes
+only two obsolete assertion identities: A1's literal-source census and B2's cancelled
+secondary-backstop expectation; remove them with those mechanisms, preserving the real
+behavior regression. The broader B4 worker/claim/snapshot tests follow §7's mechanism
+retirements. Never delete real message, contract, isolation or cleanup coverage merely
+because its fixture is broken. Each landing reports net src/test lines and actual helper
+and mutation-site deletion counts; the expected reduction is unpriced until conversion.
+
+**Owner decisions, recommendation first.** The author interface, wrapper route, real
+writers, external-only substitutes, strict entry and in-place context advance are settled.
+There is no new policy question requiring this design to pause. For implementation review,
+the remaining *delivery tradeoff* has exactly three priced choices (engineering estimates,
+not elapsed-time promises):
+
+| Choice | Guarantee | Cost and what it gives up |
+|---|---|---|
+| **Incremental proof, then sharing — recommended** | Ship the same author interface on acquired exact-basis worlds; enable sharing only after its proof; reach the full target through the ordered slices. | Three seam slices plus R1–R4 caller cuts and sharing/`with` proofs, each ≤100 added lines. Gives up cross-basis data reuse and parallel reader execution until proved; does not call the interim state done. |
+| Full optimization before conversion | All sharing, cross-basis evidence, speculative validation and parallel attribution proved before first author migration. | Same work plus a coupled multi-owner integration cut; delays deletion of bad fixtures and feedback to authors. |
+| Writer-only first release | Every resource-bearing test gets one isolated real branch/context through the new wrapper interface. | Admission/loader/effect slices and caller conversion; defers reader/`with` optimization slices. Gives up zero-branch readers and advance-preparation throughput, so remains an explicitly partial delivery of the ruling. |
+
+**The author skill is ten lines** (install into the testing skill with implementation,
+not as an additional author protocol):
+
+1. Write tests through the same checked REPL entrance as your other functions.
+2. Use normal `deftest`, `is` and `testing` when no injected input is needed.
+3. Otherwise write `defn`, a complete `:malli/schema`, and `:seon.test/world 'ns/world`.
+4. Ask for `:seon.db/database-value` to read, `:seon.db/connection` to write.
+5. Ask for the declared agent handle, world or capability schema when that is your subject.
+6. A world is data containing ordinary agent requests/forms; use canonical writers.
+7. Internal values are real; declare external effects to receive their contracted test versions.
+8. Assert the subject's behavior and use the supplied identities and explicit inputs.
+9. Do not write fixtures, cleanup, cluster names, replacement Vars or fabricated production rows.
+10. Run `my.test/run` or focused `bin/test-check`; refusal, timeout or missing evidence is not green.
+
 ## 3. Reading list — open before editing
 
 | Source | What it guarantees |
