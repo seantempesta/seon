@@ -23,13 +23,13 @@ or changing fault capture and `:record`/`:panic` behavior.
 
 There is one wake ROUTER per cluster, `seon.cluster.wake/route!`
 (`src/seon/cluster/wake.clj:438-548`), registered by `arm-agents!` under the
-key `:seon.agent/route` (`src/seon/cluster.clj:3418-3429`). It is not the only
+key `:seon.agent/route` (`src/seon/cluster.clj:3421-3432`). It is not the only
 Datahike listener on the connection. At HEAD a cluster connection with N
 armed agents holds 2 + N long-lived listeners:
 
 | key | owner | registered at |
 |---|---|---|
-| `:seon.agent/route` | the wake router | `src/seon/cluster.clj:3418-3429` |
+| `:seon.agent/route` | the wake router | `src/seon/cluster.clj:3421-3432` |
 | a `random-uuid` per agent | each agent's schedule proc, on `::flow/resume` | `src/seon/schedule.clj:795-799` |
 | `::program-identity` | the SCI program-identity observer | `src/seon/sci/eval.clj:2412-2421`, called from `:2713`, `:2782` |
 
@@ -92,9 +92,9 @@ Reversing the first two steps creates a lost interval between the initial read
 and listener registration.
 
 `arm-agents!` states this order as its contract
-(`src/seon/cluster.clj:3304-3320`): the cluster graph starts, the error fan-out
-joins, `route!` registers (`:3418-3429`), one render wake is offered
-(`:3434`), then the armer's derive-all pass runs directly (`:3438-3443`). Keep
+(`src/seon/cluster.clj:3307-3323`): the cluster graph starts, the error fan-out
+joins, `route!` registers (`:3421-3432`), one render wake is offered
+(`:3437`), then the armer's derive-all pass runs directly (`:3441-3446`). Keep
 that direct pass. A synthetic "boot wake" sent before route registration is
 not equivalent.
 
@@ -109,7 +109,7 @@ not equivalent.
 The render interest is the union of retained reads' attributes, published by
 the render proc (`publish-interest!`, `src/seon/render/web.clj:2068-2080`).
 Every wake target holds one value: the armer and render channels are
-`(sliding-buffer 1)` (`src/seon/cluster.clj:3322`, `:3341`) and a mailbox is a
+`(sliding-buffer 1)` (`src/seon/cluster.clj:3325`, `:3344`) and a mailbox is a
 sliding-one `CountedSlidingBuffer` that counts overwrites
 (`src/seon/cluster/agent.clj:101-128`). A wake says only "look".
 
@@ -130,7 +130,7 @@ Every graph exposes core.async.flow's error and report channels.
 The error policy (`AGENTS.md:279-300`) says a core fault is committed at the
 owning boundary and never dropped by an overload channel. The installed
 fan-out is an overload channel of capacity 64
-(`src/seon/cluster.clj:3374`), so that half of the policy is **[TARGET]**.
+(`src/seon/cluster.clj:3377`), so that half of the policy is **[TARGET]**.
 Core.async's own `error-chan` is also sliding, and a stop-transition error is
 lost by construction
 (`docs/seon/issues/durable-faults-cross-dropping-channels.md`,
@@ -144,7 +144,7 @@ system defects.
 
 `arm-agents!` hands the fan-out a zero-argument mode reader that reads the
 cluster's effective `:seon.config/on-core-error` on every fault, falling back
-to `:record` when the fact is absent (`src/seon/cluster.clj:3376-3380`). The
+to `:record` when the fact is absent (`src/seon/cluster.clj:3379-3383`). The
 modes are declared at `resources/seon/schemas/seon.config.edn:39-40`; the
 shipped default is `:panic` (`config/default.edn:294`).
 
@@ -156,7 +156,7 @@ Installed behavior (`fault-committer-step`, `src/seon/flow.clj:1054-1066`):
 - a repeated signature is committed and not reported again.
 
 The cluster's panic handler, `emit-core-fault!`
-(`src/seon/cluster.clj:3184-3207`), prints one `SEON CORE FAULT` line to
+(`src/seon/cluster.clj:3187-3210`), prints one `SEON CORE FAULT` line to
 stderr and returns nil. It does not throw, stop the graph or mark it failed.
 The owner's `:panic` policy (the operation throws to its caller and the
 failing graph stops and shows as failed, `AGENTS.md:290-294`) and delivery of

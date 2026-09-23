@@ -80,7 +80,7 @@ stamped interrupted, then graphs are rebuilt and the agent adapts from
 durable facts.
 
 Read `recover-call` (`src/seon/turn.clj:1650-1672`), its caller
-`recover-runs!` (`src/seon/cluster.clj:2725`), and the boot position: recovery
+`recover-runs!` (`src/seon/cluster.clj:2728`), and the boot position: recovery
 runs before config application and before any agent arms
 (`src/seon/cluster/boot.clj:59-69`). The database records what settled; an
 interrupted receipt is evidence for the next agent decision, not authority for
@@ -100,7 +100,7 @@ The transport law divides values by recovery need (`AGENTS.md:164-166`):
 
 Current examples are the sliding-one agent wake channel
 (`src/seon/cluster/agent.clj:124-128`), the cluster's sliding-one armer,
-stream, render and pages channels (`src/seon/cluster.clj:3322-3345`), and
+stream, render and pages channels (`src/seon/cluster.clj:3325-3348`), and
 counted-dropping fault observation (`src/seon/flow.clj:966-1003`). The fault
 tap is the one example the error policy rejects (`AGENTS.md:285-289`); see
 [wakes and faults](wakes-and-faults.md#fault-fan-out).
