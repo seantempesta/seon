@@ -42,17 +42,15 @@
      (when-let [member (:seon.error/member observation)]
        {:seon.await/requested-member member})
      outcome
-     {:seon.error/at (java.util.Date.)
-      :seon.error/layer :seon.await/completion
-      :seon.error/operation 'seon.await/diagnostic
-      :seon.await/config-attribute attribute
+     (seon.error.refusal/diagnostic (java.util.Date.) :seon.await/completion 'seon.await/diagnostic
+      {:seon.await/config-attribute attribute
       :seon.await/config-value backstop-ms
       :seon.await/requested-layer (:seon.error/layer observation)
       :seon.await/requested-operation (:seon.error/operation observation)
       :seon.error/message
       (if (:seon.await/closed-operation outcome)
         "The awaited channel closed before completion. Fix: publish the completion before closing the channel."
-        "The declared await bound fired before completion. Fix: inspect the awaited operation and its bound.")})))
+        "The declared await bound fired before completion. Fix: inspect the awaited operation and its bound.")}))))
 
 (defn- timeout-observation
   {:malli/schema [:=> [:cat :seon.await/request :int] :seon.await/timeout-error]}
