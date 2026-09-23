@@ -1,4 +1,9 @@
-#:seon.config.maintenance{:log-max-bytes
+#:seon.config.maintenance{:collect?
+                          [:boolean
+                           {:seon.config/optional true,
+                            :seon.config/dial true,
+                            :description "Whole-store collection runs only when true; absent means off. Off until a collection is proven to keep every node an open branch, a held database value or an in-flight transaction reads (docs/seon/issues/published-head-references-never-written-index-nodes.md)."}],
+                          :log-max-bytes
                           [:int {:min 1, :seon.config/dial true}],
                           :log-retained-files
                           [:int {:min 0, :seon.config/dial true}],

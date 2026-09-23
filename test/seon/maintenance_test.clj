@@ -407,7 +407,8 @@
       (let [result
             (maintenance/collect!
              {:seon.operator/repository-root repository-root
-              :seon.operator/managed-root managed-root})]
+              :seon.operator/managed-root managed-root
+              :seon.config.maintenance/collect? true})]
         (is (uuid? (:seon.operator.collect/store-id result)))
         (is (= managed-root
                (:seon.operator.collect/managed-root result)))

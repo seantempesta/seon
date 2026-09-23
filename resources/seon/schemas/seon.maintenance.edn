@@ -74,6 +74,10 @@
  :seon.maintenance/result-projection-failed-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
   :seon.error/base [:map [:seon.maintenance/failed-producer :seon.maintenance/failed-producer]]]
+ :seon.maintenance/disabled-collection-flag :qualified-keyword
+ :seon.maintenance/collection-disabled-error
+ [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+  :seon.error/base [:map [:seon.maintenance/disabled-collection-flag :seon.maintenance/disabled-collection-flag]]]
  :seon.maintenance/uncollected-root :string
  :seon.maintenance/root-never-collected-error
  [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}

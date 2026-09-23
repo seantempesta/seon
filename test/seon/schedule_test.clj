@@ -389,6 +389,27 @@
                          :where [_ :seon.error/operation ?operation]]
                        @connection))))))))
 
+(deftest a-scheduled-collection-without-the-flag-records-its-disabled-outcome
+  ;; Collection is off until proven safe (issue
+  ;; published-head-references-never-written-index-nodes): the trigger fires,
+  ;; no store is opened, and the receipt carries the typed refusal.
+  (test-support/with-database
+    (fn [connection]
+      (seed-task! connection "schedule-test/collect"
+                  (quote seon.maintenance/collect!))
+      (let [context (execution-context)]
+        (is (not (contains? context :seon.config.maintenance/collect?)))
+        (is (= 1 (schedule/fire-due! connection "root" (observed-after-seed)
+                                     context))))
+      (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
+      (is (= 0 (count-with @connection :seon.maintenance.receipt/result)))
+      (is (= :seon.config.maintenance/collect?
+             (db/q '[:find ?flag .
+                     :where
+                     [?receipt :seon.maintenance.receipt/error ?error]
+                     [?error :seon.maintenance/disabled-collection-flag ?flag]]
+                   @connection))))))
+
 (deftest schedule-remains-the-third-proc-in-the-agent-graph
   ;; THE BLUEPRINT'S REQUEST IS THE HANDLE A RUNNING CLUSTER OWNS, so the
   ;; census hands every declared member the way `arm!` does rather than the

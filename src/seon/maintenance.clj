@@ -937,19 +937,31 @@
 
 
 (defn collect!
-  "Collect the held store and verify every retained branch and blob."
+  "Collect the held store and verify every retained branch and blob.
+
+  Runs only when the request carries `:seon.config.maintenance/collect? true`
+  (the cluster's config fact); absent or false answers the declared
+  `:seon.maintenance/collection-disabled-error` and opens no store."
   {:malli/schema [:=> [:cat :seon.operator.collect/request]
-                      [:or :seon.operator.collect/result :seon.operator/failed-error]]}
+                      [:or :seon.operator.collect/result :seon.operator/failed-error
+                       :seon.maintenance/collection-disabled-error]]}
   [{root :seon.operator/managed-root :as request}]
-  (attempt
-   #(let [_ (refuse-misspelled-options! request)
-          root (.getCanonicalPath (io/file root))
-          [held release?] (acquire-operation-store! root nil)]
-      (try
-        (if (:seon.operator.collect/dry-run? request)
-          (dry-run-store! root held)
-          (collect-store! root held))
-        (finally (when release? (store/release-store! held)))))))
+  (if-not (true? (:seon.config.maintenance/collect? request))
+    {:seon.error/at (java.util.Date.)
+     :seon.error/layer ::collection
+     :seon.error/operation 'seon.maintenance/collect!
+     :seon.error/message "Whole-store collection is disabled; it runs only when :seon.config.maintenance/collect? is true."
+     :seon.error/member :seon.config.maintenance/collect?
+     :seon.maintenance/disabled-collection-flag :seon.config.maintenance/collect?}
+    (attempt
+     #(let [_ (refuse-misspelled-options! request)
+            root (.getCanonicalPath (io/file root))
+            [held release?] (acquire-operation-store! root nil)]
+        (try
+          (if (:seon.operator.collect/dry-run? request)
+            (dry-run-store! root held)
+            (collect-store! root held))
+          (finally (when release? (store/release-store! held))))))))
 
 (defn observe-footprint!
   "Measure only this managed data directory; the schedule records the result."

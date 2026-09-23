@@ -72,6 +72,9 @@
                             [:seon.operator/managed-root
                              :seon.operator/managed-root]
                             [:seon.boot/log-dir :seon.boot/log-dir]
+                            [:seon.config.maintenance/collect?
+                             {:optional true}
+                             :seon.config.maintenance/collect?]
                             [:seon.config.maintenance/min-usable-bytes
                              {:optional true}
                              :seon.config.maintenance/min-usable-bytes]
