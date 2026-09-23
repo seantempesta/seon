@@ -334,14 +334,12 @@
       (seq (:seon.schema/references row))
       (set (:seon.schema/references row))
       :else
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.ai/settings
-        :seon.error/operation 'seon.ai/agent-setting-attributes
-        :seon.error/message "The agent overlay schema has no declared setting references."
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/settings 'seon.ai/agent-setting-attributes
+       {:seon.error/message "The agent overlay schema has no declared setting references."
         :seon.schema/refused-value row
         :seon.schema/expected-value :seon.config/agent-overlay
         :seon.error/member :seon.schema/references
-        :seon.error/expected "installed agent-overlay setting references"})))
+        :seon.error/expected "installed agent-overlay setting references"}))))
 
 (defn agent-overlay
   "Declared setting overrides for one agent in a database value."
@@ -648,28 +646,24 @@
       (let [decoded (edn/read-string encoded)]
         (if (and (map? decoded) (every? string? (keys decoded)))
           decoded
-          {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/extra-body
-       :seon.error/offending encoded
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/extra-body
+           {:seon.error/offending encoded
        :seon.error/message "The configured extra body must be an EDN map with string keys."
        :seon.error/data {::request-transmitted? false
                              ::response-started? false
                              ::output-observed? false}
        :seon.ai/extra-body-edn encoded
-       :seon.error/expected "an EDN map with string keys"}))
+       :seon.error/expected "an EDN map with string keys"})))
       (catch Throwable failure
-        {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/extra-body
-       :seon.error/offending encoded
+        (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/extra-body
+         {:seon.error/offending encoded
        :seon.error/message "The configured extra body is not readable EDN; supply a map with string keys."
        :seon.ai/extra-body-edn encoded
        :seon.error/expected "an EDN map with string keys"
        :seon.ai/body-read-message (or (ex-message failure) "The provider-specific body could not be read.")
        ::request-transmitted? false
        ::response-started? false
-       ::output-observed? false}))
+       ::output-observed? false})))
     {}))
 
 (defn- request-headers
@@ -705,10 +699,8 @@
             conflicts (set/intersection builder-owned-keys
                                         (set (keys extra)))]
         (if (seq conflicts)
-          {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/request-body
-       :seon.error/offending extra
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/request-body
+           {:seon.error/offending extra
        :seon.error/message "The configured extra body cannot override request-builder fields."
        :seon.error/data {::protected-keys (vec (sort conflicts))
                              ::request-transmitted? false
@@ -716,7 +708,7 @@
                              ::output-observed? false}
        :seon.ai/protected-keys (set conflicts)
        :seon.error/member :seon.ai/extra-body-edn
-       :seon.error/expected "fields not owned by the request builder"}
+       :seon.error/expected "fields not owned by the request builder"})
           ;; LiteLLM's useful escape hatch, but with Seon's error-as-value
           ;; boundary: provider-owned fields merge last only after conflicts
           ;; with the builder's ACTUAL emitted keys have been refused.
@@ -732,14 +724,12 @@
 (defn- unreadable-stream-data
   {:malli/schema [:=> [:cat :string :string] :seon.ai/unparseable-body-error]}
   [payload reason]
-  {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/unreadable-stream-data
-       :seon.error/offending payload
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/unreadable-stream-data
+   {:seon.error/offending payload
        :seon.error/message (str "The provider stream carried unreadable data: " reason ".")
        :seon.error/data {::body payload}
        :seon.ai/unreadable-response-member "body"
-       :seon.error/expected "provider JSON with a textual assistant response"})
+       :seon.error/expected "provider JSON with a textual assistant response"}))
 
 (defn- stream-chunk-error
   {:malli/schema [:=> [:cat :string :seon.schema/value] [:maybe :seon.ai/unparseable-body-error]]}
@@ -901,33 +891,27 @@
                    (map? usage) (assoc ::usage usage))]
     (cond
       (and (some? content) (not (string? content)))
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/parsed-completion
-       :seon.error/offending content
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/parsed-completion
+       {:seon.error/offending content
        :seon.error/message "The provider's assistant content was not text."
        :seon.error/data evidence
        :seon.ai/unreadable-response-member "choices.message"
-       :seon.error/expected "provider JSON with a textual assistant response"}
+       :seon.error/expected "provider JSON with a textual assistant response"})
 
       (and (some? reasoning-content) (not (string? reasoning-content)))
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/parsed-completion
-       :seon.error/offending reasoning-content
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/parsed-completion
+       {:seon.error/offending reasoning-content
        :seon.error/message "The provider's assistant reasoning was not text."
        :seon.error/data evidence
        :seon.ai/unreadable-response-member "choices.message"
-       :seon.error/expected "provider JSON with a textual assistant response"}
+       :seon.error/expected "provider JSON with a textual assistant response"})
 
       (and (string? reasoning-content)
            (seq reasoning-content)
            (not= "stop" finish-reason)
            (str/blank? content))
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/parsed-completion
-       :seon.error/offending reasoning-content
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/parsed-completion
+       {:seon.error/offending reasoning-content
        :seon.ai/unanswered-reasoning-count (count reasoning-content)
        :seon.error/message (str "The provider finished after streaming "
             (count reasoning-content)
@@ -936,18 +920,16 @@
               ::reasoning-received (count reasoning-content)
               ::text-received 0)
        :seon.error/member :seon.ai/text
-       :seon.error/expected "assistant text after reasoning"}
+       :seon.error/expected "assistant text after reasoning"})
 
       (and (= "length" finish-reason) (str/blank? content))
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/parsed-completion
-       :seon.error/offending finish-reason
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/parsed-completion
+       {:seon.error/offending finish-reason
        :seon.error/message "The provider exhausted the completion budget before replying."
        :seon.error/data evidence
        :seon.ai/exhausted-finish-reason finish-reason
        :seon.error/member :seon.ai/finish-reason
-       :seon.error/expected "a completion budget sufficient for assistant text"}
+       :seon.error/expected "a completion budget sufficient for assistant text"})
 
       (or (and (string? content) (seq content))
           (and (= "stop" finish-reason) (or (nil? content) (string? content))))
@@ -960,14 +942,12 @@
         (assoc :seon.ai/finish-reason finish-reason))
 
       :else
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/parsed-completion
-       :seon.error/offending evidence
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/parsed-completion
+       {:seon.error/offending evidence
        :seon.error/message "The provider's response carried no assistant text."
        :seon.error/data evidence
        :seon.ai/unreadable-response-member "choices.message"
-       :seon.error/expected "provider JSON with a textual assistant response"})))
+       :seon.error/expected "provider JSON with a textual assistant response"}))))
 
 (defn completion-text
   "The assistant text in a decoded provider response, or a flat error.
@@ -983,14 +963,12 @@
                      (nil? body) ::nil
                      :else (str (class body)))]
     (if (and (map? body) (some? (get body "error")))
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/completion-text
-       :seon.error/offending body
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/completion-text
+       {:seon.error/offending body
        :seon.error/message "The provider returned an error document."
        :seon.error/data {::body-shape body-shape}
        :seon.ai/unreadable-response-member "body"
-       :seon.error/expected "provider JSON with a textual assistant response"}
+       :seon.error/expected "provider JSON with a textual assistant response"})
       (let [choice (when (map? body) (some-> (get body "choices") first))
             message (some-> choice (get "message"))
             content (some-> message (get "content"))
@@ -1199,10 +1177,8 @@
         reasoning-received (count (:seon.ai/reasoning-partial snapshot))
         time-limit-fired? (caused-by? failure
                                       java.net.http.HttpTimeoutException)]
-  (cond-> {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/truncation
-       :seon.error/offending snapshot
+  (cond-> (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/truncation
+           {:seon.error/offending snapshot
        :seon.ai/interrupted-text-count received
        :seon.error/message "The provider stream ended before its terminal event; inspect the retained partial output and transport evidence."
        :seon.error/data (cond-> {::text-received received
@@ -1211,7 +1187,7 @@
        (pos? reasoning-received)
        (assoc ::reasoning-received reasoning-received))
        :seon.error/member :seon.ai/text
-       :seon.error/expected "a terminal stream event"}
+       :seon.error/expected "a terminal stream event"})
     ;; THE JDK PUTS THE REAL CAUSE IN THE CAUSE: an early-ended body is
     ;; `IOException: closed` with the actual failure underneath
     ;; (`ResponseSubscribers.java:355-380`, openjdk 26.0.1). The diagnostic
@@ -1446,10 +1422,8 @@
         ;; was free" is not "it was free".
         (let [connect? (instance? java.net.http.HttpConnectTimeoutException
                                   failure)]
-          {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/send-request
-       :seon.error/offending timeout-ms
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/send-request
+           {:seon.error/offending timeout-ms
        :seon.error/message (str "The model did not answer within "
                                     timeout-ms "ms.")
        :seon.error/data {:seon.ai/timeout-ms timeout-ms
@@ -1461,14 +1435,11 @@
                              ::output-observed? false}
        :seon.ai/timeout timeout-ms
        :seon.error/member :seon.ai/timeout-ms
-       :seon.error/expected "a response within the request deadline"}))
+       :seon.error/expected "a response within the request deadline"})))
       (catch Throwable failure
         (let [before-send? (transport-before-send? failure)]
-          (refusal/diagnostic
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.ai/request
-       :seon.error/operation 'seon.ai/send-request
-       :seon.error/message (or (ex-message failure)
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.ai/request 'seon.ai/send-request
+           {:seon.error/message (or (ex-message failure)
                                    (.getName (class failure)))
        :seon.error/data {:seon.ai/endpoint endpoint
                              ::throwable (.getName (class failure))
