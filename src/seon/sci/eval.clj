@@ -532,17 +532,13 @@
 
       (empty? events)
       (throw (ex-info "Your reply had no form; only comments/prose. Send a form."
-                      {:seon.error/at (java.util.Date.)
-                       :seon.error/layer :seon.sci.eval/reader
-                       :seon.error/operation 'seon.sci.eval/one-event
-                       ::reader-event-count 0}))
+                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/reader 'seon.sci.eval/one-event
+                       {::reader-event-count 0})))
 
       :else
       (throw (ex-info "Evaluation requires exactly one reader event."
-                      {:seon.error/at (java.util.Date.)
-                       :seon.error/layer :seon.sci.eval/reader
-                       :seon.error/operation 'seon.sci.eval/one-event
-                       ::reader-event-count (count events)})))))
+                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/reader 'seon.sci.eval/one-event
+                       {::reader-event-count (count events)}))))))
 
 (defn bind-result!
   "Bind one evaluation's value in the fork under its own handle.
@@ -682,13 +678,11 @@
              db)]
     (if cluster-name
       (config/effective db cluster-name)
-      {:seon.error/at (java.util.Date.)
-       :seon.error/layer :seon.config/read
-       :seon.error/operation 'seon.sci.eval/database-effective-config
-       :seon.config/error-key :seon.boot/cluster-name
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.config/read 'seon.sci.eval/database-effective-config
+       {:seon.config/error-key :seon.boot/cluster-name
        :seon.error/expected-key :seon.boot/cluster-name
        :seon.error/message
-       "seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none."})))
+       "seon.sci.eval/database-effective-config requires configuration naming its cluster; this database has none."}))))
 
 (defn- instrumentation-config
   "Read the contract dial and admission caps from this database value.
@@ -738,14 +732,12 @@
     (when-not source
       (throw
        (ex-info "Selected function is missing from the acquired SCI program snapshot."
-                {:seon.error/at (java.util.Date.)
-                  :seon.error/layer :seon.sci.eval/program
-                  :seon.error/operation 'seon.sci.eval/install-function-from-database!
-                  :seon.error/message "Selected function has no acquired row; acquire its declaration before installing it."
+                (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/install-function-from-database!
+                 {:seon.error/message "Selected function has no acquired row; acquire its declaration before installing it."
                   :seon.error/offending function-symbol
                   ::missing-function-row function-symbol
                   :seon.fn/sym function-symbol
-                  :seon.error/expected :seon.sci.eval/acquired-function})))
+                  :seon.error/expected :seon.sci.eval/acquired-function}))))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
@@ -854,13 +846,11 @@
   {:malli/schema [:=> [:cat :qualified-symbol :string]
                   :seon.sci.eval/interpretation-error]}
   [sym reason]
-  {:seon.error/at (java.util.Date.)
-   :seon.error/layer :seon.sci.eval/program
-   :seon.error/operation 'seon.sci.eval/install-row!
-   :seon.error/message (str "Cannot interpret " sym ": " reason)
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/install-row!
+   {:seon.error/message (str "Cannot interpret " sym ": " reason)
    :seon.error/expected :seon.sci.eval/interpretable-definition
    :seon.sci.eval/refused-function sym
-   :seon.sci.eval/interpretation-reason reason})
+   :seon.sci.eval/interpretation-reason reason}))
 
 (defn- interpretation-failure
   "Refuse a row whose interpretation threw, carrying the whole cause: class,
@@ -987,14 +977,12 @@
                        (get row source-attribute)
                        (get committed source-attribute)))))
       (throw (ex-info "Committed declaration source does not match install request."
-                      {:seon.error/at (java.util.Date.)
-                        :seon.error/layer :seon.sci.eval/program
-                        :seon.error/operation 'seon.sci.eval/install-row!
-                        :seon.error/message "Install source differs from the committed declaration; install the committed source."
+                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/install-row!
+                       {:seon.error/message "Install source differs from the committed declaration; install the committed source."
                         :seon.error/offending row
                         :seon.sci.eval/installation-member value
                         :seon.error/expected :seon.sci.eval/committed-source
-                        :seon.error/member identity-attribute})))
+                        :seon.error/member identity-attribute}))))
     (let [installed
           (case identity-attribute
       :seon.ns/name
@@ -1382,33 +1370,29 @@
                        cause-message
                        (when location (str " at " location)) ".")
                   diagnostic
-                  {:seon.error/at (java.util.Date.)
-                    :seon.error/layer ::acquisition
-                    :seon.error/operation 'seon.sci.eval/host-namespace!
-                    :seon.sci.eval/row-member namespace-name
+                  (seon.error.refusal/diagnostic (java.util.Date.) ::acquisition 'seon.sci.eval/host-namespace!
+                   {:seon.sci.eval/row-member namespace-name
                     :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
                      :seon.error.evidence/value cause-message}
                     :seon.error/message message
                     :seon.ns/name namespace-name
                     :seon.error/expected ::loaded-host-namespace
                     :seon.error/data {:seon.sci.eval/cause-class (symbol (.getName (class underlying)))
-                                      :seon.sci.eval/cause-location location-data}}]
+                                      :seon.sci.eval/cause-location location-data}})]
               (throw (ex-info message diagnostic failure)))))
         (or (find-ns namespace-name)
             (throw
              (ex-info
               (str "First-party program namespace " namespace-name
                    " loaded without defining a namespace.")
-              {:seon.error/at (java.util.Date.)
-                :seon.error/layer :seon.sci.eval/program
-                :seon.error/operation 'seon.sci.eval/host-namespace!
-                :seon.error/message "Loaded source defined no namespace; correct its namespace declaration."
+              (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/host-namespace!
+               {:seon.error/message "Loaded source defined no namespace; correct its namespace declaration."
                 :seon.error/offending namespace-name
                 ::row-member namespace-name
                 ::acquisition-observation {:seon.error.evidence/attribute :seon.error/message
                                            :seon.error.evidence/value "Loaded source defined no namespace."}
                 :seon.error/member :seon.ns/name
-                :seon.error/expected :seon.sci.eval/loaded-namespace}))))))
+                :seon.error/expected :seon.sci.eval/loaded-namespace})))))))
 
 (defn- load-core-namespaces!
   "The effectful cluster caller loads the running program's JVM namespaces
@@ -1521,14 +1505,12 @@
 (defn- documentation-unavailable
   {:malli/schema [:=> [:cat :symbol] :seon.sci.eval/documentation-unavailable-error]}
   [requested]
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.sci.eval/program
-    :seon.error/operation 'seon.sci.eval/documentation-unavailable
-    :seon.error/message "No public documentation is available; request an installed public declaration."
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/documentation-unavailable
+   {:seon.error/message "No public documentation is available; request an installed public declaration."
     :seon.error/offending requested
     ::documentation-unavailable requested
     :seon.error/member :seon.fn/sym
-    :seon.error/expected :seon.sci.eval/public-documentation})
+    :seon.error/expected :seon.sci.eval/public-documentation}))
 
 (defn- declaration-statement
   "The sentence `doc` and `dir` show in place of a declaration this row lacks."
@@ -1544,13 +1526,11 @@
    nothing, which is a claim the row does not support (AGENTS.md section 2.4)."
   {:malli/schema [:=> [:cat :qualified-keyword] :seon.sci.eval/declaration-absent-error]}
   [attribute]
-  {:seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.sci.eval/program
-    :seon.error/operation 'seon.sci.eval/declaration-absent
-    :seon.error/message "The program row lacks a declaration; supply the declared member before relying on it."
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/declaration-absent
+   {:seon.error/message "The program row lacks a declaration; supply the declared member before relying on it."
     :seon.error/offending attribute
     ::missing-declaration attribute
-    :seon.error/expected :seon.sci.eval/present-declaration})
+    :seon.error/expected :seon.sci.eval/present-declaration}))
 
 (defn docstring-parts
   "Split a declared docstring into its summary, body, and final Example section."
@@ -1773,10 +1753,8 @@
     (if (:seon.sci.eval/refused-function failure-data)
       failure-data
       (cond->
-       {:seon.error/at (java.util.Date.)
-      :seon.error/layer ::acquisition
-      :seon.error/operation 'seon.sci.eval/acquisition-refusal
-      :seon.sci.eval/row-member (second identity)
+       (seon.error.refusal/diagnostic (java.util.Date.) ::acquisition 'seon.sci.eval/acquisition-refusal
+        {:seon.sci.eval/row-member (second identity)
       :seon.sci.eval/acquisition-observation {:seon.error.evidence/attribute :seon.error/message
        :seon.error.evidence/value cause-message}
       :seon.error/message "Program row could not be installed; correct the reported acquisition evidence."
@@ -1785,7 +1763,7 @@
         failure-data (assoc ::acquisition-failure failure-data)
         (instance? Throwable failure)
         (assoc ::acquisition-throwable-class (.getName (class failure))))
-      :seon.error/expected ::installed}
+      :seon.error/expected ::installed})
        (instance? Throwable failure)
        (assoc :seon.error/chain (error.refusal/chain failure))))))
 
@@ -2843,13 +2821,11 @@
                 (throw
                  (ex-info
                   "Schema deletion did not unregister its reader identity."
-                  {:seon.error/at (java.util.Date.)
-                    :seon.error/layer :seon.sci.eval/program
-                    :seon.error/operation 'seon.sci.eval/declared-row
-                    :seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
+                  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/declared-row
+                   {:seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
                     :seon.error/offending schema-value
                     ::schema-refused unregister-key
-                    :seon.error/expected :seon.sci.eval/registered-reader-identity})))
+                    :seon.error/expected :seon.sci.eval/registered-reader-identity}))))
               ;; Dependency validation is pure here. Current database data
               ;; is fenced by the terminal transaction against db-before.
               (schema/projection-without-schema projection unregister-key)
@@ -2861,13 +2837,11 @@
                 (throw
                  (ex-info
                   "Schema declaration did not register its reader identity."
-                  {:seon.error/at (java.util.Date.)
-                    :seon.error/layer :seon.sci.eval/program
-                    :seon.error/operation 'seon.sci.eval/declared-row
-                    :seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
+                  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/declared-row
+                   {:seon.error/message "Evaluated schema identity differs from its declaration; return the declared identity."
                     :seon.error/offending schema-value
                     ::schema-refused schema-key
-                    :seon.error/expected :seon.sci.eval/registered-reader-identity})))
+                    :seon.error/expected :seon.sci.eval/registered-reader-identity}))))
               ;; Validate the actual evaluated value while the overlay is
               ;; isolated. The terminal transaction repeats this pure
               ;; candidate validation against its mid-transaction db value.
