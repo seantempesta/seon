@@ -168,3 +168,57 @@ shared from-zero/publication notes.
   mcp-and-stop patch's scope.
 
 RESET NEEDED: no.
+
+## Follow-ups (2026-09-23, after ed62a3e06)
+
+| Commit | Change | Proof |
+|---|---|---|
+| `0913df3c7` | P0 0j: host wrapper validates with a supplied projection only when it carries the Var's armed contract and declares every schema the contract closes over; else the armed (files') declarations | Existing-store repro `tmp/wrapper-profiling/root-move` (bfcce39ad from zero, then resumed at HEAD): at ed62a3e06 the resume logged `:malli.core/invalid-schema` faults (01:14–01:15Z, `seon.schema/projection-cache-value`, armed `seon.profile/cell` compiled against the cluster projection, which lacks `:seon.profile/identity`) and `init --dev` refused with `seon.db/write-render-target-error refused argument count … got 2` (stored 1-arity contract vs loaded 2-arity). With the fix: no new invalid-schema occurrence, `init --dev` completes (37,960 ms), armed 1,824 = armable. Regression `a-handed-projection-without-the-contracts-declarations-uses-the-loaded-ones`. Handed-path armed call median 3.77 µs parent vs 3.94 µs (noise band) |
+| `56c0941af` | MCP blob-only results (owner's patch) | read_only 5,000-element probe: commit-id before = after; `mcp-get-value` pages it after a restart; unknown digest → typed `value-not-found` |
+| `ac7b61eb4` | `seon.turn/phase` rethrows InterruptedException | REPL: rethrown `identical?`; ex-info → phase-failed value |
+| `225d0059c` | 24v: `runtime_status`/`bin/seon status` carry `:seon.dev.mcp/replaced-roots` | 4,481 defn rows, `[]` at rest, 55 ms; with-redefs of `seon.id/valid?` named with class `user$eval…`; regression `a-root-replaced-outside-a-reload-is-named` |
+| `cdbc1434b` | summary lines say "inclusive" | `reads-rank-…` expects the labelled line |
+
+Tests on scratch `root` after adoption + restart: run `ebc9ad6898f3` (7 instrument members incl. both new regressions) 32 pass; run `9eb030481076` profile ns 27 pass.
+
+### P0 0j classes, as observed
+
+1. `Cannot interpret my.agents.root/largest: :malli.core/invalid-schema` — caused by
+   ed62a3e06 (armed host `seon.profile/*` inside `wrap-interpreted`, compiled
+   against the retained cluster projection); fixed in `0913df3c7`.
+2. `The loaded JVM has no core definition seon.*-test/...` and `Cannot interpret
+   seon.cluster.reload-measure/-main: Host-bound declaration …` — produced by SCI
+   acquisition (`src/seon/sci/eval.clj:2113-2122`, `:994-1006`) and made fatal by
+   `src/seon/cluster/agent.clj:885-888` (`arm!` throws on any acquisition refusal);
+   ed62a3e06 changes neither. Reproduced on scratch after every development
+   adoption (a restart clears it); M9 owns it. Recording those refusals is itself
+   slow (`record-acquisition-refusals!` 7–36 s in the writer).
+
+### The 10 armed-red `seon.instrument-test` members (red on the armed parent too)
+
+- Fixture rows missing `:seon.program/definition-digest` (`test_support.clj:746`,
+  `seon.fn/source-rows` refuses the namespace row): `a-sci-only-arity-miss-…`,
+  `host-diagnostics-use-the-loaded-vars-arglists`,
+  `sci-installed-contracts-enforce-…`, likely `a-sovereign-sci-fork-…` — retired
+  assumption in the fixture (B1 made the digest required): the canonical
+  `program-fn-row`/namespace-row helpers must assoc
+  `(seon.program/definition-digest row)`; realities' file.
+- "A different SCI context is already armed on this thread": `a-deadline-firing-…`,
+  `an-invalid-refusal-retains-…`, `hot-sci-declared-schema-check-measurement` —
+  wanted behaviour of a surviving seam (armed host calls inside an SCI arm);
+  `seon.sci.kernel`'s owner; not investigated further.
+- `an-error-shaped-argument-…`, `instrumentation-observations-…-class-stamps`,
+  `the-caller-frame-…`: the refusal is not the one the test expects (another armed
+  boundary refuses first, or the test Var is unarmed when its namespace loads after
+  boot arming). Unclassified: needs a per-test trace. Not fixed.
+
+### Follow-up timings over 1 s
+
+| Operation | Wall ms | Note |
+|---|---:|---|
+| bfcce39ad from-zero scratch start | 160,460 (ready 120,326) | from-zero publication; DEFECT |
+| Resume at HEAD on that store | 143,950; later 51,428 / 54,130 / 99,200 | publication of changed files; DEFECT |
+| `init --dev` after the fix | 37,960 | development adoption of the whole program; DEFECT |
+| Hook adoption of 9 files | 14,026 | `development-source-refresh!` 13,170 ms; DEFECT |
+| Test runs | 16,638–27,825 | selection-admission + acquisition per request |
+| Hung test runs after adoption | 150,090 / 162,320 | acquisition refusal recording in the writer; DEFECT (M9) |
