@@ -1,6 +1,7 @@
 (ns seon.cluster.mcp-test
   "The MCP surface shares Seon's admitted print-node value chain."
-  (:require [clojure.edn :as edn]
+  (:require [clojure.core.async :as async]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
@@ -558,3 +559,20 @@
         "All five artifact cases execute, with root retraction last.")
     (is (= 1 @fresh-stores)
         "Blob-global isolation requires exactly one fresh physical store.")))
+
+(deftest only-an-evaluation-that-changed-loaded-code-drops-cached-pages
+  ;; 24z: the page-cache signal follows evidence after the evaluation
+  ;; (Var/rev and namespace mappings), not the read_only flag alone.
+  (let [signal (fn [body]
+                 (let [channel (async/chan 1)]
+                   (cluster/project-next-prepl-value! {:seon.dev.mcp/read-only? false})
+                   (cluster/mcp-valf "mcp-signal-test" config/defaults (body) false [channel])
+                   (some? (async/poll! channel))))
+        probe (symbol (str "signal-probe-" (random-uuid)))
+        created (atom nil)]
+    (try
+      (is (false? (signal #(+ 1 2))) "a form that changes no code keeps cached pages")
+      (is (true? (signal #(reset! created (intern 'seon.cluster.mcp-test probe 1)))))
+      (is (true? (signal #(alter-var-root @created inc))))
+      (is (true? (signal #(ns-unmap 'seon.cluster.mcp-test probe))))
+      (finally (ns-unmap 'seon.cluster.mcp-test probe)))))

@@ -260,6 +260,36 @@
 (defonce ^:private mcp-projection
   (ThreadLocal.))
 
+(defn identity-hash-map?
+  "True for a java.util.IdentityHashMap."
+  {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
+  [value]
+  (instance? java.util.IdentityHashMap value))
+
+(defn loaded-code-mark
+  "This JVM's loaded-code identity: `clojure.lang.Var/rev`, which every Var
+  creation and root change advances (`Var.java:78,188,282-314`), and each
+  namespace's mappings map, which an intern or unmap replaces."
+  {:malli/schema [:=> [:cat] [:tuple :int [:fn {:error/message "must be an IdentityHashMap"}
+                                           seon.cluster/identity-hash-map?]]]}
+  []
+  (let [mappings (java.util.IdentityHashMap.)]
+    (doseq [^clojure.lang.Namespace namespace-object (all-ns)]
+      (.put mappings namespace-object (.getMappings namespace-object)))
+    [clojure.lang.Var/rev mappings]))
+
+(defn loaded-code-changed?
+  "True when this JVM's loaded code differs from `mark` (`loaded-code-mark`)."
+  {:malli/schema [:=> [:cat [:tuple :int [:fn seon.cluster/identity-hash-map?]]] :boolean]}
+  [[rev ^java.util.IdentityHashMap mappings]]
+  (let [[now-rev ^java.util.IdentityHashMap now-mappings] (loaded-code-mark)]
+    (boolean
+     (or (not= rev now-rev)
+         (not= (.size mappings) (.size now-mappings))
+         (some (fn [[namespace-object current]]
+                 (not (identical? current (.get mappings namespace-object))))
+               now-mappings)))))
+
 (defn project-next-prepl-value!
   "Mark the next PREPL return with explicit projection and read-only intent.
   Unspecified intent conservatively announces possible runtime changes.
@@ -274,11 +304,12 @@
                                [:seon.dev.mcp/read-only? {:optional true} :boolean]]]] :nil]]}
   ([] (project-next-prepl-value! false))
   ([request]
-   (.set mcp-projection
-         (assoc (if (map? request)
-                  request
-                  {:seon.dev.mcp/evaluation? request})
-                :seon.profile/mark (profile/begin)))
+   (let [request (if (map? request) request {:seon.dev.mcp/evaluation? request})]
+     (.set mcp-projection
+           (cond-> (assoc request :seon.profile/mark (profile/begin))
+             ;; Only an evaluation that may change code pays for the mark.
+             (not (:seon.dev.mcp/read-only? request))
+             (assoc ::loaded-code-mark (loaded-code-mark)))))
    nil))
 
 (defn- consume-mcp-projection!
@@ -495,8 +526,10 @@
   ([cluster-name bootstrap-effective value exception? runtime-eval-channels]
    (let [projection (consume-mcp-projection!)]
      (try
-       ;; A host evaluation may replace Vars used by any cohosted cluster.
-       (when-not (:seon.dev.mcp/read-only? projection)
+       ;; A host evaluation that defined, redefined or unmapped a Var may
+       ;; change what any cohosted cluster's pages render; one that changed no
+       ;; loaded code (the evidence, not the flag) keeps every cached page.
+       (when (some-> (::loaded-code-mark projection) loaded-code-changed?)
          (doseq [channel runtime-eval-channels]
            (async/offer! channel
                          :seon.render.web/runtime-eval)))
