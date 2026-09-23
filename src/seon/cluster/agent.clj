@@ -90,6 +90,7 @@
             [seon.sci.reader :as reader]
             [seon.schema.edn :as schema.edn])
   (:import [java.util Date LinkedList]
+           [java.util.concurrent ExecutorService]
            [java.util.concurrent.atomic AtomicReference]))
 
 ;;; ---------------------------------------------------------------------------
@@ -550,8 +551,7 @@
   ;; which cluster and which agent it belongs to.
   (let [environment (env/scope (env/of handle)
                                {:seon.agent/id agent-id})]
-    (cond->
-     {:procs
+    {:procs
       {:seon.agent/mailbox
        {:proc (seon.flow/var-process
                #'mailbox-step :io
@@ -575,9 +575,7 @@
                            :seon.schedule/channel
                            (:seon.schedule/channel handle)}
                           environment))}}
-      :conns [[[:seon.agent/mailbox :seon.agent/episode] [:seon.agent/turn :seon.agent/episode]]]}
-      (:seon.flow/executor handle)
-      (assoc :io-exec (:seon.flow/executor handle)))))
+     :conns [[[:seon.agent/mailbox :seon.agent/episode] [:seon.agent/turn :seon.agent/episode]]]}))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The routing entry and the lifecycle
@@ -934,6 +932,8 @@
                     (catch Throwable cleanup (.addSuppressed failure cleanup))))
              (throw failure))))))))
 
+(declare disarm!)
+
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
   Idempotent per agent (an armed agent is left alone — the armer's
@@ -959,6 +959,17 @@
     agent-id :seon.agent/id
     routing :seon.agent/routing}]
   (locking routing
+   ;; A previous graph whose stop missed its deadline keeps its entry: its
+   ;; executor's termination is the exit fact, so no new graph overlaps it.
+   (when-let [^ExecutorService previous
+              (:seon.flow/executor (armed routing agent-id))]
+     (when (.isShutdown previous)
+       (if (.isTerminated previous)
+         (disarm! {:seon.agent/id agent-id :seon.agent/routing routing})
+         (throw (ex-info "arm! refused: the agent's previous graph has not exited."
+                         {:seon.error/message "arm! refused: the agent's previous graph has not exited."
+                          :seon.agent/id agent-id
+                          :seon.error/expected :seon.agent/graph-exited})))))
    (or (armed routing agent-id)
       (let [connection (:seon.db/connection handle)
             eid (db/q '[:find ?agent .
@@ -974,7 +985,6 @@
             wake-ch (wake-channel)
             schedule-channel (async/chan (async/sliding-buffer 1))
             completion (async/chan 1)
-            turn-stopped (async/promise-chan)
             turn-backstop-state (atom nil)
             settings (merge (config/effective @connection (:seon.cluster/name handle))
                             (ai/agent-overlay @connection agent-id))
@@ -995,11 +1005,13 @@
                                 :seon.agent/turn-backstop-state turn-backstop-state
                                 :seon.config.agent/turn-completion-backstop-ms
                                 turn-completion-backstop-ms
-                                :seon.agent/turn-stopped turn-stopped
                                 :seon.agent/turn-thread (AtomicReference.))
-            {graph :seon.flow/graph started :seon.flow/started}
+            {graph :seon.flow/graph started :seon.flow/started
+             executor :seon.flow/executor}
             (seon.flow/start-graph!
-             {:seon.flow/graph-definition
+             {:seon.flow/projection-state
+              (:seon.sci.eval/projection-state agent-handle)
+              :seon.flow/graph-definition
               (graph-definition
                {:seon.turn.loop/cluster agent-handle
                 :seon.agent/id agent-id})
@@ -1015,11 +1027,14 @@
                    :seon.turn.loop/cluster agent-handle
                    :seon.flow/graph graph
                    :seon.flow/started started
+                   :seon.flow/executor executor
                    :seon.cluster.wake/channel wake-ch
                    :seon.schedule/channel schedule-channel
                    :seon.turn.loop/completion completion
                    :seon.agent/turn-backstop-state turn-backstop-state
-                   :seon.agent/turn-stopped turn-stopped}]
+                   ;; closed at the join; kept for branches whose schema still
+                   ;; requires the member (accretion, retired later)
+                   :seon.agent/turn-stopped (async/promise-chan)}]
         (swap! routing
                (fn [current]
                  (-> current
@@ -1062,7 +1077,7 @@
     run-id))
 
 (defn- turn-completion-failure!
-  "Publish and throw the loud failure for a turn that did not stop in bound."
+  "Publish and throw the loud failure for a graph that did not exit in bound."
   {:malli/schema [:=> [:cat :seon.agent/routing :map [:maybe :seon.turn/id]
                        [:int {:min 1}]]
                   :nil]}
@@ -1071,7 +1086,7 @@
         diagnostic
         (turn/turn-completion-error
          agent-id run-id timeout-ms :seon.agent/disarm :seon.agent/turn-completed
-         [:seon.agent/turn-stopped])
+         [:seon.agent/graph-exited])
         failure (ex-info (:seon.error/message diagnostic) diagnostic)
         fault
         (cond->
@@ -1088,44 +1103,6 @@
                (pr-str (ex-data failure)))
       (flush))
     (throw failure)))
-
-(defn- await-turn-completion!
-  "Await the turn proc's stop transition within the declared disarm bound.
-
-  The bound is `:seon.config.agent/turn-completion-backstop-ms`, the dial
-  that declares orderly disarm. The active work's own allowance is not added:
-  `disarm!` has interrupted that work, so its provider schedule or
-  evaluation limit no longer describes the wait. An active turn bound that
-  fires first is joined, so one stuck turn reports one failure. Returns the
-  terminal stop value; a bound firing throws and leaves the entry armed so
-  disarm can be retried."
-  {:malli/schema [:=> [:cat :seon.agent/routing :map] :keyword]}
-  [routing entry]
-  (let [turn-stopped (:seon.agent/turn-stopped entry)]
-    (if-some [terminal (async/poll! turn-stopped)]
-      terminal
-      (let [agent-id (:seon.agent/id entry)
-            {connection :seon.db/connection
-             timeout-ms :seon.config.agent/turn-completion-backstop-ms}
-            (:seon.turn.loop/cluster entry)
-            run-id (open-turn! connection agent-id)
-            backstop (async/timeout timeout-ms)
-            failure-channel
-            (some-> (:seon.agent/turn-backstop-state entry)
-                    deref
-                    :seon.agent/failure-channel)]
-        (loop [ports (cond-> [turn-stopped]
-                       failure-channel (conj failure-channel)
-                       true (conj backstop))]
-          (let [[value selected] (async/alts!! ports :priority true)]
-            (cond
-              (= selected turn-stopped) value
-              (= selected backstop)
-              (turn-completion-failure! routing entry run-id timeout-ms)
-              ;; the active turn's own bound fired: join its failure
-              (some? value) (throw value)
-              ;; the active bound was cancelled by a completed pass
-              :else (recur (filterv #(not= % selected) ports)))))))))
 
 (defn- cancel-turn-backstop!
   "Cancel the active turn bound an interrupted transform left armed.
@@ -1172,19 +1149,19 @@
 
 (defn disarm!
   "Orderly stop of one agent's graph, idempotent.
-  Request stop, INTERRUPT the in-flight turn transform, and await the turn
-  proc's stop acknowledgement before dropping its routing entry or closing
-  channels. Interrupted execution never resumes: an in-flight provider call,
+  Request stop, INTERRUPT the in-flight turn transform, and join the graph's
+  executor (every proc loop exited) before dropping its routing entry or
+  closing channels. Interrupted execution never resumes: an in-flight provider call,
   evaluation wait or transaction wait unwinds instead of running to its end,
   and the open turn is then closed with its unfinished evaluations stamped
   interrupted by the writer function boot recovery uses. An idle completion
   permit is not a stop acknowledgement: Flow may already have selected the
-  next wake. Only the stop transition proves no later transform can write
-  after cleanup. The wait is bounded by the declared disarm allowance,
-  `:seon.config.agent/turn-completion-backstop-ms`. Host work that ignores
-  the interrupt keeps its thread until it returns; a proc that never starts
-  or never exits refuses teardown loudly, naming the agent and open turn, and
-  the entry remains so disarm can be retried. Stop drops conn contents —
+  next wake. Only the exited proc threads prove no later transform can write
+  after cleanup. The wait spends the caller's `:seon.await/deadline-nanos`,
+  else the declared allowance `:seon.config.agent/turn-completion-backstop-ms`.
+  Host work that ignores the interrupt keeps its thread until it returns; a
+  graph that does not exit refuses teardown loudly, naming the agent and open
+  turn, and the entry remains: `arm!` refuses until the executor terminates. Stop drops conn contents —
   safe by the transport law; triggers are rows and survive.
 
   THE ORDER OF THE LAST STEPS IS LOAD-BEARING, not stylistic: completion is
@@ -1198,12 +1175,27 @@
   would become a guess."
   {:malli/schema [:=> [:cat :seon.agent/disarm-request] :nil]}
   [{agent-id :seon.agent/id
-    routing :seon.agent/routing}]
+    routing :seon.agent/routing
+    deadline-nanos :seon.await/deadline-nanos}]
   (locking routing
    (when-let [entry (armed routing agent-id)]
-    (flow/stop (:seon.flow/graph entry))
-    (interrupt-turn! entry)
-    (await-turn-completion! routing entry)
+    (let [{connection :seon.db/connection
+           timeout-ms :seon.config.agent/turn-completion-backstop-ms}
+          (:seon.turn.loop/cluster entry)]
+      (flow/stop (:seon.flow/graph entry))
+      (interrupt-turn! entry)
+      (when (seon.flow/join-graph!
+             (into
+              (select-keys entry [:seon.flow/executor])
+              {:seon.await/bound
+              {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+               :seon.await/config-value timeout-ms
+               :seon.await/deadline-nanos
+               (or deadline-nanos (+ (System/nanoTime) (* 1000000 timeout-ms)))}
+              :seon.await/diagnostic {:seon.error/layer :seon.agent/agent-graph
+                                      :seon.error/operation `disarm!
+                                      :seon.error/expected :seon.agent/graph-exited}}))
+        (turn-completion-failure! routing entry (open-turn! connection agent-id) timeout-ms)))
     (cancel-turn-backstop! entry)
     (record-interruption! entry)
     (swap! routing
@@ -1214,7 +1206,7 @@
                          (:seon.agent/eid entry)))))
     (async/close! (:seon.cluster.wake/channel entry))
     (async/close! (:seon.turn.loop/completion entry))
-    (async/close! (:seon.agent/turn-stopped entry))))
+    (some-> (:seon.agent/turn-stopped entry) async/close!)))
   nil)
 
 ;;; ---------------------------------------------------------------------------
@@ -1254,8 +1246,7 @@
   Coalescing on its sliding-1 in-port is safe by the standard argument.
   L8 holds by construction: arming writes nothing, and the prime is an
   `offer!`. A quiescence request acknowledges that every earlier arm wake
-  has settled before cluster teardown disarms agent graphs. The stop
-  transition publishes the cluster graph's completion."
+  has settled before cluster teardown disarms agent graphs."
   {:malli/schema [:function [:=> [:cat] [:map]] [:=> [:cat :map] :map] [:=> [:cat :map :keyword] :map] [:=> [:cat :map :keyword :seon.schema/value] [:tuple :map [:maybe [:map-of :keyword [:vector [:some {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "core.async.flow supplies per-port messages of different declared shapes and accepts heterogeneous non-nil output messages; the port determines each message contract.", :gen/elements [false 0 "" :k [] {}]}]]]]]]]}
   ([]
    {:ins {}
@@ -1293,10 +1284,6 @@
      (async/offer! (:seon.cluster.wake/channel
                     (:seon.turn.loop/cluster state))
                    :seon.agent/arm-prime))
-   (when (= ::flow/stop transition)
-     (async/put! (:seon.turn.loop/completion
-                  (:seon.turn.loop/cluster state))
-                 :seon.agent/stopped))
    state)
   ([state _input message]
    (cond

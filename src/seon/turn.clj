@@ -5495,12 +5495,7 @@
                    (select-keys state [:seon.turn/id]))})
   ([args]
    args)
-  ([state transition]
-   (when (= ::flow/stop transition)
-     (async/offer!
-      (:seon.agent/turn-stopped
-       (:seon.turn.loop/cluster state))
-      :seon.agent/stopped))
+  ([state _transition]
    state)
   ([state _input _message]
    (let [cluster (:seon.turn.loop/cluster state)

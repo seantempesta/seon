@@ -76,19 +76,7 @@
                        @faults ::backstop-fault
                        #(= :seon.agent/turn-completion-backstop (::flow/op %))
                        observation-ms)
-                joined (future (try
-                          (#'agent/await-turn-completion!
-                           (atom {:seon.agent/fault-channel @faults})
-                           {:seon.agent/id "missing-evaluation"
-                            :seon.agent/turn-stopped (async/promise-chan)
-                            :seon.agent/turn-backstop-state state
-                            :seon.turn.loop/cluster {:seon.db/connection connection}})
-                          nil
-                          (catch clojure.lang.ExceptionInfo failure failure)))
-                failure (test-support/await-event! joined ::backstop-joined
-                                                   (constantly true) observation-ms)]
-            (is (identical? (::flow/ex fault) failure)
-                "The join reports the exact fault the observer published.")
+                failure (::flow/ex fault)]
             (is (str/includes? (ex-message failure) message))
             (is (= 200 (:seon.config.agent/turn-completion-backstop-ms (ex-data failure)))))))))))
 

@@ -41,7 +41,7 @@
             [seon.render.web :as web]
             [seon.test-support :as test-support])
   (:import [java.util Date]
-           [java.util.concurrent CountDownLatch Executor]))
+           [java.util.concurrent CountDownLatch]))
 
 (def ^:private test-environment
   ;; The subset environment (store layer only) every crossing this
@@ -401,7 +401,7 @@
                       database run-id)]
             (is (string? run-id))
             (is (= source (:seon.cluster.eval/source evaluation)))
-            (is (nil? (db/entity database [:seon.fn/sym (str function-symbol)])))
+            (is (nil? (db/entity database [:seon.fn/sym function-symbol])))
             (is (nil? (sci/resolve ctx function-symbol)))
             (is (str/includes?
                  (repl/response (assoc evaluation :seon.ns/name
@@ -570,18 +570,6 @@
                   :seon.cluster.reply/text "(+ 2 2)"})]
             (is (= :seon.turn/agent-already-running (:seon.turn/rule refusal))
                 "the transaction authority refuses a second open run")))))))
-
-(deftest graph-definition-inherits-the-cluster-io-executor
-  (with-connection
-    (fn [connection ctx]
-      (let [_ (test-support/transacted! connection [(config-row "executor-proof" {})])
-            executor (reify Executor (execute [_ _]))
-            definition
-            (agent/graph-definition
-             {:seon.turn.loop/cluster
-              (assoc (handle connection ctx "executor-proof") :seon.flow/executor executor)
-              :seon.agent/id "executor-proof"})]
-        (is (identical? executor (:io-exec definition)))))))
 
 (deftest prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound
   (with-connection
@@ -800,85 +788,6 @@
         (is (= {:routed? false :armed? false} @observed)
             "the route is already absent when orderly teardown closes")))))
 
-(defn- withheld-turn-trial
-  [connection ctx routing original-definition agent-id]
-  (let [tasks (atom [])
-        executor
-        (reify Executor
-          (execute [_ task]
-            (swap! tasks conj task)))
-        take-result (async/promise-chan)]
-    (with-redefs
-      [agent/graph-definition
-       (fn [request]
-         (let [definition (original-definition request)]
-           (assoc definition
-                  :io-exec executor
-                  :procs (select-keys (:procs definition) [:seon.agent/turn])
-                  :conns [])))]
-      (let [entry (arm-one! connection ctx routing "withheld-turn" agent-id)
-            turn-stopped (:seon.agent/turn-stopped entry)
-            observed-stop
-            (reify
-              async.impl/ReadPort
-              (take! [_ handler]
-                (let [result (async.impl/take! turn-stopped handler)]
-                  (async/put! take-result (some? result))
-                  result))
-
-              async.impl/WritePort
-              (put! [_ value handler]
-                (async.impl/put! turn-stopped value handler))
-
-              async.impl/Channel
-              (close! [_]
-                (async.impl/close! turn-stopped))
-              (closed? [_]
-                (async.impl/closed? turn-stopped)))
-            _ (swap! routing assoc-in
-                     [:seon.agent/armed agent-id :seon.agent/turn-stopped]
-                     observed-stop)
-            stopped
-            (future
-              (agent/disarm! {:seon.agent/id agent-id
-                              :seon.agent/routing routing}))
-            observation
-              (try
-                {:seon.cluster.agent-test/runnable-count (count @tasks)
-                 :seon.cluster.agent-test/stop-ready?
-                 (test-support/await-event! take-result ::parked-turn-stop)
-                 :seon.cluster.agent-test/disarm-pending? (not (realized? stopped))}
-                (finally
-                  (doseq [^Runnable task @tasks]
-                    (.run task))
-                  (test-support/await-event! stopped ::withheld-turn-disarmed)))]
-          (assoc observation :seon.cluster.agent-test/disarm-completed?
-                 (realized? stopped))))))
-
-(deftest disarm-waits-for-the-turn-proc-stop-transition
-  (let [acquisitions (atom 0)
-        trial withheld-turn-trial]
-    (with-redefs [withheld-turn-trial
-                  (fn [& args] (swap! acquisitions inc) (apply trial args))]
-      (with-connection
-        (fn [connection ctx]
-          (let [routing (armory)
-                agent-id "withheld-turn-0"
-                original-definition agent/graph-definition]
-            (test-support/transacted! connection
-                                      (conj (created-agent-tx connection "withheld-turn" agent-id)
-                                            (config-row "withheld-turn" {})))
-            (let [result (withheld-turn-trial
-                          connection ctx routing original-definition agent-id)]
-              (is (= 1 (:seon.cluster.agent-test/runnable-count result))
-                  "Flow admits exactly one turn runnable without starting it.")
-              (is (false? (:seon.cluster.agent-test/stop-ready? result))
-                  "The queued proc has not acknowledged stop before running.")
-              (is (true? (:seon.cluster.agent-test/disarm-pending? result)))
-              (is (true? (:seon.cluster.agent-test/disarm-completed? result))
-                  "Executing the admitted runnable completes disarm."))))))
-    (is (= 1 @acquisitions))))
-
 (defn- provider-backstop-config
   [cluster-name turn-completion-backstop-ms]
   (config-row
@@ -1037,11 +946,23 @@
                 (is (= agent-id (:seon.agent/id fault)))
                 (is (= run-id (:seon.turn/id fault)))
                 (is (some? (agent/armed routing agent-id))
-                    "a fired backstop fails closed and leaves stop retryable"))
-              (.release release-provider)
-              (test-support/await-event!
-               (:seon.agent/turn-stopped entry)
-               ::released-provider-turn-stopped)
+                    "a fired backstop fails closed and leaves stop retryable")
+                (is (= :seon.agent/graph-exited
+                       (:seon.error/expected
+                        (test-support/refusal-data
+                         #(arm-one! connection ctx routing
+                                    "provider-backstop" agent-id))))
+                    "a restart refuses by name while the previous graph lives"))
+              ;; enough permits that no later turn of the restart blocks
+              (.release release-provider 1000)
+              (is (.awaitTermination ^java.util.concurrent.ExecutorService
+                                     (:seon.flow/executor entry)
+                                     5000 java.util.concurrent.TimeUnit/MILLISECONDS)
+                  "the released proc loops exit")
+              (let [restarted (arm-one! connection ctx routing
+                                        "provider-backstop" agent-id)]
+                (is (not (identical? entry restarted))
+                    "after exit a restart finishes teardown and arms a fresh graph"))
               (agent/disarm! {:seon.agent/id agent-id
                               :seon.agent/routing routing})
               (is (nil? (agent/armed routing agent-id)))
@@ -1207,7 +1128,7 @@
                             (db/pull database [:seon.turn/closed-tx]
                                      [:seon.turn/id run-id]))))
                 (is (nil? (db/entity database
-                                    [:seon.fn/sym "my.agents.install-gate-chain/gate-chain"]))))))
+                                    [:seon.fn/sym 'my.agents.install-gate-chain/gate-chain]))))))
           (finally
             (stop-database-events! connection events)
             (disarm-all! routing)))))))

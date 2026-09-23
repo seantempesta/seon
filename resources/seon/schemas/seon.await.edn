@@ -37,10 +37,13 @@
              [:or
               :seon.config.eval/time-limit-ms
               :seon.config.agent/turn-completion-backstop-ms]
+             :deadline-nanos
+             [:int {:description "The caller's one monotonic deadline (System/nanoTime): the configured bound measured from the public operation's entry, shared by every await that operation makes."}]
              :bound
              [:map
               [:seon.await/config-attribute :seon.await/config-attribute]
-              [:seon.await/config-value :seon.await/config-value]]
+              [:seon.await/config-value :seon.await/config-value]
+              [:seon.await/deadline-nanos {:optional true} :seon.await/deadline-nanos]]
              :diagnostic
              [:map
               [:seon.error/layer :seon.schema/value]

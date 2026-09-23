@@ -75,37 +75,35 @@
     (nil? value)))
 
 (defn- await-port-operations
-  {:malli/schema [:=> [:cat :seon.await/port-request :int]
+  {:malli/schema [:=> [:cat :seon.await/port-request :int :int]
                   [:or :seon.schema/value :seon.error/base
                    :seon.await/timeout-error :seon.await/closed-error]]}
   [{operations :seon.await/port-operations
     accept? :seon.await/accept?
-    {backstop-ms :seon.await/config-value} :seon.await/bound
-    :as request} started]
-  (let [deadline-nanos (+ started (* 1000000 backstop-ms))]
-    (loop [remaining-operations operations]
-      (if-let [backstop-ms (remaining-ms deadline-nanos)]
-        (let [operation (first remaining-operations)
-              backstop (async/timeout backstop-ms)
-              [value selected]
-              (async/alts!! [operation backstop] :priority true)]
-          (cond
-            (= selected backstop)
-            (timeout-observation request started)
+    :as request} started deadline-nanos]
+  (loop [remaining-operations operations]
+    (if-let [backstop-ms (remaining-ms deadline-nanos)]
+      (let [operation (first remaining-operations)
+            backstop (async/timeout backstop-ms)
+            [value selected]
+            (async/alts!! [operation backstop] :priority true)]
+        (cond
+          (= selected backstop)
+          (timeout-observation request started)
 
-            (closed-operation? operation value)
-            (diagnostic request
-                        {:seon.await/closed-operation (if (vector? operation) :put :take)
-                         :seon.await/operation-index (- (count operations) (count remaining-operations))})
+          (closed-operation? operation value)
+          (diagnostic request
+                      {:seon.await/closed-operation (if (vector? operation) :put :take)
+                       :seon.await/operation-index (- (count operations) (count remaining-operations))})
 
-            (next remaining-operations)
-            (recur (next remaining-operations))
+          (next remaining-operations)
+          (recur (next remaining-operations))
 
-            (and accept? (not (accept? value)))
-            (recur remaining-operations)
+          (and accept? (not (accept? value)))
+          (recur remaining-operations)
 
-            :else value))
-        (timeout-observation request started)))))
+          :else value))
+      (timeout-observation request started))))
 
 (defn await!
   "Await one exact completion event under its carried config fact.
@@ -115,6 +113,11 @@
   are raced with `timeout` through `alts!!`, preserving put/take semantics and
   one deadline across a sequential request/reply or filtered take. Java
   futures use their timed `get`, and Clojure promises use bounded `deref`.
+
+  A bound carrying `:seon.await/deadline-nanos` spends only the time left
+  before that one deadline, so the awaits of one operation compose; the
+  diagnostic still reports the configured bound and the elapsed time from
+  the operation's entry.
 
   Completion returns the event's value. Expiry or a port closing before the
   expected event returns one evidence-complete `:seon.error` value naming what
@@ -128,21 +131,25 @@
      :seon.await/timeout-error :seon.await/closed-error]]}
   [{java-future :seon.await/future
     blocking-deref :seon.await/blocking-deref
-    {backstop-ms :seon.await/config-value} :seon.await/bound
+    {backstop-ms :seon.await/config-value
+     deadline-nanos :seon.await/deadline-nanos} :seon.await/bound
     :as request}]
-  (let [started (System/nanoTime)]
+  (let [deadline-nanos (or deadline-nanos
+                           (+ (System/nanoTime) (* 1000000 backstop-ms)))
+        started (- deadline-nanos (* 1000000 backstop-ms))
+        remaining (or (remaining-ms deadline-nanos) 0)]
    (cond
     (:seon.await/port-operations request)
-    (await-port-operations request started)
+    (await-port-operations request started deadline-nanos)
 
     java-future
     (try
-      (.get ^Future java-future (long backstop-ms) TimeUnit/MILLISECONDS)
+      (.get ^Future java-future (long remaining) TimeUnit/MILLISECONDS)
       (catch TimeoutException _
         (timeout-observation request started)))
 
     blocking-deref
-    (let [value (deref blocking-deref (long backstop-ms) timed-out)]
+    (let [value (deref blocking-deref (long remaining) timed-out)]
       (if (identical? timed-out value)
         (timeout-observation request started)
         value)))))

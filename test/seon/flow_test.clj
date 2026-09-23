@@ -1,6 +1,5 @@
 (ns seon.flow-test
   (:require [clojure.core.async :as async]
-            [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
             [clojure.core.async.flow.impl.graph :as flow.graph]
             [clojure.core.async.flow-monitor :as flow-monitor]
@@ -9,6 +8,7 @@
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.db :as db]
+            [seon.fault :as fault]
             [datahike.core :as datahike]
             [malli.core :as m]
             [malli.generator :as mg]
@@ -90,6 +90,79 @@
         (flow/stop graph)
         (async/untap error-mult tap)
         (async/close! tap)))))
+
+;;; The join: a graph's own executor terminates only when every proc loop,
+;;; stop transition included, has returned.
+(defn- join-probe-step
+  ([] {:ins {::join-in "One message the transform holds until released."}
+       :outs {}
+       :workload :io})
+  ([args] (assoc args ::flow/in-ports {::join-in (::join-in args)}))
+  ([state _transition] state)
+  ([{::keys [entered release] :as state} _input _message]
+   (.countDown ^CountDownLatch entered)
+   (.await ^CountDownLatch release)
+   [state nil]))
+
+(defn- join-probe-graph!
+  [entered release]
+  (let [in (async/chan 1)]
+    (assoc (sut/start-graph!
+            {::sut/graph-definition
+             {:procs {::join-probe
+                      {:proc (sut/var-process #'join-probe-step :io
+                                              {:seon.env/environment @test-environment
+                                               ::join-in in
+                                               ::entered entered
+                                               ::release release})}}
+              :conns []}})
+           ::in in)))
+
+(defn- join-bound
+  [bound-ms]
+  {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+   :seon.await/config-value bound-ms
+   :seon.await/deadline-nanos (+ (System/nanoTime) (* 1000000 bound-ms))})
+
+(deftest stop-joins-the-graph-only-after-its-procs-exit
+  (let [entered (CountDownLatch. 1)
+        release (CountDownLatch. 1)
+        {::sut/keys [graph executor] ::keys [in]} (join-probe-graph! entered release)
+        diagnostic {:seon.error/layer :flow
+                    :seon.error/operation ::stop-joins
+                    :seon.error/expected ::join-probe-exited}]
+    (try
+      (async/>!! in ::hold)
+      (test-support/await-event! entered ::transform-entered)
+      (flow/stop graph)
+      (let [started (System/nanoTime)
+            busy (sut/join-graph! {::sut/executor executor
+                                   :seon.await/bound (join-bound 200)
+                                   :seon.await/diagnostic diagnostic})
+            elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+        (is (number? (:seon.await/elapsed-ms busy)) (pr-str busy))
+        (is (= ::join-probe-exited (:seon.error/expected busy))
+            "the expiry names the exit that did not arrive")
+        (is (<= 190 elapsed-ms 450) (str "the one deadline bounds the join: " elapsed-ms))
+        (is (not (.isTerminated ^java.util.concurrent.ExecutorService executor))
+            "a missed deadline keeps the live proc visible"))
+      (.countDown release)
+      (is (nil? (sut/join-graph! {::sut/executor executor
+                                  :seon.await/bound (join-bound 1000)
+                                  :seon.await/diagnostic diagnostic}))
+          "once the transform returns the stop transition runs and the loop exits")
+      (is (.isTerminated ^java.util.concurrent.ExecutorService executor))
+      (finally
+        (.countDown release)
+        (flow/stop graph)))))
+
+(deftest an-idle-graph-joins-at-once
+  (let [{::sut/keys [graph executor]} (join-probe-graph! (CountDownLatch. 1) (CountDownLatch. 1))]
+    (flow/stop graph)
+    (is (nil? (sut/join-graph! {::sut/executor executor
+                                :seon.await/bound (join-bound 1000)
+                                :seon.await/diagnostic {:seon.error/layer :flow
+                                                        :seon.error/operation ::idle-join}})))))
 
 (defn- install-test-work-launcher!
   [request]
@@ -442,16 +515,26 @@
                  :seon.config.flow.compute/queue-depth 1
                  :seon.config.flow.compute/concurrency 1
                  :seon.config.agent/turn-completion-backstop-ms 20)})
+        held (CountDownLatch. 1)
+        ;; an executor whose one task never returns stands for a proc that
+        ;; does not exit
+        stand-in (doto (java.util.concurrent.Executors/newVirtualThreadPerTaskExecutor)
+                   (.execute #(.await held)))
         result
         (sut/stop-work-launcher!
-         (assoc launcher ::sut/proc-stopped (promise)))]
-    (is (number? (:seon.await/elapsed-ms result)))
-    (is (= ::sut/work-launcher-proc-stopped
-           (get-in result
-                   [:seon.await/requested-member])))
-    (is (= :seon.config.agent/turn-completion-backstop-ms
-           (get-in result
-                   [:seon.await/config-attribute])))))
+         (assoc launcher ::sut/executor stand-in))]
+    (try
+      (is (number? (:seon.await/elapsed-ms result)))
+      (is (= ::sut/work-launcher-exited
+             (get-in result
+                     [:seon.await/requested-member])))
+      (is (= :seon.config.agent/turn-completion-backstop-ms
+             (get-in result
+                     [:seon.await/config-attribute])))
+      (finally
+        (.countDown held)
+        (.close ^java.util.concurrent.ExecutorService stand-in)
+        (.close ^java.util.concurrent.ExecutorService (::sut/executor launcher))))))
 
 (deftest submission-time-limit-covers-the-pre-start-wait
   (testing "paused before start"
@@ -654,13 +737,17 @@
       (test-support/await-event!
        stop-transition
        ::work-launcher-stop-transition)
-      (let [completed
-            (count (filter #(= ::sut/completed @(::sut/status %)) queued))]
-        (is (< completed queue-depth)
+      ;; the owner sets `::completed` before it delivers the result
+      ;; (flow.clj compute task), so the two counts are not one instant:
+      ;; a delivered result implies completed, and a completed one delivers
+      (let [completed (filterv #(= ::sut/completed @(::sut/status %)) queued)]
+        (is (< (count completed) queue-depth)
             "the stop transition completes without draining the flood")
-        (is (= completed
-               (count (filter #(realized? (::sut/result %)) queued)))
-            "only work selected before the stop tap became ready can finish"))
+        (is (every? #(= ::sut/completed @(::sut/status %))
+                    (filter #(realized? (::sut/result %)) queued))
+            "only work selected before the stop tap became ready can finish")
+        (is (every? #(not= ::missing (deref (::sut/result %) 1000 ::missing)) completed)
+            "every completed submission delivers its result"))
       (finally
         (.countDown release-resume)
         (alter-var-root step-var (constantly original-step))
@@ -842,12 +929,12 @@
             (finally
               (stop-database-events! connection transactions)
               (async/close! monitor-messages)
-              (sut/stop-error-fanout! fanout)
+              (sut/stop-error-fanout! fanout (join-bound 5000))
               (stop-source-testbed! testbed))))))))
 
 (deftest fault-committer-runs-with-the-projection-handed-at-construction
   (let [commit-core-fault!
-        (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+        fault/record!
         caps (assoc (config/result-caps
                      (test-support/effective-config))
                     :seon.config.eval.result/max-depth 8
@@ -913,7 +1000,7 @@
               (is (= :input (:seon.instrument/check stored))))
             (finally
               (stop-database-events! connection transactions)
-              (sut/stop-error-fanout! fanout)
+              (sut/stop-error-fanout! fanout (join-bound 5000))
               (stop-source-testbed! testbed))))))))
 
 (deftest fault-committer-own-error-channel-reaches-the-last-resort
@@ -946,13 +1033,13 @@
             (is (= ::sut/fault-committer (::flow/pid escaped)))
             (is (= :step (::flow/op escaped))))))
       (finally
-        (sut/stop-error-fanout! fanout)
+        (sut/stop-error-fanout! fanout (join-bound 5000))
         (stop-source-testbed! testbed)
         (async/close! losses)))))))
 
 (deftest core-fault-signatures-bound-durable-and-stderr-output
   (let [commit-core-fault!
-        (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+        fault/record!
         emit-core-fault!
         (var-get (ns-resolve 'seon.cluster 'emit-core-fault!))
         committer-step
@@ -991,7 +1078,6 @@
           (let [initial-state
                   (committer-step
                    {::sut/fault-channel (async/chan 1)
-                    ::sut/completion (async/promise-chan)
                     ::sut/read-core-error-mode (constantly :panic)
                     ::sut/commit-fault!
                     #(commit-core-fault! connection "fault-test" "process-1"
@@ -1058,7 +1144,6 @@
                   initial-state
                   (committer-step
                    {::sut/fault-channel (async/chan 1)
-                    ::sut/completion (async/promise-chan)
                     ::sut/read-core-error-mode (constantly :panic)
                     ::sut/commit-fault!
                     #(commit-core-fault! connection "fault-test" "process-3"
@@ -1119,7 +1204,6 @@
                 initial-state
                 (committer-step
                  {::sut/fault-channel (async/chan 1)
-                  ::sut/completion (async/promise-chan)
                   ::sut/read-core-error-mode (constantly :panic)
                   ::sut/commit-fault!
                   #(commit-core-fault! connection "fault-test" "process-2"
@@ -1189,28 +1273,13 @@
     (try
       (async/>!! (:error-chan started) (synthetic-core-fault 0))
       (test-support/await-event! commit-entered ::fault-commit-entered)
-      (let [awaiting-completion (CountDownLatch. 1)
-            completion (::sut/completion fanout)
-            observed-completion
-            (reify async.impl/ReadPort
-              (take! [_ handler]
-                (.countDown awaiting-completion)
-                (async.impl/take! completion handler))
-              async.impl/Channel
-              (close! [_] (async.impl/close! completion))
-              (closed? [_] (async.impl/closed? completion)))
-            stopped
-            (future
-              (sut/stop-error-fanout!
-               (assoc fanout ::sut/completion observed-completion)))]
-        (test-support/await-event!
-         awaiting-completion
-         ::fanout-awaiting-completion)
+      (let [stopped (future (sut/stop-error-fanout! fanout (join-bound 5000)))]
         (is (false? (realized? stopped))
             "the fanout keeps its database dependency while commit is active")
+        (is (not (.isTerminated ^java.util.concurrent.ExecutorService (::sut/executor fanout))))
         (.countDown finish-commit)
-        (is (true? (test-support/await-event! stopped ::fanout-stopped))
-            "the fault proc publishes completion after the commit returns"))
+        (is (nil? (test-support/await-event! stopped ::fanout-stopped))
+            "the fault graph exits after the commit returns"))
       (finally
         (.countDown finish-commit)
         (stop-source-testbed! testbed)))))
@@ -1337,7 +1406,7 @@
                              (committed-faults @connection)))))
             (finally
               (stop-database-events! connection transactions)
-              (sut/stop-error-fanout! fanout)
+              (sut/stop-error-fanout! fanout (join-bound 5000))
               (stop-source-testbed! testbed))))))))
 
 (deftest fault-tap-overflow-commits-a-queryable-drop-fact
@@ -1345,7 +1414,7 @@
     (test-support/with-database
       (fn [connection]
         (let [commit-core-fault!
-              (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+              fault/record!
               fault-buffer-capacity 2
               fault-count 5
               caps (assoc (config/result-caps
@@ -1420,7 +1489,7 @@
                 (is (pos? (:seon.sci.admit/bytes (edn/read-string message)))))
             (finally
               (stop-database-events! connection transactions)
-              (sut/stop-error-fanout! fanout)
+              (sut/stop-error-fanout! fanout (join-bound 5000))
               (stop-source-testbed! testbed))))))))
 
 (deftest ^{:seon.test/long
@@ -1587,7 +1656,7 @@
                  ::sut/commit-fault! (fn [_])
                  ::sut/commit-drop! (fn [_])
                  ::sut/panic! (fn [_])})
-               sut/stop-error-fanout!)
+               #(sut/stop-error-fanout! % (join-bound 5000)))
               monitor
               (test-support/closeable
                (flow-monitor/start-server {:flow (::sut/graph @fanout) :port 0})

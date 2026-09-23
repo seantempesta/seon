@@ -52,16 +52,15 @@
 ;; Graph definitions reference schedule execution and its root cleanup owner.
 ;; This census belongs to the ordinary tier under the same reach rule.
 (deftest every-built-graph-proc-declares-a-specific-workload
-  ;; the fault graph's io-exec wraps its work in the schema projection,
-  ;; so this census hands one over explicitly, like the production caller
+  ;; the fault committer carries the schema projection, so this census
+  ;; hands one over explicitly, like the production caller
   (test-support/with-database
     (fn [connection]
       (let [environment (test-support/environment
                          "seon.flow-configuration-test" connection)
             projection (:seon.schema/projection environment)
             compute-executor (sut/bounded-platform-executor 1)
-            fault-channel (async/chan)
-            completion (async/promise-chan)]
+            fault-channel (async/chan)]
         (try
           (let [graph-definitions
                 [[:work-launcher
@@ -74,21 +73,18 @@
                     ::sut/task-executor compute-executor
                     ::sut/io-parallelism 1
                     ::sut/io-queue-depth 1
-                    ::sut/io-submissions (atom {})
-                    ::sut/proc-stopped (promise)})]
+                    ::sut/io-submissions (atom {})})]
                  [:fault
                   ((private-var 'seon.flow 'fault-graph-definition)
                    ;; every declared member, exactly like the production
                    ;; caller (`start-error-fanout!`), the projection included
                    {:seon.env/environment environment
                     ::sut/fault-channel fault-channel
-                    ::sut/completion completion
                     ::sut/projection projection
                     ::sut/read-core-error-mode (constantly :record)
                     ::sut/commit-fault! identity
                     ::sut/commit-drop! identity
-                    ::sut/panic! identity}
-                   projection)]
+                    ::sut/panic! identity})]
                  [:cluster
                   ;; the render proc joins the census automatically: it is
                   ;; built through `var-process`, which refuses `:mixed` at
@@ -133,5 +129,4 @@
                 (pr-str proc-facts)))
           (finally
             (async/close! fault-channel)
-            (async/close! completion)
             (.shutdownNow ^ExecutorService compute-executor)))))))

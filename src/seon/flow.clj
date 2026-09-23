@@ -18,9 +18,10 @@
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
-  (:import [clojure.lang Counted]
+  (:import [clojure.lang Counted IBlockingDeref]
            [java.util LinkedList]
-           [java.util.concurrent Executor Executors Future FutureTask]
+           [java.util.concurrent Executor Executors ExecutorService Future FutureTask
+            ThreadFactory TimeUnit]
            [java.util.concurrent.atomic AtomicLong]))
 
 ;;; OPTIONAL LATE DEPENDENCY. `seon.operator.runtime` lives in
@@ -68,30 +69,84 @@
 (schema/register-core-predicate! 'seon.flow/channel? channel?)
 (schema/register-core-predicate! 'seon.flow/step-var? step-var?)
 
+(defn- graph-executor
+  "One graph's own proc-loop executor: a virtual thread per task, running in
+  the projection world the graph was handed. It is the join: after
+  `.shutdown`, `awaitTermination` is true only when every proc loop,
+  stop transition included, has returned
+  (`core.async/.../flow/impl.clj:29-36,262,323`)."
+  {:malli/schema [:=> [:cat [:map [::projection-state {:optional true} :seon.sci.eval/projection-state]
+                             [::projection {:optional true} :seon.schema/projection]]]
+                  ::executor]}
+  [{::keys [projection-state projection]}]
+  (Executors/newThreadPerTaskExecutor
+   (reify ThreadFactory
+     (newThread [_ runnable]
+       (.unstarted (Thread/ofVirtual)
+                   (cond
+                     projection-state
+                     #(schema/call-with-projection-state projection-state (fn [] (.run runnable)))
+                     projection
+                     #(schema/call-with-projection projection (fn [] (.run runnable)))
+                     :else runnable))))))
+
 (defn start-graph!
-  "Create, join declared fan-outs, and resume one Flow graph."
+  "Create one Flow graph on its own executor, join declared fan-outs, resume."
   {:malli/schema
    [:=>
     [:cat
      [:map
       [::graph-definition :map]
+      [::projection-state {:optional true} :seon.sci.eval/projection-state]
+      [::projection {:optional true} :seon.schema/projection]
       [::joins {:optional true}
        [:map-of :qualified-keyword :seon.flow/join!]]]]
     [:map
      [::graph ::graph]
      [::started ::started]
+     [::executor ::executor]
      [::joins :map]]]}
-  [{::keys [graph-definition joins]}]
-  (let [graph (flow/create-flow graph-definition)
+  [{::keys [graph-definition joins] :as request}]
+  (let [executor (graph-executor request)
+        graph (flow/create-flow (assoc graph-definition :io-exec executor))
         started (flow/start graph)
         construction {::graph graph
-                      ::started started}
+                      ::started started
+                      ::executor executor}
         joined (reduce-kv (fn [results join-key join!]
                             (assoc results join-key (join! construction)))
                           {}
                           (or joins {}))]
     (flow/resume graph)
     (assoc construction ::joins joined)))
+
+(defn join-graph!
+  "Join a stopped graph: every proc loop has returned before the deadline.
+
+  The caller has already sent `flow/stop`, which is a command, not a join
+  (`core.async/.../flow/impl.clj:174-183`). `.shutdown` admits no new loop;
+  the executor's termination is the exit fact. Returns nil once every loop
+  exited, or the typed timeout naming the graph that did not exit; the
+  executor keeps its threads, so a restart reads `.isTerminated` and refuses.
+  A graph started before its executor existed (a JVM that adopted this code
+  in place) has no join: its loops run on the shared `:io` pool, so stop stays
+  a command for it until the next start."
+  {:malli/schema [:=> [:cat [:map [::executor {:optional true} ::executor]
+                             [:seon.await/bound :seon.await/bound]
+                             [:seon.await/diagnostic :seon.await/diagnostic]]]
+                  [:or :nil :seon.await/timeout-error]]}
+  [{::keys [executor] :as request}]
+  (when-let [^ExecutorService executor executor]
+    (.shutdown executor)
+    (let [result (await/await!
+                  (assoc (select-keys request [:seon.await/bound :seon.await/diagnostic])
+                         :seon.await/blocking-deref
+                         (reify IBlockingDeref
+                           (deref [_ ms timeout-value]
+                             (if (.awaitTermination executor ms TimeUnit/MILLISECONDS)
+                               ::exited
+                               timeout-value)))))]
+      (when-not (= ::exited result) result))))
 
 ;;; Every generation makes a FRESH sample. One shared delayed object
 ;;; satisfied its predicate once but could never explore lifecycle or
@@ -523,9 +578,7 @@
             ::io-active-count 0
             ::flow/in-ports
             {::completion (async/chan (+ parallelism io-parallelism))})))
-  ([{::keys [proc-stopped] :as state} transition]
-   (when (= ::flow/stop transition)
-     (deliver proc-stopped ::stopped))
+  ([state _transition]
    state)
   ([{::keys [active-count active-work admission-buffer task-executor]
      :as state}
@@ -615,8 +668,7 @@
 
 (defn- work-launcher-graph-definition
   [{::keys [parallelism active-work queue-depth compute-executor
-            task-executor io-parallelism io-queue-depth io-submissions
-            proc-stopped]
+            task-executor io-parallelism io-queue-depth io-submissions]
     :as request}]
   (let [environment (env/of request)
         admission-buffer
@@ -637,8 +689,7 @@
           ::task-executor task-executor
           ::io-parallelism io-parallelism
           ::io-submissions io-submissions
-          ::io-admission-buffer io-admission-buffer
-          ::proc-stopped proc-stopped}
+          ::io-admission-buffer io-admission-buffer}
          environment))
        :chan-opts
        {::compute-submission {:buf-or-n admission-buffer}
@@ -674,7 +725,6 @@
         io-submissions (atom {})
         accepting? (atom true)
         drained (promise)
-        proc-stopped (promise)
         _
         (add-watch
          io-submissions
@@ -685,7 +735,7 @@
         root-executors
         (@operator-runtime-root-executors)
         task-executor (:io root-executors)
-        {::keys [graph started]}
+        {::keys [graph started executor]}
         (start-graph!
          {::graph-definition
           (work-launcher-graph-definition
@@ -696,7 +746,6 @@
              ::io-queue-depth io-queue-depth
              ::io-parallelism io-parallelism
              ::io-submissions io-submissions
-             ::proc-stopped proc-stopped
              ::compute-executor (:compute root-executors)
              ::task-executor task-executor}
             environment))})]
@@ -706,7 +755,7 @@
      ::io-submissions io-submissions
      ::accepting? accepting?
      ::drained drained
-     ::proc-stopped proc-stopped
+     ::executor executor
      ::compute-executor task-executor
      ::configuration configuration}))
 
@@ -715,7 +764,7 @@
   {:malli/schema
    [:=> [:cat :seon.flow/work-launcher]
     [:or :nil :seon.await/timeout-error]]}
-  [{::keys [graph accepting? io-submissions drained proc-stopped active-work
+  [{::keys [graph executor accepting? io-submissions drained active-work
             configuration]}]
   (when graph
     (reset! accepting? false)
@@ -738,11 +787,12 @@
           :seon.error/data {::launcher-stopped ::work-launcher}}}))
     (when (empty? @io-submissions)
       (deliver drained ::drained))
-    (let [bound
+    (let [backstop-ms (:seon.config.agent/turn-completion-backstop-ms configuration)
+          bound
           {:seon.await/config-attribute
            :seon.config.agent/turn-completion-backstop-ms
-           :seon.await/config-value
-           (:seon.config.agent/turn-completion-backstop-ms configuration)}
+           :seon.await/config-value backstop-ms
+           :seon.await/deadline-nanos (+ (System/nanoTime) (* 1000000 backstop-ms))}
           observation
           (fn [member]
             {:seon.error/layer :flow
@@ -758,15 +808,14 @@
             :seon.await/diagnostic (observation ::launcher-drained)
             :seon.await/blocking-deref drained})
           _ (flow/stop graph)
-          stopped-result
-          (await/await!
-           {:seon.await/bound bound
-            :seon.await/diagnostic (observation ::work-launcher-proc-stopped)
-            :seon.await/blocking-deref proc-stopped})]
-      (cond
-        (:seon.await/elapsed-ms drained-result) drained-result
-        (:seon.await/elapsed-ms stopped-result) stopped-result
-        :else nil))))
+          exited-result
+          (join-graph!
+           (cond-> {:seon.await/bound bound
+                    :seon.await/diagnostic (observation ::work-launcher-exited)}
+             executor (assoc ::executor executor)))]
+      (if (:seon.await/elapsed-ms drained-result)
+        drained-result
+        exited-result))))
 
 (defn submit!
   "Submit bounded IO work without waiting for its terminal callback.
@@ -1013,12 +1062,7 @@
           ::panicked 0
           ::lost 0
           ::seen-signatures #{}))
-  ([{::keys [completion] :as state} transition]
-   (when (= ::flow/stop transition)
-     ;; Flow observes this transition only after an active transform
-     ;; returns, so the marker joins an in-flight durable commit without
-     ;; inventing a clock.
-     (async/put! completion ::stopped))
+  ([state _transition]
    state)
   ([{::keys [read-core-error-mode commit-fault! commit-drop! panic!
              seen-signatures]
@@ -1120,20 +1164,6 @@
     (inject [_ coordinate messages]
       (flow.graph/inject graph coordinate messages))))
 
-(defn- projection-executor
-  [projection]
-  (let [^Executor delegate
-        (:io (@operator-runtime-root-executors))]
-    (reify Executor
-      (execute [_ command]
-        (.execute
-         delegate
-         ^Runnable
-         (fn []
-           (schema/call-with-projection
-            projection
-            #(.run ^Runnable command))))))))
-
 (defn- fault-loss-name
   [value]
   (str value))
@@ -1163,30 +1193,25 @@
   nil)
 
 (defn- join-fault-committer-errors!
-  [error-channel]
-  (let [completion (async/promise-chan)
-        ^Executor io-executor
-        (:io (@operator-runtime-root-executors))]
-    (.execute
-     io-executor
-     ^Runnable
-     (fn []
-       (try
-         (loop []
-           (when-some [escaped (async/<!! error-channel)]
-             (report-committer-loss! escaped)
-             (recur)))
-         (finally
-           (async/put! completion ::fault-committer-error-channel-closed)))))
-    completion))
+  "Drain the committer graph's own error channel on that graph's executor, so
+  the graph's join also joins this reader: it ends when `flow/stop` closes
+  the channel."
+  [^Executor executor error-channel]
+  (.execute
+   executor
+   ^Runnable
+   (fn []
+     (loop []
+       (when-some [escaped (async/<!! error-channel)]
+         (report-committer-loss! escaped)
+         (recur))))))
 
 (defn- fault-graph-definition
-  [request projection]
+  [request]
   {:procs
    {::fault-committer
     {:proc (fault-committer-proc request)}}
-   :conns []
-   :io-exec (projection-executor projection)})
+   :conns []})
 
 (defn start-error-fanout!
   "Own report/error fan-out for one already-started Flow graph.
@@ -1222,28 +1247,28 @@
         fault-channel
         (async/chan
          (counted-dropping-buffer fault-buffer-capacity))
-        completion (async/promise-chan)
+        ;; closed once the committer graph is joined; kept for branches whose
+        ;; schema still requires the member (accretion, retired later)
+        joined (async/promise-chan)
         {fault-graph ::graph
-         fault-joins ::joins}
+         executor ::executor}
         (start-graph!
-         {::graph-definition
+         {::projection projection
+          ::graph-definition
           (fault-graph-definition
            (env/carry
             {::fault-channel fault-channel
-             ::completion completion
+             ::completion joined
              ::projection projection
              ::read-core-error-mode read-core-error-mode
              ::commit-fault! commit-fault!
              ::commit-drop! commit-drop!
              ::panic! panic!}
-            environment)
-           projection)
+            environment))
           ::joins
           {::fault-committer-error-join
-           (fn [{::keys [started]}]
-             (join-fault-committer-errors! (:error-chan started)))}})
-        committer-error-completion
-        (::fault-committer-error-join fault-joins)
+           (fn [{::keys [started executor]}]
+             (join-fault-committer-errors! executor (:error-chan started)))}})
         monitor-view
         (monitor-graph
          graph monitor-report-channel monitor-error-channel)]
@@ -1260,8 +1285,9 @@
      ::monitor-report-channel monitor-report-channel
      ::monitor-error-channel monitor-error-channel
      ::fault-channel fault-channel
-     ::completion completion
-     ::committer-error-completion committer-error-completion}))
+     ::completion joined
+     ::committer-error-completion joined
+     ::executor executor}))
 
 (defn join-error-fanout!
   "Feed one more started graph's errors into an existing fan-out.
@@ -1292,21 +1318,23 @@
     completion))
 
 (defn stop-error-fanout!
-  "Detach and stop one error fan-out without stopping its source graph."
+  "Detach and stop one error fan-out without stopping its source graph.
+  The committer graph is joined before its caller can release the database
+  connection an active fault commit uses. Returns nil, or the typed timeout."
   {:malli/schema
-   [:=> [:catn [::fanout ::error-fanout]] :boolean]}
-  [{::keys [fault-graph report-mult error-mult completion
-            committer-error-completion
+   [:=> [:catn [::fanout ::error-fanout] [::bound :seon.await/bound]]
+    [:or :nil :seon.await/timeout-error]]}
+  [{::keys [fault-graph executor report-mult error-mult
             application-report-channel monitor-report-channel
-            monitor-error-channel fault-channel]}]
-  (let [stopped? (boolean (flow/stop fault-graph))]
-    ;; Join the proc's lifecycle event before its caller can release the
-    ;; database connection used by an active fault commit.
-    (async/<!! completion)
-    ;; The committer graph's own error channel is a source too. Its join ends
-    ;; only after Flow closes that channel, so no escaped last-resort report is
-    ;; abandoned during teardown.
-    (async/<!! committer-error-completion)
+            monitor-error-channel fault-channel completion]}
+   bound]
+  (flow/stop fault-graph)
+  (let [exited (join-graph!
+                (cond-> {:seon.await/bound bound
+                         :seon.await/diagnostic {:seon.error/layer :flow
+                                                 :seon.error/operation ::stop-error-fanout
+                                                 :seon.error/expected ::fault-graph-exited}}
+                  executor (assoc ::executor executor)))]
     (async/untap report-mult application-report-channel)
     (async/untap report-mult monitor-report-channel)
     (async/untap error-mult monitor-error-channel)
@@ -1314,4 +1342,5 @@
     (doseq [channel [application-report-channel monitor-report-channel
                      monitor-error-channel]]
       (async/close! channel))
-    stopped?))
+    (when (and completion (nil? exited)) (async/close! completion))
+    exited))

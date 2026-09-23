@@ -71,8 +71,10 @@
                       [:seon.cluster.wake/channel :seon.flow/channel]
                       [:seon.turn.loop/completion
                        :seon.flow/channel]
-                      [:seon.agent/turn-stopped
-                       :seon.flow/channel]],
+                      ;; accretion: optional here, retired once no branch requires it
+                      [:seon.agent/turn-stopped {:optional true}
+                       :seon.flow/channel]
+                      [:seon.flow/executor {:optional true} :seon.flow/executor]],
                      :blueprint-request
                      [:map
                       [:seon.turn.loop/cluster

@@ -256,8 +256,10 @@
            request {:seon.turn.loop/cluster handle
                     :seon.agent/routing routing :seon.agent/id "concurrent"}
            _ (support/transacted! connection
-                                  [{:seon.agent/id "concurrent"
-                                    :seon.agent/namespace {:seon.ns/name 'my.agents.concurrent}}])
+                                  (agent/creation-tx {:seon.agent/id "concurrent"
+                                                     :seon.ns/name 'my.agents.concurrent
+                                                     :seon.cluster/name "loop-arm-proof"
+                                                     :seon.agent/branch (get-in (db/db connection) [:config :branch])}))
            arms (mapv (fn [_]
                         (future
                           (.countDown ready)
@@ -277,11 +279,8 @@
          (finally
            (.countDown start)
            (doseq [entry (distinct @entries)]
-             (async.flow/stop (:seon.flow/graph entry))
-             (support/await-event! (:seon.agent/turn-stopped entry) ::graph-stopped)
-             (doseq [key [:seon.cluster.wake/channel :seon.schedule/channel
-                          :seon.turn.loop/completion :seon.agent/turn-stopped]]
-               (async/close! (get entry key))))
+             (agent/disarm! {:seon.agent/id "concurrent" :seon.agent/routing routing})
+             (async/close! (:seon.schedule/channel entry)))
            (doseq [arm arms] (future-cancel arm))
            (async/close! faults)
            (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel

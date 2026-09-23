@@ -39,6 +39,7 @@
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [clojure.string :as str]
+            [seon.await :as await]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
@@ -3420,8 +3421,7 @@
                                        :seon.turn.loop/cluster handle
                                        :seon.agent/routing routing)
                                 environment))}}
-     :conns []
-     :io-exec (:seon.flow/executor handle)}))
+     :conns []}))
 
 (defn arm-agents!
   "Arm the cluster's shared graph, fan-out, routing listener and prime.
@@ -3481,9 +3481,12 @@
               ;; Execution provenance for web effects.
               :seon.db.process/id (:seon.db.process/id handle)}
         {graph :seon.flow/graph
+         executor :seon.flow/executor
          joins :seon.flow/joins}
         (flow/start-graph!
-         {:seon.flow/graph-definition
+         {:seon.flow/projection-state
+          (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance))
+          :seon.flow/graph-definition
           (cluster-graph-definition handle routing view)
           :seon.flow/joins
           {::error-fanout
@@ -3566,6 +3569,7 @@
      :seon.agent/boot)
     {:seon.turn.loop/cluster handle
      :seon.flow/graph graph
+     :seon.flow/executor executor
      :seon.flow/error-fanout fanout
      :seon.agent/routing routing
      ;; the view half `serve!` hands to the web service: one mult over
@@ -3584,18 +3588,17 @@
   graphs unwind. An explicit armer quiescence event then proves every
   earlier arm wake has settled and closes that input, while the render
   proc remains available to active agent turns. Each agent graph is
-  then joined at its own turn proc's completion; only after those turns
-  finish does the cluster graph stop and the fan-out detach its taps.
-  Each layer is released only if it stands — a degraded instance
-  disarms the same way.
+  then joined; only after those turns exit does the cluster graph stop
+  and the fan-out detach its taps. Each layer is released only if it
+  stands — a degraded instance disarms the same way.
 
-  ORDERLY STOP WAITS FOR THE ACTIVE PASS. `flow/stop` only queues
+  ORDERLY STOP JOINS THE PROC THREADS. `flow/stop` only queues
   `::flow/stop`; it does not join the proc (`flow/impl.clj:174-183`).
-  Each proc therefore publishes its own completion from the stop
-  transition, which Flow invokes only after the active transform
-  returns. This wait honestly includes a seconds-long model call and
-  any transaction it starts; only then may the branch connection be
-  released. There is no sleep or deadline standing in for that event.
+  Every graph runs on its own executor (`seon.flow/start-graph!`), whose
+  termination is the exit of every proc loop, stop transition included.
+  All joins share ONE deadline taken at entry from
+  `:seon.config.agent/turn-completion-backstop-ms`; a join that misses it
+  throws naming the missing exit and retains custody.
 
   This is orderly-stop behavior only. A process kill cannot await a
   completion and may lose an in-flight transaction by design; the crash
@@ -3610,43 +3613,56 @@
     (wake/unlisten! {:seon.cluster.wake/connection
                      (:seon.db/connection handle)
                      :seon.cluster.wake/key :seon.agent/route}))
-  (when-let [handle (:seon.turn.loop/cluster instance)]
-    (let [armer-channel (:seon.cluster.wake/channel handle)
-          quiesced (async/promise-chan)]
-      (when-not (async.protocols/closed? armer-channel)
-        (when-not (async/>!! armer-channel
-                             {:seon.agent/quiesce quiesced})
-          (throw
-           (ex-info "The cluster armer input closed before quiescence."
-                    {:seon.agent/armer-quiescence-undeliverable true
-                     :seon.error/message
-                     "The cluster armer input closed before quiescence."})))
-        (when-not (= :seon.agent/quiesced (async/<!! quiesced))
-          (throw
-           (ex-info "The cluster armer did not publish quiescence."
-                    {:seon.agent/armer-quiescence-undeliverable true
-                     :seon.error/message
-                     "The cluster armer did not publish quiescence."})))
-        ;; Closure is the observable completion fact a later stop derives
-        ;; from. Publish it only after the armer acknowledged quiescence.
-        (async/close! armer-channel))))
-  (when-let [routing (:seon.agent/routing instance)]
-    (doseq [agent-id (sort (keys (:seon.agent/armed @routing)))]
-      (cluster.agent/disarm! {:seon.agent/id agent-id
-                              :seon.agent/routing routing})))
-  (when-let [graph (:seon.flow/graph instance)]
-    (flow.core/stop graph)
-    ;; BOTH cluster-graph procs are joined at their own completions —
-    ;; `flow/stop` only queues `::flow/stop`, so a render pass holding
-    ;; the branch connection would otherwise still be deriving when the
-    ;; connection is released
-    (async/<!! (:seon.turn.loop/completion
-                (:seon.turn.loop/cluster instance)))
-    (some-> (get-in instance [:seon.render.web/view
-                              :seon.render.web/completion])
-            async/<!!))
-  (when-let [fanout (:seon.flow/error-fanout instance)]
-    (flow/stop-error-fanout! fanout))
+  (let [handle (:seon.turn.loop/cluster instance)
+        backstop-ms (when handle
+                      (:seon.config.agent/turn-completion-backstop-ms
+                       (config/effective (db/db (:seon.db/connection handle))
+                                         (:seon.cluster/name handle))))
+        ;; ONE deadline from the stop request, shared by every join below
+        bound {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+               :seon.await/config-value backstop-ms
+               :seon.await/deadline-nanos
+               (when backstop-ms (+ (System/nanoTime) (* 1000000 backstop-ms)))}
+        refuse! (fn [missing result]
+                  (when (:seon.error/at result)
+                    (throw (ex-info (str "Cluster stop: " missing " did not arrive in bound.")
+                                    (assoc result :seon.await/requested-member missing)))))]
+    (when handle
+      (let [armer-channel (:seon.cluster.wake/channel handle)
+            quiesced (async/promise-chan)]
+        (when-not (async.protocols/closed? armer-channel)
+          (refuse! ::armer-quiesced
+                   (await/await!
+                    {:seon.await/bound bound
+                     :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
+                                             :seon.error/operation `disarm-agents!
+                                             :seon.error/expected ::armer-quiesced}
+                     :seon.await/port-operations
+                     [[armer-channel {:seon.agent/quiesce quiesced}] quiesced]
+                     :seon.await/accept? #(= :seon.agent/quiesced %)}))
+          ;; Closure is the observable completion fact a later stop derives
+          ;; from. Publish it only after the armer acknowledged quiescence.
+          (async/close! armer-channel))))
+    (when-let [routing (:seon.agent/routing instance)]
+      (doseq [agent-id (sort (keys (:seon.agent/armed @routing)))]
+        (cluster.agent/disarm! {:seon.agent/id agent-id
+                                :seon.agent/routing routing
+                                :seon.await/deadline-nanos
+                                (:seon.await/deadline-nanos bound)})))
+    ;; BOTH cluster-graph procs are joined at their executor's termination:
+    ;; `flow/stop` only queues `::flow/stop`, so a render pass holding the
+    ;; branch connection would otherwise still be deriving when it is released
+    (when-let [graph (:seon.flow/graph instance)]
+      (flow.core/stop graph)
+      (refuse! ::cluster-graph-exited
+               (flow/join-graph!
+                (into (select-keys instance [:seon.flow/executor])
+                      {:seon.await/bound bound
+                       :seon.await/diagnostic {:seon.error/layer :seon.cluster/stop
+                                               :seon.error/operation `disarm-agents!
+                                               :seon.error/expected ::cluster-graph-exited}}))))
+    (when-let [fanout (:seon.flow/error-fanout instance)]
+      (refuse! ::fault-graph-exited (flow/stop-error-fanout! fanout bound))))
   (when-let [handle (:seon.turn.loop/cluster instance)]
     (some-> (:seon.turn.loop/stream-channel handle) async/close!))
   ;; the render pipeline's own ports, after the proc that reads them has

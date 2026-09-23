@@ -49,8 +49,10 @@
              [:seon.flow/monitor-report-channel :seon.flow/channel]
              [:seon.flow/monitor-error-channel :seon.flow/channel]
              [:seon.flow/fault-channel :seon.flow/channel]
-             [:seon.flow/completion :seon.flow/channel]
-             [:seon.flow/committer-error-completion :seon.flow/channel]],
+             ;; accretion: optional here, retired once no branch requires them
+             [:seon.flow/completion {:optional true} :seon.flow/channel]
+             [:seon.flow/committer-error-completion {:optional true} :seon.flow/channel]
+             [:seon.flow/executor {:optional true} :seon.flow/executor]],
             :error-fanout-request
             [:map
              [:seon.flow/graph :seon.flow/graph]
@@ -79,7 +81,7 @@
             :fault-committer-proc-request
             [:map
              [:seon.flow/fault-channel :seon.flow/channel]
-             [:seon.flow/completion :seon.flow/channel]
+             [:seon.flow/completion {:optional true} :seon.flow/channel]
              [:seon.flow/projection :seon.schema/projection]
              [:seon.flow/read-core-error-mode
               :seon.flow/read-core-error-mode]
