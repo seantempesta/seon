@@ -1085,8 +1085,11 @@
                                      (.getName (class root)))]
                     (when (and class-name
                                (or (not= expected class-name)
+                                   ;; A classpath load records `seon/x.clj`; a
+                                   ;; `load-file` records the absolute path.
                                    (not (and (string? loaded-file)
-                                             (.endsWith ^String relative-path ^String loaded-file)))))
+                                             (or (.endsWith ^String relative-path ^String loaded-file)
+                                                 (.endsWith ^String loaded-file ^String relative-path))))))
                       (cond-> {:seon.instrument/replaced-var function-symbol
                                :seon.instrument/root-class class-name
                                :seon.instrument/expected-class expected

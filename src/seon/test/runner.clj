@@ -1724,6 +1724,40 @@
             results)]
         (or (first (filter :seon.error/at recorded)) recorded)))))
 
+(defn record-interrupted!
+  "Give every admitted member of `completion`'s run that has no outcome a
+  terminal error naming `failure`, the throwable that ended its request.
+
+  An interrupted member is an obligation, never green: it is recorded red with
+  the whole cause chain, so the run's evidence is complete and the member is
+  selected again. Members already recorded are left as they are."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/completion :seon.error/throwable]
+                  [:or :seon.test/results :seon.db/error-result]]}
+  [connection completion ^Throwable failure]
+  (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
+        open (remove :seon.test.member/completed-tx
+                     (execution-members (db/db connection) run-id))
+        options (report-options {})
+        cause (str/join "\nCaused by: "
+                        (for [link (take-while some? (iterate ex-cause failure))]
+                          (str (throwable-text options link)
+                               (when-let [data (ex-data link)]
+                                 (str "\n    data " (printable options data))))))
+        message (str "Interrupted: request " run-id " threw before this member finished.\n" cause)]
+    (if (empty? open)
+      []
+      (commit-results!
+       connection
+       (assoc completion
+              :seon.test.run/terminated? true
+              :seon.test.runner/results
+              (mapv (fn [member]
+                      {:seon.test/sym (:seon.test.member/symbol member)
+                       :seon.test.member/began? false :seon.test.member/ended? false
+                       :seon.test/pass-count 0 :seon.test/fail-count 0 :seon.test/error-count 1
+                       :seon.test/failure-message message})
+                    open))))))
+
 (def ^:private run-result-query
   '[:find ?symbol ?pass ?fail ?error ?id ?at ?basis ?program ?inputs
     :in $ [?member ...]

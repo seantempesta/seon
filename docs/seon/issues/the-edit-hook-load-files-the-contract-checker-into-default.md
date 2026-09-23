@@ -87,3 +87,16 @@ no `load-file` reaches default. Observed after the change: hook lines at 04:36:4
 04:36:56Z `available errors=0` (72–96 ms). Vars loaded by an earlier `load-file` keep
 their absolute `:file` until that namespace's next reload. Evidence:
 `docs/prds/agent-platform/landing/lane-save-gate-2026-09-23.md`.
+
+## Resolution of item 2 (lane unfinished-runs, 2026-09-23)
+
+- `replaced-roots` now counts both spellings of a source file as the same file.
+  A classpath load records `seon/x.clj` and a `load-file` records the absolute
+  path. A Var whose root is another class, or whose `:file` names another file,
+  is still reported.
+- On default pid 90963, `replaced-roots` over the 4,363 function rows went from
+  15 reported to 0 after adoption, and `runtime_status` shows
+  `replaced-roots []`.
+- Regression: `seon.instrument-replaced-roots-test/a-namespace-loaded-by-its-absolute-path-reports-no-replaced-roots`.
+- **Still open:** item 1. The hook still `load-file`s the checker into default
+  (`bin/seon-hook:577`).

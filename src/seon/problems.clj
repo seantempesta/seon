@@ -378,7 +378,9 @@
   same value."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        :seon.problems/request]
-                  [:or :seon.problems/problems
+                  [:or [:and :seon.problems/problems
+                        [:map [:seon.problems/failed-tests-unknown {:optional true}
+                               [:vector :seon.test/execution-error]]]]
                    :seon.test/execution-error
                    :seon.db/invalid-read-error
                    :seon.schema/missing-projection-error]]}
@@ -393,8 +395,11 @@
         unstewarded (unstewarded-namespaces db)
         stale (stale-vars db)
         missing-model-rows (missing-models db)
+        ;; Unknown test evidence makes its own family unknown, never the rest.
         found (cond-> {}
-                (seq tests) (assoc :seon.problems/failed-tests tests)
+                (:seon.error/at tests) (assoc :seon.problems/failed-tests-unknown [tests])
+                (and (not (:seon.error/at tests)) (seq tests))
+                (assoc :seon.problems/failed-tests tests)
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)
@@ -404,7 +409,7 @@
                 (seq stale) (assoc :seon.problems/stale-vars stale)
                 (seq missing-model-rows)
                 (assoc :seon.problems/missing-models missing-model-rows))]
-    (if (:seon.error/at tests) tests found))))
+    found)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The html projection — the problems PAGE
@@ -490,6 +495,10 @@
    (family-section "failed tests"
      (for [entry (:seon.problems/failed-tests found)]
        [:li (test-render/render-html {:seon.render/value entry})]))
+   (family-section "test evidence unknown"
+     (for [entry (:seon.problems/failed-tests-unknown found)]
+       (row "error" (:seon.error/message entry)
+            "offending" (pr-str (:seon.error/offending entry)))))
    (family-section
     "errors"
     (for [entry (:seon.problems/error-signatures found)]
@@ -548,6 +557,9 @@
   (->> (concat
         (for [entry (:seon.problems/failed-tests found)]
           (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
+        (for [entry (:seon.problems/failed-tests-unknown found)]
+          (str "Test evidence unknown: " (:seon.error/message entry)
+               " Offending: " (pr-str (:seon.error/offending entry))))
         (for [entry (:seon.problems/errored-receipts found)]
           (str "Form " (:seon.cluster.eval/ordinal entry)
                " failed during evaluation: "
@@ -581,6 +593,9 @@
   (->> (concat
         (for [entry (:seon.problems/failed-tests found)]
           (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
+        (for [entry (:seon.problems/failed-tests-unknown found)]
+          (str "Test evidence unknown: " (:seon.error/message entry)
+               " Offending: " (pr-str (:seon.error/offending entry))))
         (for [entry (:seon.problems/error-signatures found)]
           (error/log-line
            (error/notice {:seon.error/fact (:seon.error/fact entry)

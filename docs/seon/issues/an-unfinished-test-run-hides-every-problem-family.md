@@ -73,3 +73,28 @@ re-observation:
   duration. Both owners named above still stand:
   - The runner should record unfinished members as terminated.
   - `problems` should confine the unknown to the failed-tests family.
+
+## Resolution (lane unfinished-runs, 2026-09-23)
+
+- **Problems owner: fixed.** `seon.problems/problems` puts unknown test
+  evidence under its own declared family, `:seon.problems/failed-tests-unknown`
+  (a vector of `:seon.test/execution-error`), and still derives every other
+  family from the same database value. On default pid 90963, `runtime_status`
+  answers `problem-counts {error-signatures 8, failed-runs 6,
+  failed-tests-unknown 1}` where it used to answer `problems-unavailable`.
+  Regression:
+  `seon.test.interrupted-request-test/unknown-test-evidence-leaves-the-other-problem-families-derivable`.
+- **Runner owner: the writer is fixed, the call site is not wired.**
+  `seon.test.runner/record-interrupted!` gives every admitted member that has no
+  outcome a red terminal record naming the whole cause chain. The member stays
+  an obligation. Regression:
+  `seon.test.interrupted-request-test/a-thrown-request-records-its-unfinished-members-as-failed-obligations`.
+  **Still open:** `seon.test/run` (`src/seon/test.clj`, held by the nsa-unblock
+  lane) must call it when a batch throws. The hunk is in
+  `docs/prds/agent-platform/landing/lane-unfinished-runs-2026-09-23.md`. Until
+  that lands, a thrown request still leaves members open. Now only the
+  failed-tests family reads unknown, not every family.
+- Still open: members left open by a JVM exit. Recovery closes turns only
+  (`seon.cluster/recover-runs!`).
+- Still open: the readiness schema should be the union
+  (`resources/seon/schemas/seon.boot.edn:114`).
