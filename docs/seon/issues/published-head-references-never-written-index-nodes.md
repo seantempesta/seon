@@ -87,33 +87,84 @@ indexes.
   connection's storage (`writing.cljc:253-270`). No path advances a
   connection without `commit!` returning.
 
-## Open: the mechanism
+## Mechanism (reproduced 2026-09-23 ~14:28Z, in-process, disposable file stores)
 
-The unexplained step: `datahike.writing/commit!` returned success, so the
-connection advanced, yet its ordered batch of nodes, commit record and head
-(`k/multi-assoc`, `writing.cljc:505-551`; konserve `write-blobs-in-order!`,
-`filestore.clj:120-154`) is absent from the directory.
+An `Error` inside a konserve write is swallowed, and the writer takes the swallowed write for a successful one.
+- superv.async 0.3.50 (the version on our classpath) defines `go-try-` so that its body is wrapped
+  in `(catch Exception e e)` (`superv/async.cljc:174-181`).
+- Its `<?-` rethrows only when the value it takes is an `Exception`
+  (`throw-if-exception-`, `superv/async.cljc:87-98`).
+- An `Error` (OutOfMemoryError, AssertionError, StackOverflowError)
+  therefore escapes the `go` block. core.async hands it to the uncaught-exception
+  handler and closes the block's channel, so the awaiting `<?-` receives `nil`.
+- Every awaiting layer reads that `nil` as success. On the ordered multi-key path those layers are
+  konserve's `-multi-assoc` (`impl/defaults.cljc:680-688`), `k/multi-assoc`
+  (`core.cljc:486-509`) and Datahike's `commit!` (`writing.cljc:535`).
+  On the per-key path they are `write-pending-kvs!` (`writing.cljc:356-366`) and the
+  `k/assoc` it awaits.
+- `commit!` then returns, and the writer installs the database and threads its commit id
+  into the next commit (`writer.cljc:245-257, 279-280`).
+- Upstream superv.async `main` (5929e31) is still `Exception`-only (`async.cljc:116, 199, 230`).
 
-Candidates to verify next:
-- A fatal `Error` inside a nested go block of konserve's asynchronous
-  filestore path (`go-try-` catches `Exception` only) under heap exhaustion.
-- A connection or store resolved by name across two physical stores in one
-  JVM, as in-process tests do.
+Reproduction: `tmp/store-damage/inject.clj`. A store bound to konserve's
+`*multi-write-stage-hook*` throws an `AssertionError` at the second
+`:blob-moved` of one commit.
+- `d/transact` returned a report, and the connection advanced to `6ab3e1e9-1cf8…`
+  while the disk head stayed at the prior commit.
+- One more ordinary transaction then published a head on top of the phantom.
+- A fresh connection refused: `Node not found in storage` `6ab3e1e9-0ee1…`.
+  That is the incident's signature, end to end.
+- The same injection with an `ExceptionInfo` failed the commit loudly
+  (`:datahike/writer-shutdown`).
+- Per-key path, same hole: `k/assoc` whose write hook throws an `Error`
+  delivers `nil` (a successful write delivers `[nil 9]`), and
+  `write-pending-kvs!` returns `nil` either way.
+- Heap exhaustion is the production trigger. `prepare-multi-assoc` serializes every
+  value of the batch before writing any (`impl/defaults.cljc:417-470`), so an
+  OutOfMemoryError there loses the whole batch, as observed.
 
-Recording the failed commit is also owed. The fork's commit loop converts an
-`Error` to `:fatal-commit-error` (`writing.cljc:565-569`), but nothing
-observed here produced one.
+Reverting our filestore multi-key implementation (konserve fork `5b39fdd`,
+owner ruling) moves Datahike to its per-key path. It does not close the class.
 
-## Not the fix
+## Recommendations: each part fails alone and loudly
 
-Publishing `(:db-after report)` instead of `@connection` at
-`source.clj:660` changes nothing: the committed report's `:db-after` is the
-same `commit-db` the writer installs (`writer.cljc:257-262`).
+**(a) Every Throwable in the write path fails the commit, and the connection does not advance.**
+The single seam is superv.async's two definitions: `go-try-`/`go-try` catch
+`Throwable`, and `throw-if-exception-` tests `Throwable`. That is 4 lines, and it covers
+every konserve and Datahike await at once.
+
+| Option | Cost | What it gives up |
+|---|---|---|
+| 1. Fork superv.async (`seantempesta/superv.async`) and pin it in `deps.edn` (**recommended**) | 4 lines; a new fork repository plus a pin | nothing |
+| 2. konserve-local and Datahike-local macros, swapped in by one script over 19 namespaces (8 konserve, 11 Datahike: 120 `go-try-` and 302 `<?-` sites) | about 20 lines plus the swap | other superv callers keep the hole |
+| 3. Catch only `VirtualMachineError` at Datahike's `commit!` | smallest edit | cannot see nested blocks, so it does not close the class |
+
+Datahike's `commit!` already converts an `Error` raised in its own block
+(`writing.cljc:565-569`); nested blocks are the gap.
+**(b) The JVM exits on OutOfMemoryError.** Add `-XX:+ExitOnOutOfMemoryError` and
+`-XX:+HeapDumpOnOutOfMemoryError -XX:HeapDumpPath=data/heap` to the JVM options at
+`deps.edn:150`.
+- Exiting costs one boot (about 27 s ready, 41 s wall measured today).
+- Limping cost two stores today (two nukes, about 56 s each plus the lost state) and hours of lanes blocked.
+- A dump costs disk the size of the heap (up to 10.7 GB); keep the newest only.
+**(c) Opening a store proves that its heads' nodes exist.** For every roster head, check
+that each child address of the six fused roots exists, with `k/exists?` (a file stat).
+- On the preserved store it took 60 ms for 9 heads (6,188 checks).
+- It found every damaged head: `current-src` 7 missing, `cluster-default` 2, two agent heads 2 each.
+- It is proportional to root fan-out × heads (depth-1 trees at branching factor 4096).
+  Deeper trees add their interior nodes. Sub-second either way.
+- Boot then refuses a damaged store by name instead of failing later inside a test.
+
+## Before whole-store collection is turned on (`:seon.config.maintenance/collect?`, `ba173845c`)
+
+On the fork, prove that a collection loses no reachable node while a context holds an old
+database value and while a transaction is in flight. Today a zero-window
+collection sweeps an adopted source commit
+(`an-explicit-collection-sweeps-the-clusters-adopted-source-commit.md`).
 
 ## Owner and regression
 
-Owner: the Datahike fork's commit path (`reference-code/datahike`).
+Owners: superv.async's `go-try-`/`<?-`, plus konserve's and Datahike's awaits.
 
-Wanted regression: once the failure is reproducible, a commit whose durable
-write does not complete never advances the connection and never becomes a
-parent. A fresh connection reads every node of every published head.
+Wanted regression: inject an `Error` into one konserve write. The commit fails,
+the connection stays at the prior head, and a fresh connection reads every node of that head.
