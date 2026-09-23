@@ -39,7 +39,7 @@ What goes: the ThreadLocal hand-off, the loaded-code mark and page invalidation 
 REPL, per-eval configuration reads, admission-then-artifact-then-blob on the REPL path,
 `get_value` (decision §7.1), named stateful sessions (decision §7.2), the bespoke
 exception summary, the health observation on every call, and the SCI template string.
-Projected: **src ≈ −830 net lines, tests ≈ −1,000 net** (§5).
+Projected: **src ≈ −830 net lines, tests ≈ −900 net** (§5).
 
 ## 1. Properties (acceptance)
 
