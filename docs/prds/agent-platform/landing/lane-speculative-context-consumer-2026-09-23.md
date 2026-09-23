@@ -191,3 +191,35 @@ Hot path (alternating loads): committed revision hit 12.7 / 12.3 µs parent, 13.
 mine (n=20,000); fork acquisition at the head 53-75 ms parent, 54-83 ms mine (n=3 each): no
 change beyond noise. Adoption `init --dev --changed` db.clj + test: 57.7 s (**defect >10 s**,
 `full-source-refresh!` 36.0 s, same adoption class as above).
+
+## Commit 4: read evidence checks only the attributes whose revision moved (24x)
+
+Ruled in `lane-page-reads-2026-09-23.md` (commit 2 there). `read-evidence-current?` hands its
+`dependency-revision` to `index-evidence-current`; `changed-read-attributes` names the read
+attributes whose Datahike revision differs (nil for an `:all` plan, a moved conservative
+revision, or a current value with no committed revision). Only those attributes' patterns are
+index-checked; an entity-only pattern (`:db/id`) is covered by the explicit attribute set; a
+moved attribute with no pattern or `:db/noHistory` gives no decision (replay). No selector is
+narrowed.
+
+Regression `db-test/an-entity-pull-is-checked-only-on-the-attributes-that-changed` (pull of an
+artifact row with `:db/id`, identity, a no-history digest and `:seon.ns/doc`): unrelated commit
+true, 0 replays; another entity's `:seon.ns/doc` true, 0 replays; another artifact (moves the
+no-history digest) true by replay; the entity's digest changed false. Parent (`afaf59013`
+db.clj by `load-file`) run `8bdd2b1b5be0`: red at :2292 `(not (zero? 1))`; mine runs
+`f856e7fc657d` (adopted, armed), `f416519d7fed`: 27/27 with `equal-revisions-...`,
+`an-index-page-...` and render_cache_test. Projection set `575e9381120c` 58/58.
+
+Walk-shaped pull (all 1,217 installed attributes, refs as `{attr [:db/id]}`, 1,223 patterns)
+after two commits (`:seon.fn/doc` elsewhere, `:seon.ns/doc` on `seon.db`), median of 15, ms:
+
+| entity | parent | mine | answer (both) |
+|---|---|---|---|
+| agent `root` | 5.4 / 7.3 | 0.55 / 0.77 | true |
+| ns `seon.flow` | 6.5 / 9.2 | 0.77 / 0.75 | true |
+| ns `seon.db` (its doc moved) | 6.8 / 9.7 | 0.66 / 0.70 | false |
+
+Contracts check over db.clj and the test files: no findings (594 ms). Adoption of db.clj +
+db_test + projection_writer_test: 11.1 s (**over 10 s**, adoption class); one attempt refused
+"Source changed during development adoption" because I had omitted a copied test file from
+`--changed` (my error, 66.3 s).

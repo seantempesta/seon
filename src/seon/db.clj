@@ -1087,9 +1087,33 @@
              (keep #(index-pattern-change changes %) patterns))))
          retained)))))
 
+(defn- changed-read-attributes
+  "The read attributes whose Datahike revision differs between `revision`
+  (retained) and `current`, or nil when revisions cannot narrow the check: a
+  plan reading every attribute, a moved conservative revision, or a current
+  value with no committed revision."
+  {:malli/schema [:=> [:cat :map :map] [:or :nil [:set :keyword]]]}
+  [revision current]
+  (let [attributes (:datahike.read/attributes revision)]
+    (when (and (set? attributes)
+               (= attributes (:datahike.read/attributes current))
+               (not (false? (:datahike.read/cache-eligible? current)))
+               (= (:datahike.cache/conservative-revision revision)
+                  (:datahike.cache/conservative-revision current)))
+      (let [before (:datahike.cache/attribute-revisions revision)
+            after (:datahike.cache/attribute-revisions current)]
+        (into #{} (remove #(= (get before %) (get after %))) attributes)))))
+
 (defn- index-evidence-current
   "An exact index check when historical datoms retain the read's dependencies.
   Return no decision for a different database origin or discarded history.
+
+  With `current`'s revisions, only the patterns of attributes whose revision
+  moved are checked: an unchanged revision already proves its attribute's
+  datoms (`changed-read-attributes`), and an entity-only pattern (a pulled
+  `:db/id`) reads nothing outside the plan's explicit attribute set. A moved
+  attribute without a pattern, or without history, gives no decision.
+  Without narrowing, every pattern needs an attribute with history.
 
   A speculative value keeps its basis's connection and generation
   (`datahike.db/speculative-cache-context`, datahike db.cljc:444), so a read
@@ -1097,20 +1121,30 @@
   history, which holds its uncommitted datoms above the read's basis. That
   answers whether the read still holds on this value; it never makes the value
   committed evidence, because `dependency-revision` gives it no revision."
-  [database source revision]
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :map :map] [:or :nil :boolean]]}
+  [database source revision current]
   (let [patterns (:seon.db/read-index-patterns source)
         basis (:seon.db/read-basis-t source)
-        context (:cache-context database)]
-    (when (and patterns basis
+        context (:cache-context database)
+        installed (dbi/-schema database)
+        history? (fn [attribute] (not (:db/noHistory (get installed attribute))))
+        changed (changed-read-attributes revision current)
+        checked (if changed
+                  (let [covered (into #{} (keep :seon.db/pattern-attribute) patterns)]
+                    (when (and (every? covered changed) (every? history? changed))
+                      (filterv #(contains? changed (:seon.db/pattern-attribute %)) patterns)))
+                  (when (every? (fn [pattern]
+                                  (when-let [attribute (:seon.db/pattern-attribute pattern)]
+                                    (history? attribute)))
+                                patterns)
+                    patterns))]
+    (when (and patterns basis checked
                (instance? DB database)
                (= (select-keys revision [:datahike.cache/connection-id :datahike.cache/generation])
-                  (select-keys context [:datahike.cache/connection-id :datahike.cache/generation]))
-               (every? (fn [pattern]
-                         (when-let [attribute (:seon.db/pattern-attribute pattern)]
-                           (not (:db/noHistory (get (dbi/-schema database) attribute)))))
-                       patterns))
-      (let [changes (d/since (d/history database) basis)]
-        (not-any? #(index-pattern-change changes %) patterns)))))
+                  (select-keys context [:datahike.cache/connection-id :datahike.cache/generation])))
+      (or (empty? checked)
+          (let [changes (d/since (d/history database) basis)]
+            (not-any? #(index-pattern-change changes %) checked))))))
 
 (defn read-evidence-current?
   "True when `database` still satisfies every retained dependency revision."
@@ -1132,11 +1166,12 @@
        ;; revision per changed attribute, `datahike/query.cljc:2568`), so the
        ;; history scan could only agree; it runs when revisions differ, where
        ;; another entity's write may still leave this read's patterns intact.
-       (or (and (not (false? (:datahike.read/cache-eligible? revision)))
-                (= revision (dependency-revision database plan source-position)))
+       (let [current (dependency-revision database plan source-position)]
+        (or (and (not (false? (:datahike.read/cache-eligible? revision)))
+                (= revision current))
            (let [source (some #(when (= source-position (:datahike.query.source/argument-position %)) %)
                               (:datahike.query.dependency/sources plan))
-                 indexed (index-evidence-current database source revision)]
+                 indexed (index-evidence-current database source revision current)]
              (if (some? indexed)
                indexed
                ;; A replay's declared failures are values (`q`, `pull` and
@@ -1158,7 +1193,7 @@
                                   (:seon.db/read-result-digest evidence)]
                          (when-let [actual
                                     (read-result-digest replayed)]
-                           (= expected actual))))))))))
+                           (= expected actual)))))))))))
      retained)))
 
 ;;; THE declaration population for ONE read operation. Every decode walker
