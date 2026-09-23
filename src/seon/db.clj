@@ -269,7 +269,7 @@
          [:maybe :seon.sci.eval/projection-state]]
     [:or :seon.db/database-value :seon.error/value]]}
   [database state]
-  (if (and state (not (:seon.error/at database)))
+  (if (and state (db.utils/db? database))
     (let [projection (or (:seon.schema/projection (meta database))
                          (:seon.schema/projection @state))]
       (cond-> (vary-meta database assoc :seon.sci.eval/projection-state state)
@@ -357,7 +357,7 @@
     [:or :seon.db/connection-identity :seon.error/value]]}
   [connection]
   (cond
-    (:seon.error/at connection) connection
+    (not (connection-object? connection)) connection
 
     (not (map? (:config @connection)))
     (error-value
@@ -428,7 +428,7 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :seon.db/database-value-identity :seon.error/value]]}
   [database]
-  (if (:seon.error/at database)
+  (if-not (db.utils/db? database)
     database
     (let [configuration (dbi/-config database)
           commit-id (d/commit-id database)]
@@ -455,7 +455,7 @@
    [:=> [:cat [:or :seon.db/database-value :seon.error/value]]
     [:or :int :seon.error/value]]}
   [database]
-  (if (:seon.error/at database)
+  (if-not (db.utils/db? database)
     database
     (long (dbi/-max-tx database))))
 
@@ -1144,7 +1144,7 @@
                        [:vector :seon.db/read-evidence]]
                   [:or :boolean :seon.db/error-result]]}
   [database retained]
-  (if (:seon.error/at database)
+  (if-not (db.utils/db? database)
     database
     (every?
      (fn [{source-position :seon.db/source-argument-position
@@ -2038,7 +2038,7 @@
   ([]
    (current-database-value))
   ([connection]
-   (if (:seon.error/at connection)
+   (if-not (connection-object? connection)
      (assoc connection :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/db)
      (resolve-database-value connection))))
 
@@ -2108,7 +2108,7 @@
           (let [position (:datahike.query.source/argument-position source)]
             (when (< position (count arguments))
               (let [argument (nth arguments position)]
-                (when (:seon.error/at argument)
+                (when (:seon.db/invalid-read argument)
                   argument)))))
         source-bindings))
 
@@ -2151,7 +2151,7 @@
                         value (get arguments (if (and omitted? (> index position))
                                                (dec index) index))]
                     (or (and omitted? (= index position))
-                        (db.utils/db? value) (:seon.error/at value))))
+                        (db.utils/db? value) (:seon.db/invalid-read value))))
                 sources)]
     (cond
       (not valid-sources?) :invalid
@@ -2169,7 +2169,7 @@
             :explicit arguments
             :invalid (query-input-shape-error query-form arguments)
             (let [database (or explicit-database (current-database-value))]
-              (if (:seon.error/at database)
+              (if-not (db.utils/db? database)
                 database
                 (into (conj (subvec arguments 0 position) database)
                       (subvec arguments position)))))))))
@@ -2186,7 +2186,9 @@
   [[call-arguments result]]
   (let [[query-or-database & arguments] call-arguments]
     (cond
-      (:seon.error/at query-or-database)
+      ;; Not one of the union's database or query members: its error member.
+      (not (or (db.utils/db? query-or-database) (vector? query-or-database) (string? query-or-database)
+                (:find query-or-database) (:query query-or-database)))
       true
 
       (and (map? result) (::invalid-read result)
@@ -2212,7 +2214,7 @@
                   :string]}
   [{value :value} _options]
   (let [[[head & tail] result] value]
-    (or (when (:seon.error/at result) (:seon.error/message result))
+    (or (when (:seon.db/invalid-read result) (:seon.error/message result))
         (let [explicit? (db.utils/db? head)
               query-input (if explicit? (first tail) head)
               supplied (if explicit? (rest tail) tail)
@@ -2226,7 +2228,8 @@
   {:malli/schema
    [:=> [:catn [:seon.db/query-or-database [:or :seon.db/database-value :seon.error/value :seon.db/query :seon.db/query-args]] [:seon.db/arguments [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike Datalog bindings carry arbitrary values. The function guard derives input count and database source positions from the parsed query.", :gen/elements [[]]} :seon.schema/value]]] [:or :seon.schema/value :seon.db/invalid-read-error] [:fn #:error{:message "The supplied arguments must match the query's :in (default [$]); every source input must be a database value. Use (seon.db/q query input ...) with $ elided, or (seon.db/q database query input ...) with the database first.", :fn seon.db/query-guard-message} seon.db/query-call-valid?]]}
   [query-or-database & arguments]
-  (if (:seon.error/at query-or-database)
+  (if-not (or (db.utils/db? query-or-database) (vector? query-or-database) (string? query-or-database)
+                (:find query-or-database) (:query query-or-database))
     (assoc query-or-database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/q)
     (let [explicit-database? (db.utils/db? query-or-database)
         query-input
@@ -2378,7 +2381,7 @@
 (defn- pull-call
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.db/error-result] [:sequential :seon.schema/value] [:function [:=> [:cat :seon.db/database-value :map] :map] [:=> [:cat :seon.db/database-value :seon.db/pull-selector :seon.schema/value] :map]] :keyword :qualified-keyword :qualified-symbol] [:or :nil :seon.db/pulled-entity [:vector [:or :nil :seon.db/pulled-entity]] :seon.db/error-result :seon.db/pull-budget-error]]}
   [database arguments operation operation-key result-key public-operation]
-  (if (:seon.error/at database)
+  (if-not (db.utils/db? database)
     (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation public-operation)
     (or (missing-pull-selector-error public-operation arguments)
         (let [many? (= :pull-many operation-key)
@@ -2437,9 +2440,8 @@
   {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]] :boolean]}
   [[arguments _result]]
   (let [[head & tail] arguments
-        inputs (if (or (db.utils/db? head) (:seon.error/at head)) tail arguments)]
-    (or (some? (:seon.error/at head))
-        (and (= 1 (count inputs)) (map? (first inputs)))
+        inputs (if (or (vector? head) (:selector head)) arguments tail)]
+    (or (and (= 1 (count inputs)) (map? (first inputs)))
         (and (= 2 (count inputs)) (vector? (first inputs))
              (not (map? (second inputs)))))))
 
@@ -2628,7 +2630,7 @@
 (defn- datoms-call
   {:malli/schema [:=> [:cat [:or :seon.db/database-value :seon.error/value] [:or :nil [:sequential :seon.schema/value]]] [:or :seon.db/datoms :seon.db/invalid-read-error]]}
   [database arguments]
-  (if (:seon.error/at database)
+  (if-not (db.utils/db? database)
     (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/datoms)
     (try
       ;; Datahike's index cursor is lazy and each element is a host Datom.
@@ -2657,24 +2659,21 @@
   {:malli/schema [:=> [:cat [:tuple [:sequential :seon.schema/value] :seon.schema/value]] :boolean]}
   [[arguments _result]]
   (let [[head & tail] arguments
-        inputs (if (db.utils/db? head) tail arguments)
+        inputs (if (or (keyword? head) (:index head)) arguments tail)
         [index & components] inputs]
-    (or (some? (:seon.error/at head))
-        (if (map? index)
-          (empty? components)
-          (and (#{:eavt :aevt :avet} index)
-               (<= (count components) 4))))))
+    (if (map? index)
+      (empty? components)
+      (boolean (and (#{:eavt :aevt :avet} index)
+                    (<= (count components) 4))))))
 
 (defn datoms
   "Eager ordinary datoms from an explicit or current database value."
   {:malli/schema
    [:=> [:cat [:or :seon.db/database-value :seon.error/value :seon.db/index-lookup :keyword] [:* {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Datahike index components include arbitrary attribute values. The function guard checks index, component count and argument-map exclusivity.", :gen/elements [[]]} :seon.schema/value]] [:or :seon.db/datoms :seon.db/invalid-read-error] [:fn #:error{:message "Use (seon.db/datoms index & components) or (seon.db/datoms database index & components); an index argument map takes no trailing arguments, and an index has at most four components."} seon.db/datoms-call-valid?]]}
   [database-or-index & arguments]
-  (if (or (db.utils/db? database-or-index)
-          (:seon.error/at database-or-index))
-    (datoms-call database-or-index arguments)
-    (datoms-call (current-database-value)
-                 (cons database-or-index arguments))))
+  (if (or (keyword? database-or-index) (:index database-or-index))
+    (datoms-call (current-database-value) (cons database-or-index arguments))
+    (datoms-call database-or-index arguments)))
 
 (defn index-page
   "One bounded, decoded page in native Datahike index order."
@@ -2687,7 +2686,7 @@
      [:or ::index-page-result :seon.db/error-result]]]}
   ([options] (index-page (current-database-value) options))
   ([database options]
-   (if (:seon.error/at database)
+   (if-not (db.utils/db? database)
      database
      (try
        (with-declarations database 'seon.db/index-page
@@ -2723,7 +2722,7 @@
     [:or :seon.db/database-value :seon.db/invalid-read-error]]}
   [operation database arguments]
   (cond
-    (:seon.error/at database)
+    (not (db.utils/db? database))
     (assoc database :seon.db/invalid-read true :seon.db/refused-read-operation 'seon.db/database-view)
 
     (not (dbi/-temporal-index? database))
@@ -2755,7 +2754,7 @@
 (defn- database-identity
   {:malli/schema [:=> [:cat [:=> [:cat :seon.db/database-value] :seon.schema/value] :qualified-symbol [:or :seon.db/database-value :seon.error/value]] [:or :seon.schema/value :seon.db/error-result]]}
   [operation operation-name database]
-  (if (:seon.error/at database)
+  (if-not (db.utils/db? database)
     database
     (try
       (let [result (operation database)]
@@ -3600,19 +3599,16 @@
   "The arity gate's whole-program input for a value, memoized by the datoms it
   reads: edges, bounds, the comparison, and the edges indexed by caller and
   callee so a report can replace only the ones it touched."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :map :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
   (let [derive (fn []
-                 (let [edges (d/q call-edges-query database)
+                 (let [edges (set (d/q call-edges-query database))
                        bounds (declared-arity-bounds d/q database)]
-                   (if (:seon.error/at bounds)
-                     bounds
-                     (let [edges (set edges)]
-                       (merge (arity-comparison edges bounds)
-                              {::edge-set edges
-                               ::bounds bounds
-                               ::by-caller (group-by first edges)
-                               ::by-callee (group-by (comp first second) edges)})))))]
+                   (merge (arity-comparison edges bounds)
+                          {::edge-set edges
+                           ::bounds bounds
+                           ::by-caller (group-by first edges)
+                           ::by-callee (group-by (comp first second) edges)})))]
     ;; Keyed by the datoms it reads. The writer's own `:db-before` carries no
     ;; committed identity (Datahike's writer loop threads each report's
     ;; `:db-after`, `datahike/writer.cljc:118`, whose context is speculative,
@@ -3634,7 +3630,7 @@
   its caller's symbol and a bound to its callee's, so every other edge and
   bound is unchanged. Without every read attribute installed before, the
   final value is compared whole."
-  {:malli/schema [:=> [:cat :seon.db/transaction-report] [:or :map :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat :seon.db/transaction-report] :map]}
   [report]
   (let [before (:db-before report)
         after (:db-after report)
@@ -3642,13 +3638,9 @@
     (if-not (every? #(get (dbi/-schema before) %) arity-attributes)
       (let [edges (d/q call-edges-query after)
             bounds (declared-arity-bounds d/q after)]
-        (if (:seon.error/at bounds)
-          bounds
-          (assoc (arity-comparison (set edges) bounds) ::bounds bounds)))
-      (let [base (arity-base before)]
-        (if-not (::bounds base)
-          base
-          (let [symbols (fn [database entities attributes]
+        (assoc (arity-comparison (set edges) bounds) ::bounds bounds))
+      (let [base (arity-base before)
+              symbols (fn [database entities attributes]
                           (into #{}
                                 (for [entity entities attribute attributes
                                       :when (get (dbi/-schema database) attribute)
@@ -3704,7 +3696,7 @@
                 {::candidates (into (reduce disj (::candidates base) removed) (::candidates current))
                  ::checked (+ (- (::checked base) (::checked prior)) (::checked current))
                  ::edges (+ (- (::edges base) (::edges prior)) (::edges current))
-                 ::bounds bounds}))))))))
+                 ::bounds bounds}))))))
 
 (defn- arity-verdict
   "Refuse or report the candidates whose prepared arities also refuse.
@@ -3719,14 +3711,14 @@
   (let [candidates (vec candidates)
         snapshot (when (seq candidates)
                    (@call-preparation-report-snapshot report projection))
-        refusal (or (when (:seon.error/at snapshot) snapshot)
+        refusal (or (when (and snapshot (nil? (:seon.call-preparation/basis-t snapshot))) snapshot)
                     (first (:seon.call-preparation/refusals snapshot)))]
     (or refusal
         (let [plans (into {} (map (fn [callee]
                                     [callee (@call-preparation-plan-for
                                              database snapshot callee)]))
                           (distinct (map (comp first second) candidates)))
-              refused (some #(when (:seon.error/at %) %) (vals plans))]
+              refused (some #(when (and % (nil? (:seon.fn/sym %))) %) (vals plans))]
           (or refused
               {:seon.fn/arity-mismatches
                (->> candidates
@@ -3757,24 +3749,24 @@
                          (or [?caller :seon.fn/sym ?caller-symbol]
                              [?caller :seon.test/sym ?caller-symbol])]
                        database)
-        bounds (when-not (:seon.error/at edges)
+        bounds (when-not (:seon.db/invalid-read edges)
                  (declared-arity-bounds query-fn database))]
-    (or (when (:seon.error/at edges) edges)
-        (when (:seon.error/at bounds) bounds)
+    (or (when (:seon.db/invalid-read edges) edges)
+        (when (:seon.db/invalid-read bounds) bounds)
         (let [checked (filterv (fn [[_ [callee _]]] (contains? bounds callee)) edges)
               candidates (filterv (fn [[_ [callee n]]]
                                     (not (arity-admitted? (get bounds callee) n)))
                                   checked)
               snapshot (when (seq candidates)
                          (@call-preparation-snapshot database projection))
-              refusal (or (when (:seon.error/at snapshot) snapshot)
+              refusal (or (when (and snapshot (nil? (:seon.call-preparation/basis-t snapshot))) snapshot)
                           (first (:seon.call-preparation/refusals snapshot)))]
           (or refusal
               (let [plans (into {} (map (fn [callee]
                                          [callee (@call-preparation-plan-for
                                                   database snapshot callee)]))
                                 (distinct (map (comp first second) candidates)))
-                    refused (some #(when (:seon.error/at %) %) (vals plans))]
+                    refused (some #(when (and % (nil? (:seon.fn/sym %))) %) (vals plans))]
                 (or refused
                     {:seon.fn/arity-mismatches
                      (->> candidates
@@ -4054,9 +4046,7 @@
                  [:seon.fn/sym :seon.test/sym :seon.schema/key
                   :seon.schema.shape/fingerprint :seon.call-preparation/key])
        (let [comparison (report-arity-comparison report)
-             result (if (::candidates comparison)
-                      (arity-verdict database projection report comparison)
-                      comparison)
+             result (arity-verdict database projection report comparison)
              mismatches (:seon.fn/arity-mismatches result)]
          (if-not mismatches
            (assoc result ::transaction-refused true)
@@ -4524,7 +4514,7 @@
          (or
           (missing-transaction-data-error transaction)
           (cond
-            (:seon.error/at connection) connection
+            (not (connection-object? connection)) connection
 
             (not (connection? connection))
             (dependency-error
@@ -4532,7 +4522,7 @@
              (ex-info "The explicit transaction connection is not live."
                       {::connection connection}))
 
-            (:seon.error/at database) database
+            (not (db.utils/db? database)) database
 
             :else
             (or (foreign-connection-error database connection transaction)
