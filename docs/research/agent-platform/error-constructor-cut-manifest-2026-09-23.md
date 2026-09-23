@@ -1,6 +1,6 @@
 ---
 type: implementation-manifest
-status: prepared for independent review; not implemented
+status: accepted independent review incorporated; implementation proofs outstanding
 created: 2026-09-23
 scope: B3 constructor/callers, cut-analysis rank 9
 ---
@@ -9,19 +9,34 @@ scope: B3 constructor/callers, cut-analysis rank 9
 
 The system already carries errors as flat values and has one cause-preserving constructor. Keep that owner, pass the existing timestamp, and replace only repeated syntax; neither error policy nor domain evidence needs another mechanism.
 
-**Decision for review:** extend `seon.error.refusal/diagnostic` with one positional arity; retain its map arity and all producer contracts. The measured free conversion is **224 sites, −436 caller lines**, not the historical ≈−1,200. With the helper and the one supported prose deletion, the measured prepared free source/script change is **−452**, plus **−11 test lines** before the required regression additions. No implementation, JVM, test, runtime-status request, publication, worktree, or push occurred in this assignment.
+**Reviewed decision:** extend `seon.error.refusal/diagnostic` with one positional arity; retain its map arity and all producer contracts. The measured free conversion is **191 sites, −370 caller lines**, not the historical ≈−1,200. With the helper and the one supported prose deletion, the measured prepared free source/script change is **−386**, plus **−11 test lines** before the required regression additions. No implementation, JVM, test, runtime-status request, publication, worktree, or push occurred in this assignment.
+
+## Accepted review disposition
+
+Read [the independent review](astra-review-error-manifest-2026-09-23.md) at `2b8d70c9a` end to end; the orchestrator accepts all findings. This revision incorporates them without running project code.
+
+| Finding | Change in this manifest and executable scripts |
+|---|---|
+| **P1-1: replay/admission** | §§3–5/8: positive expression-context whitelist, unique literal resolved keys, real ns/require/alias inspection, explicit selected file list, original whole-file plus exact-span checks, porcelain staged/unstaged/untracked/rename handling, current ledger fingerprint check, current output roster, stale refusal vs fresh-census no-op. `admission.clj`, `census.clj`, `preview.py`, `prose-preview.py`; offline replay evidence below. |
+| **P1-2: armed complete values** | §6: both arities armed from the same acquired projection; actual `prepare` intermediate in E0; conditional config, computed messages, subsequent assoc/merge, original ex-info cause, exact producer alternative/recording declaration; both constructor entries profiled. Synthetic wrapper checks alone do not pass. |
+| **P2-1: completeness/reproducibility** | §3 explicitly limits lexical discovery; §§4/7 recounted from the narrowed rules; §8 embeds current executable bytes. `write-manifest.py` now exits with a retired-draft warning, preventing the old template from discarding the reviewed shape table. |
+| **P2-2: slice/platform admission** | §6 budgets are provisional until actual proof additions are counted. Split at definition boundaries, never trim assertions. Operator has zero newly admitted sites and remains a named platform-proof residue; a pure constructor test never proves its loadability. |
+
+All census-bearing source/test fingerprint rows still match the refreshed input bytes. Ownership changed **during** preparation: the new entrance actually refused `Ledger drift` rather than generating candidates from stale holds. The orchestrator's new evening STALE-ROW NOTE says all Opus running rows are stale except dirty files left by stopped lanes; Codex holds come from their launch specs. `fix-schedule-2026-09-23.md` at `99cd7eebf`, 17:19Z, names sol-refusal-canonicalization's `src/seon/schema/internal.cljc`, `test/seon/render/value_test.clj` and its new regression. The value test was initially clean; final porcelain now shows both it and schema/internal.cljc modified, confirming they remain HELD by that new lane, following repairs `97a3fed6c` and `11cc76396`. It has no literal census site; no extra row is invented. The five dirty production owners and their test families remain HELD, and current porcelain catches any additional dirty/staged/untracked path. No lane was contacted.
+
+Admission narrowing yields **207 sites**, down from the former 311. After the new ownership ruling, **191 are FREE and 16 HELD** (389/71 total lexical sites); the earlier 151/56 split in this fold was superseded by that real ledger change. Content hashes were unchanged, so ownership was refreshed from recorded rows rather than reparsing valid source. We retain 102 unsupported expression-context rows, 11 unsupported namespace rows and 3 unresolved/nonliteral/duplicate-key rows instead of building a general Clojure interpreter. Resolving real aliases also recognizes `error/diagnostic` in `src/seon/edit.clj:123,287` as existing constructor calls: D shapes, not raw-Throwable L maps. The total lexical census remains 460; these differences are admission/classification/ownership, not production edits.
 
 ## 1. Basis, authority and ownership
 
-Basis: `refactor/agent-platform`, observed HEAD `b2ac2c4737c35dfea584cc623210f16ef2587583`; census uses working-tree bytes, including explicitly marked foreign WIP. The per-file hashes below identify those bytes independently of HEAD. This is a point-in-time manifest, not a lock or a claim that other lanes stopped changing files.
+Original basis: `refactor/agent-platform`, HEAD `b2ac2c4737c35dfea584cc623210f16ef2587583`. Review-fold ownership check observed HEAD `4a19086564d6698a08332f8fe39d236f32b9857d`; census uses working-tree bytes, including explicitly marked foreign WIP. The per-file hashes below identify those bytes independently of HEAD. This is a point-in-time manifest, not a lock or a claim that other lanes stopped changing files.
 
-Authorities read: root `AGENTS.md` (principal Clojure approach, flat declared errors, whole causes, scripted changes, one-file ownership); `docs/prds/agent-platform/plan/AGENTS.md`; plan README and B3 §2a / §5 rows 1–3; `cut-analysis-2026-09-23.md` §2 B-c and rank 9; `astra-cut-review-2026-09-23.md` Error group. Design and proof guidance: `.agents/skills/data-oriented-clojure/SKILL.md` and `.agents/skills/clojure-testing/SKILL.md`. This document refines the existing cut; it does not replace B3 or authorize implementation before independent review.
+Authorities read: root `AGENTS.md` (principal Clojure approach, flat declared errors, whole causes, scripted changes, one-file ownership); `docs/prds/agent-platform/plan/AGENTS.md`; plan README and B3 §2a / §5 rows 1–3; `cut-analysis-2026-09-23.md` §2 B-c and rank 9; `astra-cut-review-2026-09-23.md` Error group. Design and proof guidance: `.agents/skills/data-oriented-clojure/SKILL.md` and `.agents/skills/clojure-testing/SKILL.md`. This document refines the existing cut; it does not replace B3 or authorize implementation before the review findings and implementation admission checks are satisfied.
 
 Historical evidence: `a86e93e21` retained explicit producing contracts; `ed2e1a6b6` installed whole-chain construction; `0d6eef939` changed error-floor behavior. Current `refusal.clj:91–115` already has the supplied `at` map contract, and `refusal_test.clj:181` asserts the facade is gone. Thus B3's historical seven-key migration and facade retirement are not repeated. Its old one-publication requirement applies to a breaking input retirement; this proposal adds an arity and leaves held old callers callable, so free callers can land first.
 
-**HELD:** the dirty `src/seon/{cluster,fn,issue,instrument,test}.clj` and their test families named by the assignment. `git status` also reported modified cluster adoption/reload/store tests, `instrument_test`, test admission-digest tests and `render/web_test`; these are foreign boundaries, not work for this lane. The ledger's CURRENT HOLDS block also reserves `db.clj` (cut-l2), flow/await/cluster-agent/cluster-process/turn (m4-n1), maintenance/schedule (store-damage), cluster/source (test-overhead), and script/dev/mcp (branch-repl). Their rows and associated test families are conservatively HELD even when clean. Older “running” ledger blocks explicitly say they are stale. No held file or session was edited, resumed or messaged. FREE means outside those recorded holds and dirty paths, not blanket permission: the orchestrator must reacquire exact paths before launch.
+**HELD:** dirty `src/seon/{cluster,fn,issue,instrument,test}.clj` and their test families remain with stopped lanes. Current modified cluster adoption/reload/store tests, instrument_test, admission_digest_test and render/web_test remain foreign boundaries. The newer evening STALE-ROW NOTE supersedes the ledger's older CURRENT HOLDS block: clean db, flow/await, cluster-agent/process/source, turn, maintenance/schedule and script/dev/mcp are no longer held merely by those stale rows. The current canonicalization launch separately holds schema/internal.cljc and render/value_test.clj; its new regression is also outside this lane. FREE is a current census classification, not blanket edit permission: reacquire exact source and proof paths before launch. No foreign file/session was edited, resumed or messaged.
 
-**Deliverable conflict resolved narrowly:** the assignment says both “commit only” this Markdown and “commit the script under tmp/error-constructor/.” Only the Markdown is committed. The complete executed census and preview scripts are embedded below so their bytes are committed and can be extracted to the named tmp paths. Executable copies, JSON evidence and dry-run patches remain in `tmp/error-constructor/`; none is a second committed path. No production source was written.
+**Deliverable conflict resolved narrowly:** the assignment says both “commit only” this Markdown and “commit the script under tmp/error-constructor/.” Only the Markdown is committed. The complete executed census and preview scripts are embedded below so their bytes are committed and can be extracted to the named tmp paths. Updated executable copies, JSON evidence and dry-run patches remain in `tmp/error-constructor/`; none is a second committed path. No production source was written.
 
 ## 2. Existing owner and the smallest extension
 
@@ -73,9 +88,13 @@ Cost: a plain error remains work proportional to its own member count k, O(k) ti
 
 One `rg -l :seon.error/at src test script bin` discovery pass per census invocation, followed by rewrite-clj traversal, not evaluation or regex replacement. Clojure files and extensionless Babashka scripts are parsed. A site is a literal map whose direct key forms contain `:seon.error/at`, `:seon.error/layer`, and `:seon.error/operation`; key order is unrestricted for counting. Maps with message are the requested four-key class. Three-key maps are additionally recorded because message is optional. Keywords inside strings, schema vectors, attribute reads, destructuring without those direct keys, and maps assembled only by `assoc` are not claimed as literal construction sites. Dependencies, caches, EDN database snapshots, and docs are outside the production census.
 
-Result: **460 sites**: src 353, test 102, script 4, bin 1. **416** have all four requested keys; **339** of those are in src. The 353 src map spans occupy 3,059 lines including domain members and multiline values. This is not the historical 2,128 “base-key lines.” The older 342 literals / ≈−1,200 is a proposal at another basis, not a current measured diff. Do not scale it to the free subset.
+Result: **460 sites**: src 353, test 102, script 4, bin 1. **416** have all four requested keys; **339** of those are in src. This is a census of the stated lexical subset, **not all error producers**: namespaced-map shorthand (`#:seon.error{...}`), alias-qualified spellings without the literal discovery token, and computed/assoc/merge-assembled constructions lie outside discovery. The independent review found no real shorthand construction omitted in the inspected source/script/test files; that observation does not make the method universal.
 
-Mechanical admission requires the first three direct keys in exactly at/layer/operation order, no internal comments, no quoted/discarded ancestor, and no raw Throwable input unless the entire immediate parent is already a recognized one-argument diagnostic call. No member expressions are evaluated by the script. The source-independent `script/seon/dev/dependency_digest.clj` remains a literal: its :2–15 contract says tools.deps loads it without the Seon source classpath. Introducing a require there would break bootstrap. Test literal maps remain independent expected/fixture data; constructing an expectation with the function under test would weaken the proof. The single prose-only test specimen removed with its owner is accounted separately.
+The 353 src map spans occupy 3,059 lines including domain members and multiline values. This is not the historical 2,128 “base-key lines.” The older 342 literals / ≈−1,200 is a proposal at another basis, not a current measured diff. Do not scale it to the free subset.
+
+Mechanical admission requires unique direct literal keyword keys, resolving `::local` through the actual ns name and `::alias/key` through an actual require alias; unresolved, computed or duplicate resolved keys refuse conversion. The first three keys remain in exactly at/layer/operation order. There must be one simple parsed top-level ns with one simple :require clause; the constructor alias must actually resolve to `seon.error.refusal`. A docstring mention or unrelated substring never establishes that dependency. Namespace prefix libspecs and reader-conditional requires are retained as unsupported.
+
+Expression positions use the finite positive whitelist in `admission.clj`: supported direct single-arity defn/fn bodies, ordinary binding-value positions, map values, data vectors/sets and explicitly named core expression forms/calls. Only the initial-value position of threading forms is admitted, never a map used as a threading step. Arbitrary call/macro ancestry, multi-arity or metadata-wrapped parameter shapes, metadata/reader/quoted/discard contexts and map-key/binding-name positions are retained. This deliberately leaves familiar but unsupported forms for review; their semantics are not guessed. Internal comments remain residue, as do raw Throwable inputs unless the immediate parent is already the resolved one-argument diagnostic call. No member expressions are evaluated by the script. The source-independent `script/seon/dev/dependency_digest.clj` remains a literal: its :2–15 contract says tools.deps loads it without the Seon source classpath. Introducing a require there would break bootstrap. Test literal maps remain independent expected/fixture data; constructing an expectation with the function under test would weaken the proof. The single prose-only test specimen removed with its owner is accounted separately.
 
 Codes in the complete site table:
 
@@ -87,6 +106,9 @@ Codes in the complete site table:
 - `Q`: quoted/discarded data; keep data, never turn into a call.
 - `F`: independent test fixture/expected literal; retain, except error_test:1285's obsolete prose fixture deleted in E0.
 - `B`: bootstrap classpath boundary; retain literal.
+- `K`: nonliteral/unresolved/duplicate resolved keys; retain.
+- `N`: unsupported ns/require form; retain.
+- `X`: outside the positive expression-context grammar; retain.
 
 Every location is `line:column/shape/disposition`. “Auto” is syntactic eligibility, not permission to edit a HELD row. The Δ column includes the necessary require line for that file and measures only admitted substitutions; test/prose/helper changes are separate.
 
@@ -96,65 +118,65 @@ Every location is `line:column/shape/disposition`. “Auto” is syntactic eligi
 |---|---|---:|---:|---:|---|
 | `bin/seon-hook` | FREE | 1 | 0 | +0 | 1663:31/L+M/Q |
 | `script/seon/dev/dependency_digest.clj` | FREE | 1 | 0 | +0 | 109:5/L+M/B |
-| `script/seon/dev/mcp.clj` | HELD | 2 | 0 | +0 | 500:9/L+M/Q, 559:28/L+M/Q |
-| `script/seon/operator.clj` | FREE | 1 | 1 | -2 | 61:4/L+M/A |
+| `script/seon/dev/mcp.clj` | FREE | 2 | 0 | +0 | 500:9/L+M/Q, 559:28/L+M/Q |
+| `script/seon/operator.clj` | FREE | 1 | 0 | +0 | 61:4/L+M/X |
 | `src/my/background.clj` | FREE | 1 | 1 | -2 | 12:3/L+M/A |
-| `src/my/program.clj` | FREE | 5 | 5 | -9 | 29:12/L+M/A, 63:21/L+M/A, 430:7/L+M/A, 464:4/L+M/A, 666:16/L+M/A |
+| `src/my/program.clj` | FREE | 5 | 4 | -7 | 29:12/L+M/A, 63:21/L+M/A, 430:7/L+M/A, 464:4/L+M/A, 666:16/L+M/X |
 | `src/seon/agent.clj` | FREE | 3 | 1 | -1 | 23:7/L+M/O, 44:13/L+M/O, 141:23/L+M/A |
 | `src/seon/ai.clj` | FREE | 17 | 14 | -29 | 337:7/L+M/A, 651:11/L+M/A, 662:9/L+M/A, 708:11/L+M/A, 735:3/L+M/A, 904:7/L+M/A, 914:7/L+M/A, 927:7/L+M/A, 942:7/L+M/A, 963:7/L+M/A, 986:7/L+M/A, 1202:11/L+M/A, 1405:15/D+M/C, 1423:13/L+M/C, 1449:11/L+M/A, 1468:7/D+M/A, 1523:7/L+M/C |
-| `src/seon/await.clj` | HELD | 1 | 1 | -2 | 45:6/L+M/A |
+| `src/seon/await.clj` | FREE | 1 | 1 | -2 | 45:6/L+M/A |
 | `src/seon/background.clj` | FREE | 2 | 2 | -4 | 51:5/L+M/A, 83:7/L+M/A |
-| `src/seon/blob.clj` | FREE | 5 | 5 | -10 | 77:9/L+M/A, 94:9/L+M/A, 154:9/L+M/A, 263:13/L+M/A, 395:11/L+M/A |
-| `src/seon/bootstrap.clj` | FREE | 5 | 5 | -10 | 117:7/L+M/A, 391:7/L+M/A, 595:7/L+M/A, 696:37/L+M/A, 720:23/L+M/A |
-| `src/seon/call_preparation.clj` | FREE | 6 | 6 | -12 | 208:3/L+M/A, 1189:3/L+M/A, 1237:28/L+M/A, 1254:29/L+M/A, 1275:11/L+M/A, 1408:9/L+M/A |
-| `src/seon/cluster.clj` | HELD | 7 | 4 | -7 | 103:23/L+M/A, 340:9/L+M/A, 375:5/L+M/A, 393:13/L+M/A, 612:7/L+M/O, 620:5/L+M/O, 3179:11/L+M/O |
-| `src/seon/cluster/agent.clj` | HELD | 2 | 2 | -3 | 655:7/L+M/A, 690:19/L+M/A |
-| `src/seon/cluster/boot.clj` | FREE | 1 | 1 | -2 | 276:4/L+M/A |
-| `src/seon/cluster/message.clj` | FREE | 14 | 0 | +0 | 157:5/L+M/O, 163:5/L+M/O, 169:5/L+M/O, 196:28/L+M/O, 204:28/L+M/O, 216:26/L+M/O, 605:7/L+M/O, 627:5/L+M/O, 635:5/L+M/O, 644:5/L+M/O, 684:29/L+M/O, 739:5/L+M/O, 747:5/L+M/O, 755:5/L+M/O |
-| `src/seon/cluster/process.clj` | HELD | 4 | 4 | -8 | 45:9/L+M/A, 202:15/L+M/A, 212:21/L+M/A, 279:11/L+M/A |
+| `src/seon/blob.clj` | FREE | 5 | 4 | -8 | 77:9/L+M/A, 94:9/L+M/X, 154:9/L+M/A, 263:13/L+M/A, 395:11/L+M/A |
+| `src/seon/bootstrap.clj` | FREE | 5 | 4 | -8 | 117:7/L+M/A, 391:7/L+M/A, 595:7/L+M/A, 696:37/L+M/X, 720:23/L+M/A |
+| `src/seon/call_preparation.clj` | FREE | 6 | 5 | -10 | 208:3/L+M/A, 1189:3/L+M/A, 1237:28/L+M/X, 1254:29/L+M/A, 1275:11/L+M/A, 1408:9/L+M/A |
+| `src/seon/cluster.clj` | HELD | 7 | 3 | -5 | 103:23/L+M/A, 340:9/L+M/A, 375:5/L+M/A, 393:13/L+M/X, 612:7/L+M/O, 620:5/L+M/O, 3179:11/L+M/O |
+| `src/seon/cluster/agent.clj` | FREE | 2 | 2 | -3 | 655:7/L+M/A, 690:19/L+M/A |
+| `src/seon/cluster/boot.clj` | FREE | 1 | 0 | +0 | 276:4/L+M/X |
+| `src/seon/cluster/message.clj` | FREE | 14 | 0 | +0 | 157:5/L+M/O, 163:5/L+M/O, 169:5/L+M/O, 196:28/L+M/O, 204:28/L+M/O, 216:26/L+M/X, 605:7/L+M/O, 627:5/L+M/O, 635:5/L+M/O, 644:5/L+M/O, 684:29/L+M/O, 739:5/L+M/O, 747:5/L+M/O, 755:5/L+M/O |
+| `src/seon/cluster/process.clj` | FREE | 4 | 4 | -8 | 45:9/L+M/A, 202:15/L+M/A, 212:21/L+M/A, 279:11/L+M/A |
 | `src/seon/cluster/prompt.clj` | FREE | 2 | 1 | -1 | 57:7/L+M/O, 351:7/L+M/A |
 | `src/seon/cluster/reply.clj` | FREE | 1 | 0 | +0 | 55:11/L+M/O |
-| `src/seon/cluster/source.clj` | HELD | 5 | 5 | -7 | 409:3/L+M/A, 452:26/L+M/A, 484:36/L+M/A, 535:21/L+M/A, 807:18/L+M/A |
+| `src/seon/cluster/source.clj` | FREE | 5 | 4 | -5 | 409:3/L+M/A, 452:26/L+M/A, 484:36/L+M/X, 535:21/L+M/A, 807:18/L+M/A |
 | `src/seon/cluster/status.clj` | FREE | 1 | 1 | -1 | 16:3/L+M/A |
 | `src/seon/cluster/wake.clj` | FREE | 4 | 4 | -7 | 231:7/L+M/A, 240:7/L+M/A, 250:7/L+M/A, 277:5/L+M/A |
-| `src/seon/config.clj` | FREE | 18 | 18 | -35 | 122:7/L+M/A, 198:8/L+M/A, 217:8/L+M/A, 232:8/L+M/A, 265:8/L+M/A, 280:8/L+M/A, 294:8/L+M/A, 308:8/L+M/A, 323:8/L+M/A, 345:8/L+M/A, 387:8/L+M/A, 404:8/L+M/A, 485:8/L+M/A, 506:8/L+M/A, 529:8/L+M/A, 577:8/L+M/A, 632:12/L+M/A, 791:13/L+M/A |
+| `src/seon/config.clj` | FREE | 18 | 2 | -3 | 122:7/L+M/A, 198:8/L+M/X, 217:8/L+M/X, 232:8/L+M/X, 265:8/L+M/X, 280:8/L+M/X, 294:8/L+M/X, 308:8/L+M/X, 323:8/L+M/X, 345:8/L+M/X, 387:8/L+M/X, 404:8/L+M/X, 485:8/L+M/X, 506:8/L+M/X, 529:8/L+M/X, 577:8/L+M/X, 632:12/L+M/X, 791:13/L+M/A |
 | `src/seon/context.clj` | FREE | 1 | 1 | -1 | 67:4/L+M/A |
-| `src/seon/db.clj` | HELD | 9 | 7 | -17 | 169:3/L+M/O, 196:3/L+M/A, 487:12/L+M/A, 1248:3/L+M/A, 2381:19/L-M/T, 2740:7/L+M/A, 2997:19/D+M/A, 3005:7/D+M/A, 4329:19/D+M/A |
-| `src/seon/edit.clj` | FREE | 10 | 8 | -16 | 123:8/L+M/T, 165:11/L+M/A, 276:9/L+M/A, 287:8/L+M/T, 356:17/L+M/A, 373:17/L+M/A, 429:7/L+M/A, 442:7/L+M/A, 482:7/L+M/A, 498:11/L+M/A |
-| `src/seon/edit/jvm.clj` | FREE | 1 | 0 | +0 | 11:3/L+M/O |
-| `src/seon/effect.clj` | FREE | 15 | 14 | -28 | 258:9/L+M/A, 314:17/L+M/A, 327:17/L+M/A, 383:17/L+M/A, 396:17/L+M/A, 611:16/L+M/A, 633:8/L+M/T, 699:9/L+M/A, 711:7/L+M/A, 726:8/L+M/A, 735:8/L+M/A, 774:12/L+M/A, 784:12/L+M/A, 794:12/L+M/A, 823:16/L+M/A |
+| `src/seon/db.clj` | FREE | 9 | 4 | -9 | 169:3/L+M/K, 196:3/L+M/A, 487:12/L+M/X, 1248:3/L+M/A, 2381:19/L-M/T, 2740:7/L+M/A, 2997:19/D+M/A, 3005:7/D+M/X, 4329:19/D+M/X |
+| `src/seon/edit.clj` | FREE | 10 | 10 | -22 | 123:8/D+M/A, 165:11/L+M/A, 276:9/L+M/A, 287:8/D+M/A, 356:17/L+M/A, 373:17/L+M/A, 429:7/L+M/A, 442:7/L+M/A, 482:7/L+M/A, 498:11/L+M/A |
+| `src/seon/edit/jvm.clj` | FREE | 1 | 0 | +0 | 11:3/L+M/K |
+| `src/seon/effect.clj` | FREE | 15 | 14 | -29 | 258:9/L+M/A, 314:17/L+M/A, 327:17/L+M/A, 383:17/L+M/A, 396:17/L+M/A, 611:16/L+M/X, 633:8/D+M/A, 699:9/L+M/A, 711:7/L+M/A, 726:8/L+M/A, 735:8/L+M/A, 774:12/L+M/A, 784:12/L+M/A, 794:12/L+M/A, 823:16/L+M/A |
 | `src/seon/env.clj` | FREE | 10 | 10 | -20 | 89:15/L+M/A, 107:15/L+M/A, 168:11/L+M/A, 217:3/L+M/A, 236:5/L+M/A, 301:7/L+M/A, 314:7/L+M/A, 361:5/L+M/A, 378:7/L+M/A, 439:15/L+M/A |
-| `src/seon/error.clj` | FREE | 8 | 7 | -13 | 507:29/L-M/A, 553:36/L-M/A, 611:17/L-M/O, 732:8/D+M/A, 1509:8/L+M/A, 1602:5/L+M/A, 1782:19/L+M/A, 2191:15/L-M/A |
-| `src/seon/eval.clj` | FREE | 1 | 1 | -1 | 35:7/L+M/A |
-| `src/seon/flow.clj` | HELD | 8 | 8 | -15 | 366:3/L+M/A, 696:9/L+M/A, 818:9/L+M/A, 898:15/L+M/A, 912:12/L+M/A, 939:7/L+M/A, 1035:6/L+M/A, 1194:7/L+M/A |
-| `src/seon/fn.clj` | HELD | 1 | 1 | -1 | 1039:16/L+M/A |
-| `src/seon/fs/jvm.clj` | FREE | 1 | 0 | +0 | 38:3/L+M/O |
-| `src/seon/instrument.clj` | HELD | 4 | 4 | -9 | 370:15/L+M/A, 436:15/L+M/A, 591:21/L-M/A, 670:21/D+M/A |
-| `src/seon/issue.clj` | HELD | 21 | 21 | -41 | 78:27/L+M/A, 142:52/L+M/A, 208:23/L+M/A, 558:22/L+M/A, 567:38/L+M/A, 575:29/L+M/A, 597:30/L+M/A, 605:29/L+M/A, 617:22/L+M/A, 781:7/L+M/A, 1049:16/L+M/A, 1078:48/L+M/A, 1085:44/L+M/A, 1093:16/L+M/A, 1101:39/L+M/A, 1108:37/L+M/A, 1116:16/L+M/A, 1170:20/L+M/A, 1179:20/L+M/A, 1290:14/L+M/A, 1333:48/L+M/A |
+| `src/seon/error.clj` | FREE | 8 | 4 | -8 | 507:29/L-M/A, 553:36/L-M/A, 611:17/L-M/O, 732:8/D+M/A, 1509:8/L+M/X, 1602:5/L+M/A, 1782:19/L+M/X, 2191:15/L-M/X |
+| `src/seon/eval.clj` | FREE | 1 | 0 | +0 | 35:7/L+M/X |
+| `src/seon/flow.clj` | FREE | 8 | 4 | -7 | 366:3/L+M/A, 696:9/L+M/A, 818:9/L+M/X, 898:15/L+M/X, 912:12/L+M/X, 939:7/L+M/A, 1035:6/L+M/A, 1194:7/L+M/X |
+| `src/seon/fn.clj` | HELD | 1 | 0 | +0 | 1039:16/L+M/X |
+| `src/seon/fs/jvm.clj` | FREE | 1 | 0 | +0 | 38:3/L+M/K |
+| `src/seon/instrument.clj` | HELD | 4 | 3 | -7 | 370:15/L+M/A, 436:15/L+M/X, 591:21/L-M/A, 670:21/D+M/A |
+| `src/seon/issue.clj` | HELD | 21 | 4 | -7 | 78:27/L+M/A, 142:52/L+M/A, 208:23/L+M/A, 558:22/L+M/X, 567:38/L+M/X, 575:29/L+M/X, 597:30/L+M/X, 605:29/L+M/X, 617:22/L+M/X, 781:7/L+M/A, 1049:16/L+M/X, 1078:48/L+M/X, 1085:44/L+M/X, 1093:16/L+M/X, 1101:39/L+M/X, 1108:37/L+M/X, 1116:16/L+M/X, 1170:20/L+M/X, 1179:20/L+M/X, 1290:14/L+M/X, 1333:48/L+M/X |
 | `src/seon/issue/opening.clj` | FREE | 2 | 2 | -3 | 206:5/L+M/A, 233:5/L+M/A |
-| `src/seon/maintenance.clj` | HELD | 8 | 7 | -14 | 52:7/L+M/A, 65:13/L+M/A, 73:13/L+M/A, 252:7/L+M/A, 448:13/L+M/T, 724:5/L+M/A, 929:9/L+M/A, 950:5/L+M/A |
-| `src/seon/plan.clj` | FREE | 24 | 24 | -47 | 172:16/L+M/A, 361:7/L+M/A, 411:7/L+M/A, 541:16/L+M/A, 556:18/L+M/A, 583:16/L+M/A, 593:16/L+M/A, 609:41/L+M/A, 654:16/L+M/A, 707:18/L+M/A, 742:16/L+M/A, 800:16/L+M/A, 814:16/L+M/A, 830:22/L+M/A, 895:16/L+M/A, 907:16/L+M/A, 937:16/L+M/A, 990:16/L+M/A, 1005:16/L+M/A, 1024:22/L+M/A, 1151:16/L+M/A, 1174:20/L+M/A, 1188:22/L+M/A, 1209:30/L+M/A |
-| `src/seon/problems.clj` | FREE | 1 | 0 | +0 | 120:18/L-M/O |
-| `src/seon/program.cljc` | FREE | 10 | 10 | -20 | 145:13/L+M/A, 325:9/L+M/A, 403:14/L+M/A, 796:23/L+M/A, 813:23/L+M/A, 867:15/L+M/A, 917:17/L+M/A, 944:15/L+M/A, 1003:23/L+M/A, 1082:17/L+M/A |
-| `src/seon/render.clj` | FREE | 10 | 6 | -11 | 144:15/L+M/A, 317:9/L+M/A, 938:16/L+M/A, 1257:15/L+M/O, 1273:15/L+M/O, 1288:15/L+M/O, 1349:9/L+M/A, 1401:17/L+M/O, 1467:27/L+M/A, 1749:10/L+M/A |
-| `src/seon/render/data.clj` | FREE | 2 | 2 | -3 | 72:19/L+M/A, 114:4/L+M/A |
+| `src/seon/maintenance.clj` | FREE | 8 | 6 | -12 | 52:7/L+M/A, 65:13/L+M/A, 73:13/L+M/A, 252:7/L+M/A, 448:13/L+M/T, 724:5/L+M/A, 929:9/L+M/X, 950:5/L+M/A |
+| `src/seon/plan.clj` | FREE | 24 | 2 | -3 | 172:16/L+M/X, 361:7/L+M/A, 411:7/L+M/A, 541:16/L+M/X, 556:18/L+M/X, 583:16/L+M/X, 593:16/L+M/X, 609:41/L+M/X, 654:16/L+M/X, 707:18/L+M/X, 742:16/L+M/X, 800:16/L+M/X, 814:16/L+M/X, 830:22/L+M/X, 895:16/L+M/X, 907:16/L+M/X, 937:16/L+M/X, 990:16/L+M/X, 1005:16/L+M/X, 1024:22/L+M/X, 1151:16/L+M/X, 1174:20/L+M/X, 1188:22/L+M/X, 1209:30/L+M/X |
+| `src/seon/problems.clj` | FREE | 1 | 0 | +0 | 120:18/L-M/X |
+| `src/seon/program.cljc` | FREE | 10 | 0 | +0 | 145:13/L+M/N, 325:9/L+M/N, 403:14/L+M/N, 796:23/L+M/N, 813:23/L+M/N, 867:15/L+M/N, 917:17/L+M/N, 944:15/L+M/N, 1003:23/L+M/N, 1082:17/L+M/N |
+| `src/seon/render.clj` | FREE | 10 | 5 | -9 | 144:15/L+M/A, 317:9/L+M/A, 938:16/L+M/A, 1257:15/L+M/X, 1273:15/L+M/X, 1288:15/L+M/X, 1349:9/L+M/A, 1401:17/L+M/O, 1467:27/L+M/A, 1749:10/L+M/X |
+| `src/seon/render/data.clj` | FREE | 2 | 1 | -1 | 72:19/L+M/X, 114:4/L+M/A |
 | `src/seon/render/hiccup.clj` | FREE | 4 | 4 | -8 | 277:5/L+M/A, 304:9/L+M/A, 325:17/L+M/A, 440:18/L+M/A |
 | `src/seon/render/transcript.clj` | FREE | 3 | 3 | -6 | 701:9/L+M/A, 961:15/L+M/A, 2346:13/L+M/A |
 | `src/seon/render/value.clj` | FREE | 2 | 2 | -4 | 248:7/L+M/A, 345:8/L+M/A |
-| `src/seon/render/walk.clj` | FREE | 4 | 2 | -4 | 234:12/L+M/O, 644:12/L+M/O, 742:20/L+M/A, 941:23/L+M/A |
-| `src/seon/render/web.clj` | FREE | 11 | 11 | -22 | 639:41/L+M/A, 728:25/L+M/A, 755:13/L+M/A, 1833:23/L+M/A, 2676:30/L+M/A, 2808:17/L-M/A, 2841:11/L-M/A, 3155:21/L+M/A, 3475:24/L+M/A, 3527:21/L+M/A, 3551:21/L+M/A |
+| `src/seon/render/walk.clj` | FREE | 4 | 1 | -2 | 234:12/L+M/O, 644:12/L+M/O, 742:20/L+M/X, 941:23/L+M/A |
+| `src/seon/render/web.clj` | FREE | 11 | 6 | -12 | 639:41/L+M/X, 728:25/L+M/A, 755:13/L+M/A, 1833:23/L+M/X, 2676:30/L+M/X, 2808:17/L-M/X, 2841:11/L-M/X, 3155:21/L+M/A, 3475:24/L+M/A, 3527:21/L+M/A, 3551:21/L+M/A |
 | `src/seon/run.clj` | FREE | 2 | 2 | -3 | 124:5/L+M/A, 145:5/L+M/A |
-| `src/seon/schedule.clj` | HELD | 8 | 8 | -17 | 243:23/L+M/A, 366:23/L+M/A, 381:23/L+M/A, 399:21/L+M/A, 467:23/L+M/A, 500:23/L+M/A, 643:44/L+M/A, 657:9/D+M/A |
-| `src/seon/schema.clj` | FREE | 7 | 6 | -12 | 505:7/L+M/T, 1233:11/L+M/A, 1335:19/L+M/A, 1973:9/L+M/A, 3058:35/L+M/A, 3306:3/L+M/A, 3404:3/L+M/A |
-| `src/seon/sci/admit.clj` | FREE | 4 | 4 | -8 | 130:23/L+M/A, 423:21/L+M/A, 634:3/L+M/A, 660:15/L+M/A |
-| `src/seon/sci/eval.clj` | FREE | 16 | 16 | -32 | 222:48/L+M/A, 535:23/L-M/A, 542:23/L-M/A, 685:7/L+M/A, 741:17/L+M/A, 857:3/L+M/A, 990:23/L+M/A, 1086:27/L+M/A, 1385:19/L+M/A, 1402:15/L+M/A, 1524:3/L+M/A, 1547:3/L+M/A, 1776:8/L+M/A, 2055:19/L+M/A, 2846:19/L+M/A, 2864:19/L+M/A |
-| `src/seon/sci/kernel.clj` | FREE | 6 | 6 | -14 | 174:17/L-M/A, 304:17/L-M/A, 322:15/L-M/A, 561:8/D+M/A, 625:25/L+M/A, 680:17/D+M/A |
-| `src/seon/sci/reader.cljc` | FREE | 1 | 1 | -2 | 17:5/L+M/A |
+| `src/seon/schedule.clj` | FREE | 8 | 7 | -15 | 243:23/L+M/X, 366:23/L+M/A, 381:23/L+M/A, 399:21/L+M/A, 467:23/L+M/A, 500:23/L+M/A, 643:44/L+M/A, 657:9/D+M/A |
+| `src/seon/schema.clj` | FREE | 7 | 4 | -8 | 505:7/L+M/T, 1233:11/L+M/A, 1335:19/L+M/X, 1973:9/L+M/A, 3058:35/L+M/X, 3306:3/L+M/A, 3404:3/L+M/A |
+| `src/seon/sci/admit.clj` | FREE | 4 | 3 | -6 | 130:23/L+M/A, 423:21/L+M/A, 634:3/L+M/A, 660:15/L+M/X |
+| `src/seon/sci/eval.clj` | FREE | 16 | 13 | -26 | 222:48/L+M/X, 535:23/L-M/A, 542:23/L-M/A, 685:7/L+M/A, 741:17/L+M/A, 857:3/L+M/A, 990:23/L+M/A, 1086:27/L+M/X, 1385:19/L+M/A, 1402:15/L+M/A, 1524:3/L+M/A, 1547:3/L+M/A, 1776:8/L+M/A, 2055:19/L+M/X, 2846:19/L+M/A, 2864:19/L+M/A |
+| `src/seon/sci/kernel.clj` | FREE | 6 | 5 | -12 | 174:17/L-M/A, 304:17/L-M/A, 322:15/L-M/A, 561:8/D+M/A, 625:25/L+M/X, 680:17/D+M/A |
+| `src/seon/sci/reader.cljc` | FREE | 1 | 0 | +0 | 17:5/L+M/N |
 | `src/seon/shell/jvm.clj` | FREE | 9 | 8 | -16 | 46:7/L+M/A, 56:7/L+M/A, 149:7/L+M/A, 168:11/L+M/A, 187:17/L+M/A, 200:17/L+M/A, 214:17/L+M/A, 411:18/L+M/A, 453:16/L+M/T |
 | `src/seon/test.clj` | HELD | 6 | 6 | -8 | 26:3/L+M/A, 419:10/L+M/A, 955:16/L+M/A, 1273:25/L+M/A, 1320:13/L+M/A, 1398:3/L+M/A |
 | `src/seon/test/accretion.clj` | FREE | 2 | 2 | -4 | 83:30/L+M/A, 348:12/L+M/A |
-| `src/seon/test/runner.clj` | FREE | 7 | 7 | -13 | 358:5/L+M/A, 453:15/L+M/A, 892:3/L+M/A, 979:5/L+M/A, 1027:24/L+M/A, 1418:28/L+M/A, 1703:12/L+M/A |
-| `src/seon/turn.clj` | HELD | 10 | 9 | -16 | 282:13/L+M/A, 310:21/L+M/A, 2054:7/L+M/A, 2080:7/L+M/A, 2263:19/L+M/A, 3315:7/L+M/O, 3440:15/L+M/A, 4670:7/L+M/A, 5237:11/L+M/A, 5351:5/L+M/A |
+| `src/seon/test/runner.clj` | FREE | 7 | 6 | -11 | 358:5/L+M/A, 453:15/L+M/X, 892:3/L+M/A, 979:5/L+M/A, 1027:24/L+M/A, 1418:28/L+M/A, 1703:12/L+M/A |
+| `src/seon/turn.clj` | FREE | 10 | 8 | -14 | 282:13/L+M/A, 310:21/L+M/A, 2054:7/L+M/A, 2080:7/L+M/A, 2263:19/L+M/A, 3315:7/L+M/X, 3440:15/L+M/X, 4670:7/L+M/A, 5237:11/L+M/A, 5351:5/L+M/A |
 | `test/my/background_test.clj` | FREE | 1 | 0 | +0 | 20:17/L+M/F |
 | `test/my/program_test.clj` | FREE | 1 | 0 | +0 | 176:33/L-M/F |
 | `test/seon/ai_test.clj` | FREE | 1 | 0 | +0 | 1329:3/L+M/F |
@@ -168,7 +190,7 @@ Every location is `line:column/shape/disposition`. “Auto” is syntactic eligi
 | `test/seon/cluster/turn_test.clj` | HELD | 12 | 0 | +0 | 787:18/L+M/F, 908:22/L+M/F, 1283:18/L+M/F, 1551:18/L+M/F, 1663:43/L+M/F, 2077:10/L+M/F, 2227:13/L+M/F, 2293:21/L+M/F, 2334:13/L+M/F, 3201:15/L+M/F, 3242:27/L+M/F, 3348:21/L+M/F |
 | `test/seon/cluster_test.clj` | HELD | 1 | 0 | +0 | 144:22/L+M/F |
 | `test/seon/config_test.clj` | FREE | 2 | 0 | +0 | 365:24/L+M/F, 635:17/L+M/F |
-| `test/seon/db_test.clj` | HELD | 2 | 0 | +0 | 323:20/L-M/F, 2061:45/L-M/F |
+| `test/seon/db_test.clj` | FREE | 2 | 0 | +0 | 323:20/L-M/F, 2061:45/L-M/F |
 | `test/seon/effect_test.clj` | FREE | 1 | 0 | +0 | 42:9/L+M/F |
 | `test/seon/error/refusal_test.clj` | FREE | 5 | 0 | +0 | 17:3/L-M/F, 65:18/L-M/F, 80:18/L-M/F, 126:3/L-M/F, 168:18/L-M/F |
 | `test/seon/error_result_test.clj` | FREE | 1 | 0 | +0 | 43:3/L+M/F |
@@ -177,7 +199,7 @@ Every location is `line:column/shape/disposition`. “Auto” is syntactic eligi
 | `test/seon/fs/jvm_test.clj` | FREE | 1 | 0 | +0 | 312:30/L+M/F |
 | `test/seon/instrument_test.clj` | HELD | 9 | 0 | +0 | 179:17/L-M/F, 345:21/L-M/F, 600:18/L-M/F, 1156:26/L+M/F, 1190:19/L+M/F, 1213:15/L-M/F, 1241:15/L-M/F, 1274:18/L-M/F, 1426:14/L-M/F |
 | `test/seon/maintenance_schema_test.clj` | FREE | 2 | 0 | +0 | 285:9/L+M/F, 343:29/L+M/F |
-| `test/seon/maintenance_test.clj` | HELD | 2 | 0 | +0 | 65:10/L+M/F, 249:17/L+M/F |
+| `test/seon/maintenance_test.clj` | FREE | 2 | 0 | +0 | 65:10/L+M/F, 249:17/L+M/F |
 | `test/seon/problems_test.clj` | FREE | 2 | 0 | +0 | 77:7/L+M/F, 111:26/L+M/F |
 | `test/seon/reconcile_test.clj` | FREE | 1 | 0 | +0 | 122:21/L+M/F |
 | `test/seon/render/faults_test.clj` | FREE | 1 | 0 | +0 | 27:43/L+M/F |
@@ -186,7 +208,7 @@ Every location is `line:column/shape/disposition`. “Auto” is syntactic eligi
 | `test/seon/render/web_debug_test.clj` | FREE | 4 | 0 | +0 | 256:31/L-M/F, 280:55/L+M/F, 591:39/L+M/F, 667:17/L+M/F |
 | `test/seon/render/web_test.clj` | HELD | 4 | 0 | +0 | 2122:19/L+M/F, 2125:19/L+M/F, 2141:29/L+M/F, 2364:61/L-M/F |
 | `test/seon/run6_stall_test.clj` | FREE | 1 | 0 | +0 | 40:59/L+M/F |
-| `test/seon/schedule_test.clj` | HELD | 2 | 0 | +0 | 90:3/L+M/F, 99:19/L+M/F |
+| `test/seon/schedule_test.clj` | FREE | 2 | 0 | +0 | 90:3/L+M/F, 99:19/L+M/F |
 | `test/seon/schema/datahike_test.clj` | FREE | 1 | 0 | +0 | 45:18/L-M/F |
 | `test/seon/schema_test.clj` | FREE | 3 | 0 | +0 | 202:19/L-M/F, 1508:26/L-M/F, 1568:21/L+M/F |
 | `test/seon/sci/eval_test.clj` | FREE | 3 | 0 | +0 | 1142:15/L+M/F, 2337:19/L+M/F, 2455:22/L+M/F |
@@ -200,9 +222,9 @@ Every location is `line:column/shape/disposition`. “Auto” is syntactic eligi
 
 | Conversion shape | All sites | Admitted free | Admitted held | Retained/review residue |
 |---|---:|---:|---:|---:|
-| `L+M` | 406 | 210 | 81 | 115 |
-| `L-M` | 44 | 10 | 1 | 33 |
-| `D+M` | 10 | 4 | 5 | 1 |
+| `L+M` | 403 | 175 | 14 | 214 |
+| `L-M` | 44 | 7 | 1 | 36 |
+| `D+M` | 13 | 9 | 1 | 3 |
 | `D-M` | 0 | 0 | 0 | 0 |
 
 The single transformation keeps the first three value expressions in source order and copies the remaining source bytes. It replaces a whole existing diagnostic call for D shapes, never nests a second constructor. It does not descend into a quoted map and “fix” its contents.
@@ -246,15 +268,18 @@ Raw `:seon.error/throwable` maps are explicitly NOT D shapes. Their before/after
 
 Exact non-fixture residue by reason (all locations also appear above):
 
-- **header evaluation order** (33): `src/seon/agent.clj:23`, `src/seon/agent.clj:44`, `src/seon/cluster.clj:612`, `src/seon/cluster.clj:620`, `src/seon/cluster.clj:3179`, `src/seon/cluster/message.clj:157`, `src/seon/cluster/message.clj:163`, `src/seon/cluster/message.clj:169`, `src/seon/cluster/message.clj:196`, `src/seon/cluster/message.clj:204`, `src/seon/cluster/message.clj:216`, `src/seon/cluster/message.clj:605`, `src/seon/cluster/message.clj:627`, `src/seon/cluster/message.clj:635`, `src/seon/cluster/message.clj:644`, `src/seon/cluster/message.clj:684`, `src/seon/cluster/message.clj:739`, `src/seon/cluster/message.clj:747`, `src/seon/cluster/message.clj:755`, `src/seon/cluster/prompt.clj:57`, `src/seon/cluster/reply.clj:55`, `src/seon/db.clj:169`, `src/seon/edit/jvm.clj:11`, `src/seon/error.clj:611`, `src/seon/fs/jvm.clj:38`, `src/seon/problems.clj:120`, `src/seon/render.clj:1257`, `src/seon/render.clj:1273`, `src/seon/render.clj:1288`, `src/seon/render.clj:1401`, `src/seon/render/walk.clj:234`, `src/seon/render/walk.clj:644`, `src/seon/turn.clj:3315`.
-- **raw Throwable must remain raw** (7): `src/seon/db.clj:2381`, `src/seon/edit.clj:123`, `src/seon/edit.clj:287`, `src/seon/effect.clj:633`, `src/seon/maintenance.clj:448`, `src/seon/schema.clj:505`, `src/seon/shell/jvm.clj:453`.
+- **header evaluation order** (24): `src/seon/agent.clj:23`, `src/seon/agent.clj:44`, `src/seon/cluster.clj:612`, `src/seon/cluster.clj:620`, `src/seon/cluster.clj:3179`, `src/seon/cluster/message.clj:157`, `src/seon/cluster/message.clj:163`, `src/seon/cluster/message.clj:169`, `src/seon/cluster/message.clj:196`, `src/seon/cluster/message.clj:204`, `src/seon/cluster/message.clj:605`, `src/seon/cluster/message.clj:627`, `src/seon/cluster/message.clj:635`, `src/seon/cluster/message.clj:644`, `src/seon/cluster/message.clj:684`, `src/seon/cluster/message.clj:739`, `src/seon/cluster/message.clj:747`, `src/seon/cluster/message.clj:755`, `src/seon/cluster/prompt.clj:57`, `src/seon/cluster/reply.clj:55`, `src/seon/error.clj:611`, `src/seon/render.clj:1401`, `src/seon/render/walk.clj:234`, `src/seon/render/walk.clj:644`.
+- **raw Throwable must remain raw** (4): `src/seon/db.clj:2381`, `src/seon/maintenance.clj:448`, `src/seon/schema.clj:505`, `src/seon/shell/jvm.clj:453`.
 - **comment inside literal** (3): `src/seon/ai.clj:1405`, `src/seon/ai.clj:1423`, `src/seon/ai.clj:1523`.
 - **quoted/discarded data** (3): `bin/seon-hook:1663`, `script/seon/dev/mcp.clj:500`, `script/seon/dev/mcp.clj:559`.
 - **tools.deps bootstrap classpath: keep core-only literal** (1): `script/seon/dev/dependency_digest.clj:109`.
+- **nonliteral/unresolved/duplicate keys** (3): `src/seon/db.clj:169`, `src/seon/edit/jvm.clj:11`, `src/seon/fs/jvm.clj:38`.
+- **unsupported namespace require form** (11): `src/seon/program.cljc:145`, `src/seon/program.cljc:325`, `src/seon/program.cljc:403`, `src/seon/program.cljc:796`, `src/seon/program.cljc:813`, `src/seon/program.cljc:867`, `src/seon/program.cljc:917`, `src/seon/program.cljc:944`, `src/seon/program.cljc:1003`, `src/seon/program.cljc:1082`, `src/seon/sci/reader.cljc:17`.
+- **unsupported expression context** (102): `script/seon/operator.clj:61`, `src/my/program.clj:666`, `src/seon/blob.clj:94`, `src/seon/bootstrap.clj:696`, `src/seon/call_preparation.clj:1237`, `src/seon/cluster.clj:393`, `src/seon/cluster/boot.clj:276`, `src/seon/cluster/message.clj:216`, `src/seon/cluster/source.clj:484`, `src/seon/config.clj:198`, `src/seon/config.clj:217`, `src/seon/config.clj:232`, `src/seon/config.clj:265`, `src/seon/config.clj:280`, `src/seon/config.clj:294`, `src/seon/config.clj:308`, `src/seon/config.clj:323`, `src/seon/config.clj:345`, `src/seon/config.clj:387`, `src/seon/config.clj:404`, `src/seon/config.clj:485`, `src/seon/config.clj:506`, `src/seon/config.clj:529`, `src/seon/config.clj:577`, `src/seon/config.clj:632`, `src/seon/db.clj:487`, `src/seon/db.clj:3005`, `src/seon/db.clj:4329`, `src/seon/effect.clj:611`, `src/seon/error.clj:1509`, `src/seon/error.clj:1782`, `src/seon/error.clj:2191`, `src/seon/eval.clj:35`, `src/seon/flow.clj:818`, `src/seon/flow.clj:898`, `src/seon/flow.clj:912`, `src/seon/flow.clj:1194`, `src/seon/fn.clj:1039`, `src/seon/instrument.clj:436`, `src/seon/issue.clj:558`, `src/seon/issue.clj:567`, `src/seon/issue.clj:575`, `src/seon/issue.clj:597`, `src/seon/issue.clj:605`, `src/seon/issue.clj:617`, `src/seon/issue.clj:1049`, `src/seon/issue.clj:1078`, `src/seon/issue.clj:1085`, `src/seon/issue.clj:1093`, `src/seon/issue.clj:1101`, `src/seon/issue.clj:1108`, `src/seon/issue.clj:1116`, `src/seon/issue.clj:1170`, `src/seon/issue.clj:1179`, `src/seon/issue.clj:1290`, `src/seon/issue.clj:1333`, `src/seon/maintenance.clj:929`, `src/seon/plan.clj:172`, `src/seon/plan.clj:541`, `src/seon/plan.clj:556`, `src/seon/plan.clj:583`, `src/seon/plan.clj:593`, `src/seon/plan.clj:609`, `src/seon/plan.clj:654`, `src/seon/plan.clj:707`, `src/seon/plan.clj:742`, `src/seon/plan.clj:800`, `src/seon/plan.clj:814`, `src/seon/plan.clj:830`, `src/seon/plan.clj:895`, `src/seon/plan.clj:907`, `src/seon/plan.clj:937`, `src/seon/plan.clj:990`, `src/seon/plan.clj:1005`, `src/seon/plan.clj:1024`, `src/seon/plan.clj:1151`, `src/seon/plan.clj:1174`, `src/seon/plan.clj:1188`, `src/seon/plan.clj:1209`, `src/seon/problems.clj:120`, `src/seon/render.clj:1257`, `src/seon/render.clj:1273`, `src/seon/render.clj:1288`, `src/seon/render.clj:1749`, `src/seon/render/data.clj:72`, `src/seon/render/walk.clj:742`, `src/seon/render/web.clj:639`, `src/seon/render/web.clj:1833`, `src/seon/render/web.clj:2676`, `src/seon/render/web.clj:2808`, `src/seon/render/web.clj:2841`, `src/seon/schedule.clj:243`, `src/seon/schema.clj:1335`, `src/seon/schema.clj:3058`, `src/seon/sci/admit.clj:660`, `src/seon/sci/eval.clj:222`, `src/seon/sci/eval.clj:1086`, `src/seon/sci/eval.clj:2055`, `src/seon/sci/kernel.clj:625`, `src/seon/test/runner.clj:453`, `src/seon/turn.clj:3315`, `src/seon/turn.clj:3440`.
 
 ## 6. Loadable slices, proofs and the error/prose file group
 
-**E0 first, one owner:** `src/seon/error/refusal.clj`, `test/seon/error/refusal_test.clj`, `src/seon/blob.clj`, `src/seon/error.clj`, `test/seon/error_test.clj`, `test/seon/schema_test.clj`. Install the additive arity, convert exactly the A sites in blob/error, and perform the prose changes below once. This couples the helper to actual deletion. Measured additions before regression work: 10 helper + 15 blob + 17 error + 2 fixture = 44. Reserve at most 40 added regression lines: **≤84 additions**, with a deletion-heavy source diff. Retain the existing map arity; no held caller or resource must move for this slice to load.
+**E0 first, one owner:** `src/seon/error/refusal.clj`, `test/seon/error/refusal_test.clj`, `src/seon/blob.clj`, `src/seon/error.clj`, `test/seon/error_test.clj`, `test/seon/schema_test.clj`. Install the additive arity, convert the four A sites in blob (:77,154,263,395) and four in error (:507,553,732,1602), and perform the prose changes below once. This couples the helper to actual deletion. Measured additions before regression work: 10 helper + 12 blob + 10 error + 2 fixture = 34. Reserve at most 40 added regression lines: **≤74 additions**, with a deletion-heavy source diff. Retain the existing map arity; no held caller or resource must move for this slice to load.
 
 The one error/prose group is:
 
@@ -262,6 +287,20 @@ The one error/prose group is:
 2. Delete only the `testing "refusal names the transition, rule, and atomic result"` block in `test/seon/error_test.clj:1283` (11 lines). It tests the retired prose function, not real transition atomicity. Existing `the-default-renderers-accept-an-attribute-shaped-error` and refusal grammar remain.
 3. In `test/seon/schema_test.clj:977,989`, change both literal renderer symbols `'seon.error/refusal-prose` to `'seon.error/render-ai`. This fixture proves metadata/required-attribute derivation; its required members and expected shape stay unchanged. Two added/two removed lines, net zero.
 4. **Retain** `edit-prose`, `mcp-prose`, `index-refusal-prose`, `evidence-text` and their surviving tests. Contrary to a blanket −62 prose deletion, `resources/seon/schemas/seon.dev.mcp.edn:2,4,6,10,22` names `mcp-prose`; `seon.fn.edn:218–238` names `index-refusal-prose`; `edit-prose` still has its explicit specialist test. This manifest does not remove schema render behavior or change shown text to chase that estimate. No second prose lane or double-counted error.clj cut.
+
+**P1-2 acceptance is required in E0, not deferred to the final cut.** Acquire one projection and verify both constructor arities are armed under it. Compare the independently expected entire old/new observation using the same supplied timestamp; each supplied `at` is `identical?` and evaluated exactly once. Exercise the actual changed producer under its unchanged declared output alternative. Tests that only call a bare function, compare key sets, or wrap only the old map arity in synthetic x/y contracts are insufficient. Extend `constructor-output-keeps-the-producing-contract` for both entries and retain actual producer coverage.
+
+| Required case | Actual boundary and proving namespace | Acceptance |
+|---|---|---|
+| E0 intermediate construction | `seon.error/prepare`, error.clj:553; `seon.error-test` | Exercise the actual prepare request with its supplied `at`, projection, caps and producer `declared-schema`. Assert that the three-key intermediate passes the new armed boundary **before** class/frame/chain assoc and right-hand merge, then assert the complete prepared observation. Cover overriding source evidence; constructor validation cannot be postponed until the complete result. |
+| E0 computed message/cause | `seon.error/fact-source`, error.clj:732; `seon.error-test` and `seon.error.refusal-test` | Supplied/fallback caller at, full computed message expression, expected-key, class/chain/frame and original ex-info cause survive. |
+| E0 absent message/empty remainder | error.clj:507,553 and both diagnostic arities; `seon.error.refusal-test` | No nil message/member is introduced; timestamp evaluation and identity hold. Test real prepare as well as the synthetic empty remainder. |
+| E0 declared domain/ex-info | blob.clj:77,154,263,395; `seon.blob-error-test` | Actual producer's entire returned or thrown data, distinguishing members and original cause identity; precise declared alternatives stay unchanged. |
+| Conditional evidence, in config's own slice | `seon.config/result-caps`, config.clj:122; `seon.config-test` | Exercise presence/absence of missing-effective and configuration-refusal, retaining the whole nested cond-> expression and complete final value. Newly armed intermediate succeeds under the same projection. |
+| Assoc/merge precedence | actual prepare plus representative converted producers; `seon.error-test` | Check left intermediate and right overriding map separately at their real boundaries; assert complete result, not only the final set of keys. |
+| Recording identity | `seon.error-test/recorded-identity-uses-the-producer-declared-schema` and recurrence-identity cases | Preserve the exact explicitly supplied recording schema and resulting identity. Map equality or structural shape matching cannot substitute for this proof. |
+
+For producers that create their own `Date`, use each actual call's observed timestamp in its independent expected value and prove constructor argument identity/evaluation count separately; do not falsify equality by comparing wall-clock instants from two different calls or redefine default's clock/Vars. Parent/child probes otherwise use identical supplied inputs and one acquired projection. Profile **both contracted constructor entries** (positional then map), including their overhead; record whole probe values and timings. This is a proof obligation, not a diagnosed regression or performance claim.
 
 E0 proof namespaces: **`seon.error.refusal-test`, `seon.blob-error-test`, `seon.error-test`, `seon.schema-test`, `seon.refusal-grammar-test`**. Extend the existing constructor behavior cases, not a parallel test harness:
 
@@ -271,116 +310,226 @@ E0 proof namespaces: **`seon.error.refusal-test`, `seon.blob-error-test`, `seon.
 - Keep `facade-is-retired-and-reader-refusal-is-a-literal` (:181): cluster/reply remains residue; do not convert its protected literal to satisfy a grep count.
 - Use side-effect counters only inside the disposable test body to prove at → layer → operation → remainder evaluation order once each; ensure surrounding merge precedence and ex-info data/cause survive. Existing full-cause rendering/recording assertions must remain; add no runtime classifier.
 
-**E1 onward:** one whole FREE production file per sequential slice, exactly its A sites and one dependency require if absent. E0's error/blob paths are excluded. Every generated file diff below is ≤74 added lines, leaving a small per-file regression budget without exceeding ~100. This is a slice size limit, not permission for simultaneous regions in a file. The same lane retains a file until its coherent slice commits. There is no helper-only commit and no all-files mega-commit. If required regression additions exceed remaining room, split by existing defn boundaries in sequential commits under the same file owner; do not split an individual definition or contract.
+**E1 onward:** one whole FREE production file per sequential slice, exactly its A sites and one dependency require if absent. E0's error/blob paths are excluded. Every generated file diff below is ≤41 added lines, leaving a small per-file regression budget without exceeding ~100. **Final slice size is an admission check:** the measured caller additions plus unwritten regression budget are not a completed size proof. If full assertions need more than ~100 additions, split at existing definition boundaries and carry the proof with its implementation; never trim assertions to fit. This is a slice size limit, not permission for simultaneous regions in a file. The same lane retains a file until its coherent slice commits. There is no helper-only commit and no all-files mega-commit. If required regression additions exceed remaining room, split by existing defn boundaries in sequential commits under the same file owner; do not split an individual definition or contract.
 
 Each slice must load its source namespace and its listed test namespace using the installed branch path after E0. The list names existing test namespaces to extend/check; **their existence does not prove they currently assert every converted branch**. Require positive reaching coverage and complete-value assertions at the changed producer. Where a listed test file is HELD, run its unchanged committed tests and place any necessary new case in the owned refusal test, or defer that file's implementation until the test owner releases it; do not edit a HELD test. No source deletion depends on deleting or weakening held tests.
 
 | Subsequent FREE file (E1 onward, table order) | Generated added lines | Net lines | Named proof namespace |
 |---|---:|---:|---|
-| `script/seon/operator.clj` | 3 | -2 | `seon.error.refusal-test (pure constructor); platform operator proof deferred to orchestrator` |
 | `src/my/background.clj` | 3 | -2 | `my.background-test` |
-| `src/my/program.clj` | 17 | -9 | `my.program-test` |
+| `src/my/program.clj` | 14 | -7 | `my.program-test` |
 | `src/seon/agent.clj` | 4 | -1 | `seon.cluster.agent-identity-test` |
 | `src/seon/ai.clj` | 41 | -29 | `seon.ai-test` |
+| `src/seon/await.clj` | 3 | -2 | `seon.await-test` |
 | `src/seon/background.clj` | 6 | -4 | `seon.background-test` |
-| `src/seon/bootstrap.clj` | 15 | -10 | `seon.bootstrap-test` |
-| `src/seon/call_preparation.clj` | 18 | -12 | `seon.call-preparation-test` |
-| `src/seon/cluster/boot.clj` | 3 | -2 | `seon.cluster.boot-test` |
+| `src/seon/bootstrap.clj` | 12 | -8 | `seon.bootstrap-test` |
+| `src/seon/call_preparation.clj` | 15 | -10 | `seon.call-preparation-test` |
+| `src/seon/cluster/agent.clj` | 8 | -3 | `seon.cluster.agent-test` |
+| `src/seon/cluster/process.clj` | 12 | -8 | `seon.cluster.boot-test` (platform-sensitive members: orchestrator proof required) |
 | `src/seon/cluster/prompt.clj` | 5 | -1 | `seon.cluster.prompt-test` |
+| `src/seon/cluster/source.clj` | 14 | -5 | `seon.cluster.source-test` |
 | `src/seon/cluster/status.clj` | 5 | -1 | `seon.cluster.status-test` |
 | `src/seon/cluster/wake.clj` | 14 | -7 | `seon.cluster.wake-test` |
-| `src/seon/config.clj` | 56 | -35 | `seon.config-test` |
+| `src/seon/config.clj` | 8 | -3 | `seon.config-test` |
 | `src/seon/context.clj` | 5 | -1 | `seon.context-test` |
-| `src/seon/edit.clj` | 24 | -16 | `seon.edit-test` |
-| `src/seon/effect.clj` | 42 | -28 | `seon.effect-test` |
+| `src/seon/db.clj` | 11 | -9 | `seon.db-test` |
+| `src/seon/edit.clj` | 28 | -22 | `seon.edit-test` |
+| `src/seon/effect.clj` | 41 | -29 | `seon.effect-test` |
 | `src/seon/env.clj` | 30 | -20 | `seon.env-test` |
-| `src/seon/eval.clj` | 5 | -1 | `seon.eval-test` |
+| `src/seon/flow.clj` | 14 | -7 | `seon.flow-test` |
 | `src/seon/issue/opening.clj` | 6 | -3 | `seon.issue-test` |
-| `src/seon/plan.clj` | 74 | -47 | `seon.plan-test` |
-| `src/seon/program.cljc` | 30 | -20 | `seon.program-test` |
-| `src/seon/render.clj` | 20 | -11 | `seon.render-simplification-test` |
-| `src/seon/render/data.clj` | 8 | -3 | `seon.render.data-test` |
+| `src/seon/maintenance.clj` | 18 | -12 | `seon.maintenance-test` |
+| `src/seon/plan.clj` | 8 | -3 | `seon.plan-test` |
+| `src/seon/render.clj` | 17 | -9 | `seon.render-simplification-test` |
+| `src/seon/render/data.clj` | 5 | -1 | `seon.render.data-test` |
 | `src/seon/render/hiccup.clj` | 12 | -8 | `seon.render.hiccup-test` |
 | `src/seon/render/transcript.clj` | 9 | -6 | `seon.render.transcript-test` |
-| `src/seon/render/value.clj` | 6 | -4 | `seon.render.value-test` |
-| `src/seon/render/walk.clj` | 6 | -4 | `seon.render.walk-test` |
-| `src/seon/render/web.clj` | 33 | -22 | `seon.render.web-test` |
+| `src/seon/render/value.clj` | 6 | -4 | `seon.render.value-test — test HELD by sol-refusal-canonicalization` |
+| `src/seon/render/walk.clj` | 3 | -2 | `seon.render.walk-test` |
+| `src/seon/render/web.clj` | 18 | -12 | `seon.render.web-test` |
 | `src/seon/run.clj` | 8 | -3 | `seon.run6-stall-test` |
-| `src/seon/schema.clj` | 18 | -12 | `seon.schema-test` |
-| `src/seon/sci/admit.clj` | 12 | -8 | `seon.sci.admit-test` |
-| `src/seon/sci/eval.clj` | 46 | -32 | `seon.sci.eval-test` |
-| `src/seon/sci/kernel.clj` | 16 | -14 | `seon.sci.eval-test` |
-| `src/seon/sci/reader.cljc` | 3 | -2 | `seon.sci.reader-test` |
+| `src/seon/schedule.clj` | 20 | -15 | `seon.schedule-test` |
+| `src/seon/schema.clj` | 12 | -8 | `seon.schema-test` |
+| `src/seon/sci/admit.clj` | 9 | -6 | `seon.sci.admit-test` |
+| `src/seon/sci/eval.clj` | 37 | -26 | `seon.sci.eval-test` |
+| `src/seon/sci/kernel.clj` | 13 | -12 | `seon.sci.eval-test` |
 | `src/seon/shell/jvm.clj` | 31 | -16 | `seon.shell.jvm-test` |
 | `src/seon/test/accretion.clj` | 6 | -4 | `seon.test.accretion-test` |
-| `src/seon/test/runner.clj` | 21 | -13 | `seon.test.runner-test` |
+| `src/seon/test/runner.clj` | 18 | -11 | `seon.test.runner-test` |
+| `src/seon/turn.clj` | 26 | -14 | `seon.turn-test` |
+
+`script/seon/operator.clj:61` is now X residue (its metadata-wrapped parameter form is outside the grammar). If later explicitly admitted, it remains **platform-unproven** until the orchestrator proves operator loadability; `seon.error.refusal-test` cannot do so. No lane cold gate.
 
 **H last:** the HELD A sites are a measured later tranche, never silently included in E1. Their table locations remain exact evidence of the observed WIP, not a patch to replay blindly on its eventual commits. After release, rebase the census onto released bytes and reacquire each whole file/test owner; apply the same rule. No additional constructor is needed. Residue remains separately named until reviewed, and retained literals are an explicit outcome rather than false completion of “all literals deleted.”
 
 Implementation verification (not executed here): one focused installed request at a time, `bin/test-check [--root ROOT] CLUSTER --ns <namespace>` on the lane's cluster branch, or the equivalent `seon.test/run` request. Positively establish adopted definition and armed contracts first; then record full envelope, timing, actual executions/reuse, exclusions and exact proof boundary. No `bin/test` gates by a lane. Orchestrator owns platform/affected integration at cut completion and exclusive adoption. A broken shared tree calls for the authorized HEAD-plus-diff git-archive proof with linked caches; no worktree or probe JVM. Foreign breakage is a named proof boundary, never fabricated green. This docs-only assignment intentionally performs none of these runtime steps.
 
-## 7. Measured line accounting
+## 7. Measured line accounting after accepted admission fixes
 
-All measurements are dry-run source diffs, not landed changes. `preview.py` preserves remainder bytes and uses unified-diff added/deleted counts; a require is counted once when needed. No test literals were blanket-converted. The optional fixture deletion is disjoint from caller rewrites.
+These are generated candidate diffs, not landed implementation or completed proof budgets. Stronger admission intentionally reduces the savings. Every admitted site is now in src; script/operator remains residue. Namespace insertion positions come from the parsed ns tree. Old measurement/preview directories are historical artifacts, never a current output roster.
 
 | Scope | Converted sites | Added | Removed | Net |
 |---|---:|---:|---:|---:|
-| FREE src callers | 223 | 690 | 1,124 | −434 |
-| FREE script caller | 1 | 3 | 5 | −2 |
-| FREE caller subtotal | 224 | 693 | 1,129 | **−436** |
-| HELD src callers, after release only | 87 | 272 | 437 | −165 |
-| Full mechanically admitted callers | 311 | 965 | 1,566 | **−601** |
+| FREE src callers | 191 | 597 | 967 | **−370** |
+| HELD src callers, after release only | 16 | 53 | 80 | −27 |
+| Full mechanically admitted callers | 207 | 650 | 1,047 | **−397** |
 | Same-Var arity addition, once | — | 10 | 3 | +7 |
 | Supported refusal-prose deletion, once | — | 0 | 23 | −23 |
 | Prose-only test retirement | — | 0 | 11 | −11 |
 | Renderer-symbol fixture conversion | — | 2 | 2 | 0 |
-| Prepared FREE src + script + helper/prose | 224 | 703 | 1,155 | **−452** |
-| Prepared FULL src + script + helper/prose | 311 | 975 | 1,592 | **−617** |
-| Prepared FREE including existing test edits | — | 705 | 1,168 | **−463** |
-| Prepared FULL including existing test edits | — | 977 | 1,605 | **−628** |
+| Prepared FREE source + helper/prose | 191 | 607 | 993 | **−386** |
+| Prepared FULL source + helper/prose | 207 | 660 | 1,073 | **−413** |
+| Prepared FREE including existing test edits | — | 609 | 1,006 | **−397** |
+| Prepared FULL including existing test edits | — | 662 | 1,086 | **−424** |
 
-Source alone (excluding the −2 script caller): free **−450**, full **−615**. Existing-test net is **−11** in each. Required new regression edits have not been authored/executed; E0 reserves ≤40 added lines, so its effect is a budget, not a measured number. A maximum +40 test increase would leave free total ≤−423 and full total ≤−588 before any further per-file regression needs. Remaining residue contributes **zero assumed savings**. Therefore −628 is the exact prepared full candidate before new proofs, not a guarantee for all historical 342 sites or an implemented result. Every eventual landing must replace budgets with its actual src/test diff counts.
+Source net is −386 FREE / −413 FULL; existing-test net is −11 each. E0's generated owner/caller/fixture additions are 34; ≤40 regression additions would total ≤74, **only if those complete proofs actually fit**. The maximum subsequent caller addition is 41. New regression edits remain unwritten, so free/full net after them is unmeasured. A +40 E0 regression allowance would leave ≤−357 FREE / ≤−384 FULL before other per-file proof additions. Every landing must count its actual source/test additions and split before exceeding ~100, without weakening tests. Residue assumes zero savings. The independent review's −436 free/−601 full caller figures reproduce the earlier, weaker admission version; they are historical, superseded here rather than silently reused.
 
-Static evidence: final census 3.3–3.8 s wall across this checkout; dry-run generation sub-second; rewrite-clj parsing of proposed files/constructor 0.43 s wall, successful. **The census is over one second:** its work is proportional to every candidate source byte because an exact whole-tree inventory was explicitly requested; it is offline planning work, not an armed Seon call. No armed runtime functions were entered. Do not install this scan on an agent/eval path; reuse its recorded JSON for subsequent tables and regenerate only when inputs/rules change. The early preview failures were script issues (groupby iterator consumption and newline after `:require`), corrected before the measured candidate. Parse success proves syntax only: not contracts, loadability, evaluation order, runtime latency, adoption or browser paint. Peak memory was not measured; no memory-performance claim is made.
+Final refreshed full lexical census: 4.9736 s reported (combined shell census/preview call 5.07 s); offline replay demonstration 0.237 s; other small source reads/preview generation sub-second. **The census exceeds one second:** parsing all requested candidate bytes plus namespace/context checks is O(candidate bytes), outside the agent execution path. No armed Seon function ran. Reuse saved inputs/JSON for tables and previews; refresh only changed rules/inputs or explicitly selected files. This is not permission to put a multi-second scan on a runtime path. No runtime memory or performance claim; peak memory unmeasured. Source/test edits in this docs-only revision are 0/0.
 
-## 8. Reproducible scripts (committed here; executable copies in tmp)
+## 8. Refusing, path-selected offline rewrite and replay
 
-Run from repository root with installed native Babashka/rewrite-clj, then Python. No JVM or project namespace loads are involved. The census produces exact before/after strings in `census.json`; the dry-run writes only under tmp and never applies a production patch. One reviewable rule handles all A sites. For implementation, select only the acquired FREE file's rows, refuse changed file hashes or changed `before` spans, apply that file's reviewed patch, lint and prove through the installed path. Full preview includes HELD rows for measurement only; **never apply preview.patch wholesale**.
+Extract the scripts below to their named paths from this committed document. Installed native Babashka/rewrite-clj inspect syntax only; Python prepares patches. No project namespaces or JVM are loaded. `write-manifest.py` is a retired earlier drafting aid and now exits explicitly; never use its old template to refresh this reviewed document. This revision updates the current Markdown in place.
 
-The script versions below are the final executed versions; three census invocations occurred while admission/preservation rules were refined, each with one rg pass. They are not three independent claimed proofs.
+Commands, from repository root:
+
+```sh
+# Full lexical inventory, or supply exact files for a fresh selected basis:
+bb tmp/error-constructor/census.clj
+# Explicit acquired FREE files only; refuses any missing, held or drifted basis:
+python3 tmp/error-constructor/preview.py --files src/seon/blob.clj src/seon/error.clj test/seon/error_test.clj test/seon/schema_test.clj --prose
+# Prose-only measurement/preparation is also available through prose-preview.py --files ...
+# Separate measurement mode, never an application entrance:
+python3 tmp/error-constructor/preview.py --measure-all
+```
+
+`inputs.json` records original whole-file hashes and the ledger digest; each site also records its original hash and exact span. Porcelain `-z --untracked-files=all` includes both index/worktree states and rename/copy paths. Selected preparation refuses HELD, staged, unstaged or untracked candidates; a clean file can still be held by the ledger/user. If the ledger changes, stop preparation, review its current holds and update the explicit held set before recensus/reacquisition. A fresh ledger hash alone is not a release or automatic interpretation of prose. No source writes occur: the existing accepted write-back path must verify the roster's `before` hash again at actual application.
+
+Require availability and insertion use the actual parsed top-level namespace/require clause and resolved aliases. Keys are resolved and checked for uniqueness before construction. Unsupported syntax stays named residue. The script copies remainder bytes rather than rebuilding member expressions. No general interpreter, runtime registry or production parser is added.
+
+Replay is precise:
+
+1. Same admitted input bytes produce identical candidate bytes/patches.
+2. Any stale whole-file basis refuses, including same-length edits outside the chosen spans. An old manifest against converted files also refuses; that is not a replay bug.
+3. A **fresh census** of already converted files has no admitted old sites and yields a no-op. Prose conversion similarly returns unchanged content once its owner/fixture has already retired, after fresh basis checks.
+4. Only the just-successful `selected-roster.json` (or separate prose roster) is consumable. The entrance clears its roster before basis admission; it replaces the current patch/roster on success. It never enumerates old candidate files. Output paths include the input hash. If a later file refuses, no production write has occurred; exit failure means consume nothing.
+5. Measurement mode is explicitly separate and includes HELD candidates solely for accounting. Never apply `measurement.patch` or an older `preview.patch` wholesale. `--prose` composes the complete E0 prose group and caller rewrites against one original basis into one candidate per file, requiring all three prose paths explicitly. Inspect the final whole-file diff and its proof size, add the helper/regressions in that same slice, then let the owner accept/write once; never apply two stale patches in sequence.
+
+**Offline demonstration, executed without tests or source evaluation:** `replay-demo.py` on current blob/error inputs returned deterministic=true; same-length namespace text edits outside selected spans and stale replay against converted candidate text both refused `Row fingerprint mismatch`; selecting dirty/HELD cluster.clj refused. A native fresh census of the two generated candidate texts found five remaining literal sites and **zero eligible**; rewriting that fresh inventory was a no-op for both. The prose text transformations were also no-ops on their already-converted candidates. The source tree was untouched. These demonstrate offline refusal/replay behavior only—not armed value equivalence, project loadability, timing, or adoption. After the real ledger refusal, the refreshed combined E0 candidate contained exactly four files and parsed successfully as syntax, with +24/−74 = −50 before the helper/new regressions. The earlier empty output after refusal is **not** counted as a parse pass; success required four concrete candidates. Index/untracked handling was inspected in the actual porcelain parser; no foreign file was staged/untracked to manufacture a scenario.
+
+### tmp/error-constructor/admission.clj
+
+```clojure
+;; Offline syntax admission only; never load project namespaces.
+(require '[rewrite-clj.zip :as z] '[clojure.string :as s])
+(defn children [l] (take-while some? (iterate z/right (z/down l))))
+(defn ancestors [l] (take-while some? (iterate z/up (z/up l))))
+(defn namespace-info [tree]
+  (let [nss (filter #(and (= :list (z/tag %)) (= "ns" (some-> % z/down z/string)))
+                    (children (z/of-node* (z/root tree) {:track-position? true})))
+        n (when (= 1 (count nss)) (first nss))
+        clauses (filter #(and (= :list (z/tag %)) (= ":require" (some-> % z/down z/string))) (when n (children n)))
+        specs (mapcat #(rest (children %)) clauses)
+        simple? (every? (fn [spec]
+                          (let [xs (vec (children spec)) opts (rest xs)]
+                            (and (= :vector (z/tag spec)) (= :token (some-> spec z/down z/tag))
+                                 (even? (count opts))
+                                 (every? #{":as" ":as-alias" ":refer"} (map z/string (take-nth 2 opts)))))) specs)
+        libs (when simple? (map #(mapv z/string (children %)) specs))]
+    {:name (some-> n z/down z/right z/string)
+     :require-position (when (= 1 (count clauses)) (z/position (first clauses)))
+     :simple? (boolean (and n simple? (= 1 (count clauses))))
+     :dependencies (set (map first (remove #(some #{":as-alias"} %) libs)))
+     :aliases (into {} (keep (fn [[lib & opts]]
+                              (when-let [a (second (drop-while #(not= % ":as") opts))] [a lib])) libs))}))
+(defn resolved-key [ns-info token]
+  (when (and (= :token (z/tag token)) (s/starts-with? (z/string token) ":"))
+    (let [v (z/string token)]
+      (if (s/starts-with? v "::")
+        (let [parts (s/split (subs v 2) #"/" 2)]
+          (if (= 1 (count parts))
+            (when (:name ns-info) (str ":" (:name ns-info) "/" (first parts)))
+            (when-let [n (get (:aliases ns-info) (first parts))] (str ":" n "/" (second parts)))))
+        v))))
+(defn diagnostic-call? [ns-info l]
+  (let [head (some-> l z/down z/string) [a v] (when head (s/split head #"/" 2))]
+    (and (= :list (some-> l z/tag)) (= 2 (count (children l))) (= v "diagnostic")
+         (or (= a "seon.error.refusal") (= "seon.error.refusal" (get (:aliases ns-info) a)))
+         (contains? (:dependencies ns-info) "seon.error.refusal"))))
+(def expression-heads
+  #{"if" "if-not" "when" "when-not" "do" "and" "or" "cond" "cond->" "cond->>"
+    "->" "->>" "some->" "some->>" "try" "catch" "finally" "throw"
+    "ex-info" "merge" "assoc" "assoc-in" "conj" "into" "vector" "list"})
+(def binding-heads #{"let" "let*" "loop" "loop*" "binding" "with-open" "if-let" "when-let" "if-some" "when-some"})
+(defn expression-position? [l ns-info]
+  (loop [child l]
+    (if-let [parent (z/up child)]
+      (let [cs (vec (children parent)) i (.indexOf cs child)
+            head (some-> parent z/down z/string)
+            ok (and (<= 0 i) (case (z/tag parent)
+                 :forms true
+                 :map (odd? i)
+                 :set true
+                 :vector (let [gp (z/up parent) gh (some-> gp z/down z/string)]
+                           (if (and (binding-heads gh) (= parent (second (children gp))))
+                             (odd? i) true))
+                 :list (cond
+                         (#{"defn" "defn-" "fn" "fn*"} head)
+                         (let [params (first (keep-indexed #(when (= :vector (z/tag %2)) %1) cs))]
+                           (and params (> i params)))
+                         (binding-heads head) (pos? i)
+                         (#{"->" "->>" "some->" "some->>" "cond->" "cond->>"} head) (= i 1)
+                         (expression-heads head) (pos? i)
+                         (diagnostic-call? ns-info parent) (= i 1)
+                         :else false)
+                 false))]
+        (and ok (recur parent)))
+      true)))
+```
 
 ### tmp/error-constructor/census.clj
 
 ```clojure
 (require '[babashka.process :as p] '[rewrite-clj.zip :as z]
          '[clojure.string :as s] '[cheshire.core :as json])
+(load-file "tmp/error-constructor/admission.clj")
 (def started (System/nanoTime))
 (def headers [":seon.error/at" ":seon.error/layer" ":seon.error/operation"])
 (def held #{"src/seon/cluster.clj" "src/seon/fn.clj" "src/seon/issue.clj"
-            "src/seon/instrument.clj" "src/seon/test.clj" "src/seon/db.clj"
-            "src/seon/flow.clj" "src/seon/await.clj" "src/seon/cluster/agent.clj"
-            "src/seon/turn.clj" "src/seon/maintenance.clj" "src/seon/schedule.clj"
-            "src/seon/cluster/source.clj" "src/seon/cluster/process.clj"
-            "script/seon/dev/mcp.clj"})
-(def dirty (set (s/split-lines (:out (p/shell {:out :string} "git diff --name-only")))))
+            "src/seon/instrument.clj" "src/seon/test.clj"
+            "src/seon/schema/internal.cljc" "test/seon/render/value_test.clj"})
+(def status-bytes (:out (p/shell {:out :string} "git status --porcelain=v1 -z --untracked-files=all")))
+(def dirty
+  (loop [parts (seq (s/split status-bytes #"\u0000")) paths #{}]
+    (if-let [entry (first parts)]
+      (if (< (count entry) 4) paths
+        (let [renamed? (some #{\R \C} (take 2 entry))]
+          (recur (drop (if renamed? 2 1) parts)
+                 (cond-> (conj paths (subs entry 3)) renamed? (conj (second parts))))))
+      paths)))
+(defn digest [s] (format "%064x" (java.math.BigInteger. 1 (.digest (java.security.MessageDigest/getInstance "SHA-256") (.getBytes s "UTF-8")))))
+(def ledger-digest (digest (slurp "tmp/orchestrator/file-ownership.md")))
 (defn held? [f]
   (or (held f) (dirty f)
       (some #(or (= f (str "test/seon/" % "_test.clj"))
                  (s/starts-with? f (str "test/seon/" % "/")))
-            ["cluster" "fn" "issue" "instrument" "test" "db" "flow" "await"
-             "turn" "maintenance" "schedule"])))
+            ["cluster" "fn" "issue" "instrument" "test"])))
 (defn children [l] (take-while some? (iterate z/right (z/down l))))
 (defn ancestors [l] (take-while some? (iterate z/up (z/up l))))
-(def files (sort (s/split-lines (:out (p/shell {:out :string}
-  "rg -l :seon.error/at src test script bin")))))
-(def files (filterv #(or (some (partial s/ends-with? %) [".clj" ".cljc" ".cljs" ".bb"])
-                              (s/includes? (first (s/split-lines (slurp %))) "bb")) files))
+(defn input-files []
+  (if (seq *command-line-args*) (vec *command-line-args*)
+    (->> (:out (p/shell {:out :string} "rg -l :seon.error/at src test script bin"))
+         s/split-lines sort
+         (filterv #(or (some (partial s/ends-with? %) [".clj" ".cljc" ".cljs" ".bb"])
+                        (s/includes? (first (s/split-lines (slurp %))) "bb"))))))
 (defn census [f]
   (let [source (slurp f)
+        source-digest (digest source)
+        tree (z/of-string source {:track-position? true})
+        ns-info (namespace-info tree)
         starts (vec (reductions + 0 (map #(inc (count %)) (s/split source #"\n"))))
         offset (fn [[r c]] (+ (starts (dec r)) (dec c)))]
     (for [l (take-while (complement z/end?)
-                       (iterate z/next (z/of-string source {:track-position? true})))
+                       (iterate z/next tree))
           :when (= :map (z/tag l))
           :let [cs (vec (children l)) pairs (partition 2 cs)
                 ks (mapv (comp z/string first) pairs)]
@@ -390,11 +539,8 @@ The script versions below are the final executed versions; three census invocati
                                   (and (= :list (z/tag %))
                                        (= "quote" (some-> % z/down z/string)))) parents)
                 parent (z/up l)
-                diagnostic (and (= :list (some-> parent z/tag))
-                                (contains? #{"error.refusal/diagnostic" "refusal/diagnostic"
-                                             "seon.error.refusal/diagnostic"}
-                                           (some-> parent z/down z/string))
-                                (= 2 (count (children parent))))
+                diagnostic (diagnostic-call? ns-info parent)
+                resolved (mapv #(resolved-key ns-info (first %)) pairs)
                 comments (some #(= :comment (z/tag %))
                                (take-while (complement z/end?)
                                 (iterate z/next* (z/of-string (z/string l)))))
@@ -402,6 +548,10 @@ The script versions below are the final executed versions; three census invocati
                              (s/starts-with? f "test/") "fixture/expected value: retain independent literal"
                              quoted "quoted/discarded data"
                              comments "comment inside literal"
+                             (not (and (even? (count cs)) (every? some? resolved)
+                                       (= (count resolved) (count (set resolved))))) "nonliteral/unresolved/duplicate keys"
+                             (not (:simple? ns-info)) "unsupported namespace require form"
+                             (not (expression-position? (if diagnostic parent l) ns-info)) "unsupported expression context"
                              (not= headers (subvec ks 0 3)) "header evaluation order"
                              (and (some #{":seon.error/throwable"} ks) (not diagnostic))
                              "raw Throwable must remain raw"
@@ -417,91 +567,182 @@ The script versions below are the final executed versions; three census invocati
                            (s/join " " (map (comp z/string second) (take 3 pairs)))
                            "\n " members ")")
                 [row col] (z/position l)]]
-      {:file f :line row :column col :held (boolean (held? f))
+      {:sha256 source-digest :ledger-sha256 ledger-digest
+       :namespace (:name ns-info) :require-position (:require-position ns-info)
+       :require-added (not (contains? (:dependencies ns-info) "seon.error.refusal"))
+       :file f :line row :column col :held (boolean (held? f))
        :keys ks :shape (str (if diagnostic "D" "L") (if (some #{":seon.error/message"} ks) "+M" "-M"))
        :reason reason :before before :after (when-not reason after)
        :map-lines (count (s/split-lines (z/string l)))
        :delta (if reason 0 (- (count (s/split-lines after)) (count (s/split-lines before))))
        :target-position (z/position target)})))
-(def rows (vec (mapcat census files)))
-(spit "tmp/error-constructor/census.json" (json/generate-string rows {:pretty true}))
-(doseq [[k rs] (sort-by key (group-by :file rows))]
- (println k (if (:held (first rs)) "HELD" "FREE") (count rs)
-          "auto" (count (remove :reason rs)) "delta" (reduce + (map :delta rs))))
-(println "TOTAL" (count rows) "SECONDS" (/ (- (System/nanoTime) started) 1e9))
+(defn -main []
+  (let [files (input-files) rows (vec (mapcat census files))
+        inputs (into {} (map (fn [f] [f {:sha256 (digest (slurp f)) :held (boolean (held? f))}]) files))]
+    (spit "tmp/error-constructor/inputs.json"
+          (json/generate-string {:ledger-sha256 ledger-digest :inputs inputs} {:pretty true}))
+    (spit "tmp/error-constructor/census.json" (json/generate-string rows {:pretty true}))
+    (doseq [[k rs] (sort-by key (group-by :file rows))]
+      (println k (if (:held (first rs)) "HELD" "FREE") (count rs)
+               "auto" (count (remove :reason rs)) "delta" (reduce + (map :delta rs))))
+    (println "TOTAL" (count rows) "SECONDS" (/ (- (System/nanoTime) started) 1e9))))
+(when (= (.getCanonicalPath (java.io.File. *file*))
+         (.getCanonicalPath (java.io.File. (or (System/getProperty "babashka.file") ""))))
+  (-main))
 ```
 
 ### tmp/error-constructor/preview.py
 
 ```python
-# Dry-run only: exact admitted spans, no checkout writes.
-import json, pathlib, difflib, collections, hashlib
-root=pathlib.Path('tmp/error-constructor')
-rows=json.loads((root/'census.json').read_text())
-for r in rows:
-    if r['file']=='script/seon/dev/dependency_digest.clj':
-        r['reason']='tools.deps bootstrap classpath: keep core-only literal';r['after']=None;r['delta']=0
-(root/'census.json').write_text(json.dumps(rows,indent=2)+'\n')
-metrics=[]; patches=[]
-for file, sites in __import__('itertools').groupby(sorted(rows,key=lambda r:r['file']),key=lambda r:r['file']):
-    sites=list(sites); original=pathlib.Path(file).read_text(); candidate=original
-    chosen=[r for r in sites if not r['reason']]
-    offsets=[0]
-    for line in original.splitlines(True): offsets.append(offsets[-1]+len(line))
-    spans=[]
+# Offline, path-selected rewrite preview. Never writes production files.
+import argparse, difflib, hashlib, json, pathlib, subprocess, runpy
+ROOT = pathlib.Path('tmp/error-constructor')
+def sha(text): return hashlib.sha256(text.encode()).hexdigest()
+def dirty_paths():
+    parts = subprocess.check_output(['git','status','--porcelain=v1','-z','--untracked-files=all']).decode().split('\0')
+    result=set(); i=0
+    while i < len(parts) and parts[i]:
+        entry=parts[i]; result.add(entry[3:]); i+=1
+        if any(c in entry[:2] for c in 'RC'):
+            result.add(parts[i]); i+=1
+    return result
+
+def basis(files, measurement=False):
+    snapshot=json.loads((ROOT/'inputs.json').read_text())
+    if sha(pathlib.Path('tmp/orchestrator/file-ownership.md').read_text()) != snapshot['ledger-sha256']:
+        raise ValueError('Ledger drift: review current holds, refresh census and reacquire paths')
+    dirty=dirty_paths(); sources={}
+    for file in files:
+        info=snapshot['inputs'][file]; original=pathlib.Path(file).read_text()
+        if sha(original)!=info['sha256']: raise ValueError('Stale whole-file basis: '+file)
+        if not measurement and (info['held'] or file in dirty): raise ValueError('HELD or dirty/staged/untracked: '+file)
+        sources[file]=original
+    return sources
+
+def rewrite(original, sites):
+    starts=[0]
+    for line in original.splitlines(True): starts.append(starts[-1]+len(line))
+    def offset(pos): return starts[pos[0]-1]+pos[1]-1
+    chosen=[r for r in sites if r['reason'] is None]; spans=[]
     for r in chosen:
-        row,col=r['target-position']; start=offsets[row-1]+col-1
-        assert original[start:start+len(r['before'])]==r['before'],(file,row)
-        after=r['after'].replace('\n ','\n'+' '*col,1)
-        spans.append((start,start+len(r['before']),after))
-    for (a,b,_),(c,d,_) in zip(sorted(spans),sorted(spans)[1:]): assert b<=c,(file,a,c)
-    for a,b,after in sorted(spans,reverse=True): candidate=candidate[:a]+after+candidate[b:]
-    # All selected files have an ns :require; preserve existing dependency aliases.
-    ns_end=original.find('(:import')
-    ns_prefix=original[:ns_end if ns_end>=0 else original.find('(def')]
-    require_added=bool(chosen and 'seon.error.refusal' not in ns_prefix)
-    if require_added:
-        assert '(:require' in candidate,file
-        candidate=candidate.replace('(:require','(:require [seon.error.refusal]\n           ',1)
-    diff=list(difflib.unified_diff(original.splitlines(True),candidate.splitlines(True),fromfile='a/'+file,tofile='b/'+file))
-    add=sum(l.startswith('+') and not l.startswith('+++') for l in diff)
-    delete=sum(l.startswith('-') and not l.startswith('---') for l in diff)
-    metrics.append(dict(file=file,held=sites[0]['held'],sites=len(sites),auto=len(chosen),add=add,delete=delete,net=add-delete,require=require_added,sha256=hashlib.sha256(original.encode()).hexdigest()))
-    if chosen:
-        dest=root/'preview'/file;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(candidate)
-        patches+=diff
-(root/'preview.patch').write_text(''.join(patches))
-(root/'metrics.json').write_text(json.dumps(metrics,indent=2)+'\n')
-for held in [False,True]:
-    a=[m for m in metrics if m['held']==held];print('HELD' if held else 'FREE', {k:sum(m[k] for m in a) for k in ['sites','auto','add','delete','net','require']})
+        if sha(original)!=r['sha256']: raise ValueError('Row fingerprint mismatch')
+        start=offset(r['target-position']); end=start+len(r['before'])
+        if original[start:end]!=r['before']: raise ValueError('Stale source span')
+        spans.append((start,end,r['after'].replace('\n ','\n'+' '*r['target-position'][1],1)))
+    if chosen and chosen[0]['require-added']:
+        # Position comes from the parsed top-level ns :require clause, not substring discovery.
+        start=offset(chosen[0]['require-position'])+len('(:require')
+        if original[start-len('(:require'):start]!='(:require': raise ValueError('Stale require clause')
+        spans.append((start,start,' [seon.error.refusal]\n           '))
+    spans.sort()
+    if any(b>c for (_,b,_),(c,_,_) in zip(spans,spans[1:])): raise ValueError('Overlapping edits')
+    result=original
+    for a,b,replacement in reversed(spans): result=result[:a]+replacement+result[b:]
+    return result
+
+def emit(sources, rows, label, prose=False):
+    prose_code=runpy.run_path(str(ROOT/'prose-preview.py')) if prose else None
+    metrics=[]; patches=[]; roster=[]
+    for file,original in sources.items():
+        sites=[r for r in rows if r['file']==file]; candidate=rewrite(original,sites)
+        if prose_code and file in prose_code['ALLOWED']: candidate=prose_code['convert'](file,candidate)
+        diff=list(difflib.unified_diff(original.splitlines(True),candidate.splitlines(True),fromfile='a/'+file,tofile='b/'+file))
+        add=sum(x.startswith('+') and not x.startswith('+++') for x in diff)
+        delete=sum(x.startswith('-') and not x.startswith('---') for x in diff)
+        info=json.loads((ROOT/'inputs.json').read_text())['inputs'][file]
+        metrics.append(dict(file=file,held=info['held'],sites=len(sites),auto=sum(r['reason'] is None for r in sites),add=add,delete=delete,net=add-delete,sha256=sha(original)))
+        if candidate!=original:
+            dest=ROOT/label/sha(original)/file;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(candidate)
+            roster.append(dict(file=file,output=str(dest),before=sha(original),after=sha(candidate)));patches+=diff
+    # Only this freshly replaced roster is authoritative. Old output files are never enumerated.
+    (ROOT/(label+'-roster.json')).write_text(json.dumps(roster,indent=2)+'\n')
+    (ROOT/(label+'.patch')).write_text(''.join(patches))
+    (ROOT/(label+'-metrics.json')).write_text(json.dumps(metrics,indent=2)+'\n')
+    print(label, 'files',len(roster),'sites',sum(m['auto'] for m in metrics),'net',sum(m['net'] for m in metrics))
+
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();group=parser.add_mutually_exclusive_group(required=True)
+    group.add_argument('--files',nargs='+',help='Explicit acquired FREE paths; no globs')
+    group.add_argument('--measure-all',action='store_true',help='Measurements only; includes held rows; never apply')
+    parser.add_argument('--prose',action='store_true',help='Compose the complete E0 prose group into the same candidate')
+    args=parser.parse_args();rows=json.loads((ROOT/'census.json').read_text())
+    files=args.files or sorted({r['file'] for r in rows})
+    if args.prose and (args.measure_all or not {'src/seon/error.clj','test/seon/error_test.clj','test/seon/schema_test.clj'}<=set(files)):
+        raise ValueError('--prose requires the explicit complete E0 prose group')
+    if len(set(files))!=len(files): raise ValueError('Duplicate acquired path')
+    label='measurement' if args.measure_all else 'selected'
+    (ROOT/(label+'-roster.json')).write_text('[]\n')
+    (ROOT/(label+'.patch')).write_text('')
+    (ROOT/(label+'-metrics.json')).write_text('[]\n')
+    emit(basis(files,args.measure_all),rows,label,args.prose)
 ```
 
 ### tmp/error-constructor/prose-preview.py
 
 ```python
+# Path-selected E0 prose preview; whole-file/ownership checks shared with the rewrite entrance.
 from pathlib import Path
-import difflib,json
-out=[]
-for file in ['src/seon/error.clj','test/seon/error_test.clj','test/seon/schema_test.clj']:
-    old=Path(file).read_text();new=old
+import argparse, difflib, json
+from preview import ROOT, basis, sha
+ALLOWED={'src/seon/error.clj','test/seon/error_test.clj','test/seon/schema_test.clj'}
+def convert(file, old):
     if file=='src/seon/error.clj':
-        a=new.index('(defn refusal-prose');b=new.index('(defn instrumentation-prose',a);new=new[:a]+new[b:]
-    elif file=='test/seon/error_test.clj':
-        a=new.index('  (testing "refusal names the transition, rule, and atomic result"');b=new.index('  (testing ',a+12);new=new[:a]+new[b:]
-    else:
-        assert new.count("'seon.error/refusal-prose")==2
-        new=new.replace("'seon.error/refusal-prose","'seon.error/render-ai")
-    diff=list(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='a/'+file,tofile='b/'+file))
-    add=sum(l.startswith('+') and not l.startswith('+++') for l in diff);delete=sum(l.startswith('-') and not l.startswith('---') for l in diff)
-    out.append(dict(file=file,add=add,delete=delete,net=add-delete))
-    Path('tmp/error-constructor/'+Path(file).name+'.prose.patch').write_text(''.join(diff))
-Path('tmp/error-constructor/prose-metrics.json').write_text(json.dumps(out,indent=2))
-print(out)
+        a=old.find('(defn refusal-prose')
+        if a<0: return old  # Fresh census of an already retired definition is a no-op.
+        b=old.index('(defn instrumentation-prose',a)
+        return old[:a]+old[b:]
+    if file=='test/seon/error_test.clj':
+        a=old.find('  (testing "refusal names the transition, rule, and atomic result"')
+        if a<0: return old
+        b=old.index('  (testing ',a+12)
+        return old[:a]+old[b:]
+    count=old.count("'seon.error/refusal-prose")
+    if count not in (0,2): raise ValueError('Unexpected renderer fixture count')
+    return old.replace("'seon.error/refusal-prose","'seon.error/render-ai")
+if __name__=='__main__':
+    parser=argparse.ArgumentParser();parser.add_argument('--files',nargs='+',required=True);args=parser.parse_args()
+    if not set(args.files)<=ALLOWED: raise ValueError('Outside acquired prose slice')
+    (ROOT/'prose-roster.json').write_text('[]\n')
+    sources=basis(args.files);metrics=[];roster=[]
+    for file,old in sources.items():
+        new=convert(file,old)
+        diff=list(difflib.unified_diff(old.splitlines(True),new.splitlines(True),fromfile='a/'+file,tofile='b/'+file))
+        add=sum(x.startswith('+') and not x.startswith('+++') for x in diff);delete=sum(x.startswith('-') and not x.startswith('---') for x in diff)
+        metrics.append(dict(file=file,add=add,delete=delete,net=add-delete))
+        if new!=old:
+            dest=ROOT/'prose'/sha(old)/file;dest.parent.mkdir(parents=True,exist_ok=True);dest.write_text(new)
+            roster.append(dict(file=file,output=str(dest),before=sha(old),after=sha(new)))
+        (ROOT/(Path(file).name+'.prose.patch')).write_text(''.join(diff))
+    (ROOT/'prose-roster.json').write_text(json.dumps(roster,indent=2)+'\n')
+    (ROOT/'prose-metrics.json').write_text(json.dumps(metrics,indent=2)+'\n')
+    print(metrics)
+```
+
+### tmp/error-constructor/replay-demo.py
+
+```python
+# Offline demonstration of the prepared rewrite only. No production code is loaded or written.
+import importlib.util, json, pathlib, subprocess, time
+start=time.perf_counter(); root=pathlib.Path('tmp/error-constructor')
+spec=importlib.util.spec_from_file_location('preview',root/'preview.py');p=importlib.util.module_from_spec(spec);spec.loader.exec_module(p)
+rows=json.loads((root/'census.json').read_text()); report={}
+for file in ['src/seon/blob.clj','src/seon/error.clj']:
+    source=p.basis([file])[file];sites=[r for r in rows if r['file']==file]
+    after=p.rewrite(source,sites)
+    report[file]={'identical_input_identical_output':after==p.rewrite(source,sites)}
+    for label,other in [('same_length_edit_outside_span',source.replace('ns seon.','ns xeon.',1)),('stale_replay_on_converted',after)]:
+        try: p.rewrite(other,sites)
+        except ValueError as e: report[file][label]=str(e)
+        else: raise ValueError('Expected stale-basis refusal: '+label)
+try:p.basis(['src/seon/cluster.clj'])
+except ValueError as e:report['held_path']=str(e)
+else:raise ValueError('Expected held-path refusal')
+(root/'replay-demo.json').write_text(json.dumps(report,indent=2)+'\n');print(json.dumps(report,indent=2));print('seconds',time.perf_counter()-start)
 ```
 
 ## 9. Input fingerprints and review gate
 
-These SHA-256 values cover exact whole-file census inputs. They make drift visible; they are evidence for this document, not a new runtime stamp/cache mechanism. The constructor source is separately fixed by the quoted form and basis above. Review must settle the additive arity, per-call wrapper cost, each admitted key expression/order, and the residual/prose decisions before implementation. Recheck all holds at launch. No unverified runtime guarantee is inferred from this manifest.
+These SHA-256 values cover exact whole-file census inputs. They make drift visible; they are evidence for this document, not a new runtime stamp/cache mechanism. The constructor source is separately fixed by the quoted form and basis above. The independent review accepts the additive arity and owning cut with the incorporated admission/proof requirements. Implementation must still establish per-call armed cost, whole-value equivalence, actual reaching coverage and final slice size; this document does not mark those proofs complete. Recheck all holds at launch. No unverified runtime guarantee is inferred from this manifest.
 
 | Input | SHA-256 |
 |---|---|
