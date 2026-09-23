@@ -227,9 +227,11 @@ rewrite preserves calls to the currently installed projection, acquisition and s
 owners until their listed replacement slices land; it does not require implementing
 steps 1.1–1.3 or 1.4/1.5 inside B1b. Those steps retain their dependency order.
 
-Assign models by the work (owner, 2026-09-23): Opus 5.5 implements and researches,
-through the Agent tool with `model: opus`; `gpt-6-astra` at medium reviews diffs and
-cuts and writes PRDs and designs; no Fable lanes. New assignments set the model and
+Assign models by the work (owner, 2026-09-23): `gpt-6-astra` at medium reviews diffs and
+cuts, writes PRDs and designs and diagnoses; `gpt-6-sol` implements from that written doc;
+Opus 5.5 (Agent tool, `model: opus`) implements and researches beside them; only GPT-6
+Codex models; no Fable lanes. The orchestrator compares Astra→Sol against Opus on
+clean, small, bug-free code and keeps the better pairing. New assignments set the model and
 effort explicitly. A clear spec
 includes owned paths, the replacement seam, every caller to convert and concrete
 acceptance checks; the implementer should not have to invent a missing design. No high-effort
