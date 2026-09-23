@@ -295,12 +295,100 @@
   [name]
   (str "seon.cluster/" name))
 
+;;; ---------------------------------------------------------------------------
+;;; The process uncaught handler (flow PRD N4)
+;;; ---------------------------------------------------------------------------
+
+(defn- carried-environment
+  "The environment carried in the throwable's own `ex-data` chain, or nil.
+  Attribution is evidence the failure carries; never a lookup elsewhere."
+  {:malli/schema [:=> [:cat :seon.error/throwable] [:maybe :seon.env/environment]]}
+  [throwable]
+  (some #(env/of (ex-data %)) (take-while some? (iterate ex-cause throwable))))
+
+(defn- uncaught-emergency!
+  "Print one uncaught failure that could not be stored, with every cause."
+  {:malli/schema [:=> [:cat :string :seon.error/throwable :map] :nil]}
+  [thread-name throwable evidence]
+  (binding [*out* *err*]
+    (prn {:seon.error/message "SEON CORE FAULT (uncaught, not stored)"
+          :seon.error/operation `record-uncaught!
+          :seon.error/data (assoc evidence
+                                  :thread thread-name
+                                  :cause (Throwable->map throwable))})
+    (flush))
+  nil)
+
+(defn record-uncaught!
+  "Store one exception no thread caught through the cluster fault recorder.
+
+  The world is the environment the throwable carries; absent that, the sole
+  live instance's (the root agent receives it). With several live instances
+  and no carried world no cluster is chosen: that failure, and a recording
+  the database refuses, panic in both modes on stderr with every cause.
+  `:panic` also prints a stored fault loudly; `:record` stays quiet once
+  stored and delivered."
+  {:malli/schema [:=> [:cat :string :seon.error/throwable] :nil]}
+  [thread-name throwable]
+  (let [instances (filterv map? (vals @running-instances))
+        environment (or (carried-environment throwable)
+                        (when (= 1 (count instances))
+                          (env/of (:seon.sci.eval/ctx (first instances)))))]
+    (if-not environment
+      (uncaught-emergency! thread-name throwable
+                           {:candidates (mapv #(get-in % [:seon.boot/config :seon.boot/cluster-name]) instances)})
+      (let [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
+             caps :seon.sci.admit/caps mode :seon.config/on-core-error
+             agent-id :seon.agent/id} environment
+            [fact outcome]
+            (cluster/commit-fault!
+             connection cluster-name (cluster/process-identity (process/current-identity)) caps
+             {:seon.error/source (cond-> {:clojure.core.async.flow/ex throwable}
+                                   agent-id (assoc :seon.agent/id agent-id))
+              :seon.error/declared-schema
+              (or (:seon.error/declared-schema (meta (ex-data throwable)))
+                  :seon.flow/exception-error)})]
+        (cond
+          (not= ::flow/committed outcome)
+          (uncaught-emergency! thread-name throwable
+                               {:cluster cluster-name
+                                :signature (:seon.error/signature fact)
+                                :outcome (if (instance? Throwable outcome)
+                                           (Throwable->map outcome)
+                                           outcome)})
+          (= :panic mode)
+          (binding [*out* *err*]
+            (println "SEON CORE FAULT (dev panic, uncaught on" (str thread-name "):")
+                     (:seon.error/message fact) "[signature" (str (:seon.error/signature fact) "]"))
+            (flush))))))
+  nil)
+
+(defn- install-uncaught-handler!
+  "Install the process handler, delegating to whatever handler preceded it."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (let [^Thread$UncaughtExceptionHandler previous
+        (Thread/getDefaultUncaughtExceptionHandler)]
+    (Thread/setDefaultUncaughtExceptionHandler
+     (reify Thread$UncaughtExceptionHandler
+       (uncaughtException [_ thread throwable]
+         (try
+           (record-uncaught! (.getName thread) throwable)
+           (finally
+             (when previous (.uncaughtException previous thread throwable))))))))
+  nil)
+
+;;; Once per JVM: a reload of this namespace neither reinstalls nor wraps it
+;;; twice, and the handler calls `record-uncaught!` through its Var.
+(defonce ^:private uncaught-handler (delay (install-uncaught-handler!)))
+
 (defn start!
   "Acquire a listener before the store; retain partial boot after any later refusal.
   A supplied listener was opened by the launcher's minimal core-only entry form."
   {:malli/schema [:=> [:cat :seon.boot/start-request] :seon.boot/instance]}
   [request]
   (let [began (System/nanoTime)
+        _ @uncaught-handler
         config (cluster/resolve-bootstrap
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
