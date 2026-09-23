@@ -14,7 +14,6 @@
             [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.sci.admit :as admit]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]))
@@ -469,7 +468,7 @@
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
-(defn- retrievable-artifacts-have-an-identified-no-history-root
+(defn- retrievable-artifacts-commit-no-transaction
   {:malli/schema [:=> [:cat :seon.db/connection] :boolean]}
   [connection]
   (let [cluster-name "mcp-durable-artifact-test"
@@ -481,47 +480,24 @@
     (swap! running-instances assoc cluster-name
            (running-instance connection cluster-name))
     (try
-      (let [stored (projected cluster-name effective value)
-            content-digest (:seon.blob/digest stored)
-            artifact-id
-            (db/q
-             '[:find ?id .
-               :in $ ?digest
-               :where
-               [?artifact :seon.dev.mcp.artifact/id ?id]
-               [?artifact :seon.dev.mcp.artifact/digest ?digest]]
-             (db/db connection)
-             content-digest)]
+      (let [before (db/commit-id (db/db connection))
+            stored (projected cluster-name effective value)
+            content-digest (:seon.blob/digest stored)]
+        (is (= before (db/commit-id (db/db connection)))
+            "a windowed result stores its blob and commits no transaction")
         (is (true? (:seon.dev.mcp/retrievable? stored))
-            "retrievability is returned only after the root commits")
+            "the stored blob is retrievable by its digest")
         (let [requery (some :seon.print/requery-form
                             (tree-seq coll? seq (:seon.dev.mcp/value stored)))]
           (is (seq requery) "a clipped value supplies an executable requery")
           (is (= value (eval requery))
               "the advertised requery reads the complete stored value"))
-        (is (= content-digest artifact-id)
-            "the content digest identifies its durable artifact root")
-        (is (true?
-             (:db/noHistory
-              (schema.datahike/malli->datahike-attr-in (seon.schema/handed-projection) :seon.dev.mcp.artifact/digest)))
-            "the direct digest root derives Datahike noHistory")
-        (support/transacted!
-                connection
-                [[:db.fn/retractEntity
-                  [:seon.dev.mcp.artifact/id artifact-id]]])
-        (is (empty?
-             (db/q
-              '[:find [?digest ...]
-                :in $ ?digest
-                :where
-                [_ :seon.dev.mcp.artifact/digest ?digest]]
-              (db/history (db/db connection)) content-digest))
-            "explicit root retraction does not retain the digest in history")
-        (is (= content-digest
-               (:seon.dev.mcp/value-not-found
-                (cluster/mcp-get-value
-                 cluster-name content-digest [] 0)))
-            "retraction ends the durable retrieval promise immediately"))
+        (let [absent (apply str (repeat 64 "0"))]
+          (is (= absent
+                 (:seon.dev.mcp/value-not-found
+                  (cluster/mcp-get-value cluster-name absent [] 0)))
+              "an unknown digest is a typed value-not-found refusal"))
+        (is (not= content-digest (apply str (repeat 64 "0")))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
@@ -557,7 +533,7 @@
         (swap! running-instances dissoc cluster-name)))))
 
 (deftest ^{:seon.test/fixture-observation
-           "Artifact blobs are store-global: identity, paging and root retraction require a private physical store."}
+           "Artifact blobs are store-global: identity, paging and the zero-transaction blob store require a private physical store."}
   artifact-lifecycle-preserves-identity-paging-and-retraction
   (let [fresh-stores (atom 0)
         executed (atom [])
@@ -567,7 +543,7 @@
          [:identity oversized-values-share-one-digest-across-storeless-and-stored-modes]
          [:string stored-strings-page-by-character-offset]
          [:nested ordinary-value-artifacts-drill-from-the-result-root]
-         [:retraction retrievable-artifacts-have-an-identified-no-history-root]]]
+         [:blob-only retrievable-artifacts-commit-no-transaction]]]
     (with-redefs-fn
       {#'support/with-fresh-database
        (fn [& args] (swap! fresh-stores inc) (apply acquire args))}

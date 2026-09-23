@@ -455,30 +455,13 @@
                  :seon.render.value/root [:seon.blob/digest content-digest]
                  :seon.sci.admit/caps caps})
                projected-node (:seon.render.value/tree projection)
-               staged (when (and artifact-backed? connection)
-                        (blob/stage! connection content))
-               stored-digest
-               (when staged
-                 (blob/with-publication!
-                  connection
-                  [staged]
-                  (fn []
-                    (let [result
-                          (db/transact!
-                           connection
-                           [{:seon.dev.mcp.artifact/id content-digest
-                             :seon.dev.mcp.artifact/digest content-digest}])]
-                      (when (or (:seon.db.write.attempt/request-id result)
-                                (:seon.db/invalid-read result) (:seon.schema/expected-value result))
-                        (throw
-                         (ex-info
-                          "The durable MCP artifact root did not commit."
-                          {:seon.dev.mcp.artifact/root-not-committed content-digest
-                           :seon.error/message
-                           "The durable MCP artifact root did not commit."
-                           :seon.dev.mcp.artifact/digest content-digest
-                           :seon.dev.mcp.artifact/transaction-result result})))
-                      content-digest))))]
+               ;; THE BLOB IS THE WHOLE RECORD. The content-addressed tier
+               ;; already stores the value by digest and `get_value` reads it
+               ;; by that digest, so a windowed result commits NO transaction:
+               ;; a probe advances no basis, and nothing downstream re-derives.
+               ;; An unreferenced blob goes with the next explicit GC sweep.
+               stored-digest (when (and artifact-backed? connection)
+                               (blob/put! connection content))]
            (cond-> {:seon.dev.mcp/value
                     (cond-> (admit/semantic-value projected-node)
                       exception-summary-value
@@ -558,16 +541,7 @@
   [cluster-name content-digest path offset]
   (if-let [connection (:seon.boot/cluster-connection
                        (mcp-instance cluster-name))]
-    (if-let [content
-             (when
-              (db/q
-               '[:find ?artifact .
-                 :in $ ?digest
-                 :where
-                 [?artifact :seon.dev.mcp.artifact/digest ?digest]]
-               (db/db connection)
-               content-digest)
-               (blob/get connection content-digest))]
+    (if-let [content (blob/get connection content-digest)]
       (let [stored (render.value/read-artifact content)
             found (render.data/at
                    (render.value/artifact-value stored)
@@ -606,7 +580,9 @@
        :seon.error/at (java.util.Date.)
        :seon.error/layer :seon.cluster/operation
        :seon.error/operation 'seon.cluster/mcp-get-value
-       :seon.error/message "No stored MCP value has this digest."
+       :seon.error/message
+       "No blob has this digest: an explicit GC sweep collected it, or it was never stored. Evaluate the form again to store its value."
+       :seon.error/expected "a stored blob at the requested digest"
        :seon.blob/digest content-digest})
     {:seon.dev.mcp/remainder-not-retrievable content-digest
      :seon.error/at (java.util.Date.)
