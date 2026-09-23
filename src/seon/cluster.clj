@@ -2791,6 +2791,12 @@
                      :seon.source/candidate branch)))
           (finally (d/release-materialized-db published-database)))))))
 
+;; One publication of this JVM's store at a time (B1 §2a steps 1, 11). Two
+;; concurrent requests otherwise each pay the whole analysis and the loser
+;; refuses at `force-branch!`; Datahike's expected head stays the fence
+;; against writers outside this JVM.
+(defonce ^:private publication-monitor (Object.))
+
 (defn refresh-source!
   "Publish the current source tree onto the one `current-src` branch.
 
@@ -2825,6 +2831,9 @@
    (refresh-source! root changed-paths development-cluster directory {}))
   ([root changed-paths development-cluster directory {gate? :seon.source/gate?}]
    (report-source-progress! "request accepted")
+   ;; The head this request builds on is captured inside the monitor, so a
+   ;; waiting publication runs against the head the running one installs.
+   (locking publication-monitor
      (report-source-progress! "bootstrap configuration")
      (let [;; A publication over one second reports what the armed
            ;; definitions did during it, in its progress and its result.
@@ -2873,7 +2882,7 @@
                     (assoc result :seon.profile/explanation explanation))
                 result))))
          (finally
-           (release-root-store! store-dir))))))
+           (release-root-store! store-dir)))))))
 
 (defn publication-base!
   "Export the common publication and its exact manifest for isolated workers."
