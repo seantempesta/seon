@@ -176,15 +176,16 @@ the reload leaves loaded code no row describes. Steps 13–17 become six parts, 
 | capture | read each named path's bytes once (`source/capture-paths`, `source.clj:104`) | \|P\| bytes | a missing or outside path refuses by name (`ca9587817`) |
 | publish | rows for exactly those bytes on `current-src` (steps 2–11, unchanged) | changed files | stale head or refused rows leave `current-src` unmoved |
 | adopt rows | ONE transaction on the cluster branch: `head-guard-tx`, schema declarations, `reconcile-tx-in`, `issue/adopt-tx` — schema operations first, since a transaction applies schema datoms before later operations (`D/db/transaction.cljc:466`); `seon.fn/index!`'s `:seon.db/tx-data` (`fn.clj:3620`) moves before the reconcile operation | touched identities | refused ⇒ branch unchanged, JVM untouched |
-| load | make the loaded Vars equal the adopted rows (mechanism: owner decision below) | changed declarations (+ macro/const referrers by `:seon.fn/references`; 17 type/protocol rows keep the namespace closure; `defmulti` is `ns-unmap`ped first as for deleted symbols, `cluster.clj:2598-2605`) | a compile failure is a core fault; the record stays at R, so contexts interpret the rows that differ (B2 §2a, `sci/eval.clj:2532`) |
+| load | make the loaded Vars equal the adopted rows with ordinary `require :reload` under the existing evaluation/adoption boundary (D1 §2e) | changed declarations (+ macro/const referrers by `:seon.fn/references`; 17 type/protocol rows keep the namespace closure; `defmulti` is `ns-unmap`ped first as for deleted symbols, `cluster.clj:2598-2605`) | a compile failure is a core fault; record R is not health; affected execution stays unavailable until bytes, callable behavior and arming converge |
 | arm | `instrument/apply!` over the loaded Vars (step 16) | changed Vars | as load |
 | record | its own guarded transaction after load and arm: `adoption-guard-tx` (prior = R), `:seon.source/commit-id` C, `:seon.test/adoption-*` (step 17 as written) | 1 | refused ⇒ a newer convergence owns the record |
 
-Only the JVM can be partial, only between load and record, and never backwards: every loaded
-declaration is R's or C's, and the record names R until the whole of C is loaded.
-`68f769a4a` currently writes the record with the rows (owner question pending). Deletions:
-`verify-development-sources!` and its calls (`:2594`, `:2611`) once the loaded bytes are the
-published bytes; `clojure.core/def` leaves `compiled-into-callers` (README 1.2b: a `def`,
+Rows precede load, arm and the guarded record. Partial JVM convergence does not
+certify either R or C: exclude conflicting reloads and dependent evaluations until
+load → arm → record completes. Branch acceptance’s writer guard cannot serialize Var
+mutations. Keep digest verification; a failed reload leaves affected execution
+unavailable until exact bytes, callable behavior and arming converge. Deletions:
+`clojure.core/def` leaves `compiled-into-callers` (README 1.2b: a `def`,
 like a `defn`, is read through its Var); the three-transaction `adopt-rows!` (`:2483`);
 `issue/adopt!`'s 5-arity (`issue.clj:991`) if unused. A partial publication's schema forms are
 the published commit's stored `:seon.schema/form` rows plus the named resource paths only,
@@ -196,21 +197,21 @@ has none today); from zero still reads everything. The other runtime `packaged-f
 |---|---|---|---|---|
 | S1 | `def` leaves `compiled-into-callers` | `cluster.clj` | 0 / −1 | a private `def` edit in a namespace with dependents reloads only that namespace |
 | S2 | optional `:seon.fn/line` from clj-kondo `:row` at `var-row` (only if load is per row) | `fn.clj`, `seon.fn.edn` | +4 | an indexed `defn`'s line equals its file line |
-| S3 | load from published bytes (owner decision below) replacing both verify calls | `cluster.clj` | +35 / −45 | adopting X while dependent Y's disk bytes differ from its published bytes succeeds with Y's Var unchanged; a `defmethod`-only edit loads |
+| S3 | keep `require :reload` and digest verification; D1 §2e holds file-only destinations through integration and defers integration when a required namespace/schema dependency is dirty; branch REPL edits reach files only through accepted write-back | `cluster.clj`, existing source owner | no new loader | a dirty required dependency defers integration without loading unpublished bytes; a `defmethod`-only edit loads after controlled integration |
 | S4 | rows → load → arm → record; rows in one transaction; `save-gate!` (`:2759`) converted in the slice | `cluster.clj`, `fn.clj`, `issue.clj` | +15 / −45 | an adoption changing `adopt-rows!`'s own arity succeeds the first time; a declaration that fails to compile leaves record R, rows C, one stored fault, and the next adoption converges |
-| S5 | concurrent adoptions serialize (owner decision below) | `cluster.clj` | ≤ +20 | two concurrent adoptions of one declaration end with the newer source loaded and recorded |
+| S5 | exclusive load → arm → record through the existing evaluation/adoption boundary; interim: one orchestrator integration caller, lanes never self-adopt (D1 §2e) | `cluster.clj`, existing adoption boundary | reprice the existing seam before code if exclusion is missing | interleaved adoptions, partial reload failure and an old branch’s indirect call cannot report healthy convergence from a stale record |
 | S6 | named resources only; optional `:seon.schema/file` | `fn.clj`, `cluster.clj`, `seon.schema.edn` | +20 / −5 | an unnamed dirty resource does not reach the published projection |
 
 Probe inside S3/S4 before code: the rows-ahead window (target < 100 ms for a `defn` edit);
 residue top-level forms with no row (75 `declare`, 69 `defonce`, 26 `defmethod`, 41
 `schema.edn/load!`, …) need a change signal that a comment-only edit does not trip; an
 `accrete-schema-population!` purge inside the one rows transaction on a branch of default.
-**Open (owner):** how load reads bytes (`require :reload` of the namespace — the ruled
-vocabulary — versus `Compiler/load` of captured bytes, `Compiler.java:8194-8233`, per file or
-per row; P4: a `LineNumberingPushbackReader` at 2180 gives `:line 2180` and the right frame in
-0.66 ms); how concurrent adoptions serialize (guards only, per 1.3f, versus one Clojure agent
-converging to the head); and whether the record stays with the rows (`68f769a4a`) or follows
-load and arm (step 17).
+**Settled:** reload is `require :reload`; the record follows load and arm. D1 §2e
+avoids the dirty-dependent window by keeping lane changes on named branches until
+accepted write-back, holding the complete destination files and deferring integration
+when a required dependency is dirty. Database acceptance and exclusive JVM convergence
+remain separate proofs; guards alone do not establish the latter.
+Authority: owner, 2026-09-23 (`59a908e55`, “Don't create some broken loading shit”); D1 §2e (`7523dd510`) and Astra plan review #2.
 
 ### 2b. The reset's cold path
 
@@ -532,7 +533,7 @@ selection sets after this proof; no reduction is promised from the existing coun
 
 | Candidate | Probe | Decides |
 |---|---|---|
-| reload from the CAPTURED bytes (`clojure.lang.Compiler/load` with a `StringReader`, `*file*` bound) instead of `require :reload` re-reading disk | adopt after editing the file between capture and reload | deletes the post-reload digest check and the retry at `cluster.clj:696` |
+| ordinary `require :reload` after D1 §2e controlled write-back; retain digest verification | edit a required dependency between capture and integration | integration defers; no unpublished bytes load, no replacement loader or removal of digest checks |
 | schema declarations and rows in ONE transaction on reset (`rschema` updates as schema datoms are added, `transaction.cljc:539-615`) | transact `[attr-decl {row}]` on a scratch branch | collapses the cold path's ordered transactions |
 | the pathless request replacing the hook's bb walk | `path-digests` over 791 paths | ≤ 150 ms retires `bin/seon-hook:1688-1819` |
 | clj-kondo `:parallel` with per-file groups (fork: `group-id` per explicit file) | fidelity diff, then time | 15.4 s → ? only with equal output |

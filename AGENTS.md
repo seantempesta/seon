@@ -316,8 +316,17 @@ arbitrary host functions. Retain isolation where termination cannot be guarantee
 
 ### Total, honest boundaries
 
-Every function, private included, has a complete Malli contract. Invalid input prevents
-entry; invalid output refuses the result. Refusals identify operation, member, expected
+Every function, private included, admitted into a cluster’s program has a complete,
+well-formed, fully namespaced Malli contract and reaching-test coverage. On an
+experimental branch, the shared REPL entrance reads configurable schema/test/test-first
+checks: `:warn` (default) accepts a definition without a schema or test with a declared
+warning; `:gate` refuses it before evaluation. Nothing merges into a cluster’s program
+without passing every check, regardless of entry policy. Every valid contract remains
+armed; a warned missing or malformed contract is never manufactured or replaced by a
+stale wrapper. Armed contracts prevent entry on invalid input and refuse invalid output.
+Authority: owner, 2026-09-23 (`a29faf5a6`, `215c32d9a`), configurable entry, unconditional merge checks.
+
+Refusals identify operation, member, expected
 shape and offending value. Unavailable evidence is typed unknown, never silence.
 Domain functions enumerate possible errors. Body-derived verification of their declared
 unions remains pending an explicitly owned producer, checker and regression; do not
