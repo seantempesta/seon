@@ -128,17 +128,27 @@
        (publish! (cluster/serve! instance dials))))))
 
 (defn- changed-source-paths
-  "Discovered inputs whose bytes differ from the published program's digests.
-  An input the published program names but the files no longer discover is
-  outside this check (measured 459 ms by lane resume-in-seconds)."
+  "Inputs whose bytes differ from the published program's digests, including
+  inputs the published program names that the files no longer have."
   {:malli/schema [:=> [:cat :seon.store/store] [:vector :string]]}
   [store]
   (let [directory (fs/source-directory)
         paths (source/discover-paths directory cluster/source-roots)
         files (source/path-digests directory paths)
-        database (source/database store (:seon.source/commit-id (source/current store)))]
+        ;; File digests only: the old commit's stored contracts may name
+        ;; predicates this JVM's files deleted, and are replaced by the
+        ;; publication this comparison selects, so no projection is built.
+        commit-id (:seon.source/commit-id (source/current store))
+        ;; An absent commit refuses through `source/database`, by name.
+        database (or (source/commit-database store commit-id)
+                     (source/database store commit-id))]
     (try
-      (let [stored (source/stored-path-digests database paths)]
+      ;; Every stored file row is compared, so an input the files deleted is
+      ;; published as a deletion instead of later read through its callers.
+      (let [stored (into {} (d/q '[:find ?path ?digest
+                                   :where [?file :seon.fn.file/relative-path ?path]
+                                          [?file :seon.fn.file/digest ?digest]]
+                                 database))]
         (into [] (comp (distinct) (remove #(= (get files %) (get stored %))))
               (sort (concat (keys files) (keys stored)))))
       (finally (d/release-materialized-db database)))))

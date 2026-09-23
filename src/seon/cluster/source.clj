@@ -249,18 +249,21 @@
        ::read unread})))
 
 (defn stored-path-digests
-  "Seek each named input by its unique file identity in one database value."
+  "The stored digest of each named input, read from `database`'s file rows.
+
+  A raw Datahike query: the answer needs no schema projection, so a published
+  commit whose stored contracts name a since-deleted predicate is still
+  readable (resume compares file digests before publishing the files that
+  replace those contracts)."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :string]]
                   :seon.source/relative-file-digests]}
   [database paths]
   (into {}
-        (keep (fn [path]
-                (let [row (db/pull database [:seon.fn.file/digest]
-                                   [:seon.fn.file/relative-path path])]
-                  (when (:seon.error/at row)
-                    (throw (ex-info (:seon.error/message row) row)))
-                  (when-let [digest (:seon.fn.file/digest row)] [path digest]))))
-        paths))
+        (d/q '[:find ?path ?digest
+               :in $ [?path ...]
+               :where [?file :seon.fn.file/relative-path ?path]
+                      [?file :seon.fn.file/digest ?digest]]
+             database paths)))
 
 (defn current
   "The published source branch and commit ID, or nil before publication."
@@ -273,6 +276,14 @@
                :seon.store/branch current-branch})]
     {:seon.source/branch current-branch
      :seon.source/commit-id commit-id}))
+
+(defn commit-database
+  "The exact published source commit as a raw database value, with no schema
+  projection derived; `nil` when the commit is absent."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id]
+                  [:or :nil :seon.db/database-value]]}
+  [store commit-id]
+  (d/commit-as-db (:seon.store/connection-object store) commit-id))
 
 (defn database
   "Read the exact published source commit without opening its branch."

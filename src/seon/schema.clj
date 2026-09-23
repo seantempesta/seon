@@ -3118,6 +3118,40 @@
                           (d/datoms database :avet attribute))))
           [:seon.schema/key :seon.fn/sym])))
 
+(defn- deleted-predicate-functions
+  "Refusing callables for the predicates stored rows name but the loaded files deleted.
+
+  A stored commit (the published source a resume diffs, a cluster that
+  retains its program) may name a predicate whose namespace is loaded but no
+  longer defines it. Those rows stay readable: each such predicate compiles
+  to a callable that refuses by name when a value is validated against it,
+  and its namespace is never reloaded to look for it. A predicate of an
+  unloaded namespace keeps the ordinary resolution."
+  {:malli/schema [:=> [:cat :map :map] [:map-of :qualified-symbol [:fn clojure.core/ifn?]]]}
+  [forms function-contracts]
+  (into {}
+        (comp (filter #(and (vector? %) (= :fn (first %))))
+              (map #(get % (if (map? (second %)) 2 1)))
+              (filter qualified-symbol?)
+              (distinct)
+              (filter #(and (find-ns (symbol (namespace %)))
+                            (nil? (loaded-predicate-var %))))
+              (map (fn [predicate]
+                     [predicate
+                      (fn [value]
+                        (throw
+                         (ex-info (str "Predicate " predicate
+                                       " was deleted from its loaded namespace; a stored"
+                                       " declaration still names it.")
+                                  {:seon.error/at (java.util.Date.)
+                                   :seon.error/layer :seon.schema/compilation
+                                   :seon.error/operation 'seon.schema/projection-from-rows
+                                   :seon.error/message "A stored declaration names a deleted predicate."
+                                   :seon.schema/error :seon.schema/unresolved-predicate
+                                   :seon.schema/unresolved-predicate predicate
+                                   :seon.error/offending value})))])))
+        (tree-seq coll? seq [(vals forms) (vals function-contracts)])))
+
 (defn projection-from-rows
   "Build one complete projection from committed schema and contract rows.
 
@@ -3321,7 +3355,8 @@
               :seon.schema/function-source-admissions source-admissions
               :seon.schema/artifact-exports artifact-exports
               :seon.schema/pure-predicate-symbols pure-predicate-symbols
-              :seon.schema/predicate-functions {}
+              :seon.schema/predicate-functions
+              (deleted-predicate-functions forms function-contracts)
               :seon.schema/validate-render-contracts? true}))
           ;; The row text each form was read from, so the next derivation
           ;; from this projection reads only rows whose text differs. A

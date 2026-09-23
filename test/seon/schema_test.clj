@@ -1797,3 +1797,19 @@
            (is (= (comparable-projection full) (comparable-projection derived)))
            (is (contains? (:seon.schema.projection/forms derived) ::incremental-declaration))
            (println "incremental load-projection" {:derived-ms derived-ms :full-ms full-ms})))))))
+
+(deftest a-stored-declaration-naming-a-deleted-predicate-stays-readable
+  ;; A resume reads the published commit before the changed files replace its
+  ;; rows; a contract there may name a predicate the loaded files deleted
+  ;; (ec1b53b38 deleted seon.db/projection-value-key?). It compiles to a
+  ;; callable that refuses by name, never a projection that refuses to build.
+  (let [deleted @#'seon.schema/deleted-predicate-functions
+        found (deleted {:probe/stale [:fn 'seon.schema/no-such-deleted-predicate?]
+                        :probe/live [:fn 'clojure.core/int?]
+                        :probe/unloaded [:fn 'no.such.namespace/predicate?]}
+                       {})
+        refusal (try ((get found 'seon.schema/no-such-deleted-predicate?) 1)
+                     (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+    (is (= ['seon.schema/no-such-deleted-predicate?] (vec (keys found))))
+    (is (= 'seon.schema/no-such-deleted-predicate?
+           (:seon.schema/unresolved-predicate refusal)))))
