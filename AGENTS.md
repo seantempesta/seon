@@ -74,6 +74,21 @@ slice that adds more than about a hundred lines is presumed the wrong design: st
 writing it and report the smaller alternative — the dependency seam, the deletion, the one
 call-site conversion. Net line count is not the test; added machinery is.
 
+**Algorithmic analysis and principal-engineering common sense in every design (owner,
+2026-09-23).** Every design and spec states, before code: what each operation's cost is
+proportional to (inputs changed, the whole program, the store, the call count), the
+target complexity, and the simplest alternative considered — the dependency seam, the
+existing function, the deletion. Work proportional to the whole program on a change, or
+per call where per evaluation suffices, is the defect to design away, not to cache around.
+
+**Anything not sub-second is the agent's defect to fix (owner, 2026-09-23: "make it extremely
+clear when agents fuckup (anything thats not sub second) that they have to fix it and it's
+likely they overengineered or are redoing something that is already done elsewhere
+better").** Every agent-facing result over one second says so as a directive, with the
+armed functions that spent the time; the agent that caused it fixes it before continuing,
+first asking whether it over-engineered or redid work a dependency or another function
+already does better.
+
 **No stamps (owner, 2026-09-23: "get rid of bullshit stamps; so much of what we are
 doing is already available in Datahike").** A value derived from a database value is a
 FUNCTION of that value, memoized with Clojure's tools (`clojure.core.cache`, keyed by
