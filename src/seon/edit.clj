@@ -119,11 +119,8 @@
   (try
     {:seon.edit/root (z/of-string* source {:track-position? true})}
     (catch Throwable error
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/parse-root
-        :seon.error/message "The complete source could not be parsed structurally."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/parse-root
+       {:seon.error/message "The complete source could not be parsed structurally."
         :seon.error/offending source
         :seon.error/data {:seon.edit/cause (.getMessage error)}
         :my.edit/parse-byte-count (utf8-bytes source)
@@ -162,14 +159,12 @@
           {:seon.edit/location location
            :seon.edit/node (z/node location)
            :seon.edit/sexpr (:seon.edit/sexpr semantic)}
-          {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/single-form
-        :seon.error/message message
+          (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/single-form
+           {:seon.error/message message
         :seon.error/offending source
         :seon.error/data {:seon.edit/form-count (count locations)}
         :my.edit/parse-byte-count (utf8-bytes source)
-        :seon.error/expected "readable source with the required form count"})))))
+        :seon.error/expected "readable source with the required form count"}))))))
 
 (defn single-form?
   "True when `source` is exactly one readable semantic form."
@@ -273,21 +268,16 @@
           reparsed (parse-root candidate)]
       (if (or (:my.edit/parse-byte-count reparsed)
               (not= rendered (z/root-string (:seon.edit/root reparsed))))
-        {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/lossless-candidate
-        :seon.error/message "The structural edit did not preserve the source boundary."
+        (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/lossless-candidate
+         {:seon.error/message "The structural edit did not preserve the source boundary."
         :seon.error/offending source
         :seon.error/data {}
         :my.edit/unverified-char-span [start end]
-        :seon.error/expected "an edit preserving all unrelated source bytes"}
+        :seon.error/expected "an edit preserving all unrelated source bytes"})
         actual))
     (catch Throwable error
-      (error/diagnostic
-       {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/lossless-candidate
-        :seon.error/message "The structural edit could not be verified losslessly."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/lossless-candidate
+       {:seon.error/message "The structural edit could not be verified losslessly."
         :seon.error/offending source
         :seon.error/data {:seon.edit/cause (.getMessage error)}
         :my.edit/unverified-char-span [start end]
@@ -353,34 +343,30 @@
                     (bounded-values
                      (map #(candidate-evidence source starts %) semantics)
                      context-byte-limit)]
-                {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/form
-        :seon.error/message "No top-level form matches the exact selector."
+                (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/form
+                 {:seon.error/message "No top-level form matches the exact selector."
         :seon.error/offending request
         :seon.error/data {:seon.edit/candidates (:seon.edit/values evidence)
                   :seon.edit/candidates-complete?
                   (:seon.edit/complete? evidence)}
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
+        :seon.error/expected "one matching source region, or explicit replacement of all matches"}))
 
               (< 1 (count matches))
               (let [evidence
                     (bounded-values
                      (map #(candidate-evidence source starts %) matches)
                      context-byte-limit)]
-                {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/form
-        :seon.error/message "More than one top-level form matches the selector."
+                (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/form
+                 {:seon.error/message "More than one top-level form matches the selector."
         :seon.error/offending request
         :seon.error/data {:seon.edit/candidates (:seon.edit/values evidence)
                   :seon.edit/candidates-complete?
                   (:seon.edit/complete? evidence)}
         :my.edit/ambiguous-match (:my.edit/path request)
         :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
+        :seon.error/expected "one matching source region, or explicit replacement of all matches"}))
 
               :else
               (matched-form-result source starts (first matches) request
@@ -426,30 +412,26 @@
                   context-byte-limit)]
     (cond
       (empty? positions)
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/exact
-        :seon.error/message "The exact prior string does not occur in the source."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/exact
+       {:seon.error/message "The exact prior string does not occur in the source."
         :seon.error/offending request
         :seon.error/data {:my.edit/replacements 0
                    :seon.edit/lines (:seon.edit/values evidence)
                    :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"}
+        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
 
       (and (not replace-all?) (< 1 (count positions)))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/exact
-        :seon.error/message "The exact prior string occurs more than once."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/exact
+       {:seon.error/message "The exact prior string occurs more than once."
         :seon.error/offending request
         :seon.error/data {:my.edit/replacements (count positions)
                    :seon.edit/lines (:seon.edit/values evidence)
                    :seon.edit/lines-complete? (:seon.edit/complete? evidence)}
         :my.edit/ambiguous-match (:my.edit/path request)
         :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"}
+        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
 
       :else
       (let [applied (if replace-all? positions [(first positions)])
@@ -479,26 +461,22 @@
         from-line (:my.edit/from-line request)
         to-line (:my.edit/to-line request)]
     (if (or (> from-line to-line) (> to-line (count starts)))
-      {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/lines
-        :seon.error/message "The guarded line range is outside the current source."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/lines
+       {:seon.error/message "The guarded line range is outside the current source."
         :seon.error/offending request
         :seon.error/data {:my.edit/from-line from-line
                    :my.edit/to-line to-line
                    :seon.edit/line-count (count starts)}
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"}
+        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
       (let [start (nth starts (dec from-line))
             end (or (nth starts to-line nil) (count source))
             actual (subs source start end)
             expected (:my.edit/old-window request)]
         (if (not= expected actual)
-          {:seon.error/at (java.util.Date.)
-        :seon.error/layer :my.edit/source
-        :seon.error/operation 'seon.edit/lines
-        :seon.error/message "The guarded line window does not match current source."
+          (seon.error.refusal/diagnostic (java.util.Date.) :my.edit/source 'seon.edit/lines
+           {:seon.error/message "The guarded line window does not match current source."
         :seon.error/offending request
         :seon.error/data {:my.edit/from-line from-line
                        :my.edit/to-line to-line
@@ -506,7 +484,7 @@
                        :my.edit/source-window-complete? true}
         :my.edit/no-match (:my.edit/path request)
         :seon.error/member :my.edit/path
-        :seon.error/expected "one matching source region, or explicit replacement of all matches"}
+        :seon.error/expected "one matching source region, or explicit replacement of all matches"})
           (let [new-window (:my.edit/new-window request)
                 candidate-source (splice source start end new-window)
                 changed-end (+ start (count new-window))]
