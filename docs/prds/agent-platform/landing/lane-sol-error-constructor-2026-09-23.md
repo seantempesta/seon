@@ -89,3 +89,4 @@ Both status entrances observed default PID 44576, source archive `b1ff7ba6cf9be0
 | E21: `src/seon/flow.clj` | 4 | 14 / 21 / -7; +0 | 6 / 41 | 26.661375 | `seon.flow-test` | None; four unsupported expression contexts retained; no graph change |
 | E22: `src/seon/issue/opening.clj` | 2 | 6 / 9 / -3; +0 | 0 / 15 | 26.119667 | `seon.issue-test` | None; dirty issue.clj untouched |
 | E23: `src/seon/maintenance.clj` | 6 | 18 / 30 / -12; +0 | 5 / 30 | 28.147708 | `seon.maintenance-test` | None; raw Throwable and unsupported context retained; ex-info cause preserved |
+| E24: `src/seon/plan.clj` | 2 | 8 / 11 / -3; +0 | 0 / 50 | 29.055334 | `seon.plan-test` | None; 22 unsupported expression contexts retained |

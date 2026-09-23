@@ -13,7 +13,8 @@
 
   Completion is the presence of `:my.plan.item/completed-tx`; ready, blocked,
   parent, depth, and state are queries over current facts, never stored."
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [seon.db :as db]
             [seon.id :as id]
             [seon.issue :as issue]
@@ -358,15 +359,13 @@
       (or (:seon.db/invalid-read agent-entity) (:seon.schema/expected-value agent-entity)) agent-entity
 
       (nil? agent-entity)
-      {:seon.error/at (java.util.Date.)
-                 :seon.error/layer :my.plan/constraint
-                 :seon.error/operation 'seon.plan/plan
-                 :seon.error/message "Plan request refused; an existing agent is required."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.plan/constraint 'seon.plan/plan
+       {:seon.error/message "Plan request refused; an existing agent is required."
                  :my.plan/refused-member :seon.agent/id
                  :seon.error/offending {:seon.agent/id agent-id}
                  :seon.error/data {:seon.agent/id agent-id}
                  :my.plan/missing-agent-id (get {:seon.agent/id agent-id} :seon.agent/id)
-                 :seon.error/expected "an existing agent"}
+                 :seon.error/expected "an existing agent"})
 
       :else
       (let [pulled (agent-plan-pull database agent-id)
@@ -408,15 +407,13 @@
       (or (:seon.db/invalid-read entity) (:seon.schema/expected-value entity)) entity
 
       (nil? entity)
-      {:seon.error/at (java.util.Date.)
-                 :seon.error/layer :my.plan/constraint
-                 :seon.error/operation 'seon.plan/item
-                 :seon.error/message "Plan request refused; an existing plan step is required."
+      (seon.error.refusal/diagnostic (java.util.Date.) :my.plan/constraint 'seon.plan/item
+       {:seon.error/message "Plan request refused; an existing plan step is required."
                  :my.plan/refused-member :my.plan.item/id
                  :seon.error/offending {:my.plan.item/id item-id}
                  :seon.error/data {:my.plan.item/id item-id}
                  :my.plan/missing-item-id (get {:my.plan.item/id item-id} :my.plan.item/id)
-                 :seon.error/expected "an existing plan step"}
+                 :seon.error/expected "an existing plan step"})
 
       :else
       (let [agent-id (db/q '[:find ?id . :in $ % ?step
