@@ -47,3 +47,4 @@ Every row has zero lint errors and packaged findings `[]`. All tests remain orch
 | E6: `src/seon/background.clj` | 2 | 6 / 10 / -4; 0 | 0 / 12 | 24.328125 | `seon.background-test` | None |
 | E7: `src/seon/bootstrap.clj` | 4 | 12 / 20 / -8; 0 | 0 / 28 | 23.072166 | `seon.bootstrap-test` | One X literal retained; outer ex-info unchanged |
 | E8: `src/seon/call_preparation.clj` | 5 | 15 / 25 / -10; 0 | 3 / 40 | 24.954542 | `seon.call-preparation-test` | One X literal retained; supply catch still carries its original Throwable as offending evidence |
+| E9: `src/seon/cluster/agent.clj` | 2 | 8 / 11 / -3; 0 | 18 / 42 | 27.579083 | `seon.cluster.agent-test` | None |

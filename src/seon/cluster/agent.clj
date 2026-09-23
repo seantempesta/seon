@@ -62,7 +62,8 @@
   mailbox once. Boot closes prior open turns and interrupts unfinished
   evaluations; nothing resumes the interrupted execution. No row
   depends on a channel for recovery."
-  (:require [clojure.core.async :as async]
+  (:require [seon.error.refusal]
+            [clojure.core.async :as async]
             [clojure.core.protocols :as core.protocols]
             [clojure.core.async.impl.protocols :as async.protocols]
             [clojure.core.async.flow :as flow]
@@ -652,13 +653,11 @@
       (assoc namespace-name :seon.agent/refused-source-agent agent-id)
 
       (nil? namespace-name)
-      {:seon.error/at (Date.)
-        :seon.error/layer :seon.agent/source-submission
-        :seon.error/operation `submit-source!
-        :seon.agent/refused-source-agent agent-id
+      (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
+       {:seon.agent/refused-source-agent agent-id
         :seon.error/message "Source submission requires an agent with an assigned namespace."
         :seon.error/member :seon.agent/namespace
-        :seon.error/expected :seon.ns/name}
+        :seon.error/expected :seon.ns/name})
 
       :else
       (let [max-source
@@ -687,15 +686,13 @@
                         (:seon.cluster.wake/channel handle))]
                 (if (async/offer! channel :seon.agent/wake)
                   {:seon.turn/id run-id}
-                  {:seon.error/at (Date.)
-                    :seon.error/layer :seon.agent/source-submission
-                    :seon.error/operation `submit-source!
-                    :seon.agent/refused-source-agent agent-id
+                  (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `submit-source!
+                   {:seon.agent/refused-source-agent agent-id
                     :seon.error/message "The source run committed, but its wake was not delivered."
                     :seon.error/member :seon.cluster.wake/channel
                     :seon.error/expected :seon.agent/wake
                     :seon.error/offending run-id
-                    :seon.error/data {:seon.turn/id run-id}})))))))))
+                    :seon.error/data {:seon.turn/id run-id}}))))))))))
 
 (defn fenced?
   "True when this agent is QUARANTINED: armed, routed, mailbox closed.
