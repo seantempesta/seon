@@ -1,6 +1,7 @@
 (ns seon.run
   "Construct completion and waiting values for an agent session."
-  (:require [clojure.string :as str]
+  (:require [seon.error.refusal]
+            [clojure.string :as str]
             [seon.db :as db]
             [seon.schema.edn :as schema.edn]))
 
@@ -121,12 +122,10 @@
                   [:or :my.turn/wait :seon.error/value]]}
   [note]
   (if (or (not (string? note)) (str/blank? note))
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer :my.turn/disposition
-     :seon.error/operation 'seon.run/wait
-     :my.turn/blank-note true
+    (seon.error.refusal/diagnostic (java.util.Date.) :my.turn/disposition 'seon.run/wait
+     {:my.turn/blank-note true
      :seon.error/message
-     "wait needs a note saying what you are waiting for, as a string."}
+     "wait needs a note saying what you are waiting for, as a string."})
     {:my.turn/disposition :wait
      :my.turn/note note}))
 
@@ -142,11 +141,9 @@
   ; agent-facing: a wrong TYPE is an agent mistake too — the error
   ; value answers, str/blank? on a non-string would throw
   (if (or (not (string? result)) (str/blank? result))
-    {:seon.error/at (java.util.Date.)
-     :seon.error/layer :my.turn/disposition
-     :seon.error/operation 'seon.run/complete
-     :my.turn/blank-result true
+    (seon.error.refusal/diagnostic (java.util.Date.) :my.turn/disposition 'seon.run/complete
+     {:my.turn/blank-result true
      :seon.error/message
-     "complete needs the reply text you want delivered, as a string."}
+     "complete needs the reply text you want delivered, as a string."})
     {:my.turn/disposition :completed
      :my.turn/result result}))

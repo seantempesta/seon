@@ -118,3 +118,4 @@ Both status entrances observed PID 48902, archive `ce73846828a5cc32798ef630b5a57
 | Slice and path | Sites | Src + / − / net; test net | Kondo warnings / ms | Contract ms | Proof namespace | Hand residue |
 |---|---:|---|---|---:|---|---|
 | E31: `src/seon/render/web.clj` | 6 | 18 / 30 / -12; +0 | 10 / 137 | 42.57925 | `seon.render.web-test` | None; five X contexts retained; dirty web test untouched |
+| E32: `src/seon/run.clj` | 2 | 8 / 11 / -3; +0 | 0 / 11 | 22.805667 | `seon.run6-stall-test` | None |
