@@ -1006,38 +1006,87 @@
         (is (thrown? clojure.lang.ExceptionInfo (healthy "not an int"))))
       (finally (doseq [name names] (ns-unmap 'seon.instrument-test name))))))
 
-(deftest a-validator-that-throws-at-the-call-is-a-minimal-declared-error
-  ;; A1-8b (G2-G4): a contract whose lazy ref does not resolve compiles, and
-  ;; its validator throws only at the call. Malli reports it as
-  ;; ::invalid-schema-at-call and the wrapper throws the base built from the
-  ;; report alone; its required members derive from the packaged base.
-  (let [name 'lazy-absent
-        sym 'seon.instrument-test/lazy-absent
-        lazy {:registry (assoc (m/default-schemas) :lazy-ref (m/-ref-schema {:lazy true}))}
-        contract (m/schema [:=> [:cat [:schema [:lazy-ref ::absent]]] :int] lazy)
-        candidate (intern 'seon.instrument-test name identity)
-        admitted (schema/handed-projection)
+(defn- masked-registry
+  "`projection` whose registry answers `replacement` for `schema-key` (nil:
+  absent), without the compiled holder that would answer from the old one."
+  [projection schema-key replacement]
+  (let [registry (:seon.schema.projection/registry projection)]
+    (-> projection
+        (dissoc :seon.schema.projection/compiled)
+        (assoc :seon.schema.projection/registry
+               (reify mr/Registry
+                 (-schema [_ candidate]
+                   (if (= schema-key candidate) replacement (mr/-schema registry candidate)))
+                 (-schemas [_]
+                   (let [schemas (mr/-schemas registry)]
+                     (if replacement (assoc schemas schema-key replacement)
+                         (dissoc schemas schema-key)))))))))
+
+(deftest a-refusal-that-cannot-be-built-is-a-minimal-declared-error
+  ;; A1-8b (G2-G4). Each case reaches the wrapper's minimal base: a validator
+  ;; that throws at the call (Malli's ::invalid-schema-at-call), an absent
+  ;; refusal schema, a refusal its schema rejects, and a construction that
+  ;; throws. The base keeps the report's expected schema and offending value;
+  ;; the body's own exception passes through untouched. The wrapper is the
+  ;; object `apply!` installs, built without arming any Var.
+  (let [admitted (schema/handed-projection)
         registry (:seon.schema.projection/registry admitted)
-        projection (assoc admitted :seon.schema.projection/registry
-                          (mr/composite-registry {sym contract} registry))
+        base? (schema/projection-validator admitted :seon.error/base)
         required (into #{} (keep (fn [[k properties _]] (when-not (:optional properties) k)))
-                       (m/children (m/deref-all (m/schema :seon.error/base {:registry registry}))))]
-    (try
-      (alter-meta! candidate assoc :malli/schema (m/form contract))
-      (is (= {:seon.instrument/registered 1}
-             (select-keys (instrument/apply!
-                           {:seon.config/on-core-error :panic :seon.schema/projection projection
-                            :seon.instrument/changed-identities #{[:seon.fn/sym sym]}})
-                          [:seon.instrument/registered])))
-      (let [refusal (try (candidate 1) nil
-                         (catch clojure.lang.ExceptionInfo thrown (ex-data thrown)))]
-        (is (= :malli.core/invalid-schema-at-call (:seon.error/member refusal)))
-        (is (= sym (:seon.error/operation refusal)) "the error names the call")
-        (is (= ::absent (get-in (peek (:seon.error/chain refusal)) [:seon.error/data :data :ref]))
-            "the chain names the unresolvable schema")
-        (is (every? #(some? (find refusal %)) required))
-        (is (m/validate :seon.error/base refusal {:registry registry})))
-      (finally (ns-unmap 'seon.instrument-test name)))))
+                       (m/children (m/deref-all (m/schema :seon.error/base {:registry registry}))))
+        lazy {:registry (assoc (m/default-schemas) :lazy-ref (m/-ref-schema {:lazy true}))}
+        absent [:schema [:lazy-ref ::absent]]
+        caps (config/result-caps config/defaults)
+        wrapper (fn [projection function-symbol form body]
+                  (#'instrument/compiled-wrapper
+                   (update projection :seon.schema.projection/registry
+                           #(mr/composite-registry {function-symbol (m/schema form lazy)} %))
+                   function-symbol form body caps {:seon.config/on-core-error :panic}))
+        refusal (fn [call] (try (call) nil (catch clojure.lang.ExceptionInfo thrown (ex-data thrown))))
+        unhashable (reify Object
+                     (hashCode [_] (throw (ex-info "unhashable" {})))
+                     (toString [_] "unhashable"))]
+    (doseq [[label projection form argument member expected offending cause]
+            [[:input admitted [:=> [:cat absent] :int] 1
+              :malli.core/invalid-schema-at-call [:cat [:schema [:ref ::absent]]] [1] ":malli.core/invalid-ref"]
+             [:output admitted [:=> [:cat :int] absent] 2
+              :malli.core/invalid-schema-at-call [:schema [:ref ::absent]] 2 ":malli.core/invalid-ref"]
+             [:guard admitted [:=> [:cat :int] :int absent] 3
+              :malli.core/invalid-schema-at-call [:schema [:ref ::absent]] [[3] 3] ":malli.core/invalid-ref"]
+             [:missing-refusal-schema (masked-registry admitted :seon.instrument/refusal-result nil)
+              [:=> [:cat :int] :int] "x" :malli.core/invalid-input [:cat :int] ["x"]
+              "Missing schema declaration :seon.instrument/refusal-result."]
+             [:rejected-refusal (masked-registry admitted :seon.instrument/refusal-result (m/schema :nil))
+              [:=> [:cat :int] :int] "x" :malli.core/invalid-input [:cat :int] ["x"]
+              "Instrumentation constructed an invalid refusal."]
+             [:construction-throws admitted [:=> [:cat :int] :int] unhashable
+              :malli.core/invalid-input [:cat :int] [unhashable] "unhashable"]]]
+      (testing label
+        (let [function-symbol (symbol "seon.instrument-test" (str "minimal-" (name label)))
+              called (atom 0)
+              value (refusal #((wrapper projection function-symbol form
+                                        (fn [x] (swap! called inc) x))
+                               argument))]
+          (is (= member (:seon.error/member value)) "the report key names who is wrong")
+          (is (= function-symbol (:seon.error/operation value)) "the error names the call")
+          (is (= expected (:seon.error/expected value)) "the report's schema survives")
+          (is (= offending (:seon.error/offending value)) "the checked value survives")
+          (is (= cause (:seon.error/message (peek (:seon.error/chain value))))
+              "the chain carries the whole cause")
+          (is (every? #(some? (find value %)) required))
+          (is (base? value))
+          (is (= (if (#{:output :guard} label) 1 0) @called) "a refused input never runs the body"))))
+    (testing "the body's own exception is rethrown unchanged"
+      (let [boom (ex-info "boom" {::body true})]
+        (is (identical? boom
+                        (try ((wrapper admitted 'seon.instrument-test/minimal-body [:=> [:cat :int] :int]
+                                       (fn [_] (throw boom))) 4)
+                             (catch Throwable thrown thrown))))))
+    (is (= ::absent (get-in (peek (:seon.error/chain
+                                   (refusal #((wrapper admitted 'seon.instrument-test/minimal-ref
+                                                       [:=> [:cat absent] :int] identity) 1))))
+                            [:seon.error/data :data :ref]))
+        "the chain names the unresolvable schema")))
 
 (deftest re-evaluating-a-defn-silently-strips-instrumentation
   ;; the measured fact this namespace's discipline exists for

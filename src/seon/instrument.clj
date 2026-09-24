@@ -674,31 +674,49 @@
         marker (Object.)
         ;; The base from Malli's report alone: valid by construction, a core
         ;; fault, the report key naming who is wrong, the failure in its chain.
-        minimal (fn [kind failure]
-                  [:seon.error/base
-                   (seon.error.refusal/diagnostic
-                    {:seon.error/at (java.util.Date.)
-                     :seon.error/layer :seon.instrument/invocation
-                     :seon.error/operation function-symbol
-                     :seon.error/member kind
-                     :seon.error/message (str function-symbol " " kind
-                                              ": the refusal could not be built.")
-                     :seon.error/throwable failure})])
+        ;; Each report carries its arm's schema and checked values (arity:
+        ;; the function schema and the count), so expected and offending
+        ;; need no computation that could fail again.
+        minimal (fn [kind data failure]
+                  (let [arm (case kind
+                              :malli.core/invalid-schema-at-call (:arm data)
+                              :malli.core/invalid-arity :arity
+                              :malli.core/invalid-output :output
+                              :malli.core/invalid-guard :guard
+                              :input)
+                        offending (case arm
+                                    :arity (find data :arity)
+                                    :input (find data :args)
+                                    :output (find data :value)
+                                    (clojure.lang.MapEntry/create
+                                     :guard [(:args data) (:value data)]))]
+                    [:seon.error/base
+                     (seon.error.refusal/diagnostic
+                      (cond-> {:seon.error/at (java.util.Date.)
+                               :seon.error/layer :seon.instrument/invocation
+                               :seon.error/operation function-symbol
+                               :seon.error/member kind
+                               :seon.error/expected (m/form (if (= :arity arm) (:schema data)
+                                                                (get data arm (:schema data))))
+                               :seon.error/message (str function-symbol " " kind
+                                                        ": the refusal could not be built.")
+                               :seon.error/throwable failure}
+                        offending (assoc :seon.error/offending (val offending))))]))
         refusal (fn [kind data]
                   (if (= :malli.core/invalid-schema-at-call kind)
-                    (minimal kind (:exception data))
+                    (minimal kind data (:exception data))
                     (try
                       (let [value (boundary-refusal projection caps kind
                                                     (assoc data :fn-name function-symbol) arities)]
                         (if (@refusal? value)
                           [(if (= :malli.core/invalid-arity kind)
                              :seon.instrument/arity-error :seon.instrument/contract-error) value]
-                          (minimal kind (ex-info "Instrumentation constructed an invalid refusal."
+                          (minimal kind data (ex-info "Instrumentation constructed an invalid refusal."
                                                  {:seon.instrument/problems
                                                   (mapv #(select-keys % [:path :in])
                                                         (:errors (m/explain :seon.instrument/refusal-result
                                                                             value options)))}))))
-                      (catch Throwable failure (minimal kind failure)))))
+                      (catch Throwable failure (minimal kind data failure)))))
         wrapped
         (m/-instrument
          {:schema compiled :scope #{:input :output :guard}
