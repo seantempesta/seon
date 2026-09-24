@@ -111,7 +111,8 @@ or isolated branch. Use the one shared agent REPL entrance, including filesystem
 on their own named branches. Retain private defs/atoms/objects while advancing program
 changes in place at idle boundaries.
 Reacquire from the branch head at turn start, reusing content-valid derivations. Stability
-comes from branch custody; no reload may run under an evaluation. A **reload** uses
+comes from branch custody; work that overlaps a reload detects it (loaded program identity
+at start vs end) and pushes back, never a lock. A **reload** uses
 `require :reload` for changed namespaces and dependents. Ordinary clusters keep their
 program; selected development clusters adopt explicitly. Every program function is
 callable: prompt visibility grants no execution permission; consumer domains stay downstream.
@@ -272,8 +273,8 @@ Keep the development REPL available. Assigned agents never stop or reset default
 report **RESET NEEDED**. Root preserves evidence, batches recovery, reconnects and verifies;
 disposable data/private state may not be reconstructible. Root coordinates shared exhaust
 and integration. Publish schema resources and consumers together; pause hooks during source
-cuts and record pause/resumption. Adopt exclusively through rows → load → arm → record,
-excluding conflicting reloads/evaluations. Failure leaves affected execution unavailable
+cuts and record pause/resumption. Adopt through rows → load → arm → record; adoption waits
+for no one, and overlapping work detects the change and pushes back. Failure leaves affected execution unavailable
 until exact bytes, behavior and arming converge; never call an unchanged record healthy.
 
 One file has one owner at a time, no shared hunks. Root checks
