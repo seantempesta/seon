@@ -9,9 +9,14 @@
 
 (defn- start-tree
   "Start `script` under sh and return its record and identities once
-  `processes` members of its tree are visible (bounded at 2 s)."
+  `processes` members of its tree are visible (bounded at 2 s).
+  Output goes to /dev/null, never to the JDK's pipes: the JDK closes those when
+  the root exits (`ProcessImpl$ProcessPipeInputStream/processExited`), so a
+  member whose TERM handler still writes (sh reports its killed `sleep` on
+  stderr) would die of SIGPIPE, a fault of the fixture, not of the owner."
   [script processes]
-  (let [record (bp/process ["/bin/sh" "-c" script] {:shutdown bp/destroy-tree})
+  (let [record (bp/process ["/bin/sh" "-c" script]
+                           {:shutdown bp/destroy-tree :out :discard :err :discard})
         root (.toHandle ^Process (:proc record))
         deadline (+ (System/nanoTime) 2000000000)]
     (loop []

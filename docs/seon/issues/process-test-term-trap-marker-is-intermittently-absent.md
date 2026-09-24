@@ -1,36 +1,48 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, process, test, flake]
 ---
 
-# The well-behaved-tree process test intermittently finds no TERM-trap marker
+# The well-behaved-tree process test intermittently found no TERM-trap marker
 
-## Problem
+## Cause (verified 2026-09-24, lane fix-nil-process-agent)
 
-`seon.cluster.process-test/a-well-behaved-tree-exits-on-term-without-force`
-(`test/seon/cluster/process_test.clj`) asserts that the grandchild shell ran its
-TERM trap, which writes `term` into a temporary directory. After
-`terminate-subprocess!` returns true (every captured identity exited), the marker
-is sometimes absent.
+The fixture launched the tree with babashka's default `:out`/`:err` pipes. When the
+JDK sees its child (the tree's root) exit, the process reaper drains those pipes and
+closes their file descriptors. See `ProcessImpl$ProcessPipeInputStream/processExited`
+at `java/lang/ProcessImpl.java:589-596` in the JDK source that clojure-lsp caches.
+The trapping shell was still waiting for its TERMed `sleep`. It then writes
+"Terminated: 15" to its inherited stderr, receives SIGPIPE and dies before its
+`trap` runs.
 
-## Evidence (2026-09-24, lane fix-nil-process-agent)
+Evidence, in a `git archive` snapshot using `clojure -M:test`, with processes the
+probe itself started:
 
-`git archive` snapshot of HEAD 7c761e0c9, `clojure -M:test`,
-`(clojure.test/run-tests 'seon.cluster.process-test)`:
+| variant (owner = `terminate-subprocess!`) | marker written |
+|---|---|
+| owner, default pipes | 0/10, 1/10, 1/20 |
+| owner, `:err :discard :out :discard` | 10/10 |
+| owner, stderr redirected to a file | 10/10 (file held `"Terminated: 15\n"`) |
+| a plain shell sending TERM in the same forward order | always |
 
-- HEAD's `process.clj`: 1 of 2 runs failed this assertion.
-- HEAD plus the fix-nil-process-agent change: 1 of 3 runs failed it.
+The root can also exit by itself once its direct child dies. So no signal order in
+the owner guarantees that a descendant's handler still has the pipe. A trial that
+signalled the root last still failed 1 of 8 runs.
 
-The failure is `expected: (= "term\n" (when (.exists marker) (slurp marker)))`,
-`actual: (not (= "term\n" nil))`. The other assertions in that test (reaped,
-no survivors, root exit 143, elapsed < 2000 ms) passed in every run.
+## Fix
 
-## Unknown
+The test fixture `start-tree` now sends the tree's output to `/dev/null`. The test
+was 15/15 green afterwards; before, it failed in about 1 of 3 runs. The owner is
+unchanged.
 
-Which member of the tree (`sh -c "cd … && sh -c '…' & wait"`: root, a subshell
-for the backgrounded list, the trapping shell, the rotating `sleep 0.1`) is
-captured when `start-tree` sees three members, and whether the trapping shell is
-reparented out of the root's tree before the owner recaptures it. Probe with the
-captured identities printed on a failing run before changing the owner or the test.
+## Still open (production, not this test)
+
+Any caller whose child's output is JDK pipes, such as `seon.shell.jvm` and
+`run-process!`, has the same property. After the root exits, a descendant that
+writes to stdout or stderr gets SIGPIPE. Its TERM handler may therefore not
+complete, and the output it would have written is lost. Changing that means
+changing the owner's termination semantics, or keeping the pipes open (the
+descendants inherit the pipes while the JDK owns only the root). That decision
+needs an owner ruling. It is not a test concern.
