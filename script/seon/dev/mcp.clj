@@ -32,6 +32,10 @@
 (def stdout-lock (Object.))
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
 (defonce reload-state (atom {}))
+;; [root cluster] -> the open faults its last discovery observed, and the
+;; latest occurrence instant this MCP session has already reported.
+(defonce observed-faults (atom {}))
+(defonce reported-at (atom {}))
 
 (defn- content-text
   {:seon.fn/projection-boundary :none}
@@ -105,10 +109,12 @@
                             {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
                            (~'seon.cluster/mcp-runtime-observation ~cluster))))
                (catch Exception _ nil))]
+         (when observation
+           (swap! observed-faults assoc [root cluster] (:seon.dev.mcp/open-faults observation)))
          {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster
           :seon.dev.mcp/path (str (io/file root "data/clusters" cluster "prepl.edn"))
           :seon.dev.mcp/state (if observation
-                               (if (= :observed (:seon.dev.mcp/health observation)) :alive :degraded)
+                               (if (#{:observed :faulted} (:seon.dev.mcp/health observation)) :alive :degraded)
                                :unknown)
           :seon.dev.mcp/advertisement advertisement :seon.dev.mcp/source :advertisement}))
      advertisements)))
@@ -894,6 +900,21 @@
 ;;; JSON-RPC
 ;;; ---------------------------------------------------------------------------
 
+(defn- later? [a b] (or (nil? b) (pos? (compare a b))))
+
+(defn- new-faults!
+  "Open faults whose latest occurrence this session has not reported; advance the cursor."
+  []
+  (let [observed @observed-faults
+        fresh (vec (for [[[_ cluster :as k] faults] observed
+                         :let [seen (get @reported-at k)]
+                         fault faults
+                         :when (later? (:seon.error.occurrence/last-at fault) seen)]
+                     (assoc fault :seon.dev.mcp/cluster cluster)))]
+    (doseq [[k faults] observed, at (map :seon.error.occurrence/last-at faults)]
+      (swap! reported-at update k #(if (later? at %) at %)))
+    fresh))
+
 (defn- send-response
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
@@ -933,10 +954,14 @@
       "tools/call"
       (let [{:keys [name arguments]} params]
         (let [result (execute-tool name arguments)
-              error (:error @reload-state)]
+              error (:error @reload-state)
+              faults (new-faults!)]
           (send-result id (cond-> result
                             error (update :content conj
-                                          {:type "text" :text (content-text error)})))
+                                          {:type "text" :text (content-text error)})
+                            (seq faults) (update :content conj
+                                                 {:type "text"
+                                                  :text (content-text {:seon.dev.mcp/new-faults faults})})))
           (when error (swap! reload-state dissoc :error))))
 
       (when id
