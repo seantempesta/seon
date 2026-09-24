@@ -73,7 +73,7 @@
                     :seon.config/manifest {:seon.config.ai/no-provider true
                                            :seon.config/on-core-error :panic}})
      (support/transacted! connection [{:seon.agent/id "contracts-plan"
-                                      :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
+                                      :seon.agent/namespace (support/namespace-row @connection 'my.agents.juniper)}])
      (let [database (db/db connection)
            projection (schema/projection-from-database database)
            state (env/environment-state

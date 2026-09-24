@@ -328,7 +328,7 @@
      (support/seed-cluster! connection "renderer-facts")
      (support/transacted! connection
               (into (support/agent-tx @connection "renderer-facts")
-                [{:seon.ns/name 'user}
+                [(support/namespace-row @connection 'user)
                
                  {:seon.turn/id "renderer-facts-turn"
                   :seon.turn/agent [:seon.agent/id "renderer-facts"]

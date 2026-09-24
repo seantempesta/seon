@@ -30,7 +30,7 @@
       (support/transacted!
               connection
               {:tx-data
-               [{:seon.ns/name 'my.agents.projection-proof}
+               [(support/namespace-row @connection 'my.agents.projection-proof)
                 {:seon.agent/id "projection-proof"
                  :seon.agent/namespace
                  [:seon.ns/name 'my.agents.projection-proof]}

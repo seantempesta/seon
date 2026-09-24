@@ -104,7 +104,7 @@
   (support/with-database
    (fn [connection]
      (is (:db-after (db/transact! connection
-                                 [{:seon.ns/name 'fixture.own-functions}])))
+                                 [(support/namespace-row @connection 'fixture.own-functions)])))
      (let [ctx (support/fork-cluster-ctx connection)
            configuration (support/effective-config)
            captured (atom [])
@@ -130,7 +130,7 @@
        (is (nil? (:seon.cluster.eval/error defined)) (pr-str defined))
        (is (= 'fixture.own-functions/identity-number (:seon.fn/sym row)))
        (let [written (db/transact! connection
-                                   [{:seon.ns/name 'fixture.own-functions}
+                                   [(support/namespace-row @connection 'fixture.own-functions)
                                     (program/canonical-row row)])]
          (is (:db-after written) (pr-str written))
          (when (:db-after written)
@@ -181,7 +181,7 @@
      (is (:db-after (db/transact! connection
                                  [{:seon.agent/id "bare-tests"
                                    :seon.agent/namespace
-                                   {:seon.ns/name 'fixture.bare-tests}}])))
+                                   (support/namespace-row @connection 'fixture.bare-tests)}])))
      (doseq [ctx [(evaluation/build-base-ctx (seon.schema/handed-projection))
                  (support/fork-cluster-ctx connection)]]
        (sci/add-namespace! ctx 'fixture.bare-tests {})
@@ -216,7 +216,7 @@
      (is (:db-after (db/transact! connection
                                  [{:seon.agent/id "retained-tests"
                                    :seon.agent/namespace
-                                   {:seon.ns/name 'fixture.retained-tests}}])))
+                                   (support/namespace-row @connection 'fixture.retained-tests)}])))
      (let [base (support/fork-cluster-ctx connection)
            _ (sci/eval-string* base
                               "(do (ns-unmap 'clojure.core 'deftest) (ns-unmap 'clojure.core 'is))")

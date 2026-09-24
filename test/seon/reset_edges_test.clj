@@ -88,7 +88,7 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           namespace-row {:seon.ns/name 'seon.reset-edges-test}
+           namespace-row (support/namespace-row database 'seon.reset-edges-test)
            target (symbol "seon.reset-edges-test" "owned-unreferenced-definition")
            rows (functions/source-rows
                  database (program/shapes) namespace-row
@@ -293,7 +293,7 @@
   (support/with-database
    (fn [connection]
      (let [database (db/db connection)
-           namespace-row {:seon.ns/name 'seon.id}
+           namespace-row (support/namespace-row database 'seon.id)
            source "(defn reset-analysis-proof [] true)"
            analyze (fn [database]
                      (#'functions/runtime-analysis-batch

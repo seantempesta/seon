@@ -71,7 +71,7 @@
   (test-support/with-database
     (fn [connection]
       (test-support/transacted! connection
-                                {:tx-data [{:seon.ns/name 'sample.runtime-batch}]})
+                                {:tx-data [(test-support/namespace-row @connection 'sample.runtime-batch)]})
       (let [namespace-ref [:seon.ns/name 'sample.runtime-batch]
             shadow-source
             "(defn shadowed [x] (identity (let [map identity] (map x))))"
@@ -430,9 +430,12 @@
         (test-support/seed-cluster! connection "call-edges")
         (transact-fixture!
          connection
-         [{:seon.ns/name namespace-name
-           :seon.ns/source "(ns my.agents.call-edges)"
-           :seon.ns/requires #{(quote my.turn)}}
+         [(program/declaration-row
+           (db/carried-projection @connection)
+           {:seon.ns/name namespace-name
+            :seon.ns/source "(ns my.agents.call-edges)"
+            :seon.ns/requires #{(quote my.turn)}}
+           :all :agent)
           {:seon.agent/id "call-edges-direct"
            :seon.agent/namespace [:seon.ns/name namespace-name]}
           {:seon.agent/id "call-edges-fold"
@@ -524,8 +527,7 @@
                        ;; The indexed row carries its file ref, so the emitted file rows
                        ;; are admitted first exactly as publication admits them.
                        (into (filterv :seon.fn.file/relative-path rows)
-                        [{:seon.ns/name namespace-name
-                         :seon.ns/source "(ns sample.settlement-parity)"}
+                        [(test-support/namespace-row @connection namespace-name)
                         (test-support/program-fn-row (db/db connection) (quote sample.settlement-parity/helper) "(defn helper [value] value)")
                         {:seon.agent/id "settlement-parity-agent"
                          :seon.agent/namespace
@@ -1193,8 +1195,7 @@
                      references))]
         (test-support/transacted!
                      connection
-                     [{:seon.ns/name 'sample.reach
-                       :seon.ns/source "(ns sample.reach)"}
+                     [(test-support/namespace-row @connection 'sample.reach)
                       (function-row (quote sample.reach/target) nil)
                       (function-row (quote sample.reach/bridge)
                                     #{(quote sample.reach/target)})
@@ -1254,8 +1255,7 @@
               (test-support/program-fn-row database function-symbol source))]
         (transact-fixture!
          connection
-         [{:seon.ns/name 'sample.contract-findings
-           :seon.ns/source "(ns sample.contract-findings)"}
+         [(test-support/namespace-row @connection 'sample.contract-findings)
           (function-row
            'sample.contract-findings/any-input
            "(defn any-input {:malli/schema [:=> [:cat :any] :int]} [x] 1)")
@@ -1308,7 +1308,7 @@
     (fn [connection]
       (transact-fixture!
        connection
-       (into [{:seon.ns/name 'sample.gates :seon.ns/source "(ns sample.gates)"}]
+       (into [(test-support/namespace-row @connection 'sample.gates)]
              (map (fn [s]
                     (test-support/program-fn-row (db/db connection) s (str "(defn " (name (symbol s)) " [] nil)"))))
              [(quote sample.gates/a) (quote sample.gates/b) (quote sample.gates/unrelated)]))
@@ -1404,7 +1404,7 @@
     (fn [connection]
       (transact-fixture!
        connection
-       (into [{:seon.ns/name 'sample.shape :seon.ns/source "(ns sample.shape)"}]
+       (into [(test-support/namespace-row @connection 'sample.shape)]
              (map (fn [s]
                     (test-support/program-fn-row (db/db connection) s (str "(defn " (name (symbol s)) " [] nil)"))))
              [(quote sample.shape/none) (quote sample.shape/one) (quote sample.shape/many)]))
@@ -1475,8 +1475,7 @@
                      facts))]
         (transact-fixture!
          connection
-         [{:seon.ns/name 'sample.output
-           :seon.ns/source "(ns sample.output)"}
+         [(test-support/namespace-row @connection 'sample.output)
           (function-row (quote sample.output/sink)
                         {:seon.fn/external-sink :ai-visible-text
                          :seon.fn/projection-boundary :none})
@@ -2203,7 +2202,7 @@
             program-row (test-support/program-fn-row (db/db connection) (quote sample.attributes/record-agent!) definition)]
         (transact-fixture!
          connection
-         [{:seon.ns/name 'sample.attributes}
+         [(test-support/namespace-row @connection 'sample.attributes)
           {:seon.ns/name 'seon.db}])
         (transact-fixture!
          connection
@@ -2236,7 +2235,7 @@
                       :seon.fn/source source
                       :seon.fn/arglists "([])"
                       :seon.fn/private? false)
-           _ (test-support/transacted! connection [{:seon.ns/name 'sample.prepared}])
+           _ (test-support/transacted! connection [(test-support/namespace-row @connection 'sample.prepared)])
            analyzed (seon.fn/analyze-forms
                      (db/db connection)
                      [{:seon.cluster.eval/source source
@@ -2287,7 +2286,7 @@
               caller (quote sample.mismatch/caller)]
           (transact-fixture!
            connection
-           [{:seon.ns/name 'sample.mismatch}
+           [(test-support/namespace-row @connection 'sample.mismatch)
             (merge (test-support/program-fn-row (db/db connection) caller "(defn caller [] nil)") {:seon.fn/call-arities #{[callee admitted]}})])
           (let [basis (:max-tx @connection)
                 refusal (db/transact!
@@ -2758,13 +2757,13 @@
 (deftest invocation-metadata-survives-admission-and-exact-replacement
   (test-support/with-database
    (fn [connection]
-     (test-support/transacted! connection [{:seon.ns/name 'sample.invocation}])
+     (test-support/transacted! connection [(test-support/namespace-row @connection 'sample.invocation)])
      (let [database (db/db connection)
            projection (db/carried-projection database)
            shapes (program/shapes-in projection)
            analyze (fn [source]
                      (seon.fn/source-rows (db/db connection) shapes
-                       {:seon.ns/name 'sample.invocation} source
+                       (test-support/namespace-row (db/db connection) 'sample.invocation) source
                        (set (keys (:seon.schema.projection/forms projection)))))
            source "(defn invoke {:seon.fn/invokes #{:seon.render/ai}} [value] ((requiring-resolve (:seon.render/ai value)) value))"
            rows (analyze source)]
@@ -2993,6 +2992,24 @@
                 'sample.host-bound/->Record true
                 'sample.host-bound/map->Record true}
                facts)))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest a-dependency-macro-sci-cannot-expand-is-host-bound
+  ;; SCI hands a copied JVM macro its own `&env`; `go` reads it as compiler locals.
+  (let [root (fixture-root)
+        text (str "(ns sample.env-macro (:require [clojure.core.async :as async]))\n"
+                  "(defn looping [c] (async/go-loop [] (when (async/<! c) (recur))))\n"
+                  "(defn channel [] (async/chan 1))\n"
+                  "(defn plain [x] (when x (inc x)))\n")]
+    (try
+      (write-source! root "sample/env_macro.clj" text)
+      (is (= {'sample.env-macro/looping true
+              'sample.env-macro/channel false
+              'sample.env-macro/plain false}
+             (into {} (keep (fn [row]
+                              (when-let [sym (:seon.fn/sym row)]
+                                [sym (:seon.fn/host-bound? row)])))
+                   (seon.fn/rows {:seon.fn/roots [(.getPath root)]}))))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest canonical-program-has-complete-host-binding-facts

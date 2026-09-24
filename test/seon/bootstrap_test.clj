@@ -306,7 +306,7 @@
         :seon.ns/name namespace-name})
       (support/transacted!
               connection
-              [{:seon.ns/name 'fixture.intent}
+              [(support/namespace-row @connection 'fixture.intent)
                {:seon.fn/sym 'fixture.intent/target
                 :seon.schema.admission/source :core
                 :seon.fn/ns [:seon.ns/name 'fixture.intent]

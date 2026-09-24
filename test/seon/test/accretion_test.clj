@@ -9,7 +9,8 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
-            [seon.test.accretion :as accretion]))
+            [seon.test.accretion :as accretion]
+            [seon.program :as program]))
 
 (defn- admit!
   [connection rows]
@@ -126,8 +127,7 @@
     (fn [connection]
       (admit!
        connection
-       [{:seon.ns/name 'fixture.gate :seon.ns/source "(ns fixture.gate)"
-         :seon.schema.admission/source :agent}
+       [(test-support/namespace-row @connection 'fixture.gate)
         {:seon.fn/sym "fixture.gate/target"
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.gate]
@@ -177,11 +177,13 @@
        connection
        [{:seon.agent/id "candidate-author"
          :seon.agent/namespace
-         {:seon.ns/name 'fixture.candidate
-          :seon.schema.admission/source :agent
-          :seon.ns/source
-          (str "(ns fixture.candidate "
-               "(:require [clojure.test :refer [deftest is]]))")}}
+         (program/declaration-row
+          (db/carried-projection @connection)
+          {:seon.ns/name 'fixture.candidate
+           :seon.ns/source
+           (str "(ns fixture.candidate "
+                "(:require [clojure.test :refer [deftest is]]))")}
+          :all :agent)}
         {:seon.fn/sym "fixture.candidate/target"
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.candidate]
@@ -276,11 +278,13 @@
        connection
        [{:seon.agent/id "custody-author"
          :seon.agent/namespace
-         {:seon.ns/name 'fixture.custody
-          :seon.schema.admission/source :agent
-          :seon.ns/source
-          (str "(ns fixture.custody "
-               "(:require [clojure.test :refer [deftest is]]))")}}
+         (program/declaration-row
+          (db/carried-projection @connection)
+          {:seon.ns/name 'fixture.custody
+           :seon.ns/source
+           (str "(ns fixture.custody "
+                "(:require [clojure.test :refer [deftest is]]))")}
+          :all :agent)}
         {:seon.test/sym "fixture.custody/reads-its-own-cluster"
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.custody]
@@ -321,9 +325,7 @@
        connection
        [{:seon.agent/id "auto-check-author"
          :seon.agent/namespace
-         {:seon.ns/name 'fixture.auto-check
-          :seon.schema.admission/source :agent
-          :seon.ns/source "(ns fixture.auto-check)"}}
+         (test-support/namespace-row @connection 'fixture.auto-check)}
         {:seon.fn/sym "fixture.auto-check/capability"
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.auto-check]

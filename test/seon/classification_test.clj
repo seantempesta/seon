@@ -76,9 +76,12 @@
       (let [before (set (instruction/toolkit-namespaces @connection))]
         (is (seq before) "Canonical namespace declarations must be indexed.")
         (let [report (db/transact! connection
-                      [{:seon.ns/name 'sample.relevant
-                        :seon.ns/context-relevant? true}
-                       {:seon.ns/name 'my.impostor}
+                      [(program/declaration-row
+                        (db/carried-projection @connection)
+                        {:seon.ns/name 'sample.relevant :seon.ns/source "(ns sample.relevant)"
+                         :seon.ns/context-relevant? true}
+                        :all :agent)
+                       (test-support/namespace-row @connection 'my.impostor)
                        {:seon.fn/sym "sample.relevant/call"
                         :seon.schema.admission/source :core
                         :seon.fn/ns [:seon.ns/name 'sample.relevant]

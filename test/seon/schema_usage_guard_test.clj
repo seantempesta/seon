@@ -214,7 +214,7 @@
           (when extra-row
             (test-support/transacted!
              connection
-             [{:seon.ns/name 'seon.schema-usage-guard}
+             [(test-support/namespace-row @connection 'seon.schema-usage-guard)
               (assoc (test-support/program-fn-row
                       (db/db connection) 'seon.schema-usage-guard/accept
                       "(defn accept [value] value)")
@@ -342,8 +342,7 @@
             request {:seon.turn/id run-id}]
         (install-forms! connection {base-key (get forms base-key)
                                     unrelated-key [:int {:seon.db/index true}]})
-        (test-support/transacted! connection [{:seon.ns/name namespace-name
-                                               :seon.ns/source "(ns my.agents.schema-usage-guard)"}
+        (test-support/transacted! connection [(test-support/namespace-row @connection namespace-name)
                                               {:seon.agent/id agent-id
                                                :seon.agent/namespace
                                                [:seon.ns/name namespace-name]}])

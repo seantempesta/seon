@@ -27,7 +27,7 @@
       (is (:db-after (db/transact! connection
                                    [{:seon.agent/id "core-functions"
                                      :seon.agent/namespace
-                                     {:seon.ns/name 'fixture.core-functions}}])))
+                                     (support/namespace-row @connection 'fixture.core-functions)}])))
       (let [ctx (support/fork-cluster-ctx connection)
             _ (doseq [[schema-key form] [[:example/order :string]
                                          [:example/customer :string]

@@ -25,7 +25,7 @@
      (is (:db-after
           (transact! connection
                         [{:seon.agent/id "run6-stall"
-                          :seon.agent/namespace {:seon.ns/name 'my.agents.run6-stall}
+                          :seon.agent/namespace (support/namespace-row @connection 'my.agents.run6-stall)
                           :seon.agent/plan {:my.plan/objective "Finish the work"
                                             :my.plan/steps [{:my.plan.item/id "run6-step"
                                                              :my.plan.item/title "Read"

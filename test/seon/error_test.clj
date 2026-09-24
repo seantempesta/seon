@@ -25,7 +25,8 @@
             [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
             [seon.test-support :as test-support]
-            [seon.db :as db]))
+            [seon.db :as db]
+            [seon.program :as program]))
 
 (declare commit-request with-db)
 
@@ -90,8 +91,11 @@
             _ (test-support/seed-cluster! connection "error-graph")
             _ (is (:db-after (db/transact! connection
                                           (into (test-support/agents-tx @connection ["error-graph-a" "error-graph-b" "error-graph-steward"])
-                                            [{:seon.ns/name 'my.error-graph
-                                              :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
+                                            [(program/declaration-row
+                                              (db/carried-projection @connection)
+                                              {:seon.ns/name 'my.error-graph :seon.ns/source "(ns my.error-graph)"
+                                               :seon.ns/steward [:seon.agent/id "error-graph-steward"]}
+                                              :all :agent)
                                              (test-support/program-fn-row
                                               (db/db connection) 'my.error-graph/raise
                                               "(defn raise [] nil)")

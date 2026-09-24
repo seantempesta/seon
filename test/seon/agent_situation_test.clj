@@ -5,7 +5,8 @@
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.env :as env]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.program :as program]))
 
 (defn- seed-situation!
   [connection]
@@ -13,9 +14,11 @@
           connection
           [{:seon.ns/name 'my.turn}
            {:seon.ns/name 'my.message}
-           {:seon.ns/name 'my.agents.situation
-            :seon.ns/requires [[:seon.ns/name 'my.turn]
-                               [:seon.ns/name 'my.message]]}
+           (program/declaration-row
+            (db/carried-projection @connection)
+            {:seon.ns/name 'my.agents.situation :seon.ns/source "(ns my.agents.situation)"
+             :seon.ns/requires #{'my.turn 'my.message}}
+            :all :agent)
            {:seon.agent/id "situation"
             :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
            {:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
