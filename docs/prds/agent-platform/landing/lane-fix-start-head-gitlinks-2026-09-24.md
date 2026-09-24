@@ -69,3 +69,48 @@ through `seon.operator/request!` `:start :head?` with `:seon.source/revision`:
   `refresh-source!` now uses it. +20/−8.
 - `test/seon/cluster/publication_serialize_test.clj`: one class regression, +33.
 - Commit 2614d0353.
+
+## Follow-up commits (coordinator extension)
+
+**732b34072**: an unreadable `on-core-error` dial panics. The fault committer's
+mode reader in `arm-agents!` used to be `(or dial :record)`. It is now
+`core-error-mode`, which answers the dial as read. When the dial cannot be read,
+it prints the `config/effective` refusal whole
+(`SEON CORE-ERROR MODE UNREADABLE (panic): …`) and answers nil, and
+`seon.fault/policy` turns nil into `:panic`. Census S1:
+`docs/research/agent-platform/ambiguous-nil-producers-2026-09-24.md`.
+
+- Regression:
+  `test/seon/cluster/core_error_mode_test.clj`. It checks that the configured
+  dial equals `config/effective`, that an unknown cluster answers nil and
+  `fault/policy` gives `:panic`, and that the printed refusal names
+  `:seon.config/missing-effective`.
+- **Not done (outside ownership, `src/seon/flow.clj`):** the census also asks to
+  carry the read refusal into the fault fact. The committer step
+  (`seon.flow/fault-committer-step`, `mode (read-core-error-mode)` inside its
+  `try`) has no slot for it. A reader that threw would lose the fault through
+  `report-committer-loss!`, so the refusal is printed rather than thrown. The
+  flow owner should give the committer a reader result that can carry a refusal.
+
+**f2e164bdb**: `seon.cluster/read-advertisement` deleted (−30 lines).
+`rg read-advertisement` over src/ test/ script/ bin/ resources/ found only its
+own definition. In default's database, the only reverse references to its row
+are 5 `:seon.test/adoption-identities` (test evidence), with no calls.
+
+**Proof.** The scratch root moved to f2e164bdb: exit 0, `:missing-layers []`,
+adopted. Phases: archive-ms 956, down-ms 750, launch-ms 153,340,
+ready-ms 129,584, adopt-ms 68,165, total-ms 224,054. That is again far over one
+second; see the issue cited above. The adoption notes listed SCI
+interpretation failures in foreign test namespaces (entrance-supplier, turn-loop,
+mcp), which were not investigated.
+
+- On that root, `bin/test-check … --ns seon.cluster.core-error-mode-test` gave
+  pass 6, fail 0, 11,137 ms.
+- `--ns seon.cluster.publication-serialize-test` gave pass 7, fail 0, 16,075 ms.
+  The same run took 2,862 ms before this move. The runs are over the 5 s default
+  bound, and the cause was not investigated.
+- After the move, `seon.cluster/read-advertisement` resolves to no Var and no row.
+  `core-error-mode` has a row, and for `"default"` it answered `:panic`.
+
+Net: cluster.clj +32/−38 across the three commits, tests +55.
+The scratch root was taken down and deleted after these runs.
