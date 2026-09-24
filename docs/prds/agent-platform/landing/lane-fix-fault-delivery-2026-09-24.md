@@ -111,3 +111,28 @@ Limits:
   frames fits. If it answers the honest marker, raise the bound.
 - Root's LLM turn on a fault is unchanged (owner decision pending). Item 2
   makes more faults reach root.
+
+## Follow-up after root's verification run (8b696b15d)
+
+Root ran both regressions on default. HEAD was adopted, and the config had
+escalate-to absent (872281634). Both were red.
+
+- **`an-unattributable-fault-without-a-throwable-is-delivered`: 16 facts,
+  17 root messages.** The test world inherits the live cluster's error rows
+  and messages (class 6). The test now counts only messages about its own
+  fault. It finds that fault by a unique message and its occurrence's
+  signature, and it sets `:seon.config.error/escalate-to "root"` explicitly.
+- **`over-bound-fault-evidence-keeps-its-cause-chain`: chain `[]`, remainder
+  nil.** `seon.error/classifying-error-data` in default carries the
+  addab5ae5 docstring, so the fix was loaded. A nil remainder means
+  `admit-partitioned` refused the partition itself: the kept part was over
+  the bound too, so `bounded-error-admission` fell back to the bare marker.
+  Under the test runner's deep stack, each link's full first-party frame list
+  is kilobytes. The kept chain now holds, per link, its class, its message
+  and the first frame (where it was raised). The full stacks remain in the
+  evidence whenever the whole source fits.
+  - Inferred, not reproduced in the JVM (load rule).
+
+Rerun (root):
+- `bin/test-check default --test seon.error-test/an-unattributable-fault-without-a-throwable-is-delivered`
+- `bin/test-check default --test seon.error-test/over-bound-fault-evidence-keeps-its-cause-chain`
