@@ -10,7 +10,7 @@ updated: 2026-09-24
 
 - research-publication-concurrency-astra (read-only): class 4 — three priced options for publication under concurrent lanes.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
-- fix-env-macro-callers (fn.clj): the affected-callers residual — callers expanding &env-reading JVM macros (async/go-loop) classed interpretable.
+- fix-analysis-key-omits-analyzer (cluster.clj, fn.clj): derived analysis rows are keyed without the analyzer program, so a changed indexer leaves unchanged files stale (11 rows on default after 55af9e04b).
 - fix-agent-custody-label (agent.clj): class 2 below.
 
 Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
@@ -73,6 +73,7 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 ## Testing framework (owner 2026-09-24: "we need to nail this")
 
 - For harness S0 (result schemas + readers change together): seon.test/green? (test.clj:1614) refuses a result missing :seon.test/run-basis-t — seen in two save gates today (degraded gate). Fix inside S0, not separately.
+- Env-reading macro callers: fixed 55af9e04b (host-bound when using a JVM macro from a namespace SCI does not interpret, from the loaded Var's :macro; clj-kondo does not flag dependency macros). Over-approximates (timbre/warn also host-bound): no analysis fact separates &env readers. 0 acquisition refusals, 722 ms (was 1,052 ms with 5 refusals).
 - Partial render profile: fixed at entry (c3c48bde2): request-profile refuses a partial carried profile and tags a carried config refusal; the log's "profile" was an effective-in refusal for cluster "flow-evaluation" (producer already removed by c1cd41b25). Stale test expectations: seon.render.call-test:28-29, seon.flow-test:948 (fixture has no config row for its cluster).
 - Turn-suite subsumption DONE (c8621765a, read-only): 152 tests → 98 keep, 51 subsumed, 3 delete (−54 tests, −1,909 lines). Deletions wait for the harness go (with S12). Survivors to trim: retirement checks, timing-as-behaviour asserts, call-count spies; turn_test:1386 declares 60 s with no authorization; provider-progress test sleeps 2×10 s.
 
