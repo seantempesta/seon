@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved (datahike fork f4614c9d + 620721d6; Seon workaround retired)
 severity: friction
 created: 2026-09-24
 tags: [issue, database, query, datahike, upstream-delta]

@@ -2723,7 +2723,7 @@
                        (#'seon.fn/declared-reference-edges declared-only))
                  (db/q '[:find ?caller :in $ % ?target
                          :where (call-edge ?caller ?target)]
-                       declared-only (#'seon.fn/ground-test-reach-rules declared-only) handler)))
+                       declared-only @#'seon.fn/test-reach-rules handler)))
           (is (= [(quote sample.call-declarations/reaches-declarations)]
                  (filterv #(= "sample.call-declarations" (namespace %))
                           (seon.fn/tests-reaching declared-only (symbol "sample.call-declarations" "handler"))))))
@@ -2938,7 +2938,7 @@
                               [?target :seon.fn/sym ?target-symbol]
                               (call-edge ?caller ?target)
                               [?caller :seon.test/sym ?caller-symbol]]
-                            projected (#'seon.fn/ground-test-reach-rules projected) target)))
+                            projected (var-get (ns-resolve 'seon.fn 'test-reach-rules)) target)))
               "coverage rules use the same scoped incoming relation")))
       (finally (test-support/delete-recursively! root)))))
 
