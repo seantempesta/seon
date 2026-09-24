@@ -1887,3 +1887,23 @@
                (:seon.schema.edn/error refused)))
         (is (= ::bootstrap-referrer
                (:seon.schema.edn/unresolved-reference refused)))))))
+
+(deftest a-nilable-value-schema-gets-one-verdict-at-build-and-replacement
+  ;; CLASS: a named value schema is never nil. The full build
+  ;; (`projection-registry`) refuses `[:maybe X]`; replacement through
+  ;; `projection-with-schema` reaches the same gate for the changed key, and
+  ;; this pins that the two cannot diverge.
+  (let [verdict (fn [thunk]
+                  (try (thunk) :admitted
+                       (catch clojure.lang.ExceptionInfo e
+                         (:seon.schema/error (ex-data e)))))
+        base (schema/build-projection {::nilable-base :string} {})]
+    (doseq [[form expected] [[[:maybe :string] :seon.schema/nilable-value-schema]
+                             [:string :admitted]]]
+      (is (= expected
+             (verdict #(schema/build-projection
+                        {::nilable-base :string ::nilable-candidate form} {}))
+             (verdict #(schema/projection-with-schema
+                        base ::nilable-candidate form
+                        {:seon.schema.admission/source :agent})))
+          (pr-str form)))))

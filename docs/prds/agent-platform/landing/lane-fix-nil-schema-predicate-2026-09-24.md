@@ -107,4 +107,25 @@ src +12 −5, test +48.
   `seon.schema-test`, `contracts-compile-test`, `schema.edn-test`,
   `schema.admission-gate-test`, `schema.admission-test`: failure sets identical to
   HEAD (the 25 + 4 + 4 errors are fixture custody outside `seon.test/run`).
-- Size: src +13 −2 (incl. 5 comment lines), test +27.
+- Size: src +10 −2 (5 of them comment lines), test +26.
+
+## Follow-up 1 — `projection-with-schema` and `[:maybe X]`: premise refuted
+
+- The claim that `projection-with-schema` admits a `[:maybe X]` value schema
+  while activation refuses it does not reproduce. Live default (installed
+  archive ce7384682 and again after the move to HEAD; `projection-registry` is
+  unchanged between them): `projection-with-schema` over
+  `projection-from-database` refuses `[:maybe :string]` (new key, `:agent` and
+  `:core`), `[:maybe :seon.schema/key]`, and a replaced existing key
+  `:seon.schema/key` as `:seon.schema/nilable-value-schema`, in 1.5–2.3 ms; the
+  incremental path recompiles changed keys through the same
+  `projection-registry` gate (`schema.clj` `projection-with-declarations` →
+  `projection-registry` → `internal/assert-non-nilable-value-schema!`).
+- No source change. One regression pins the single verdict:
+  `seon.schema-test/a-nilable-value-schema-gets-one-verdict-at-build-and-replacement`
+  (snapshot, armed: 2 pass twice, 103 ms / 17 ms). Test +20.
+- **Out-of-scope finding:** `[:or :nil :string]` as a named value schema is
+  admitted by build, replacement and `register!` alike, while
+  `internal/nilable-union?` treats that spelling as nilable for map values.
+  `assert-non-nilable-value-schema!` (`src/seon/schema/internal.cljc`) checks only
+  `:maybe`. Not mine; owner: internal.cljc.
