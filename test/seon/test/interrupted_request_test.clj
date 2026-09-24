@@ -146,3 +146,45 @@
        (is (< allocated (quot (count huge) 2)) (str "the read allocated " allocated " bytes"))
        (is (str/includes? (sut/failure-message (first latest)) "seon.blob/get")
            "the shown text names the blob")))))
+
+(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
+  a-deleted-tests-red-member-is-history-not-a-failed-test
+  (support/with-database
+   (fn [connection]
+     (let [deleted 'seon.id-test/a-test-deleted-after-its-red-run
+           handle (support/execution-handle connection)
+           database (db/db connection)
+           provenance (runner/provenance database)
+           red-result (fn [test-symbol]
+                        {:seon.test/sym test-symbol
+                         :seon.test.member/began? true :seon.test.member/ended? true
+                         :seon.test/pass-count 0 :seon.test/fail-count 1 :seon.test/error-count 0})
+           _ (support/transacted!
+              connection
+              [[:db.fn/call sut/admit-run
+                {:seon.test.run/provenance provenance
+                 :seon.test.run/cluster [:seon.cluster/name (:seon.cluster/name handle)]
+                 :seon.test.run/input-digest
+                 (db/q '[:find ?digest . :where [_ :seon.source/test-input-digest ?digest]] database)
+                 :seon.test.run/policy :named
+                 :seon.test.run/include-long? false
+                 :seon.test.run/members
+                 (mapv #(hash-map :seon.test.member/symbol % :seon.test.member/reasons #{:named})
+                       [red deleted])}]])
+           committed (runner/commit-results!
+                      connection
+                      {:seon.db/db database
+                       :seon.test.runner/results [(red-result red) (red-result deleted)]
+                       :seon.test/run-basis-t (:seon.test.run/basis-t provenance)
+                       :seon.test/run-at (:seon.test.run/at provenance)
+                       :seon.test.run/provenance provenance
+                       :seon.test.run/terminated? true})
+           database (db/db connection)
+           failed (set (map :seon.test/sym (:seon.problems/failed-tests (problems/problems database {}))))]
+       (is (not (:seon.error/at committed)) (pr-str committed))
+       (is (nil? (db/q '[:find ?t . :in $ ?s :where [?t :seon.test/sym ?s]] database deleted))
+           "the deleted symbol has no test row")
+       (is (= 1 (:seon.test/fail-count (first (runner/latest-results database [deleted]))))
+           "its member evidence stays readable as history")
+       (is (contains? failed red) "a current test's red is listed")
+       (is (not (contains? failed deleted)) "a symbol that is no test row is not a failed test")))))

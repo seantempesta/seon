@@ -377,13 +377,16 @@
 
 (defn- failed-tests
   "Current failed executions from admitted member facts, with each test whose
-  latest execution recorded no outcome kept as its own typed unknown."
+  latest execution recorded no outcome kept as its own typed unknown. Only
+  symbols that are test rows at `database` count: a deleted test's member
+  evidence is history, not a current failure."
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.test/latest-results :seon.test/execution-error :seon.db/invalid-read-error
                    :seon.schema/missing-projection-error]]}
   [database]
   (let [symbols (db/q '[:find [?symbol ...]
-                        :where [_ :seon.test.member/symbol ?symbol]] database)
+                        :where [_ :seon.test/sym ?symbol]
+                               [_ :seon.test.member/symbol ?symbol]] database)
         results (if (:seon.error/at symbols) symbols
                     (test.runner/latest-results database symbols))]
     (if (:seon.error/at results) results
