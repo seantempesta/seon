@@ -27,3 +27,16 @@
     (is (= (id/symbol-in "result" \e a)
            (read-string (str (id/symbol-in "result" \e a))))
         "the handle survives the reader")))
+
+(deftest printed-identity-ignores-the-callers-print-bindings
+  ;; THE CLASS: an identity is a function of the value, never of the thread's
+  ;; print bindings. The literal is the REPL-bound identity stored ids carry.
+  (let [parts [{:a/b 1 :a/c 2} [1 2 3] (with-meta 'x {:line 1}) "s"]
+        expected (id/digest 12 parts)]
+    (is (= "15564fc125fc" (id/digest 12 [{:a/b 1 :a/c 2}])))
+    (doseq [hostile [{#'*print-length* 1} {#'*print-level* 1} {#'*print-meta* true}
+                     {#'*print-namespace-maps* false} {#'*print-namespace-maps* true}
+                     {#'*print-readably* false} {#'*print-dup* true}]]
+      (with-bindings hostile
+        (is (= expected (id/digest 12 parts)) (pr-str (keys hostile)))
+        (is (= "15564fc125fc" (id/digest 12 [{:a/b 1 :a/c 2}])))))))

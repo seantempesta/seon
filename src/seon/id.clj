@@ -1,5 +1,5 @@
 (ns seon.id
-  "One identity entry: `id` hashes the pr-str of data, or creates a fresh
+  "One identity entry: `id` hashes the printed data, or creates a fresh
   event identity when called without data. Stable identities retain the
   supplied data's shape; callers choose their own identity parts."
   (:require [clojure.string :as str])
@@ -26,20 +26,32 @@
            (map #(format "%02x" (bit-and 0xff %))
                 (.digest digester)))))
 
+(defn- printed
+  "The printed text an identity hashes: `pr-str` under fixed print bindings,
+  so a caller's `*print-length*`, `*print-meta*` or other print binding cannot
+  change an identity. `*print-namespace-maps*` is true because every stored
+  identity was printed under clojure.main's REPL bindings, which set it."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] :string]}
+  [data]
+  (binding [*print-length* nil *print-level* nil *print-meta* false *print-dup* false
+            *print-readably* true *print-namespace-maps* true]
+    (pr-str data)))
+
 (defn id
-  "SHA-256 of (pr-str data), truncated to n characters (default 12).
-  With no arguments, mint a fresh event identity. Data is deliberately
-  polymorphic: scalars and collections are hashed exactly as printed."
+  "SHA-256 of the fixed-binding `pr-str` of data, truncated to n characters
+  (default 12). With no arguments, mint a fresh event identity. Data is
+  deliberately polymorphic: scalars and collections are hashed exactly as
+  printed, so equal maps printed in different entry order differ."
   {:malli/schema
    [:function [:=> [:cat] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 12, :max 12}]] [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}] [:int {:min 1, :max 64}]] [:string {:min 1, :max 64}]]]}
   ([] (id (random-uuid)))
   ([data] (id data default-length))
   ([data n]
-   (subs (sha-256 [(.getBytes ^String (pr-str data) "UTF-8")]) 0 n)))
+   (subs (sha-256 [(.getBytes ^String (printed data) "UTF-8")]) 0 n)))
 
 (defn digest
   "The stable id of a thing that IS its `parts`: `length` hex characters of
-  the SHA-256 over their ordered `pr-str`."
+  the SHA-256 over their ordered, fixed-binding `pr-str`."
   {:malli/schema [:=> [:cat [:int {:min 1, :max 64}] [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Identity hashes Clojure's printed representation of arbitrary data, including nested heterogeneous values and nil.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:string {:min 1, :max 64}]]}
   [length parts]
   (id (vec parts) length))
