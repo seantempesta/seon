@@ -135,6 +135,8 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 
 ## 6. Platform gaps the runs exposed (each is itself a task)
 
+- Two definition authorities: REPL forms are recognized by a hand matcher (`src/seon/sci/reader.cljc:245,323`) that sees only a top-level `clojure.core/defn`, so `(do (defn …))`, `(let [..] (defn …))`, `(def f (fn …))` and defn-expanding macros bypass the entry gate and arming. Owner-directed fix: observe what an evaluation defined (evaluate in a `sci/fork`, diff namespace maps, gate/arm the created Vars from their metadata, adopt or discard the fork); clj-kondo stays the one analyzer for rows and edges. Limit: a call inside the defining form runs before the check.
+
 - An agent cannot validate a value against a key in SCI — `:seon.schema.task/agents-can-validate` DONE on branch `exp-validate-2` by a Codex agent from the brief alone (11 forms); not delivered: cherry-pick → rows → files does not exist.
 - A session's MCP server that predates a script change silently runs the old evaluation path: branch definitions did not persist for this session's agents. Reconnect MCP after script changes; Codex lanes start fresh servers.
 - `:nil` is refused in agent-authored contracts although core contracts use it; `[:= nil]` refused as not EDN-readable; `seon.schema.internal/contract-error!` crashes on a function symbol.
