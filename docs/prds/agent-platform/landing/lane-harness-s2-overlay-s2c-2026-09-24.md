@@ -213,6 +213,38 @@ reproduced in a throwaway namespace.
      Admission reads the recording connection, which this lane did not change. A failure of the
      same assertion was already recorded when I first read default's results.
 
+## Fourth follow-up (commits b0e68bc03, 1e39e06a0, 2b2c2bf39, 8da3dcd16)
+
+- **program-attributes (b0e68bc03).** It is now cached per projection through
+  `seon.schema/projection-cache-value`: 16.8 ms to derive, 0.12 ms on a hit (live projection).
+  A freshly derived projection still derives it once.
+- **The arity gate inside write-report-error (1e39e06a0).**
+  - Profile of one 15-datom overlay write on a fresh branch: 917 ms in total, of which
+    `write-report-error` took 318 ms. Within that, `arity-base` took 185 ms and
+    `write-owned-values-error` 96 ms.
+  - `arity-base` built its cache key from all ~78,000 arity datoms, which alone took 114 ms.
+    It now keys a committed value by its Datahike commit id. The first write on a fresh branch
+    of a shared commit is committed; later ones keep the content key.
+  - About 600 ms of the write is in `transact-call`, outside write-report-error. That part of
+    `db.clj` is not in this lane's grant. No after-measurement was possible without loading
+    the change.
+  - Scope note: `arity-base` sits below write-report-error. The grant says "write-report-error
+    only", so root should confirm this edit is within it.
+- **one-request :351 (2b2c2bf39).** B is released by redefinition. **:203** (a held request
+  executes 1 member) is not diagnosed.
+  - In the code, admission holds a member that has `completed-tx` and no `terminated-tx`, which
+    the fixture's `record! false` writes.
+  - Admission reads the recording connection, which S2 does not touch.
+- **Reaching tests (8da3dcd16).** An incremental request's changed tests are now members
+  themselves. `an-in-process-check...:522` and `the-declared-opt-in...` had selected nothing
+  since the scoped first run landed.
+  - `failed-results...:234` and `fixture-observations...:205` fail because the recorded reach
+    digest is nil. That digest is attached by `seon.test.runner/commit-results!`, which another
+    lane holds. A probe on an equivalent value (live default plus an indexed tmp file) computes
+    `runner/reach-digests` in 18 ms, so that attachment is the next place to look.
+  - Bounds are not re-declared. Raising a bound needs `:seon.test/long`, which moves the test
+    out of the default tier. Measure after these commits before marking anything long.
+
 ## Root runs (serially, after adopting the three commits)
 
 1. `bin/test-check default --test seon.test.scoped-first-run-test/a-first-incremental-request-naming-a-change-selects-only-its-reach`
