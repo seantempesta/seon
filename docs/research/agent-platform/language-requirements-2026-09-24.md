@@ -151,23 +151,17 @@ explode and the metadata larger than the actual function… tasks and references
 | 7.9 | **Ingestion:** the analyzer stores `:seon/tasks` and `:seon/must-read`/`:seon/see-also` references as symbol/keyword edges (today it drops them); task EDN reconciles by id into the same task schema | O | open |
 | 7.10 | **Context:** `(task :id)` shows the entity with its subjects and proofs; a function's context lists the open tasks that reference it, so work on one function surfaces its other known problems | O | proposed |
 
-## 8. Errors reach whoever is working on them (proposed 2026-09-24, awaiting the owner's go)
-
-Today (after lane fix-fault-visibility, `e868e5ec5`): an agent's own failing evaluation returns its error as the result;
-everything else reaches an MCP caller as `:seon.dev.mcp/new-faults` — open faults newer than that MCP **session's** cursor.
-A per-session time cursor shows one lane another lane's faults and lets whichever session calls first consume them.
-Proposed: route by attribution, derived by a query at the moment of reading, with no cursor or mailbox.
+## 8. Errors are recorded on the branch where they happen (owner 2026-09-24: "all errors then just get logged to the database in the right branches and we don't have to worry about routing them")
 
 | # | Requirement | Status |
 |---|---|---|
-| 8.1 | An agent's own failing evaluation returns its error as that evaluation's result (unchanged) | met |
-| 8.2 | An attempt sees the open faults that occurred **on its branch**, or in **the functions its task is about or its diff changed**, on each evaluation response — filtered to occurrences after its previous evaluation's stored read basis (no cursor to consume) | proposed |
-| 8.3 | A namespace agent sees open faults in the namespaces it stewards, through the existing wake route | exists (steward wake); keep |
-| 8.4 | Root (the orchestrator in development) sees faults no attempt or steward owns, plus the open-fault summary in status, and can block on `bin/seon faults --wait` to be woken | status met (`de13aa02c`); `--wait` proposed |
-| 8.5 | Outside lanes are attempts: each works on its own named branch, and its task's subjects are the files it owns, so it sees its own faults and faults in code it touches | proposed |
-| 8.6 | GAP: fault occurrences do not record their branch or attempt (they carry agent, turn, process, proc-fn); custody at record time knows the branch — store it | open |
-| 8.7 | GAP: errors from MCP JVM-mode probes are recorded into default as cluster faults with no attribution (5 of 16 signatures); they return to the caller instead | open |
-| 8.8 | The per-session cursor (`e868e5ec5`) is replaced by the 8.2 query: one mechanism | proposed |
+| 8.1 | An agent's own failing evaluation returns its error as that evaluation's result | met |
+| 8.2 | Every error occurrence is recorded in the database of the branch where it happened (the custody at record time); an agent's view of errors is a query of its own branch — no routing, no cursor, no mailbox | lane launched |
+| 8.3 | Each evaluation response carries the open errors on its branch that occurred after the previous evaluation's stored basis | lane launched |
+| 8.4 | Core faults (not agent mistakes) are also recorded on the cluster branch with their origin branch, so status, root, stewards and `faults --wait` see platform bugs hit inside attempts, and unlinking a branch never drops an open core fault | lane launched |
+| 8.5 | Errors are data, never program: they never merge; an agent's mistakes go with its branch | met by the partition |
+| 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults | lane launched |
+| 8.7 | The per-session `:seon.dev.mcp/new-faults` cursor (`e868e5ec5`) is deleted, replaced by 8.3 | lane launched |
 
 ## 6. Platform gaps the runs exposed (each is itself a task)
 
