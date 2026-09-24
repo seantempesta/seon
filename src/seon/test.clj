@@ -941,7 +941,11 @@
         (assoc {:seon.error/at (java.util.Date.)
           :seon.error/layer :seon.test/admission
           :seon.error/operation 'seon.test/admit-run
-          :seon.error/message "Test run admission refused inconsistent evidence."
+          ;; The kind names which evidence disagreed; `expected` joins it only
+          ;; when it is a scalar, so the message stays bounded.
+          :seon.error/message (str "Test run admission refused inconsistent evidence: " kind
+                                   (when-not (coll? expected) (str ", expected " (pr-str expected)))
+                                   ".")
           :seon.error/expected expected
           :seon.error/offending offending
           :seon.error/data {:seon.test.run/id run-id}} :seon.test/admission-refusal kind)]
