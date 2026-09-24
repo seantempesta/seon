@@ -91,6 +91,21 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 5.5 | The same brief value renders for the agent (AI) and for the owner's debug page (HTML): one path | O | not yet |
 | 5.6 | Contradictions are surfaced, not hidden (a docstring that teaches a no-op function; a schema description its form does not enforce) | R, A | not yet |
 | 5.7 | Intent is the only authored prose; everything else in the brief is derived | O | met |
+| 5.8 | What the agent must change is shown whole; only must-reads are clipped (a 14-line clip hid the exact call a deletion must remove) | R | met |
+| 5.9 | A deletion or rename brief carries each affected definition's current callers | R | met |
+| 5.10 | Briefs stay focused: measured 410–4,078 characters across 12 task kinds, generated in 3.4 ms | R | met |
+| 5.11 | The plan is a rendered view of the task data (no hand-written plan); it must be readable on the owner's phone | O | met: plan artifact rendered from task data |
+
+## 5b. Explicit authority (v0.2 prototype, pending the owner; `experiments/tasks_v02.clj.txt`)
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 5b.1 | What a task may change is explicit (`definitions`, `retracts`, `renames`, `schemas`, `retires`, or a data `output`); being about code grants nothing | A | prototyped: 12 tasks, 9 kinds, 0 findings |
+| 5b.2 | Prerequisites are explicit (`needs`); the writer suggests missing needs (calls into another task's definitions; keys another task's schemas define) and refuses cycles, unknown ids and duplicate ids | A | prototyped |
+| 5b.3 | Two tasks changing one definition is advice (declare needs or same-cause) unless an explicit needs path already orders them | R | prototyped |
+| 5b.4 | Dependencies come from CALLS, not quoted names; a proof printing `'x/f` does not depend on x/f's author | A | prototyped |
+| 5b.5 | A namespace a task creates is allowed only through its own explicit definitions in it | A, R | prototyped |
+| 5b.6 | `#:seon.task{…}` literal is the natural file syntax; the task-level must-read key is `:seon.task/must-read` | A, R | prototyped |
 
 ## 6. Platform gaps the runs exposed (each is itself a task)
 
