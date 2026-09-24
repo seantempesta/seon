@@ -364,13 +364,24 @@
            "classified transaction refusals satisfy the same error contract as their callers")))))
 
 (defn- with-codec-database
+  "The fixture attributes also land as schema rows: the writer encodes through
+  the projection derived from the branch's rows (`db/carried-projection`)."
   [options body]
   (test-support/with-database
    options
    (fn [connection]
      (db/carry-connection-projection-state!
       connection (sci.eval/projection-state @connection fixture-projection))
-     (schema/call-with-projection fixture-projection #(body connection)))))
+     (schema/call-with-projection
+      fixture-projection
+      (fn []
+        (test-support/transacted!
+         connection
+         (schema/canonical-schema-rows
+          fixture-projection
+          (select-keys (:seon.schema.projection/forms fixture-projection)
+                       (keep :db/ident (:seon.test-support/extra-schema options)))))
+        (body connection))))))
 
 (deftest edn-backed-reads-return-distinguishable-logical-values
   (with-codec-database
@@ -710,6 +721,35 @@
           [[:db/add [:seon.cluster/name "evidence-all"] :seon.cluster/name "evidence-renamed"]])
          (is (false? (db/read-evidence-current? @connection evidence))
              "a changed result replays unequal"))))))
+
+(deftest a-mistyped-pattern-value-refuses-as-a-read-and-as-a-replay
+  ;; A quoted `'sym` inside a quoted query is the list `(quote sym)`. Replaying
+  ;; such a retained read threw Datahike's ClassCastException out of the
+  ;; since-diff before root's turns (2026-09-23, seven occurrences).
+  (test-support/with-database
+   (fn [connection]
+     (let [query '[:find ?f . :where [?f :seon.fn/sym 'seon.db/transact!]]
+           captured (atom [])
+           refused (binding [db/*read-evidence-sink* captured]
+                     (db/q query @connection))
+           basis (db/basis-t @connection)
+           evidence (db/read-evidence
+                     [{:seon.db/db @connection
+                       :seon.db/source-argument-position 0
+                       :datahike.read/dependency-plan :all
+                       :seon.db/read-request
+                       {:seon.db/read-operation :q
+                        :seon.db/query-request {:query query :args [::db/database]}}
+                       :seon.db/read-result nil}])]
+       (is (= :db.type/symbol
+              (get-in refused [:seon.error/data :seon.error/source ::db/value-type]))
+           "the read refuses naming the installed value type")
+       (is (empty? @captured) "a refused read leaves no evidence")
+       (test-support/transacted!
+        connection [[:db/add [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "moved"]])
+       (is (false? (db/read-evidence-current? @connection evidence))
+           "evidence retained before the check replays as a refusal")
+       (is (vector? (db/read-evidence-changes @connection evidence basis)))))))
 
 (deftest collection-bound-query-evidence-covers-every-input-attribute
   (test-support/with-database

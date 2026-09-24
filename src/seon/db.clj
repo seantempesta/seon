@@ -956,7 +956,7 @@
          captured)))
 
 (declare decode-index-page decode-query-result decode-pull-result read-declarations
-         with-declarations encode-query-request)
+         with-declarations encode-query-request query-value-type-error)
 
 (defn- pull-plan-with-evidence
   [& arguments]
@@ -989,14 +989,17 @@
               (update (:seon.db/query-request request) :args
                       (fn [arguments]
                         (mapv #(if (= ::database %) database %) arguments)))
-              parsed-query (query/memoized-parse-query (:query query-request))
-              response (d/q-with-evidence
-                        (encode-query-request declarations
-                                              query-request parsed-query))]
-          (decode-query-result declarations
-                               query-request
-                               parsed-query
-                               (:datahike.query/result response)))
+              parsed-query (query/memoized-parse-query (:query query-request))]
+          ;; Evidence recorded before reads were type-checked can still hold
+          ;; a mistyped value; it refuses here as the read now would.
+          (or (query-value-type-error declarations query-request parsed-query)
+              (decode-query-result declarations
+                                   query-request
+                                   parsed-query
+                                   (:datahike.query/result
+                                    (d/q-with-evidence
+                                     (encode-query-request declarations
+                                                           query-request parsed-query))))))
 
         :pull
         (let [arguments (:seon.db/pull-arguments request)
@@ -1673,6 +1676,22 @@
       :seon.error/offending offending
       :seon.error/data (merge evidence {:seon.error/member attribute})})))
 
+(defn- value-type-error
+  {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :map :qualified-keyword :seon.schema/value] :seon.error/base]}
+  [operation database declaration attribute value]
+  (diagnostic
+   {:seon.error/message (str operation " received " (pr-str value) " for "
+         (pr-str attribute) ", whose installed value type is "
+         (pr-str (:db/valueType declaration)) ".")
+    :seon.db/invalid-read true
+    :seon.error/layer :database-read
+    :seon.error/operation operation
+    :seon.error/expected declaration
+    :seon.error/offending {::attribute attribute ::value value}
+    :seon.error/data (merge (attribute-observation database attribute)
+                            {:seon.error/member attribute :seon.error/source {::validation ::value-does-not-match-installed-type
+     ::value-type (:db/valueType declaration)}})}))
+
 (defn- lookup-ref-error
   {:malli/schema [:=> [:cat :qualified-symbol :seon.db/database-value :seon.schema/value] [:or :nil :seon.error/base]]}
   [operation database entity-id]
@@ -1700,18 +1719,7 @@
                                   {:seon.error/member attribute})})
 
         (not valid-value?)
-        (diagnostic
-         {:seon.error/message (str operation " received " (pr-str value) " for "
-               (pr-str attribute) ", whose installed value type is "
-               (pr-str (:db/valueType declaration)) ".")
-          :seon.db/invalid-read true
-          :seon.error/layer :database-read
-          :seon.error/operation operation
-          :seon.error/expected declaration
-          :seon.error/offending {::attribute attribute ::value value}
-          :seon.error/data (merge (attribute-observation database attribute)
-                                  {:seon.error/member attribute :seon.error/source {::validation ::value-does-not-match-installed-type
-           ::value-type (:db/valueType declaration)}})})))))
+        (value-type-error operation database declaration attribute value)))))
 
 (defn- query-binding-values
   "Collect every scalar value admitted by a Datalog input binding."
@@ -1806,6 +1814,40 @@
             (get databases source-symbol)
             attribute
             (parsed-pattern-value pattern)))))
+     (query-patterns parsed-query))))
+
+;; A data pattern's value must satisfy its attribute's installed type, as a
+;; transaction's must (`datahike.schema/value-valid?`). Datahike's planner
+;; compares the value against the AVET index only on some database shapes
+;; (a quoted `'sym` inside a quoted query is the list `(quote sym)`, which
+;; Symbol.compareTo throws on over a raw DB and a filtered DB answers nil), so
+;; an unchecked read could succeed, become read evidence, and throw on replay.
+;; Refs take lookup refs and idents; EDN-encoded values are encoded later.
+(defn- query-value-type-error
+  {:malli/schema [:=> [:cat :map :map :seon.schema/value] [:or :nil :seon.error/base]]}
+  [declarations request parsed-query]
+  (let [arguments (:args request)
+        input-values (query-input-values parsed-query arguments)
+        databases (query-source-databases (:query request) arguments)]
+    (some
+     (fn [pattern]
+       (let [[_ attribute-node value-node] (:pattern pattern)
+             attribute (if (instance? Constant attribute-node)
+                         (:value attribute-node)
+                         (let [values (get input-values (:symbol attribute-node))]
+                           (when (= 1 (count values)) (first values))))
+             database (get databases (or (:symbol (:source pattern)) '$))
+             installed (when (and database (keyword? attribute))
+                         (dbi/-schema (schema-database database)))
+             declaration (get installed attribute)
+             values (cond (instance? Constant value-node) [(:value value-node)]
+                          (instance? Variable value-node) (get input-values (:symbol value-node)))
+             invalid (when (and declaration (not= :db.type/ref (:db/valueType declaration)))
+                       (remove #(datahike.schema/value-valid? attribute % installed) values))]
+         ;; Only a failing value resolves the declarations (a delay most
+         ;; reads never force).
+         (when (and (seq invalid) (not (edn-encoded? declarations attribute)))
+           (value-type-error 'seon.db/q database declaration attribute (first invalid)))))
      (query-patterns parsed-query))))
 
 (defn- query-variable-attributes
@@ -2291,14 +2333,15 @@
                   ;; it reads "nothing to decode" as "cannot decode".
                   :seon.db/relation-only
                   (fn [declarations]
-                    (let [response (d/q-with-evidence
-                                    (encode-query-request declarations request parsed-query))
-                          result (decode-query-result
-                                  declarations
-                                  request parsed-query
-                                  (:datahike.query/result response))]
-                      (append-query-evidence! request response result)
-                      result)))))))
+                    (or (query-value-type-error declarations request parsed-query)
+                        (let [response (d/q-with-evidence
+                                        (encode-query-request declarations request parsed-query))
+                              result (decode-query-result
+                                      declarations
+                                      request parsed-query
+                                      (:datahike.query/result response))]
+                          (append-query-evidence! request response result)
+                          result))))))))
         (catch Throwable cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
