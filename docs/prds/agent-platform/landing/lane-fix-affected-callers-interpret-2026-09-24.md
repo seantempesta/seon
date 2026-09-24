@@ -89,3 +89,37 @@ Net lines: +100/-8 source and test, plus this note and the issue update. RESET N
 - An agent evaluating inside a first-party namespace that holds an interpreted row
   now also resolves that namespace's private interns and the `clojure.core` names
   SCI omits, such as `spit`. The compiled namespace already reaches all of these.
+
+## Follow-up: the "every required dial" refusal in `branch-definitions-and-unchanged-callers-share-one-context`
+
+The proposed cause was wrong. `database-effective-config` does pick an arbitrary
+row, but both rows the fixture holds are complete. A probe inside the member read:
+
+- `{:rows #{["default" 42401] ["realities-proof" 62445]}, :effective {"default" nil, "realities-proof" nil}}`
+  (nil means no refusal)
+- the refusal's `::available ["default" "realities-proof"]`
+- `::missing` = every dial
+- `:seon.config/missing-effective "current-src"`, thrown from `seon.sci.eval/shown-result`
+  (`eval.clj:3116`) when an evaluation on the fork rendered its result
+
+The producer is the 3-arity `seon.sci.eval/fork-cluster-ctx`. It built a fresh
+`projection-state`, which hardcodes `:seon.boot/cluster-name "current-src"`
+(`eval.clj:181`), so the fork lost its base context's cluster. The production
+callers (`seon.cluster.boot:91`, `seon.cluster.agent:902`) pass the environment
+explicitly. Only this test used the 3-arity.
+
+Change:
+- The 3-arity now passes `{:seon.env/environment (env/of base-ctx)}` when the base
+  has one (+6/-1). The fork keeps its cluster, and connection, basis and projection
+  are still replaced from the receiving branch.
+- That exposed a second, test-side assumption: `interpreted-count` equals the
+  closure. The fixture inherits default's agent-authored `my.agents.root/largest`,
+  which interprets in every acquisition. The assertion now says the branch
+  interprets exactly its parent's set plus the closure (+6/-2).
+
+Evidence:
+- Before: run efc277be292d errored.
+- After: all 8 `branch-execution-test` members, run by name, passed as run
+  9a92b7eecfc9 (69 pass / 0 fail / 0 error, 21,226 ms for the eight).
+- `database-effective-config` is unchanged. Its arbitrary pick is still a latent
+  ambiguity, but it did not cause this failure.

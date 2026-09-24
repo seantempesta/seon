@@ -2893,9 +2893,14 @@
            [:seon.env/environment {:optional true} :seon.env/environment]
            [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]]]
      :seon.sci.eval/ctx]]}
+  ;; The fork keeps the base context's cluster; `projection-state` alone names
+  ;; "current-src", whose config row a fixture branch does not hold.
   ([base-ctx db connection]
    (fork-cluster-ctx base-ctx db connection
-                     (projection-state db (schema/projection-from-database db))))
+                     (projection-state db (schema/projection-from-database db))
+                     (if-let [environment (env/of base-ctx)]
+                       {:seon.env/environment environment}
+                       {})))
   ([base-ctx db connection supplied-projection-state]
    (fork-cluster-ctx base-ctx db connection supplied-projection-state {}))
   ([base-ctx db connection supplied-projection-state arm-request]

@@ -111,8 +111,12 @@
                (is (= (:seon.fn/tests closure)
                       (functions/gate-sets {:seon.db/db (db/db a) :seon.fn/seeds #{leaf}})))
                (is (contains? (:seon.fn/affected closure) caller))
-               (is (= (count (:seon.fn/affected closure))
-                      (:seon.sci.eval/interpreted-count (:value acquisition))))
+               ;; The fixture inherits the handle's rows (an agent's own
+               ;; definitions interpret everywhere), so the branch interprets
+               ;; exactly what its parent did plus the changed row's closure.
+               (is (= (into (set (:seon.sci.eval/interpreted @(:seon.sci.kernel/program-snapshot live)))
+                            (:seon.fn/affected closure))
+                      (set (:seon.sci.eval/interpreted @(:seon.sci.kernel/program-snapshot a-ctx)))))
                (is (pos? (:seon.sci.eval/interpreted-count (:value acquisition))))
                (is (empty? (:seon.test/acquisition-refusals (eval/acquired-program a-ctx))))
                (println "REALITIES-PROOF"
