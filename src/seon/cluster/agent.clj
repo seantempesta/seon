@@ -827,6 +827,41 @@
     (throw-causes! causes))
   nil)
 
+(defn- acquire-once!
+  "Acquire `key` in `contexts` once per concurrent demand, holding no monitor.
+  `swap-vals!` reserves the key with a delay of `(acquire previous)`; a caller
+  finding one in flight derefs it, so same-key callers share one handle and
+  other keys run in parallel. Settling (the handle, or previous on failure)
+  applies only while this reservation holds the key, so a release wins."
+  {:malli/schema [:=> [:cat :seon.agent/context-state
+                       [:tuple :seon.agent/branch [:maybe :seon.agent/id]]
+                       [:fn clojure.core/ifn?]]
+                  :seon.agent/execution-handle]}
+  [contexts key acquire]
+  (let [reserve (fn [held]
+                  (let [entry (get held key)]
+                    (if (::acquiring entry)
+                      held
+                      (assoc held key (assoc entry ::acquiring (delay (acquire entry)))))))
+        entry (get (second (swap-vals! contexts reserve)) key)
+        pending (::acquiring entry)
+        previous (not-empty (dissoc entry ::acquiring))
+        settle! (fn [value]
+                  (swap! contexts
+                         (fn [held]
+                           (cond (not (identical? pending (::acquiring (get held key)))) held
+                                 value (assoc held key value)
+                                 :else (dissoc held key)))))]
+    (try
+      (let [acquired @pending]
+        (settle! (if (identical? contexts (:seon.agent/context-state acquired))
+                   acquired
+                   previous))
+        acquired)
+      (catch Throwable failure
+        (settle! previous)
+        (throw failure)))))
+
 (defn acquire-context!
   "Acquire a coherent execution handle without starting any graph.
 
@@ -869,11 +904,13 @@
      (when (and (:seon.agent/isolate? options) (= branch live-branch))
        (throw (ex-info "Isolation cannot borrow the live cluster branch."
                        {:seon.agent/branch branch})))
-     (locking contexts
+     (acquire-once! contexts [branch agent-id] (fn [previous]
        (let [key [branch agent-id]
-             previous (get @contexts key)
+             ;; An entry still acquiring its first handle holds no connection yet.
              branch-owner (some (fn [[[held-branch _] execution]]
-                                  (when (= branch held-branch) execution)) @contexts)
+                                  (when (and (= branch held-branch)
+                                             (:seon.db/connection execution))
+                                    execution)) @contexts)
              isolated? (not= branch live-branch)
              create? (and isolated? (nil? previous)
                           (or (:seon.agent/isolate? options)
@@ -979,7 +1016,10 @@
                             (boolean (or create? (:seon.agent/owns-branch? previous)))}
                             agent-id (assoc :seon.agent/id agent-id)
                             held-store (assoc :seon.store/store held-store))]
-             (swap! held-contexts assoc key acquired)
+             ;; An isolated world's own state; the parent's entry is settled by
+             ;; `acquire-once!`.
+             (when-not (identical? held-contexts contexts)
+               (swap! held-contexts assoc key acquired))
              acquired)
            (catch Throwable failure
              (when-let [connection @allocated]
@@ -989,7 +1029,7 @@
                (try (registry/retire-branch!
                      {:seon.store/store held-store :seon.store/branch branch})
                     (catch Throwable cleanup (.addSuppressed failure cleanup))))
-             (throw failure))))))))
+             (throw failure)))))))))
 
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
