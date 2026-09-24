@@ -6,24 +6,37 @@ updated: 2026-09-24
 
 # Open items (living list — root rewrites it in place; ledger of file owners: tmp/orchestrator/file-ownership.md)
 
-## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
+## Now (rewritten 2026-09-24 ~22:10Z; ledger: tmp/orchestrator/file-ownership.md)
 
-- NO PAID AGENT CALLS (owner 2026-09-24): config/default.edn now ships no-provider true (committed) and escalate-to absent (872281634) — boot re-applies that file, so runtime overrides did not survive the restart. TOOL DEFECT: `bin/seon config apply default config/default.edn` refuses (the operator request contract wants an integer where the file says :seon.config/available-processors; boot resolves it, apply does not). Boot took 57 s ready-ms after the 21:4xZ restart (10 s target) — measure its phases. `config apply` reconciles to defaults + ONE file (a second file silently dropped the first's override — caught and re-applied); it reports converged? false every time — tool smell to check. Re-apply after reset/nuke. Owed: tests asserting the old escalate-to default (fault_test.clj:76-79, cluster/armed_test.clj:166, config_test.clj:459-467) and fault.clj:186-188 docstring "(root by default)". Root reads errors via MCP (runtime_status, branch-errors) first, logs second.
-- LOAD RULE (owner 2026-09-24): lanes write and commit code only; root runs every test request and adoption serially in quiet windows. Hook publication PAUSED (.claude/seon-hook.edn) at 21:3xZ: ten lanes' test runs + every session republishing pinned default at 900% CPU / 13.5 GB, old gen 92%. After the pause: ~200%, no test requests running.
-- Owner 2026-09-24: ALL test harness work approved (S3 running; S2/S2b/S4/S5… follow in design order).
-- One-happy-path progress: wave 1 (correctness) mostly done today; wave 2: launcher compute half DELETED (d2604ede9 + bff4fac4b, −885 net: submit!!, execute-work!, capacity observer, compute in-port, 10 schemas); still owed (held files): log-line/log-report (problems.clj), dead boot fns + publication-base! (cluster.clj), dead snapshot fields (test.clj/runner.clj/seon.test.run.edn); unread :seon.config.flow.compute/* dials; stale submit!! mentions in cluster/agent.clj:39, flow skill, flow-foundation.md, 3 issues, datahike_parity.edn; wave 3 only small items done (carry-derived-projection, projection-delta, delta branch, ground-attribute-rules); wave 4 one fault route + one config read done, one test runner via the harness. Roughly a few hundred of ~13,400 lines deleted so far.
-- fix-ns-usages-span-filter: "wrong parser again" — clj-kondo reports my.edit's top-level require alias; our analyzer keeps only usages inside the ns form's span (analyzer.clj ~569), dropping it. Use every usage kondo attributes; delete the span filter and, if redundant, 4f880a823's SCI alias copy.
-- MCP error window FIXED 43aa341b6 (a new lane branch's window starts at its fork basis; durable fork basis belongs in registry/branch!). HIGHEST PRIORITY: 23 Datahike "Node not found in storage" errors (3 on 09-23; 18:07:30Z one minute before the OOM; 21:14, 21:19 x5) — store integrity; lane diagnose-node-not-found (read-only first). Error triage DONE (0d48a2449): the feed finds bugs but is diluted — 15 signatures: 4 live (graph after store close; agent-eid passes a refused read as an id → wake-datoms; basis-t nil at context.clj:386; parallel-trial 20 s stop), 4 test noise, 7 stale; none resolved. Faults DO reach root — default's DeepSeek agent: 9 fault-woken turns x ~25k prompt tokens, each ignored the fault (OWNER DECISION: should an LLM root turn run, and be paid for, per core fault?). Test-branch faults copied to cluster-default (fault.clj:144); faults without an exception class never escalate (error.clj:1408/1454); 0 of 108 rows store :seon.error/chain. Lanes fix-fault-delivery, fix-refused-read-as-id.
-- Red baseline census DONE (341a94f23): 591 current reds. Class 1 (195) never-started members recorded as errors → fix-unstarted-members-unknown (+ why requests stop; + 34 deleted tests still counted). Class 2 (115) SCI helpers: 76 stale (pre-55af9e04b, rerun), 24 live (spit, private defs) → fix-sci-unresolved-host-names, 12 correct refusals. Class 3 (~100) hand-built fixture rows = harness S5, except my.plan-test (~21) → fix-retired-shape-tests. Class 4 (~33) over bound under load → rerun quiet. Class 5 (~29) retired shapes → fix-retired-shape-tests. Class 6 (~21) inherited live faults (existing issue). Class 7 (~13) refusals missing payload keys — probe. Class 8 (~8) cache counters = H6. Class 9 (~9) render selection → fix-render-pair-selection. ~68 unclassified = candidate real regressions (fn.clj:603, turn.clj:3674/4498, NPEs, a destructive store test not isolated from default).
-- Harness first cuts (owner check-in 2026-09-24 "don't we have a large list of work"; root took the recommended option): harness-s12 DONE e56bf63ef (56 tests, −2,023 test lines; 11 of the 54 kept after reading their survivors; costs kept in script/seon/dev/harness_costs.clj); root adopted it with init --dev (7 s), harness-s0 DONE e33009381 (per-member :seon.test/result-unknown under the new name :seon.test/latest-results; problems lists unknowns; verified? false for unknown; green? contract is the captured-result shape). It exposes 554–647 real failed tests on default (the red baseline, class 6); problems AI prose bounded 0039ff531 (313,589 → 27,957 chars; elision names count + requery; output uglier: each line an EDN string with literal \n). Found: a declared render pair on an all-optional map is never selected (matching-shapes-in) — readers saw the attribute map, not ai-prose → lane fix-render-pair-selection (census of every declared pair), harness-s1-attempt-release (designed 07c8dfc7f: handles carry routing, arm! stops accepting it, release refuses new arms, joins all graphs, keeps resources on failure; RESUMED).
-- Publication design: three priced options DONE (b8fae5bf8, publication-under-concurrent-lanes-2026-09-24.md), awaiting owner choice: (1) root-only checkpoints, hook lint-only, 0–15 lines, 2–4 h; (2) content-derived reconciliation, 60–100 lines, 12–24 h; (3, recommended) named lane branches → root-accepted merge → fail-closed convergence, the CLAUDE.md/D1 model, 250–450 lines, 40–72 h, with (1) as its interim.
-- Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
-- Analysis key: fixed c3a225dc7 (:seon.source/analyzer-digest; 11 stale rows converged; unchanged publication 229→249 ms). OVER TEN SECONDS, needs owner authorization: every edit inside the analyzer's reach (338 declarations, 12 namespaces) now costs one full reanalysis, 24.9 s (full-source-refresh! 23.9 s, analyze-rows 13.2 s, with-declarations x866k; issue a-full-reanalysis-publication-takes-twenty-five-seconds.md). The honest fix is making full analysis cheap (clj-kondo is 5.7 s of it), not skipping it.
-- fix-agent-custody-label (agent.clj): class 2 below.
+**Standing rules (owner 2026-09-24).** No paid agent calls: config/default.edn ships `:seon.config.ai/no-provider true`
+and `:seon.config.error/escalate-to` absent (boot re-applies that file). Root reads errors via MCP first, logs second.
+LOAD RULE: lanes write and commit code; root runs every test request and adoption serially. Hook publication is
+PAUSED; root publishes at checkpoints with `bin/seon init --dev default --changed <paths>` (zsh: `${=paths}`), because
+a restart loads code from the checkout but schema and test rows install only through publication.
 
-Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
-rows refuse only when called (f2bc7088a); interpreted callers get their namespace's compiled Vars, so 0 "Cannot interpret" in the save gate (b855a8a17); a fork keeps its cluster environment instead of a hardcoded "current-src" (f7ae12104). Tool smell: every seon.sci.branch-execution-test member is marked long, so
-`bin/test-check --ns` runs 0 of them without --include-long.
+**Running lanes:** none. Default: pid restarted ~22:05Z on datahike 4157916b, ready 12.3 s, no-provider on.
+
+**Waiting on the owner:**
+1. Publication option (b8fae5bf8): recommended 3 (lane branches → root-accepted merge → fail-closed convergence),
+   with 1 (root-only checkpoints) as the interim — the interim is effectively in force now (hook paused).
+2. Authorization for a full reanalysis over 10 s (16 s after 36abe8bef) until analysis is made cheap.
+3. S3b follow-up: should an agent SCI evaluation hold the adoption read lock (adoption waits; refuses after 5 s)
+   or only check validity at entry (cannot stop an adoption that starts mid-evaluation)? Root leans: adoption waits
+   for idle boundaries ("no reload may run under an evaluation").
+4. Test-declared expected faults: the proposed marker goes into a hand list at program.cljc:209 — a smell; needs a
+   derived design before the test-branch fault marker lands.
+5. Inherited agents inside test members: run them, or only the agents a member's seeds create?
+
+**Harness (all approved):** S12, S0, S1, S3a–S3c landed; next S2/S2a (clean facts/branch) → S2b (seeds; three seed
+forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by namespace groups).
+**One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
+dead snapshot fields still owed; wave 3 F2/F5/F6 (projection wrappers, call-with-projection sweep, lazy registry) next.
+
+**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Green today: S1 release + disarm (34/0),
+fault delivery (2), no-wake, projection builder key, evidence reuse, bounded failure text, SCI aliases, refused lookup,
+launcher API, datahike root pin (4/12, red on parent). Red: seon.fault-test record-mode (fault recording 1,716 ms vs
+its 1,000 ms bound — a cost defect), problems fact-shape (:376/379), one-request unexited member (parent comparison
+owed), flow-test turn-evaluation (not eligible).
 
 ## Recurring classes — root causes, not symptoms (owner 2026-09-24: "step back and find root causes")
 
