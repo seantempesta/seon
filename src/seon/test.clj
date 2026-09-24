@@ -117,45 +117,35 @@
   member body; an agent (SCI) body reaches its branch through custody instead."
   nil)
 
-;;; LOAD-CYCLE BOUNDARY: `seon.cluster` owns the adoption exclusion.
-(def ^:private call-excluding-adoption
-  (delay (requiring-resolve 'seon.cluster/call-excluding-adoption)))
-
-(def ^:private program-change
-  (delay (requiring-resolve 'seon.cluster/program-change)))
-
-(def ^:private program-validity
-  (delay (requiring-resolve 'seon.cluster/program-validity)))
-
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
-  The body thread takes `lock`'s exclusion, THEN calls `resolve!` for the Var
-  it runs, so no adoption replaces, deletes or recreates it in between. While
-  `validity` names an unknown loaded program nothing resolves or runs: the
+  The body thread reads `loaded`, the loaded program identity, then calls
+  `resolve!` for the Var it runs and runs it; nothing waits for adoption. When
+  the identity was unknown at start nothing resolves or runs, and when another
+  thread changed it before the end the result is discarded: either way the
   result carries `:seon.test.run/stopped :program-unknown` and no outcome.
 
   `release!` is called exactly once, with `true` when the body outlived the
   bound (from a watcher that joins the live thread) and `false` otherwise:
   at once when the body exits inside the bound, or before rethrowing when
   the body thread never started. The caller hands all cleanup to it."
-  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock :seon.cluster/program-validity
-                       :seon.test/sym
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.test/sym
                        [:=> [:cat] [:or :seon.test/var :seon.error/value]] [:int {:min 1}]
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                         [:seon.test/member {:optional true} :seon.agent/execution-handle]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
-  [lock validity test-symbol resolve! timeout-ms custody release!]
+  [loaded test-symbol resolve! timeout-ms custody release!]
   (let [started? (volatile! false)]
     (try
       (let [member (:seon.test/member custody)
-            ;; No development adoption reloads or arms while this body runs.
+            ;; A development adoption spanning this body makes it unknown.
             task (FutureTask.
                   (bound-fn []
-                    (@call-excluding-adoption
-                     lock validity
+                    (sci.eval/call-detecting-program-change
+                     loaded `bounded-result
                      #(let [test-var (resolve!)]
                         (if (:seon.error/at test-var)
                           test-var
@@ -844,7 +834,7 @@
             ;; (a restart from changed files, before adoption), the rows cannot
             ;; vouch for what executes: unknown, so nothing is reused.
             ;; The adopted commit whose loaded, armed definitions agree with
-            ;; its record (`seon.cluster/program-validity`): base provenance.
+            ;; its record (`seon.sci.eval/loaded-identity`): base provenance.
             recorded (when cluster-id
                        (:seon.source/commit-id
                         (selection-read! (db/pull database [:seon.source/commit-id] cluster))))
@@ -1050,7 +1040,7 @@
   (let [run-id (:seon.test.run/id run)
         snapshot? (some? (:seon.test.run/published-base-digest run))
         ;; Its commit is the adopted program agreeing with its record
-        ;; (`seon.cluster/program-validity`), read here at the writer.
+        ;; (`seon.sci.eval/loaded-identity`), read here at the writer.
         cluster-row (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
         cluster-id (:db/id cluster-row)
         branch (get-in (db/schema-database database) [:config :branch])
@@ -1579,7 +1569,7 @@
     (try
       (let [ctx (:seon.sci.eval/ctx child)
             resolved (volatile! 0.0)
-            ;; Resolved on the body thread inside the adoption exclusion.
+            ;; Resolved on the body thread, inside its program-change detection.
             resolve! #(let [started (System/nanoTime)]
                         (try (resolve-test
                               {:seon.db/db (:seon.db/db child)
@@ -1604,7 +1594,7 @@
                       ;; always has; its fixtures find the member through
                       ;; `*member*`.
                       #(bounded-result
-                        @@program-change @@program-validity test-symbol resolve! remaining-ms
+                        sci.eval/loaded-identity test-symbol resolve! remaining-ms
                         {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
                          :seon.test/member child}
                         (fn [watched?]

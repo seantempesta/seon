@@ -643,8 +643,6 @@
                       [?file :seon.fn.file/relative-path ?path]]
              database '[clojure.core/defn clojure.core/defn-])))
 
-(declare program-validity)
-
 (defn mcp-runtime-observation
   "Derive health and Flow observations for one root-discovered cluster."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name] :map]}
@@ -680,7 +678,9 @@
                                       (vec (:seon.problems/error-signatures problems)))))
         readiness-face
         (when ready
-          (dissoc ready :seon.problems/problems))]
+          (dissoc ready :seon.problems/problems))
+        ;; A failed adoption leaves the JVM's loaded program unknown.
+        unloaded (let [loaded @sci.eval/loaded-identity] (when (:seon.error/at loaded) loaded))]
     (cond-> {:seon.dev.mcp/cluster cluster-name
              ;; Cumulative inclusive timing of every armed definition in this
              ;; JVM, one line each: the top five by total and by maximum, and
@@ -696,7 +696,7 @@
              ;; Health is derived from open faults, never from a connection's
              ;; existence: unknown without the problems to read.
              :seon.dev.mcp/health
-             (cond @program-validity :faulted (nil? open-faults) :unknown
+             (cond unloaded :faulted (nil? open-faults) :unknown
                    (seq open-faults) :faulted :else :observed)
              :seon.dev.mcp/flow
              (if (and connection (:seon.flow/graph instance))
@@ -704,7 +704,7 @@
                 projection-state
                 #(oversight/flow-status (db/db connection) instance))
                :unknown)}
-      @program-validity (assoc :seon.dev.mcp/program-unavailable @program-validity)
+      unloaded (assoc :seon.dev.mcp/program-unavailable unloaded)
       (seq open-faults) (assoc :seon.dev.mcp/open-faults open-faults)
       problem-counts (assoc :seon.dev.mcp/problem-counts problem-counts)
       unavailable (assoc :seon.dev.mcp/problems-unavailable unavailable)
@@ -2190,66 +2190,18 @@
                      namespace-name)))
         (reload-order namespaces requires)))
 
-;;; No reload runs under a test member: a member body holds the read side of
-;;; `program-change` for its whole run, development adoption the write side
-;;; from unmap to arming. Fair, so a queued adoption holds back later members.
-(defonce program-change (java.util.concurrent.locks.ReentrantReadWriteLock. true))
-
-;;; Loaded Var roots have no database owner: this holds, for `program-change`,
-;;; nil while loaded definitions, arming and the adoption record agree, else
-;;; the diagnostic of the adoption that changed roots without recording.
-(defonce program-validity (atom nil))
-
-(defn program-validity?
-  "True for the atom holding a program exclusion's validity."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (instance? clojure.lang.IAtom value))
-
-(schema/register-core-predicate! 'seon.cluster/program-validity? program-validity?)
-
-(defn program-change-lock?
-  "True for the read-write lock that excludes test members from adoption."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (instance? java.util.concurrent.locks.ReentrantReadWriteLock value))
-
-(schema/register-core-predicate! 'seon.cluster/program-change-lock? program-change-lock?)
-
-(def ^:dynamic ^:private *member-lock*
-  "The exclusion whose read side this thread's test member holds; conveyed to
-  threads the body binds, so an adoption the member itself runs is its own work."
-  nil)
-
-(defn call-excluding-adoption
-  "Run one test member body `work` while no adoption on `lock` reloads or arms.
-  While `validity` holds a failed adoption's diagnostic the loaded program is
-  unknown: `work` never starts and that diagnostic is the answer."
-  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock :seon.cluster/program-validity
-                       [:=> [:cat] [:or :seon.test.runner/captured-result :seon.error/value]]]
-                  [:or :seon.test.runner/captured-result :seon.error/value]]}
-  [^java.util.concurrent.locks.ReentrantReadWriteLock lock validity work]
-  ;; A member nested in a member's body already runs inside the exclusion; a
-  ;; second hold would queue behind a waiting adoption that waits for the first.
-  (if (identical? lock *member-lock*)
-    (work)
-    (let [held (.readLock lock)]
-      (.lock held)
-      (try (or @validity (binding [*member-lock* lock] (work)))
-           (finally (.unlock held))))))
-
 (defn- call-with-program-change
-  "Call `change` once no test member holds `lock`, waiting at most the longest
-  declared member body bound on `database`; beyond it refuse by name, never
-  interrupting a member. A member's own adoption runs inside its exclusion.
+  "Call `change`, which reloads and arms toward `commit-id`, never waiting for anyone.
 
-  Before `change` touches a root, `validity` marks the loaded program toward
-  `commit-id` unknown; only `change` returning (its record committed) clears
-  it. A throw keeps the mark, with its cause, after unlocking."
-  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock :seon.cluster/program-validity
-                       :seon.db/database-value :seon.source/commit-id [:=> [:cat] :seon.source/adoption-result]]
+  Before `change` touches a root, `identity-atom` names the loaded program
+  unknown; only `change` returning (its record committed) names `commit-id`.
+  A throw keeps the unknown mark, with its cause. A member or evaluation that
+  read another identity at its start refuses its own result
+  (`seon.sci.eval/call-detecting-program-change`)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.source/commit-id
+                       [:=> [:cat] :seon.source/adoption-result]]
                   :seon.source/adoption-result]}
-  [^java.util.concurrent.locks.ReentrantReadWriteLock lock validity database commit-id change]
+  [identity-atom commit-id change]
   (let [unknown (fn [throwable]
                   (seon.error.refusal/diagnostic
                    (cond-> {:seon.error/at (Date.) :seon.error/layer :seon.cluster/adoption
@@ -2260,27 +2212,14 @@
                                                      " until an adoption records.")
                             :seon.test/not-runnable (str commit-id)
                             :seon.source/commit-id commit-id}
-                     throwable (assoc :seon.error/throwable throwable))))
-        marked (fn []
-                 (reset! validity (unknown nil))
-                 (try (let [result (change)] (reset! validity nil) result)
-                      (catch Throwable failure (reset! validity (unknown failure)) (throw failure))))]
-    (if (identical? lock *member-lock*)
-      (marked)
-      (let [exclusive (.writeLock lock)]
-        (when-not (or (.tryLock exclusive)
-                      (let [bound-ms (max 5000 (or (db/q '[:find (max ?ms) . :where [_ :seon.test/long-ms ?ms]]
-                                                         database)
-                                                   0))]
-                        (or (.tryLock exclusive bound-ms java.util.concurrent.TimeUnit/MILLISECONDS)
-                            (refused! (str "Development adoption waited " bound-ms " ms, the longest declared"
-                                           " member bound, and " (.getReadLockCount lock)
-                                           " running test member(s) had not exited.")
-                                      {:seon.cluster.source/phase :adoption
-                                       :seon.test/time-limit-ms bound-ms}))))
-          (refused! "Development adoption could not exclude running test members."
-                    {:seon.cluster.source/phase :adoption}))
-        (try (marked) (finally (.unlock exclusive)))))))
+                     throwable (assoc :seon.error/throwable throwable))))]
+    (sci.eval/advance-loaded-identity! identity-atom (unknown nil))
+    (try (let [result (change)]
+           (sci.eval/advance-loaded-identity! identity-atom {:seon.source/commit-id commit-id})
+           result)
+         (catch Throwable failure
+           (sci.eval/advance-loaded-identity! identity-atom (unknown failure))
+           (throw failure)))))
 
 (declare process-identity)
 
@@ -2730,11 +2669,11 @@
     (verify-development-sources! published-database (fs/source-directory) namespaces)
     (adopt-rows! connection published identities published-database)
     (report-source-progress! "development loaded definitions")
-    ;; Unmap, reload and arm exclude every running test member: none sees
-    ;; its program change under it, and none starts until arming is done.
+    ;; Unmap, reload and arm wait for no one: a member or evaluation spanning
+    ;; them reads a changed loaded identity at its end and refuses its result.
     (let [{reloaded :seon.source/reloaded-namespaces arming-identities :seon.source/arming-identities}
           (call-with-program-change
-           program-change program-validity previous-database (:seon.source/commit-id published)
+           sci.eval/loaded-identity (:seon.source/commit-id published)
            (fn []
           ;; Clojure reload leaves removed interns behind. Remove only definitions
           ;; whose identity is absent from the published database.
@@ -2778,8 +2717,8 @@
                  (when (arming-refused? effective arming-identities result)
                    (refused! "Development JVM instrumentation did not restore contracts."
                              result)))))
-            ;; The record commits inside the exclusion, so no member enters
-            ;; between arming and the record naming what is loaded.
+            ;; The record commits before the loaded identity names it, so no
+            ;; member starting between arming and the record reads it as converged.
             (report-source-progress! "development adoption record")
             (require-committed!
              (db/transact! connection
@@ -2991,9 +2930,9 @@
   files. The captured input bytes produce rows directly; the current database
   supplies prior identities. Analyzer configuration changes select every source.
   A refusal after reload began (source change, arming, record) leaves the
-  record unchanged and the loaded program unknown (`program-validity`): no
-  test member enters until the next request reconciles from the last adopted
-  source database and records."
+  record unchanged and the loaded program unknown
+  (`seon.sci.eval/loaded-identity`): no test member or evaluation runs until
+  the next request reconciles from the last adopted source database and records."
   {:malli/schema
    [:function
     [:=> [:cat :seon.boot/root] :seon.source/refresh-result]

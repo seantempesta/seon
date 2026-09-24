@@ -154,7 +154,7 @@
         ;; The gated Var lives in a namespace this test creates and removes.
         owned (create-ns (gensym "seon.test.one-request-test.gated-"))
         gated (intern owned (with-meta 'gated-probe {:test body}) nil)
-        result (#'sut/bounded-result (java.util.concurrent.locks.ReentrantReadWriteLock. true) (atom nil)
+        result (#'sut/bounded-result (atom {})
                                      (symbol gated) (constantly gated) 100 {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)}
                                      (fn [watched?] (deliver released watched?) nil))]
       (try
