@@ -97,6 +97,18 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 5.10 | Briefs stay focused: measured 410–4,078 characters across 12 task kinds, generated in 3.4 ms | R | met |
 | 5.11 | The plan is a rendered view of the task data (no hand-written plan); it must be readable on the owner's phone | O | met: plan artifact rendered from task data |
 
+## 5a. Context is generated from the task, never a namespace (owner 2026-09-24; prototype `scratch.task-context`)
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 5a.1 | Seeds = the symbols, schema keys and `[attr value]` entities the task's proofs (and must-reads) reference; the author controls relevance by writing proofs | O | prototyped |
+| 5a.2 | Hop 1 is CONTENT: a seed function's doc + contract + source once; a seed key's schema form; a seed entity's AI render; a missing symbol is "you create this" | O, R | prototyped |
+| 5a.3 | Hop 2 is ADDRESSES only: callers, first-party callees, contract keys, reaching tests — names the agent fetches with one REPL call (`(source f)`, `(callers 'f)`) | O, R | prototyped |
+| 5a.4 | Taught vocabulary is never expanded: functions a help topic teaches (`:seon.help/about`) are tools, not subjects. Without this rule `seon.db/q` in a proof dragged in 410 callers and 12 schemas (27.8 KB); with it the faults task's context is 7.7 KB in 0.3 ms (live root prompt: 680 KB) | R | measured |
+| 5a.5 | DATA GAP: a function's contract is stored only as a string (`:seon.fn/spec`); its schema keys are not an edge (`:seon.fn/keywords` of `faults-form` lacks `:seon.render/unit`). Store contract keys as `keyword*` at the analyzer (no string parsing at readers) | R | open |
+| 5a.6 | DATA GAP: `:seon/must-read` / `:seon/see-also` metadata is not ingested (no attribute) | R | open |
+| 5a.7 | DATA GAP: test→function edges are unusable as context: `seon.error/faults-form` has 0 reaching tests and no `:seon.test/subject` test; a core function reports 1,720 (saturated) | R | open |
+
 ## 5b. Explicit authority (v0.2 prototype, pending the owner; `experiments/tasks_v02.clj.txt`)
 
 | # | Requirement | Source | Status |
