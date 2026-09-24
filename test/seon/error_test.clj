@@ -27,7 +27,7 @@
             [seon.test-support :as test-support]
             [seon.db :as db]))
 
-(declare commit-request)
+(declare commit-request with-db)
 
 (deftest recording-ignores-transient-inline-members-when-finding-components
   (test-support/with-database
@@ -144,7 +144,8 @@
           (is (str/includes? (error/log-line (error/notice {:seon.error/fact (:seon.error/fact summary) :seon.error/occurrence-count 6})) "occurrences=6"))
           (is (str/includes? (error/render-ai row) "Occurrences: 6"))
           (is (str/includes? (pr-str (error/render-html row)) "Open"))
-          (let [observed (db/q (second (second read-form)) database (last read-form))]
+          (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
+          (let [observed (error/for-agent database "error-graph-steward")]
             (is (= 1 (count observed)) (pr-str observed)))
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
           (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
@@ -157,6 +158,35 @@
           (is (= 'seon.id/valid? (:seon.instrument/fn (:seon.error/fact flat))))
           (is (not (contains? (:seon.error/fact flat) :seon.error/exception-class)))
           (is (:db-after (db/transact! connection (:seon.db/tx-data flat)))))))))
+
+(deftest agent-fault-read-is-a-short-call-that-shows-each-recorded-message
+  ;; The opening once printed the whole observation selector (81,805 chars on
+  ;; root, five times per prompt), and a capped occurrence rendered as
+  ;; "Error evidence is unavailable." because the capped evidence's remainder
+  ;; shadowed the recorded message.
+  (with-db
+    (fn [connection]
+      (let [failure (ex-info "capped evidence message" {:seon.error-test/rows (vec (range 20000))})
+            recorded (error/recording (db/db connection)
+                                      (commit-request failure {:seon.agent/id "agent-3"
+                                                               :seon.error/process "agent-fault-read"}))
+            _ (test-support/transacted! connection (:seon.db/tx-data recorded))
+            database (db/db connection)
+            form (:seon.repl/form (error/faults-form {:seon.db/db database
+                                                      :seon.render/value [:seon.agent/id "agent-3"]}))
+            errors (error/for-agent database "agent-3")]
+        (is (= '(seon.error/for-agent (seon.db/db) "agent-3") form))
+        (is (> 300 (count (pr-str form))))
+        (is (= #{(second (:seon.error/ref recorded))}
+               (set (map :seon.error/signature errors))
+               (set (db/q '[:find [?sig ...] :in $ ?id
+                            :where [?a :seon.agent/id ?id] [?e :seon.error/signature ?sig]
+                            [?o :seon.error.occurrence/agent ?a] [?e :seon.error/occurrences ?o]]
+                          database "agent-3"))))
+        (is (:seon.error/capped? (error/latest-fact (first errors))))
+        (is (str/includes? (error/render-ai (first errors)) "capped evidence message")
+            (error/render-ai (first errors)))
+        (is (= [] (error/for-agent database "root")))))))
 
 (deftest dropped-fault-counts-accumulate-in-the-occurrence
   (test-support/with-database
