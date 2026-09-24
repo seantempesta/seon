@@ -1995,7 +1995,8 @@
   {:malli/schema
    [:=> [:cat :seon.boot/root :seon.store/store
          [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]
-          [:seon.source/changed-paths [:vector :string]]]]
+          [:seon.source/changed-paths [:vector :string]]
+          [:seon.source/analyzer-digest {:optional true} :seon.source/analyzer-digest]]]
     :seon.source/publish-result]}
   [root store roots]
   (let [published (current-publication store nil)
@@ -2024,8 +2025,16 @@
                 (refused! "Changed paths are neither in the JVM's source directory nor published."
                           {:seon.fn/root directory :seon.source/changed-paths (vec unknown)}))
             changed (into #{} (filter #(not= (get prior %) (get observed %))) paths)
+            analyzer (:seon.source/analyzer-digest roots)
+            ;; Rows derive from the analyzer as well as the bytes: rows another
+            ;; analyzer produced are all stale, whatever file changed.
+            analyzer-changed? (and committed analyzer
+                                   (not= analyzer
+                                         (when (contains? (:schema committed) :seon.source/analyzer-digest)
+                                           (db/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]]
+                                                 committed))))
             classification (cond
-                             (nil? committed) :all
+                             (or (nil? committed) analyzer-changed?) :all
                              (empty? changed) :selected
                              ;; A changed directory input is a gitlink: capture digests
                              ;; directories only through their recorded pins.
@@ -2040,7 +2049,7 @@
             [additional additional-sources]
             (source/capture-paths directory (vec (remove (set inventory) analysis-paths)))
             captured (merge captured additional-sources)]
-    (if (and committed (empty? changed)
+    (if (and committed (empty? changed) (not analyzer-changed?)
              (not-any? (requiring-resolve 'seon.issue/note-path?) requested-paths))
       published
       (let [stored (when partial?
@@ -2104,7 +2113,8 @@
                           ;; The analysis above derives from this head; the
                           ;; publisher refuses if another publication moved it.
                           published (assoc :seon.source/expected-commit-id
-                                           (:seon.source/commit-id published))))]
+                                           (:seon.source/commit-id published))
+                          analyzer (assoc :seon.source/analyzer-digest analyzer)))]
             (report-source-progress! "branch publication complete")
             result)
           (finally (when database (d/release-materialized-db database))))))))
@@ -2423,6 +2433,38 @@
                     :where [?function :seon.fn/sym ?sym]
                            [?function :seon.program/definition-digest ?digest]]
                   database symbols))))
+
+(defn- analyzer-digest
+  "The analyzer's identity in `database`: the digest of the definition digests
+  reached from `seon.fn/analyze-rows` through stored calls."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/analyzer-digest]}
+  [database]
+  (let [calls (reduce (fn [calls [caller callee]] (update calls caller (fnil conj []) callee)) {}
+                      (db/q '[:find ?caller ?callee
+                              :where [?function :seon.fn/sym ?caller] [?function :seon.fn/calls ?callee]]
+                            database))
+        reach (loop [reached #{} pending (list `seon.fn/analyze-rows)]
+                (if-let [[function & more] (seq pending)]
+                  (recur (conj reached function) (into more (remove reached) (get calls function)))
+                  reached))]
+    (id/digest 64 [(into (sorted-map) (definition-digests database (vec reach)))])))
+
+(defn- loaded-analyzer-digest
+  "The analyzer digest of the program this JVM loaded: a development cluster's
+  adopted commit (rows, load, arm, record), else the published head, whose
+  files a JVM without one loaded at boot; nil before any publication."
+  {:malli/schema [:=> [:cat :seon.store/store [:maybe :seon.boot/instance]]
+                  [:maybe :seon.source/analyzer-digest]]}
+  [store instance]
+  (when-let [commit-id (or (when instance
+                             (:seon.source/commit-id
+                              (db/pull (db/db (:seon.boot/cluster-connection instance)) [:seon.source/commit-id]
+                                       [:seon.cluster/name (get-in instance [:seon.boot/advertisement
+                                                                             :seon.boot/cluster-name])])))
+                           (:seon.source/commit-id (source/current store)))]
+    (let [database (source/database store commit-id)]
+      (try (analyzer-digest database)
+           (finally (d/release-materialized-db database))))))
 
 (defn published-program
   "The published source program's definition digests and program namespaces.
@@ -2945,8 +2987,10 @@
            held-store (acquire-root-store! store-dir)
            ;; The publication's own roots, read before any adoption reload can
            ;; re-evaluate the vars that declare them.
-           roots (assoc (publication-roots) :seon.fn/root directory
-                        :seon.source/changed-paths changed)]
+           analyzer (loaded-analyzer-digest held-store instance)
+           roots (cond-> (assoc (publication-roots) :seon.fn/root directory
+                                :seon.source/changed-paths changed)
+                   analyzer (assoc :seon.source/analyzer-digest analyzer))]
        (try
          (report-source-progress! "source build")
          (schema/call-with-projection

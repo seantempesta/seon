@@ -403,3 +403,21 @@
       (is (= disposition (:seon.cluster.boot/disposition refusal)))
       (is ((schema/projection-validator (schema/handed-projection)
                                        :seon.cluster.boot/operation-error) refusal)))))
+
+(deftest the-analyzer-digest-follows-the-analyzing-declarations-only
+  ;; Publication reanalyzes every file when the loaded analyzer's digest
+  ;; differs from the seal's, and nothing when it is equal.
+  (test-support/with-database
+    (fn [connection]
+      (let [digest #(#'cluster/analyzer-digest (db/db connection))
+            restamp! (fn [function-symbol]
+                       (test-support/transacted!
+                        connection {:tx-data [{:seon.fn/sym function-symbol
+                                               :seon.program/definition-digest
+                                               (apply str (repeat 64 (rand-nth "0123456789abcdef")))}]}))
+            before (digest)]
+        (is (= before (digest)) "an unchanged analyzer reanalyzes nothing")
+        (restamp! `cluster/serve!)
+        (is (= before (digest)) "a declaration outside the analyzer's reach changes no analysis")
+        (restamp! 'seon.fn/host-bound-callers)
+        (is (not= before (digest)) "a changed analyzing declaration makes every file's analysis stale")))))

@@ -32,6 +32,8 @@
               [:re #:seon.db{:identity true} "^[0-9a-f]{64}$"],
               :test-input-digest
               [:and {:seon.db/identity false :description "Digest of the sorted publication input inventory outside the program graph, including pinned gitlink identities. Observed value survives its input files."} :seon.source/digest],
+              :analyzer-digest
+              [:and {:seon.db/identity false :description "Digest of the definition digests reached from seon.fn/analyze-rows in the program this JVM loaded when it analyzed the published rows. Rows derive from that code as well as from their file bytes."} :seon.source/digest],
               :test-input-digests [:map-of :string :seon.source/digest],
               :digest-request
               [:map [:seon.source/roots :seon.source/roots]
@@ -71,6 +73,7 @@
                [:seon.source/relative-file-digests {:optional true} :seon.source/relative-file-digests]
                [:seon.source/changed-paths {:optional true} :seon.source/changed-paths]
                [:seon.source/test-input-digest {:optional true} :seon.source/test-input-digest]
+               [:seon.source/analyzer-digest {:optional true} :seon.source/analyzer-digest]
                [:seon.fn/root {:optional true} :seon.fn/root]
                [:seon.source/expected-commit-id {:optional true} :seon.source/expected-commit-id]
                [:seon.db/process {:optional true} :seon.db/ref]

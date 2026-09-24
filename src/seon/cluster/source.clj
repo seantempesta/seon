@@ -33,7 +33,7 @@
   :current-src)
 
 (def ^:private source-attributes
-  [:seon.source/digest :seon.source/test-input-digest :seon.source/built-at])
+  [:seon.source/digest :seon.source/test-input-digest :seon.source/analyzer-digest :seon.source/built-at])
 
 (defn- refuse!
   {:malli/schema [:=> [:cat :keyword :string :map] :nil]}
@@ -544,6 +544,7 @@
     directory :seon.fn/root
     source-digest :seon.source/digest
     test-input-digest :seon.source/test-input-digest
+    analyzer-digest :seon.source/analyzer-digest
     input-digests :seon.source/relative-file-digests
     changed-paths :seon.source/changed-paths
     requested-commit :seon.source/expected-commit-id
@@ -561,15 +562,24 @@
                                     (:seon.source/commit-id published)))
         unchanged? (when committed
                      (try
-                       (if input-digests
+                       (cond
+                         ;; Rows analyzed by other code are changed even when
+                         ;; every input's bytes are equal.
+                         (and analyzer-digest
+                              (not= analyzer-digest
+                                    (d/q '[:find ?digest . :where [_ :seon.source/analyzer-digest ?digest]]
+                                         committed)))
+                         false
+                         input-digests
                          (= (select-keys input-digests changed-paths)
                             (stored-path-digests committed changed-paths))
-                       (let [digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
-                                          committed)]
-                         (when (map? digest)
-                           (refuse! ::publish-readback-failed
-                                    "The published source digest could not be read." digest))
-                         (= source-digest digest)))
+                         :else
+                         (let [digest (db/q '[:find ?digest . :where [_ :seon.source/digest ?digest]]
+                                            committed)]
+                           (when (map? digest)
+                             (refuse! ::publish-readback-failed
+                                      "The published source digest could not be read." digest))
+                           (= source-digest digest)))
                        (finally (d/release-materialized-db committed))))]
     (cond
       ;; The request was derived from `requested-commit`; another publisher
@@ -642,6 +652,7 @@
                   (cond-> {:seon.source/digest source-digest
                            :seon.source/built-at (java.util.Date.)
                            :seon.source/test-input-digest input-digest}
+                    analyzer-digest (assoc :seon.source/analyzer-digest analyzer-digest)
                     prior-id (assoc :db/id prior-id)))]}
                 process (assoc :tx-meta {:seon.db/process process})))
              ::source-seal-refused
