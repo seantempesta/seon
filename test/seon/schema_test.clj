@@ -1813,3 +1813,51 @@
     (is (= ['seon.schema/no-such-deleted-predicate?] (vec (keys found))))
     (is (= 'seon.schema/no-such-deleted-predicate?
            (:seon.schema/unresolved-predicate refusal)))))
+
+(deftest a-predicate-namespace-that-fails-to-load-is-not-an-unresolved-predicate
+  ;; CLASS: `runtime-predicate` caught every Throwable as nil, so a predicate
+  ;; namespace that fails to compile read as "nothing names it" and its
+  ;; compile error disappeared (ambiguous-nil census S1). The classpath is the
+  ;; external effect here: a scratch root, handed through `Compiler/LOADER` —
+  ;; the loader `RT.load` reads — so no broken source ever joins the
+  ;; project classpath.
+  (let [root (.toFile (java.nio.file.Files/createTempDirectory
+                       "seon-schema-predicate-load"
+                       (make-array java.nio.file.attribute.FileAttribute 0)))
+        write! (fn [path text]
+                 (let [file (java.io.File. root path)]
+                   (.mkdirs (.getParentFile file))
+                   (spit file text)))
+        loader (doto (clojure.lang.DynamicClassLoader. (clojure.lang.RT/baseLoader))
+                 (.addURL (.toURL (.toURI root))))
+        registered? #(with-bindings {clojure.lang.Compiler/LOADER loader}
+                       (schema/core-predicate-registered? %))]
+    (try
+      (write! "seon_schema_load_probe/broken.clj"
+              "(ns seon-schema-load-probe.broken)\n(defn ok? [x] (no-such-fn x))")
+      (write! "seon_schema_load_probe/transitive.clj"
+              "(ns seon-schema-load-probe.transitive (:require [seon-schema-load-probe.absent]))\n(defn ok? [_] true)")
+      (write! "seon_schema_load_probe/fine.clj"
+              "(ns seon-schema-load-probe.fine)\n(defn ok? [_] true)")
+      (testing "a compile failure surfaces whole, with its location"
+        (let [thrown (try (registered? 'seon-schema-load-probe.broken/ok?) nil
+                          (catch clojure.lang.Compiler$CompilerException e e))]
+          (is (instance? clojure.lang.Compiler$CompilerException thrown))
+          (is (= "seon_schema_load_probe/broken.clj"
+                 (:clojure.error/source (ex-data thrown))))))
+      (testing "a missing transitive require is a load failure, not absence"
+        (let [thrown (try (registered? 'seon-schema-load-probe.transitive/ok?) nil
+                          (catch clojure.lang.Compiler$CompilerException e e))]
+          (is (instance? java.io.FileNotFoundException (ex-cause thrown)))))
+      (testing "nothing naming the predicate is still nothing"
+        (is (false? (registered? 'seon-schema-load-probe.absent/ok?)))
+        (is (false? (registered? 'seon-schema-load-probe.fine/never-declared?)))
+        (is (true? (registered? 'seon-schema-load-probe.fine/ok?))))
+      (finally
+        (doseq [file (reverse (file-seq root))] (.delete file))
+        (doseq [probe '[seon-schema-load-probe.broken
+                        seon-schema-load-probe.transitive
+                        seon-schema-load-probe.fine]]
+          ;; Undo only what this test loaded, so a rerun loads it again.
+          (remove-ns probe)
+          (dosync (commute @#'clojure.core/*loaded-libs* disj probe)))))))

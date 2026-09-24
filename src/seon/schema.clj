@@ -144,7 +144,7 @@
     :else #{}))
 
 (defn- runtime-predicate
-  "The Var a qualified predicate symbol names, or nil.
+  "The Var a qualified predicate symbol names, or nil when nothing names it.
 
    THE resolution rule for host-authored predicates. A qualified symbol names
    exactly one Var, so resolution is collision-free by construction — two
@@ -156,12 +156,19 @@
 
    The VAR is retained rather than its current value. Invoking a Var reads its
    root at call time, so re-evaluating a `defn` changes what an already
-   compiled schema calls, exactly as it changes every other caller."
+   compiled schema calls, exactly as it changes every other caller.
+
+   Nil means only that nothing names the predicate: its namespace loads
+   without that Var, or no file for the namespace is on the classpath
+   (`RT.load` throws `FileNotFoundException` itself for the requested root).
+   A namespace that exists but fails to load throws `requiring-resolve`'s
+   whole `CompilerException` — a missing transitive require arrives wrapped
+   in one — so a compile failure is never read as an unresolved predicate."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?]]]}
   [predicate]
   (try
-    (when (qualified-symbol? predicate)
-      (requiring-resolve predicate))
-    (catch Throwable _
+    (requiring-resolve predicate)
+    (catch java.io.FileNotFoundException _
       nil)))
 
 (defn- loaded-predicate-var
