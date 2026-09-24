@@ -1,12 +1,28 @@
+---
+type: living-list
+status: current
+updated: 2026-09-24
+---
+
 # Open items (living list — root rewrites it in place; ledger of file owners: tmp/orchestrator/file-ownership.md)
 
-## Blocking integration (running)
-- fix-start-head-gitlinks: `start --head` refuses changed gitlinks (datahike gitlink changed b626390b2). Must land before the reset/move.
-- fix-unbounded-failure-text: the 105 MB datom's producers. Reset default only after it lands.
+## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
-## Integration (root, after the two above)
-1. Reset default (drops the 105 MB datom, the 16 historical fault signatures, stale exp-* branch scratch).
-2. `bin/seon start --head`; verify HEAD loads; run each changed namespace's tests (landing notes list them):
+- sweep-hand-built-ns-rows: scripted conversion of 52 test files to test-support/namespace-row.
+- review-test-harness-astra: review of one-test-harness/design-2026-09-24.md → astra-review-2026-09-24.md; then to the owner.
+- fix-affected-callers-interpret (sci/eval.clj): a branch changing one :core function refuses its whole acquisition because
+  interpreted callers cannot resolve privates, def Vars and dependency aliases (docs/seon/issues/affected-callers-fail-to-interpret-against-uninstalled-bindings.md). Blocking: most branch tests.
+- fix-test-world-refusals (diagnose first): fixture writes refused with :seon.error/unknown for the definition digest
+  (bootstrap-test; 63 of a 65-test save gate red), and test worlds missing the :seon.config.agent/turn-completion-backstop-ms dial.
+
+Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
+rows refuse only when called (f2bc7088a). Tool smell: every seon.sci.branch-execution-test member is marked long, so
+`bin/test-check --ns` runs 0 of them without --include-long.
+
+## Integration (root, at the end of the fix round)
+
+1. Default already runs the nuked store from the checkout; after the running lanes land, `bin/seon down && bin/seon start`.
+2. Verify HEAD loads; run each changed namespace's tests (landing notes list them):
    seon.id-test, seon.problems-test, seon.cluster-test, seon.cluster.publication-delta-test, seon.cluster.mcp-test,
    seon.fn.analyzer-test, seon.sci.entry-gate-test, seon.sci.eval-test, seon.schema.admission-gate-test,
    seon.schema.agent-nil-contract-test, seon.db-test, seon.error-test, seon.turn-disposition-test, seon.cluster.prompt-test,
@@ -15,6 +31,7 @@
 3. Triage reds by the three questions (deleted machinery / retired assumption / surviving owner); report to owner.
 
 ## Queued correctness (file held; launch when released)
+
 - error/commit-tx callers (sci/eval.clj:1889, cluster.clj:3432) still record capped faults with no blob — route through recording + evidence-stage; declare :seon.blob/staged-writes on :seon.error/recording (seon.error.edn).
 - schema.clj assert-config-display! is an authoring rule still run at projection build (would break old as-of views if tightened): move to projection-with-schema + update test/seon/config_test.clj:62.
 - test/seon/schema/datahike_test.clj unsupported-database-attributes-refuse-at-one-rule is stale (register! outside a registration delta now refuses) — retired assumption.
@@ -28,7 +45,6 @@
 - test/seon/schema/datahike_parity.edn is stale by 322 changed forms, 4 missing and 28 unexpected attributes (a hand-maintained baseline — a smell): after fix-leftovers-1 lands, regenerate its current sections from the schema, or replace the baseline file with a derived check; decide which (landing lane-fix-leftovers-2-2026-09-24.md).
 - "Isolation requires a fresh owned branch." (src/seon/cluster/agent.clj:848) stops seon.issue-settlement-test's first test early — diagnose.
 - Publication refuses while :cluster-default-candidate holds a connection (issue publication-refuses-while-the-candidate-branch-holds-a-connection.md); test worlds inherit the live cluster's errors/messages (issue test-fixture-worlds-inherit-the-live-clusters-errors-and-messages.md).
-- `bin/seon status` fails after the reset: seon.cluster.boot/readable-response refuses its own return value for a missing :seon.error/at (likely the open-fault listing added in de13aa02c). boot.clj :344 is held by errors-on-their-branch-2 — launch when released, or send to it.
 - Subprocess descendants die of SIGPIPE after the root exits (docs/seon/issues/subprocess-descendants-die-of-sigpipe-after-the-root-exits.md) — needs an owner ruling on stream handling.
 - test/runner.clj + test.clj: reach leaves omit fixture metadata (stale green); test diagnostics drop causes; `find-var` on a referred Var makes the live-cluster drift snapshot always empty (issue filed).
 - refers slice (tmp/fix-entry-2-refers.patch): needs script/seon/dev/mcp.clj, test/seon/custody_stability_test.clj, src/seon/test/runner.clj.
@@ -39,12 +55,14 @@
 - Tests red at HEAD before today: seon.db-test (19, EDN codec fixture), seon.sci.reader-test (19, symbols-as-strings), mcp_test fake connection, bounded-boundary-census (34 script subjects), shell time-limit fixture, fn-test members over 5 s bound, resume-turn test 16.7 s.
 
 ## Testing framework (owner 2026-09-24: "we need to nail this")
-1. Survey (running, census-test-redefs): every test namespace → DELETE / HARNESS (conversion class) / PLATFORM; the 351 redef sites classified by purpose.
-2. Design (next, Opus) — OWNER RULING 2026-09-24: the harness adds nothing the agent path lacks; a test is an agent attempt with a deftest body instead of model turns. Every lesson lands in the ONE agent path (retire stops the graph and awaits exit; attempts record base + program identity; capabilities as world values) and the harness only composes it; harness-only concerns are limited to running a body and recording test evidence — anything more is a smell. Design: ONE harness through the one interface — world = checkpoint fork + seed branch + capabilities as values; seon.test/run fork→inject→run→record→unlink; each member records the program it actually ran (root ruling on adoption-between-members); everything else is a platform test.
+
+1. Survey DONE (01c6571d6, d0d9dad21): one-test-harness/test-survey — harness 1,913 / platform 230 / delete 19; redef-census classifies the 351 sites.
+2. Design DONE (623918f70, one-test-harness/design-2026-09-24.md; capabilities dropped: effects through config facts or owner arguments) — OWNER RULING 2026-09-24: the harness adds nothing the agent path lacks; a test is an agent attempt with a deftest body instead of model turns. Every lesson lands in the ONE agent path (retire stops the graph and awaits exit; attempts record base + program identity; capabilities as world values) and the harness only composes it; harness-only concerns are limited to running a body and recording test evidence — anything more is a smell. Design: ONE harness through the one interface — world = checkpoint fork + seed branch + capabilities as values; seon.test/run fork→inject→run→record→unlink; each member records the program it actually ran (root ruling on adoption-between-members); everything else is a platform test.
 2b. Design input: agent graphs keep stepping after their test branch's store closes (docs/seon/issues/an-agent-graph-steps-after-its-test-branch-store-closes.md) — the harness's unlink must stop the member's graph and await its exit before releasing the store.
-3. Astra review of the design; owner review; then scripted conversion by class with deletions.
+3. Astra review RUNNING; then owner review (open question: an agent SCI test runs on its own branch commit, or on base plus its differing rows?); then scripted conversion by class with deletions.
 
 ## Scheduled (owner: wait for fixes before large items)
+
 - Committer-graph deletion (~470 lines): needs turn.clj:5359-5406, render/web.clj, cluster/wake.clj, cluster/agent.clj, cluster.clj, cluster/boot.clj (join-launcher-errors! now inert), schemas seon.flow/boot/cluster.wake/render.web (landing lane-fix-fault-route-2026-09-24.md; issue durable-faults-cross-dropping-channels.md).
 - Launcher compute half: submit!! referenced by dead turn.clj:3290-3334, env_test.clj, instrument_test.clj.
 - First-ever delivery gate still in error.clj:1393.
@@ -62,11 +80,13 @@
 - MEMORY.md is over its size limit: consolidate.
 
 ## Owner rulings 2026-09-24
+
 - ab7e4a643: REVIEW NOW (Astra review launched).
 - Entry gate: GATE ONLY, no :warn dial.
 - exp-* branches: DISCARD at reset.
 - Ingestion slice: AFTER THIS FIX ROUND (first language work after the reset + namespace tests).
 
 ## Queued (from config-read-2, 91c9079a9)
+
 - `:seon.boot/cluster-name` supplier: one row in config/default.edn + small supplier in src/seon/env.clj, so (agent-history {}) works; transcript ledger's per-model calibrations still store refusals as calibrations.
 - Tests passing only :seon.db/db to render/request-profile will now refuse (expected; count at integration).
