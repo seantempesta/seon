@@ -31,3 +31,15 @@
               (:seon.sci.admit/value
                (evaluate-in ctx "(into {} (map (fn [[k v]] [k (ns-name v)])) (ns-aliases 'seon.note))")))
            "an uninterpreted file namespace has its row's aliases in SCI")))))
+
+(deftest a-contracted-definition-is-armed-before-any-commit
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           defined (evaluate-in ctx (str "(defn twice \"Double x.\" "
+                                         "{:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"))]
+       (is (= :ok (get-in defined [:seon.sci.admit/record :seon.eval/outcome])))
+       (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))))
+       (let [refused (:seon.sci.admit/value (evaluate-in ctx "(twice \"a\")"))]
+         (is (= :input (:seon.instrument/check refused))
+             (pr-str refused)))))))

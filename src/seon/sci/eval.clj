@@ -3503,6 +3503,13 @@
                               before-intern-values source
                               (assoc (binding-rows before-reader-context)
                                      :seon.ns/name namespace-name)))
+            ;; Arm the contract definition-row just validated. Arming belongs
+            ;; to the live Var, not to durability: an evaluation that never
+            ;; commits must refuse invalid input all the same. The commit's
+            ;; later install re-wraps the interpreted original idempotently.
+            _ (when (:seon.fn/spec var-row)
+                (install-function-contract!
+                 execution-ctx var-row projection (:seon.db/db request)))
             ending-namespace-row
             (when (and (nil? var-row)
                        (nil? reader-row)
