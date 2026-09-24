@@ -149,6 +149,7 @@ explode and the metadata larger than the actual function… tasks and references
 | 7.7 | **Out of source and out of EDN:** attempts, decisions, evidence, measurements, discussion — database entities pointing at the task id | O | proposed |
 | 7.8 | **Runtime tasks** (detectors, errors, users, agents) are database writes through `seon.task/create!`; they may name subjects explicitly because no code lists them yet | O, A | proposed |
 | 7.9 | **Ingestion:** the analyzer stores `:seon/tasks` and `:seon/must-read`/`:seon/see-also` references as symbol/keyword edges (today it drops them); task EDN reconciles by id into the same task schema | O | open |
+| 7.9b | **Test seeds are edges too:** a deftest's `:seon.test/seed` qualified symbols are ingested as edges, so a task's context walk follows task → test → seed fn (doc, contract, source) → the schema keys it writes (`:seon.fn/writes`, already stored) → their forms; the seed's tx-data is validated against those schemas at admission, so the context shows data of known shape (owner 2026-09-24) | O | open: part of the ingestion slice |
 | 7.10 | **Context:** `(task :id)` shows the entity with its subjects and proofs; a function's context lists the open tasks that reference it, so work on one function surfaces its other known problems | O | proposed |
 
 ## 8. Errors are recorded on the branch where they happen (owner 2026-09-24: "all errors then just get logged to the database in the right branches and we don't have to worry about routing them")
