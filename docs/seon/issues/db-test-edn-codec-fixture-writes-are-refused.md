@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved (fixture built wrong: with-codec-database now writes its schema rows, 9b5eefbb7)
 severity: defect
 tags: [issue, db, testing, codec, fixtures]
 ---
