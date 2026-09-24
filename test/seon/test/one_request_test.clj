@@ -286,3 +286,54 @@
        (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members drifted)))
            "another loaded program executes the member again")
        (is (:seon.test/loaded-source-drift drifted))))))
+
+(deftest ^{:seon.test/long "Two requests over three agent tests on one fixture branch: the first is held for its whole 10 s bound by a member that runs until the bound fires (the stop being proved), which then runs to its own 15 s bound; the rest is definition and admission. Measured 38.5 s on default's JVM (2026-09-24) with a 20 s exit wait since removed."
+           :seon.test/long-ms 60000}
+  a-stopped-requests-unstarted-member-is-unknown-and-an-identical-request-reruns-it
+  (support/with-database
+   {:seon.test-support/extra-schema marker}
+   (fn [connection]
+     (let [handle (support/execution-handle connection)
+           members #{'seon.test.one-request-test/a-quick
+                     'seon.test.one-request-test/b-runs-until-released
+                     'seon.test.one-request-test/c-after}
+           unstarted 'seon.test.one-request-test/c-after
+           request #(sut/run {:seon.test/execution (support/execution-handle connection)
+                              :seon.test/recording-connection connection
+                              :seon.test/policy :named
+                              :seon.test/identities members
+                              :seon.test/include-long? true
+                              :seon.test/check-time-limit-ms 10000})]
+       (define-agent-test! handle "(clojure.test/deftest a-quick (clojure.test/is true))")
+       (define-agent-test! handle
+         ;; Its own 15 s bound outlasts the request's 10 s, so the request
+         ;; stops on it unfinished; SCI then interrupts the body at 15 s.
+         (str "(clojure.test/deftest ^{:seon.test/long \"runs until the request bound fires\" :seon.test/long-ms 15000}"
+              " b-runs-until-released"
+              " (if (= [\"go\"] (vec (seon.db/q '[:find [?m ...] :where [_ :seon.test.one-request-test/marker ?m]] (seon.db/db))))"
+              " (clojure.test/is true) (loop [] (recur))))"))
+       (define-agent-test! handle "(clojure.test/deftest c-after (clojure.test/is true))")
+       (let [stopped (request)
+             run-id (some #(when (= unstarted (:seon.test/sym %)) (second (:seon.test/run %)))
+                          (:seon.test/results stopped))
+             database (db/db connection)
+             latest (first (runner/latest-results database [unstarted]))
+             stop (db/q '[:find ?cause . :in $ ?id :where [?r :seon.test.run/id ?id] [?r :seon.test.run/stopped ?cause]]
+                        database (second (:seon.test/run latest)))]
+         (is (false? (:seon.test/passed? stopped)) (sut/tally stopped))
+         (is (some #{unstarted} (:seon.test/pending stopped)) (sut/tally stopped))
+         (is (nil? run-id) "the unstarted member has no captured result")
+         (is (= unstarted (:seon.test/error-test-symbol latest)) (pr-str latest))
+         (is (not-any? #(contains? latest %) [:seon.test/pass-count :seon.test/error-count])
+             "never started is an unknown, not a red")
+         (is (= :member-unfinished stop) "the run names why it stopped")
+         (is (str/includes? (:seon.error/message latest) "member-unfinished") (:seon.error/message latest))
+         (is (false? (sut/verified? database unstarted)) "an unknown never verifies"))
+       ;; If its exit is recorded by now it reruns and passes on the marker;
+       ;; otherwise it still holds and is pending. Either way C runs.
+       (support/transacted! connection [{:seon.test.one-request-test/marker "go"}])
+       (let [again (request)]
+         (is (some #(= unstarted (:seon.test/sym %)) (:seon.test/results again))
+             (str "an identical later request is admitted and reruns the unstarted member: " (sut/tally again)))
+         (is (not-any? #{unstarted} (:seon.test/pending again)) (sut/tally again))
+         (is (= 1 (:seon.test/pass-count (first (runner/latest-results (db/db connection) [unstarted]))))))))))

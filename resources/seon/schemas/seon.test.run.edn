@@ -64,6 +64,7 @@
                  [:seon.test.member/host :seon.test.member/host]
                  [:seon.test.run/deadline :seon.test.run/deadline]
                  [:seon.test.run/dead-workers {:optional true} :seon.test.run/dead-workers]],
+                :stopped [:enum {:description "Why this request stopped before running every reserved member. Its members with no completed outcome were never started: each reads as an unknown, never green, and no longer covers a later request."} :deadline :member-unfinished :recording-refused :platform-red],
                 :terminated? [:boolean {:description "Caller observed execution return or exact process exit; a bound firing alone is false."}],
                 :claim-completion
                 [:and :seon.test.run/completion
@@ -119,6 +120,7 @@
                  [:seon.test.run/exclusions {:optional true} :seon.test.run/exclusions]
                  [:seon.test.run/selection-tx {:optional true} :seon.test.run/selection-tx]
                  [:seon.test.run/deadline {:optional true} :seon.test.run/deadline]
+                 [:seon.test.run/stopped {:optional true} :seon.test.run/stopped]
                  [:seon.test.run/branch {:optional true} :seon.test.run/branch]]
  ; Additive error declaration manifest, 2026-09-18.
 

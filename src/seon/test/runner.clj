@@ -1598,7 +1598,10 @@
                                                                :seon.test.member/error-count])))
                       {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
                        :seon.error/operation 'seon.test.runner/recorded-member-results
-                       :seon.error/message "This test's latest admitted execution recorded no completed outcome."
+                       :seon.error/message
+                       (if-let [cause (:seon.test.run/stopped run)]
+                         (str "Never started: request " (:seon.test.run/id run) " stopped (" cause ") before this test.")
+                         "This test's latest admitted execution recorded no completed outcome.")
                        :seon.error/expected :completed-member :seon.error/offending test-symbol
                        :seon.test/execution-refusal :seon.test/population-unknown
                        :seon.test/error-test-symbol test-symbol :seon.test/run run-ref}
@@ -1776,7 +1779,7 @@
            (mapcat (fn [[run-id rows]]
                       (let [run (execution-read
                                  (db/pull database
-                                          [:seon.test.run/id :seon.test.run/at
+                                          [:seon.test.run/id :seon.test.run/at :seon.test.run/stopped
                                            :seon.test.run/basis-t :seon.test.run/program-digest]
                                           [:seon.test.run/id run-id]))
                             results (recorded-member-results database run (mapv first rows))]

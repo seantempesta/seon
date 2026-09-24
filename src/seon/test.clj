@@ -1195,8 +1195,11 @@
                                     ;; in every scope.
                                     (not (:seon.test.member/terminated-tx member-row))
                                     ;; An admitted, unstarted member covers an
-                                    ;; identical concurrent request.
-                                    (= (admission-scope row) (scope-of run-eid)))
+                                    ;; identical concurrent request; a stopped
+                                    ;; run is no longer concurrent.
+                                    (and (not (:seon.test.run/stopped
+                                               (selection-read! (db/pull database [:seon.test.run/stopped] run-eid))))
+                                         (= (admission-scope row) (scope-of run-eid))))
                               [test-symbol (select-keys member-row [:db/id :seon.test.member/symbol
                                                              :seon.test.member/reasons])]))))
                   (sort-by first > candidates))
@@ -1779,7 +1782,7 @@
                     (loop [remaining members outcome outcome]
                       (if-let [test-symbol (first remaining)]
                         (if-not (pos? (remaining-ms))
-                          (assoc outcome ::stopped (vec remaining))
+                          (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [{result :seon.test/result timings :seon.test/timings}
                                 (member-result request-handle test-symbol (remaining-ms) settle!)
                                 committed (runner/commit-results!
@@ -1797,12 +1800,12 @@
                             (cond
                               (:seon.error/at committed)
                               (assoc outcome :seon.test/recording-refusal committed
-                                             ::stopped (vec (next remaining)))
+                                             ::stopped (vec (next remaining)) ::stop-cause :recording-refused)
                               (not (:seon.test.run/terminated? result))
                               (assoc outcome :seon.test/unfinished [result]
-                                             ::stopped (vec (next remaining)))
+                                             ::stopped (vec (next remaining)) ::stop-cause :member-unfinished)
                               (and (platform? test-symbol) (not (green? result)))
-                              (assoc outcome ::stopped (vec (next remaining)))
+                              (assoc outcome ::stopped (vec (next remaining)) ::stop-cause :platform-red)
                               :else (recur (next remaining) outcome))))
                         outcome))
                     (catch Throwable failure
@@ -1815,25 +1818,12 @@
                           (.addSuppressed failure recording-failure)))
                       (throw failure)))))
                 release-not-started!
-                ;; A reserved member a batch never started is released as an
-                ;; unfulfilled obligation (one transaction of at most `limit`),
-                ;; never left to cover later requests.
-                (fn [batch-provenance members]
-                  (when (seq members)
-                    (runner/commit-results!
-                     recording
-                     (recording-completion
-                      batch-provenance
-                      (mapv (fn [test-symbol]
-                              {:seon.test/sym test-symbol
-                               :seon.test.member/began? false :seon.test.member/ended? false
-                               :seon.test/pass-count 0 :seon.test/fail-count 0
-                               :seon.test/error-count 1
-                               :seon.test/failure-message
-                               (str "Not started: request " (:seon.test.run/id provenance)
-                                    " stopped before this member.")})
-                            members)
-                      true))))
+                ;; A stopped run records why; the members it never started keep
+                ;; no outcome, so each reads as an unknown (never green) and,
+                ;; the run being stopped, covers no later request.
+                (fn [batch-provenance cause]
+                  (db/transact! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
+                                            :seon.test.run/stopped cause]]))
                 outcome
                 (try
                   (loop [index 0
@@ -1852,8 +1842,9 @@
                                   outcome (-> (update outcome ::held into (remove reserved members))
                                               (run-batch (::provenance admitted) (filterv reserved members)))
                                   stopped (::stopped outcome)
-                                  released (release-not-started! (::provenance admitted) stopped)
-                                  outcome (cond-> (dissoc outcome ::stopped)
+                                  released (when stopped
+                                             (release-not-started! (::provenance admitted) (::stop-cause outcome)))
+                                  outcome (cond-> (dissoc outcome ::stopped ::stop-cause)
                                             (:seon.error/at released)
                                             (update :seon.test/recording-refusal #(or % released)))]
                               (if (some? stopped)
