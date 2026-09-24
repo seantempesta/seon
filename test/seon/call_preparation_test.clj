@@ -245,17 +245,17 @@
        (is (true? (:seon.call-preparation/empty? plan))
            "the supplier itself declares no supplied default")))))
 
-(defn- with-program-less-database
-  "Call `body` with a database value whose schema declares no program
-  attribute, so Datahike refuses every program read: the program graph
-  cannot be read, which is not the same as a function being absent from it."
+(defn- with-program-less-connection
+  "Call `body` with a connection whose schema declares no program attribute,
+  so Datahike refuses every program read: the program graph cannot be read,
+  which is not the same as a function being absent from it."
   [body]
   (let [configuration {:store {:backend :memory :id (random-uuid)}
                        :schema-flexibility :write :keep-history? false}]
     (d/create-database configuration)
     (try
       (with-open [held (test-support/closeable (d/connect configuration) d/release)]
-        (body @@held))
+        (body @held))
       (finally (d/delete-database configuration)))))
 
 (deftest an-unreadable-program-graph-is-not-an-uncontracted-function
@@ -266,18 +266,19 @@
        (testing "a function absent from a readable program graph has no plan"
          (is (nil? (cp/plan-for @connection current 'sample/absent-function)))
          (is (nil? (cp/plan call-state @connection current 'sample/absent-function))))
-       (with-program-less-database
-        (fn [unreadable]
-          (let [refused (cp/plan-for unreadable current 'seon.db/pull)]
+       (with-program-less-connection
+        (fn [unreadable-connection]
+          (let [unreadable @unreadable-connection
+                refused (cp/plan-for unreadable current 'seon.db/pull)]
             (is (true? (:seon.db/invalid-read refused))
                 "the read error is returned, never nil \"not contracted\"")
-            (is (= 'seon.db/datoms (:seon.db/refused-read-operation refused))))
-          (is (true? (:seon.db/invalid-read
-                      (cp/plan call-state unreadable current 'seon.db/pull)))
-              "plan passes it on")
-          (is (not (contains? (:seon.call-preparation/plans @call-state)
-                              'seon.db/pull))
-              "and caches nothing, so the next call reads again")))))))
+            (is (= 'seon.db/datoms (:seon.db/refused-read-operation refused)))
+            (is (true? (:seon.db/invalid-read
+                        (cp/plan call-state unreadable current 'seon.db/pull)))
+                "plan passes it on")
+            (is (not (contains? (:seon.call-preparation/plans @call-state)
+                                'seon.db/pull))
+                "and caches nothing, so the next call reads again"))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Supplier coherence is proved at acquisition
@@ -578,6 +579,27 @@
 (defn- probe
   [ctx source]
   (sci/eval-string* ctx (str "(seon.call-preparation-test/" source ")")))
+
+(deftest unreadable-custody-refuses-the-call-instead-of-running-it-unprepared
+  ;; The outer branch hands the projection the probe context is built with.
+  (test-support/with-database
+   (fn [_]
+     (with-program-less-connection
+      (fn [connection]
+        (let [ctx (probe-ctx connection)]
+          (d/release connection)
+          (reset! entered 0)
+          (let [refused (probe ctx "probe-received-database? \"a\"")]
+            (is (true? (:seon.db/invalid-read refused))
+                "the call's result is the database read error")
+            (is (= 'seon.db/db (:seon.db/refused-read-operation refused)))
+            (is (= (symbol #'probe-received-database?)
+                   (:seon.call-preparation/target-symbol refused))
+                "naming the call it refused")
+            (is (zero? @entered) "the body never ran without its database"))
+          (testing "a context without call-preparation state is still inert"
+            (is (= "ab" (sci/eval-string* (sci/init {:call-preparation-hook cp/hook})
+                                          "(str \"a\" \"b\")"))))))))))
 
 (deftest a-compiled-first-party-call-is-prepared
   (testing "positional, map-key, caller-wins, supplied-nil, undeclared and

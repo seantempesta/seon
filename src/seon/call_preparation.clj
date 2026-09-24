@@ -1494,7 +1494,9 @@
   Everything a call needs is read from the ctx: no dynamic var, no cluster
   lookup, no effect request. A ctx with no call-preparation state, no
   environment, or no plan for this callee is passed through untouched, so
-  the hook is inert in a non-Seon context. The return is genuinely
+  the hook is inert in a non-Seon context. A database, snapshot or plan
+  that cannot be read refuses the call as `(reduced read-error)` naming the
+  callee: it never runs without the defaults it may need. The return is genuinely
   polymorphic — sci's contract is `args` OR a `reduced` result.
 
   THE HOOK IS ARMED ON EVERY CALL IN THE CLUSTER, so the path for a
@@ -1516,23 +1518,27 @@
         connection (when (and call-state environment projection)
                      (:seon.db/connection environment))
         database (when connection ((mi/-f->original db/db) connection))]
-    (if-not (and database (not (or (:seon.db/invalid-read database) (:seon.schema/expected-value database))
-))
+    (if (nil? database)
       arguments
-      (let [current ((mi/-f->original current-snapshot) call-state database projection)]
-        (if (or (:seon.db/invalid-read current) (:seon.schema/expected-value current))
-
+      (let [current (if (refused-read [database])
+                      database
+                      ((mi/-f->original current-snapshot) call-state database projection))
+            sym (callee-identity callee)]
+        (cond
+          ;; A callee with no program identity is never prepared.
+          (nil? sym) arguments
+          ;; Unreadable custody or program rows: whether this call needs a
+          ;; supplied default is unknown, so it never runs without one.
+          (refused-read [current]) (reduced (refused-call sym current))
+          (not (contains? (:seon.call-preparation/prepared-symbols current) sym))
           arguments
-          (let [sym (callee-identity callee)]
-            (if-not (contains? (:seon.call-preparation/prepared-symbols current)
-                               sym)
-              arguments
-              (let [environment (env/scope environment {:my.program/executing-ctx ctx})
-                    plan-value (plan call-state database current sym)]
-                (if (refused-read [plan-value])
-                  (reduced (refused-call sym plan-value))
-                  (let [prepared (prepare current environment plan-value
-                                          (vec arguments))]
-                    (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidate-count prepared)))
-                      (reduced prepared)
-                      prepared)))))))))))
+          :else
+          (let [environment (env/scope environment {:my.program/executing-ctx ctx})
+                plan-value (plan call-state database current sym)]
+            (if (refused-read [plan-value])
+              (reduced (refused-call sym plan-value))
+              (let [prepared (prepare current environment plan-value
+                                      (vec arguments))]
+                (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidate-count prepared)))
+                  (reduced prepared)
+                  prepared)))))))))
