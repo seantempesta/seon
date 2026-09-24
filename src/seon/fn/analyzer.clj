@@ -246,6 +246,24 @@
     (under? (::source-roots (roots-of (.getPath checkout)))
             (.getCanonicalPath (io/file (analyzed-source-path path))))))
 
+(defn- classpath-source
+  "The checkout file this JVM's classpath loads for `namespace-name`, outside
+  every `:local/root` dependency: first-party by the process's own classpath
+  (the `:test` alias's `.` puts `dev_cache.clj` there), never a list. The
+  system loader answers, not a thread's context loader (`seon.sci.eval`)."
+  {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
+  [namespace-name]
+  (let [checkout (.getCanonicalPath (io/file "."))
+        base (-> (str namespace-name) (str/replace "-" "_") (str/replace "." "/"))]
+    (some (fn [extension]
+            (when-let [url (.getResource (ClassLoader/getSystemClassLoader) (str base extension))]
+              (when (= "file" (.getProtocol url))
+                (let [path (.getCanonicalPath (io/file (.toURI url)))]
+                  (when (and (str/starts-with? path (str checkout java.io.File/separator))
+                             (not (under? (::dependency-roots (roots-of checkout)) path)))
+                    path)))))
+          [".clj" ".cljc"])))
+
 (defn- stale-cache-entries
   "The cache entries this analysis could have read that do not answer for the
   current bytes of their source.
@@ -317,7 +335,8 @@
                              (and shared? (nil? current)
                                   (str/starts-with? path prefix)
                                   (not (under? source-roots path))
-                                  (not (under? dependency-roots path))) ::foreign
+                                  (not (under? dependency-roots path))
+                                  (not= path (classpath-source namespace-name))) ::foreign
                              (> (.lastModified source) (.lastModified file)) ::modified)]
               :when reason]
           (cond-> {::cache-file (.getPath file)
@@ -327,6 +346,8 @@
             (and (#{::modified ::moved} reason)
                  (or (not shared?) (under? source-roots path)))
             (assoc ::source path))))}))
+
+(declare unanalyzed-namespaces)
 
 (defn- invoke-kondo
   "Run clj-kondo once, then rebuild any cache entry the run read that does not
@@ -362,7 +383,16 @@
                     (kondo.cache/with-cache root 6
                       (stale-cache-entries root shared? result)))
                   {::examined 0 ::stale []}))
-        result (clj-kondo/run! options)
+        first-run (clj-kondo/run! options)
+        ;; A first-party namespace kondo holds no entry for (one outside the
+        ;; publication roots) is analyzed from the file the classpath loads.
+        first-party (when root
+                      (into [] (keep classpath-source)
+                            (unanalyzed-namespaces root (:analysis first-run))))
+        result (if (seq first-party)
+                 (do (clj-kondo/run! (assoc options :lint first-party))
+                     (clj-kondo/run! options))
+                 first-run)
         {::keys [examined stale]} (check result)]
     (if (empty? stale)
       (cond-> (assoc result ::cache {::examined examined ::stale [] ::rebuilt []})
