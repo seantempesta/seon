@@ -108,6 +108,13 @@ value is what the owner's debug page must render.
 - **Proved:** a Codex agent given only a brief delivered `seon.schema/valid?` and `explain` (docstring,
   contract, one-line bodies over `projection-validator`/`projection-explainer`) in 11 forms, 11–62 ms
   each, all proofs green in separate evaluations on branch `exp-validate-2`.
+- **Proved again, new case:** a Codex agent given only a brief created the `seon.task` namespace on branch
+  `exp-stale-docs-1` and delivered `seon.task/stale-docs` in 18 forms (5–169 ms each); it found the
+  attributes it needed from the must-read row's pull in one 9 ms step, and its result equals the
+  orchestrator's detector (the same eight `seon.flow` functions). It wrote ~20 lines over
+  `seon.db/history` where one clause over current datoms' transactions suffices: must-reads should carry
+  the idiom, not only the function. It also found that an empty result does not prove review
+  (undocumented functions are excluded) — a second detector, and a sharper intent.
 - **Exposed:** delivery (cherry-pick → program rows → files) does not exist; a schema declaration
   cannot be published to a branch; `:nil` is refused in agent-authored contracts while core contracts
   use it; `seon.schema.internal/contract-error!` crashes on a function symbol; a session's MCP server
