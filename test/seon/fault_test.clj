@@ -80,6 +80,38 @@
          (is (empty? woken)))
        (is (< elapsed-ms 1000.0) (str "one synchronous fault write took " elapsed-ms " ms"))))))
 
+(deftest a-stored-occurrence-carries-its-own-declared-schemas-attributes
+  ;; The writer derives which diagnostics an occurrence stores from the fault's
+  ;; declared schema and the base alone, never from every declared error
+  ;; schema: `:seon.program/deletion-refused-error` declares
+  ;; `:seon.db/attributes false`, so its `:seon.db/transaction-refused` stays
+  ;; evidence even though another error schema stores that attribute.
+  (test-support/with-database
+   (fn [connection]
+     (let [environment (world connection "fault-attributes" {:seon.config/on-core-error :record})
+           occurrence (fn [declared-schema extra]
+                        (let [receipt (fault/fault! environment
+                                                    (merge {:seon.error/at (java.util.Date.)
+                                                            :seon.error/layer ::boundary
+                                                            :seon.error/operation `boundary
+                                                            :seon.error/message "refused"
+                                                            :seon.db/transaction-refused true}
+                                                           extra)
+                                                    (assoc context :seon.error/declared-schema declared-schema))]
+                          (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
+                          (db/pull (db/db connection) '[*]
+                                   [:seon.error.occurrence/id (:seon.error.occurrence/id receipt)])))
+           kept-out (occurrence :seon.program/deletion-refused-error
+                                 {:seon.program/referrers [{:seon.program/subject 'my.fault/f
+                                                            :seon.program/relation :seon.fn/calls
+                                                            :seon.program/referrer {:seon.fn/sym 'my.fault/f}
+                                                            :db/id 1}]})
+           kept (occurrence :seon.db/transaction-refused-error {:seon.db.write.attempt/request-id "r1"})]
+       (is (= "refused" (:seon.error/message kept-out)) "the base's attributes are stored")
+       (is (not (contains? kept-out :seon.db/transaction-refused)) (pr-str kept-out))
+       (is (true? (:seon.db/transaction-refused kept)) (pr-str kept))
+       (is (= "r1" (:seon.db.write.attempt/request-id kept)))))))
+
 (deftest panic-mode-stores-then-throws-its-receipt-and-a-rethrow-is-not-recounted
   (test-support/with-database
    (fn [connection]

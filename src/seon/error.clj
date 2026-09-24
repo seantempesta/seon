@@ -1395,9 +1395,16 @@
       (let [projection (or (db/carried-projection database)
                             (:seon.schema/projection request)
                             (schema/projection-from-database database))
+        ;; THE FAULT'S OWN SCHEMA, NOT THE POPULATION. The stored diagnostic
+        ;; attributes are its declared schema's and the base's own entries,
+        ;; each where that schema declares `:seon.db/attributes`. An earlier
+        ;; occurrence shares the signature, hence the declared schema, so the
+        ;; same set names what it stored. Walking every declared error schema
+        ;; (294 schemas, 5,585 armed storability checks, ~120 ms inside the
+        ;; writer on each new projection) is gone; one schema is ~1 ms.
         diagnostic-attributes
         (schema/projection-cache-value
-         projection ::declared-schema-attributes
+         projection [::diagnostic-attributes (:seon.error/declared-schema fact)]
          (fn []
            (into #{}
                  (comp (mapcat (fn [schema-key]
@@ -1405,7 +1412,7 @@
                                    (when (:seon.db/attributes (internal/entity-properties compiled))
                                      (map first (internal/entity-entries compiled))))))
                        (filter #(schema.datahike/storable-attribute-in? projection %)))
-                 (conj (declared-schema-keys projection) :seon.error/base))))
+                 [(:seon.error/declared-schema fact) :seon.error/base])))
         replacements (mapv (fn [attribute]
                              [:db.fn/retractAttribute occurrence-ref attribute])
                            (filter diagnostic-attributes (keys old)))
@@ -1428,12 +1435,7 @@
                                    :seon.instrument/actual-size])
         digest (:seon.error/data-blob fact)
         occurrence (cond-> (merge evidence
-                                 (let [attributes (into #{}
-                                                    (mapcat #(map first (internal/entity-entries
-                                                                         (mr/schema (:seon.schema.projection/registry projection) %))))
-                                                    [(:seon.error/declared-schema fact) :seon.error/base])]
-                                   (select-keys (:seon.error/source request)
-                                                (filter diagnostic-attributes attributes)))
+                                 (select-keys (:seon.error/source request) diagnostic-attributes)
                                  {:seon.error.occurrence/id occurrence-id
                                   :seon.error.occurrence/count count
                                   :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
