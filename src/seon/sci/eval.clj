@@ -64,10 +64,11 @@
 
   OUTPUT IS CAPTURED, NOT DISCARDED. sci's `*out*` and `*err*` are
   unbound by default — `println` fails with `SciUnbound cannot be cast
-  to java.io.Writer` — so both are bound to one `StringWriter` per
-  evaluation and what the form printed rides back on the evaluation as
-  `:seon.cluster.eval/output`, bounded by the same `max-string` cap the
-  projection uses. Printed output is evidence an agent produced about
+  to java.io.Writer` — so both are bound to one writer per evaluation and
+  what the form printed rides back on the evaluation as
+  `:seon.cluster.eval/output`, streamed under the caps' `max-bytes`
+  storage bound (a crossing print refuses with `:seon.sci.admit/error`).
+  Compiled host code printing to `clojure.core/*out*` is not captured. Printed output is evidence an agent produced about
   its own work; a sink would have made it disappear, and the drive
   showed exactly how expensive disappeared evidence is.
 
@@ -3280,7 +3281,45 @@
                          (if-let [observed (::kernel/built-in-calls @arm-state)]
                            (observed)
                            #{}))
-        printed (java.io.StringWriter.)
+        ;; Printed output is stored with the evaluation, so it streams under
+        ;; the same UTF-8 storage bound as external evidence: the fragment that
+        ;; would cross `max-bytes` refuses (admission's declared
+        ;; `:seon.sci.admit/error`) and stops a runaway print; the text kept is
+        ;; exact. Presentation clipping stays with the value renderer.
+        printed-text (StringBuilder.)
+        printed-bytes (volatile! 0)
+        put-printed!
+        (fn [^String text]
+          (locking printed-text
+            (let [bound (long (:seon.config.eval.result/max-bytes caps))
+                  total (+ (long @printed-bytes)
+                           (alength (.getBytes text java.nio.charset.StandardCharsets/UTF_8)))]
+              (when (> total bound)
+                (throw (ex-info "printed output reached its storage bound"
+                                (seon.error.refusal/diagnostic
+                                 (java.util.Date.) :seon.sci.eval/output 'seon.sci.eval/evaluate
+                                 {:seon.error/message "Printed output reached its byte bound; print less or return a value."
+                                  :seon.error/offending total
+                                  :seon.error/member :seon.config.eval.result/max-bytes
+                                  :seon.sci.admit/bound-bytes bound
+                                  :seon.sci.admit/bytes total
+                                  :seon.sci.admit/projection-observation
+                                  {:seon.error.evidence/attribute :seon.sci.admit/bytes
+                                   :seon.error.evidence/value total}}))))
+              (vreset! printed-bytes total)
+              (.append printed-text text))))
+        printed (proxy [java.io.Writer] []
+                  (write
+                    ([x] (put-printed! (cond (string? x) x
+                                             (int? x) (str (char x))
+                                             :else (String. ^chars x))))
+                    ([x off len]
+                     (put-printed! (if (string? x)
+                                     (subs x off (+ off len))
+                                     (String. ^chars x (int off) (int len))))))
+                  (flush [])
+                  (close [])
+                  (toString [] (locking printed-text (str printed-text))))
         ;; A turn's fork carries the session's print options; a host caller
         ;; that forked nothing gets a carrier of its own for its own forms.
         print-session (or (::print-session evaluation-ctx) (atom {}))
