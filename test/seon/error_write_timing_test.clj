@@ -18,7 +18,7 @@
         record! (fn [sym start]
                   (swap! events conj [sym (/ (- (System/nanoTime) start) 1e6)]))
         symbols '[seon.error/prepare seon.error/prepare-result seon.error/recording
-                  seon.error/commit-call seon.error/recurrence
+                  seon.error/commit-call
                   seon.error/agent-exists? seon.error/entity-exists?
                   seon.error/observation-selector seon.db/pull
                   seon.db/write-error seon.db/write-entity-schemas
