@@ -13,6 +13,8 @@
             [seon.cluster.agent :as agent]
             [seon.flow :as seon.flow]
             [seon.note :as note]
+            [seon.render :as render]
+            [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.oversight :as oversight]
             [seon.render.hiccup :as hiccup]
@@ -144,6 +146,7 @@
             built (oversight/unit {:seon.db/db db
                                    :seon.agent/routing
                                    (:seon.agent/routing instance)
+                                   :seon.sci.eval/ctx (:seon.sci.eval/ctx instance)
                                    :seon.sci.admit/caps caps})
             value (:seon.render/value built)
             root (first (:seon.oversight/agents value))
@@ -277,6 +280,7 @@
   (support/with-database
     (fn [connection]
       (let [db @connection
+            ctx (support/fork-cluster-ctx connection)
             graph (probe-graph)]
         (try
           (testing "a detached request has no live story"
@@ -285,6 +289,7 @@
             (let [routing (agent/routing)
                   _ (swap! routing assoc :seon.flow/graph graph)
                   built (oversight/unit {:seon.db/db db
+                                         :seon.sci.eval/ctx ctx
                                          :seon.agent/routing routing})
                   value (:seon.render/value built)]
               (is (= [] (:seon.oversight/agents value))
@@ -310,5 +315,47 @@
                 (is (str/includes? html "data-fleet-oversight=\"unavailable\""))
                 (is (not (str/includes? html "data-fleet-oversight=\"agents\""))
                     "missing state never renders as an empty fleet"))))
+          (testing "a caller naming no cluster is unavailable, never a guessed row"
+            (let [routing (agent/routing)
+                  _ (swap! routing assoc :seon.flow/graph graph :seon.agent/armed {})]
+              (is (= {:seon.oversight/missing [:seon.boot/cluster-name]}
+                     (:seon.render/value
+                      (oversight/unit {:seon.db/db db :seon.agent/routing routing}))))))
+          (finally
+            (flow/stop graph)))))))
+
+(deftest every-consumer-reads-the-cluster-its-caller-names
+  ;; THE CLASS: a forked branch carries its parent's cluster and config rows,
+  ;; so `[:find ?name .]` picked one of several. Each consumer now reads the
+  ;; name from the caller's context environment and refuses by that name.
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "named-a" {:seon.config.render.agent/max-children 3})
+      (support/seed-cluster! connection "named-b" {:seon.config.render.agent/max-children 5})
+      (is (not (:seon.error/at (cluster/ensure-cluster-entity!
+                                 connection "unconfigured" cluster/boot-process-identity))))
+      (let [db @connection
+            names (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] db)
+            ctx-of #(support/fork-cluster-ctx connection %)
+            graph (probe-graph)
+            routing (doto (agent/routing)
+                      (swap! assoc :seon.flow/graph graph :seon.agent/armed {}))
+            fleet #(:seon.render/value
+                    (oversight/unit {:seon.db/db db :seon.agent/routing routing
+                                     :seon.sci.eval/ctx (ctx-of %)}))
+            profile #(render/request-profile {:seon.db/db db :seon.sci.eval/ctx (ctx-of %)})
+            history #(transcript/agent-history {:seon.db/db db :seon.agent/id "nobody"
+                                                :seon.boot/cluster-name %})]
+        (try
+          (is (<= 3 (count names)) "the branch carries several cluster rows")
+          (testing "the named cluster's configuration answers"
+            (is (= [] (:seon.oversight/agents (fleet "named-b"))))
+            (is (= 3 (:seon.render.profile/max-children (profile "named-a"))))
+            (is (= 5 (:seon.render.profile/max-children (profile "named-b"))))
+            (is (= [] (:seon.render.transcript/runs (history "named-b")))))
+          (testing "a named cluster without configuration refuses by that name"
+            (doseq [refusal [(fleet "unconfigured") (profile "unconfigured")
+                             (history "unconfigured")]]
+              (is (= "unconfigured" (:seon.config/missing-effective refusal)))))
           (finally
             (flow/stop graph)))))))

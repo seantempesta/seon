@@ -19,6 +19,7 @@
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.id :as id]
             [seon.error :as error]
             [seon.print :as print]
@@ -124,22 +125,25 @@
       (if-let [projection (or (:seon.schema/projection request)
                               (some-> (:seon.db/db request) db/carried-projection)
                               (schema/handed-projection))]
+        ;; The request's context environment names the cluster: a forked
+        ;; branch carries its parent's cluster rows, so no row can.
         (let [database (:seon.db/db request)
-              cluster-name
-              (when database
-                (db/q '[:find ?cluster-name .
-                        :where
-                        [?cluster :seon.cluster/name ?cluster-name]]
-                      database))
-              effective (if (:seon.db/invalid-read cluster-name)
-                          cluster-name
-                          (when cluster-name
-                            (schema/call-with-projection
-                             projection #(config/effective database cluster-name))))]
-          (if (or (:seon.config/error-key effective) (:seon.config/missing-effective effective) (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-            (assoc effective :seon.render/refused-member :seon.render/profile)
-            (or (when effective (agent-render-profile effective))
-                @default-agent-profile)))
+              cluster-name (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request)))
+              effective (cond
+                          (nil? database) nil
+                          (nil? cluster-name)
+                          (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/request-profile
+                           {:seon.error/message "Rendering a database value requires a carried profile or a context whose environment names the cluster."
+                            :seon.error/fix "Carry the caller's context or its render profile."
+                            :seon.error/member :seon.boot/cluster-name
+                            :seon.error/expected :seon.boot/cluster-name
+                            :seon.error/offending (vec (sort (keys request)))})
+                          :else (schema/call-with-projection
+                                 projection #(config/effective database cluster-name)))]
+          (cond
+            (nil? effective) @default-agent-profile
+            (:seon.error/at effective) (assoc effective :seon.render/refused-member :seon.render/profile)
+            :else (agent-render-profile effective)))
         (let [observation
               (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/request-profile
                {:seon.error/message "Rendering requires a carried profile or handed projection."
@@ -1753,13 +1757,6 @@
   (or (:seon.db/db *walk-context*)
       (db/db)))
 
-(defn- custody-cluster-name
-  {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :nil :seon.cluster/name :seon.db/error-result]]}
-  [database]
-  (db/q '[:find ?cluster-name .
-          :where [_ :seon.cluster/name ?cluster-name]] database))
-
 (defn- repl-state
   [db agent-id]
   (let [basis (db/basis-t db)
@@ -1824,22 +1821,26 @@
          (walk-error "No calling agent is bound to this evaluation.")
 
          :else
-         (let [cluster-name (custody-cluster-name db)
+         (let [cluster-name (:seon.boot/cluster-name
+                             (env/of (:seon.sci.eval/ctx *walk-context*)))
                effective (when cluster-name
                            (config/effective db cluster-name))
                caps (or (:seon.sci.admit/caps *walk-context*)
                         (some-> effective config/result-caps))
-               profile (when effective
+               profile (when (and effective (not (:seon.error/at effective)))
                          (agent-render-profile effective))]
            (cond
+             (:seon.error/at effective)
+             (pr-str effective)
+
              (or (empty? caps) (some nil? (vals caps)))
              (walk-error
               (if cluster-name
                 (str "Cluster " (pr-str cluster-name)
                      " has no complete render caps.")
                 (str "Agent " (pr-str agent-id)
-                     " has neither ambient render caps nor a cluster "
-                     "connection from which to derive them.")))
+                     " has neither ambient render caps nor a context "
+                     "environment naming its cluster.")))
 
              :else
              (let [root (get options :root

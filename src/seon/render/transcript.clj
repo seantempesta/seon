@@ -853,36 +853,17 @@
 ;;; out is an ordinary elision value and not a truncation.
 ;;; ---------------------------------------------------------------------------
 
-(defn- agent-config
-  "The effective configuration of the cluster this agent belongs to."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.config/effective]}
-  [database]
-  (let [cluster-name
-        (db/q '[:find ?cluster-name .
-                :where [_ :seon.cluster/name ?cluster-name]] database)
-        effective (when (and cluster-name
-                             (not (or (:seon.db/invalid-read cluster-name) (:seon.schema/expected-value cluster-name))))
-                    (config/effective database cluster-name))]
-    (if (and (map? effective) (nil? (or (:seon.db/invalid-read effective) (:seon.schema/expected-value effective) (:seon.config/error-key effective) (:seon.config/missing-effective effective))))
-      effective
-      config/defaults)))
-
 (def ^:private history-run-selector
   [:seon.turn/id
    {:seon.turn/opened-tx [:db/id :db/txInstant]}
    {:seon.turn/closed-tx [:db/id :db/txInstant]}])
 
-(defn agent-history
-  "This agent's own submitted forms and their stored results, newest run first.
-
-  The runs are bounded by the cluster's declared agent child count; the runs
-  beyond it are an ordinary elision value carrying their count and a requery
-  identity, so nothing is silently dropped."
-  {:malli/schema [:=> [:cat :seon.render.transcript/history-request]
+(defn- agent-history-under
+  "The history rows bounded by one cluster's effective configuration."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.config/effective]
                   [:or :seon.render.transcript/history :seon.db/error-result]]}
-  [{database :seon.db/db agent-id :seon.agent/id}]
-  (let [effective (agent-config database)
-        limit (long (:seon.config.render.agent/max-children effective))
+  [database agent-id effective]
+  (let [limit (long (:seon.config.render.agent/max-children effective))
         caps (config/result-caps effective)
         rows (db/q {:query '[:find ?run ?opened
                              :in $ ?agent-id
@@ -926,6 +907,22 @@
                   :seon.render.profile/id :seon.render.profile/agent
                   :seon.print/requery-id
                   [:seon.agent/id agent-id]}))))))
+
+
+(defn agent-history
+  "This agent's own submitted forms and their stored results, newest run first.
+
+  The runs are bounded by the cluster's declared agent child count; the runs
+  beyond it are an ordinary elision value carrying their count and a requery
+  identity, so nothing is silently dropped."
+  {:malli/schema [:=> [:cat :seon.render.transcript/history-request]
+                  [:or :seon.render.transcript/history :seon.db/error-result
+                   :seon.config/error :seon.schema/validation-refusal]]}
+  [{database :seon.db/db agent-id :seon.agent/id cluster-name :seon.boot/cluster-name}]
+  (let [effective (config/effective database cluster-name)]
+    (if (:seon.error/at effective)
+      effective
+      (agent-history-under database agent-id effective))))
 
 (defn render-history-ai
   "The prompt is this concern's AI projection, so emit no duplicate text."
@@ -1464,9 +1461,11 @@
   A model with recorded usage supplies its own ratio through
   `seon.cluster.prompt/agent-calibration` under the cluster the request's
   context environment names; an agent with no settled attempt yet uses the
-  measured shipped prior rather than inventing one."
+  measured shipped prior rather than inventing one. A calibration refusal
+  (no named cluster, no configuration) is returned for the outline to show."
   {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.boot/cluster-name]
-                       :seon.agent/id [:sequential :map]] :seon.ai.tokens/calibration]}
+                       :seon.agent/id [:sequential :map]]
+                  [:or :seon.ai.tokens/calibration :seon.error/value]]}
   [database cluster-name agent-id rows]
   (let [model (some :seon.ai/model
                     (reverse (sort-by :seon.ai.attempt/ordinal
@@ -1474,9 +1473,7 @@
         fitted (when model
                  ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
                   database cluster-name agent-id model))]
-    (if (or (nil? fitted) (or (:seon.db/invalid-read fitted) (:seon.schema/expected-value fitted) (:seon.config/error-key fitted) (:seon.config/missing-effective fitted) (:seon.cluster.prompt/missing-cluster fitted) (:seon.cluster.prompt/missing-config fitted)))
-      tokens/shipped-calibration
-      fitted)))
+    (or fitted tokens/shipped-calibration)))
 
 (defn- outline-renderer
   "The declared renderer that produced this unit's saved shown text.
@@ -1612,6 +1609,10 @@
        (:seon.render.web/refused-member acquired)
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))]
+
+       (:seon.error/at calibration)
+       [:div {:class "seon-emission-error"}
+        (error/render-html (assoc request :seon.render/value calibration))]
 
        (empty? rows) [:p "No turns recorded."]
 

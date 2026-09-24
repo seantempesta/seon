@@ -7,6 +7,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
+            [seon.env]
             [seon.blob :as blob]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
@@ -1087,8 +1088,11 @@
                :seon.cluster.eval/source (str "(+ " ordinal " 1)")}]))
          (range 3))))
       (let [database @connection
+            cluster-name (:seon.boot/cluster-name
+                          (seon.env/of (support/fork-cluster-ctx connection)))
             derived (transcript/agent-history
-                     {:seon.db/db database :seon.agent/id agent-id})
+                     {:seon.db/db database :seon.agent/id agent-id
+                      :seon.boot/cluster-name cluster-name})
             runs (:seon.render.transcript/runs derived)
             rows (db/pull-many
                   database

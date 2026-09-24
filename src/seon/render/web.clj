@@ -60,6 +60,7 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.error :as error]
             [seon.oversight :as oversight]
             [seon.render :as render]
@@ -364,7 +365,7 @@
 ;;; Painting
 ;;; ---------------------------------------------------------------------------
 
-(declare walk-request root-call-id acquire-root current-cluster-name)
+(declare walk-request root-call-id acquire-root cluster-effective!)
 
 (defn- unit-id
   [agent-id unit]
@@ -2259,7 +2260,7 @@
     (schema/call-with-projection
      projection
      (fn []
-       (let [effective (config/effective database (current-cluster-name database))
+       (let [effective (cluster-effective! service database)
              profile (render/agent-render-profile effective)]
          (:seon.render.web/page
           (derive-page! handle database {} profile registration-key false false)))))))
@@ -3119,11 +3120,28 @@
        db agent-id))
 
 (defn- current-cluster-name
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :nil :seon.cluster/name :seon.db/error-result]]}
-  [db]
-  (db/q '[:find ?cluster-name .
-         :where [?cluster :seon.cluster/name ?cluster-name]]
-       db))
+  "The cluster the service's context environment names, or nil.
+  A forked branch carries its parent's cluster rows, so no row can name it."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.boot/cluster-name]]}
+  [service]
+  (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx service))))
+
+(defn- cluster-effective!
+  "The named cluster's effective configuration; its refusal is thrown whole."
+  {:malli/schema [:=> [:cat :map :seon.db/database-value] :seon.config/effective]}
+  [service database]
+  (let [cluster-name (current-cluster-name service)
+        effective (if cluster-name
+                    (config/effective database cluster-name)
+                    (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/cluster-effective!
+                     {:seon.error/message "The web service's context environment names no cluster."
+                      :seon.error/fix "Start the web service with its cluster's context."
+                      :seon.error/member :seon.boot/cluster-name
+                      :seon.error/expected :seon.boot/cluster-name}))]
+    (if (:seon.error/at effective)
+      (throw (ex-info (:seon.error/message effective "The cluster's configuration refused.")
+                      effective))
+      effective)))
 
 (defn- ensure-namespace-owner!
   "Create the namespace's owner agent unless one is assigned; its id or refusal.
@@ -3133,7 +3151,8 @@
   transaction, and the agent it creates runs provider turns (issue 24w)."
   {:malli/schema [:=> [:cat [:map [:seon.store/connection-object :seon.db/connection] [:seon.db.process/id :seon.db.process/id]] :seon.render/namespace] [:or :seon.agent/id :seon.render.web/request-error :seon.agent/error :seon.db/error-result]]}
   [{connection :seon.store/connection-object
-    process :seon.db.process/id}
+    process :seon.db.process/id
+    :as service}
    namespace-name]
   ;; Any agent assigned to the namespace evaluates there; stewardship only
   ;; routes that namespace's faults and requests.
@@ -3142,7 +3161,7 @@
             result (ensure!
                     connection process
                     {:seon.agent/id (str namespace-name)
-                     :seon.cluster/name (current-cluster-name (db/db connection))
+                     :seon.cluster/name (current-cluster-name service)
                      :seon.ns/name namespace-name})]
         (if (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           result
@@ -3340,7 +3359,7 @@
                     (:seon.sci.eval/ctx service))
         effective (schema/call-with-projection
                    projection
-                   #(config/effective db (current-cluster-name db)))
+                   #(cluster-effective! service db))
         render-context
         (assoc service :seon.render/profile
                (render/agent-render-profile effective))
@@ -3561,7 +3580,7 @@
                     (:seon.sci.eval/ctx service))
         effective (schema/call-with-projection
                    projection
-                   #(config/effective db (current-cluster-name db)))
+                   #(cluster-effective! service db))
         options
         (select-keys
          effective

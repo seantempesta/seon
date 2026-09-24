@@ -29,26 +29,21 @@
             [seon.turn :as turn]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.render.block :as block]))
 
 ;;; Flow's ping contract is explicitly timeout-bounded because an active
 ;;; transform cannot answer until it returns. The window is a config fact;
 ;;; absence of a reply remains unknown rather than becoming a health claim.
 
-(defn- cluster-name
-  "The database value's cluster name, or nil when no cluster row exists."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:maybe :seon.cluster/name]]}
-  [db]
-  (db/q '[:find ?name .
-         :where [_ :seon.cluster/name ?name]]
-       db))
+(defn- context-cluster-name
+  "The cluster the carried context's environment names, or nil.
 
-(defn- ping-timeout-ms
-  "The configured Flow ping window for the database value's cluster."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.config.flow/ping-timeout-ms]}
-  [db]
-  (:seon.config.flow/ping-timeout-ms
-   (config/effective db (cluster-name db))))
+  A forked branch holds its parent's cluster rows too, so no database row
+  can name the cluster; the caller's context environment is the one place."
+  {:malli/schema [:=> [:cat [:maybe :seon.sci.eval/ctx]] [:maybe :seon.boot/cluster-name]]}
+  [ctx]
+  (:seon.boot/cluster-name (env/of ctx)))
 
 (defn- current-run-id
   "The agent's open turn id, or nil when none is open."
@@ -167,14 +162,23 @@
 
 (defn- fleet-value
   "The complete process-local fleet value at one database value, or the
-  routing entry's declared unavailability."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/routing]
-                  [:or :seon.oversight/fleet :seon.oversight/unavailable]]}
-  [db routing]
-  (let [state (live-state routing)]
-    (if (:seon.oversight/missing state)
-      state
-      (let [timeout-ms (ping-timeout-ms db)]
+  routing entry's declared unavailability, or the named cluster's config
+  refusal. A caller naming no cluster lacks `:seon.boot/cluster-name`."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.boot/cluster-name]
+                       :seon.agent/routing]
+                  [:or :seon.oversight/fleet :seon.oversight/unavailable
+                   :seon.config/error :seon.schema/validation-refusal
+                   :seon.db/invalid-read-error]]}
+  [db cluster-name routing]
+  (let [state (live-state routing)
+        effective (when (and cluster-name (not (:seon.oversight/missing state)))
+                    (config/effective db cluster-name))]
+    (cond
+      (:seon.oversight/missing state) state
+      (nil? cluster-name) {:seon.oversight/missing [:seon.boot/cluster-name]}
+      (:seon.error/at effective) effective
+      :else
+      (let [timeout-ms (:seon.config.flow/ping-timeout-ms effective)]
         {:seon.oversight/agents
          (into []
                (map (fn [[agent-id entry]]
@@ -184,11 +188,15 @@
          (plumbing-story (:seon.flow/graph state) timeout-ms)}))))
 
 (defn flow-status
-  "Return the current agent and plumbing Flow observations for one instance."
+  "Return the current agent and plumbing Flow observations for one instance,
+  under the cluster its context's environment names."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/instance]
-                  [:or :seon.oversight/fleet :seon.oversight/unavailable]]}
+                  [:or :seon.oversight/fleet :seon.oversight/unavailable
+                   :seon.config/error :seon.schema/validation-refusal
+                   :seon.db/invalid-read-error]]}
   [db instance]
-  (fleet-value db (:seon.agent/routing instance)))
+  (fleet-value db (context-cluster-name (:seon.sci.eval/ctx instance))
+               (:seon.agent/routing instance)))
 
 (defn unit
   "Build the live fleet render unit; nil only for a detached request."
@@ -197,7 +205,9 @@
   [source]
   (when-let [routing (:seon.agent/routing source)]
     (assoc source
-           :seon.render/value (fleet-value (:seon.db/db source) routing)
+           :seon.render/value (fleet-value (:seon.db/db source)
+                                           (context-cluster-name (:seon.sci.eval/ctx source))
+                                           routing)
            :seon.render/ai `ai-story
            :seon.render/html `html-table)))
 
@@ -226,12 +236,15 @@
     :else "unknown"))
 
 (defn- unavailable-text
-  "Name the live-state members the handed routing entry lacked."
-  {:malli/schema [:=> [:cat :seon.oversight/unavailable] :string]}
+  "Name what the live fleet value lacked: routing members, the caller's
+  cluster name, or the named cluster's configuration (its refusal)."
+  {:malli/schema [:=> [:cat [:or :seon.oversight/unavailable :seon.error/value]] :string]}
   [unavailable]
-  (str "Live fleet state is unavailable: the routing entry lacks "
-       (str/join ", " (:seon.oversight/missing unavailable))
-       "."))
+  (if-let [missing (:seon.oversight/missing unavailable)]
+    (str "Live fleet state is unavailable: the request lacks "
+         (str/join ", " missing) ".")
+    (str "Live fleet state is unavailable: "
+         (or (:seon.error/message unavailable) (pr-str (:seon.error/operation unavailable))))))
 
 (defn ai-story
   "Tell the fleet's current story in one concise line."
@@ -240,7 +253,7 @@
   (let [value (:seon.render/value unit)
         agents (:seon.oversight/agents value)]
     (cond
-      (:seon.oversight/missing value)
+      (or (:seon.oversight/missing value) (:seon.error/at value))
       (unavailable-text value)
 
       (empty? agents)
@@ -283,12 +296,13 @@
   (let [value (:seon.render/value unit)
         agents (:seon.oversight/agents value)
         plumbing (:seon.oversight/plumbing value)]
-    (if (:seon.oversight/missing value)
+    (if (or (:seon.oversight/missing value) (:seon.error/at value))
       [:section {:id (block/surface-id :fleet-oversight)
                  :class "seon-card"}
        [:h2 "fleet"]
        [:p {:data-fleet-oversight "unavailable"
-            :data-missing (str/join " " (:seon.oversight/missing value))}
+            :data-missing (str/join " " (or (:seon.oversight/missing value)
+                                            [(:seon.error/operation value)]))}
         (unavailable-text value)]]
     [:section {:id (block/surface-id :fleet-oversight)
                :class "seon-card"}

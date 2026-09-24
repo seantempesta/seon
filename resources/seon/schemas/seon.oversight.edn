@@ -3,7 +3,7 @@
                   {:description "The routing entry's contents oversight reads: the armed agent graphs by agent id and the cluster graph joined before it resumes. Open: the entry carries other process-local members."}
                   [:seon.agent/armed [:map-of :seon.agent/id :seon.agent/armed]]
                   [:seon.flow/graph :seon.flow/graph]],
-                 :missing [:vector {:min 1 :description "The live-state members the handed routing entry did not hold."} :qualified-keyword],
+                 :missing [:vector {:min 1 :description "The live-state members the handed request did not hold: routing entry members, or :seon.boot/cluster-name when no context environment names the cluster."} :qualified-keyword],
                  :unavailable
                  [:map
                   {:description "Live fleet state was requested with a routing entry that cannot answer it. Rendered visibly; never an empty fleet."}
@@ -12,7 +12,8 @@
                  [:map
                   {:description "One oversight render source. Supplying routing asks for live state; omitting it is a detached render of facts with no live graph."}
                   [:seon.db/db :seon.db/database-value]
-                  [:seon.agent/routing {:optional true} :seon.agent/routing]],
+                  [:seon.agent/routing {:optional true} :seon.agent/routing]
+                  [:seon.sci.eval/ctx {:optional true :description "The caller's context; its environment names the cluster whose ping window applies. Absent with routing present is unavailable, never a guessed cluster."} :seon.sci.eval/ctx]],
                  :proc [:qualified-keyword {:description "A Flow proc id. core.async.flow admits any value; every Seon graph producer (seon.cluster/cluster-graph-definition, seon.cluster.agent's blueprint, seon.flow's work-launcher and fault graphs) names its procs with qualified keywords, and this is the grammar oversight reads."}],
                  :flow-buffer
                  [:map
@@ -78,4 +79,4 @@
                   [:seon.oversight/plumbing :seon.oversight/plumbing]],
                  :unit
                  [:and :seon.render/unit
-                  [:map [:seon.render/value [:or :seon.oversight/fleet :seon.oversight/unavailable]]]]}
+                  [:map [:seon.render/value [:or :seon.oversight/fleet :seon.oversight/unavailable :seon.config/error :seon.schema/validation-refusal :seon.db/invalid-read-error]]]]}
