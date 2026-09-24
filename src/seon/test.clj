@@ -116,6 +116,13 @@
   member body; an agent (SCI) body reaches its branch through custody instead."
   nil)
 
+;;; LOAD-CYCLE BOUNDARY: `seon.cluster` owns the adoption exclusion.
+(def ^:private call-excluding-adoption
+  (delay (requiring-resolve 'seon.cluster/call-excluding-adoption)))
+
+(def ^:private program-change
+  (delay (requiring-resolve 'seon.cluster/program-change)))
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
@@ -138,10 +145,13 @@
             ;; bound; `duration-failures` fails any body that completes over it.
             body-bound (or (:seon.test/long-ms markers) 5000)
             member (:seon.test/member custody)
+            ;; No development adoption reloads or arms while this body runs.
             task (FutureTask.
                   (bound-fn []
-                    (with-test-loader
-                      #(if (var? test-var)
+                    (@call-excluding-adoption
+                     @@program-change
+                     #(with-test-loader
+                      (fn [] (if (var? test-var)
                          ;; A host body runs unarmed, with no inherited cluster
                          ;; custody, as a JVM test body always has: it may
                          ;; evaluate its own SCI contexts, which another arm on
@@ -151,7 +161,7 @@
                          (sci.eval/run-test
                           (assoc (dissoc custody :seon.test/member)
                                  :seon.test/var test-var
-                                 :seon.sci.eval/time-limit-ms body-bound))))))
+                                 :seon.sci.eval/time-limit-ms body-bound))))))))
             thread (.unstarted (Thread/ofVirtual) task)
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol
