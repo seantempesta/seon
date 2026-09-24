@@ -161,15 +161,30 @@
    Nil means only that nothing names the predicate: its namespace loads
    without that Var, or no file for the namespace is on the classpath
    (`RT.load` throws `FileNotFoundException` itself for the requested root).
-   A namespace that exists but fails to load throws `requiring-resolve`'s
-   whole `CompilerException` — a missing transitive require arrives wrapped
-   in one — so a compile failure is never read as an unresolved predicate."
+   A namespace that exists but fails to load — a missing transitive require
+   arrives wrapped in a `CompilerException` too — throws the declared
+   `:seon.schema/unloadable-predicate-error` carrying the whole cause chain,
+   so a compile failure is never read as an unresolved predicate."
   {:malli/schema [:=> [:cat :qualified-symbol] [:or :nil [:fn clojure.core/var?]]]}
   [predicate]
   (try
     (requiring-resolve predicate)
     (catch java.io.FileNotFoundException _
-      nil)))
+      nil)
+    (catch clojure.lang.Compiler$CompilerException failure
+      (let [refusal
+            (refusal/diagnostic
+             {:seon.error/at (java.util.Date.)
+              :seon.error/layer :seon.schema/derivation
+              :seon.error/operation 'seon.schema/runtime-predicate
+              :seon.error/message
+              (str "Predicate " predicate " cannot resolve: its namespace "
+                   (namespace predicate) " failed to load ("
+                   (ex-message failure) "). Fix that namespace, then retry.")
+              :seon.error/member predicate
+              :seon.error/throwable failure
+              :seon.schema/unloadable-predicate predicate})]
+        (throw (ex-info (:seon.error/message refusal) refusal failure))))))
 
 (defn- loaded-predicate-var
   "The Var a qualified predicate symbol names, WITHOUT loading its namespace.

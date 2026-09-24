@@ -116,6 +116,8 @@
               :cyclic-reference-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the schema participating in a cyclic reference"} [:seon.schema/cyclic-reference :seon.schema/cyclic-reference] [:seon.error/message :seon.error/message]]
               :unresolved-predicate :qualified-symbol
               :unresolved-predicate-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify the predicate with no admitted callable"} [:seon.schema/unresolved-predicate :seon.schema/unresolved-predicate] [:seon.error/message :seon.error/message]]
+              :unloadable-predicate :qualified-symbol
+              :unloadable-predicate-error [:and {:seon.db/attributes false :description "A predicate whose namespace exists but failed to load; the load failure survives as the cause chain."} :seon.error/base [:map [:seon.schema/unloadable-predicate :seon.schema/unloadable-predicate]]]
               :noncanonical-definition :seon.schema/key
               :noncanonical-definition-error [:map {:seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html :error/message "must identify a durable schema definition that is not canonical EDN"} [:seon.schema/noncanonical-definition :seon.schema/noncanonical-definition] [:seon.error/message :seon.error/message]]
               :noncanonical-projection-data [:= true]

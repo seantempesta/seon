@@ -1817,7 +1817,8 @@
 (deftest a-predicate-namespace-that-fails-to-load-is-not-an-unresolved-predicate
   ;; CLASS: `runtime-predicate` caught every Throwable as nil, so a predicate
   ;; namespace that fails to compile read as "nothing names it" and its
-  ;; compile error disappeared (ambiguous-nil census S1). The classpath is the
+  ;; compile error disappeared (ambiguous-nil census S1); it is now one
+  ;; declared error with the load failure as its cause. The classpath is the
   ;; external effect here: a scratch root, handed through `Compiler/LOADER` —
   ;; the loader `RT.load` reads — so no broken source ever joins the
   ;; project classpath.
@@ -1839,16 +1840,24 @@
               "(ns seon-schema-load-probe.transitive (:require [seon-schema-load-probe.absent]))\n(defn ok? [_] true)")
       (write! "seon_schema_load_probe/fine.clj"
               "(ns seon-schema-load-probe.fine)\n(defn ok? [_] true)")
-      (testing "a compile failure surfaces whole, with its location"
+      (testing "a compile failure is the declared error, keeping its whole cause"
         (let [thrown (try (registered? 'seon-schema-load-probe.broken/ok?) nil
-                          (catch clojure.lang.Compiler$CompilerException e e))]
-          (is (instance? clojure.lang.Compiler$CompilerException thrown))
+                          (catch clojure.lang.ExceptionInfo e e))]
+          (is (= 'seon-schema-load-probe.broken/ok?
+                 (:seon.schema/unloadable-predicate (ex-data thrown))))
+          (is (nil? (schema/explain-candidate-value
+                     (schema/declaration-projection (schema.edn/packaged-forms))
+                     :seon.schema/unloadable-predicate-error (ex-data thrown))))
+          (is (= 'clojure.lang.Compiler$CompilerException
+                 (:seon.error/exception-class (ex-data thrown))))
           (is (= "seon_schema_load_probe/broken.clj"
-                 (:clojure.error/source (ex-data thrown))))))
+                 (:clojure.error/source (ex-data (ex-cause thrown)))))))
       (testing "a missing transitive require is a load failure, not absence"
         (let [thrown (try (registered? 'seon-schema-load-probe.transitive/ok?) nil
-                          (catch clojure.lang.Compiler$CompilerException e e))]
-          (is (instance? java.io.FileNotFoundException (ex-cause thrown)))))
+                          (catch clojure.lang.ExceptionInfo e e))]
+          (is (= 'seon-schema-load-probe.transitive/ok?
+                 (:seon.schema/unloadable-predicate (ex-data thrown))))
+          (is (instance? java.io.FileNotFoundException (ex-cause (ex-cause thrown))))))
       (testing "nothing naming the predicate is still nothing"
         (is (false? (registered? 'seon-schema-load-probe.absent/ok?)))
         (is (false? (registered? 'seon-schema-load-probe.fine/never-declared?)))
