@@ -40,11 +40,11 @@ forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by name
 **One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
 dead snapshot fields still owed; wave 3 F2/F5/F6 (projection wrappers, call-with-projection sweep, lazy registry) next.
 
-**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Green today: S1 release + disarm (34/0),
-fault delivery (2), no-wake, projection builder key, evidence reuse, bounded failure text, SCI aliases, refused lookup,
-launcher API, datahike root pin (4/12, red on parent). Red: seon.fault-test record-mode (fault recording 1,716 ms vs
-its 1,000 ms bound — a cost defect), problems fact-shape (:376/379), one-request unexited member (parent comparison
-owed), flow-test turn-evaluation (not eligible).
+**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Latest checkpoint (~22:40Z): 15 of 18
+focused regressions green (detection, F3–F6, F8, agent.clj lock replacements, S2a, fs locks); 3 red with test-side causes,
+back to lanes. Kondo dependency fill now required before publication of src/ (15.3 s once; AGENTS.md corrected f8caae1a4).
+Open: agent-submitted (stdin) forms run kondo with the cache disabled, so after F7 they cannot resolve dependency macros
+(refuse instead) — needs the cache on that path.
 
 ## Recurring classes — root causes, not symptoms (owner 2026-09-24: "step back and find root causes")
 
