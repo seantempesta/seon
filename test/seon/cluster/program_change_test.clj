@@ -16,10 +16,12 @@
   {:seon.source/reloaded-namespaces [] :seon.source/arming-identities #{}})
 
 (defn- adopt!
-  "Run one adoption toward `commit` on `loaded`; a refusal answers its message."
+  "Run one adoption toward `commit` on `loaded`; a failure answers its root
+  cause's message (a throw inside `load-string` arrives wrapped by the Compiler)."
   [loaded commit work]
   (try (@#'cluster/call-with-program-change loaded commit work)
-       (catch clojure.lang.ExceptionInfo failure (ex-message failure))))
+       (catch Exception failure
+         (ex-message (last (take-while some? (iterate ex-cause failure)))))))
 
 (defn- member-run
   "Run `body` as one member test through `seon.test/bounded-result` on `loaded`,
@@ -93,7 +95,8 @@
                                                         " (throw (ex-info \"reload stopped midway\" {}))")))))
         (is (= :new @(resolve (symbol scratch "loaded"))) "the root changed before the failure")
         (is (= commit (:seon.source/commit-id @loaded)))
-        (is (= ["reload stopped midway"] (keep :seon.error/message (:seon.error/chain @loaded))))))
+        (is (= "reload stopped midway" (last (keep :seon.error/message (:seon.error/chain @loaded))))
+            "the chain keeps the root cause")))
     (doseq [[label message] [["arming" "Development JVM instrumentation did not restore contracts."]
                              ["the record" "The cluster population transaction was refused: basis moved"]]]
       (testing (str label " refused after the reload")
