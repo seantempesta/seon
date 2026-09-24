@@ -42,14 +42,24 @@
   "Loaded Vars bearing their own host wrapper, derived without a registry."
   {:malli/schema [:=> [:cat] [:set :seon.instrument/loaded-var]]}
   []
-  (into #{}
-        (comp (mapcat ns-interns)
-              (map val)
-              (filter (fn [candidate]
-                        (and (bound? candidate)
-                             (identical? candidate
-                                         (::var (meta @candidate)))))))
-        (all-ns)))
+  ;; Reads each namespace's own mapping table (`Namespace.getMappings`); an
+  ;; interned Var is one whose `.ns` is that namespace, which is the filter
+  ;; `ns-interns` applies to a map it copies first
+  ;; (`reference-code/clojure/src/clj/clojure/core.clj:4237`). A wrapper is
+  ;; installed on the root, so the root is read, never a thread binding.
+  ;; The copy cost 15 ms and 78 MB per call over 485k mappings (2026-09-24).
+  (persistent!
+   (reduce (fn [found ^clojure.lang.Namespace namespace-object]
+             (reduce-kv (fn [found _ candidate]
+                          (if (and (instance? clojure.lang.Var candidate)
+                                   (identical? namespace-object (.ns ^clojure.lang.Var candidate))
+                                   (.hasRoot ^clojure.lang.Var candidate)
+                                   (identical? candidate
+                                               (::var (meta (.getRawRoot ^clojure.lang.Var candidate)))))
+                            (conj! found candidate)
+                            found))
+                        found (.getMappings namespace-object)))
+           (transient #{}) (all-ns))))
 
 (defn- primitive-fn?
   "Malli's own exclusion rule, read from its source rather than remembered.
