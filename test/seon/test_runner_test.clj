@@ -387,3 +387,50 @@
         (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
         (is (= symbols (:seon.error/offending refusal)) "the refusal names both tests")
         (is (not-any? #(string? (get refusal %)) symbols) "no reuse key is answered")))))
+
+(deftest a-failure-over-huge-values-reports-and-identifies-within-the-render-bound
+  ;; Default died of OutOfMemoryError "Requested array size exceeds VM limit"
+  ;; (2026-09-24T23:27Z, seon.test.overlay-world-test): failure-identity and
+  ;; failure-report pr-str'd whole expected/actual values, and a test error
+  ;; carried a whole program overlay. Each value here prints as over 200 MB
+  ;; while holding one shared 1 MiB string; before the fix one whole print of
+  ;; a tenth of it took 713 ms and allocated 112 MB.
+  (let [mebibyte (.repeat "x" (* 1024 1024))
+        huge (vec (repeat 200 mebibyte))
+        test-var #'a-failure-over-huge-values-reports-and-identifies-within-the-render-bound
+        options (#'runner/report-options)
+        bound (* 4 (:seon.render.profile/token-budget (:seon.render/profile options)))
+        capture (atom {::runner/order [] ::runner/results {}})
+        report! (fn [event]
+                  (with-out-str
+                    (binding [test/*test-out* *out*
+                              test/*report-counters* (ref test/*initial-report-counters*)
+                              test/*testing-vars* [test-var]]
+                      (#'runner/capture-and-report-event!
+                       options capture #{'seon.test-runner-test}
+                       (fn [_] (throw (ex-info "Raw assertion reporter bypass" {})))
+                       (atom #{}) event))))
+        event {:type :fail :var test-var :expected huge :actual {:seon.test/overlay huge}}
+        threads ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+        thread (.getId (Thread/currentThread))
+        allocated-before (.getThreadAllocatedBytes threads thread)
+        started (System/nanoTime)
+        output (report! event)
+        elapsed-ms (/ (- (System/nanoTime) started) 1e6)
+        allocated (- (.getThreadAllocatedBytes threads thread) allocated-before)
+        _ (report! (assoc event :actual {:seon.test/overlay (conj huge "different")}))
+        [first-report second-report] (:seon.test.failure/reports
+                                      (first (#'runner/captured-results @capture)))]
+    (is (< elapsed-ms 1000) (str "capturing and reporting the failure took " elapsed-ms " ms"))
+    (is (< allocated (* 256 1024 1024))
+        (str "the failure allocated " allocated " bytes; one whole print is over 400 MB"))
+    (is (< (count output) bound) (str "the gate log printed " (count output) " chars"))
+    (doseq [field [:seon.test.failure/expected :seon.test.failure/actual]]
+      (is (< (count (get first-report field)) bound) (str field " is bounded by the render profile"))
+      (is (str/includes? (get first-report field) ":seon.print/omitted") (str field " names its elision")))
+    (is (= (:seon.test/failure-identity first-report)
+           (#'runner/failure-identity options (symbol test-var) event))
+        "the identity is stable across renders")
+    (is (not= (:seon.test/failure-identity first-report)
+              (:seon.test/failure-identity second-report))
+        "a claim that renders differently has a different identity")))

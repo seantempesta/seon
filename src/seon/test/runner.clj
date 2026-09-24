@@ -60,14 +60,6 @@
   [event]
   (var-symbol (or (:var event) (first test/*testing-vars*))))
 
-(defn- printable
-  [options value]
-  (if (instance? Throwable value)
-    (str (.getName (class value)) ": " (or (ex-message value) ""))
-    (binding [*print-length* (:seon.print/length options)
-              *print-level* (:seon.print/level options)]
-      (pr-str value))))
-
 (defn- report-options
   ([]
    (let [configuration config/defaults]
@@ -149,25 +141,6 @@
        (remove str/blank?)
        (str/join "\n")))
 
-(defn- failure-identity
-  "Content identity for one normalized failing assertion report.
-
-  SCI reports interpreted tests from generic JVM frames, so a source position
-  would claim precision the reporter does not have. The normalized report is
-  stable across reruns and distinguishes different failing claims."
-  [options test-symbol event]
-  (schema/sha-256
-   [(.getBytes
-     (pr-str [test-symbol
-              (:type event)
-              (:message event)
-              (when (contains? event :expected)
-                (printable options (:expected event)))
-              (when (contains? event :actual)
-                (printable options (:actual event)))
-              (event-signature event)])
-     StandardCharsets/UTF_8)]))
-
 (defn- ensure-result
   [capture test-symbol]
   (if (contains? (::results capture) test-symbol)
@@ -184,10 +157,19 @@
                    ::failure-messages []
                    ::failure-identities #{}}))))
 
-(defn- failure-report [event]
+(defn- failure-report
+  "One failing assertion as stored evidence. Expected and actual are the text
+  `report-value` renders — the text the gate log shows, bounded once by the
+  value renderer with each elision named, or a throwable's whole cause chain
+  under the floor — never a whole-value print: a test error carrying a
+  program overlay printed a >2 GB string and killed default with
+  OutOfMemoryError (2026-09-24T23:27Z). The whole message stays on the
+  report for the blob tier; the whole values stay on the event in memory."
+  {:malli/schema [:=> [:cat :map :map] :seon.test.failure/report]}
+  [options event]
   (cond-> {:seon.test.failure/type (:type event)}
-    (find event :expected) (assoc :seon.test.failure/expected (printable {} (:expected event)))
-    (find event :actual) (assoc :seon.test.failure/actual (printable {} (:actual event)))
+    (find event :expected) (assoc :seon.test.failure/expected (report-value options (:expected event)))
+    (find event :actual) (assoc :seon.test.failure/actual (report-value options (:actual event)))
     (:message event) (assoc :seon.test.failure/message (str (:message event)))
     (seq test/*testing-contexts*)
     ;; A label prints as `clojure.test/testing-contexts-str` prints it, by `str`
@@ -201,55 +183,81 @@
     (instance? Throwable (:actual event))
     (assoc :seon.test.failure/throwable (symbol (.getName (class (:actual event)))))))
 
+(defn- report-identity
+  "Content identity of one failing assertion from its stored `report`.
+
+  SCI reports interpreted tests from generic JVM frames, so a source position
+  would claim precision the reporter does not have. The claim is the test,
+  the event type, the bounded message and the report's bounded expected and
+  actual text: stable across reruns, distinct for claims that render
+  differently, and costing the render bound, never the values' printed size."
+  {:malli/schema [:=> [:cat :map :qualified-symbol :map :seon.test.failure/report] [:string {:min 64 :max 64}]]}
+  [options test-symbol event report]
+  (schema/sha-256
+   [(.getBytes
+     (pr-str [test-symbol
+              (:type event)
+              (when (some? (:message event)) (message-text options (:message event)))
+              (:seon.test.failure/expected report)
+              (:seon.test.failure/actual report)
+              (event-signature event)])
+     StandardCharsets/UTF_8)]))
+
+(defn- failure-identity
+  "Content identity for one failing assertion event (`report-identity`)."
+  [options test-symbol event]
+  (report-identity options test-symbol event (failure-report options event)))
+
 (defn- capture-event!
   [options capture selected-namespaces event]
   (when-let [test-symbol (event-symbol event)]
     (when (contains? selected-namespaces (symbol (namespace test-symbol)))
-      (swap! capture
-             (fn [current]
-               (let [current (ensure-result current test-symbol)
-                     event-type (:type event)]
-                 (case event-type
-                   :begin-test-var
-                   (-> current
-                       (assoc-in [::results test-symbol :seon.test.member/began?] true)
-                       (assoc-in [::results test-symbol ::started-nanos] (System/nanoTime)))
+      ;; A failure renders once, before the swap: a retried swap never renders again.
+      (let [report (when (#{:fail :error} (:type event)) (failure-report options event))
+            failure-id (when report (report-identity options test-symbol event report))
+            message (when report (failure-message options event))]
+        (swap! capture
+               (fn [current]
+                 (let [current (ensure-result current test-symbol)
+                       event-type (:type event)]
+                   (case event-type
+                     :begin-test-var
+                     (-> current
+                         (assoc-in [::results test-symbol :seon.test.member/began?] true)
+                         (assoc-in [::results test-symbol ::started-nanos] (System/nanoTime)))
 
-                   :end-test-var
-                   (-> current
-                       (assoc-in [::results test-symbol :seon.test.member/ended?] true)
-                       (assoc-in [::results test-symbol ::ended-nanos] (System/nanoTime)))
+                     :end-test-var
+                     (-> current
+                         (assoc-in [::results test-symbol :seon.test.member/ended?] true)
+                         (assoc-in [::results test-symbol ::ended-nanos] (System/nanoTime)))
 
-                   :pass
-                   (update-in current [::results test-symbol
-                                       :seon.test/pass-count] inc)
+                     :pass
+                     (update-in current [::results test-symbol
+                                         :seon.test/pass-count] inc)
 
-                   (:fail :error)
-                   (let [failure-id
-                         (failure-identity options test-symbol event)
-                         seen? (contains?
-                                (get-in current [::results test-symbol
-                                                 ::failure-identities])
-                                failure-id)]
-                     (cond-> (-> current
-                                 (update-in [::results test-symbol :seon.test.failure/reports]
-                                            (fnil conj [])
-                                            (assoc (failure-report event)
-                                                   :seon.test/failure-identity failure-id))
-                                 (update-in
-                                        [::results test-symbol
-                                         (if (= :fail event-type)
-                                           :seon.test/fail-count
-                                           :seon.test/error-count)]
-                                        inc))
-                       (not seen?)
-                       (update-in [::results test-symbol
-                                   ::failure-identities] conj failure-id)
-                       (not seen?)
-                       (update-in [::results test-symbol ::failure-messages]
-                                  conj (failure-message options event))))
+                     (:fail :error)
+                     (let [seen? (contains?
+                                  (get-in current [::results test-symbol
+                                                   ::failure-identities])
+                                  failure-id)]
+                       (cond-> (-> current
+                                   (update-in [::results test-symbol :seon.test.failure/reports]
+                                              (fnil conj [])
+                                              (assoc report :seon.test/failure-identity failure-id))
+                                   (update-in
+                                          [::results test-symbol
+                                           (if (= :fail event-type)
+                                             :seon.test/fail-count
+                                             :seon.test/error-count)]
+                                          inc))
+                         (not seen?)
+                         (update-in [::results test-symbol
+                                     ::failure-identities] conj failure-id)
+                         (not seen?)
+                         (update-in [::results test-symbol ::failure-messages]
+                                    conj message)))
 
-                   current)))))))
+                     current))))))))
 
 (defn- report-error!
   [options event signature]
