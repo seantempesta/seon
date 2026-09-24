@@ -6,7 +6,8 @@
             [datahike.api :as d]
             [edamame.core :as e]
             [malli.core :as m]
-            [malli.error :as me]))
+            [malli.error :as me]
+            [clojure.pprint]))
 
 (def task-dir "/Users/sean/src/seon/resources/seon/tasks/")
 
@@ -15,11 +16,13 @@
    [:seon.task/id :qualified-keyword]
    [:seon.task/problem [:string {:min 20}]]
    [:seon.task/subjects {:optional true} [:set :symbol]]
+   [:seon/must-read {:optional true} [:set :qualified-symbol]]
    [:seon.task/keys {:optional true} [:set :qualified-keyword]]
    [:seon.task/entities {:optional true} [:set [:tuple :qualified-keyword :any]]]
    [:seon.task/schemas {:optional true} [:map-of :qualified-keyword :any]]
-   [:seon.task/requirements [:vector {:min 1} :any]]
-   [:seon.task/delivers [:set {:min 1} :qualified-symbol]]
+   [:seon.task/requirements {:optional true} [:vector {:min 1} :any]]
+   [:seon.task/delivers {:optional true} [:set {:min 1} :qualified-symbol]]
+   [:seon.task/evidence {:optional true} [:set :string]]
    [:seon.task/needs {:optional true} [:set :qualified-keyword]]
    [:seon.task/context :qualified-symbol]])
 
@@ -93,6 +96,7 @@
     (concat
      (when-let [e (m/explain task-schema task)] [{:rule :shape :why (me/humanize e)}])
      (for [s subjects :when (not (program-node? db s))] {:rule :subject-missing :sym s})
+     (for [s (:seon/must-read task) :when (not (or (program-node? db s) (var-exists? s)))] {:rule :must-read-missing :sym s})
      (for [n (:seon.task/needs task) :when (not (ids n))] {:rule :needs-unknown-task :task n})
      (for [k (:seon.task/keys task)
            :when (not (or (key-known? registry k) (contains? (:seon.task/schemas task) k)))]
@@ -101,7 +105,14 @@
        {:rule :delivers-missing-and-untested :sym s})
      (for [c called :when (not (or (program-node? db c) (delivered c) (var-exists? c)))]
        {:rule :requirement-calls-unknown :sym c})
-     (when (empty? exercised) [{:rule :requirement-exercises-nothing-it-changes}])
+     (when (and (seq (:seon.task/requirements task)) (empty? exercised))
+       [{:rule :requirement-exercises-nothing-it-changes}])
+     (when (and (empty? (:seon.task/requirements task)) (not= 'seon.task/triage (:seon.task/context task)))
+       [{:rule :raised-task-needs-triage :why "a task without requirements can only be triaged"}])
+     (when (and (seq (:seon.task/requirements task)) (empty? (:seon.task/delivers task)))
+       [{:rule :specified-task-delivers-nothing}])
+     (for [p (:seon.task/evidence task) :when (not (.exists (java.io.File. (str "/Users/sean/src/seon/" p))))]
+       {:rule :evidence-missing :path p})
      (for [s (distinct (mapcat bare-symbol-values (:seon.task/requirements task)))]
        {:rule :unquoted-symbol-value :sym s :why "evaluates to the Var's value; write 'sym for the name"}))))
 
@@ -110,3 +121,57 @@
   [db registry tasks]
   (let [by-id (into {} (map (juxt :seon.task/id identity)) tasks)]
     (vec (for [t tasks f (task-findings db registry by-id t)] (assoc f :task (:seon.task/id t))))))
+
+(defn- entry [comment form value] {:comment comment :form form :value value})
+
+(defn- row-form [sym] (list 'seon.db/pull '(seon.db/db) ''[:seon.fn/doc :seon.fn/spec :seon.fn/source] [:seon.fn/sym (list 'quote sym)]))
+
+(defn brief-entries
+  "The brief for `task`: only forms the agent can evaluate itself in its SCI context, each with
+  the value it returns now. Order: the task, its proofs, what to read, where it lives."
+  [db task]
+  (let [pull-row (fn [sym] (d/pull db '[:seon.fn/doc :seon.fn/spec :seon.fn/source] [:seon.fn/sym sym]))
+        ns-sym (first (filter simple-symbol? (:seon.task/subjects task)))]
+    (concat
+     [(entry "Your task (given; tasks are not yet stored in the database)." nil
+             (select-keys task [:seon.task/id :seon.task/problem :seon.task/delivers :seon.task/needs]))
+      (entry "Done when every form here returns true on your branch. Evaluate them yourself." nil
+             (:seon.task/requirements task))]
+     (for [s (sort (:seon/must-read task))]
+       (entry (str "Must read: " s) (row-form s) (pull-row s)))
+     (when ns-sym
+       [(entry (str "Where your definitions go: the " ns-sym " namespace, as it describes itself.")
+               (list 'seon.db/pull '(seon.db/db) ''[:seon.ns/doc] [:seon.ns/name (list 'quote ns-sym)])
+               (d/pull db '[:seon.ns/doc] [:seon.ns/name ns-sym]))]))))
+
+(defn render-brief
+  "Brief entries as REPL-shaped text: comment, rN => form, value."
+  [entries]
+  (str/join "\n\n"
+            (map-indexed (fn [i {:keys [comment form value]}]
+                           (str ";; " comment "\n"
+                                (if form (str "r" (inc i) " => " (pr-str form) "\n") "")
+                                (if (and (map? value) (:seon.fn/source value))
+                                  (str ";; doc: " (:seon.fn/doc value) "\n;; contract: " (:seon.fn/spec value) "\n" (:seon.fn/source value))
+                                  (if (and (map? value) (:seon.ns/doc value))
+                                    (:seon.ns/doc value)
+                                    (str/trimr (with-out-str (clojure.pprint/pprint value)))))))
+                         entries)))
+
+(defn state
+  "Derived, never stored: :raised (no requirements), :specified (requirements, none run yet)."
+  [task]
+  (if (seq (:seon.task/requirements task)) :specified :raised))
+
+(defn plan
+  "The plan is a query: every task with its derived state, in dependency order (needs first)."
+  [tasks]
+  (let [by-id (into {} (map (juxt :seon.task/id identity)) tasks)]
+    (loop [out [] done #{} left (set (keys by-id))]
+      (if (empty? left) out
+          (let [ready (sort (filter #(every? done (:seon.task/needs (by-id %))) left))
+                ready (if (seq ready) ready [(first (sort left))])]
+            (recur (into out (map (fn [id] {:id id :state (state (by-id id))
+                                            :needs (vec (sort (:seon.task/needs (by-id id))))
+                                            :subjects (vec (sort (map str (:seon.task/subjects (by-id id)))))})) ready)
+                   (into done ready) (reduce disj left ready)))))))

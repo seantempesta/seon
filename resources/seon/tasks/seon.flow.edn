@@ -1,0 +1,13 @@
+;; Tasks about seon.flow — decoration language v0. Both are RAISED: a problem and its producers,
+;; no requirements yet. Their first work is triage: write red requirements, then a fix task.
+[{:seon.task/id        :seon.flow.task/durable-faults-cross-dropping-channels
+  :seon.task/problem   "Core faults travel through a counted dropping buffer: under overload a fault can be dropped after it was admitted, so saturation can erase the evidence the error route promises to deliver. Every admitted core fault must be durably recorded and delivered under overload."
+  :seon.task/subjects  #{seon.flow/counted-dropping-buffer seon.fault/fault!}
+  :seon.task/evidence  #{"docs/seon/issues/durable-faults-cross-dropping-channels.md"}
+  :seon.task/context   seon.task/triage}
+
+ {:seon.task/id        :seon.flow.task/stop-transition-faults-are-kept
+  :seon.task/problem   "An error thrown in a proc's stop transition is put on the graph's error channel after it has closed, so the fault is dropped. Throwing in a real stop transition must durably record and deliver its fault before resources are released."
+  :seon.task/subjects  #{seon.flow/var-process seon.fault/fault!}
+  :seon.task/evidence  #{"docs/seon/issues/flow-stop-transition-errors-are-dropped-on-a-closed-error-channel.md"}
+  :seon.task/context   seon.task/triage}]
