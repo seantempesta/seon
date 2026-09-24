@@ -1,0 +1,51 @@
+;; Tasks about seon.note — decoration language v0.
+[{:seon.task/id        :seon.note.task/about-is-a-value
+  :seon.task/problem   "A note's subject (:my.note/about) is a ref, but what a note is about is an observed name: a function, a schema key or a task. As a ref it can only point at stored entities, is swept silently when its target is retracted, and the renderers only understand plan items. Decide the data model first: subjects are values, one attribute per value type."
+  :seon.task/subjects  #{seon.note/add! seon.note/add-note-call}
+  :seon.task/keys      #{:my.note/about}
+  :seon.task/schemas   {:my.note/about-symbol [:qualified-symbol {:description "The function, test or namespace this note is about, as an observed name; it survives the target's deletion."}]
+                        :my.note/about-key    [:qualified-keyword {:description "The schema key or task this note is about, as an observed name."}]}
+  :seon.task/requirements
+  [(true? (seon.schema/valid? :my.note/about-symbol 'seon.db/pull))
+   (true? (seon.schema/valid? :my.note/about-key :my.note/content))]
+  :seon.task/delivers  #{seon.note/add! seon.note/add-note-call}
+  :seon.task/needs     #{:seon.schema.task/agents-can-validate}
+  :seon.task/context   seon.task/implement}
+
+ {:seon.task/id        :seon.note.task/render-any-subject
+  :seon.task/problem   "Both note renderers are hard-wired to plan items (:my.plan.item/id): a note about anything else renders as \"a related record\" and render-notes-ai's read pulls only plan-item subjects."
+  :seon.task/subjects  #{seon.note/render-note-ai seon.note/render-note-html seon.note/render-notes-ai}
+  :seon.task/requirements
+  [(clojure.string/includes?
+    (seon.note/render-note-ai #:my.note{:id "n1" :agent [:seon.agent/id "root"] :content "slow on large pulls"
+                                        :about-symbol 'seon.db/pull})
+    "seon.db/pull")]
+  :seon.task/delivers  #{seon.note/render-note-ai seon.note/render-note-html seon.note/note-line seon.note/note-html}
+  :seon.task/needs     #{:seon.note.task/about-is-a-value}
+  :seon.task/context   seon.task/implement}
+
+ {:seon.task/id        :seon.note.task/declared-refusals
+  :seon.task/problem   "seon.note refuses with hand-built ex-info maps (refuse!) although my.note.edn already declares each refusal's schema (:my.note/agent-not-found-error and five more). Refusals should be the declared values, so agents get the schema's explanation."
+  :seon.task/subjects  #{seon.note/add-note-call seon.note/forget-note-call}
+  :seon.task/requirements
+  [(true? (seon.schema/valid? :my.note/agent-not-found-error
+                              (seon.note/add! "n1" "content" seon.db/*conn* "no-such-agent")))]
+  :seon.task/delivers  #{seon.note/add-note-call seon.note/forget-note-call}
+  :seon.task/needs     #{:seon.schema.task/agents-can-validate}
+  :seon.task/context   seon.task/implement}
+
+ {:seon.task/id        :seon.note.task/one-read-for-many-notes
+  :seon.task/problem   "notes pulls once per note and note-html queries once per note for its timestamp: work proportional to the note count times round trips, where one query can return every row."
+  :seon.task/subjects  #{seon.note/notes seon.note/note-html}
+  :seon.task/requirements
+  [(vector? (seon.note/notes (seon.db/db) "root"))]
+  :seon.task/delivers  #{seon.note/notes seon.note/note-html}
+  :seon.task/context   seon.task/implement}
+
+ {:seon.task/id        :seon.note.task/guarantees
+  :seon.task/problem   "No test reaches any seon.note function, so every change here is unguarded. Add guarantee tests (ordinary deftests that merge) for add!, forget! and notes through the real writers."
+  :seon.task/subjects  #{seon.note}
+  :seon.task/requirements
+  [(some #{'seon.note-test/add-then-forget-round-trips} (seon.fn/tests-reaching (seon.db/db) 'seon.note/add!))]
+  :seon.task/delivers  #{seon.note-test/add-then-forget-round-trips}
+  :seon.task/context   seon.task/implement}]

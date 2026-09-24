@@ -1,0 +1,112 @@
+(ns scratch.tasks-v0
+  "Experiment: load decoration-language v0 task EDN, validate it against the real program
+  database (read-only), and render briefs. Throwaway."
+  (:require [clojure.edn :as edn]
+            [clojure.string :as str]
+            [datahike.api :as d]
+            [edamame.core :as e]
+            [malli.core :as m]
+            [malli.error :as me]))
+
+(def task-dir "/Users/sean/src/seon/resources/seon/tasks/")
+
+(def task-schema
+  [:map {:closed true}
+   [:seon.task/id :qualified-keyword]
+   [:seon.task/problem [:string {:min 20}]]
+   [:seon.task/subjects {:optional true} [:set :symbol]]
+   [:seon.task/keys {:optional true} [:set :qualified-keyword]]
+   [:seon.task/entities {:optional true} [:set [:tuple :qualified-keyword :any]]]
+   [:seon.task/schemas {:optional true} [:map-of :qualified-keyword :any]]
+   [:seon.task/requirements [:vector {:min 1} :any]]
+   [:seon.task/delivers [:set {:min 1} :qualified-symbol]]
+   [:seon.task/needs {:optional true} [:set :qualified-keyword]]
+   [:seon.task/context :qualified-symbol]])
+
+(defn read-tasks
+  "Every task map in every EDN file of the task directory."
+  []
+  ;; Clojure syntax, read without evaluation: requirements are code, so 'sym must mean (quote sym).
+  (vec (mapcat #(e/parse-string (slurp %) {:quote true :deref false :fn false :regex false})
+               (filter #(str/ends-with? (str %) ".edn") (file-seq (java.io.File. task-dir))))))
+
+(defn program-node?
+  "Does `s` name a function, test or namespace row in `db`?"
+  [db s]
+  (boolean (or (d/q '[:find ?e . :in $ ?s :where [?e :seon.fn/sym ?s]] db s)
+               (d/q '[:find ?e . :in $ ?s :where [?e :seon.test/sym ?s]] db s)
+               (d/q '[:find ?e . :in $ ?s :where [?e :seon.ns/name ?s]] db s))))
+
+(defn key-known?
+  "Does the registry resolve schema key `k`?"
+  [registry k]
+  (some? (try (m/schema k {:registry registry}) (catch Exception _ nil))))
+
+(defn calls-in
+  "Every (qualified-symbol …) call form inside `form`."
+  [form]
+  (filter #(and (seq? %) (qualified-symbol? (first %))) (tree-seq coll? seq form)))
+
+(defn var-exists?
+  "Does `s` resolve to a loaded Var (library or program)?"
+  [s]
+  (boolean (try (find-var s) (catch Exception _ nil))))
+
+(defn needed-deliverables
+  "Everything delivered by the tasks `task` needs, transitively."
+  [by-id task]
+  (loop [todo (vec (:seon.task/needs task)) seen #{} out #{}]
+    (if-let [n (first todo)]
+      (if (seen n) (recur (subvec todo 1) seen out)
+          (let [t (by-id n)]
+            (recur (into (subvec todo 1) (:seon.task/needs t)) (conj seen n) (into out (:seon.task/delivers t)))))
+      out)))
+
+(defn bare-symbol-values
+  "Qualified symbols in value position (not a call head, not quoted): evaluated, they become the
+  Var's value, which is almost never what a requirement means."
+  [form]
+  (letfn [(walk [x head?]
+            (cond
+              (and (seq? x) (= 'quote (first x))) []
+              (seq? x) (concat (walk (first x) true) (mapcat #(walk % false) (rest x)))
+              (map? x) (mapcat #(walk % false) (mapcat identity x))
+              (coll? x) (mapcat #(walk % false) x)
+              (and (qualified-symbol? x) (not head?)
+                   (not (and (clojure.string/starts-with? (name x) "*") (clojure.string/ends-with? (name x) "*")))) [x]
+              :else []))]
+    (walk form false)))
+
+(defn task-findings
+  "Everything wrong with one task, as data."
+  [db registry by-id task]
+  (let [ids (set (keys by-id))
+        delivered (into (:seon.task/delivers task #{}) (needed-deliverables by-id task))
+        subjects (:seon.task/subjects task #{})
+        called (set (map first (mapcat calls-in (:seon.task/requirements task))))
+        referenced (set (filter qualified-symbol? (tree-seq coll? seq (:seon.task/requirements task))))
+        subject-nss (set (map #(or (some-> % namespace symbol) %) subjects))
+        changed-keys (into (set (:seon.task/keys task)) (keys (:seon.task/schemas task)))
+        used-keys (set (filter qualified-keyword? (tree-seq coll? seq (:seon.task/requirements task))))
+        exercised (concat (filter #(or ((:seon.task/delivers task #{}) %) (subjects %) (subject-nss (symbol (namespace %)))) referenced)
+                          (filter changed-keys used-keys))]
+    (concat
+     (when-let [e (m/explain task-schema task)] [{:rule :shape :why (me/humanize e)}])
+     (for [s subjects :when (not (program-node? db s))] {:rule :subject-missing :sym s})
+     (for [n (:seon.task/needs task) :when (not (ids n))] {:rule :needs-unknown-task :task n})
+     (for [k (:seon.task/keys task)
+           :when (not (or (key-known? registry k) (contains? (:seon.task/schemas task) k)))]
+       {:rule :key-unknown :key k})
+     (for [s (:seon.task/delivers task #{}) :when (not (or (program-node? db s) (referenced s)))]
+       {:rule :delivers-missing-and-untested :sym s})
+     (for [c called :when (not (or (program-node? db c) (delivered c) (var-exists? c)))]
+       {:rule :requirement-calls-unknown :sym c})
+     (when (empty? exercised) [{:rule :requirement-exercises-nothing-it-changes}])
+     (for [s (distinct (mapcat bare-symbol-values (:seon.task/requirements task)))]
+       {:rule :unquoted-symbol-value :sym s :why "evaluates to the Var's value; write 'sym for the name"}))))
+
+(defn findings
+  "Every finding for every task, each tagged with its task id."
+  [db registry tasks]
+  (let [by-id (into {} (map (juxt :seon.task/id identity)) tasks)]
+    (vec (for [t tasks f (task-findings db registry by-id t)] (assoc f :task (:seon.task/id t))))))
