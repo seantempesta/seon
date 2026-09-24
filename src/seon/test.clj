@@ -643,6 +643,7 @@
                      :seon.test.run/cluster :seon.test.run/policy
                      :seon.test.run/branch :seon.test.run/tested-branch
                      :seon.test.run/include-long? :seon.test.run/input-digest
+                     :seon.test.run/loaded-commit-id
                      :seon.test.run/basis-t :seon.test.run/selection-tx
                      :seon.test.run/namespaces :seon.test.run/identities
                      :seon.test.run/members :seon.test.run/covered-by
@@ -841,10 +842,13 @@
             ;; the JVM loaded source the cluster's program rows do not describe
             ;; (a restart from changed files, before adoption), the rows cannot
             ;; vouch for what executes: unknown, so nothing is reused.
+            ;; The adopted commit whose loaded, armed definitions agree with
+            ;; its record (`seon.cluster/program-validity`): base provenance.
+            recorded (when cluster-id
+                       (:seon.source/commit-id
+                        (selection-read! (db/pull database [:seon.source/commit-id] cluster))))
             loaded-drift? (when-let [loaded (:seon.test/loaded-source request)]
-                            (not= loaded (:seon.source/commit-id
-                                          (selection-read!
-                                           (db/pull database [:seon.source/commit-id] cluster)))))
+                            (not= loaded recorded))
             reuse-candidates (cond
                                loaded-drift? {}
                                (and (= :incremental policy) (not work?)) eligible
@@ -861,7 +865,9 @@
             reused (into (sorted-map)
                          (keep (fn [[test-symbol _]]
                                  (when-let [[run-eid member] (get latest test-symbol)]
+                                   ;; Evidence naming no loaded program is unknown.
                                    (when (and (green? member)
+                                              (one run-eid :seon.test.run/loaded-commit-id)
                                               (or (nil? supplied-basis) (= supplied-basis (one run-eid :seon.test.run/basis-t)))
                                               (not (reached test-symbol))
                                               (string? (get current-reach test-symbol))
@@ -906,11 +912,8 @@
           loaded-drift? (assoc :seon.test/loaded-source-drift
                                ;; Rows that record no source commit are absent,
                                ;; never a nil commit id.
-                               (let [recorded (:seon.source/commit-id
-                                               (selection-read!
-                                                (db/pull database [:seon.source/commit-id] cluster)))]
-                                 (cond-> {:seon.test/loaded-source (:seon.test/loaded-source request)}
-                                   recorded (assoc :seon.source/commit-id recorded)))))))
+                               (cond-> {:seon.test/loaded-source (:seon.test/loaded-source request)}
+                                 recorded (assoc :seon.source/commit-id recorded))))))
     (catch clojure.lang.ExceptionInfo failure
       (let [refusal (ex-data failure)]
         (if (or (:seon.test/selection-refusal refusal)
@@ -1045,7 +1048,9 @@
              members :seon.test.run/members :as request}]
   (let [run-id (:seon.test.run/id run)
         snapshot? (some? (:seon.test.run/published-base-digest run))
-        cluster-row (when cluster (db/pull database [:db/id :seon.cluster/name] cluster))
+        ;; Its commit is the adopted program agreeing with its record
+        ;; (`seon.cluster/program-validity`), read here at the writer.
+        cluster-row (when cluster (db/pull database [:db/id :seon.cluster/name :seon.source/commit-id] cluster))
         cluster-id (:db/id cluster-row)
         branch (get-in (db/schema-database database) [:config :branch])
         ;; The writer's value has no commit id, so the digest memo cannot name it;
@@ -1066,7 +1071,9 @@
                                      :seon.test.run/program-digest :seon.test.run/basis-t
                                      :seon.test.run/callers-at-head
                                      :seon.test.run/branch :seon.test.run/tested-branch]))
-                (cond-> cluster-id (assoc :seon.test.run/cluster cluster-id)))
+                (cond-> cluster-id (assoc :seon.test.run/cluster cluster-id)
+                  (:seon.source/commit-id cluster-row)
+                  (assoc :seon.test.run/loaded-commit-id (:seon.source/commit-id cluster-row))))
         selector (into [:db/id :seon.test.run/selection-tx
                         [:seon.test.run/callers-at-head :limit nil]
                         [:seon.test.run/namespaces :limit nil]

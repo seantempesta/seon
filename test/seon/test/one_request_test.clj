@@ -286,7 +286,17 @@
        (is (empty? (:seon.test.selection/unchanged drifted)))
        (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members drifted)))
            "another loaded program executes the member again")
-       (is (:seon.test/loaded-source-drift drifted))))))
+       (is (:seon.test/loaded-source-drift drifted))
+       (testing "a recorded run names its loaded program; one naming none is unknown"
+         (let [run [:seon.test.run/id (:seon.test.run/id recorded)]]
+           (is (= rows-commit (:seon.test.run/loaded-commit-id
+                               (db/pull database [:seon.test.run/loaded-commit-id] run))))
+           (support/transacted! connection [[:db/retract run :seon.test.run/loaded-commit-id rows-commit]])
+           (let [old (sut/select {:seon.db/db (db/db connection) :seon.test.run/cluster cluster
+                                  :seon.test.run/policy :named :seon.test/identities #{test-symbol}
+                                  :seon.test/loaded-source rows-commit})]
+             (is (empty? (:seon.test.selection/unchanged old)))
+             (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members old)))))))))))
 
 (deftest ^{:seon.test/long "Two requests over three agent tests on one fixture branch: the first is held for its whole 10 s bound by a member that runs until the bound fires (the stop being proved), which then runs to its own 15 s bound; the rest is definition and admission. Measured 38.5 s on default's JVM (2026-09-24) with a 20 s exit wait since removed."
            :seon.test/long-ms 60000}
