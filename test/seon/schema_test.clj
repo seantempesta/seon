@@ -1883,17 +1883,20 @@
                                         :seon.schema/admission
                                         {:seon.schema.admission/source :core}})
                      (catch clojure.lang.ExceptionInfo e (ex-data e))))]
-    (is (nil? (schema/current-projection)) "the bootstrap path is the one exercised")
-    (is (= :inst (get-in forms [:seon.error/at])) "the entity reaches :inst")
-    (is (vector? (admit forms :seon.config/error))
-        "a packaged entity reaching :inst is admitted")
-    (testing "a reference nothing declares still refuses by name"
-      (let [refused (admit (assoc forms ::bootstrap-referrer [:vector ::never-declared])
-                           ::bootstrap-referrer)]
-        (is (= :seon.schema.edn/unresolved-reference
-               (:seon.schema.edn/error refused)))
-        (is (= ::bootstrap-referrer
-               (:seon.schema.edn/unresolved-reference refused)))))))
+    ;; The runner hands every test body a projection; the bootstrap world
+    ;; is the one with none, so the body is run in that world.
+    (with-bindings {#'schema/*projection* nil}
+      (is (nil? (schema/current-projection)) "the bootstrap path is the one exercised")
+      (is (= :inst (get-in forms [:seon.error/at])) "the entity reaches :inst")
+      (is (vector? (admit forms :seon.config/error))
+          "a packaged entity reaching :inst is admitted")
+      (testing "a reference nothing declares still refuses by name"
+        (let [refused (admit (assoc forms ::bootstrap-referrer [:vector ::never-declared])
+                             ::bootstrap-referrer)]
+          (is (= :seon.schema.edn/unresolved-reference
+                 (:seon.schema.edn/error refused)))
+          (is (= ::bootstrap-referrer
+                 (:seon.schema.edn/unresolved-reference refused))))))))
 
 (deftest a-nilable-value-schema-is-refused-at-admission-never-at-build
   ;; CLASS: a tightened authoring rule judges a new or changed declaration at
