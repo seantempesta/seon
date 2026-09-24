@@ -1,6 +1,6 @@
 ---
 type: landing
-status: committed bbb2efd86 464bca11b 41f2f0b53 4da02fcea, code only (owner load rule); unadopted; no test request run
+status: committed bbb2efd86 464bca11b 41f2f0b53 4da02fcea and a bounded-refusal fix, code only (owner load rule); unadopted; no test request run
 lane: harness-s2-overlay-s2c
 created: 2026-09-24
 design: docs/research/agent-platform/one-test-harness/design-2026-09-24.md §2 steps 1 and 4, §9c row S2
@@ -150,6 +150,29 @@ reproduced in a throwaway namespace.
 - `bin/test-check default --ns seon.test-reaching-test`
 - `bin/test-check default --ns seon.test.one-request-test --include-long`
 - `bin/test-check default --test seon.test.clean-world-test/a-member-world-is-the-loaded-program-with-boot-facts-only`
+
+## Second follow-up (default OOM at 23:27Z)
+
+- **Bounded refusals.** The source-record and overlay-read throws now carry the refusal's
+  message, its operation, and at most 400 characters of the offending value
+  (`seon.render.value/bounded-text`), with the overlay's entry count in the message. The whole
+  report is no longer ex-data. 4da02fcea had put the whole overlay transaction inline, which a
+  printing runner turned into a string over 2 GB.
+- **File rows the overlay references but does not carry.**
+  - The earlier scan looked only at the rows. It now inspects the reconciled transaction
+    itself. Any 2-element lookup on an identity attribute (map entries excluded) that neither
+    the world nor the transaction's own rows hold gets its row added, and the transaction is
+    recomputed.
+  - Identities that still cannot be supplied refuse with the first five named. So the writer's
+    "Nothing found for entity id" cannot reappear unnamed.
+  - Root's failing `tmp/reaching-source-*/probe.clj` case did not reproduce. Four candidates,
+    each overlaid onto the published base, applied, and each world's full digest map equals its
+    candidate's (101–171 ms):
+    - live default;
+    - live default plus one retracted test;
+    - an agent file referenced by `my.agents.root/largest`;
+    - a real `seon.fn/rows` index of a new tmp file.
+  - Its exact cause is therefore unproven. The named refusal will identify it on the next run.
 
 ## Root runs (serially, after adopting the three commits)
 

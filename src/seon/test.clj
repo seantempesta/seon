@@ -1425,7 +1425,7 @@
   declaration that was added, changed or retracted. Only those identities are
   read and replaced (`seon.fn/reconcile-tx`) with their program-partition
   attributes, an identity absent from the candidate retracting, and with any
-  recomputed row (a file) they name that the world lacks. Callers of a changed
+  row they name by lookup that the world lacks (a new file). Callers of a changed
   definition interpret it at acquisition. Equal programs answer `[]`; a refused read answers its refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
                   [:or :seon.db/tx-data :seon.error/value]]}
@@ -1454,25 +1454,40 @@
                   (into #{} (remove (fn [a] (or (program a) (= "db" (namespace a)))))
                         (filter qualified-keyword? (keys (:schema candidate)))))
         read-rows #(functions/published-index-rows candidate (vec (sort %)) (others))
-        ;; A row names a recomputed row (its file) by identity; one the world
-        ;; lacks travels with it. The world's own file rows stay its own.
-        recomputed (:seon.program/recomputed-families
-                    (program/declaration-families (db/carried-projection candidate)))
-        lacking (fn [rows]
-                  (into #{} (filter #(and (vector? %) (= 2 (count %)) (recomputed (first %))
-                                          (nil? (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]]
-                                                      world (first %) (second %)))))
-                        (tree-seq coll? seq rows)))
-        rows (when (and (set? changed) (seq (into present changed))) (read-rows present))
-        files (when (vector? rows) (lacking rows))
-        rows (if (seq files) (read-rows (into present files)) rows)]
+        identity? (set (db/identity-attributes world))
+        ;; Any identity the transaction names by lookup that neither the world
+        ;; nor the transaction's rows hold: a recomputed row (a file) a carried
+        ;; row names travels with it; the world keeps its own file rows.
+        missing (fn [tx rows]
+                  (let [created (into #{} (map program/row-identity) rows)]
+                    (into #{} (filter #(and (vector? %) (not (map-entry? %)) (= 2 (count %)) (identity? (first %))
+                                            (not (created %))
+                                            (nil? (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]]
+                                                        world (first %) (second %)))))
+                          (tree-seq coll? seq tx))))
+        overlay (fn [extra]
+                  (let [rows (read-rows (into present extra))
+                        tx (if (:seon.error/at rows) rows
+                               (functions/reconcile-tx world rows (vec (sort (into present changed)))))]
+                    [rows tx]))]
     (cond
       (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
       (not (set? present)) present
       (not (set? changed)) changed
-      (nil? rows) []
-      (:seon.error/at rows) rows
-      :else (functions/reconcile-tx world rows (vec (sort (into (into present changed) files)))))))
+      (empty? (into present changed)) []
+      :else
+      (loop [extra #{}]
+        (let [[rows tx] (overlay extra)
+              absent (when (vector? tx) (missing tx rows))]
+          (cond
+            (not (vector? tx)) tx
+            (empty? absent) tx
+            (and (empty? (remove extra absent)) (seq extra))
+            (throw (ex-info (str "The test world's overlay names " (count absent)
+                                 " identities its candidate cannot supply.")
+                            {:seon.error/expected :seon.program/row
+                             :seon.error/offending (vec (take 5 (sort absent)))}))
+            :else (recur (into extra absent))))))))
 
 ;;; A checkpoint is a shared branch named by the content it holds. The
 ;;; registry's roster serializes its creation: exactly one `branch!` call is
@@ -1515,10 +1530,13 @@
             (let [report (db/transact! connection (conj overlay {:seon.cluster/name cluster
                                                                  :seon.source/commit-id base}))]
               (when-not (:db-after report)
-                (throw (ex-info (str "The test world's source record was refused: "
-                                     (:seon.error/message report) " Offending: "
-                                     (pr-str (:seon.error/offending report)))
-                                report))))))
+                ;; A bounded summary: the refusal's offending value may be the
+                ;; whole overlay, which its own evidence already retains.
+                (throw (ex-info (str "The test world's source record was refused ("
+                                     (count overlay) " overlay entries): " (:seon.error/message report))
+                                {:seon.error/message (:seon.error/message report)
+                                 :seon.error/operation (:seon.error/operation report)
+                                 :seon.error/offending (value/bounded-text (:seon.error/offending report) 400)}))))))
       (catch Throwable failure
         (doseq [cleanup! [#(store/release-branch! connection)
                           #(registry/retire-branch! {:seon.store/store store :seon.store/branch branch})]]
@@ -1556,7 +1574,10 @@
         candidate (db/db (:seon.db/connection execution))
         overlay (program-overlay-tx (source/database store base) candidate)
         _ (when (:seon.error/at overlay)
-            (throw (ex-info "The test world's program overlay could not be read." overlay)))
+            (throw (ex-info (str "The test world's program overlay could not be read: "
+                                 (:seon.error/message overlay))
+                            {:seon.error/message (:seon.error/message overlay)
+                             :seon.error/offending (value/bounded-text (:seon.error/offending overlay) 400)})))
         process (cluster.process/id (cluster.process/current-identity))
         prefix (str "checkpoint-" cluster "-")
         branch (keyword (str prefix (id/digest 24 [base cluster (sort effective) process overlay])))
