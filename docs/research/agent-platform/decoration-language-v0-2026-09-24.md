@@ -115,6 +115,10 @@ value is what the owner's debug page must render.
   `seon.db/history` where one clause over current datoms' transactions suffices: must-reads should carry
   the idiom, not only the function. It also found that an empty result does not prove review
   (undocumented functions are excluded) — a second detector, and a sharper intent.
+- **Proved, deletion kind:** a Codex agent removed `seon.note/note-row` and repaired its three callers from
+  a v0.2 brief in 19 forms (proofs green at runtime) — and exposed that REPL deletion records nothing and
+  warns about no callers, that the gate refuses core contracts containing `:nil` verbatim, that a
+  redefinition without a contract is silently admitted, and that branch namespaces lack their aliases.
 - **Exposed:** delivery (cherry-pick → program rows → files) does not exist; a schema declaration
   cannot be published to a branch; `:nil` is refused in agent-authored contracts while core contracts
   use it; `seon.schema.internal/contract-error!` crashes on a function symbol; a session's MCP server

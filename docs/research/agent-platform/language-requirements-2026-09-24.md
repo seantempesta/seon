@@ -117,3 +117,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 - `seon.fn/tests-reaching` takes 1.9 s / 6.5 GB and reports 1,720 tests for a core function (saturated reach).
 - Refusals are ~15 KB of duplicated location trees; MCP drops `defn` name metadata, mislabels the namespace, turns keywords into strings.
 - The merge owner refuses added definitions; every new function is blocked from landing.
+- Deletion at the REPL (`ns-unmap`, deletion task run 2026-09-24 on `exp-drop-note-row-1`) warns about no callers and records nothing: the program row survives. The "no deletion while callers exist" law is bypassed on this path.
+- The entry gate refuses an agent re-entering a CORE contract verbatim (`:nil` in `seon.note/add-note!`'s own contract); agents must rewrite system contracts to redefine a function.
+- A redefinition without `:malli/schema` is admitted and silently drops the function's contract, although the strict `:gate` default should refuse it.
+- A branch's SCI copy of a namespace lacks the file's `:require` aliases (`db/pull` unresolved in `seon.note` until the agent re-required `seon.db`).
