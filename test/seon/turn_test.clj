@@ -2391,3 +2391,26 @@
                            (turn/form-settlement (db/db connection)
                                                  (:seon.cluster.eval/id receipt)))))
                source)))))))
+
+(deftest an-agent-dial-read-that-refuses-is-not-an-absent-dial
+  ;; THE CLASS: `(or overlay carried effective)` read a refused config as an
+  ;; absent dial, so the bound fell to the next source or to nil. A cluster
+  ;; with no config row makes the effective read refuse.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx @connection "dial-reader"))
+     (let [handle (support/cluster-handle
+                   {:seon.db/connection connection
+                    :seon.cluster/name "no-such-dial-cluster"
+                    :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                    :seon.db.process/id cluster/boot-process-identity})
+           refused (try (turn/write-refusal-bound (db/db connection) handle "dial-reader")
+                        nil
+                        (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+       (is (= :seon.config/cluster (:seon.config/error-key refused)) (pr-str refused))
+       (is (= "no-such-dial-cluster" (:seon.config/missing-effective refused)))
+       (is (= 3 (turn/write-refusal-bound
+                 (db/db connection)
+                 (assoc handle :seon.config.agent/write-refusal-bound 3)
+                 "dial-reader"))
+           "a carried dial is read without asking the config")))))

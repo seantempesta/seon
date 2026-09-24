@@ -3244,8 +3244,10 @@
             :seon.program/row analyzed-row
             :seon.test.accretion/gate-set test-symbols
             :seon.config.test/auto-check-cases
-            (:seon.config.test/auto-check-cases
-             (config/effective database (:seon.cluster/name cluster)))
+            (let [effective (config/effective database (:seon.cluster/name cluster))]
+              (when (:seon.error/at effective)
+                (throw (ex-info (:seon.error/message effective "Config read refused.") effective)))
+              (:seon.config.test/auto-check-cases effective))
             :seon.test.accretion/seed seed
             :seon.sci.eval/time-limit-ms
             (:seon.config.eval/time-limit-ms cluster)
@@ -5272,6 +5274,25 @@
   (let [diagnostic (turn-completion-error agent-id run-id timeout-ms operation expected events)]
     (ex-info (:seon.error/message diagnostic) diagnostic)))
 
+(defn- agent-dial
+  "One agent dial: the agent's overlay, else the handle's carried value, else
+  the cluster's effective config; nil only when none of them declares it.
+
+  A refused overlay or config read throws that declared error as its
+  `ex-data`; it never falls through to the next source as if it were absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn.loop/cluster
+                       :seon.agent/id :qualified-keyword]
+                  [:maybe :seon.schema/value]]}
+  [database cluster agent-id dial]
+  (let [refused! #(throw (ex-info (:seon.error/message % "Agent dial read refused.") %))
+        overlay (ai/agent-overlay database agent-id)]
+    (when (:seon.error/at overlay) (refused! overlay))
+    (or (get overlay dial)
+        (get cluster dial)
+        (let [effective (config/effective database (:seon.cluster/name cluster))]
+          (when (:seon.error/at effective) (refused! effective))
+          (get effective dial)))))
+
 (defn- await-turn-permit!
   [state]
   (let [{connection :seon.db/connection
@@ -5280,19 +5301,19 @@
          completion :seon.turn.loop/completion
          executor :seon.flow/executor
          fault-channel :seon.agent/fault-channel
-         carried-timeout-ms
-         :seon.config.agent/turn-completion-backstop-ms
          backstop-state :seon.agent/turn-backstop-state}
         (:seon.turn.loop/cluster state)
         agent-id (:seon.agent/id state)
         database (db/db connection)
         run-id (open-for-agent database [:seon.agent/id agent-id])
-        settings (ai/agent-overlay database agent-id)
-        timeout-ms
-        (or (:seon.config.agent/turn-completion-backstop-ms settings)
-            carried-timeout-ms
-            (:seon.config.agent/turn-completion-backstop-ms
-             (config/effective database cluster-name)))
+        timeout-ms (or (agent-dial database (:seon.turn.loop/cluster state) agent-id
+                                   :seon.config.agent/turn-completion-backstop-ms)
+                       (throw (ex-info (str "Cluster " (pr-str cluster-name)
+                                            " declares no turn completion backstop.")
+                                       {:seon.config/required-absent
+                                        :seon.config.agent/turn-completion-backstop-ms
+                                        :seon.cluster/name cluster-name
+                                        :seon.agent/id agent-id})))
         [value selected]
         (async/alts!! [completion (async/timeout timeout-ms)] :priority true)]
     (if (= selected completion)
@@ -5330,11 +5351,7 @@
                   :seon.config.agent/write-refusal-bound]}
   [database cluster agent-id]
   (let [cluster-name (:seon.cluster/name cluster)]
-    (or (:seon.config.agent/write-refusal-bound
-         (ai/agent-overlay database agent-id))
-        (:seon.config.agent/write-refusal-bound cluster)
-        (:seon.config.agent/write-refusal-bound
-         (config/effective database cluster-name))
+    (or (agent-dial database cluster agent-id :seon.config.agent/write-refusal-bound)
         ;; ABSENCE IS NEVER "no bound". A cluster whose config singleton
         ;; predates this dial would otherwise read as healthy and re-fire
         ;; forever, which is the exact failure class this bound exists to end.
