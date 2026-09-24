@@ -149,7 +149,7 @@
    :seon.error/op :seon.problems-test/op
    :seon.error/cid :seon.problems-test/cid
    :seon.error/basis-t 7
-   :seon.instrument/fn "seon.problems-test/generated"
+   :seon.instrument/fn 'seon.problems-test/generated
    :seon.instrument/arm :output
    :seon.instrument/expected ":seon.error/fact"
    :seon.instrument/args "[{:generated true}]"})
@@ -168,6 +168,8 @@
             :seon.error/process live
             :seon.error/declared-schema :seon.error/normalization-error
             :seon.error/message (str "generated error " ordinal)
+            :seon.error/layer ::generated
+            :seon.error/operation 'seon.problems-test/generated
             :seon.error/signature
             (apply str (repeat 64 (nth "abcd" ordinal)))
             :seon.error/data-edn "{}"

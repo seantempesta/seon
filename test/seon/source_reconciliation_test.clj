@@ -9,9 +9,9 @@
   (test-support/with-database
     (fn [connection]
       (let [namespace-ref [:seon.ns/name 'sample.development]
-            kept [:seon.fn/sym "sample.development/value"]
-            removed [:seon.fn/sym "sample.development/removed"]
-            agent-function [:seon.fn/sym "sample.agent/value"]
+            kept [:seon.fn/sym 'sample.development/value]
+            removed [:seon.fn/sym 'sample.development/removed]
+            agent-function [:seon.fn/sym 'sample.agent/value]
             before
             [{:seon.ns/name 'sample.development
               :seon.ns/source "(ns sample.development)"}
@@ -42,15 +42,15 @@
               :seon.fn/arglists "([x])" :seon.fn/private? false
               :seon.fn/arities [{:seon.fn.arity/arity "1"
                                 :seon.fn.arity/order 0}]}
-             {:seon.fn/sym "sample.development/new-value" :seon.fn/ns namespace-ref
+             {:seon.fn/sym 'sample.development/new-value :seon.fn/ns namespace-ref
               :seon.fn/source "(defn new-value [] (value 2))"
               :seon.fn/calls [kept]}
              {:seon.schema/key :sample.development/new-schema
               :seon.schema/form ":string"}
-             {:seon.test/sym "sample.development/new-test"
+             {:seon.test/sym 'sample.development/new-test
               :seon.test/ns namespace-ref
               :seon.test/source "(deftest new-test (is (= 2 (new-value))))"
-              :seon.fn/calls [[:seon.fn/sym "sample.development/new-value"]]}]
+              :seon.fn/calls [[:seon.fn/sym 'sample.development/new-value]]}]
             report (db/transact! connection
                                  {:tx-data [[:db.fn/call seon.fn/reconcile-tx
                                              desired [namespace-ref kept removed]]]})
@@ -67,9 +67,9 @@
         (is (= "(defn value [] :agent)" (:seon.fn/source (db/pull after '[*] agent-function))))
         (is (= ":string" (:seon.schema/form
                           (db/pull after '[*] [:seon.schema/key :sample.development/new-schema]))))
-        (is (= "sample.development/new-value"
+        (is (= 'sample.development/new-value
                (get-in (db/pull after '[{:seon.fn/calls [:seon.fn/sym]}]
-                                [:seon.test/sym "sample.development/new-test"])
+                                [:seon.test/sym 'sample.development/new-test])
                        [:seon.fn/calls 0 :seon.fn/sym])))
         (is (empty? (seon.fn/reconcile-tx after desired [namespace-ref kept removed]))
             "same admitted source produces no definition transactions")

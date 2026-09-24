@@ -5,14 +5,14 @@
             [seon.test-support :as test-support]))
 
 (def ^:private await-owner
-  "seon.await/await!")
+  'seon.await/await!)
 
 (def ^:private declared-production-callers
-  #{"seon.effect/dispatch"
-    "seon.flow/stop-work-launcher!"
-    "seon.render.web/await-feed-package!"
-    "seon.render.web/write-package!"
-    "seon.shell.jvm/task-result"})
+  #{'seon.effect/dispatch
+    'seon.flow/stop-work-launcher!
+    'seon.render.web/await-feed-package!
+    'seon.render.web/write-package!
+    'seon.shell.jvm/task-result})
 
 (defn- production-callers
   [database owner-symbol]

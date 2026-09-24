@@ -951,11 +951,13 @@
        {:seon.agent/id "owner-b"
         :seon.cluster/name "render-failure"
         :seon.ns/name fixture-b}))
-     (let [failure {
+     (let [failure {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.render/render
+                    :seon.error/operation 'seon.render/render-call
                     :seon.error/message "secret stack and renderer symbol"
                     :seon.error/data
                     {:seon.fn/sym
-                     "seon.render-simplification.fixture-b/holes-html"}}
+                     'seon.render-simplification.fixture-b/holes-html}}
            outcome
            (target-call
             'seon.render 'renderer-failure
