@@ -67,7 +67,8 @@ A docstring states what is true and why; incident narratives belong in tasks and
 #:seon.task{:id        :seon.error.task/faults-read-is-a-call
             :intent    "Root's opening prints an 81,805-character error query five times (81% of its prompt).
                         It should be a short call that returns the same errors."
-            :done-when [(deftest opener-is-short …) (deftest for-agent-matches-the-query …)]}   ; §3
+            :done-when [seon.error.task-test/opener-is-short
+                        seon.error.task-test/for-agent-matches-the-query]}   ; §3
 ```
 
 Optional only when nothing else can say it: `:seon.task/must-read`, `:seon.task/needs`, `:seon.task/merge`
@@ -83,43 +84,41 @@ diff, and root's decision selects from it.
             :about #{source callers calls}}
 ```
 
-## 3. Done when: ordinary deftests through the one test pipeline
+## 3. Done when: symbols of ordinary deftests
 
-`:seon.task/done-when` is a vector of deftests: symbols of existing tests, or deftest forms that belong to
-the task (proofs). Each runs through the existing `seon.test/run` on a throwaway fork of the attempt's
-branch — `branch!` → fork the SCI context → inject the connection → run the one body → record → unlink — with
-`is` failures returned as data (expected, actual, message) and re-prompted to the agent. Results key by
-proof-source digest + program digest; they never count as coverage and never merge. A proof becomes a
-permanent guarantee only when root promotes the same text into a namespace deftest.
+`:seon.task/done-when` names tests by their fully qualified symbols; EDN never holds function bodies. The tests
+are code in an ordinary test namespace, written first (TDD) — so they are rows in the graph like any test,
+and their calls seed the context:
 
 ```clojure
-:seon.task/done-when
-[(deftest opener-is-short
-   (is (> 300 (count (pr-str (:seon.repl/form
-                               (seon.error/faults-form {:seon.db/db (seon.db/db)
-                                                        :seon.render/value [:seon.agent/id "root"]})))))))
- (deftest for-agent-matches-the-query
-   (is (= (set (map :seon.error/signature (seon.error/for-agent (seon.db/db) "root")))
-          (set (seon.db/q '[:find [?sig ...] …] (seon.db/db) "root")))))]
+#:seon.task{:id        :seon.error.task/faults-read-is-a-call
+            :intent    "…"
+            :done-when [seon.error.task-test/opener-is-short
+                        seon.error.task-test/for-agent-matches-the-query]}
+
+;; test/seon/error/task_test.clj — the tests, as code
+(deftest opener-is-short
+  (is (> 300 (count (pr-str (:seon.repl/form
+                              (seon.error/faults-form {:seon.db/db (db/db)
+                                                       :seon.render/value [:seon.agent/id "root"]})))))))
 ```
 
-The file holds forms (read by edamame without evaluation); the writer stores each proof's exact source and
-its digest. A test's name is local to the task (`opener-is-short`), so proofs never collide with program tests.
+Anything else a task must run (a merge function, a detector) is likewise a fully qualified symbol, or an
+inline anonymous function only when it is a one-liner with no other home.
 
-Measured (`agent-deftest-and-test-forks-2026-09-24.md`): the same deftest source through the existing owners
-on a throwaway fork takes **~130 ms** (branch + fork 48.7, evaluate 33.7, run 37.7, unlink 8.6) and
-`(seon.db/db)` in the body reaches the fork. Through `seon.test/run` today one test costs **3,320 ms**, of
-which the body is 121: a history scan (1,596 ms, `test/runner.clj:930`) and blob publication (617 ms)
-dominate, and a global drift snapshot costs 32 ms / 143 MB around a 2 ms body. Floor: a read-only proof is an
-SCI fork plus the body (< 1 ms); a real connection ~40 ms. Missing: an entrance that runs *source*, not only
-admitted rows (`test.clj:1264`), and a deftest defined at an agent's REPL returns `nil` with its failures
-lost today. v0.1–v0.2's "forms that must be truthy" and the hand-run checks are deleted.
+Each test runs through the existing `seon.test/run` on a throwaway fork of the attempt's branch — `branch!` →
+fork the SCI context → inject the connection → run the one body → record → unlink — with `is` failures
+returned as data and re-prompted to the agent. Measured (`agent-deftest-and-test-forks-2026-09-24.md`): the
+same deftest through the existing owners on a throwaway fork takes ~130 ms; through `seon.test/run` today one
+test costs 3,320 ms (history scan 1,596 ms, blob publication 617 ms; body 121 ms). A deftest defined at an
+agent's REPL today returns `nil` and loses its failures.
 
-Invariant: at least one proof red on the base; run after every turn and again on the merge branch.
+Invariant: at least one proof red on the base (a run on 2026-09-24 found the faults task already green on
+default's rows — the check must settle such a task, not farm it); run after every turn and on the merge branch.
 
 ## 4. Context generation: task → forms → transcript
 
-1. **Seeds**: the qualified symbols, schema keys and `[attr value]` entities in the task's proofs, plus its must-reads.
+1. **Seeds**: the first-party functions, schema keys and `[attr value]` entities the task's named tests reference (task → test → function), plus its must-reads.
 2. **Tools are not subjects**: a symbol some help topic teaches (`:seon.help/about`) is vocabulary — its topic
    is included, the symbol is never expanded. Without this rule `seon.db/q` in a proof pulled 410 callers
    and 12 schemas (27.8 KB).
@@ -193,8 +192,16 @@ arguments violate the called function's contract; a help-topic cycle.
 4. Help topics become data (today: 13 hard-coded lines + an unused seeded instruction).
 5. Docstrings state intent; incident history moves to tasks/evidence (detector).
 
+## 8b. The loop, run on 2026-09-24 (scripted steps, real evaluation, no model)
+
+`tmp/wiki-toy/experiment/scratch/loop.clj` on branch `exp-loop-faults`: tests defined, vocabulary defined,
+the opening derived from the task and evaluated at the agent entrance (1.3 KB, 107 ms), then scripted steps
+each evaluated with its result appended; total 522 ms. It exposed: printed output is dropped by the
+evaluation entrance (`(source 'f)` shows `nil`); the task was already green on default's rows while the JVM
+still ran the old code; a reused branch carries private state between attempts (each attempt needs a fresh
+branch); the alias defect (`db/` unresolved); the `contract-error!` crash hiding the real refusal.
+
 ## 9. Open decisions
 
-- Proofs: deftest symbols or task-owned deftest source (recommended, §3).
 - Task identity: keywords for authored and generated tasks (recommended).
 - The entry gate's `:warn` dial.
