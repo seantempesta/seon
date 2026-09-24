@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved (da9910fec: a changed :core test is host-bound, reloaded before its gate runs)
 severity: blocking
 created: 2026-09-24
 tags: [issue, publication, save-gate, test, adoption]
