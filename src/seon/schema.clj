@@ -1839,8 +1839,6 @@
   (update-candidate-forms! merge forms)
   (candidate-forms))
 
-(declare compose-projection-data materialize-projection)
-
 (def ^:private render-declaration-properties
   [:seon.render/ai :seon.render/html :seon.render/form])
 
@@ -2217,11 +2215,6 @@
           predicate-functions {}}
      :as options}]
    (cond
-     (contains? forms :seon.schema.projection/forms)
-     (materialize-projection
-      (compose-projection-data forms function-contracts)
-      options)
-
      ;; A complete supplied projection is derived from by replacement: only
      ;; the changed declarations and their reverse closure recompile.
      (some-> (:seon.schema/projection options) incremental-base?)
@@ -2421,17 +2414,6 @@
     (:seon.schema.projection/fingerprint projection)
     (projection-fingerprint-from-data projection)))
 
-(defn- reverse-dependencies
-  [dependencies]
-  (reduce-kv
-   (fn [reverse-edges dependent dependency-keys]
-     (reduce (fn [edges dependency]
-               (update edges dependency (fnil conj #{}) dependent))
-             reverse-edges
-             dependency-keys))
-   {}
-   dependencies))
-
 (defn- shape-projections
   [registry shape-rows]
   (let [required-by-key
@@ -2466,57 +2448,6 @@
     {:seon.schema.projection/required-by-key required-by-key
      :seon.schema.projection/shape-index shape-index
      :seon.schema.projection/catalog catalog}))
-
-(defn compose-projection-data
-  "Compose preproved base pure data with one divergence pure-data delta.
-
-   Row identities are map keys, so divergence naturally wins for a redefined
-   base identity. The cross-population fingerprint and reverse indexes are
-   recomputed over ordinary data. Shape indexes derive at materialization
-   from the retained compiled roots; no schema is compiled here."
-  {:malli/schema [:=> [:catn [::projection :map]
-                             [:seon.schema/divergence-delta :map]]
-                  :map]}
-  [base divergence]
-  (let [merge-map-key
-        (fn [projection key]
-          (assoc projection key
-                 (merge (get projection key {})
-                        (get divergence key {}))))
-        keyed
-        [:seon.schema.projection/forms
-         :seon.schema.projection/schema-admissions
-         :seon.schema.projection/function-admissions
-         :seon.schema.projection/function-source-admissions
-         :seon.schema.projection/schema-dependencies
-         :seon.schema.projection/function-contracts
-         :seon.schema.projection/function-dependencies
-         :seon.schema.projection/shape-rows]
-        composed
-        (reduce merge-map-key (projection-pure-data base) keyed)
-        composed
-        (cond-> composed
-          (contains? divergence :seon.schema.projection/artifact-exports)
-          (assoc :seon.schema.projection/artifact-exports
-                 (:seon.schema.projection/artifact-exports divergence))
-
-          (contains? divergence
-                     :seon.schema.projection/pure-predicate-symbols)
-          (assoc :seon.schema.projection/pure-predicate-symbols
-                 (:seon.schema.projection/pure-predicate-symbols divergence)))
-        composed
-        (merge composed
-               {:seon.schema.projection/canonical-keys
-                (set (keys (:seon.schema.projection/forms composed)))
-                :seon.schema.projection/reverse-schema-dependencies
-                (reverse-dependencies
-                 (:seon.schema.projection/schema-dependencies composed))
-                :seon.schema.projection/reverse-function-dependencies
-                (reverse-dependencies
-                 (:seon.schema.projection/function-dependencies composed))})]
-    (assoc composed
-           :seon.schema.projection/fingerprint
-           (projection-fingerprint-from-data composed))))
 
 (defn materialize-projection
   "Rematerialize registry/options over preproved pure projection data."
