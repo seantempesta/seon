@@ -386,6 +386,28 @@
 
 (deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
            :seon.test/long-ms 600000
+           :seon.test/fixture-observation "The real effect's child leaves a detached grandchild when it exits normally; the handler must reap it before returning."} a-normal-exit-reaps-the-descendant-it-left-behind
+  (with-temp-tree
+    (fn [root]
+      (with-handler
+        (effective root {})
+        (fn [_connection run effective-map]
+          (let [result (run {:my.shell/argv
+                             ["/bin/sh" "-c"
+                              (str "/bin/sleep 30 >/dev/null 2>&1 & "
+                                   "printf '%s' \"$!\" > child.pid; /bin/sleep 0.3")]
+                             :my.shell/cwd "."}
+                            effective-map)
+                child-handle (ProcessHandle/of
+                              (parse-long
+                               (slurp (.toFile (.resolve ^Path root "child.pid")))))]
+            (is (= 0 (:my.shell/exit result)) (pr-str result))
+            (is (or (.isEmpty child-handle)
+                    (not (.isAlive ^ProcessHandle (.get child-handle))))
+                "no descendant outlives a normally exiting root")))))))
+
+(deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
+           :seon.test/long-ms 600000
            :seon.test/fixture-observation "The evaluation admits a real shell child under a file-backed effect context and must release its process before fixture-store teardown."} an-evaluations-deadline-reaps-the-child-it-admitted
   ;; The class: a child process outliving the evaluation that admitted it.
   ;; Two limits govern a foreground child — the shell's and the evaluation's —

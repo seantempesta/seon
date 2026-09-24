@@ -4,6 +4,7 @@
             [babashka.process :as process]
             [seon.await :as await]
             [seon.blob :as blob]
+            [seon.cluster.process :as cluster.process]
             [seon.effect :as effect]
             [seon.error.refusal :as error]
             [seon.fs.jvm]
@@ -12,11 +13,11 @@
             [seon.env :as env]
             [seon.sci.kernel :as kernel])
   (:import [java.io InputStream OutputStream]
-           [java.lang ProcessHandle Thread$Builder$OfVirtual]
+           [java.lang Thread$Builder$OfVirtual]
            [java.nio ByteBuffer]
            [java.nio.charset CodingErrorAction StandardCharsets]
            [java.security MessageDigest]
-           [java.util HexFormat Optional]
+           [java.util HexFormat]
            [java.util.concurrent TimeUnit TimeoutException]))
 
 (set! *warn-on-reflection* true)
@@ -236,48 +237,13 @@
          (copy-blob-stdin! connection stream (:seon.blob/digest stdin)
                            limit))))))
 
-(defn- handle-identity
-  [^ProcessHandle handle]
-  (let [started (.startInstant (.info handle))]
-    {:seon.shell.jvm/pid (.pid handle)
-     :seon.shell.jvm/started
-     (when (.isPresent ^Optional started) (.get ^Optional started))
-     :seon.shell.jvm/handle handle}))
-
-(defn- process-descendants
-  [^ProcessHandle root]
-  (with-open [stream (.descendants root)]
-    (mapv handle-identity (iterator-seq (.iterator stream)))))
-
-(defn- same-process?
-  [{:seon.shell.jvm/keys [^ProcessHandle handle started]}]
-  (and (.isAlive handle)
-       (let [current (.startInstant (.info handle))]
-         (= started
-            (when (.isPresent ^Optional current)
-              (.get ^Optional current))))))
-
-(defn- force-exact!
-  [identities]
-  (doseq [process-identity (reverse (vec (distinct identities)))]
-    (when (same-process? process-identity)
-      (.destroyForcibly ^ProcessHandle (:seon.shell.jvm/handle process-identity)))))
-
-(defn- terminate-tree!
-  [process-record grace-ms]
-  (let [^Process child (:proc process-record)
-        root (.toHandle child)
-        before (into [(handle-identity root)] (process-descendants root))]
-    (process/destroy-tree process-record)
-    (when-not (.waitFor child (long grace-ms) TimeUnit/MILLISECONDS)
-      (let [current (if (.isAlive root) (process-descendants root) [])]
-        (force-exact! (into before current))
-        (.destroyForcibly child)
-        (.get (.onExit child) (long grace-ms) TimeUnit/MILLISECONDS)))
-    nil))
+;; A descendant is only visible while its parent lives, so the wait samples
+;; the tree; one sample costs ~0.4 ms (2026-09-24), under 1% of a core at 50 ms.
+(def ^:private descendant-sample-ms 50)
 
 (defn- await-exit
-  "Wait for the child, bounded by whichever limit ends first.
+  "Wait for the child, bounded by whichever limit ends first, sampling its
+  tree into `captured` so descendants orphaned by the root's exit stay known.
 
   Two limits govern a foreground child and only one of them used to be
   observed. `:seon.config.shell/time-limit-ms` is the shell's own bound; the
@@ -290,17 +256,26 @@
   Returns `:exited`, `:shell-limit`, or `:evaluation-limit` — a disposition,
   never a bare boolean, because the caller must say which limit ended the
   child."
-  [^Process child time-limit-ms]
+  [^Process child time-limit-ms captured]
   (let [remaining (kernel/deadline-remaining-ms)
         evaluation-first? (and remaining (< remaining (long time-limit-ms)))
-        wait-ms (if evaluation-first? (max 0 remaining) (long time-limit-ms))]
-    (try
-      (.get (.onExit child) wait-ms TimeUnit/MILLISECONDS)
-      :exited
-      (catch TimeoutException _
-        (if (or evaluation-first? (kernel/deadline-reached?))
-          :evaluation-limit
-          :shell-limit)))))
+        wait-ms (if evaluation-first? (max 0 remaining) (long time-limit-ms))
+        deadline-ns (+ (System/nanoTime) (* 1000000 (long wait-ms)))]
+    (loop []
+      (vswap! captured #(into [] (distinct)
+                              (concat % (cluster.process/subprocess-tree-identities
+                                         (.toHandle child)))))
+      (let [left-ms (quot (- deadline-ns (System/nanoTime)) 1000000)
+            exited? (try
+                      (.get (.onExit child) (max 0 (min left-ms descendant-sample-ms))
+                            TimeUnit/MILLISECONDS)
+                      true
+                      (catch TimeoutException _ false))]
+        (cond
+          exited? :exited
+          (> left-ms descendant-sample-ms) (recur)
+          (or evaluation-first? (kernel/deadline-reached?)) :evaluation-limit
+          :else :shell-limit)))))
 
 (defn- output-descriptor
   [_connection captured effective]
@@ -351,6 +326,8 @@
           :extra-env (environment-overrides projection effective)
           :shutdown process/destroy-tree})
         ^Process child (:proc process-record)
+        captured (volatile! [])
+        grace-ms (:seon.config.shell/termination-grace-ms effective)
         stdout-task
         (capture-task connection "seon-shell-stdout-" (:out process-record))
         stderr-task
@@ -361,9 +338,11 @@
     (try
       (let [disposition (await-exit child
                                     (:seon.config.shell/time-limit-ms
-                                     effective))]
+                                     effective)
+                                    captured)]
         (if (= :exited disposition)
-          (let [evidence (finish-evidence connection stdout-task stderr-task
+          (let [_ (cluster.process/terminate-subprocess! process-record @captured grace-ms grace-ms)
+                evidence (finish-evidence connection stdout-task stderr-task
                                           effective)
                 input (task-result input-task effective ::stdin)]
             (cond
@@ -380,9 +359,7 @@
           ;; what stamps `:seon.effect/interrupted-at` on the receipt, so the
           ;; process and the receipt terminate together or not at all.
           (do
-            (terminate-tree! process-record
-                             (:seon.config.shell/termination-grace-ms
-                              effective))
+            (cluster.process/terminate-subprocess! process-record @captured grace-ms grace-ms)
             (let [evidence (finish-evidence connection stdout-task stderr-task
                                             effective)
                   input
@@ -407,8 +384,7 @@
         :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)})
                  :seon.effect/disposition :interrupted))))))
       (catch InterruptedException interrupted
-        (terminate-tree! process-record
-                         (:seon.config.shell/termination-grace-ms effective))
+        (cluster.process/terminate-subprocess! process-record @captured grace-ms grace-ms)
         (.interrupt (Thread/currentThread))
         (throw interrupted)))))
 

@@ -105,6 +105,8 @@
 
 
 (def ^:private subprocess-cleanup-ms 10000)
+;; TERM grace before force; the operator bound already expired, so keep it short.
+(def ^:private subprocess-grace-ms 1000)
 
 
 (defn- subprocess-remaining-ms
@@ -133,7 +135,9 @@
     (when (and candidate (= pid (.pid ^java.lang.ProcessHandle candidate)))
       candidate)))
 
-(defn- subprocess-tree-identities
+(defn subprocess-tree-identities
+  "The `(pid, start-instant)` identities of `root` and its current descendants.
+  An exited root has no descendants: capture while it is alive."
   {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]]}
   [^java.lang.ProcessHandle root]
   (with-open [descendant-stream (.descendants root)]
@@ -141,27 +145,35 @@
           (map subprocess-identity)
           (iterator-seq (.iterator descendant-stream)))))
 
-(defn- terminate-subprocess!
-  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]] :boolean]}
-  [process-record launch-identities]
+(defn terminate-subprocess!
+  "Terminate every captured identity plus the root's current tree: TERM each,
+  wait up to `grace-ms` for all to exit, force survivors, then await actual exit
+  within `cleanup-ms`. Every signal first verifies `(pid, start-instant)`.
+  Returns true when no captured identity survives."
+  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]] [:int {:min 0}] [:int {:min 0}]] :boolean]}
+  [process-record launch-identities grace-ms cleanup-ms]
   (let [^Process child (:proc process-record)
         identities (vec (distinct (concat launch-identities
                                           (subprocess-tree-identities
-                                           (.toHandle child)))))]
-    (process/destroy-tree process-record)
-    (doseq [process-identity (reverse identities)]
-      (when-let [handle (same-subprocess-handle process-identity)]
-        (.destroyForcibly ^java.lang.ProcessHandle handle)))
-    (let [cleanup-deadline
-          (+ (System/nanoTime) (* 1000000 subprocess-cleanup-ms))]
-      (doseq [process-identity identities]
-        (when-let [handle (same-subprocess-handle process-identity)]
-          (try
-            (.get (.onExit ^java.lang.ProcessHandle handle)
-                  (subprocess-remaining-ms cleanup-deadline)
-                  java.util.concurrent.TimeUnit/MILLISECONDS)
-            (catch java.util.concurrent.TimeoutException _ nil)
-            (catch java.util.concurrent.ExecutionException error (throw (.getCause error)))))))
+                                           (.toHandle child)))))
+        signal! (fn [destroy!]
+                  (doseq [process-identity identities]
+                    (when-let [handle (same-subprocess-handle process-identity)]
+                      (destroy! handle))))
+        await-all! (fn [bound-ms]
+                     (let [deadline (+ (System/nanoTime) (* 1000000 (long bound-ms)))]
+                       (doseq [process-identity identities]
+                         (when-let [handle (same-subprocess-handle process-identity)]
+                           (try
+                             (.get (.onExit ^java.lang.ProcessHandle handle)
+                                   (subprocess-remaining-ms deadline)
+                                   java.util.concurrent.TimeUnit/MILLISECONDS)
+                             (catch java.util.concurrent.TimeoutException _ nil)
+                             (catch java.util.concurrent.ExecutionException error (throw (.getCause error))))))))]
+    (signal! #(.destroy ^java.lang.ProcessHandle %))
+    (await-all! grace-ms)
+    (signal! #(.destroyForcibly ^java.lang.ProcessHandle %))
+    (await-all! cleanup-ms)
     (not-any? same-subprocess-handle identities)))
 
 (defn run-process!
@@ -266,7 +278,8 @@
                 (identical? timeout-value error-output) :stderr
                 :else nil)]
     (if phase
-      (let [reaped? (terminate-subprocess! process-record identities)]
+      (let [reaped? (terminate-subprocess! process-record identities
+                                            subprocess-grace-ms subprocess-cleanup-ms)]
         (throw
          (ex-info
           "The process and its output must finish within the declared bound."
