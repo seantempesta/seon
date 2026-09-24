@@ -699,7 +699,7 @@
   [message offense]
   (throw (ex-info message
                   (merge
-                   {:seon.boot/refused true
+                   {:seon.cluster.boot/disposition :refused
                     :seon.error/message message
                     ;; A projection is execution input, not refusal evidence.
                     :seon.boot/offense
@@ -729,7 +729,7 @@
   carries the real port), log-dir derived as <root>/<name>/logs,
   store-dir derived as <operator-root>/data/store — the process-root
   store every cluster branches from.
-  Refuses (throws ex-info {:seon.boot/refused true ...}) when a
+  Refuses (throws ex-info {:seon.cluster.boot/disposition :refused ...}) when a
   declared key has an invalid value. Extra keys remain available for
   accretion."
   {:malli/schema [:=> [:cat :seon.boot/overrides] :seon.boot/config]}

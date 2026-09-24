@@ -91,7 +91,7 @@
            (spit (io/file root "src" "leaf.clj") "(ns sample.reload.leaf)\n(defn value [] 2)\n")
            (let [refusal (support/refusal-data
                           #(verify database (.getCanonicalPath root) namespaces))]
-             (is (true? (:seon.boot/refused refusal)))
+             (is (= :refused (:seon.cluster.boot/disposition refusal)))
              (is (= :adoption (:seon.cluster.source/phase refusal)))
              (is (= ["src/leaf.clj"]
                     (get-in refusal [:seon.boot/offense :seon.source/changed-paths])))))

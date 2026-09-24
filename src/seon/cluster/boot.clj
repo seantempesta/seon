@@ -662,7 +662,7 @@
       (let [refused? (= :refused (:seon.cluster.boot/disposition (ex-data cause)))
             response (diagnostic (if refused? (ex-message cause) (render.value/floor cause))
                                  (dissoc (or (ex-data cause) request) :seon.boot/instance :seon.boot/prepl-server)
-                                 :operation-failed cause)]
+                                 (if refused? :refused :operation-failed) cause)]
         (if refused?
           response
           (assoc response :seon.fault/recorded

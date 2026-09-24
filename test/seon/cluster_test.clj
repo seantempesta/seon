@@ -320,7 +320,7 @@
                     '{sample.a #{sample.a}}]]
     (let [refusal (test-support/refusal-data
                    #(cluster/reload-order (set (keys requires)) requires))]
-      (is (true? (:seon.boot/refused refusal)))
+      (is (= :refused (:seon.cluster.boot/disposition refusal)))
       (is (= (set (keys requires))
              (get-in refusal [:seon.boot/offense :seon.ns/requires]))))))
 
@@ -340,7 +340,7 @@
             refusal (test-support/refusal-data
                      #(#'cluster/transact-initialization! connection [row]))
             offense (:seon.boot/offense refusal)]
-        (is (true? (:seon.boot/refused refusal))
+        (is (= :refused (:seon.cluster.boot/disposition refusal))
             (pr-str refusal))
         (is (not (str/includes? (str (:seon.error/message refusal))
                                 "lookup refs do not resolve"))
