@@ -2027,7 +2027,15 @@
         registration [::prefix (:seon.agent/id request)]
         retained (get-in @cache [:seon.render.web/calls registration] {})
         captured (atom {})
-        request (assoc request :seon.render/profile (render/request-profile request)
+        ;; The caller names its cluster on the request; a refused profile is
+        ;; passed on, never carried as the prefix render's profile.
+        profile (render/request-profile
+                 (cond-> request
+                   (:seon.cluster/name request)
+                   (assoc :seon.boot/cluster-name (:seon.cluster/name request))))
+        _ (when (:seon.render/refused-member profile)
+            (throw (ex-info (:seon.error/message profile) profile)))
+        request (assoc request :seon.render/profile profile
                                :seon.render/output :seon.render/ai
                                :seon.render/ai 'seon.render.transcript/render-captured-prefix
                                :seon.render/retained-calls retained
