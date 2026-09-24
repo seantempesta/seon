@@ -10,6 +10,8 @@
             [seon.cluster.process :as process]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
+            [seon.env :as env]
+            [seon.fault :as fault]
             [seon.fs :as fs]
             [seon.id :as id]
             [seon.instrument :as instrument]
@@ -479,3 +481,44 @@
       (boot/record-uncaught! "probe-thread" (IllegalStateException. ^String message)))
     (is (str/includes? (str printed) "SEON CORE FAULT (uncaught, not stored)"))
     (is (str/includes? (str printed) message) "the throwable is printed whole")))
+
+(deftest status-answers-faulted-health-and-lists-the-open-fault
+  ;; Status refused its own output contract because health `:faulted` was
+  ;; produced but undeclared (6b4f88d2f). One open fault, recorded through the
+  ;; canonical writer, must reach the operator response readably. The fixture
+  ;; cluster's instance takes the live instance's structural members (socket,
+  ;; executors, advertisement) so `readiness` sees a well-formed instance.
+  (support/with-database
+   (fn [connection]
+     (let [cluster-name (str "status-faulted-" (random-uuid))
+           live (some #(when (map? %) %) (vals @runtime/running-instances))
+           _ (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+           receipt (fault/fault! (env/environment {:seon.boot/cluster-name cluster-name
+                                                   :seon.db/connection connection})
+                                 (IllegalStateException. "status regression fault")
+                                 {:seon.error/layer ::status
+                                  :seon.error/operation `status-answers-faulted-health-and-lists-the-open-fault
+                                  :seon.db.process/id "boot-test"})]
+       (is (some? live) "status is requested of this JVM's live instance")
+       ;; registered only for this request; removed in `finally`
+       (swap! runtime/running-instances assoc cluster-name
+              (-> (select-keys live [:seon.boot/config :seon.boot/advertisement
+                                     :seon.boot/prepl-server :seon.boot/executors])
+                  (assoc-in [:seon.boot/config :seon.boot/cluster-name] cluster-name)
+                  (assoc :seon.boot/cluster-connection connection)))
+       (try
+         (let [started (System/nanoTime)
+               response (boot/request! (merge (process/current-identity)
+                                              {:seon.operator/command :status
+                                               :seon.operator/managed-root
+                                               (or (store/declared-operator-root) (System/getProperty "user.dir"))}))
+               elapsed-ms (/ (- (System/nanoTime) started) 1e6)
+               observed (some #(when (= cluster-name (:seon.dev.mcp/cluster %)) %)
+                              (:seon.operator/clusters response))]
+           (is (nil? (:seon.error/at response)) (pr-str (select-keys response [:seon.error/message])))
+           (is (= :faulted (:seon.dev.mcp/health observed)))
+           ;; the fixture branch also carries whatever open faults its parent had
+           (is (some #{(:seon.error/signature receipt)}
+                     (map :seon.error/signature (:seon.dev.mcp/open-faults observed))))
+           (println "STATUS-FAULTED" elapsed-ms "ms"))
+         (finally (swap! runtime/running-instances dissoc cluster-name)))))))
