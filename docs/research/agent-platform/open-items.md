@@ -12,7 +12,7 @@ updated: 2026-09-24
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
 - fix-affected-callers-interpret (sci/eval.clj): a branch changing one :core function refuses its whole acquisition because
   interpreted callers cannot resolve privates, def Vars and dependency aliases (docs/seon/issues/affected-callers-fail-to-interpret-against-uninstalled-bindings.md). Blocking: most branch tests.
-- fix-unbounded-printed-values: root cause of the OOMs (class 1 below).
+- fix-panic-print-sink (flow.clj, cluster/store.clj): class 1 below.
 - fix-agent-custody-label (agent.clj): class 2 below.
 
 Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
@@ -24,7 +24,8 @@ rows refuse only when called (f2bc7088a). Tool smell: every seon.sci.branch-exec
 1. **Unbounded printed values kill default** (3 OOMs: 105 MB datom, 557M-char `is` message, 18:08Z 13.9 GB heap dump).
    Contract refusals rightly carry live world objects (connection, ctx, projection) in ex-data; some text sink prints them
    whole to stdout (seon.log lines of 18 MB–1,052 MB; the log reached 3.7 GB). Each earlier fix bounded one producer; the
-   class needs its one bounded sink (law "Apply presentation limits once"). Lane fix-unbounded-printed-values.
+   class needs its one bounded sink (law "Apply presentation limits once"). Found: two sinks. The test runner printed `is` messages whole (fixed 10d629c54, bounded by the profile). Flow/store panic prints `prn` whole Throwable->map to stderr (1 GB lines, killed pid 68592) → lane fix-panic-print-sink (seon.render.value/floor, as boot.clj:320). Today's 18:08Z death of pid 70372 is NOT a print (no line over 44 KB): cause unknown; heap sampler running (tmp/heap-samples/, every 10 min). Also: failure-identity/failure-report pr-str whole expected/actual (4.4 s for 60 MB).
+   Q4: sci/eval.clj shown-result passes a request profile lacking :seon.render.profile/id (render.clj:129 passes carried profiles unchecked).
 2. **Custody inferred from a label, not the held connection** (agent.clj:205 → 43 "fresh owned branch" refusals; latent
    live-root escape through a shared context-state atom). Lane fix-agent-custody-label.
 3. **Hand-built rows in fixtures** (ns, fn and test rows missing required digests → most save-gate reds). The rows should
