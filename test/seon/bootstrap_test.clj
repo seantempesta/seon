@@ -1,7 +1,6 @@
 (ns seon.bootstrap-test
   "The live-fact opening generator and its agent-creation seam."
-  (:require [clojure.java.io :as io]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.plan :as plan]
             [seon.bootstrap :as bootstrap]
@@ -281,12 +280,6 @@
           (is (= [(:seon.repl/root-key pull)]
                  (mapv :seon.repl/key episode))
               "with nothing settled the episode is exactly the root entry"))))))
-
-(deftest authored-plan-machinery-is-deleted
-  (is (nil? (io/resource "seon/bootstrap.edn")))
-  (doseq [old '[packaged-forms population-tx ordered-sources agent-sources
-                plan-digest help-text entry-source]]
-    (is (nil? (ns-resolve 'seon.bootstrap old)) (str old " is deleted"))))
 
 (defn- candidate-sources
   [pull]

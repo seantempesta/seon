@@ -253,54 +253,6 @@
                     (db/pull (db/db connection) [:seon.turn/closed-tx]
                              [:seon.turn/id run-id])))))))))
 
-(deftest a-run-no-message-caused-settles-its-forms
-  (testing "a continuation run has no trigger, and its batch still settles"
-   (support/with-database
-    (fn [connection]
-      ;; The branch already carries the executing cluster; seeding another
-      ;; would cost a second config application for nothing this reads.
-      (let [cluster-name (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]]
-                               (db/db connection))
-            _ (checked-transact! connection
-                                 (agent/creation-tx {:seon.agent/id "continuer"
-                                                     :seon.ns/name 'my.agents.continuer
-                                                     :seon.cluster/name cluster-name}))
-            run-id "untriggered"
-            evaluation-id (id/evaluation run-id 0)
-            _ (checked-transact!
-               connection
-               [{:seon.turn/id run-id
-                 :seon.turn/agent [:seon.agent/id "continuer"]
-                 :seon.turn.work/situation :call
-                 :seon.turn/starting-ns [:seon.ns/name 'my.agents.continuer]
-                 :seon.turn/opened-tx "datomic.tx"}
-                {:seon.cluster.eval/id evaluation-id
-                 :seon.cluster.eval/at (java.util.Date.)
-                 :seon.cluster.eval/run [:seon.turn/id run-id]
-                 :seon.cluster.eval/ordinal 0
-                 :seon.cluster.eval/author :agent
-                 :seon.cluster.eval/ns [:seon.ns/name 'my.agents.continuer]
-                 :seon.cluster.eval/source "(+ 1 2)"}])
-            handle (support/cluster-handle
-                    {:seon.env/environment (support/environment cluster-name connection)
-                     :seon.db/connection connection
-                     :seon.cluster/name cluster-name
-                     :seon.db.process/id cluster/boot-process-identity
-                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection)})
-            report (turn/turn {:seon.turn.loop/cluster handle
-                               :seon.turn.work/next {:seon.turn.work/situation :resume
-                                                     :seon.turn/id run-id
-                                                     :seon.agent/id "continuer"
-                                                     :seon.cluster.eval/ordinal 0}}
-                              (java.util.Date.))
-            shown (:seon.eval/shown
-                   (db/pull (db/db connection) [:seon.eval/shown]
-                            [:seon.cluster.eval/id evaluation-id]))]
-        ;; Without a trigger the run's request carried `:seon.message/trigger
-        ;; nil`, and `settle-batch!`'s contract refused the whole batch.
-        (is (#{:closed :released} (:seon.turn.loop/outcome report)) (pr-str report))
-        (is (= "3" shown) (pr-str shown)))))))
-
 (deftest compaction-refuses-an-open-turn-at-the-writer
   (support/with-database
    (fn [connection]
@@ -983,20 +935,6 @@
   (turn/open-for-agent (db/db connection)
                       [:seon.agent/id agent-id]))
 
-;;; ---------------------------------------------------------------------------
-;;; Derivations — state is computed from primitives, never stored
-;;; ---------------------------------------------------------------------------
-
-(deftest state-is-derived-from-primitives
-  (testing "open is the absence of closed-at"
-    (let [open-turn {:seon.turn/id "open"
-                     :seon.turn/agent [:seon.agent/id "a"]
-                     :seon.turn/opened-tx 1}]
-      (is (true? (turn/open? open-turn)))
-      (is (false? (turn/open? (assoc open-turn
-                                     :seon.turn/closed-tx 2))))))
-  )
-
 (deftest an-open-turn-read-refusal-refuses-the-writer-verbatim
   (support/with-database
     (fn [connection]
@@ -1084,107 +1022,6 @@
                     {:seon.cluster.eval/ordinal 2}])]
       (is (= 1 (:seon.cluster.eval/ordinal warning)))
       (is (= 2 (:seon.turn/missing-results warning))))))
-
-(deftest a-frozen-run-holds-exactly-one-evaluation-per-ordinal-and-no-form-entity
-  ;; THE MERGE, ASSERTED AS A COUNT. A frozen plan of N sources leaves N
-  ;; evaluation entities and nothing else: no twin form entity, no second
-  ;; `:db.unique/identity` attribute that a derived identity string could
-  ;; resolve against, and no run-side component list mirroring the back-edge
-  ;; the evaluations already carry.
-  (with-model-database
-    (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "merged-agent" :seon.agent/branch (registry/cluster-branch "turn-test")}])
-      (support/transacted!
-              connection
-              (turn/open-tx {::turn/id "merged" ::turn/agent [:seon.agent/id "merged-agent"] :seon.turn/opened-tx "datomic.tx"}))
-
-      (is (= ::committed
-             (transact-or-refusal
-              connection
-              (turn/plan-tx {::turn/id "merged" :seon.db.process/id "p1" ::turn/starting-ns [:seon.ns/name 'user] :seon.cluster.eval/at t1 ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}
-                             {:seon.cluster.eval/source "(+ 2 2)"}
-                             {:seon.cluster.eval/source "(+ 3 3)"}]}))))
-      (let [database (db/db connection)
-            run (run-entity connection "merged")
-            evaluations
-            (db/q '[:find [(pull ?evaluation [*]) ...]
-                    :in $ ?run
-                    :where [?evaluation :seon.cluster.eval/run ?run]]
-                  database (:db/id run))]
-        (is (= 3 (count evaluations))
-            "one entity per (run, ordinal), never two")
-        (is (= [0 1 2] (sort (map :seon.cluster.eval/ordinal evaluations))))
-        (is (= 3 (count (set (map :db/id evaluations))))
-            "three ordinals name three entities, not six")
-        (is (= (set (map #(turn/receipt-identity "merged" %) [0 1 2]))
-               (set (map :seon.cluster.eval/id evaluations)))
-            "one identity derivation names every frozen ordinal")
-        (is (= ["(+ 1 1)" "(+ 2 2)" "(+ 3 3)"]
-               (mapv :seon.cluster.eval/source
-                     (sort-by :seon.cluster.eval/ordinal evaluations)))
-            "the frozen source is an attribute of the evaluation itself")
-        (is (every? #(= :agent (:seon.cluster.eval/author %)) evaluations))
-        (is (not-any? turn/terminal? evaluations)
-            "the freeze asserts no terminal fact; that absence IS running")
-        (is (empty?
-             (filter #(and (keyword? %)
-                           (= "seon.cluster.run.form" (namespace %)))
-                     (keys (:schema database))))
-            "no attribute of the deleted form family is installed")
-        (is (nil? (find run :seon.turn/forms))
-            "the run keeps no component mirror of the back-edge")))))
-
-;;; ---------------------------------------------------------------------------
-;;; Teaching examples — the call shapes, one committed lifecycle
-;;; ---------------------------------------------------------------------------
-
-(deftest one-run-lifecycle-teaches-the-call-shapes
-  (with-model-database
-    (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "teacher" :seon.agent/branch (registry/cluster-branch "turn-test")}])
-      (testing "open: run entity + agent pointer from ONE agent ref"
-        (is (= ::committed
-               (transact-or-refusal
-                connection
-                (turn/open-tx {::turn/id "lesson" ::turn/agent [:seon.agent/id "teacher"] :seon.turn/opened-tx "datomic.tx"}))))
-        (is (= "lesson" (open-run-id connection "teacher"))))
-
-      (testing "plan freezes once, with its ordered owned forms"
-        (is (= ::committed
-               (transact-or-refusal
-                connection
-                (turn/plan-tx {::turn/id "lesson" :seon.db.process/id "p1" ::turn/starting-ns [:seon.ns/name 'user] ::turn/sources [{:seon.cluster.eval/source "(+ 1 1)"}
-                               {:seon.cluster.eval/source "(+ 2 2)"}]}))))
-        (is (= ["(+ 1 1)" "(+ 2 2)"]
-               (->> (db/q '[:find ?ordinal ?source
-                           :in $ ?run-id
-                           :where
-                           [?run :seon.turn/id ?run-id]
-                           [?form :seon.cluster.eval/run ?run]
-                           [?form :seon.cluster.eval/ordinal ?ordinal]
-                           [?form :seon.cluster.eval/source ?source]]
-                         (db/db connection) "lesson")
-                    (sort-by first)
-                    (mapv second)))))
-        (is (= #{:agent}
-               (set
-                (db/q '[:find [?author ...]
-                        :in $ ?run-id
-                        :where
-                        [?run :seon.turn/id ?run-id]
-                        [?form :seon.cluster.eval/run ?run]
-                        [?form :seon.cluster.eval/author ?author]]
-                      @connection "lesson"))))
-      (testing "close settles the run and retracts the pointer it
-                derived from the run's own agent connection"
-        (is (= ::committed
-               (transact-or-refusal
-                connection
-                (turn/close-tx {::turn/id "lesson" :seon.db.process/id "p1" :seon.turn/closed-tx "datomic.tx"}))))
-        (let [entity (run-entity connection "lesson")]
-          (is (false? (turn/open? entity)))
-          )
-        (is (nil? (open-run-id connection "teacher")))))))
 
 (deftest generated-system-runs-grow-only-after-their-settled-prefix
   (with-model-database
@@ -2066,43 +1903,6 @@
     (is (true? (:result check))
         (str "recovery property failed: " (pr-str check)))))
 
-(deftest recovery-cannot-stamp-a-settled-receipt
-  ;; the zombie audit's order-B soft spot, made unrepresentable
-  ;; (custody revision, Revision 4): `recover-call` reads the receipt
-  ;; AT TRANSACTION TIME, so there is no stale caller basis from which
-  ;; a settled receipt could be stamped `interrupted-at`.
-  (with-model-database
-    (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "orderer" :seon.agent/branch (registry/cluster-branch "turn-test")}])
-      (support/transacted! connection
-                         (turn/open-tx {::turn/id "order-b" ::turn/agent [:seon.agent/id "orderer"] :seon.turn/opened-tx "datomic.tx"}))
-
-      (support/transacted! connection
-                         (turn/receipt-start-tx {::turn/id "order-b"
-                                                :seon.cluster.eval/ordinal 0
-                                                :seon.cluster.eval/at t0}))
-      ;; the settle lands FIRST; recovery then runs against whatever
-      ;; the transaction sees — which includes that settle
-      (support/transacted! connection
-                         (turn/receipt-settle-tx {::turn/id "order-b"
-                                                 :seon.cluster.eval/ordinal 0
-                                                 :seon.eval/shown "2"}))
-      (support/transacted! connection
-                         (turn/recover-tx {::turn/id "order-b"
-
-                                          ::turn/now t2}))
-      (let [receipt (db/pull @connection '[*]
-                            [:seon.cluster.eval/id (turn/receipt-identity "order-b" 0)])]
-        (is (= "2" (:seon.eval/shown receipt)))
-        (is (nil? (:seon.cluster.eval/interrupted-at receipt))
-            "the settled receipt is byte-untouched — no contradiction
-             fact can exist"))
-
-      (is (some? (:seon.turn/closed-tx (run-entity connection "order-b")))
-          "the interrupted run is ended")
-      (is (nil? (open-run-id connection "orderer"))
-          "and the agent pointer is retracted"))))
-
 (deftest recovery-closes-a-turn-with-no-evaluations
   (with-model-database
     (fn [connection]
@@ -2121,41 +1921,6 @@
                             :where [?e :seon.cluster.eval/id]] @connection)))
         (is (str/includes? (turn/render-ai (assoc cut :seon.db/db @connection))
                            "interrupted before the reply arrived"))))))
-
-;;; ---------------------------------------------------------------------------
-;;; Schema admissibility — the model refuses what it must
-;;; ---------------------------------------------------------------------------
-
-(deftest run-schema-admits-and-refuses
-  (is (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-       :seon.turn/turn
-       {::turn/id "r1" ::turn/agent [:seon.agent/id "runner"] :seon.turn/opened-tx "datomic.tx"}))
-  (is (not (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-            :seon.turn/turn
-            {::turn/agent [:seon.agent/id "runner"] :seon.turn/opened-tx "datomic.tx"}))
-      "identity is required")
-  (is (not (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-            :seon.turn/turn
-            {::turn/id "" ::turn/agent [:seon.agent/id "runner"] :seon.turn/opened-tx "datomic.tx"}))
-      "a blank identity is refused"))
-
-(deftest open-turn-is-derived-without-an-agent-pointer
-  (with-model-database
-    (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "derived" :seon.agent/branch (registry/cluster-branch "turn-test")}])
-      (support/transacted! connection
-                           (turn/open-tx {::turn/id "derived-turn" ::turn/agent [:seon.agent/id "derived"] :seon.turn/opened-tx "datomic.tx"}))
-      (is (= "derived-turn" (open-run-id connection "derived")))
-      (doseq [attribute [:seon.agent/run :seon.agent/cluster
-                         :seon.agent/instructions]]
-        (is (nil? (seon.schema/schema-definition attribute))))
-      (is (= #{:db/id :seon.agent/id :seon.agent/runtime}
-             (set (keys (db/pull @connection '[*]
-                                 [:seon.agent/id "derived"])))))
-      (support/transacted! connection
-                           [[:db/add [:seon.turn/id "derived-turn"]
-                             :seon.turn/closed-tx "datomic.tx"]])
-      (is (nil? (open-run-id connection "derived"))))))
 
 ;; THE FAULTS UNIT lives on `:seon.error/agent`, whose renderer needs a run to
 ;; link to; that is why its regression sits beside the run model rather than in

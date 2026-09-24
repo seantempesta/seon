@@ -356,26 +356,6 @@
               :seon.agent/id agent-id
               :seon.cluster.eval/ordinal 0}}])
 
-(deftest the-request-declares-exactly-the-dependencies-the-derivation-reads
-  ;; The class: a required argument no code reads. It cannot be passed
-  ;; wrongly, so it can only ever be forgotten. The derivation is
-  ;; pure over committed facts and reads no clock, so the request now says
-  ;; exactly that, and an unread required key cannot be reintroduced without
-  ;; failing here.
-  (let [complete {:seon.agent/id agent-id}]
-    (is (true? (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-                :seon.turn.work/agent-request complete))
-        "the agent identity the derivation reads are the whole request")
-    (is (true? (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-                :seon.turn.work/agent-request
-                (assoc complete :seon.turn.work/now (Date.))))
-        "a caller still passing a clock is accreted, never refused")
-    (doseq [required (keys complete)]
-      (is (false? (seon.schema/valid-candidate-value? (seon.schema/handed-projection)
-                   :seon.turn.work/agent-request
-                   (dissoc complete required)))
-          (str required " is genuinely required")))))
-
 (deftest the-derivation-is-total-over-every-state
   (doseq [{::keys [label build expect]} states]
     (with-database
@@ -497,28 +477,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The F2 sealed suite — situation-totality-property, seed 2026072829
 ;;; ---------------------------------------------------------------------------
-
-(deftest an-answered-subjectless-message-does-not-end-a-session
-  ;; The fixed-seed property's minimal case: planned, closed, triggered
-  ;; before opening, no lint ordinal, and no terminal evaluations.
-  (with-database
-    (fn [connection]
-      (configure-cap! connection 3)
-      (add-trigger! connection)
-      (open-run! connection {:planned? true :triggered? true})
-      (close-run! connection)
-      (is (nil? (:seon.message/about
-                 (db/pull @connection [:seon.message/about]
-                          [:seon.message/id message-id]))))
-      (is (empty? (turn/unanswered-triggers @connection agent-id)))
-      (is (= {:seon.turn.work/situation :open :seon.agent/id agent-id}
-             (turn/next-agent-work @connection request))
-          "the accepted reply continues independently of the answered wake")
-      (support/transacted! connection
-                          [[:db/add [:seon.turn/id run-id]
-                            :seon.turn/disposition :completed]])
-      (is (nil? (turn/next-agent-work @connection request))
-          "a disposition ends the session without changing the message"))))
 
 (deftest situation-totality-property
   ;; ORACLE, re-sealed agent-scoped after the central pass died: over

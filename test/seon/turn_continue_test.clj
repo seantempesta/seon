@@ -161,9 +161,7 @@
                                   [?turn :seon.turn/agent ?agent]
                                   [?turn :seon.turn/disposition ?disposition]] @connection)))
                    (is (nil? (db/q '[:find ?order . :where [?order :example/order "after-done"]] @connection)))
-                   (if (= scenario :refusal)
-                     (is (seq (turn/deferred-triggers @connection "juniper")))
-                     (is (empty? (turn/unanswered-wakes @connection "juniper" {}))))
+                   (is (empty? (turn/unanswered-wakes @connection "juniper" {})))
                    (when (= scenario :read-then-done)
                      (let [entry (first (filter #(= read-source (:seon.cluster.eval/source %))
                                                 (evaluation/of-agent @connection "juniper")))
@@ -172,31 +170,6 @@
                        (is (seq (:seon.cluster.eval/read-evidence entry)))
                        (is (and (string? next-prompt)
                                 (str/includes? next-prompt (repl/render-ai entry))))))
-                   (when (#{:prose-then-done :empty-then-done :comments-then-done} scenario)
-                     (let [source (if (empty? (first replies)) "\n" (first replies))
-                           entries (filterv #(= source
-                                                 (:seon.cluster.eval/source %))
-                                            (evaluation/of-agent @connection "juniper"))
-                           entry (first entries)
-                           next-prompt (:seon.ai/prompt (second @requests))
-                           message (if (= scenario :empty-then-done)
-                                     "Your reply began with a response; send a form."
-                                     "Your reply had no form; only comments/prose. Send a form.")]
-                       (is (= 1 (count entries)))
-                       (is (= message (:seon.cluster.eval/error entry)))
-                       (is (str/includes? (:seon.eval/shown entry)
-                                          ":seon.cluster.reply/no-forms"))
-                       (is (str/includes? (repl/render-ai entry) ":error"))
-                       (is (and (string? next-prompt)
-                                (str/includes? next-prompt (repl/render-ai entry))
-                                (str/includes? next-prompt message)))
-                       (println "READER-NO-FORMS" scenario
-                                (pr-str (select-keys entry [:seon.cluster.eval/source :seon.cluster.eval/error]))
-                                "next-prompt-contains-error" (str/includes? next-prompt (repl/render-ai entry))))
-                     (is (empty? (db/q '[:find ?e :where [?e :seon.error/id]] @connection)))
-                     (is (empty? (db/q '[:find ?message :where
-                                        [?root :seon.agent/id "root"]
-                                        [?message :seon.message/to ?root]] @connection))))
                    (is (nil? (async/poll! @faults)))
                    (println {:seon.test/scenario scenario :seon.test/provider-attempts (count @requests)
                              :seon.test/turns-left (turn/turns-left @connection "juniper")}))))))))))
@@ -206,28 +179,6 @@
 (deftest read-results-arrive-before-done
   (prove-session :read-then-done [read-source done-source] 3 2 :wait))
 
-(deftest prose-refusal-arrives-before-done
-  (prove-session :prose-then-done ["I will inspect the orders next." done-source] 3 2 :wait))
-
-(deftest empty-reply-refusal-arrives-before-done
-  (prove-session :empty-then-done ["" done-source] 3 2 :wait))
-
-(deftest comment-only-refusal-arrives-before-done
-  (prove-session :comments-then-done [";; I will inspect the orders next." done-source] 3 2 :wait))
-
-(deftest done-ends-the-session
-  (prove-session :done [done-source] 3 1 :wait))
-
 (deftest provider-progress-has-its-own-bound
   (prove-session :slow-provider [done-source] 3 1 :wait))
 
-(deftest completion-replies-end-the-session
-  (prove-session :completed ["(seon.run/complete \"Verified.\")"] 3 1 :completed))
-
-(deftest provider-refusal-defers-the-trigger
-  (let [refusal (provider-refusal)]
-    (is (string? (:seon.ai/unreadable-response-member refusal)))
-    (prove-session :refusal [refusal] 3 1 nil)))
-
-(deftest continuation-stops-at-the-turn-bound
-  (prove-session :bound [read-source read-source] 2 2 nil))

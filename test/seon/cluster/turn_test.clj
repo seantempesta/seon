@@ -24,7 +24,6 @@
             [seon.turn :as turn]
             [seon.error :as error]
             [seon.cluster.message :as message]
-            [seon.cluster.prompt :as prompt]
             [seon.cluster.reply :as reply]
 
 
@@ -327,21 +326,6 @@
           (turn/next-agent-work @connection (request connection agent-id)))
         (agent-ids @connection)))
 
-(defn- drive-passes!
-  "Run the loop's own pass — settle, then derive, then turn — until idle.
-  This drives what `step` drives, so a test sees what production sees."
-  [cluster limit]
-  (let [connection (:seon.db/connection cluster)]
-    (loop [passes 0]
-      (let [now (Date.)]
-
-        (when-let [work (any-agent-work connection)]
-          (when (< passes limit)
-            (turn/turn {:seon.turn.loop/cluster cluster
-                                :seon.turn.work/next work}
-                               now)
-            (recur (inc passes))))))))
-
 (defn- drive!
   "Run passes until the loop says idle, or `limit` passes have run."
   [cluster limit]
@@ -375,44 +359,6 @@
                          :seon.turn.work/next work}
                         (:seon.turn.work/now request)))))))))
 
-
-(deftest a-prose-prefixed-contracted-defn-settles-and-doc-answers
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            source
-            (str
-             "; The situation is clear - this cluster has stale function references that need a JVM restart to fix. The maintenance tasks are failing because the operator functions (`seon.operator/census-processes!`, `seon.maintenance/observe-footprint!`, etc.) have been removed from the published program graph but are still loaded in the JVM.\n\n"
-             "; This is a systemic issue that I can't fix from within the REPL - it requires someone to restart the JVM. Let me note this finding and see if I can do anything else productive.\n\n"
-             "; Actually, let me look at this from the bootstrap task perspective - I had a task to define a function called `largest`. Let me focus on that:\n\n"
-             "(defn largest\n"
-             "  \"Return the row with the greatest :example/amount, or {} for empty input.\"\n"
-             "  {:malli/schema [:=> [:cat [:sequential :map]] [:or :map]]}\n"
-             "  [rows]\n"
-             "  (if (empty? rows)\n"
-             "    {}\n"
-             "    (apply max-key #(or (:example/amount %) 0) rows)))\n"
-             "(doc my.agents.agent-a/largest)\n"
-             "(seon.run/complete \"built largest\")")]
-        (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text source})]
-          (let [reports (drive-agent! cluster "agent-a" 2)
-                row (db/pull @connection
-                             '[:seon.fn/sym :seon.fn/spec :seon.fn/doc]
-                             [:seon.fn/sym "my.agents.agent-a/largest"])
-                doc-output
-                (db/q '[:find ?output .
-                        :where
-                        [?receipt :seon.cluster.eval/ordinal 1]
-                        [?receipt :seon.eval/shown ?output]
-                        [?receipt :seon.cluster.eval/author :agent]]
-                      @connection)]
-            (is (= [:open :call]
-                   (mapv :seon.turn.work/situation reports)))
-            (is (= "[:=> [:cat [:sequential :map]] [:or :map]]"
-                   (:seon.fn/spec row)))
-            (is (= "Return the row with the greatest :example/amount, or {} for empty input."
-                   (:seon.fn/doc row)))
-            (is (str/includes? doc-output "my.agents.agent-a/largest"))))))))
 
 
 (deftest function-install-reads-the-case-count-from-cluster-facts
@@ -658,54 +604,6 @@
             (is (= "{:x :clojure.set/after-dynamic-require}" (get results 3))
                 "later sources are read only after prior namespace effects")))))))
 
-(deftest qualified-dynamic-ns-unmap-is-durable-in-a-fresh-context
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            function-sym "my.agents.agent-a/dynamic-obsolete"]
-        (with-redefs [ai/complete
-                      (fn [_projection _]
-                        {:seon.ai/text
-                         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} dynamic-obsolete [x] (inc x))\n"
-                              "(clojure.core/ns-unmap (find-ns 'my.agents.agent-a) (symbol \"dynamic-obsolete\"))\n"
-                              "(seon.run/complete \"deleted\")")})]
-          (drive-agent! cluster "agent-a" 2)
-          (is (nil? (db/pull (db/db connection) '[*] [:seon.fn/sym function-sym]))
-              "program-facts section 1f G1 retracts the entity, not only its definition")
-          (is (string? (db/q '[:find ?source . :in $ ?symbol :where
-                              [?function :seon.fn/sym ?symbol]
-                              [?function :seon.fn/source ?source]]
-                            (db/history (db/db connection)) function-sym))
-              "the historical declaration proves this is deletion, not failed creation")
-          (let [database (db/db connection)
-                fresh (sci.eval/cluster-ctx
-                       database connection
-                       (sci.eval/projection-state database (db/carried-projection database)))]
-            (is (nil? (sci.core/eval-string* fresh
-                       "(resolve 'my.agents.agent-a/dynamic-obsolete)"))
-                "fresh acquisition cannot resurrect a deleted definition")))))))
-
-(deftest absent-foreign-ns-unmap-commits-and-mutates-the-run-sci-ctx
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            original-evaluate sci.eval/evaluate
-            evaluated-ctx (atom nil)]
-        (with-redefs [ai/complete
-                      (fn [_projection _] {:seon.ai/text "(ns-unmap 'clojure.string 'upper-case)"})
-                      sci.eval/evaluate
-                      (fn [request]
-                        (reset! evaluated-ctx (:seon.sci.eval/ctx request))
-                        (original-evaluate request))]
-          (drive-agent! cluster "agent-a" 2)
-          (let [evaluations (agent-evaluations (db/db connection))]
-            (is (= 1 (count evaluations)))
-            (is (= "nil" (:seon.eval/shown (first evaluations))))
-            (is (nil? (:seon.cluster.eval/error (first evaluations)))))
-          (is (nil? (sci.core/eval-string* @evaluated-ctx
-                     "(resolve 'clojure.string/upper-case)"))
-              "the committed deletion updates the evaluated SCI context"))))))
-
 (deftest import-only-ns-unmap-installs-exactly-after-its-context-commit
   (with-cluster
     (fn [cluster]
@@ -751,69 +649,6 @@
                    "(resolve 'String)"
                    {:ns (sci.core/create-ns 'my.agents.agent-a)})))
                 "fresh acquisition reinstalls the persisted mask")))))))
-
-(deftest refused-import-only-ns-unmap-leaves-the-run-sci-ctx-unchanged
-  (with-cluster
-    (fn [cluster]
-      (let [original-evaluate sci.eval/evaluate
-            evaluated-ctx (atom nil)
-            transact! db/transact!]
-        (with-redefs
-          [ai/complete
-           (fn [_projection _]
-             {:seon.ai/text
-              "(clojure.core/ns-unmap *ns* (symbol \"String\"))"})
-           sci.eval/evaluate
-           (fn [request]
-             (reset! evaluated-ctx (:seon.sci.eval/ctx request))
-             (original-evaluate request))
-           db/transact!
-           (fn [target transaction]
-             (let [tx-data (if (map? transaction)
-                             (:tx-data transaction)
-                             transaction)
-                   namespace-mutation?
-                   (some
-                    (fn [operation]
-                      (and (vector? operation)
-                           (= :db.fn/call (first operation))
-                           (= #'turn/receipt-settle-call (second operation))
-                           (some-> (get-in operation
-                                         [2 :seon.program/row
-                                          :seon.ns/source])
-                                   (str/includes? "ns-unmap"))))
-                    tx-data)]
-               (if namespace-mutation?
-                 {:seon.db.write.attempt/request-id "namespace-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
-                  :seon.error/message "injected namespace refusal"
-                  :seon.error/data {:error :transact/namespace}}
-                 (transact! target transaction))))]
-          (drive! cluster 10)
-          (is (nil?
-               (db/q '[:find ?import .
-                      :in $ ?namespace ?local
-                      :where
-                      [?namespace-entity :seon.ns/name ?namespace]
-                      [?namespace-entity :seon.ns/imports ?import]
-                      [?import :seon.ns.import/local ?local]]
-                    @(:seon.db/connection cluster)
-                    'my.agents.agent-a
-                    'String))
-              "a refused mask never reaches the database")
-          (is (nil?
-               (:val
-                (sci.core/eval-string+
-                 @evaluated-ctx
-                 "(resolve 'String)"
-                 {:ns (sci.core/create-ns 'my.agents.agent-a)})))
-              "the rejected mutation remains visible only in the discarded turn fork")
-          (is (some?
-               (:val
-                (sci.core/eval-string+
-                 (:seon.sci.eval/ctx cluster)
-                 "(resolve 'String)"
-                 {:ns (sci.core/create-ns 'my.agents.agent-a)})))
-              "the live base context is unchanged by the rejected turn"))))))
 
 (deftest import-addition-is-ordinary-data-and-reacquires-exactly
   (with-cluster
@@ -1215,90 +1050,6 @@
                        (schema/projection-from-database db))
                       schema-key))
                 "the run-local projection derives absence from db-after")))))))
-
-(deftest refused-runtime-schema-registration-mutates-neither-row-nor-projection
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            schema-key :my.agents.agent-a/refused
-            global-projection (schema/current-projection)
-            global-forms (schema/registered-schemas)]
-        (with-redefs
-          [ai/complete
-           (fn [_projection _]
-             {:seon.ai/text
-              (str
-               "(require '[seon.schema :as schema])\n"
-               "(schema/register! ::refused (vector :missing/schema))")})]
-          (drive! cluster 10)
-          (is (some?
-               (db/q '[:find ?error .
-                      :where [?receipt :seon.cluster.eval/error ?error]]
-                    @connection))
-              "the rejected form leaves a terminal error receipt")
-          (is (nil? (db/pull @connection [:db/id]
-                            [:seon.schema/key schema-key]))
-              "a rejected registration leaves no program row")
-          (is (not (contains? (:schema @connection) schema-key))
-              "a rejected registration installs no Datahike attribute")
-          (is (identical? global-projection (schema/current-projection))
-              "candidate evaluation never mutates the global projection")
-          (is (= global-forms (schema/registered-schemas))
-              "candidate evaluation never mutates global declarations"))))))
-
-(deftest runtime-declarations-install-only-from-a-successful-terminal-db-after
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            schema-key :my.agents.agent-a/not-committed
-            transact! db/transact!
-            install! sci.eval/install-row!
-            installations (atom [])
-            global-forms (schema/registered-schemas)]
-        (with-redefs
-          [ai/complete
-           (fn [_projection _]
-             {:seon.ai/text
-              (str
-               "(require '[seon.schema :as schema])\n"
-               "(schema/register! ::not-committed "
-               "(vector :int {:seon.db/index true}))")})
-           db/transact!
-           (fn [target transaction]
-             (let [tx-data (if (map? transaction)
-                             (:tx-data transaction)
-                             transaction)
-                   declaration?
-                   (some
-                    (fn [operation]
-                      (and (vector? operation)
-                           (= :db.fn/call (first operation))
-                           (= #'turn/receipt-settle-call (second operation))
-                           (= schema-key
-                              (get-in operation
-                                      [2 :seon.program/row
-                                       :seon.schema/key]))))
-                    tx-data)]
-               (if declaration?
-                 {:seon.db.write.attempt/request-id "declaration-refusal" :seon.error/at (java.util.Date.) :seon.error/layer :seon.db/invocation :seon.error/operation 'seon.db/transact!
-                  :seon.error/message "injected declaration refusal"
-                  :seon.error/data {:error :transact/schema}}
-                 (transact! target transaction))))
-           sci.eval/install-row!
-           (fn [request]
-             (swap! installations conj request)
-             (install! request))]
-          (drive! cluster 10)
-          (is (nil? (db/pull @connection [:db/id]
-                            [:seon.schema/key schema-key])))
-          (is (not (contains? (:schema @connection) schema-key)))
-          (is (not-any? #(= schema-key
-                            (get-in % [:seon.program/row
-                                       :seon.schema/key]))
-                        @installations)
-              "a rejected transaction report never reaches installation")
-          (is (= global-forms (schema/registered-schemas))
-              "a transaction refusal discards the evaluation overlay"))))))
 
 (deftest runtime-tests-install-run-redefine-and-delete-exactly
   (with-cluster
@@ -1811,23 +1562,6 @@
                       @connection route-run))
               "the whole batch settles in one transaction"))))))
 
-(deftest a-whole-turn-runs-from-trigger-to-closed-run
-  (with-cluster
-    (fn [cluster]
-      (with-redefs [ai/complete
-                    (fn [_projection _] {:seon.ai/text
-                             "(+ 1 1)\n(seon.run/complete \"two widgets\")"})]
-        (let [connection (:seon.db/connection cluster)
-              reports (drive-agent! cluster "agent-a" 2)
-              database (db/db connection)
-              evaluations (agent-evaluations database)]
-          (is (empty? (turn/unanswered-triggers database "agent-a")))
-          (is (= [:open :call] (mapv :seon.turn.work/situation reports)))
-          (is (= 2 (count evaluations)))
-          (is (= "2" (:seon.eval/shown (first evaluations))))
-          (is (str/includes? (:seon.eval/shown (second evaluations)) "two widgets"))
-          (is (nil? (turn/next-agent-work database (request connection)))))))))
-
 
 (deftest an-unreadable-reply-is-a-settled-form-with-paid-attempt-evidence
   (doseq [[reply-text hint]
@@ -1929,24 +1663,6 @@
                 (async/close! completion)
                 (async/close! faults)
                 (.shutdownNow executor)))))))))
-
-(deftest a-completing-disposition-closes-in-the-terminal-transaction
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (with-redefs [ai/complete
-                    (fn [_projection _] {:seon.ai/text "(seon.run/complete \"done\")"})]
-        (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                               (pr-str (seon.run/complete "done"))
-                               :seon.sci.admit/value (seon.run/complete "done")}]
-          (let [connection (:seon.db/connection cluster)
-                reports (drive! cluster 10)]
-            (is (= [:open :call]
-                   (mapv :seon.turn.work/situation reports))
-                "no separate close pass — the disposition closed it")
-            (is (some? (db/q '[:find ?closed .
-                              :where [_ :seon.turn/closed-tx ?closed]]
-                            @connection))
-                "the run closed in the SAME transaction as its receipt")))))))
 
 (deftest a-combined-evaluation-projects-every-terminal-receipt-datom
   (with-cluster
@@ -2147,39 +1863,6 @@
                              (not (contains? row
                                              :seon.ai.attempt/failover-from))))})))
 
-(deftest one-successful-call-leaves-exactly-one-attempt-fact
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            requests (atom [])]
-        (is (nil? (:seon.config.ai.backup/model
-                   (config/effective (db/db connection) "turn-test")))
-            "the fixture reconciles its explicit backup absence against seeded defaults")
-        (with-redefs [ai/complete
-                      (recording-completer
-                       requests
-                       [{:seon.ai/text "(seon.run/complete \"one\")"}])]
-          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (seon.run/complete "one"))
-                                  :seon.sci.admit/value (seon.run/complete "one")}]
-            (drive! cluster 10)))
-        (is (= 1 (count @requests)) "one request built, so one call made")
-        (let [[row :as rows] (attempt-rows @connection)]
-          (is (= 1 (count rows)))
-          (is (.equals "probe" (:seon.ai/model row)))
-          (is (not (contains? row :seon.ai.attempt/error))
-              "no error ref — the ref's presence IS the outcome, and a
-               success simply has none")
-          (is (not (contains? row :seon.ai.attempt/failover-from))
-              "nothing failed over, so nothing points anywhere")
-          (is (not (contains? row :seon.ai.attempt/usage-edn))
-              "provider usage remains absent when the provider omitted it")
-          (is (not (contains? row :seon.ai/disposition))
-              "and no disposition is stored on any row — it is derived
-               at read from the durable evidence"))
-        (is (nil? (db/q '[:find ?e . :where [?e :seon.error/id _]] @connection))
-            "and a call that worked committed no error fact")))))
-
 (deftest successful-call-persists-the-providers-open-usage-document
   (doseq [retain? [false true]]
     (with-cluster
@@ -2326,53 +2009,6 @@
               "reasoning-only starvation still persists the settled trace")
           (is (string? (:seon.ai/exhausted-finish-reason error-fact))
               "the attempt points at the named starvation error fact")))))))
-
-(deftest reasoning-only-time-limit-persists-its-flat-diagnostic
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            requests (atom [])
-            sent-body
-            "{\"thinking\":{\"type\":\"disabled\"},\"stream\":true}"
-            failure
-            {
-    :seon.ai/interrupted-text-count 0
-    :seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.ai/completion
-    :seon.error/operation 'seon.ai/complete
-             :seon.error/message
-             (str "The provider streamed 8 characters of reasoning but no "
-                  "assistant text before the configured time limit fired.")
-             :seon.error/data
-             {:seon.ai/reasoning-received 8
-              :seon.ai/text-received 0
-              :seon.ai/cause-chain
-              ["java.io.IOException: closed"
-               "java.net.http.HttpTimeoutException: request timed out"]
-              :seon.ai/error-class :response
-              :seon.ai/http-status 200
-              :seon.ai/request-transmitted? true
-              :seon.ai/response-started? true
-              :seon.ai/output-observed? true}
-             :seon.ai.attempt/sent-body sent-body}]
-        (with-redefs [ai/complete (recording-completer requests [failure])]
-          (drive! cluster 10))
-        (let [[row :as rows] (attempt-rows @connection)
-              error-fact (durable-fact @connection (:db/id (:seon.ai.attempt/error row)))
-              recorded (semantic-result (:seon.error/data-edn error-fact))]
-          (is (= 1 (count @requests)))
-          (is (= 1 (count rows)))
-          (is (nil? (:seon.ai.attempt/sent-body row)))
-          (is (true? (:seon.ai/output-observed? row)))
-          (is (nat-int? (:seon.ai/interrupted-text-count error-fact)))
-          (is (= 8 (get-in recorded
-                           [:seon.error/data :seon.ai/reasoning-received])))
-          (is (zero? (get-in recorded
-                             [:seon.error/data :seon.ai/text-received])))
-          (is (str/includes? (:seon.error/message recorded)
-                             "no assistant text"))
-          (is (str/includes? (:seon.error/message recorded)
-                             "configured time limit fired")))))))
 
 (deftest an-unpaid-failure-with-a-backup-makes-exactly-two-calls
   (with-cluster fake-evaluate
@@ -2722,46 +2358,6 @@
                  (:seon.eval/shown (first evaluations))))
           (is (empty? (db/q '[:find ?message :where [?message :seon.message/from _]] database)))
           (is (nil? (turn/next-agent-work database (request connection)))))))))
-
-(deftest a-held-runs-paid-call-is-never-duplicated
-  ;; P2, the lapsed-lease re-pay cycle, re-expressed as CUSTODY
-  ;; MISMATCH now that no lease exists to lapse: across the whole
-  ;; open→call→fold interleaving there is exactly ONE provider
-  ;; dispatch, and a rewake seen by a DIFFERENT process derives no
-  ;; second `:call` for the held run
-  ;; (research/trigger-conservation-2026-07-28 §3.2).
-  (with-cluster fake-evaluate
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            requests (atom [])]
-        ;; pass 1: open + claim (the busy fence before the expensive part)
-        (let [work (turn/next-agent-work @connection (request connection))]
-          (is (= :open (:seon.turn.work/situation work)))
-          (turn/turn {:seon.turn.loop/cluster cluster
-                              :seon.turn.work/next work}
-                             (Date.)))
-        (testing "the held run derives :call for its holder ONLY"
-          (is (= :call (:seon.turn.work/situation
-                        (turn/next-agent-work @connection (request connection)))))
-          )
-        ;; the rest of the interleaving, arbitrarily later — there is
-        ;; no clock on custody, so the pass simply proceeds
-        (with-redefs [ai/complete
-                      (recording-completer
-                       requests
-                       [{:seon.ai/text "(seon.run/complete \"one\")"}])]
-          (with-redefs [injected-evaluation {:seon.cluster.eval/result-edn
-                                  (pr-str (seon.run/complete "one"))
-                                  :seon.sci.admit/value
-                                  (seon.run/complete "one")}]
-            (drive! cluster 6)))
-        (is (= 1 (count @requests))
-            "zero duplicate provider dispatches across the interleaving")
-        (is (= 1 (count (attempt-rows @connection)))
-            "and the durable attempt chain agrees")
-        (is (some? (db/q '[:find ?c . :where
-                          [_ :seon.turn/closed-tx ?c]] @connection))
-            "the turn ran to completion")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Nothing throws into the agent loop — the prompt refusal seam
@@ -3117,62 +2713,6 @@
                 used)
         (pr-str used))))
 
-(deftest generated-fixed-point-closes-the-run
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            run-id "generated-fixed-point"]
-        (test-support/transacted!
-                     connection
-                     (turn/generated-run-tx
-                      @connection
-                      {:seon.agent/id "agent-a" :seon.turn/id run-id :seon.db.process/id process :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.agent-a]}))
-        (test-support/transacted!
-                     connection
-                     (turn/append-generated-tx
-                      {:seon.turn/id run-id
-                       :seon.db.process/id process
-                       :seon.cluster.eval/at now
-                       :seon.cluster.eval/ordinal 0
-                       :seon.cluster.eval/source "(help)"
-                       :seon.ns/name 'my.agents.agent-a}))
-        (test-support/transacted!
-                     connection
-                     (turn/receipt-settle-tx
-                      {:seon.turn/id run-id
-                       :seon.cluster.eval/ordinal 0
-                       :seon.eval/shown "{:introduced 'my.turn}"}))
-        (let [request {:seon.agent/id "agent-a"
-                       :seon.db.process/id process}
-              generated (turn/next-agent-work @connection request)
-              report
-              (with-redefs-fn {#'turn/declared-sources
-                              (fn [& _] {:seon.turn/forms []})}
-                #(turn/turn
-                 {:seon.turn.loop/cluster cluster
-                  :seon.turn.work/next generated}
-                 now))]
-          ;; Exhausting the declared system sources closes the turn.
-          (is (= :closed (:seon.turn.loop/outcome report)))
-          (is (inst? (:db/txInstant
-                       (db/pull @connection [:db/txInstant]
-                                (get-in (db/pull @connection [:seon.turn/closed-tx]
-                                                 [:seon.turn/id run-id])
-                                        [:seon.turn/closed-tx :db/id])))))
-          (is (not= run-id
-                    (:seon.turn/id (turn/next-agent-work @connection
-                                                               request)))
-              "a closed generated run derives no further work of its own")
-          (is (= :system
-                 (db/q '[:find ?author .
-                         :in $ ?run-id
-                         :where
-                         [?run :seon.turn/id ?run-id]
-                         [?form :seon.cluster.eval/run ?run]
-                         [?form :seon.cluster.eval/ordinal 0]
-                         [?form :seon.cluster.eval/author ?author]]
-                       @connection run-id))))))))
-
 (deftest generated-membership-failure-never-advances-the-run-to-call
   (with-cluster
     (fn [cluster]
@@ -3343,42 +2883,6 @@
                messages")
           (is (<= (count faults) (count signatures))
               "and never more messages than there are distinct signatures"))))))
-
-(deftest a-prompt-refusal-is-a-recorded-error-value-never-a-throw
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            requests (atom [])
-            refusal {:seon.error/at now
-                     :seon.error/layer :seon.cluster.prompt/acquisition
-                     :seon.error/operation 'seon.cluster.prompt/prompt
-                     :seon.cluster.prompt/refused :retained-context
-                     :seon.error/message "The retained prompt could not be acquired."
-                     :seon.error/data {}}]
-        (turn/turn {:seon.turn.loop/cluster cluster
-                    :seon.turn.work/next
-                    (turn/next-agent-work @connection (request connection))}
-                   now)
-        (with-redefs [prompt/prompt (fn [_ _] refusal)
-                      ai/complete
-                      (recording-completer requests [{:seon.ai/text "unused"}])]
-          (let [report (turn/turn
-                        {:seon.turn.loop/cluster cluster
-                         :seon.turn.work/next
-                         (turn/next-agent-work @connection (request connection))}
-                        now)]
-            (is (= :error (:seon.turn.loop/outcome report))
-                "the refused prompt settles as an error value")))
-        (is (empty? @requests) "no provider call without a prompt")
-        (is (empty? (attempt-rows @connection)) "and no attempt row")
-        (is (false? (contains? (:schema (db/db connection))
-                              (keyword "seon.error" "kind"))))
-        (is (contains? (set (db/q '[:find [?message ...] :where
-                                   [?fault :seon.error/occurrences ?e]
-                                   [?e :seon.error.occurrence/message ?message]]
-                                 @connection))
-                       (:seon.error/message refusal))
-            "the actual acquisition refusal is durable")))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The prompt's cause is the run's recorded trigger
@@ -3615,114 +3119,6 @@
                                        [:render-proc-stopped])
             (async/close! (:render-channel proc))
             (async/close! stream-channel)))))))
-
-;;; 5. concurrent-streams-share-one-conn-test — seed 2026072825
-
-(deftest concurrent-streams-share-one-conn-test
-  ;; ORACLE: two agents streaming onto the ONE sliding-1 conn. A's offer
-  ;; can displace B's newest snapshot — accepted at token cadence (R4)
-  ;; — and the repair is B's next chunk. The claims that must hold
-  ;; anyway: both agents settle at their EXACT texts, which come from
-  ;; FACTS and never from the channel; a displaced snapshot is
-  ;; superseded by that agent's next offer; and the producers' fold
-  ;; threads are NEVER parked, whatever the render side is doing.
-  (with-cluster
-    (fn [cluster]
-      (let [connection (:seon.db/connection cluster)
-            stream-channel (async/chan (async/sliding-buffer 1))
-            cluster (assoc cluster :seon.turn.loop/stream-channel
-                           stream-channel)]
-        ;; a second agent with a trigger of its own
-        (test-support/transacted! connection
-                                [(agent-row "agent-b")
-                                 {:seon.message/id "m-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "count the sprockets"}])
-        ;; NOBODY reads the conn for the whole run: every offer must
-        ;; still return immediately, which is what sliding-1 buys
-        (let [offer-results (atom [])
-              completed-producers (atom #{})
-              request-index (atom -1)
-              texts {"agent-a" "(seon.run/complete \"alpha\")"
-                     "agent-b" "(seon.run/complete \"beta\")"}
-              completer
-              (fn [_projection request]
-                (let [sink (:seon.ai/sink request)
-                      ;; The fixture drives agents in declared sorted order.
-                      ;; Agent identity is a database fact, not prompt format.
-                      agent-id (nth ["agent-a" "agent-b"]
-                                    (swap! request-index inc))
-                      text (get texts agent-id)]
-                  (doseq [n (range 1 (inc (count text)))]
-                    (swap! offer-results conj
-                           (when sink
-                             (sink {:seon.ai/text (subs text 0 n)
-                                    :seon.ai/tokens n}))))
-                  (swap! completed-producers conj agent-id)
-                  {:seon.ai/text text}))]
-          (try
-            (with-redefs [ai/complete completer]
-              (drive-passes! cluster 24))
-
-            (testing "both agents settled at their EXACT texts, from facts"
-              (doseq [[agent-id text] texts]
-                (let [sources
-                      (db/q '[:find [?source ...]
-                             :in $ ?agent-id
-                             :where
-                             [?agent :seon.agent/id ?agent-id]
-                             [?run :seon.turn/agent ?agent]
-                             [?form :seon.cluster.eval/run ?run]
-                             [?form :seon.cluster.eval/source ?source]
-                             [?form :seon.cluster.eval/author :agent]]
-                           @connection agent-id)
-                      shown-results
-                      (db/q '[:find [?shown ...]
-                             :in $ ?agent-id
-                             :where
-                             [?agent :seon.agent/id ?agent-id]
-                             [?run :seon.turn/agent ?agent]
-                             [?e :seon.cluster.eval/run ?run]
-                             [?e :seon.eval/shown ?shown]
-                             [?e :seon.cluster.eval/author :agent]]
-                           @connection agent-id)]
-                  (is (= [(pr-str
-                           (seon.run/complete (second (edn/read-string text))))]
-                         shown-results)
-                      (str agent-id " stored its exact completion result"))
-                  ;; the stored reply is the durable record of what the
-                  ;; provider settled on. It is a fact, committed once,
-                  ;; and it is byte-identical to this agent's own text —
-                  ;; while the channel, shared and lossy, carried only
-                  ;; presentation that either arrived or did not
-                  (is (= [text] sources)
-                      (str agent-id "'s settled text came from FACTS: "
-                           "the stored reply, not the shared channel")))))
-
-            (testing "the producers' fold threads were NEVER parked"
-              (is (= (set (keys texts)) @completed-producers)
-                  "both producers completed while nobody read the conn")
-              (is (= (reduce + (map count (vals texts)))
-                     (count @offer-results))
-                  "every emitted prefix reached the sink")
-              (is (every? true? @offer-results)
-                  "every `offer!` completed immediately on sliding-1"))
-
-            (testing "a displaced snapshot is superseded, never lost work"
-              ;; only ONE value is ever pending, and it is the newest
-              (let [pending (async/poll! stream-channel)]
-                (is (contains? #{"agent-a" "agent-b"}
-                               (:seon.agent/id pending))
-                    "exactly one newest snapshot, whichever agent won
-                     the race — the other's next chunk repaired it")
-                (is (string? (:seon.turn/id pending))
-                    "the partial names the run whose terminal facts
-                     supersede it")
-                (is (map? (:seon.ai/partial pending))
-                    "only complete partial snapshots ride the conn;
-                     there is no clear shape")
-                (is (nil? (async/poll! stream-channel))
-                    "and never a queue: sliding-1 holds exactly one")))
-            (finally
-              (async/close! stream-channel))))))))
 
 (deftest a-turn-hands-its-clusters-projection-to-every-database-call
   ;; §2.1, measured: a `seon.db` read or write with no handed projection

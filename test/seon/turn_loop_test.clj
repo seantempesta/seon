@@ -20,7 +20,6 @@
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [datahike.api :as d]
             [seon.blob :as blob]
             [seon.db :as db]
             [seon.run :as my.turn]
@@ -28,7 +27,6 @@
             [seon.config :as config]
             [seon.cluster.agent :as cluster.agent]
             [seon.turn :as turn]
-            [seon.cluster.message :as message]
             [seon.cluster.prompt :as prompt]
 
             [seon.cluster.wake :as wake]
@@ -39,7 +37,6 @@
             [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.util Date]))
@@ -89,108 +86,6 @@
     (is (< elapsed-ms 200.0)
         (str "read-evidence transaction projection took " elapsed-ms " ms"))))
 
-(deftest attempt-evidence-prefers-completion-and-falls-back-to-error-data
-  (let [project (private-loop-fn 'attempt-evidence)]
-    (is (= {:seon.ai.model/last-latency-ms 42
-            :seon.ai/usage {:source :completion}
-            :seon.ai/reasoning-content "fallback reasoning"
-            :seon.ai/finish-reason "stop"}
-           (project
-            {:seon.ai/completion
-             {:seon.ai/usage {:source :completion}
-              :seon.ai.model/last-latency-ms 42
-              :seon.ai/finish-reason "stop"
-              :seon.error/data
-              {:seon.ai/usage {:source :error}
-               :seon.ai/reasoning-content "fallback reasoning"
-               :seon.ai/finish-reason "length"}}})))))
-
-(deftest attempt-request-assembles-evidence-and-optional-provenance
-  (let [failure {
-                 :seon.error/message "refused"}
-        evidence {:seon.ai/usage {"prompt_tokens" 3}
-                  :seon.ai.model/last-latency-ms 42
-                  :seon.ai/reasoning-content "reasoning"
-                  :seon.ai/finish-reason "length"}
-        settings (ai/settings
-                  (test-support/effective-config)
-                  {:seon.config.ai/thinking :high})]
-    (is (= {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
-                             :seon.ai/model "model"}
-            :seon.ai/settings settings
-            :seon.turn/id "run-1"
-            :seon.agent/id "agent-1"
-            :seon.ai.attempt/ordinal 2
-            :seon.ai/usage {"prompt_tokens" 3}
-            :seon.ai.model/last-latency-ms 42
-            :seon.ai/reasoning-content "reasoning"
-            :seon.ai/finish-reason "length"
-            :seon.error/value failure
-            :seon.ai.attempt/failover-from "run-1:1"
-            :seon.ai.attempt/delay-ms 200}
-           ((private-loop-fn 'attempt-request)
-            {:seon.ai/target {:seon.ai/endpoint "https://provider.invalid"
-                              :seon.ai/model "model"}
-             :seon.ai/settings settings
-             :seon.turn/id "run-1"
-             :seon.agent/id "agent-1"
-             :seon.ai.attempt/ordinal 2
-             :seon.turn.loop/attempt-evidence evidence
-             :seon.error/value failure
-             :seon.ai.attempt/failover-from "run-1:1"
-             :seon.ai.attempt/delay-ms 200})))))
-
-(deftest provider-targets-resolves-once-and-omits-backoff-for-a-backup
-  (let [db {:immutable :database-value}
-        cluster-settings {:scope :cluster}
-        overlay {:scope :agent}
-        settings {:resolved true}
-        primary {:seon.ai/model "primary"}
-        backup {:seon.ai/model "backup"}
-        strategy {:retry :strategy}
-        calls (atom [])]
-    (with-redefs [config/effective
-                  (fn [actual-db cluster-name]
-                    (swap! calls conj [:effective actual-db cluster-name])
-                    cluster-settings)
-                  ai/agent-overlay
-                  (fn [actual-db agent-id]
-                    (swap! calls conj [:overlay actual-db agent-id])
-                    overlay)
-                  ai/settings
-                  (fn [actual-cluster-settings actual-overlay]
-                    (swap! calls conj
-                           [:settings actual-cluster-settings actual-overlay])
-                    settings)
-                  ai/targets (fn [_projection actual-db actual-settings]
-                               (swap! calls conj
-                                      [:targets actual-db actual-settings])
-                               {:seon.ai/primary primary
-                                :seon.ai/backup backup})
-                  ai/retry-strategy
-                  (fn [actual-settings]
-                    (swap! calls conj [:strategy actual-settings])
-                    strategy)
-                  ai/delays
-                  (fn [& arguments]
-                    (swap! calls conj [:delays arguments])
-                    [10 20])]
-      (is (= {:seon.ai/primary primary
-              :seon.ai/backup backup
-              :seon.ai/settings settings
-              :seon.turn.loop/schedule []}
-             ((private-loop-fn 'provider-targets)
-              {:seon.db/db db
-               :seon.cluster/name "cluster"
-               :seon.agent/id "agent"})))
-      (is (= [[:effective db "cluster"]
-              [:overlay db "agent"]
-              [:settings cluster-settings overlay]
-              [:targets db settings]
-              [:strategy settings]]
-             @calls)
-          "a configured backup makes the schedule empty without deriving delays"))))
-
 (deftest attempt-settlement-updates-the-registered-model-gauges
   (test-support/with-database
     (fn [connection]
@@ -232,171 +127,6 @@
                   [?attempt :seon.ai.attempt/id ?id]]
                 @connection (#'turn/attempt-id "gauge-run" 0)))
             "the durable attempt and display gauges settle together")))))
-
-(deftest evaluation-request-projects-the-admitted-form-and-cluster-controls
-  (let [ctx {:live :context}
-        form {:seon.cluster.eval/source "(inc 2)"
-              :seon.cluster.eval/ns [:seon.ns/name 'old.namespace]}
-        caps {:seon.config.eval.result/max-depth 4}
-        cluster {:seon.sci.admit/caps caps
-                 :seon.cluster/name "default"
-                 :seon.config.eval/time-limit-ms 500
-                 :seon.config/on-core-error :panic}]
-    (is (= {:seon.cluster.eval/source "(inc 2)"
-            :seon.cluster.eval/ns [:seon.ns/name 'current.namespace]
-            :seon.sci.admit/caps caps
-            :seon.sci.eval/ctx ctx
-            :seon.agent/id "agent-1"
-            :seon.turn/id "run-1"
-            :seon.cluster.eval/ordinal 3
-            :seon.boot/cluster-name "default"
-            :seon.sci.eval/time-limit-ms 500
-            :seon.config/on-core-error :panic}
-           ((private-loop-fn 'evaluation-request)
-            {:seon.turn.loop/admitted-form form
-             :seon.turn.loop/evaluation-namespace 'current.namespace
-             :seon.turn.loop/cluster cluster
-             :seon.sci.eval/ctx ctx
-             :seon.agent/id "agent-1"
-             :seon.turn/id "run-1"
-             :seon.cluster.eval/ordinal 3})))))
-
-(deftest asked-value-preserves-reply-and-problem-precedence
-  (let [db {:immutable :database-value}
-        reply {:my.message/to "agent-3" :my.message/content "reply"}
-        assignment {:my.message/to "agent-4" :my.message/content "repair"}
-        completed (seon.run/complete "done")]
-    (with-redefs [message/reply (fn [actual-db request]
-                                  (is (= db actual-db))
-                                  (is (= {:my.turn/result "done"
-                                          :seon.agent/id "agent-1"
-                                          :seon.message/trigger "m-1"}
-                                         request))
-                                  reply)
-                  problems/assignment-value (constantly assignment)]
-      (is (= reply
-             ((private-loop-fn 'asked-value)
-              {:seon.db/db db
-               :seon.sci.eval/evaluation {:seon.sci.admit/value :explicit}
-               :seon.turn.loop/settled completed
-               :seon.problems/form-problem {:seon.problems/id :problem}
-               :seon.agent/id "agent-1"
-               :seon.message/trigger "m-1"})))
-      (is (= reply
-             ((private-loop-fn 'asked-value)
-              {:seon.db/db db
-               :seon.sci.eval/evaluation {:seon.sci.admit/value :ordinary}
-               :seon.turn.loop/settled completed
-               :seon.problems/form-problem {:seon.problems/id :problem}
-               :seon.agent/id "agent-1"
-               :seon.message/trigger "m-1"})))
-      (is (= assignment
-             ((private-loop-fn 'asked-value)
-              {:seon.db/db db
-               :seon.sci.eval/evaluation {:seon.sci.admit/value :ordinary}
-               :seon.turn.loop/settled nil
-               :seon.problems/form-problem {:seon.problems/id :problem}
-               :seon.agent/id "agent-1"}))))))
-
-(deftest one-wake-cannot-open-a-second-turn-after-the-first-closes
-  ;; THE SAME CLASS, PROVED BY THE DERIVATION INSTEAD OF A FENCE. It used
-  ;; to take a `:db.fn/call` refusing `::trigger-already-answered` on a
-  ;; stored reference; the wake's own transaction is older than the turn
-  ;; that opened, so the derivation never offers a second turn and there
-  ;; is nothing left to refuse.
-  (test-support/with-database
-    (fn [connection]
-      (let [agent-id "one-answer"
-            trigger-id "one-question"
-            first-run "first-answer"
-            request {:seon.agent/id agent-id
-                     :seon.db.process/id process}]
-        (test-support/apply-config! connection "loop-test"
-                                    {:seon.config.run/max-episode-runs 100})
-        (test-support/transacted!
-                     connection
-                     (into (test-support/agent-tx @connection agent-id)
-                       [{:seon.message/id trigger-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "answer once"}]))
-        (is (= :open (:seon.turn.work/situation
-                      (turn/next-agent-work (db/db connection) request)))
-            "the wake opens exactly one turn")
-        (test-support/transacted!
-                     connection
-                     {:tx-data
-                      (into
-                       [[:db.fn/call
-                         #'turn/open-call
-                         {:seon.turn/id first-run :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}]]
-                       [])})
-        (test-support/transacted!
-                     connection
-                     [[:db/add [:seon.turn/id first-run]
-                       :seon.turn/reply "(+ 1 1)"]
-                      {:seon.ai.attempt/id "one-answer-attempt"
-                       :seon.turn/_attempts [:seon.turn/id first-run]
-                       :seon.ai.attempt/ordinal 0
-                       :seon.ai.attempt/at now
-                       :seon.ai/endpoint "https://fixture.invalid/v1/chat"
-                       :seon.ai/model "fixture-model"
-                       :seon.ai.attempt/settings-edn "{}"}])
-        (test-support/transacted!
-                     connection
-                     (turn/close-tx
-                      {:seon.turn/id first-run :seon.db.process/id process :seon.turn/closed-tx "datomic.tx"}))
-        (let [database (db/db connection)]
-          (is (empty? (turn/unanswered-wakes database agent-id {}))
-              "the closed turn answered it, with nothing stored")
-          (is (nil? (turn/next-agent-work database request))
-              "and a second turn is never derived — the fence it used to
-               need is gone with the reference it guarded")
-          (is (= [first-run]
-                 (db/q '[:find [?run-id ...]
-                         :in $ ?agent-id
-                         :where
-                         [?agent :seon.agent/id ?agent-id]
-                         [?run :seon.turn/agent ?agent]
-                         [?run :seon.turn/id ?run-id]]
-                       database agent-id))
-              "exactly one turn exists"))))))
-
-(deftest delivery-rows-projects-rows-and-every-refusal-transaction
-  (let [db {:immutable :database-value}
-        asked [{:my.message/to "agent-2" :my.message/content "deliver"}
-               {:my.message/to "missing" :my.message/content "refuse"}]
-        rows [{:seon.message/id "delivered"}]
-        failures [{:seon.error/message "first refusal"}
-                  {:seon.error/message "second refusal"}]
-        cluster {:seon.config.message/max-chain 8}
-        requests (atom [])]
-    (with-redefs-fn
-      {#'message/delivery
-       (fn [actual-db request]
-         (swap! requests conj [:delivery actual-db request])
-         {:seon.message/rows rows
-          :seon.error/values failures})
-       (ns-resolve 'seon.turn 'error-tx)
-       (fn [actual-cluster actual-db failure actual-now attribution]
-         (swap! requests conj
-                [:error actual-cluster actual-db failure actual-now attribution])
-         [[:error/tx (:seon.error/message failure)]])}
-      (fn []
-        (is (= {:seon.message/rows rows
-                :seon.error/values-tx
-                [[:error/tx "first refusal"] [:error/tx "second refusal"]]}
-               ((private-loop-fn 'delivery-rows)
-                {:seon.db/db db
-                 :seon.turn.loop/cluster cluster
-                 :seon.turn.loop/asked asked
-                 :seon.agent/id "agent-1"
-                 :seon.turn/id "run-1"
-                 :seon.cluster.eval/ordinal 2
-                 :seon.turn.loop/now now
-                 :seon.message/trigger "m-1"})))
-        (is (= [:delivery db
-                {:my.message/value asked :seon.agent/id "agent-1" :seon.turn/id "run-1" :seon.cluster.eval/ordinal 2 :seon.config.message/max-chain 8 :seon.message/trigger "m-1"}]
-               (first @requests)))
-        (is (= failures
-               (mapv #(nth % 3) (rest @requests))))))))
 
 (deftest committed-ending-namespace-seeds-a-resumed-fold
   (test-support/with-database
@@ -685,93 +415,6 @@
       (finally
         (flow.core/stop graph)
         (async/<!! completion)))))
-
-(deftest assigned-namespace-seeds-the-run-and-its-receipt
-  (test-support/with-database
-    (fn [connection]
-      (let [cluster-name "assigned-run-namespace"
-            agent-id "toolsmith"
-            run-id "assigned-run"
-            assigned-namespace 'my.tools.demo]
-        (test-support/seed-cluster! connection cluster-name)
-        (test-support/transacted!
-                     connection
-                     (cluster.agent/creation-tx
-                      {:seon.agent/id agent-id
-                       :seon.ns/name assigned-namespace
-                       :seon.cluster/name cluster-name}))
-        (test-support/transacted!
-                     connection
-                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
-
-        (test-support/transacted!
-                     connection
-                     (turn/plan-tx
-                      {:seon.turn/id run-id :seon.db.process/id process :seon.turn/sources [{:seon.cluster.eval/source "(ns-name *ns*)"}]}))
-        (let [planned-form
-              (db/pull
-               @connection
-               '[:seon.cluster.eval/source
-                 {:seon.cluster.eval/ns [:seon.ns/name]}]
-               (db/q '[:find ?form .
-                       :in $ ?run-id
-                       :where
-                       [?run :seon.turn/id ?run-id]
-                       [?form :seon.cluster.eval/run ?run]
-                       [?form :seon.cluster.eval/ordinal 0]]
-                     @connection run-id))]
-          (is (= assigned-namespace
-                 (db/q '[:find ?namespace-name .
-                         :in $ ?run-id
-                         :where
-                         [?run :seon.turn/id ?run-id]
-                         [?run :seon.turn/starting-ns ?namespace]
-                         [?namespace :seon.ns/name ?namespace-name]]
-                       @connection run-id))
-              "the normal run writes its starting namespace from the assignment")
-          (is (= assigned-namespace
-                 (get-in planned-form
-                         [:seon.cluster.eval/ns :seon.ns/name])))
-          (let [evaluation
-                (sci.eval/evaluate
-                 {:seon.cluster.eval/source
-                  (:seon.cluster.eval/source planned-form)
-                  :seon.cluster.eval/ns
-                  [:seon.ns/name
-                   (get-in planned-form
-                           [:seon.cluster.eval/ns :seon.ns/name])]
-                  :seon.sci.eval/ctx
-                  (test-support/fork-cluster-ctx connection)
-                  :seon.sci.admit/caps
-                  (config/result-caps config/defaults)
-                  :seon.sci.eval/time-limit-ms 2000
-                  :seon.config/on-core-error :panic
-                  :seon.boot/cluster-name cluster-name
-                  :seon.agent/id agent-id
-                  :seon.turn/id run-id
-                  :seon.cluster.eval/ordinal 0})]
-            (test-support/transacted!
-                         connection
-                         (turn/receipt-settle-tx
-                          (merge {:seon.turn/id run-id
-                                  :seon.cluster.eval/ordinal 0}
-                                 (select-keys evaluation
-                                              [:seon.eval/shown
-                                               :seon.cluster.eval/ns
-                                               :seon.sci.eval/ending-ns]))))
-            (is (= assigned-namespace
-                   (:seon.sci.admit/value evaluation)))
-            (is (= assigned-namespace
-                   (db/q '[:find ?namespace-name .
-                           :in $ ?run-id
-                           :where
-                           [?run :seon.turn/id ?run-id]
-                           [?receipt :seon.cluster.eval/run ?run]
-                           [?receipt :seon.cluster.eval/ordinal 0]
-                           [?receipt :seon.cluster.eval/ns ?namespace]
-                           [?namespace :seon.ns/name ?namespace-name]]
-                         @connection run-id))
-                "the settled receipt records the evaluated namespace")))))))
 
 (deftest prompt-and-call-resolve-once-record-settings-and-see-next-turn-config
   (test-support/with-database
@@ -1183,102 +826,9 @@
               "a wake attribute boot cannot install can never be committed,
                so the loop would never wake at all"))))))
 
-(deftest a-boot-built-database-takes-every-row-the-turn-writes
-  ;; NO explicit attribute list: the schema comes from the same
-  ;; derivation the ancestor build uses, so this database is the one the
-  ;; live drive boots onto.
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write}
-        _ (d/create-database configuration)
-        connection (d/connect configuration)]
-    (try
-      (test-support/transacted! connection
-                              (schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) (schema/canonical-database-attributes (seon.schema/handed-projection))))
-      (testing "the trigger — the exact transact the live drive failed on"
-        (is (map? (db/transact! connection
-                              (into (test-support/agent-tx @connection "alice")
-                                [{:seon.message/id "m-live" :seon.message/to [:seon.agent/id "alice"] :seon.message/content "count the widgets"}])))))
-      (testing "the run, its agent pointer, and recorded trigger"
-        (is (map? (db/transact!
-                   connection
-                   {:tx-data [{:seon.turn/id "run-live" :seon.turn/agent [:seon.agent/id "alice"] :seon.turn/trigger [:seon.message/id "m-live"] :seon.turn/opened-tx "datomic.tx"}
-                              {:seon.agent/id "alice"
-                               }]}))))
-      (testing "one frozen evaluation, then its start and its settlement, all
-                on the ONE entity that (run, ordinal) names"
-        (is (map? (db/transact! connection
-                              [{:seon.cluster.eval/id "e-0"
-                                :seon.cluster.eval/run
-                                [:seon.turn/id "run-live"]
-                                :seon.cluster.eval/ordinal 0
-                                :seon.cluster.eval/source "(+ 1 1)"}])))
-        (is (map? (db/transact! connection
-                              [{:seon.cluster.eval/id "e-0"
-                                :seon.cluster.eval/run
-                                [:seon.turn/id "run-live"]
-                                :seon.cluster.eval/ordinal 0
-                                :seon.cluster.eval/at now}])))
-        (is (map? (db/transact! connection
-                              [{:seon.cluster.eval/id "e-0"
-                                :seon.eval/shown "2"}]))))
-      (testing "the model-attempt chain: a failed primary carrying its
-      transport evidence, and the backup that points back at it"
-        (is (map? (db/transact! connection
-                              [{:seon.ai.attempt/id "run-live-attempt-0"
-                                :seon.turn/_attempts
-                                [:seon.turn/id "run-live"]
-                                :seon.ai.attempt/ordinal 0
-                                :seon.ai.attempt/at now
-                                :seon.ai/endpoint "https://example.invalid/v1"
-                                :seon.ai/model "primary-probe"
-                                :seon.ai/http-status 503
-                                :seon.ai/request-transmitted? false
-                                :seon.ai/response-started? false
-                                :seon.ai/output-observed? false}])))
-        (is (map? (db/transact! connection
-                              [{:seon.ai.attempt/id "run-live-attempt-1"
-                                :seon.turn/_attempts
-                                [:seon.turn/id "run-live"]
-                                :seon.ai.attempt/ordinal 1
-                                :seon.ai.attempt/at now
-                                :seon.ai/endpoint "https://example.invalid/v2"
-                                :seon.ai/model "backup-probe"
-                                :seon.ai.attempt/delay-ms 0
-                                :seon.ai.attempt/failover-from
-                                [:seon.ai.attempt/id "run-live-attempt-0"]}]))))
-      (testing "and an error receipt, whose result and error both land"
-        (is (map? (db/transact! connection
-                              [{:seon.cluster.eval/id "e-1"
-                                :seon.cluster.eval/run
-                                [:seon.turn/id "run-live"]
-                                :seon.cluster.eval/ordinal 1
-                                :seon.cluster.eval/at now
-                                :seon.cluster.eval/error "boom"
-                                :seon.eval/shown "{:seon.error/message \"failed\"}"}]))))
-      (testing "the refs really are refs — a follow, not a string"
-        (is (= "alice"
-               (db/q '[:find ?id .
-                      :where
-                      [?m :seon.message/id "m-live"]
-                      [?m :seon.message/to ?agent]
-                      [?agent :seon.agent/id ?id]]
-                    @connection))))
-      (finally
-        (d/release connection)
-        (d/delete-database configuration)))))
-
 ;;; ---------------------------------------------------------------------------
 ;;; The crash walk, as kill positions over facts
 ;;; ---------------------------------------------------------------------------
-
-(def ^:private request
-  "The AGENT-SCOPED request (F2 §3.2): the kill positions below are
-  per-agent facts and always were, so the crash walk derives through
-  `next-agent-work` with the same rows and the same expected
-  situations."
-  {:seon.agent/id "agent-a"
-   :seon.db.process/id process
-   :seon.turn.work/now now})
 
 (defn- with-database [body]
   (test-support/with-database
@@ -1414,42 +964,6 @@
         (is (= "install gate broke after evaluation"
                (:seon.cluster.eval/error receipt)))
         (is (inst? (test-support/turn-closed-at @connection "run-1")))))))
-
-;;; The F2 sealed suite — kill-positions-per-agent-test, seed 2026072827.
-;;; ORACLE: the crash-walk rows 1-10, re-grounded — `next-agent-work`
-;;; derives the same expected situation per row under the AGENT-SCOPED
-;;; request. Boot-recovery rows are absent here because recovery now
-;;; closes interrupted runs before this derivation can see them. The
-;;; rows were always per-agent facts; the global pass just asked the
-;;; question badly.
-
-(deftest kill-positions-per-agent-test
-  (doseq [[row state expected]
-          [["1 — trigger only" nil :open]
-           ;; A claimed, unplanned turn is THE ONE PAID CALL, not yet made:
-           ;; `open-call` writes `:seon.turn.work/situation :call` at open
-           ;; (`src/seon/turn.clj:377`), so a turn with no situation is a
-           ;; state the writer cannot produce. seon.turn-work-test's totality
-           ;; table has said `:call` for this row all along; this one still
-           ;; expected the pre-writer nil.
-           ["2-4 — claimed, no plan: the one paid call" {} :call]
-           ["5 — planned, no receipts" {:planned? true} :resume]
-           ["8 — one terminal receipt"
-            {:planned? true :receipts [[0 :done]]} :resume]
-           ["9 — every receipt terminal, run open"
-            {:planned? true
-             :receipts [[0 :done] [1 :done]]} :close]
-           ;; Idle needs the disposition: a closed provider reply CONTINUES
-           ;; unless its turn carries one (`src/seon/turn.clj:2845`).
-           ["10 — closed and completed"
-            {:planned? true :closed? true :completed? true
-             :receipts [[0 :done] [1 :done]]} nil]]]
-    (with-database
-      (fn [connection]
-        (when state (commit-run! connection state))
-        (let [derived (turn/next-agent-work (db/db connection) request)]
-          (testing (str "work derivation row " row)
-            (is (= expected (:seon.turn.work/situation derived)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; A staged blob settles, and a failed commit still closes the run

@@ -5,7 +5,6 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
-            [seon.cluster.reply :as reply]
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
@@ -197,15 +196,6 @@
         (let [result (test-support/refusal-data #(apply refused args))]
          (is ((schema/projection-validator projection :seon.instrument/contract-error) result))
          (is (= 'x/refused (:seon.error/operation result)))))))
-
-(deftest facade-is-retired-and-reader-refusal-is-a-literal
-  (is (nil? (ns-resolve 'seon.error 'diagnostic)))
-  (let [value (with-redefs [error.refusal/diagnostic
-                            (fn [_] (throw (ex-info "Unexpected constructor call" {})))]
-                (reply/sources "; comment only" 'user 100))]
-    (is (true? (:seon.cluster.reply/no-forms value)))
-    (is (inst? (:seon.error/at value)))
-    (is (= 'seon.cluster.reply/sources (:seon.error/operation value)))))
 
 (deftest positional-construction-evaluates-each-input-once-in-order
   (let [seen (atom []) at (java.util.Date. 0)

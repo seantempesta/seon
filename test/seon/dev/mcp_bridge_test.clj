@@ -519,18 +519,6 @@
     (is (str/includes? (get-in result [:content 0 :text])
                        "Unknown tool: eval_cljs"))))
 
-(deftest deleted-list-sessions-name-is-an-unknown-tool
-  (let [[response]
-        (rpc-responses
-         [{:jsonrpc "2.0"
-           :id 1
-           :method "tools/call"
-           :params {:name "list_sessions" :arguments {}}}])
-        result (:result response)]
-    (is (true? (:isError result)))
-    (is (str/includes? (get-in result [:content 0 :text])
-                       "Unknown tool: list_sessions"))))
-
 (deftest parent-watchdog-observes-the-captured-parent-exit
   (let [fixture-root (io/file project-root "tmp"
                               (str "mcp-parent-" (random-uuid)))

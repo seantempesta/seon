@@ -40,67 +40,6 @@
          (is (m/validate input [{::value 1}]))
          (is (not (m/validate input [{::value "wrong"}]))))))))
 
-(deftest registry-generation-operation-counts
-  (test-support/with-database
-    (fn [connection]
-      (let [projection (seon.db/carried-projection (seon.db/db connection))
-            forms (:seon.schema.projection/forms projection)
-            original-schema m/schema
-            original-fast mr/fast-registry
-            counts (atom {:compiles 0 :named-lookups 0 :registries 0 :copied-entries 0})]
-        (is (seq forms))
-        (with-redefs [m/schema (fn count-schema
-                                ([s] (count-schema s nil))
-                                ([s options]
-                                 (when-not (m/schema? s)
-                                   (swap! counts update :compiles inc)
-                                   (when (contains? forms s)
-                                     (swap! counts update :named-lookups inc)))
-                                 (original-schema s options)))
-                      mr/fast-registry
-                      (fn [entries]
-                        (swap! counts #(-> % (update :registries inc)
-                                           (update :copied-entries + (count entries))))
-                        (original-fast entries))]
-          (dotimes [_ 10]
-            (is ((schema/projection-validator projection :seon.agent/id) "root"))
-            (is (seq (:errors ((schema/projection-explainer projection :seon.agent/id) ""))))))
-        (println "registry-generation repeated acquisitions"
-                 {:schemas (count forms)
-                  :contracts (count (:seon.schema.projection/function-contracts projection))
-                  :operations @counts})
-        (is (zero? (:copied-entries @counts)))
-        (reset! counts {:compiles 0 :registries 0 :copied-entries 0})
-        (with-redefs [m/schema (fn count-schema
-                                ([s] (count-schema s nil))
-                                ([s options]
-                                 (when-not (m/schema? s)
-                                   (swap! counts update :compiles inc))
-                                 (original-schema s options)))
-                      mr/fast-registry
-                      (fn [entries]
-                        (swap! counts #(-> % (update :registries inc)
-                                           (update :copied-entries + (count entries))))
-                        (original-fast entries))]
-          (dotimes [_ 10]
-            (is ((schema/projection-validator projection :seon.agent/id) "root"))
-            (is (seq (:errors ((schema/projection-explainer projection :seon.agent/id) ""))))))
-        (println "registry-generation populated Malli caches" @counts)
-        (is (zero? (:compiles @counts)))
-        (is (zero? (:copied-entries @counts)))
-        (reset! counts {:registries 0 :copied-entries 0})
-        (with-redefs [mr/fast-registry
-                      (fn [entries]
-                        (swap! counts #(-> % (update :registries inc)
-                                           (update :copied-entries + (count entries))))
-                        (original-fast entries))]
-          (dotimes [_ 10]
-            (schema.internal/assert-compilable-schema!
-             forms :seon.agent/id (get forms :seon.agent/id)
-             (:seon.schema.projection/compile-options projection))))
-        (println "registry-generation supplied registry admission" @counts)
-        (is (zero? (:copied-entries @counts)))))))
-
 (deftest retained-generation-recompiles-dependent-roots
   (test-support/with-database
     (fn [connection]
@@ -303,27 +242,6 @@
          (schema/canonical-data-string value)))
     :seed 2026091706)
    "Canonical projection encoding changed bytes:"))
-
-(deftest full-projection-fingerprint-dispatch-timing
-  (test-support/with-database
-    (fn [connection]
-      (let [projection (schema/projection-from-database (seon.db/db connection))
-            fingerprint
-            (ns-resolve 'seon.schema 'projection-fingerprint-from-data)
-            canonical-var (ns-resolve 'seon.schema 'canonical-data-string)
-            before-start (System/nanoTime)
-            before (with-redefs-fn {canonical-var legacy-canonical-data-string}
-                     #(fingerprint projection))
-            before-ms (/ (- (System/nanoTime) before-start) 1e6)
-            after-start (System/nanoTime)
-            after (fingerprint projection)
-            after-ms (/ (- (System/nanoTime) after-start) 1e6)]
-        (is (= before after) "the full projection fingerprint stays identical")
-        (println "full-projection-fingerprint-dispatch-ms"
-                 {:before before-ms :after after-ms
-                  :schemas (count (:seon.schema.projection/forms projection))
-                  :contracts
-                  (count (:seon.schema.projection/function-contracts projection))})))))
 
 (defn- reference-entry?
   [_projection entry]
@@ -1458,19 +1376,6 @@
         (is (= absent (:seon.schema/unresolved-predicate data)))
         (is (= 'seon.schema.predicate-owner-probe
                (:seon.schema/predicate-namespace data)))))))
-
-(deftest declaration-manifest-projection-build-cost
-  (test-support/with-database
-   (fn [connection]
-     (let [projection (schema/projection-from-database (seon.db/db connection))
-           forms (:seon.schema.projection/forms projection)
-           started (System/nanoTime)
-           rebuilt (schema/build-projection forms)
-           elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
-       (is (= (set (keys forms))
-              (set (keys (:seon.schema.projection/forms rebuilt)))))
-       (println "ERROR-MANIFEST projection-build"
-                {:schemas (count forms) :elapsed-ms elapsed-ms})))))
 
 
 (deftest error-declarations-expand-all-inherited-members

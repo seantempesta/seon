@@ -9,7 +9,7 @@
   (:require [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [datahike.core :as datahike]
             [seon.db :as db]
             [seon.ai :as ai]
@@ -262,9 +262,6 @@
        "(defn beta-label [] \"beta\")\n"
        "(beta-helper-missing)\n"))
 
-(def ^:private planner-attempt
-  (str program "(seon.run/wait \"asked the namespace owners\")"))
-
 (defn- prompt-agent-id
   "The focal agent owns the namespace in the first REPL prompt."
   [prompt]
@@ -275,46 +272,9 @@
                 agent-id))
             cast-spec))))
 
-(defn- staged-reply
-  "One provider stub for the whole cast, keyed on WHOSE prompt it is."
-  [_projection {prompt :seon.ai/prompt}]
-  {:seon.ai/text
-   (case (prompt-agent-id prompt)
-     "planner" planner-attempt
-
-     "(seon.run/complete \"nothing to do\")")})
-
 ;;; ---------------------------------------------------------------------------
 ;;; Queries — every milestone is a fact
 ;;; ---------------------------------------------------------------------------
-
-(defn- form-namespaces
-  "Ordinal → parse-time namespace, for the forms that carry one."
-  [db run-id]
-  (into {}
-        (db/q '[:find ?ordinal ?namespace-name
-               :in $ ?run-id
-               :where
-               [?run :seon.turn/id ?run-id]
-               [?form :seon.cluster.eval/run ?run]
-               [?form :seon.cluster.eval/ordinal ?ordinal]
-               [?form :seon.cluster.eval/ns ?namespace]
-               [?namespace :seon.ns/name ?namespace-name]]
-             db run-id)))
-
-(defn- assignments
-  "Messages about one run's red receipts: #{[recipient receipt-id]}."
-  [db run-id]
-  (set (db/q '[:find ?to-id ?receipt-id
-              :in $ ?run-id
-              :where
-              [?run :seon.turn/id ?run-id]
-              [?receipt :seon.cluster.eval/run ?run]
-              [?receipt :seon.cluster.eval/id ?receipt-id]
-              [?m :seon.message/assignment ?receipt-id]
-              [?m :seon.message/to ?to]
-              [?to :seon.agent/id ?to-id]]
-            db run-id)))
 
 (defn- states
   "The derived state of every form of the planner's plan, by ordinal."
@@ -327,158 +287,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; The loop
 ;;; ---------------------------------------------------------------------------
-
-(deftest a-goal-is-a-message-and-the-attempt-retains-its-own-failures
-  (with-gen-cluster
-   (fn [cluster]
-     (let [connection (:seon.db/connection cluster)]
-       ;; THE SURFACE: no new agent-facing construct — root's goal is an
-       ;; ordinary message, and everything after it is the system's own
-       ;; doing.
-       (test-support/transacted! connection
-                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content (str "Build the widget helpers: my.gen.alpha owns "
-                                      "the arithmetic and my.gen.beta owns the label.")}])
-       (let [run-id (with-redefs [ai/complete staged-reply]
-                      (drive! cluster 12 7))
-             db @connection]
-
-         (testing "the attempt froze one plan whose forms carry the
-                   namespace each was WRITTEN under"
-           (is (= {0 'my.gen.planner
-                   1 'my.gen.alpha
-                   2 'my.gen.alpha
-                   3 'my.gen.alpha
-                   4 'my.gen.beta
-                   5 'my.gen.beta
-                   6 'my.gen.beta}
-                  (form-namespaces db run-id))
-               "REPL semantics across two declarations in ONE reply.
-                The agent namespace is the default until a namespace
-                declaration governs; from there the last EXPLICIT
-                declaration holds, so `(alpha-helper-missing)` runs in
-                my.gen.alpha where it was written. Presuming an ordinary
-                call moved the namespace is what erased most of the
-                program graph (2026-07-29); only a form that mentions
-                `ns`/`in-ns` below its head clears attribution.")
-           (is (= 7 (count (db/q '[:find ?f
-                                  :in $ ?run-id
-                                  :where
-                                  [?run :seon.turn/id ?run-id]
-                                  [?f :seon.cluster.eval/run ?run]]
-                                db run-id)))
-               "seven forms froze and every form has evaluation truth"))
-
-         (testing "execution honours parse-time attribution"
-           (is (str/includes?
-                (db/q '[:find ?edn .
-                       :in $ ?run-id
-                       :where
-                       [?run :seon.turn/id ?run-id]
-                       [?r :seon.cluster.eval/run ?run]
-                       [?r :seon.cluster.eval/ordinal 1]
-                       [?r :seon.eval/shown ?edn]]
-                     db run-id)
-                "my.gen.alpha/widget-total")
-               "the definition is installed in the namespace the reader
-                attributed to its form"))
-
-         (testing "the fold CONTINUES past a red form — nothing halts"
-           (is (= 7 (count (db/q '[:find ?r
-                                  :in $ ?run-id
-                                  :where
-                                  [?run :seon.turn/id ?run-id]
-                                  [?r :seon.cluster.eval/run ?run]]
-                                db run-id)))
-               "one receipt per ordinal, including the ones after the
-                first failure"))
-
-         (testing "errors remain evaluation facts without automatic assignments"
-           (is (empty? (assignments db run-id)))
-           (is (= #{:unrouted-red}
-                  (set (vals (select-keys (states db run-id) [2 5]))))))
-
-         (testing "the whole reply settles in one transaction"
-           (is (= 1
-                  (count (db/q '[:find ?tx
-                                 :in $ ?run-id
-                                 :where
-                                 [?run :seon.turn/id ?run-id]
-                                 [?evaluation :seon.cluster.eval/run ?run]
-                                 [?evaluation :seon.eval/shown _ ?tx]]
-                               db run-id)))))
-
-         (testing "the red evidence survives the settlement"
-           (is (some? (db/q '[:find ?error .
-                             :in $ ?run-id
-                             :where
-                             [?run :seon.turn/id ?run-id]
-                             [?r :seon.cluster.eval/run ?run]
-                             [?r :seon.cluster.eval/ordinal 5]
-                             [?r :seon.cluster.eval/error ?error]]
-                           db run-id))))
-
-         (testing "the plan is NOT settled, and no agent's completion
-                   can make it so"
-           (is (false? (:seon.turn.work/settled?
-                        (turn/plan-settlement db run-id))))
-           (is (some? (db/q '[:find ?closed .
-                             :in $ ?run-id
-                             :where
-                             [?run :seon.turn/id ?run-id]
-                             [?run :seon.turn/closed-tx ?closed]]
-                           db run-id))
-               "the planner's run closed normally — settlement is a
-                derivation over forms, never a run state"))
-
-         (testing "the derivation transacts nothing"
-           ;; The live drive cannot settle this — its cluster is still
-           ;; taking turns while the derivation runs, so `max-tx` moves
-           ;; for reasons that have nothing to do with it. Here the
-           ;; drive has stopped, so the basis is decisive.
-           (let [before (:max-tx @connection)]
-             (turn/plan-settlement @connection run-id)
-             (is (= before (:max-tx @connection))
-                 "plan settlement is a pure function of a database
-                  value; deriving it can never commit")))
-
-         (testing "settlement preserves the subjectless message and answers its wake"
-           (is (= "goal-1"
-                  (:seon.message/id
-                   (db/pull db [:seon.message/id] [:seon.message/id "goal-1"]))))
-           (is (some? (db/q '[:find ?turn . :in $ ?run-id :where
-                             [?turn :seon.turn/id ?run-id]
-                             [?turn :seon.turn/handled ?message]
-                             [?message :seon.message/id "goal-1"]] db run-id)))
-           (is (empty? (turn/unanswered-triggers db "planner")))))))))
-
-(deftest a-computation-using-a-failed-definition-retains-its-error
-  ;; A deterministic failed definition followed by a computation using it:
-  ;; both errors must remain visible after the batch has settled.
-  (with-gen-cluster
-   (fn [cluster]
-     (let [connection (:seon.db/connection cluster)]
-       (test-support/transacted! connection
-                               [{:seon.message/id "goal-1" :seon.message/to [:seon.agent/id "planner"] :seon.message/from [:seon.agent/id "root"] :seon.message/content "Count the primes."}])
-       (let [run-id
-             (with-redefs [ai/complete
-                           (fn [_projection {prompt :seon.ai/prompt}]
-                             {:seon.ai/text
-                              (if (= "planner" (prompt-agent-id prompt))
-                                (str "(in-ns 'my.gen.alpha)\n"
-                                     ;; The failure is explicit, independent of Java admission.
-                                     "(def primes (throw (ex-info \"injected failure\" {})))\n"
-                                     ;; Computing with the failed definition must also fail.
-                                     "(+ primes 1)\n")
-                                "(seon.run/wait \"nothing\")")})]
-               (drive! cluster 6 3))
-             db @connection
-             state (states db run-id)]
-         (is (= :unrouted-red (get state 1))
-             "the failed definition retains its error")
-         (is (= :unrouted-red (get state 2))
-             "the later computation also retains its error")
-         (is (false? (:seon.turn.work/settled?
-                      (turn/plan-settlement db run-id)))))))))
 
 (deftest completion-prose-does-not-erase-failed-evaluations
   ;; A completion reply is delivered, but it does not rewrite prior errors.

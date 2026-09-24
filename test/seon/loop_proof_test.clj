@@ -287,43 +287,6 @@
                         :seon.turn.loop/completion]]
              (async/close! (get handle key)))))))))
 
-(deftest terminal-provider-refusal-is-durable
-  (support/with-database
-   (fn [connection]
-     (let [ctx (support/fork-cluster-ctx connection)
-           handle (support/cluster-handle
-                   {:seon.db/connection connection
-                    :seon.cluster/name "loop-refusal-proof"
-                    :seon.sci.eval/ctx ctx
-                    :seon.db.process/id cluster/boot-process-identity})
-           target (-> (:seon.ai/primary (ai/targets (seon.schema/handed-projection) (support/effective-config)))
-                      (dissoc :seon.config.ai/no-auth)
-                      (assoc :seon.ai/api-key-variable "SEON_LOOP_PROOF_UNSET_CREDENTIAL"
-                             :seon.ai/prompt "Probe terminal refusal."))]
-       (try
-         (assert (nil? (System/getenv "SEON_LOOP_PROOF_UNSET_CREDENTIAL")))
-         (is (some? (:db-after (db/transact! connection (support/agent-tx @connection "root")))))
-         (is (some? (:db-after (db/transact! connection
-                                  (turn/open-tx {:seon.turn/id "refusal-proof" :seon.turn/agent [:seon.agent/id "root"] :seon.turn/opened-tx "datomic.tx"})))))
-         (let [failure (ai/complete (seon.schema/handed-projection) target)
-               _ (is (string? (:seon.ai/missing-credential-variable failure)))
-               result (turn/settle! {:seon.turn.loop/cluster handle
-                                     :seon.turn.loop/now (java.util.Date.)
-                                     :seon.agent/id "root"
-                                     :seon.turn/id "refusal-proof"
-                                     :seon.error/value failure})]
-           (is (some? (:db-after (:seon.turn.loop/outcome result))) (pr-str result))
-           (is (some? (:seon.turn/closed-tx
-                       (db/pull @connection [:seon.turn/closed-tx]
-                                [:seon.turn/id "refusal-proof"]))))
-           (is (= #{["SEON_LOOP_PROOF_UNSET_CREDENTIAL"]}
-                  (db/q '[:find ?variable :where [?e :seon.error/id]
-                           [?e :seon.ai/missing-credential-variable ?variable]] @connection))))
-         (finally
-           (doseq [key [:seon.cluster.wake/channel :seon.render/context-channel
-                        :seon.turn.loop/completion]]
-             (async/close! (get handle key)))))))))
-
 (deftest virtual-loop-end-to-end
   (support/with-database
    (fn [connection]

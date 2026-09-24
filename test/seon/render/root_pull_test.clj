@@ -453,20 +453,3 @@
                 [:seon.ns/name 'root-walk.dependent]}
               (member-lookups acquisition)))))))
 
-(deftest cold-root-pull-records-an-informational-latency-sample
-  (support/with-database
-   {:seon.test-support/extra-schema root-pull-schema}
-   (fn [connection]
-     (support/transacted! connection [{::root-id "root" ::value "sample"}])
-     (let [acquisition-request (request connection)
-           pull-plan (walk/root-pull-plan acquisition-request)
-           started (System/nanoTime)
-           acquisition
-           (walk/root-acquisition
-            (assoc acquisition-request
-                   :seon.render.walk/root-pull-plan pull-plan))
-           elapsed-ms (/ (double (- (System/nanoTime) started)) 1000000.0)]
-       (println (pr-str {:seon.render.walk/cold-pull-ms elapsed-ms
-                         :seon.render.walk/four-query-floor-ms 46.0}))
-       (is (seq (:seon.render.walk/order acquisition))
-           "latency is recorded while correctness remains the verdict")))))

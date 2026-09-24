@@ -1283,65 +1283,6 @@
            [#'kernel/failure-value :seon.error/base]]]
     (is (= expected (last (:malli/schema (meta candidate)))) (str candidate))))
 
-(deftest hot-host-declared-schema-check-measurement
-  (let [projection (schema/handed-projection)
-        caps (config/result-caps (test-support/effective-config))
-        samples 20000
-        measured (fn [call value]
-                   (dotimes [_ 3000] (call value))
-                   (let [start (System/nanoTime)]
-                     (dotimes [_ samples] (call value))
-                     (/ (double (- (System/nanoTime) start)) samples 1000.0)))]
-    (doseq [[label contract value]
-            [[:scalar [:=> [:cat :int] :int] 1]
-             [:ordinary-map [:=> [:cat :map] :map] {::value 1}]
-             [:declared-error [:=> [:cat :map] [:or :map :seon.agent/error]]
-              {:seon.error/at #inst "2026-09-18T00:00:00Z"
-               :seon.error/layer ::benchmark :seon.error/operation 'seon.instrument-test/benchmark
-               :seon.agent/error-agent-id "benchmark"}]]]
-      (let [before (m/-instrument {:schema contract :scope #{:input :output :guard}
-                                   :report (fn [kind data] (throw (ex-info (str kind) data)))}
-                                  identity (:seon.schema.projection/compile-options projection))
-            after (with-bindings {#'instrument/*compiling-contract* true}
-                    (#'instrument/compiled-wrapper projection 'seon.instrument-test/benchmark
-                                                   contract identity caps
-                                                   {:seon.config/on-core-error :panic}))
-            timings (mapv (fn [_] {:before-us (measured before value)
-                                   :after-us (measured after value)}) (range 3))]
-        (is (= value (after value)))
-        (prn {::declared-schema-overhead label ::samples samples ::timings timings})))))
-
-(deftest hot-sci-declared-schema-check-measurement
-  (let [projection (schema/handed-projection)
-        caps (config/result-caps (test-support/effective-config))
-        ctx (sci.eval/build-base-ctx projection)
-        original (sci/eval-string* ctx "(fn [value] value)")
-        samples 20000
-        measured (fn [call value]
-                   (dotimes [_ 3000] (call value))
-                   (let [start (System/nanoTime)]
-                     (dotimes [_ samples] (call value))
-                     (/ (double (- (System/nanoTime) start)) samples 1000.0)))]
-    (kernel/with-arm
-     ctx (* 1000 test-support/event-backstop-seconds)
-     (fn [_]
-       (doseq [[label contract value]
-               [[:scalar [:=> [:cat :int] :int] 1]
-                [:ordinary-map [:=> [:cat :map] :map] {::value 1}]
-                [:declared-error [:=> [:cat :map] [:or :map :seon.agent/error]]
-                 {:seon.error/at #inst "2026-09-18T00:00:00Z"
-                  :seon.error/layer ::benchmark :seon.error/operation 'user/benchmark
-                  :seon.agent/error-agent-id "benchmark"}]]]
-         (let [before (m/-instrument {:schema contract :scope #{:input :output :guard}
-                                      :report (fn [kind data] (throw (ex-info (str kind) data)))}
-                                     original (:seon.schema.projection/compile-options projection))
-               after (instrument/wrap-interpreted 'user/benchmark (pr-str contract)
-                                                   projection :panic caps original)
-               timings (mapv (fn [_] {:before-us (measured before value)
-                                      :after-us (measured after value)}) (range 3))]
-           (is (= value (after value)))
-           (prn {::sci-declared-schema-overhead label ::samples samples ::timings timings})))))))
-
 (deftest the-work-launcher-api-is-collected-without-an-allowlist
   (instrumented!
    (fn [_]
@@ -1492,21 +1433,6 @@
     (is (= {::success true} (declared {::success true})))
     (is (= :output (:seon.instrument/check refusal)))
     (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))))
-
-(deftest instrumentation-observations-do-not-carry-legacy-class-stamps
-  (let [projection (schema/handed-projection)
-        forms (:seon.schema.projection/forms projection)
-        refusal (test-support/refusal-data #(prefix-contract "wrong"))
-        registration (instrument/apply! {:seon.config/on-core-error :record})]
-    (doseq [retired [:seon.instrument/contract-violated-error
-                     :seon.instrument/registration-failed-error
-                     :seon.error/unclassified-error
-                     :seon.instrument/contract-violated
-                     :seon.instrument/registration-failed
-                     :seon.error/unclassified :seon.error/refusal]]
-      (is (not (contains? forms retired)) (str retired)))
-    (is (not (contains? refusal :seon.instrument/contract-violated)))
-    (is (not (contains? registration :seon.instrument/registration-failed)))))
 
 (deftest every-instrument-function-declares-its-input-and-output
   (doseq [[name candidate] (ns-interns 'seon.instrument)

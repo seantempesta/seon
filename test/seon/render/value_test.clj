@@ -489,14 +489,6 @@
     (is (= (:seon.sci.admit/edn admitted)
            (admit/canonical-edn (:seon.sci.admit/print-node restored))))))
 
-(deftest profile-fit-supersedes-legacy-print-cuts-with-values
-  (is (= "(1 2 3)" (value/render-ai (unit '(1 2 3)))))
-  (is (not (str/includes?
-       (value/render-ai
-        (assoc (unit (vec (range 20)))
-               :seon.print/options {:seon.print/width 20}))
-       "\n"))))
-
 (deftest rendering-live-values-does-not-apply-a-storage-bound
   (let [raw (vec (range 100))
         request (assoc (unit raw) :seon.sci.admit/caps
