@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.schema :as schema]
             [seon.schema.admission :as admission]))
 
 (defn- findings-of-type
@@ -54,15 +55,16 @@
       (is (= :error (:level finding)))
       (is (= 1 (:row finding)))
       (is (pos-int? (:col finding)))))
-  (testing "a readable malformed declaration is refused by Malli"
+  (testing "a readable malformed declaration is refused, naming it"
     (let [findings
           (admission/admit
            {::admission/declarations
             {:malformed.fixture/value [:not-a-schema]}
             ::admission/registry {}})]
-      (is (= 1
-             (count
-              (findings-of-type :schema-malli-compilation findings)))))))
+      (is (= [:malformed.fixture/value]
+             (into [] (comp (filter #(= :error (:level %)))
+                            (map :seon.schema.admission/declaration))
+                   findings))))))
 
 (deftest house-rules-are-distinct-error-findings
   (testing "registry keys are fully namespaced"
@@ -72,15 +74,6 @@
              :schema-unqualified-key
              (admission/admit
               {::admission/declarations {:value :string}
-               ::admission/registry {}}))))))
-  (testing "polymorphic schemas require an explicit recorded exemption"
-    (is (= 1
-           (count
-            (findings-of-type
-             :schema-polymorphism
-             (admission/admit
-              {::admission/declarations
-               {:maybe.fixture/value [:maybe :string]}
                ::admission/registry {}}))))))
   (testing "closed maps are refused"
     (is (= 1
@@ -109,19 +102,6 @@
               {::admission/declarations {:actual.namespace/value :string}
                ::admission/file "wrong.namespace.edn"
                ::admission/registry {}})))))))
-
-(deftest a-recorded-polymorphism-exemption-is-recognized-as-data
-  (let [findings
-        (admission/admit
-         {::admission/declarations
-          {:opaque.fixture/value
-           [:any
-            {:seon.schema.admission/exemption
-             :seon.schema.admission/polymorphic-boundary
-             :seon.schema.admission/reason "External value has no stable predicate."
-             :gen/schema :string}]}
-          ::admission/registry {}})]
-    (is (empty? (findings-of-type :schema-polymorphism findings)))))
 
 (deftest exact-shape-reuse-is-an-advisory-finding
   (let [findings
@@ -181,43 +161,67 @@
             :invoice/item-total]
            (mapv :seon.schema.admission/similar-key overlaps)))))
 
-(deftest predicate-error-messages-are-advised-without-blocking-admission
-  (let [without-message
-        (admission/admit
-         {::admission/declarations
-          {:predicate.fixture/value
-           [:fn {:gen/schema :int} clojure.core/int?]}
-          ::admission/registry {}})
-        with-message
-        (admission/admit
-         {::admission/declarations
-          {:predicate.fixture/value
-           [:fn {:error/message "must be an integer"
-                 :gen/schema :int}
-            clojure.core/int?]}
-          ::admission/registry {}})
-        missing
-        (findings-of-type :schema-predicate-missing-error-message
-                          without-message)]
-    (is (= 1 (count missing)))
-    (is (= :warning (:level (first missing)))
-        "a missing explanation teaches at declaration time but never blocks")
-    (is (str/includes? (or (:message (first missing)) "")
-                       ":error/message"))
-    (is (empty?
-         (findings-of-type :schema-predicate-missing-error-message
-                           with-message)))))
-
-(deftest packaged-predicate-declarations-all-explain-their-values
-  (let [findings
-        (admission/admit
-         {::admission/path "resources/seon/schemas"})]
-    (is (empty?
-         (findings-of-type :schema-predicate-missing-error-message
-                           findings)))))
-
 (deftest a-clean-declaration-produces-no-findings
   (is (empty?
        (admission/admit
         {::admission/declarations {:fresh/zorb [:string {:min 1}]}
          ::admission/registry {:existing/alpha :int}}))))
+
+(defn- register-verdict
+  "`:admitted`, or the declared refusal kind, from `schema/register!` staged in
+   an isolated delta over `projection` with `source` admission."
+  [projection source schema-key form]
+  (try
+    (schema/call-with-registration-delta
+     (schema/begin-registration-delta projection)
+     {:seon.schema.admission/source source}
+     #(schema/register! schema-key form))
+    :admitted
+    (catch clojure.lang.ExceptionInfo failure
+      (or (:seon.schema/error (ex-data failure)) :refused))))
+
+(defn- hook-verdict
+  "`:admitted`, or the first blocking finding's declared refusal kind."
+  [projection source schema-key form]
+  (if-let [blocking (first (filter #(= :error (:level %))
+                                   (admission/admit
+                                    {::admission/declarations {schema-key form}
+                                     ::admission/registry
+                                     (:seon.schema.projection/forms projection)
+                                     ::admission/source source})))]
+    (or (:seon.schema/error blocking) :refused)
+    :admitted))
+
+(deftest one-contract-text-gets-one-verdict-at-every-entrance
+  (let [forms (schema/snapshot)
+        projection
+        (schema/build-projection
+         forms {}
+         {:seon.schema/schema-admissions
+          (zipmap (keys forms) (repeat {:seon.schema.admission/source :core}))})
+        cases
+        {:unexplained-predicate [:fn {:gen/schema :int} 'clojure.core/int?]
+         :explained-predicate
+         [:fn {:gen/schema :int :error/message "must be an integer"} 'clojure.core/int?]
+         :nilable-value [:maybe :string]
+         :nilable-member [:map [:one-verdict.fixture/member [:maybe :string]]]
+         :nil-union-member [:map [:one-verdict.fixture/member [:or :nil :string]]]
+         :exempted-any
+         [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                :seon.schema.admission/reason "External value has no stable predicate."
+                :gen/schema :string}]
+         :complete [:string {:min 1}]}
+        verdicts
+        (for [source [:agent :core]
+              [case-name form] (sort-by key cases)
+              :let [schema-key (keyword "one-verdict.fixture" (name case-name))]]
+          [source case-name
+           (register-verdict projection source schema-key form)
+           (hook-verdict projection source schema-key form)])]
+    (doseq [[source case-name registered hooked] verdicts]
+      (is (= registered hooked) (pr-str [source case-name])))
+    (testing "the one rule refuses an agent's incomplete contracts"
+      (is (= :seon.schema/nilable-map-value
+             (some (fn [[source case-name _ hooked]]
+                     (when (= [:agent :nilable-member] [source case-name]) hooked))
+                   verdicts))))))

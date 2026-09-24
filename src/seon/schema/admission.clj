@@ -11,13 +11,8 @@
             [clojure.tools.reader.edn :as reader.edn]
             [clojure.tools.reader.reader-types :as reader-types]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
-
-(def ^:private polymorphism-exemption
-  :seon.schema.admission/polymorphic-boundary)
-
-(def ^:private generator-properties
-  #{:gen/schema :gen/elements :gen/gen :gen/return})
+            [seon.schema.edn :as schema.edn]
+            [seon.schema.internal :as internal]))
 
 (defn tokens
   "Split a keyword, symbol, or string on its natural non-alphanumeric
@@ -225,22 +220,6 @@
   [definition]
   (tree-seq #(seq (schema-children %)) schema-children definition))
 
-(defn- recorded-polymorphism-exemption?
-  [form]
-  (let [properties (form-properties form)]
-    (and (= polymorphism-exemption
-            (:seon.schema.admission/exemption properties))
-         (not (str/blank?
-               (:seon.schema.admission/reason properties)))
-         (some #(contains? properties %) generator-properties))))
-
-(defn- polymorphic-form?
-  [form]
-  (or (= :any form)
-      (= :some form)
-      (and (vector? form)
-           (contains? #{:any :some :maybe} (first form)))))
-
 (defn- direct-database-ref?
   [form]
   (some #(= :db.type/ref %)
@@ -277,33 +256,6 @@
                                  " belongs in " (namespace declaration-key)
                                  ".edn, not " (.getName (io/file file)) ".")
                             base-extra)])
-                (keep
-                 (fn [node]
-                   (when (and (polymorphic-form? node)
-                              (not (recorded-polymorphism-exemption? node)))
-                     (finding
-                      file :error :schema-polymorphism
-                      (str "Schema declaration " declaration-key
-                           " uses " (pr-str node)
-                           " without the recorded polymorphic-boundary exemption, reason, and bounded generator.")
-                      base-extra)))
-                 nodes)
-                (keep
-                 (fn [node]
-                   (when (and (vector? node)
-                              (= :fn (first node))
-                              (str/blank?
-                               (:error/message (form-properties node))))
-                     (finding
-                      file :warning
-                      :schema-predicate-missing-error-message
-                      (str "Predicate schema " declaration-key
-                           " must declare a nonblank `:error/message` "
-                           "saying what value "
-                           (pr-str (first (form-body node)))
-                           " accepts.")
-                      base-extra)))
-                 nodes)
                 (keep
                  (fn [node]
                    (when (and (vector? node)
@@ -373,10 +325,15 @@
   (into []
         (mapcat
          (fn [[declaration-key _]]
-           (->> (similar-identities
+           ;; An unqualified candidate already has its blocking finding.
+           (->> (when (qualified-keyword? declaration-key)
+                  (similar-identities
                  declaration-key
-                 (remove #{declaration-key} (keys registry))
-                 3)
+                 ;; Malli's own unqualified defaults (e.g. :inst) are not
+                 ;; declarations an author could reuse.
+                 (filter qualified-keyword?
+                         (remove #{declaration-key} (keys registry)))
+                 3))
                 (mapv
                    (fn [{similar-key :seon.schema.admission/similar-key
                          shared :seon.schema.admission/shared-tokens}]
@@ -392,27 +349,41 @@
                        :seon.schema.admission/shared-tokens shared})))))
          (sort-by key declarations))))
 
-(defn- compilation-finding
-  [files-by-key forms]
+(defn- registration-finding
+  "Nil, or the finding for the refusal `schema/register!` gives
+  `declaration-key`: its nilable-value check, then `schema.edn/admit` with the
+  declaration's admission source."
+  [files-by-key forms declaration-key source]
   (try
-    (schema.edn/admit {:seon.schema/forms forms})
+    (internal/assert-non-nilable-value-schema!
+     forms declaration-key
+     (schema/structural-schema (get forms declaration-key)))
+    (schema.edn/admit {:seon.schema/forms forms
+                       :seon.schema/identity declaration-key
+                       :seon.schema/admission
+                       {:seon.schema.admission/source source}})
     nil
     (catch Throwable error
       (let [data (ex-data error)
             declaration (or (::schema.edn/attribute data)
                             (:seon.schema/key data)
                             (:seon.schema/identity data))
+            refusal (or (:seon.schema/error data) (::schema.edn/error data))
             unresolved? (= ::schema.edn/unresolved-reference
                            (::schema.edn/error data))]
         (finding
          (get files-by-key declaration)
          :error
-         (if unresolved?
-           :schema-unresolved-reference
-           :schema-malli-compilation)
-         (str "Schema population did not compile through Malli: "
+         (cond unresolved? :schema-unresolved-reference
+               (or (nil? refusal) (= :seon.schema/invalid-schema refusal))
+               :schema-malli-compilation
+               :else :schema-incomplete-contract)
+         (str (if refusal
+                "Schema admission refused the declaration: "
+                "Schema population did not compile through Malli: ")
               (.getMessage error))
          (cond-> {}
+           refusal (assoc :seon.schema/error refusal)
            declaration
            (assoc :seon.schema.admission/declaration declaration)))))))
 
@@ -421,10 +392,14 @@
 
   The open request accepts `::paths`/`::sources` for file admission or
   `::declarations` plus the complete `::registry` for declaration admission.
-  Error findings block; predicate-message, exact-reuse, and name-overlap
-  findings are advisory warnings."
+  Contract completeness has one owner, `seon.schema.internal`, reached
+  through `seon.schema.edn/admit` exactly as `seon.schema/register!` reaches
+  it. `::source` is the `:seon.schema.admission/source` the declarations
+  will be recorded with: `:core` for packaged resource files, `:agent` for
+  `::declarations`, unless the request names one. Error findings block;
+  exact-reuse and name-overlap findings are advisory warnings."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
-  [{::keys [registry] :as request}]
+  [{::keys [registry declarations source] :as request}]
   (try
     (let [parsed-units (parse-units (request-units request))
           read-findings (into [] (mapcat :findings) parsed-units)
@@ -459,19 +434,29 @@
                  (fn [{::keys [file declarations]}]
                    (collision-findings file declarations registry)))
                 valid-units)
+          ;; A file request re-reads every declaration of the file; only the
+          ;; ones whose form differs from the registered population are new
+          ;; registrations, so cost and advice follow the changed inputs.
+          published (if declarations registry (schema/registered-schemas))
+          changed? #(not= (get published (key %) ::absent) (val %))
           similarity
           (into []
                 (mapcat
                  (fn [{::keys [file declarations]}]
-                   (concat
-                    (exact-reuse-findings file declarations registry)
-                    (name-overlap-findings file declarations registry))))
+                   (let [changed (into {} (filter changed?) declarations)]
+                     (concat
+                      (exact-reuse-findings file changed registry)
+                      (name-overlap-findings file changed registry)))))
                 valid-units)
-          compilation
-          (when (seq candidate-declarations)
-            (compilation-finding files-by-key complete-forms))]
-      (vec (concat read-findings house collisions
-                   (when compilation [compilation]) similarity)))
+          source (or source (if declarations :agent :core))
+          registration
+          (into []
+                (comp (filter changed?)
+                      (keep #(registration-finding files-by-key complete-forms
+                                                   (key %) source)))
+                (sort-by key candidate-declarations))]
+      (vec (concat read-findings house collisions registration
+                   similarity)))
     (catch Throwable error
       (if-let [findings (:seon.schema.admission/findings (ex-data error))]
         (vec findings)

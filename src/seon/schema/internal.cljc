@@ -300,6 +300,11 @@
 (defn assert-complete-schema!
   "Reject incomplete positions in one compiled schema.
 
+   This is the one contract-completeness rule. Every entrance reaches it
+   through `seon.schema.edn/admit`: `seon.schema/register!`, activation and
+   the edit hook's `seon.schema.admission/admit`, so a contract text and
+   admission source get one verdict wherever they enter.
+
    Canonical references are not followed here; `seon.schema` recursively
    validates them with each referenced declaration's own admission source.
    Returns advisory findings that remain non-terminal."
