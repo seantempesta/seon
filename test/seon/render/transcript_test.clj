@@ -7,8 +7,9 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.db :as db]
-            [seon.env]
+            [seon.env :as env]
             [seon.blob :as blob]
+            [seon.fault :as fault]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
             [seon.turn :as turn]
@@ -114,7 +115,7 @@
                 [:seon.render.transcript/entry :eval "stored-evaluation"]]
                (mapv :seon.render.history/call-id entries)))
         (is (= [(str agent-prompt "(future-work)")
-                (str agent-prompt "(+ 1 2)\n#:seon.repl{:value 3}")]
+                (str agent-prompt "(+ 1 2)\n#:seon.repl{:value 3, :result result/estored-evaluation}")]
                bytes)
             "a submitted form has a prompt and no response; a settled one
              answers with the one REPL response map")
@@ -1400,3 +1401,66 @@
        (is (string? (:seon.error/message refused)))
        (is (= :prefix (:seon.render.transcript/code named))
            "the cluster the caller names on the request derives the profile")))))
+
+(defn- core-fault!
+  "Record one core fault on `connection`'s branch through the production writer."
+  [connection cluster-name message]
+  (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+  (let [receipt (fault/fault! (env/environment
+                               {:seon.boot/cluster-name cluster-name
+                                :seon.db/connection connection
+                                :seon.sci.admit/caps (config/result-caps config/defaults)})
+                              (ex-info message {})
+                              {:seon.error/layer ::evaluation
+                               :seon.error/operation `core-fault!
+                               :seon.db.process/id "transcript-test"})]
+    (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))))
+
+(defn- settled-evaluation!
+  "Settle evaluation `ordinal` of the fixture run, returning its settlement tx."
+  [connection ordinal]
+  (let [report (support/transacted!
+                connection
+                [{:seon.cluster.eval/id (turn/receipt-identity "branch-errors" ordinal)
+                  :seon.cluster.eval/run [:seon.turn/id "branch-errors"]
+                  :seon.cluster.eval/ordinal ordinal
+                  :seon.cluster.eval/at (java.util.Date.)
+                  :seon.cluster.eval/read-basis-transaction (db/basis-t @connection)
+                  :seon.eval/shown (str ordinal)
+                  :seon.cluster.eval/source (str "(identity " ordinal ")")}])]
+    (db/basis-t (:db-after report))))
+
+;; Requirement 8.3: each evaluation's response carries the open errors its
+;; branch recorded after the previous evaluation settled, up to its own
+;; settlement: an error during N reads in N's response, once, and another
+;; branch's errors never read at all.
+(deftest an-evaluations-branch-errors-read-in-its-own-response-once
+  (support/with-database
+   (fn [connection]
+     (support/transacted!
+      connection
+      (into (agents-tx connection agent-id)
+            [{:seon.turn/id "branch-errors" :seon.turn/agent [:seon.agent/id agent-id]
+              :seon.turn/opened-tx "datomic.tx"}]))
+     (settled-evaluation! connection 0)
+     (core-fault! connection "branch-errors" "raised while evaluation one ran")
+     (settled-evaluation! connection 1)
+     (support/with-database
+      (fn [sibling]
+        (core-fault! sibling "branch-errors-sibling" "raised on a sibling branch")))
+     (settled-evaluation! connection 2)
+     (let [entries (transcript/history-entries (unit connection))
+           responses (into {} (map (juxt :seon.render.history/form
+                                         :seon.render.history/printed-value))
+                           entries)
+           transcript (str/join "\n" (map :seon.render.history/bytes entries))]
+       (is (= #{"(identity 0)" "(identity 1)" "(identity 2)"} (set (keys responses))))
+       (is (str/includes? (get responses "(identity 1)") ":errors [")
+           (get responses "(identity 1)"))
+       (is (str/includes? (get responses "(identity 1)") "raised while evaluation one ran"))
+       (is (str/includes? (get responses "(identity 1)") ":seon.error.occurrence/count 1"))
+       (is (not (str/includes? (get responses "(identity 0)") ":errors")))
+       (is (not (str/includes? (get responses "(identity 2)") ":errors"))
+           "the next evaluation never repeats it")
+       (is (= 1 (count (re-seq #"raised while evaluation one ran" transcript))))
+       (is (not (str/includes? transcript "raised on a sibling branch")))))))

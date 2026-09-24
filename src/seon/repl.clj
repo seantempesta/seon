@@ -111,6 +111,7 @@
    :seon.repl/interrupted
    :seon.repl/result
    :seon.repl/out
+   :seon.repl/errors
    :seon.repl/note
    :seon.repl/ns
    :seon.repl/ms])
@@ -198,6 +199,8 @@
                 ;; binding already settled.
                 :seon.repl/result (some-> handle str)
                 :seon.repl/out (when (seq output) (pr-str output))
+                ;; ALREADY TEXT: the value renderer bounded it once.
+                :seon.repl/errors (:seon.repl/errors emission)
                 :seon.repl/note (some-> (def-note source) pr-str)
                 :seon.repl/ns (when (and ending-ns (not= ending-ns prompt-ns))
                                 (str ending-ns))
@@ -217,16 +220,21 @@
   not printed a result, and inventing an empty map would say it had."
   {:malli/schema [:=> [:cat :seon.repl/emission] [:maybe :string]]}
   [emission]
-  (if (:seon.eval/renderer emission)
-    (value-text emission)
-    (let [entries (response-entries emission)]
-    (when (seq entries)
-      (str "#:seon.repl{"
-           (str/join ", "
-                     (map (fn [[response-key text]]
-                            (str ":" (name response-key) " " text))
-                          entries))
-           "}")))))
+  (let [reply-map (fn [entries]
+                    (when (seq entries)
+                      (str "#:seon.repl{"
+                           (str/join ", "
+                                     (map (fn [[response-key text]]
+                                            (str ":" (name response-key) " " text))
+                                          entries))
+                           "}")))]
+    (if (:seon.eval/renderer emission)
+      ;; The declared renderer's output is the value; the branch's new errors
+      ;; still follow it, in the same reply map.
+      (let [errors (reply-map (some->> (:seon.repl/errors emission)
+                                       (vector :seon.repl/errors) vector))]
+        (cond-> (value-text emission) errors (str "\n" errors)))
+      (reply-map (response-entries emission)))))
 
 (defn- thinking-text
   "The agent's own `;;` prose for this evaluation, or nil.

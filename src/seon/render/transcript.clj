@@ -335,6 +335,72 @@
               identity-attrs)
         [:db/id (:db/id entity)])))
 
+(defn- read-or-throw
+  "A read's value, or its refusal thrown whole."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [result]
+  (if (and (map? result) (:seon.error/at result))
+    (throw (ex-info (str (:seon.error/message result "A branch-error read refused.")) result))
+    result))
+
+(defn- branch-errors
+  "The new open errors on `db`'s branch in each settled evaluation's window,
+  keyed by evaluation entity id, for `:all` settled evaluations or the `shown`
+  set: (previous settlement tx, this settlement tx]
+  through `seon.error/occurred-since` as of this settlement, so later
+  recurrences and resolutions never rewrite an earlier response. A reply's
+  forms settle in one transaction; that window belongs to its last form. The
+  first evaluation's window opens at its read basis. The branch's occurrence
+  history selects the windows worth reading; cluster-branch copies of other
+  branches' faults are not this branch's errors. A window whose as-of read
+  refuses answers with that refusal, a typed unknown the response shows."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id
+                       [:or [:= :all] [:set :int]]]
+                  [:map-of :int [:or [:vector {:min 1} :seon.repl/branch-error]
+                                 :seon.db/error-result]]]}
+  [db agent-id shown]
+  (let [occurred (into (sorted-set)
+                       (read-or-throw
+                        (db/q '[:find [?tx ...]
+                                :where [?o :seon.error.occurrence/last-at _ ?tx true]]
+                              (db/history db))))
+        settled (when (seq occurred)
+                  (read-or-throw
+                   (db/q '[:find ?e ?ordinal ?tx :in $ ?agent-id
+                           :where [?agent :seon.agent/id ?agent-id]
+                           [?run :seon.turn/agent ?agent]
+                           [?e :seon.cluster.eval/run ?run]
+                           [?e :seon.cluster.eval/ordinal ?ordinal]
+                           (or [?e :seon.eval/shown _ ?tx]
+                               [?e :seon.cluster.eval/error _ ?tx]
+                               [?e :seon.cluster.eval/interrupted-at _ ?tx])]
+                         db agent-id)))
+        ;; [tx last-form first-form] per settlement transaction, oldest first
+        batches (->> settled (group-by peek)
+                     (map (fn [[tx rows]]
+                            [tx (first (apply max-key second rows))
+                             (first (apply min-key second rows))]))
+                     (sort-by first))
+        opening (when-some [[_ _ first-form] (first batches)]
+                  (:seon.cluster.eval/read-basis-transaction
+                   (read-or-throw
+                    (db/pull db [:seon.cluster.eval/read-basis-transaction] first-form))))
+        branch (get-in db [:config :branch])]
+    (into {}
+          (keep (fn [[since [tx eid]]]
+                  (when (and since (or (= :all shown) (contains? shown eid)) (seq (subseq occurred > since <= tx)))
+                    (let [found (error/occurred-since (db/as-of db tx) since)]
+                      (if (map? found)
+                        ;; an unreadable window is a typed unknown in the
+                        ;; response, never an absence of errors
+                        [eid found]
+                        (let [errors (into []
+                                           (comp (filter #(contains? (:seon.error.occurrence/branch % #{branch}) branch))
+                                                 (map #(dissoc % :seon.error.occurrence/branch)))
+                                           found)]
+                          (when (seq errors) [eid errors])))))))
+          (map vector (cons opening (map first batches)) batches))))
+
 (defn- history
   ([db run-id agent-id limit]
    (history db run-id agent-id limit nil))
@@ -451,7 +517,9 @@
                               (::output entry))
       (::ending-ns entry) (assoc :seon.sci.eval/ending-ns (::ending-ns entry))
       (::duration-ms entry) (assoc :seon.eval/duration-ms
-                                   (::duration-ms entry)))))
+                                   (::duration-ms entry))
+      (::branch-errors-text entry) (assoc :seon.repl/errors
+                                          (::branch-errors-text entry)))))
 
 (defn- evaluation-text
   "One frozen form or settled evaluation, through the one REPL generator.
@@ -648,9 +716,25 @@
                        (get-in evaluation [:seon.print/options
                                            :seon.print/level])))))
            evaluated-sources)
-          (history db (:seon.turn/id unit) agent-id
-                   candidate-count (::selected-run-id unit)
-                   (:seon.context.contribution/evaluations unit)))))
+          (let [entries (history db (:seon.turn/id unit) agent-id
+                                 candidate-count (::selected-run-id unit)
+                                 (:seon.context.contribution/evaluations unit))
+                evaluations (into #{} (keep #(when (= :eval (::kind %)) (get-in % [::entity :db/id])))
+                                  entries)
+                ;; a caller rendering many runs derives the agent's windows once
+                errors (cond (::branch-errors unit) (::branch-errors unit)
+                             (seq evaluations) (branch-errors db agent-id evaluations)
+                             :else {})]
+            ;; The branch's new errors are bounded once, by the value renderer.
+            (mapv (fn [entry]
+                    (if-some [found (get errors (get-in entry [::entity :db/id]))]
+                      (let [text (floor-text (assoc unit :seon.render.value/root (::root entry))
+                                             found)]
+                        (if (string? text)
+                          (assoc entry ::branch-errors-text text)
+                          (throw (ex-info (str (:seon.error/message text)) text))))
+                      entry))
+                  entries)))))
 
 (defn- projection
   [unit]
@@ -878,6 +962,7 @@
       rows
       (let [total (count rows)
             newest (into [] (take limit) rows)
+            errors (branch-errors database agent-id :all)
             runs
             (into []
                   (keep
@@ -890,6 +975,7 @@
                                  {:seon.db/db database
                                   :seon.agent/id agent-id
                                   :seon.sci.admit/caps caps
+                                  ::branch-errors errors
                                   ::selected-run-id
                                   (:seon.turn/id row)}))))))
                   newest)

@@ -45,8 +45,10 @@
     (is (= expected (repl/text emission)))
     (is (= 128
            (alength (.getBytes (repl/text emission) "UTF-8"))))
-    (is (= (subs expected 0 (str/index-of expected "\n#:seon.repl"))
-           (get-in html [2 1 2])))))
+    ;; The HTML pair gives the agent's comment its own block (`input-text`).
+    (is (= ";; I should inspect the rows.\n;; Then I can choose." (get-in html [2 2])))
+    (is (= "my.agents.juniper=> (->> rows\n     (map :total))"
+           (get-in html [3 1 2])))))
 
 (deftest changed-read-marker-does-not-rewrite-agent-input
   (let [emission {:seon.ns/name 'my.agent

@@ -13,6 +13,18 @@
             :rows [:vector [:vector :seon.schema/value]]
             :schemas [:map-of :qualified-keyword :seon.schema/value]
             :changes :seon.db.diff/paths
+            :branch-error
+            [:map
+             {:description "One signature's new open errors on the evaluation's branch in its settlement window, as seon.error/occurred-since groups them."}
+             [:seon.error/signature :seon.error/signature]
+             [:seon.error/operation :seon.error/operation]
+             [:seon.error.occurrence/message :seon.error.occurrence/message]
+             [:seon.error.occurrence/count :seon.error.occurrence/count]]
+            :errors
+            [:string
+             {:min 1,
+              :description
+              "The value renderer's text for the new open errors recorded on the evaluation's branch between the previous evaluation's settlement and this one's, one entry per signature with its count. Present only when there are any."}]
             :shown-value :seon.schema/value
             :comment [:string {:min 1}],
             :subject :seon.render.walk/lookup,
@@ -123,7 +135,8 @@
              [:seon.print/length {:optional true} :seon.print/length]
              [:seon.print/level {:optional true} :seon.print/level]
              [:seon.print/options {:optional true} :seon.print/options]
-             [:seon.repl/handle {:optional true} :seon.repl/handle]],
+             [:seon.repl/handle {:optional true} :seon.repl/handle]
+             [:seon.repl/errors {:optional true} :seon.repl/errors]],
             :response
             [:map
              {:description
@@ -135,6 +148,7 @@
               :seon.repl/interrupted]
              [:seon.repl/result {:optional true} :seon.repl/result]
              [:seon.repl/out {:optional true} :seon.repl/out]
+             [:seon.repl/errors {:optional true} :seon.repl/errors]
              [:seon.repl/ns {:optional true} :seon.repl/ns]
              [:seon.repl/ms {:optional true} :seon.repl/ms]
              [:seon.repl/note {:optional true} :seon.repl/note]],
