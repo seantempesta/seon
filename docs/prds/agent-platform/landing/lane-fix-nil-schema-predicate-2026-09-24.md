@@ -129,3 +129,27 @@ src +12 −5, test +48.
   `internal/nilable-union?` treats that spelling as nilable for map values.
   `assert-non-nilable-value-schema!` (`src/seon/schema/internal.cljc`) checks only
   `:maybe`. Not mine; owner: internal.cljc.
+
+## Follow-up 3 — one core guard: an undefined slot must justify itself
+
+- Owner ruling 2026-09-24: core may use `:any`/`:some` only with the recorded
+  justification. `seon.schema.admission/core-polymorphism-finding` runs, for a
+  `:core` request, on each changed declaration that `registration-finding`
+  admitted, and blocks as `:schema-polymorphism` naming the slot's path. The
+  judgement is `internal/permissive-positions`' existing `justified?`
+  (polymorphic-boundary exemption + nonblank reason + a generator property) —
+  the same rule `seon.fn` already reads; no second walker.
+- Live default: 0 of the packaged declarations carry an unjustified
+  `:any`/`:some`, so no current file gains a finding.
+- **Divergence to rule on:** `register!`/activation with `:core` source still
+  admit a bare `:any` (only the hook refuses it), so
+  `one-contract-text-gets-one-verdict-at-every-entrance` holds only because its
+  cases carry no bare core `:any`. One verdict everywhere would move this check
+  into `internal/assert-complete-schema!` (not mine).
+- Evidence (snapshot, armed, guard armed): regression
+  `seon.schema.admission-gate-test/a-core-undefined-slot-must-justify-itself`
+  5 pass (6 ms); HEAD admission 3 fail. Whole namespace 10 tests, 41 pass, 0 fail
+  twice (5.6 s, 6.1 s — whole-namespace, dominated by
+  `one-contract-text-gets-one-verdict-at-every-entrance` building the packaged
+  projection).
+- Size: src +31 −2, test +30.

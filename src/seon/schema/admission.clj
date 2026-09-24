@@ -387,6 +387,34 @@
            declaration
            (assoc :seon.schema.admission/declaration declaration)))))))
 
+(defn- core-polymorphism-finding
+  "Nil, or the blocking finding for the first `:any`/`:some` slot of a `:core`
+  declaration that does not justify itself. Core code may use an undefined
+  slot only with the recorded polymorphic-boundary exemption, a reason and a
+  bounded generator: `internal/permissive-positions` owns that judgement
+  (owner ruling 2026-09-24). Runs only after the declaration was admitted, so
+  its structure compiles."
+  {:malli/schema [:=> [:cat [:or :nil :string] :keyword :seon.schema/value]
+                  [:or :nil :map]]}
+  [file declaration-key form]
+  (when-let [slot (first
+                   (filter #(and (= :undefined (:seon.schema.advisory/kind %))
+                                 (not (:seon.schema/justified? %)))
+                           (internal/permissive-positions
+                            {:seon.schema/compiled (schema/structural-schema form)})))]
+    (finding
+     file :error :schema-polymorphism
+     (str "Schema declaration " declaration-key " uses "
+          (pr-str (:seon.schema/definition slot)) " at "
+          (pr-str (:seon.schema/path slot))
+          " without the recorded polymorphic-boundary exemption, reason, and"
+          " bounded generator. Name the value with a predicate schema, or add"
+          " {:seon.schema.admission/exemption"
+          " :seon.schema.admission/polymorphic-boundary"
+          " :seon.schema.admission/reason \"...\" :gen/schema ...}.")
+     {:seon.schema.admission/declaration declaration-key
+      :seon.schema/path (:seon.schema/path slot)})))
+
 (defn admit
   "Return editor-shaped findings for one schema admission request.
 
@@ -452,8 +480,13 @@
           registration
           (into []
                 (comp (filter changed?)
-                      (keep #(registration-finding files-by-key complete-forms
-                                                   (key %) source)))
+                      (keep (fn [[declaration-key form]]
+                              (or (registration-finding files-by-key complete-forms
+                                                        declaration-key source)
+                                  (when (= :core source)
+                                    (core-polymorphism-finding
+                                     (get files-by-key declaration-key)
+                                     declaration-key form))))))
                 (sort-by key candidate-declarations))]
       (vec (concat read-findings house collisions registration
                    similarity)))

@@ -225,3 +225,33 @@
              (some (fn [[source case-name _ hooked]]
                      (when (= [:agent :nilable-member] [source case-name]) hooked))
                    verdicts))))))
+
+(deftest a-core-undefined-slot-must-justify-itself
+  ;; CLASS: c01809720 deleted the hook's only core guard, so a packaged schema
+  ;; could declare `:any`/`:some` with no recorded reason. Owner ruling
+  ;; 2026-09-24: core may use them, but only with the polymorphic-boundary
+  ;; exemption, a reason and a bounded generator.
+  (let [core-findings
+        (fn [form]
+          (findings-of-type
+           :schema-polymorphism
+           (admission/admit
+            {::admission/declarations {:core-guard.fixture/value form}
+             ::admission/registry {:existing/alpha :int}
+             ::admission/source :core})))]
+    (is (= [[:core-guard.fixture/member]] (mapv :seon.schema/path
+                       (core-findings [:map [:core-guard.fixture/member :any]])))
+        "an unjustified :any refuses, naming its path")
+    (is (seq (core-findings [:vector :some])))
+    (is (empty? (core-findings
+                 [:any {:seon.schema.admission/exemption
+                        :seon.schema.admission/polymorphic-boundary
+                        :seon.schema.admission/reason "External value has no stable predicate."
+                        :gen/schema :string}]))
+        "the recorded exemption, reason and generator justify it")
+    (is (seq (core-findings
+              [:any {:seon.schema.admission/exemption
+                     :seon.schema.admission/polymorphic-boundary
+                     :gen/schema :string}]))
+        "an exemption without its reason does not")
+    (is (empty? (core-findings [:string {:min 1}])) "a defined slot needs nothing")))
