@@ -1,4 +1,8 @@
 #:seon.sci.eval{:interpreted-count [:int {:min 0}]
+ :loaded-identity
+ [:fn {:error/message "must be the atom naming the JVM's loaded program"
+       :gen/gen seon.flow/atom-reference-generator}
+  seon.flow/atom-reference?]
  :refused-function :qualified-symbol
  :interpretation-reason :string
  :interpretation-error
@@ -189,7 +193,10 @@
                   :string]
                  [:seon.boot/cluster-name
                   {:optional true}
-                  :seon.boot/cluster-name]],
+                  :seon.boot/cluster-name]
+                 [:seon.sci.eval/loaded-identity
+                  {:optional true}
+                  :seon.sci.eval/loaded-identity]],
                 :schema-refused :seon.schema/key,
                 :reader-event-count-error
                 [:and {:seon.db/attributes true

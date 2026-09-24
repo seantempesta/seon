@@ -922,6 +922,61 @@
                    :seon.error/chain (error.refusal/chain failure))
       frame (assoc :seon.error/frame frame))))
 
+;;; Loaded Var roots have no database owner: this value names the JVM's loaded
+;;; program. Development adoption replaces it with its unknown-program
+;;; diagnostic before touching a root and with `{:seon.source/commit-id}` once its
+;;; record commits; a failed adoption leaves the diagnostic. Nothing waits on it.
+(defonce loaded-identity (atom {}))
+
+(def ^:dynamic ^:private *expected-identity*
+  "The loaded identity this thread's execution expects at its end: its own
+  adoptions advance it, so only another thread's change reads as one."
+  nil)
+
+(defn advance-loaded-identity!
+  "Set `identity-atom` to `value`, carrying this thread's expectation along."
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :map] :map]}
+  [identity-atom value]
+  (let [[old] (reset-vals! identity-atom value)]
+    (when-let [expected *expected-identity*]
+      (when (identical? old @expected) (vreset! expected value)))
+    value))
+
+(defn- identity-name
+  {:malli/schema [:=> [:cat :map] :string]}
+  [loaded]
+  (if (:seon.error/at loaded)
+    (str "unknown (" (:seon.error/message loaded) ")")
+    (str (:seon.source/commit-id loaded "the booted program"))))
+
+(defn call-detecting-program-change
+  "Call `work`, answering its result only when the loaded program did not change.
+
+  `identity-atom` is read when `work` starts and when it ends. An unknown
+  program at start answers its diagnostic without calling `work`; a change by
+  another thread (an enclosing execution's included) answers the refusal
+  naming both identities instead of the result. This thread's own adoptions
+  advance its expectation (`advance-loaded-identity!`)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol
+                       [:=> [:cat] :any]]
+                  :any]}
+  [identity-atom operation work]
+  (let [before @identity-atom
+        expected (or *expected-identity* (volatile! before))
+        changed (fn [after]
+                  (error.refusal/diagnostic
+                   (java.util.Date.) :seon.cluster/adoption operation
+                   {:seon.error/message (str "The loaded program changed during this execution, from "
+                                             (identity-name @expected) " to " (identity-name after)
+                                             "; its result is not trusted. Rerun it.")
+                    :seon.test/not-runnable (str (identity-name @expected) " -> " (identity-name after))}))]
+    (cond
+      (:seon.error/at before) before
+      (not (identical? before @expected)) (changed before)
+      :else (let [result (binding [*expected-identity* expected] (work))
+                  after @identity-atom]
+              (if (identical? @expected after) result (changed after))))))
+
 (defn- loaded-source
   "The database whose adoption record names the JVM's loaded source commit.
 
@@ -3314,6 +3369,17 @@
              :seon.sci.admit/record record}
       interrupted? (assoc :seon.cluster.eval/interrupted-at interrupted-at))))
 
+(defn- trusted-evaluation
+  "Answer `evaluate!`'s evaluation, or throw the declared refusal naming both
+  loaded identities when the program `identity-atom` names changed while it ran."
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity [:=> [:cat] :seon.sci.eval/evaluation]]
+                  :seon.sci.eval/evaluation]}
+  [identity-atom evaluate!]
+  (let [answer (call-detecting-program-change identity-atom `evaluate evaluate!)]
+    (if (:seon.error/at answer)
+      (throw (ex-info (:seon.error/message answer) answer))
+      answer)))
+
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
   Runs synchronously on the caller's `:compute` workload task — this
@@ -3334,6 +3400,9 @@
   5. evaluate;
   6. ADMIT the value — realized and bounded — while still armed;
   7. disarm in `finally`.
+  Steps 4-6 answer the declared refusal instead of their value when the
+  loaded program (`:seon.sci.eval/loaded-identity`, else the JVM's
+  `loaded-identity`) changed while they ran: nothing waits for adoption.
 
   Never throws. A failure of any kind returns an ordinary map whose
   `:seon.sci.admit/value` is a flat `:seon.error` value. PRESENCE IS
@@ -3579,6 +3648,9 @@
        (fn [armed]
         (vreset! arm-state armed)
         (try
+         (trusted-evaluation
+          (:seon.sci.eval/loaded-identity request loaded-identity)
+          (fn []
           (when (contains? evaluation-ctx ::custody)
             (when-let [database (:seon.db/db request)]
               (when-not (acquired-database? evaluation-ctx database)
@@ -3772,7 +3844,7 @@
             :seon.sci.eval/ending-namespace @ending-namespace
             :seon.print/options @print-options
             :seon.sci.eval/bindings definitions
-            :seon.program/row row}))
+            :seon.program/row row}))))
         (catch Throwable throwable
           (failure-result throwable))
           )))
