@@ -115,3 +115,25 @@ of wall time. `seon.shell.jvm`, `seon.cluster`, `seon.dev.state`, `seon.render.w
   load. Commit `f053f9477` (−4/+1).
 
 No reset is needed. Adoption into default is root's.
+
+## Installed proof after root's restart (default at archive 3ff123708)
+
+Archive 3ff123708 contains `d0ca6de68`, `8adf64a56`, `f053f9477` and `b7d4582cf`. It
+does not contain the fixture fix `1ad298a5a`.
+
+- `bin/test-check default --test seon.cluster.process-test/an-exited-or-unknown-generation-never-matches-a-process`:
+  passed with 9 assertions (reused recorded green).
+- `bin/test-check default --test seon.cluster.agent-namespace-test/assignment-reads-refuse-an-unreadable-database-and-answer-none-only-when-none`:
+  passed with 7 assertions (reused recorded green).
+- `bin/test-check default --ns seon.cluster.process-test`: 18 pass, 1 fail. The failure is
+  `a-well-behaved-tree-exits-on-term-without-force` at :56, the old fixture that
+  `1ad298a5a` fixes. That commit is not installed yet.
+- `bin/test-check default --ns seon.cluster.agent-namespace-test`: 13 pass, 2 errors, from
+  `reassignment-is-an-ordinary-cardinality-one-transaction` and
+  `source-bearing-namespaces-without-a-steward-derive-one-problem-line`. Both
+  fixture writes of bare `{:seon.ns/name …}` rows were refused for a missing
+  `:seon.program/definition-digest`. This is the known class in
+  `docs/seon/issues/fixture-namespace-rows-lack-the-required-definition-digest.md`.
+  It is not caused by this lane.
+- `bin/seon status` itself failed during the check: `seon.cluster.boot/readable-response`
+  refused its return value for a missing `:seon.error/at`. That is root's to diagnose.
