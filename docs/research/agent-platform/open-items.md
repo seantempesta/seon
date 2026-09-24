@@ -43,6 +43,9 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 - Delta branch deleted 104239f33 (−69: build-projection's projection+delta branch, compose-projection-data, reverse-dependencies). Its adoption waited ~6 min on other lanes' uncommitted edits, then 20.8 s (class 4).
 - Schema rules DONE: projection-delta deleted (53a038419, −38); assert-config-display! at admission (e9f6dc805); :inst refusal and [:maybe X] were already fixed (ab7cc7190, a70688cc8) — the :inst regression never ran its path because the runner hands every test a projection (1cc45977a binds it nil). 9 pre-existing reds each in seon.schema-test and seon.config-test.
 
+- Render pair selection FIXED 14a9291ad (an all-optional map declaring a render pair gets a shape row; census: 358 pairs, problems was the only unselected one). NOT LIVE: db/carried-projection caches by declaration content + revision and ignores the projection builder's code — same class as the analyzer key (c3a225dc7); needs the builder's definition digests in the key, or a restart. Class 9 reds are a different cause (fixture renderers in SCI).
+- A new MCP branch's first evaluation lists 10 inherited errors from other agent branches (since 0) — branch-errors should start at the branch's fork basis. A tiny SCI eval allocated 667 MB (acquisition).
+
 ## Integration (root, at the end of the fix round)
 
 1. Default already runs the nuked store from the checkout; after the running lanes land, `bin/seon down && bin/seon start`.
@@ -93,7 +96,7 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 - Launcher compute half: submit!! referenced by dead turn.clj:3290-3334, env_test.clj, instrument_test.clj.
 - First-ever delivery gate still in error.clj:1393.
 - hasch.core/edn-hash identity switch (prereqs in ledger).
-- Ingestion slice: analyzer stores :seon/tasks, :seon/must-read, :seon/see-also, ^{:seon/task}, and :seon.test/seed as edges; contract schema keys as keyword edges; task EDN loader; dangling refusal (requirements 7.9, 7.9b, 5a.5).
+- Ingestion slice: analyzer stores :seon/tasks, :seon/must-read, :seon/see-also, ^{:seon/task}, and :seon.test/seed (entries: literal tx data, qualified seed symbol, or inline fn — owner 2026-09-24, harness design §2b) as edges; contract schema keys as keyword edges; task EDN loader; dangling refusal (requirements 7.9, 7.9b, 5a.5).
 - Checkpoint execution model (§4b with review corrections): base/cluster/task checkpoints, host Vars installed directly.
 - Render pipeline 5 slices (clojure.main grammar, one printer, faults opener done, openers as data + help topics, retire transcript projection).
 - Proof entrance: run a task's named deftests through seon.test/run on a throwaway fork (~130 ms target).
