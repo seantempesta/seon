@@ -2513,6 +2513,21 @@
          (get contexts 'sample.renamed))
         "clj-kondo records no renamed local: a :rename is refused by name, never mis-bound")))
 
+(deftest a-top-level-require-rename-is-refused-by-name
+  ;; F8 (docs/research/agent-platform/review-landings-2026-09-24.md): a
+  ;; top-level require's :rename was dropped, so the row bound no local `join`.
+  (let [contexts (analyzed-namespace-contexts
+                  {"renamed.clj"
+                   (str "(ns sample.top-renamed)\n"
+                        "(require '[clojure.set :refer [union] :rename {union join}])\n"
+                        "(defn f [] (join #{1} #{2}))\n")})
+        refusal (get contexts 'sample.top-renamed)]
+    (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
+         refusal)
+        (pr-str refusal))
+    (is (= 2 (get-in refusal [:seon.fn/analysis-entry :seon.fn.analyzer/row]))
+        "the refusal names the require's own :rename")))
+
 (deftest a-file-deleted-after-listing-is-the-declared-refusal
   ;; 2026-09-24 fault row 15: `full-source-refresh!` listed a dependent file,
   ;; another lane deleted it, and the read's NoSuchFileException was recorded

@@ -511,9 +511,11 @@
        (and (map? value) (every? literal-value? (mapcat identity value))))))
 
 (defn- parsed-facts
-  "Use the existing kondo node parse for var quotes and literal def initializers."
+  "Use the existing kondo node parse for var quotes, `require` call spans and
+  literal def initializers."
   {:malli/schema [:=> [:cat :string :string]
                   [:map [:seon.fn.analyzer/var-quotes [:vector :map]]
+                   [:seon.fn.analyzer/require-forms [:vector :map]]
                    [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]]]}
   [filename source]
   (let [nodes (tree-seq (comp seq :children) :children
@@ -521,6 +523,11 @@
                           (kondo.utils/parse-string-all source)))]
     {::var-quotes
      (into [] (comp (filter #(= :var (:tag %)))
+                    (map #(assoc (meta %) :filename filename))) nodes)
+     ::require-forms
+     (into [] (comp (filter #(and (= :list (:tag %))
+                                  (#{'require 'clojure.core/require}
+                                   (:value (first (:children %))))))
                     (map #(assoc (meta %) :filename filename))) nodes)
      ::literal-defs
      (into #{}
@@ -539,19 +546,31 @@
   "Each `ns` definition's clause facts. clj-kondo attributes every require
   and `:refer` to the namespace that made it (`:from`), whether in the `ns`
   form or a top-level `require` (clj_kondo/impl/analyzer/namespace.clj:721,771;
-  :refer usages :220-231). A class import and a bare `:rename` keyword carry
-  no `:from`, so they are the ones positioned inside the `ns` form (:702);
-  clj-kondo records no renamed local. Each fact vector is indexed once."
-  [analysis]
+  :refer usages :220-231). A class import and a bare `:rename` keyword inside
+  the `ns` form are not attributed to the namespace it defines (:702), so
+  they are taken by position within that form.
+  A `:rename` inside a `require` call (`require-forms`, the parsed spans)
+  carries the requiring namespace as `:from`, so it is that namespace's
+  clause; one elsewhere in a body is data. clj-kondo records no renamed
+  local. Each fact vector is indexed once."
+  {:malli/schema [:=> [:cat [:vector :map] :map] :map]}
+  [require-forms analysis]
   (let [unqualified #(update-keys % (comp keyword name))
         usages (group-by ::from (::namespace-usages analysis))
         refers (group-by ::from (filter ::refer (::var-usages analysis)))
         in-files (fn [entries] (group-by ::filename entries))
         imports (in-files (filter ::import (::java-class-usages analysis)))
-        renames (in-files (filter #(and (= "rename" (::name %)) (not (::ns %))) (::keywords analysis)))
+        bare-renames (filter #(and (= "rename" (::name %)) (not (::ns %))) (::keywords analysis))
+        renames (in-files bare-renames)
         within (fn [by-file definition]
                  (filterv #(contains-position? (unqualified definition) (unqualified %))
-                          (get by-file (::filename definition))))]
+                          (get by-file (::filename definition))))
+        requires (in-files require-forms)
+        required-renames (group-by ::from
+                                   (filter (fn [rename]
+                                             (some #(contains-position? (unqualified %) (unqualified rename))
+                                                   (get requires (::filename rename))))
+                                           bare-renames))]
     (update analysis ::namespace-definitions
             (partial mapv
                      (fn [{namespace-name ::name :as definition}]
@@ -559,7 +578,9 @@
                               ::clause-usages (get usages namespace-name [])
                               ::clause-refers (get refers namespace-name [])
                               ::clause-imports (within imports definition)
-                              ::clause-renames (within renames definition)))))))
+                              ::clause-renames
+                              (into (within renames definition)
+                                    (get required-renames namespace-name []))))))))
 
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.
@@ -646,10 +667,12 @@
                                                              [(:row entry) (:col entry)]]))
                                          (assoc :literal-def? true))) definitions)))
         quotes (mapcat ::var-quotes (vals spans))
+        require-forms (into [] (comp (mapcat ::require-forms) (map location)) (vals spans))
         attributed (group-by #(if (:class %) :java-class-usages :var-usages)
                              (attributed-usages (assoc raw-analysis :var-quotes quotes)))
         analysis (merge raw-analysis attributed)]
     (with-namespace-clauses
+    require-forms
     {::namespace-definitions
      (filterv jvm-entry?
               (normalized-entries analysis :namespace-definitions namespace-definition))

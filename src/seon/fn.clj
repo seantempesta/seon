@@ -1176,7 +1176,7 @@
                    [:imports [:map-of :symbol :symbol]]]]}
   [{::analyzer/keys [clause-usages clause-refers clause-imports clause-renames]}]
   (when-some [rename (first clause-renames)]
-    (let [message "A file's ns :rename is not indexed: clj-kondo's analysis records no renamed local."]
+    (let [message "A require's :rename is not indexed: clj-kondo's analysis records no renamed local."]
       (throw (ex-info message {:seon.fn/index-refused true
                                :seon.cluster.source/phase :analysis
                                :seon.error/message message
