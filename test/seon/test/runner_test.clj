@@ -53,6 +53,37 @@
     (is (< (count output) 1500) "The small supplied profile bounds the SCI world.")
     (is (not (str/includes? output "value1999")))))
 
+(deftest a-huge-message-and-cause-print-bounded-text-and-keep-the-whole-message
+  ;; Default died printing a 557,665,187-char `is` message and 526 MB ex-data
+  ;; lines to its log (seon.log:67798, 64304; 2026-09-24).
+  (let [huge (.repeat "x" (* 51 1000 1000))
+        options {:seon.render/profile
+                 {:seon.render.profile/id ::assertion
+                  :seon.render.profile/token-budget 2000
+                  :seon.render.profile/max-depth 8
+                  :seon.render.profile/max-children 32
+                  :seon.render.profile/composition :multiline}}
+        var #'a-huge-message-and-cause-print-bounded-text-and-keep-the-whole-message
+        capture (atom {::runner/order [] ::runner/results {}})
+        report! (fn [event]
+                  (with-out-str
+                    (binding [test/*test-out* *out*
+                              test/*report-counters* (ref test/*initial-report-counters*)
+                              test/*testing-vars* [var]]
+                      (#'runner/capture-and-report-event!
+                       options capture #{'seon.test.runner-test}
+                       (fn [_] (throw (ex-info "Raw assertion reporter bypass" {})))
+                       (atom #{}) event))))
+        failed (report! {:type :fail :var var :message huge :expected :small :actual :large})
+        errored (report! {:type :error :var var :expected nil
+                          :actual (ex-info "refused" {:seon.error/offending huge})})
+        stored (:seon.test.failure/reports (first (#'runner/captured-results @capture)))]
+    (is (< (count failed) 20000) (str "the red report printed " (count failed) " chars"))
+    (is (< (count errored) 20000) (str "the error report printed " (count errored) " chars"))
+    (is (str/includes? failed ":seon.print/omitted") "the elision is named")
+    (is (= huge (:seon.test.failure/message (first stored)))
+        "the stored failure keeps the whole message for the blob tier")))
+
 (deftest nested-runs-own-their-counters-and-evidence
   (let [namespace-name (symbol (str "seon.nested-report-probe." (id/id)))
         namespace-object (create-ns namespace-name)

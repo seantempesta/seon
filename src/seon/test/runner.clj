@@ -122,11 +122,25 @@
       :seon.render/profile (or (:seon.render/profile options)
                                (:seon.render/profile (report-options)))})))
 
+(defn- message-text
+  "An assertion's `is` message as shown in the gate log. A string within the
+  profile's token budget counted as characters (a token is at least one) is
+  shown verbatim, as clojure.test prints it; anything longer or not a string is
+  an ordinary reported value, bounded once by `report-value` with its elision
+  named. The whole message stays on the stored failure (`failure-report`),
+  which recording stages to the blob tier."
+  [options message]
+  (let [profile (or (:seon.render/profile options) (:seon.render/profile (report-options)))]
+    (if (and (string? message)
+             (<= (count message) (:seon.render.profile/token-budget profile)))
+      message
+      (report-value (assoc options :seon.render/profile profile) message))))
+
 (defn- failure-message
   [options event]
   (->> [(when (seq test/*testing-contexts*)
           (test/testing-contexts-str))
-        (:message event)
+        (when (some? (:message event)) (message-text options (:message event)))
         (when (contains? event :expected)
           (str "expected: " (report-value options (:expected event))))
         (when (contains? event :actual)
