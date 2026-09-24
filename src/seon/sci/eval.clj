@@ -396,15 +396,16 @@
                              (= turn-generation (:sci/generation (meta sci-var))))]
               [(symbol (str namespace-name) (str intern-name))
                {:seon.sci.eval/var sci-var
+                :seon.sci.eval/metadata (meta sci-var)
                 :seon.sci.eval/value (if (sci.vars/hasRoot sci-var)
                                        @sci-var
                                        absent-intern)}])))))
 
 (defn- turn-intern-values
-  [ctx]
+  [interns]
   (into {} (map (fn [[qualified entry]]
                   [qualified (:seon.sci.eval/value entry)]))
-        (turn-interns ctx)))
+        interns))
 
 (defn- same-intern-value?
   [left right]
@@ -415,10 +416,63 @@
            (= (meta left) (meta right))
            (= left right))))
 
-(defn- definition-row
-  "Analyze the accepted source; SCI contributes only runtime contract facts."
+(defn- changed-interns
+  "This evaluation's created or replaced Vars: `after` entries whose value
+  differs from `before` (both `turn-interns`)."
+  [before after]
+  (filter (fn [[qualified {value :seon.sci.eval/value}]]
+            (and (not (identical? absent-intern value))
+                 (not (same-intern-value?
+                       (get-in before [qualified :seon.sci.eval/value] absent-intern)
+                       value))))
+          after))
+
+(declare missing-contract)
+
+(defn- refuse-uncontracted-definitions!
+  "Refuse the evaluation when a function it defined declares no `:malli/schema`.
+
+  `rows` are `definition-rows`: the indexer's analysis of the source matched
+  to the Vars SCI actually changed, not a reader pattern, so a `defn` nested
+  in `do`/`let`, `(def f (fn ...))` and macro expansions are covered. Rows the
+  analysis marks `:seon.fn/macro?` or `:seon.fn/host-bound?` (record and type
+  factories) are not interpreted functions and are not gated. Each changed Var's prior root and metadata are restored in place
+  (Var identity is kept, so interpreted callers stay linked); a Var this form
+  created is removed from its namespace. Limits: the form has already run, so
+  a call inside the same form precedes the check, and its other effects
+  (requires, atoms, IO) remain."
+  [ctx before-namespaces before after rows]
+  (let [changed (changed-interns before after)]
+    (when-let [missing (seq (for [row rows
+                                  :when (and (:seon.fn/sym row)
+                                             (not (:seon.fn/spec row))
+                                             (not (:seon.fn/macro? row))
+                                             (not (:seon.fn/host-bound? row)))]
+                              (:seon.fn/sym row)))]
+      (doseq [[qualified {sci-var :seon.sci.eval/var}] changed
+              :let [path [(symbol (namespace qualified)) (symbol (name qualified))]
+                    prior (get-in before-namespaces path)
+                    {value :seon.sci.eval/value metadata :seon.sci.eval/metadata}
+                    (get before qualified)]]
+        (cond
+          (and (identical? prior sci-var) (not (identical? absent-intern value)))
+          (do (sci.vars/bindRoot sci-var value) (reset-meta! sci-var metadata))
+          (some? prior) (swap! (:env ctx) assoc-in (into [:namespaces] path) prior)
+          :else (swap! (:env ctx) update-in [:namespaces (first path)] dissoc (second path))))
+      (let [refusal (missing-contract (first (sort-by str missing)))]
+        (throw (ex-info (:seon.error/message refusal) refusal))))))
+
+(defn- definition-rows
+  "Analyze the accepted source once; SCI contributes only runtime contract facts."
   [ctx database projection before source namespace-row]
-  (some
+  (let [source-rows
+        (delay (seon.fn/source-rows
+                database
+                (program/shapes-in projection)
+                (assoc namespace-row :seon.program/definition-digest
+                       (program/definition-digest namespace-row)) source
+                (set (keys (:seon.schema.projection/forms projection)))))]
+  (keep
    (fn [[qualified {sci-var :seon.sci.eval/var
                     value :seon.sci.eval/value}]]
      (when (and (not (identical? absent-intern value))
@@ -429,12 +483,7 @@
              (when (or (:test metadata) (fn? value))
                (some #(when (= qualified
                                (or (:seon.fn/sym %) (:seon.test/sym %))) %)
-                     (seon.fn/source-rows
-                      database
-                      (program/shapes-in projection)
-                      (assoc namespace-row :seon.program/definition-digest
-                             (program/definition-digest namespace-row)) source
-                      (set (keys (:seon.schema.projection/forms projection))))))
+                     @source-rows))
              event
              (when analysed-row
                (cond-> analysed-row
@@ -461,7 +510,7 @@
                :seon.program/schema-keys
                (set (keys (:seon.schema.projection/forms projection)))}))
            row))))
-   (sort-by (comp str key) (turn-interns ctx))))
+   (sort-by (comp str key) (turn-interns ctx)))))
 
 (defn- bindings
   [ctx _namespace-name before _source _form _observed-built-in-calls]
@@ -1527,9 +1576,10 @@
 (defn- missing-contract
   "The refusal of a function definition that declares no `:malli/schema`.
 
-  Entry defaults to the gate: the definition is refused before evaluation, so
-  it neither enters the context nor replaces an already armed root. No entry
-  dial exists yet; a `:warn` admission needs its owner's ruling first."
+  Entry defaults to the gate: `refuse-uncontracted-definitions!` refuses the
+  evaluation and restores every definition it made, so the function neither
+  stays in the context nor replaces an already armed root. No entry dial
+  exists yet; a `:warn` admission needs its owner's ruling first."
   {:malli/schema [:=> [:cat :qualified-symbol] :seon.sci.eval/declaration-absent-error]}
   [function-symbol]
   (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
@@ -3457,15 +3507,14 @@
             _ (when-let [reader-error (:seon.sci.reader/error event)]
                 (throw (ex-info (:seon.error/message reader-error)
                                 reader-error)))
-            _ (when (and (:seon.fn/sym event) (not (:seon.fn/spec event)))
-                (let [refusal (missing-contract (:seon.fn/sym event))]
-                  (throw (ex-info (:seon.error/message refusal) refusal))))
             form (:seon.sci.reader/form event)
             namespace-unmap? (:seon.sci.reader/ns-unmap? event)
             ;; The install entrance supplies a candidate for a function;
             ;; ordinary forms receive the retained agent context directly.
             execution-ctx evaluation-ctx
-            before-intern-values (turn-intern-values execution-ctx)
+            before-namespaces (:namespaces @(:env execution-ctx))
+            before-owned (turn-interns execution-ctx)
+            before-intern-values (turn-intern-values before-owned)
             _ (when-not namespace-unmap?
                 (vreset! session-observation
                          {:seon.sci.eval/ctx execution-ctx
@@ -3550,19 +3599,23 @@
               :seon.sci.eval/namespace-name namespace-name
               :seon.sci.eval/namespace-unmap? namespace-unmap?
               :seon.cluster.eval/source source})
-            var-row
+            var-rows
             (when-let [database (:seon.db/db request)]
-              (definition-row execution-ctx database projection
-                              before-intern-values source
-                              (assoc (binding-rows before-reader-context)
-                                     :seon.ns/name namespace-name)))
-            ;; Arm the contract definition-row just validated. Arming belongs
+              (vec (definition-rows execution-ctx database projection
+                                    before-intern-values source
+                                    (assoc (binding-rows before-reader-context)
+                                           :seon.ns/name namespace-name))))
+            var-row (first var-rows)
+            _ (refuse-uncontracted-definitions!
+               execution-ctx before-namespaces before-owned
+               (turn-interns execution-ctx) var-rows)
+            ;; Arm every contract definition-rows just validated. Arming belongs
             ;; to the live Var, not to durability: an evaluation that never
             ;; commits must refuse invalid input all the same. The commit's
             ;; later install re-wraps the interpreted original idempotently.
-            _ (when (:seon.fn/spec var-row)
+            _ (doseq [row var-rows :when (:seon.fn/spec row)]
                 (install-function-contract!
-                 execution-ctx var-row projection (:seon.db/db request)))
+                 execution-ctx row projection (:seon.db/db request)))
             ending-namespace-row
             (when (and (nil? var-row)
                        (nil? reader-row)

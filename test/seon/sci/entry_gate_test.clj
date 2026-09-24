@@ -1,7 +1,7 @@
 (ns seon.sci.entry-gate-test
   "Entry into an agent's SCI context: every program namespace carries its
   reader context, a contracted definition is armed at evaluation, and a
-  definition without a contract is refused before it evaluates."
+  definition without a contract is refused and its definitions restored."
   (:require [clojure.test :refer [deftest is]]
             [seon.config :as config]
             [seon.db :as db]
@@ -45,7 +45,7 @@
          (is (= :input (:seon.instrument/check refused))
              (pr-str refused)))))))
 
-(deftest a-definition-without-a-contract-is-refused-before-evaluation
+(deftest a-definition-without-a-contract-is-refused-and-restored
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)]
@@ -82,3 +82,29 @@
        (is (= :seon.config.eval.result/max-bytes (:seon.error/member refusal)) (pr-str refusal))
        (is (= 64 (:seon.sci.admit/bound-bytes refusal)))
        (is (= 70 (:seon.sci.admit/bytes refusal)))))))
+
+(deftest every-definition-a-form-makes-is-gated-and-armed
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)]
+       (evaluate-in ctx (str "(defn twice \"Double x.\" "
+                             "{:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"))
+       (doseq [source ["(do (defn nested \"No contract.\" [x] x))"
+                       "(let [k 3] (defn nested \"No contract.\" [x] (* k x)))"
+                       "(def nested (fn [x] x))"
+                       "(do (defn nested \"No contract.\" [x] x) (defn twice \"No contract.\" [x] (* 3 x)))"]]
+         (let [refusal (:seon.sci.admit/value (evaluate-in ctx source))]
+           (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)) source)
+           (is (= 'absent (:seon.sci.admit/value
+                           (evaluate-in ctx "(if (resolve 'nested) 'present 'absent)")))
+               source)
+           (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))) source)))
+       (is (= :ok (get-in (evaluate-in ctx "(defrecord Pair [a b])")
+                          [:seon.sci.admit/record :seon.eval/outcome]))
+           "record factories are host-bound, not gated")
+       (evaluate-in ctx (str "(do (defn one \"Inc.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                             " (defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x)))"))
+       (doseq [call ["(one \"a\")" "(two \"a\")"]]
+         (is (= :input (:seon.instrument/check
+                        (:seon.sci.admit/value (evaluate-in ctx call))))
+             call))))))
