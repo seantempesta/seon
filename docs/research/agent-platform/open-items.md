@@ -10,12 +10,12 @@ updated: 2026-09-24
 
 - sweep-hand-built-ns-rows: scripted conversion of 52 test files to test-support/namespace-row.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
-- fix-affected-callers-interpret (sci/eval.clj): a branch changing one :core function refuses its whole acquisition because
-  interpreted callers cannot resolve privates, def Vars and dependency aliases (docs/seon/issues/affected-callers-fail-to-interpret-against-uninstalled-bindings.md). Blocking: most branch tests.
+- fix-env-macro-callers (fn.clj): the affected-callers residual — callers expanding &env-reading JVM macros (async/go-loop) classed interpretable.
+- fix-partial-request-profile (sci/eval.clj, render.clj): who carries a render profile without an id; refuse at entry.
 - fix-agent-custody-label (agent.clj): class 2 below.
 
 Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
-rows refuse only when called (f2bc7088a). Tool smell: every seon.sci.branch-execution-test member is marked long, so
+rows refuse only when called (f2bc7088a); interpreted callers get their namespace's compiled Vars, so 0 "Cannot interpret" in the save gate (b855a8a17); a fork keeps its cluster environment instead of a hardcoded "current-src" (f7ae12104). Tool smell: every seon.sci.branch-execution-test member is marked long, so
 `bin/test-check --ns` runs 0 of them without --include-long.
 
 ## Recurring classes — root causes, not symptoms (owner 2026-09-24: "step back and find root causes")
