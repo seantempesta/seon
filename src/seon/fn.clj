@@ -452,6 +452,132 @@
                    (qualified-symbol? (symbol subject))))
       (symbol subject))))
 
+(defn- seed-refused!
+  "Refuse one `:seon.test/seed` entry by the admission rule it broke."
+  {:malli/schema [:=> [:cat :seon.test.seed/refused :qualified-symbol
+                       [:maybe :seon.test.seed/ordinal] :map] :nil]}
+  [rule test-symbol ordinal data]
+  (let [message (str "Seed entry " (or ordinal "vector") " of " test-symbol
+                     " is refused: " (name rule) ".")]
+    (throw (ex-info message
+                    (cond-> (merge {:seon.test.seed/refused rule :seon.test/sym test-symbol
+                                    :seon.fn/index-refused true :seon.error/message message}
+                                   data)
+                      ordinal (assoc :seon.test.seed/ordinal ordinal))))))
+
+(defn- seed-symbol
+  "The qualified name an authored symbol denotes through its namespace's aliases and refers."
+  {:malli/schema [:=> [:cat :map :symbol] [:maybe :qualified-symbol]]}
+  [{:keys [aliases refers]} authored]
+  (if (qualified-symbol? authored)
+    (if-let [target (get aliases (symbol (namespace authored)))]
+      (symbol (str target) (name authored))
+      authored)
+    (get refers authored)))
+
+(defn- literal-seed-writes
+  "Attributes one literal entry's entity maps write, each value checked
+  against its declaration in the supplied projection."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.test.seed/ordinal
+                       [:sequential :map]]
+                  [:set :qualified-keyword]]}
+  [projection test-symbol ordinal entities]
+  (let [registry (:seon.schema.projection/registry projection)]
+    (into (sorted-set)
+          (for [entity entities
+                [attribute value] entity
+                :when (not= :db/id attribute)]
+            (cond
+              (not (and (qualified-keyword? attribute) (mr/schema registry attribute)))
+              (seed-refused! :undeclared-attribute test-symbol ordinal {:seon.schema/key attribute})
+              (schema/explain-candidate-value projection attribute value)
+              (seed-refused! :invalid-attribute-value test-symbol ordinal
+                             {:seon.schema/key attribute :seon.error/offending value})
+              :else attribute)))))
+
+(defn- seed-occurrences
+  "The deftest's ordered `:seon.test/seed` entries as owned occurrences.
+
+  A symbol (form 2) is its qualified name; literal entity maps (form 1) keep
+  the attributes they write; an inline `(fn [input] ...)` (form 3) keeps the
+  first-party functions the test's own analysis reached from it and the
+  declared attributes its literal maps name. Values stay in the test source."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :qualified-symbol
+                       [:set :qualified-symbol] :any]
+                  [:vector :seon.test.seed/occurrence]]}
+  [projection context test-symbol reached entries]
+  (when-not (vector? entries)
+    (seed-refused! :unknown-form test-symbol nil {:seon.error/offending entries}))
+  (let [registry (:seon.schema.projection/registry projection)
+        present #(cond-> {} (seq %2) (assoc %1 (into (sorted-set) %2)))]
+    (into []
+          (map-indexed
+           (fn [ordinal entry]
+             (assoc
+              (cond
+                (symbol? entry)
+                {:seon.test.seed/function
+                 (or (when (qualified-symbol? entry) (seed-symbol context entry))
+                     (seed-refused! :unqualified-symbol test-symbol ordinal
+                                    {:seon.error/offending entry}))}
+
+                (and (seq? entry) ('#{fn fn* clojure.core/fn} (first entry)))
+                (let [nodes (tree-seq coll? seq entry)]
+                  (merge
+                   (present :seon.test.seed/calls
+                            (filter reached (mapcat (fn [authored]
+                                                      [(seed-symbol context authored)
+                                                       (when (simple-symbol? authored)
+                                                         (symbol (namespace test-symbol) (str authored)))])
+                                                    (filter symbol? nodes))))
+                   (present :seon.test.seed/writes
+                            (filter #(and (qualified-keyword? %)
+                                          (not= "seon.test.seed" (namespace %))
+                                          (mr/schema registry %))
+                                    (mapcat keys (filter map? nodes))))))
+
+                (or (map? entry) (and (vector? entry) (every? map? entry)))
+                (present :seon.test.seed/writes
+                         (literal-seed-writes projection test-symbol ordinal
+                                              (if (map? entry) [entry] entry)))
+
+                :else
+                (seed-refused! :unknown-form test-symbol ordinal {:seon.error/offending entry}))
+              :seon.test.seed/ordinal ordinal)))
+          entries)))
+
+(def ^:private seed-contract
+  "The one contract a named seed function declares, in `:seon.fn/spec` form."
+  (pr-str (schema/canonical-definition
+           [:=> [:cat :seon.test.seed/input] :seon.test.seed/value] {})))
+
+(defn- assert-seed-contracts!
+  "Refuse a seed entry whose function the final program lacks or did not
+  contract as a seed. `rows` are the batch's authored rows; `database`, when
+  present, supplies every other current row; `removed` leave in this batch."
+  {:malli/schema [:=> [:cat [:sequential :map] [:or :nil :seon.db/database-value]
+                       [:set :qualified-symbol]] :nil]}
+  [rows database removed]
+  (let [authored (into {} (comp (filter :seon.fn/sym) (map (juxt :seon.fn/sym identity))) rows)
+        read-row (fn [function-symbol]
+                   (when database
+                     (let [row (db/pull database [:seon.fn/sym :seon.fn/spec]
+                                        [:seon.fn/sym function-symbol])]
+                       (when (:seon.error/at row) (throw (ex-info (:seon.error/message row) row)))
+                       (when (:seon.fn/sym row) row))))]
+    (doseq [{test-symbol :seon.test/sym seeds :seon.test/seed} rows
+            {ordinal :seon.test.seed/ordinal function-symbol :seon.test.seed/function} seeds
+            :when function-symbol
+            :let [row (when-not (removed function-symbol)
+                        (or (get authored function-symbol) (read-row function-symbol)))
+                  data {:seon.test.seed/function function-symbol}]]
+      (cond
+        (nil? row) (seed-refused! :missing-function test-symbol ordinal data)
+        (nil? (:seon.fn/spec row)) (seed-refused! :uncontracted-function test-symbol ordinal data)
+        (not= seed-contract (:seon.fn/spec row))
+        (seed-refused! :contract-mismatch test-symbol ordinal
+                       (assoc data :seon.fn/spec (:seon.fn/spec row)))))))
+
 ;; Emit one fact per keyword. Datahike reads a two-element collection beginning
 ;; with a unique-identity attribute as one lookup ref
 ;; (`reference-code/datahike/src/datahike/db/transaction.cljc:717-735`). The
@@ -511,7 +637,7 @@
     #{}))
 
 (defn- var-row
-  [contexts namespace-contexts
+  [projection contexts namespace-contexts
    {:keys [calls-by-caller references used-keywords writes call-arities]} entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
@@ -569,7 +695,15 @@
         (assoc :seon.fn/call-arities
                (into #{} (get call-arities qualified)))
         (test-subject metadata)
-        (assoc :seon.test/subject (test-subject metadata)))
+        (assoc :seon.test/subject (test-subject metadata))
+        ;; An empty seed vector adds nothing, so its definition digest is unchanged.
+        (when-let [[_ seeds] (find metadata :seon.test/seed)] (not= [] seeds))
+        (assoc :seon.test/seed
+               (seed-occurrences projection (get namespace-contexts namespace-name) qualified
+                                 (into #{} (map symbol)
+                                       (concat (get calls-by-caller qualified)
+                                               (get references qualified)))
+                                 (:seon.test/seed metadata))))
 
             (function-definition? entry)
       (cond-> {:seon.fn/sym qualified
@@ -1258,7 +1392,7 @@
     (reduce
      (fn [rows entry]
        (if-let [row (if (::analyzer/ns entry)
-                      (var-row contexts namespace-contexts edges entry)
+                      (var-row projection contexts namespace-contexts edges entry)
                       (cond-> (namespace-row contexts
                                               (get namespace-contexts (::analyzer/name entry))
                                               entry)
@@ -1313,6 +1447,7 @@
         ;; The analysis `ns` form is widened by interpreter refers; identity
         ;; uses the namespace's own facts, as the indexer does.
         resolver-context (stored-namespace-context namespace-row)]
+    (assert-seed-contracts! (get rows "<stdin>" []) database #{})
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
@@ -2537,12 +2672,14 @@
         dependents (if (and database selected)
                      (dependent-paths database prior-projection projection removed (set selected))
                      [])]
-    (assert-capability-contracts!
-     (into artifacts
-           (analyzed-artifacts projection roots directory
-                               (mapv #(fs/absolute-path directory %) dependents) database cache-root nil
-                               (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts)))
-     database removed)))
+    (let [checked (assert-capability-contracts!
+                   (into artifacts
+                         (analyzed-artifacts projection roots directory
+                                             (mapv #(fs/absolute-path directory %) dependents) database cache-root nil
+                                             (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts)))
+                   database removed)]
+      (assert-seed-contracts! (into [] (mapcat :seon.fn.file/rows) checked) database removed)
+      checked)))
 
 (defn analyze-rows
   "Canonical rows from selected source analysis, without a manifest."

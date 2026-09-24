@@ -1,0 +1,30 @@
+#:seon.test.seed
+{:input
+ [:map {:description "What a seed function receives: the immutable database value of the world being prepared. Captured external inputs are added as declared optional members when a seed needs them."}
+  [:seon.db/db :seon.db/db]]
+ :tx-data [:and {:description "Transaction data the prepared world's checked writer applies; a seed returns data, never a transaction."} :seon.db/tx-data]
+ :value
+ [:map {:description "What a seed function or inline seed returns. Open: every member is optional and checked when present."}
+  [:seon.test.seed/tx-data {:optional true} :seon.test.seed/tx-data]
+  [:seon.config/manifest {:optional true} :seon.config/manifest]]
+ :ordinal [:int {:min 0 :description "The entry's position in the deftest's :seon.test/seed vector; cardinality-many refs keep no order, so the vector is reconstructed by ordinal."}]
+ :function [:and {:seon.db/index true :description "The qualified seed function an entry names (form 2): an authored name, resolved to its current row for validation and walking."} :seon.program/edge-symbol]
+ :writes [:set {:description "Qualified attributes the entry's literal entity maps write (forms 1 and 3). The value itself stays in the test's source."} :qualified-keyword]
+ :calls [:set {:description "Functions an inline seed (form 3) names that the test's own analysis records as its calls or references."} :seon.program/edge-symbol]
+ :occurrence
+ [:map {:seon.db/attributes true
+        :description "One ordered seed entry, owned by its test row."}
+  [:seon.test.seed/ordinal :seon.test.seed/ordinal]
+  [:seon.test.seed/function {:optional true} :seon.test.seed/function]
+  [:seon.test.seed/writes {:optional true} :seon.test.seed/writes]
+  [:seon.test.seed/calls {:optional true} :seon.test.seed/calls]]
+ :refused [:enum {:description "The admission rule one seed entry broke."}
+           :unqualified-symbol :unknown-form :missing-function :uncontracted-function
+           :contract-mismatch :undeclared-attribute :invalid-attribute-value]
+ :refused-error
+ [:map {:seon.render/ai seon.error/index-refusal-prose :seon.render/html seon.error/render-html
+        :error/message "must identify the test, the seed entry and the admission rule it broke"}
+  [:seon.test.seed/refused :seon.test.seed/refused]
+  [:seon.test/sym :seon.test/sym]
+  [:seon.test.seed/ordinal :seon.test.seed/ordinal]
+  [:seon.error/message :seon.error/message]]}

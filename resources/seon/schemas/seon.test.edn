@@ -42,6 +42,8 @@
              :seon.test/failure-identity],
             :failure-message :string,
             :failures [:vector {:seon.db/component true :seon.db/component-schema :seon.test.failure/failure} :seon.db/ref],
+            :seed [:vector {:seon.db/component true :seon.db/component-schema :seon.test.seed/occurrence
+                            :description "The deftest's ordered :seon.test/seed entries: literal transaction data, a qualified seed function, or an inline (fn [input] ...), each stored as one owned occurrence carrying its ordinal."} :seon.db/ref],
             :var
             [:fn
              {:error/message "must be a host or SCI Var"
@@ -116,6 +118,7 @@
              [:seon.fn/call-arities {:optional true} :seon.fn/call-arities]
              [:seon.fn/writes {:optional true} :seon.fn/writes]
              [:seon.fn/keywords {:optional true} :seon.fn/keywords]
+             [:seon.test/seed {:optional true} :seon.test/seed]
              [:seon.test/usage {:optional true} :seon.test/usage]
              [:seon.test/fixture-observation {:optional true}
               :seon.test/fixture-observation]
