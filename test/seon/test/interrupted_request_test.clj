@@ -60,9 +60,9 @@
        (is (= 0 (:seon.test/error-count (by-symbol finished))) "a recorded member is untouched")
        (is (= 1 (:seon.test/error-count (by-symbol interrupted))) "interrupted is red, never green")
        (is (= 1 (:seon.test/error-count (first latest))) "it stays an obligation")
-       (is (every? #(str/includes? (:seon.test/failure-message (first latest)) %)
+       (is (every? #(str/includes? (sut/failure-message (first latest)) %)
                    ["resolution exploded" "the underlying cause" "probe true"])
-           (str "the record names the whole cause chain: " (:seon.test/failure-message (first latest))))
+           (str "the record names the whole cause chain: " (sut/failure-message (first latest))))
        (is (= [] (runner/record-interrupted! connection completion failure))
            "a second observation writes nothing")))))
 
@@ -77,3 +77,44 @@
               (:seon.test/execution-refusal (first (:seon.problems/failed-tests-unknown found))))
            (pr-str found))
        (is (not (contains? found :seon.problems/failed-tests)))))))
+
+(deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
+  a-huge-assertion-message-is-a-blob-and-readiness-reads-only-counts
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "default")
+     (let [{completion ::completion} (admitted-run! connection)
+           huge (apply str (repeat (* 10 1024 1024) \x))
+           committed (runner/commit-results!
+                      connection
+                      (assoc completion :seon.test.runner/results
+                             [{:seon.test/sym interrupted
+                               :seon.test.member/began? true :seon.test.member/ended? true
+                               :seon.test/pass-count 0 :seon.test/fail-count 1 :seon.test/error-count 0
+                               :seon.test/failure-message huge}]))
+           database (db/db connection)
+           threshold (db/q '[:find ?n . :where [_ :seon.config.eval.result/blob-threshold ?n]] database)
+           longest (fn [query] (reduce max 0 (map count (db/q query database))))
+           threads (java.lang.management.ManagementFactory/getThreadMXBean)
+           thread (.getId (Thread/currentThread))
+           before (.getThreadAllocatedBytes threads thread)
+           latest (runner/latest-results database [interrupted])
+           allocated (- (.getThreadAllocatedBytes threads thread) before)]
+       (is (not (:seon.error/at committed)) (pr-str (select-keys committed [:seon.error/message])))
+       (is (integer? threshold) "the seeded cluster declares the blob threshold")
+       (is (= #{[(count huge) true]}
+              (set (db/q '[:find ?size ?blob? :where [?r :seon.test.report/id]
+                           [?r :seon.test.failure/message-size ?size]
+                           [?r :seon.test.failure/message-blob ?blob]
+                           [(string? ?blob) ?blob?]] database)))
+           "the member's report names the message by blob digest and size")
+       (is (>= threshold (longest '[:find [?m ...] :where [_ :seon.test.failure/message ?m]]))
+           "no stored assertion message is inline above the threshold")
+       (is (>= threshold (longest '[:find [?m ...] :where [_ :seon.test/failure-message ?m]]))
+           "the test row keeps no joined copy of the claim")
+       (is (= 1 (:seon.test/fail-count (first latest))))
+       (is (not (contains? (first latest) :seon.test/failure-message))
+           "a result read builds no failure text")
+       (is (< allocated (quot (count huge) 2)) (str "the read allocated " allocated " bytes"))
+       (is (str/includes? (sut/failure-message (first latest)) "seon.blob/get")
+           "the shown text names the blob")))))

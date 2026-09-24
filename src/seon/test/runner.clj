@@ -1584,10 +1584,10 @@
                                     :seon.test/run [:seon.test.run/id (:seon.test.run/id run)]
                                     :seon.test.member/completed-tx (:seon.test.member/completed-tx member)}
                                    (select-keys member [:seon.test.member/reach-digest]))
+                      ;; Reports only: text is built where it is shown
+                      ;; (`seon.test/failure-message`), never per read.
                       (seq member-reports)
-                      (assoc :seon.test.failure/reports member-reports
-                             :seon.test/failure-message
-                             (str/join "\n\n" (map (requiring-resolve 'seon.test/failure-text) member-reports))))])))
+                      (assoc :seon.test.failure/reports member-reports))])))
           members)))
 
 (defn commit-results!
