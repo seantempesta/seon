@@ -764,18 +764,50 @@
    (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
-(defn release-context!
-  "Release an execution handle after its caller has observed actual exit.
+(declare disarm!)
 
-  No graph is started by acquisition. The caller owns execution and must join
-  its work before release. Live handles own nothing; borrowed branches persist.
-  The connection release, the branch unlink and the context-state removal are
-  each attempted even when an earlier one throws; the first cause is then
-  rethrown whole, carrying every later cause as suppressed."
+(defn- throw-causes!
+  "Rethrow the first of `causes` whole, carrying every later one as suppressed."
+  {:malli/schema [:=> [:cat [:vector :seon.error/throwable]] :nil]}
+  [causes]
+  (when-let [[first-cause & later] (seq causes)]
+    (doseq [cause later] (.addSuppressed ^Throwable first-cause cause))
+    (throw first-cause)))
+
+(defn- stop-owned-graphs!
+  "Stop and join every graph armed in the owned `routing`, refusing new arms.
+
+  Under the routing's monitor, which `arm!` holds too, the routing is marked
+  released, then every armed agent is disarmed, each attempted even after an
+  earlier join fails. Any failure throws with the mark kept, so no new graph
+  arms: the caller keeps its connection, branch and custody for diagnosis and
+  a later release, which joins what remains."
+  {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
+  [routing]
+  (locking routing
+    (swap! routing assoc :seon.agent/released? true)
+    (let [causes (into [] (keep (fn [agent-id]
+                                  (try (disarm! {:seon.agent/id agent-id :seon.agent/routing routing})
+                                       nil
+                                       (catch Throwable cause cause))))
+                       (sort (keys (:seon.agent/armed @routing))))]
+      (throw-causes! causes))))
+
+(defn release-context!
+  "Release an execution handle once every graph it owns has exited.
+
+  An owning handle first stops and joins every graph armed in its routing
+  (`stop-owned-graphs!`); a failed join throws before anything closes. Live
+  handles own nothing; borrowed branches persist. Then the connection release,
+  the branch unlink and the context-state removal are each attempted even when
+  an earlier one throws; the first cause is then rethrown whole, carrying every
+  later cause as suppressed."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle] :nil]}
   [handle]
   (let [owns-connection? (:seon.agent/owns-connection? handle)
         owns-branch? (:seon.agent/owns-branch? handle)
+        _ (when (or owns-connection? owns-branch?)
+            (stop-owned-graphs! (:seon.agent/routing handle)))
         attempt (fn [step] (try (step) nil (catch Throwable cause cause)))
         causes
         (into []
@@ -792,9 +824,7 @@
                            (into {} (remove (fn [[[branch _] _]]
                                               (= branch (:seon.agent/branch handle))))
                                  contexts))))])]
-    (when-let [[first-cause & later] (seq causes)]
-      (doseq [cause later] (.addSuppressed ^Throwable first-cause cause))
-      (throw first-cause)))
+    (throw-causes! causes))
   nil)
 
 (defn acquire-context!
@@ -961,8 +991,6 @@
                     (catch Throwable cleanup (.addSuppressed failure cleanup))))
              (throw failure))))))))
 
-(declare disarm!)
-
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
   Idempotent per agent (an armed agent is left alone — the armer's
@@ -988,6 +1016,11 @@
     agent-id :seon.agent/id
     routing :seon.agent/routing}]
   (locking routing
+   (when (:seon.agent/released? @routing)
+     (throw (ex-info "arm! refused: the owning execution has released this routing."
+                     {:seon.error/message "arm! refused: the owning execution has released this routing."
+                      :seon.agent/id agent-id
+                      :seon.error/expected :seon.agent/routing})))
    ;; A previous graph whose stop missed its deadline keeps its entry: its
    ;; executor's termination is the exit fact, so no new graph overlaps it.
    (when-let [^ExecutorService previous

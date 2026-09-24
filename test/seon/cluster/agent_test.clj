@@ -20,6 +20,7 @@
             [clojure.test.check.properties :as prop]
             [datahike.api :as d]
             [seon.db :as db]
+            [seon.cluster.registry :as registry]
             [seon.ai :as ai]
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
@@ -974,6 +975,60 @@
           (finally
             (.release release-provider)
             (disarm-all! routing)))))))
+
+(deftest ^{:seon.test/long "Two arms plus one blocked turn prelude, as the disarm backstop test above (7,898 ms measured there); the release's own declared join bound is 100 ms."
+           :seon.test/long-ms 15000}
+  release-joins-every-owned-graph-before-it-closes-the-branch
+  (with-connection
+    (fn [connection _ctx]
+      (let [parent (test-support/execution-handle connection)
+            attempt (agent/acquire-context!
+                     parent nil {:seon.agent/isolate? true
+                                 :seon.cluster.registry/from (db/commit-id @connection)})
+            child (:seon.db/connection attempt)
+            routing (armory child)
+            entered (CountDownLatch. 1)
+            release-provider (java.util.concurrent.Semaphore. 0)
+            arm #(agent/arm! {:seon.turn.loop/cluster
+                              (handle child (test-support/fork-cluster-ctx child "release-join")
+                                      "release-join")
+                              :seon.agent/id % :seon.agent/routing routing})]
+        (test-support/transacted!
+         child (-> (created-agent-tx child "release-join" "stuck")
+                   (into (created-agent-tx child "release-join" "idle"))
+                   (conj (provider-backstop-config "release-join" 100))))
+        (try
+          (with-redefs [prompt/prompt (fn [_database _request]
+                                        (.countDown entered)
+                                        (.acquireUninterruptibly release-provider)
+                                        {:seon.error/message "The prelude stand-in released."})]
+            (let [_ (arm "idle")
+                  stuck (arm "stuck")]
+              (await-idle! (:seon.flow/started stuck))
+              (outside-trigger! child "stuck" "release-join-message" "block")
+              (async/offer! (:seon.cluster.wake/channel stuck) ::wake)
+              (test-support/await-event! entered ::stuck-prelude-entered)
+              (let [refused (test-support/refusal-data #(agent/release-context! attempt))]
+                (is (some? refused) "a graph that does not exit refuses the release")
+                (is (nil? (agent/armed routing "idle")) "every other owned graph was still joined")
+                (is (some? (agent/armed routing "stuck")) "the refusing graph keeps its routing")
+                (is (string? (:seon.agent/id (db/pull @child [:seon.agent/id] [:seon.agent/id "stuck"])))
+                    "the branch connection stays open for diagnosis")
+                (is (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt)))
+                (is (= :seon.agent/routing
+                       (:seon.error/expected (test-support/refusal-data #(arm "idle"))))
+                    "a releasing attempt arms no new graph"))
+              (.release release-provider 1000)
+              (is (.awaitTermination ^java.util.concurrent.ExecutorService (:seon.flow/executor stuck)
+                                     5000 java.util.concurrent.TimeUnit/MILLISECONDS))
+              (is (nil? (agent/release-context! attempt)) "a later release finishes")
+              (is (nil? (agent/armed routing "stuck")))
+              (is (not (contains? (registry/roster (:seon.store/store attempt))
+                                  (:seon.agent/branch attempt))))))
+          (finally
+            (.release release-provider 1000)
+            (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
+              (agent/release-context! attempt))))))))
 
 (deftest turn-start-has-the-same-declared-loud-completion-backstop
   (with-connection
