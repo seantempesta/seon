@@ -151,6 +151,24 @@ explode and the metadata larger than the actual function… tasks and references
 | 7.9 | **Ingestion:** the analyzer stores `:seon/tasks` and `:seon/must-read`/`:seon/see-also` references as symbol/keyword edges (today it drops them); task EDN reconciles by id into the same task schema | O | open |
 | 7.10 | **Context:** `(task :id)` shows the entity with its subjects and proofs; a function's context lists the open tasks that reference it, so work on one function surfaces its other known problems | O | proposed |
 
+## 8. Errors reach whoever is working on them (proposed 2026-09-24, awaiting the owner's go)
+
+Today (after lane fix-fault-visibility, `e868e5ec5`): an agent's own failing evaluation returns its error as the result;
+everything else reaches an MCP caller as `:seon.dev.mcp/new-faults` — open faults newer than that MCP **session's** cursor.
+A per-session time cursor shows one lane another lane's faults and lets whichever session calls first consume them.
+Proposed: route by attribution, derived by a query at the moment of reading, with no cursor or mailbox.
+
+| # | Requirement | Status |
+|---|---|---|
+| 8.1 | An agent's own failing evaluation returns its error as that evaluation's result (unchanged) | met |
+| 8.2 | An attempt sees the open faults that occurred **on its branch**, or in **the functions its task is about or its diff changed**, on each evaluation response — filtered to occurrences after its previous evaluation's stored read basis (no cursor to consume) | proposed |
+| 8.3 | A namespace agent sees open faults in the namespaces it stewards, through the existing wake route | exists (steward wake); keep |
+| 8.4 | Root (the orchestrator in development) sees faults no attempt or steward owns, plus the open-fault summary in status, and can block on `bin/seon faults --wait` to be woken | status met (`de13aa02c`); `--wait` proposed |
+| 8.5 | Outside lanes are attempts: each works on its own named branch, and its task's subjects are the files it owns, so it sees its own faults and faults in code it touches | proposed |
+| 8.6 | GAP: fault occurrences do not record their branch or attempt (they carry agent, turn, process, proc-fn); custody at record time knows the branch — store it | open |
+| 8.7 | GAP: errors from MCP JVM-mode probes are recorded into default as cluster faults with no attribution (5 of 16 signatures); they return to the caller instead | open |
+| 8.8 | The per-session cursor (`e868e5ec5`) is replaced by the 8.2 query: one mechanism | proposed |
+
 ## 6. Platform gaps the runs exposed (each is itself a task)
 
 - Two definition authorities: REPL forms are recognized by a hand matcher (`src/seon/sci/reader.cljc:245,323`) that sees only a top-level `clojure.core/defn`, so `(do (defn …))`, `(let [..] (defn …))`, `(def f (fn …))` and defn-expanding macros bypass the entry gate and arming. Owner-directed fix: observe what an evaluation defined (evaluate in a `sci/fork`, diff namespace maps, gate/arm the created Vars from their metadata, adopt or discard the fork); clj-kondo stays the one analyzer for rows and edges. Limit: a call inside the defining form runs before the check.
