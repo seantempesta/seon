@@ -10,7 +10,7 @@ updated: 2026-09-24
 
 - Publication design: three priced options DONE (b8fae5bf8, publication-under-concurrent-lanes-2026-09-24.md), awaiting owner choice: (1) root-only checkpoints, hook lint-only, 0–15 lines, 2–4 h; (2) content-derived reconciliation, 60–100 lines, 12–24 h; (3, recommended) named lane branches → root-accepted merge → fail-closed convergence, the CLAUDE.md/D1 model, 250–450 lines, 40–72 h, with (1) as its interim.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
-- fix-analysis-key-omits-analyzer (cluster.clj, fn.clj): derived analysis rows are keyed without the analyzer program, so a changed indexer leaves unchanged files stale (11 rows on default after 55af9e04b).
+- fix-analysis-key-omits-analyzer: root ruled option A (8e49a8607 landing): a seal fact :seon.source/analyzer-digest over the stored definition digests of analyze-rows's reach (338 declarations, ~20 ms); mismatch → full reanalysis once. Analysis runs before reload, and stored :seon.program/analyzed-source-digest is only the file text's SHA-256. Known gap: a first-party macro changing macro-ness does not reanalyse other files' callers.
 - fix-agent-custody-label (agent.clj): class 2 below.
 
 Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
