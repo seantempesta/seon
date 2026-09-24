@@ -159,7 +159,7 @@ explode and the metadata larger than the actual function… tasks and references
 | 8.1 | An agent's own failing evaluation returns its error as that evaluation's result | met |
 | 8.2 | Every error occurrence is recorded in the database of the branch where it happened (the custody at record time); an agent's view of errors is a query of its own branch — no routing, no cursor, no mailbox | lane launched |
 | 8.3 | Each evaluation response carries the open errors on its branch that occurred after the previous evaluation's stored basis | lane launched |
-| 8.4 | Core faults (not agent mistakes) are also recorded on the cluster branch with their origin branch, so status, root, stewards and `faults --wait` see platform bugs hit inside attempts, and unlinking a branch never drops an open core fault | lane launched |
+| 8.4 | Core faults (not agent mistakes) are also recorded on the cluster branch with their origin branch, so status, root, stewards and `faults --wait` see platform bugs hit inside attempts, and unlinking a branch never drops an open core fault. Owner 2026-09-24: a core fault does NOT wake root's paid LLM turn until root's context can act on one (a config dial, default off); it stays recorded and visible in status, the MCP error window and the faults feed | lane launched |
 | 8.5 | Errors are data, never program: they never merge; an agent's mistakes go with its branch | met by the partition |
 | 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults | lane launched |
 | 8.7 | The per-session `:seon.dev.mcp/new-faults` cursor (`e868e5ec5`) is deleted, replaced by 8.3 | lane launched |
