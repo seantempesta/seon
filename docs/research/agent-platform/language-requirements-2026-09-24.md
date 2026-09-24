@@ -57,6 +57,17 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 3.7 | After every turn the task's own requirements run on its branch; red → re-prompt with the refusal as data; budget-bounded; escape hatch to root is itself a task | O, R | proven in toy |
 | 3.8 | Requirement test digests are frozen once reviewed; only root revises them, with the reason recorded | O, A | not yet |
 
+## 3b. The stored model under the authoring surface (Astra synthesis, `task-model-synthesis-2026-09-24.md`)
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 3b.1 | Authored surface stays minimal; the writer PRODUCES producer, created-by, identity and provenance facts | O, A | open: Astra requires title/producer/created-by at authoring; recommend produced |
+| 3b.2 | Each done-when form is compiled into a task-local test body run through the existing `seon.test/run` on the attempt branch; it never enters the mergeable program or counts as coverage | A | open |
+| 3b.3 | Decisions are components: accept / revise / reject / obsolete / supersede, with by, reason, the inputs reviewed and the exact deliverables selected (root's cherry-pick) | A | open |
+| 3b.4 | Attempts carry base commit, task digest, test-run identities, deliveries (commit + digest) and an actual exit; three agents on one task = three attempts; resume keeps the attempt | A | attempts as values only |
+| 3b.5 | "Same cause" is a relation distinct from "must precede" (`needs`) | A | open |
+| 3b.6 | Task identity type: qualified keyword (authored, readable) vs string from seon.id (Astra) — owner decision | O, A | open |
+
 ## 4. The writer refuses badly written tasks (constraints, not advice)
 
 | # | Requirement | Source | v0 |
