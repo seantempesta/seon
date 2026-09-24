@@ -1,6 +1,6 @@
 ---
 type: landing
-status: partial
+status: landed-unverified-in-part
 lane: fix-unstarted-members-unknown
 created: 2026-09-24
 ---
@@ -8,88 +8,95 @@ created: 2026-09-24
 # Lane fix-unstarted-members-unknown — landing (2026-09-24)
 
 Census: docs/research/agent-platform/red-baseline-census-2026-09-24.md (Class 1, the 34 deleted-test reds).
+The root ruled on the design for items 1–2 and gave this lane seon.test.run.edn and runner.clj.
 
-## Broken or not done first
+## Broken or unproven first
 
-- **Items 1 and 2 are not implemented: they need files outside this lane's row.** Stopped per the
-  fix-lane preamble. The design below needs one schema attribute in
-  `resources/seon/schemas/seon.test.run.edn` (free in the ledger, not in this row). The census's
-  shortcut does not work as written; see "Why the census fix (a) fails".
-- Default's health is `:faulted`. One open fault is `seon.problems/failed-tests` NPE at
-  `clojure.lang.Numbers ops` (20:20:24Z, 1 occurrence): `pos?` on a missing count. It predates this
-  commit, and I did not reproduce it on the current Var. It is a candidate for a result that has no
-  counts and no `:seon.error/at`. Not investigated further.
+- **`seon.test.one-request-test/an-unexited-member-is-never-started-again-until-its-exit-is-recorded`
+  was red in the one namespace run after cb632bd81** (run 6143190cb108).
+  - What failed: the second request executed the member instead of holding it as pending.
+  - That member has `completed-tx` without `terminated-tx`. My `admit-run` change touches only the
+    branch for members with no `completed-tx`, and on reading I found no path from this change to that
+    failure.
+  - It has no earlier recorded result on default, so I cannot tell whether the red predates the change.
+  - The owner stopped test runs to ease load. Root, please run it at the parent (2a543c27a/1e9f1ec9d)
+    and at cb632bd81.
+- Other reds in that namespace run are foreign:
+  - "Worker-global state changed … seon.cluster.prompt/prompt, seon.sci.eval/evaluate": another lane's
+    instrumentation drift.
+  - "Cannot interpret seon.sci.eval-test/deadlined-in: … clojure.core/future-call": census class 2b,
+    lane fix-sci-unresolved-host-names.
+- **I broke the one-JVM rule by mistake.** A retry loop ran `clojure -M -e nil` five times, which
+  started five short-lived JVMs. None is left running.
+- Defect seen, not investigated: in an earlier draft of the regression, a member stopped unfinished
+  never had its `terminated-tx` recorded. The draft waited 20 s after its 15 s SCI bound. The watcher's
+  `settle!` may be refused as an outcome change; the evidence was lost when the fixture branch was
+  unlinked. The final regression does not depend on it.
+- Default's `problems` is slower under this load: 600 ms now, against 225 ms before. The two readings
+  were taken under different load: default was at about 900 % CPU from other lanes. The only
+  per-call cost I added is one pull per candidate run in `admit-run`, plus one attribute in the
+  `latest-results` run pull.
+- The final regression took 111 s under load, over its declared 60 s. It still reported
+  `passed? true`, so the bound check covers only the member body, not the whole request.
+- Publication raced other lanes throughout. One foreign blocker held it for several minutes:
+  analysis errors on `seon.flow/submit!!` in turn.clj and env_test.clj. One test request failed with
+  "Node not found in storage" (address 6ab5924b…). It was transient: the next read and request
+  succeeded.
 
-## Landed: item 3 (commit 2a543c27a)
+## Landed
 
-- `problems/failed-tests` (problems.clj:385) now selects `[_ :seon.test/sym ?symbol]
-  [_ :seon.test.member/symbol ?symbol]`. Only current test rows at the read's database count.
-- Regression `seon.test.interrupted-request-test/a-deleted-tests-red-member-is-history-not-a-failed-test`:
-  - It admits one run with a current red (`red`) and a symbol that has no test row.
-  - It asserts four things: the symbol has no row; its member evidence is still readable through
-    `latest-results`; `red` is listed; the deleted symbol is not.
-  - Under the old query the deleted symbol is listed.
-  - `bin/test-check default --test … --include-long`: run 68d564aa7539, pass 5, fail 0, 4,712 ms.
-- Default's numbers (read-only, `seon.problems/problems`, JVM eval, pid 99265). They move as other
-  lanes run tests.
+1. **Item 3, 2a543c27a.** `problems/failed-tests` (problems.clj:385) counts only symbols that are
+   current `:seon.test/sym` rows.
+   - Regression: `seon.test.interrupted-request-test/a-deleted-tests-red-member-is-history-not-a-failed-test`.
+2. **Items 1–2, cb632bd81.**
+   - `seon.test.run.edn` declares `:seon.test.run/stopped` as an enum of `:deadline`,
+     `:member-unfinished`, `:recording-refused` and `:platform-red`, and adds it to `:seon.test.run/run`.
+     It was published and adopted on default as a keyword attribute of cardinality one.
+   - `seon/test.clj` changes:
+     - Each place that sets `::stopped` in `run-batch` also names its `::stop-cause`.
+     - `release-not-started!` writes only `[:db/add run :seon.test.run/stopped cause]`. Unstarted
+       members keep no outcome, so each reads as the S0 unknown, never green, and pending next time.
+     - `admit-run`: an unstarted member of a stopped run no longer covers a later request.
+   - `runner.clj`: `latest-results` pulls `:seon.test.run/stopped`. The unknown's message reads
+     "Never started: request <id> stopped (<cause>) before this test." Nothing else changes.
+   - Regression: `seon.test.one-request-test/a-stopped-requests-unstarted-member-is-unknown-and-an-identical-request-reruns-it`.
+     - Three agent tests, `a-quick`, `b-runs-until-released` and `c-after`, run under a 10 s request
+       bound. B's own bound is 15 s, so the request stops on B unfinished.
+     - First request: C is pending with no captured result. C's latest result is the unknown, with no
+       counts. The run carries `:member-unfinished`, the message names it, and `verified?` is false.
+     - Second request, identical, after a marker lets B finish quickly: C is admitted and rerun, it is
+       not pending, and it passes.
 
-  | | failed-tests | from deleted symbols | unknown | `problems` time |
-  |---|---:|---:|---:|---:|
-  | before | 658 | 34 | 1 | 225 ms |
-  | after (Var adopted, docstring present) | 625–627 | 0 | 65 | 288–395 ms |
+## Evidence (default pid 99265, JVM eval, read-only)
 
-  - Counts after the fix: 1,437 member symbols, of which 1,378 are current test rows.
-  - The query costs 0.29 ms.
-  - The time difference comes from concurrent test runs, not from the query.
-  - Before the fix, 215 failed tests were "Not started" (Class 1).
-- Size: source +5/−2, test +42.
+| | failed-tests | "Not started" reds | unknown | from deleted symbols |
+|---|---:|---:|---:|---:|
+| before (lane start) | 658 | 215 | 1 | 34 |
+| after item 3 | 625–627 | — | 65 | 0 |
+| after cb632bd81 | 571 | 128 (old runs, until rerun) | 135 (all "Never started … (cause)") | 0 |
 
-## Items 1 and 2: probed design (not implemented)
+- Recorded stops since the change: `:deadline` 5, `:member-unfinished` 2, `:recording-refused` 1.
+- Live proof: the save gate's own request b56d5a17d8d2 stopped on `:deadline`. Its 48 unstarted
+  members read as `:seon.test/result-unknown` naming run b56d5a17d8d2, and `verified?` is false for them.
+- Test runs:
+  - `bin/test-check default --test seon.test.one-request-test/a-stopped-requests-… --include-long`:
+    run 8a5299f58fc1, 14 pass, 0 fail.
+  - `bin/test-check default --ns seon.test.interrupted-request-test --include-long`: run 3c242f023980,
+    37 pass, 0 fail, 4 executed.
+  - `--test …a-deleted-tests-red-member-is-history-not-a-failed-test`: run 68d564aa7539, 5 pass.
 
-**Why the census fix (a) fails.** "Write not-started members with began? false and no counts" breaks
-in three places:
-- `prepare-failures!` (runner.clj:1313–1316) computes `(pos? (+ fail error))` over nil and throws NPE.
-- The outcome map would store nil counts.
-- `execution-members` (runner.clj:1100–1106) refuses a member that has `completed-tx` without three
-  counts. That refusal takes down the whole run's read.
+## Still to run (root, in a quiet window)
 
-Writing 0/0/0 counts avoids those failures, but the member then reads as a zero-count result. It is
-neither red nor unknown, so it is invisible, which breaks "must stay visible".
+```
+bin/test-check default --test seon.test.one-request-test/an-unexited-member-is-never-started-again-until-its-exit-is-recorded --include-long
+bin/test-check default --ns seon.test.one-request-test --include-long
+bin/test-check default --ns seon.test-test
+bin/test-check default --ns seon.test.accretion-test
+```
 
-**Smallest correct composition (≈25 lines, test.clj plus one schema attribute):**
-1. Write nothing onto the unstarted members. A member with no `completed-tx` is already
-   `:seon.test/result-unknown` (runner.clj:1595; S0, e33009381). It is not green: `green-members`
-   (test.clj:556) requires `began? true`. It is therefore pending and runs again next time.
-   Delete the fake 0/0/1 outcome in `release-not-started!` (test.clj:1820–1835).
-2. Replace that write with one fact on the run: `:seon.test.run/stopped`. It is an enum of the causes
-   the request already knows where `::stopped` is set (test.clj:1781–1803):
-   - `:deadline`, when `(remaining-ms)` ≤ 0
-   - `:member-unfinished`, when `terminated?` is false
-   - `:recording-refused`, when the commit is refused
-   - `:platform-red`
+## Size
 
-   A throw is already recorded by `record-interrupted!` with its cause chain. Caller cancellation and
-   shutdown arrive as that throw. `run-batch` returns the cause beside `::stopped`, so nothing parses
-   text.
-3. `admit-run`'s coverage rule (test.clj:1193–1199) says "an admitted, unstarted member covers an
-   identical concurrent request". Add one clause: a run carrying `:seon.test.run/stopped` is not
-   concurrent, so its open members do not cover. This is the only reason the old code wrote fake
-   completions ("never left to cover later requests").
-4. Optional, in runner.clj: the unknown's message names the run's stop cause. It stays readable
-   without this, through `:seon.test/run`.
-
-**Consequence to review:** `select`'s `completed` (test.clj:686) requires every member to be complete.
-A stopped run then stops serving as the comparison basis. Today its fake completions make it the
-basis. I believe the new behaviour is the correct one, but it needs review.
-
-**Files needed:** `resources/seon/schemas/seon.test.run.edn` (the attribute and its `:run` map
-entry); runner.clj only for step 4. Regression (planned): a request whose deadline fires after one
-member. The next members read as `result-unknown`, the run carries `:deadline`, `verified?` is false,
-and an identical next request reserves them again instead of covering.
-
-## Verification limits
-
-- Only item 3 was run. Items 1 and 2 were read at `file:line` and not executed.
-- Publication raced other lanes twice ("source head changed", "source changed during development
-  adoption", 27.5 s). The test row published on the next hook.
-- No reset needed.
+Source and schema: +34 / −31 (test.clj +18/−27, runner +5/−2, problems +5/−2, schema +2).
+Tests: +93.
+Commits: 2a543c27a, 1e9f1ec9d (first note), cb632bd81, and this note.
+No branches or background shells were left. No reset is needed.
