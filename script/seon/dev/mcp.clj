@@ -425,6 +425,15 @@
                enrich-collection-tail-elisions [])
     event))
 
+(defn- printed-value-event
+  ;; The value crosses as its printed EDN so keywords and symbols read as
+  ;; themselves; JSON would turn both into strings.
+  [event]
+  (if (and (= :ret (:tag event)) (map? (:val event)))
+    (update-in event [:val :seon.dev.mcp/value]
+               #(binding [*print-length* nil *print-level* nil] (pr-str %)))
+    event))
+
 (defn- one-shot-events!
   [root cluster remote-form timeout-ms]
   (let [session-id (str "value-" (random-uuid))
@@ -469,7 +478,9 @@
     mode))
 
 (defn- jvm-evaluation-form
-  [form namespace-symbol read-only?]
+  ;; The caller's SOURCE crosses, read in the target namespace: re-printing the
+  ;; read form dropped reader metadata (`^{:malli/schema ...}` on a defn name).
+  [source namespace-symbol read-only?]
   (pr-str
    (list 'do
          (list (list 'requiring-resolve
@@ -478,7 +489,8 @@
                {:seon.dev.mcp/read-only? read-only?})
          (list 'in-ns (list 'quote namespace-symbol))
          (list 'clojure.core/refer (list 'quote 'clojure.core))
-         (list 'clojure.core/eval (list 'quote form)))))
+         (list 'clojure.core/eval
+               (list 'clojure.core/read-string {:read-cond :allow} source)))))
 
 (defn- sci-evaluation-form
   {:malli/schema [:function
@@ -528,9 +540,9 @@
             (:seon.config/on-core-error cluster#)}))))))))
 
 (defn- remote-evaluation-form
-  [{:seon.dev.mcp/keys [form source read-only? branch]} mode cluster namespace-symbol]
+  [{:seon.dev.mcp/keys [source read-only? branch]} mode cluster namespace-symbol]
   (case mode
-    "jvm" (jvm-evaluation-form form namespace-symbol (true? read-only?))
+    "jvm" (jvm-evaluation-form source namespace-symbol (true? read-only?))
     "sci" (sci-evaluation-form source cluster namespace-symbol (true? read-only?) branch)))
 
 (defn- branch-name!
@@ -593,9 +605,11 @@
                                      (branch-form cluster action (when (not= "list" action) (branch-name! branch)))
                                      (min 120000 (max 1 (or timeout_ms default-timeout-ms))))
             terminal (some #(when (= :ret (:tag %)) %) events)
-            response (assoc request :seon.dev.mcp/events events)]
-        (if (or (:exception terminal) (get-in terminal [:val :seon.dev.mcp/value :seon.error/at]))
-          (mcp-error (assoc response :seon.dev.mcp/failure :branch))
+            value (try (edn/read-string (:val terminal)) (catch Throwable _ nil))
+            response (assoc request :seon.dev.mcp/value (:val terminal))]
+        (if (or (:exception terminal) (not (map? value)) (:seon.error/at value))
+          (mcp-error (cond-> (assoc response :seon.dev.mcp/failure :branch)
+                       (:exception terminal) (assoc :seon.dev.mcp/events (mapv #(dissoc % :form) events))))
           (mcp-success response)))
       (catch Throwable throwable
         (mcp-error (merge request {:seon.dev.mcp/failure :branch :seon.dev.mcp/error (ex-message throwable)
@@ -652,6 +666,10 @@
                                (-> event
                                    decoded-projection-event
                                    enrich-projection-elisions
+                                   printed-value-event
+                                   ;; SCI's namespace is the response's; the
+                                   ;; host prepl *ns* would mislabel it.
+                                   (cond-> (= "sci" mode) (dissoc :ns))
                                    (dissoc :form)))
                              (collect-prepl-response! session timeout-ms))
                 terminal (some #(when (= :ret (:tag %)) %) events)
