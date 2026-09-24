@@ -1,6 +1,6 @@
 ---
 type: landing
-status: stopped-for-ruling
+status: partly-landed
 created: 2026-09-24
 tags: [agent-platform, sci, contracts, entry]
 ---
@@ -8,7 +8,71 @@ tags: [agent-platform, sci, contracts, entry]
 # Lane fix-entry-eval-2: printed output, nested definitions, refers (2026-09-24)
 
 Owned: `src/seon/sci/eval.clj`, `test/seon/sci/entry_gate_test.clj`, `test/seon/sci/eval_test.clj`, this note.
-**No source change landed. No commit.** Default was not touched (branch `fix-entry-eval-2` created and retired).
+Default was not touched. Hook publication is off, so default still runs archive `ce7384682`.
+**RESET NEEDED** (root's call) before the live JVM shows commits `fbbc9c596` or `8a531008a`.
+
+## After the root ruling (option A, output bound, refers): what landed
+
+- **`fbbc9c596`: printed output is streamed under `max-bytes`.** This is the patch below, applied
+  as ruled, with its regression.
+- **`8a531008a`: the gate and arming now apply to every definition** (option A). The gate reads
+  `definition-rows`: the indexer's `seon.fn/source-rows` analysis, matched to the Vars SCI
+  actually created or replaced. It no longer reads the reader's top-level event.
+  - It refuses an uncontracted `(do (defn …))`, `(let … (defn …))` or `(def f (fn …))`.
+  - Rows the analysis marks `:seon.fn/macro?` or `:seon.fn/host-bound?` (the `defrecord`/`deftype`
+    factories `->R`/`map->R`) are not gated. `(defrecord Pair [a b])` is still admitted.
+  - A refusal puts back each changed Var's prior root and metadata on the same Var object and
+    removes Vars the form created. Callers keep their link.
+  - Every contracted definition is armed; before, only the first was.
+  - `source-rows` now runs once per evaluation instead of once per changed Var.
+  - **Limits:** a call inside the defining form runs before the check. The refused form's other
+    side effects (requires, atoms, IO) remain. Without `:seon.db/db` in the request, no rows exist,
+    so nothing is gated.
+  - Net source lines: eval.clj +80 / −27; entry_gate_test.clj +28 / −2.
+- **The refers slice is NOT committed. It breaks the shared MCP entrance. Stopped.** Proven on a
+  HEAD+diff archive root: after switching the five `:refer`s to `:as operator.runtime`,
+  MCP `eval_clj` in sci mode failed even for `(+ 1 2)` (NPE), and the `branch` tool failed too.
+  Three consumers outside my ownership read these Vars *through the refer*:
+  - `script/seon/dev/mcp.clj:512` and `:569`: `(ns-resolve 'seon.cluster (symbol "running-instances"))`;
+  - `test/seon/custody_stability_test.clj:79-81`, `:207-213`: asserts
+    `(ns-resolve consumer 'running-instances)`. Three new failures at `:210`.
+  - `src/seon/test/runner.clj:627` `(find-var 'seon.cluster/running-instances)`. This one is
+    already nil today (`find-var` ignores refers), so its live-cluster drift snapshot is always
+    empty. Filed as `docs/seon/issues/runner-live-cluster-snapshot-reads-a-referred-var-with-find-var.md`.
+
+  The slice is kept as `tmp/fix-entry-2-refers.patch` (the five files plus the `ai_test` `defspec` →
+  `deftest` + `assert-check!` rewrite). The eval.clj hunk that installs refers for every row is in
+  `tmp/fix-entry-2-refers-eval-hunk.txt`.
+  With all of it applied, the scratch root booted: acquisition installed every row's refers with no
+  refusal, and all edited files load. The rewritten property passed (run `7afa181cf785`, 1/0).
+  To land it, grant `script/seon/dev/mcp.clj`, `test/seon/custody_stability_test.clj` and
+  `src/seon/test/runner.clj:627`, and switch each to `'seon.operator.runtime/running-instances`.
+
+### Numbers (same machine, scratch roots from `c327d05b5`, warm, 3 runs after 3 warm-ups; `:seon.eval/duration-ms` / allocated)
+
+| probe | parent `c327d05b5` | with `8a531008a` |
+|---|---|---|
+| `(+ 1 2)` | 1–3 ms / 645,560 B | 1–4 ms / 691,480 B (+7%: the before-namespace and metadata capture) |
+| one contracted `defn` | 81–126 ms / 22,676,024 B | 52–168 ms / 22,607,864 B |
+| `(do defn defn)`, both contracted | 190–279 ms / 25,231,304 B | 78–94 ms / 37,346,184 B (+48% B: the second definition is now armed, which was ruled; −65% time from one `source-rows` pass) |
+| `(do (defn bare …))` uncontracted | admitted (bypass) | refused, 21–34 ms / 10,202,600 B |
+
+The allocation growth for two definitions is the ruled work of arming the second one. Wall time fell.
+
+### Tests (HEAD `c327d05b5`+diff archive roots; parent = the same HEAD without the diff)
+
+- `seon.sci.entry-gate-test`: run `e0bab8ac7b56`, 5 executed, 33 pass / 0 fail, 9,013 ms.
+  With the refers slice as well: run `9124e79594d8`, 33 / 0.
+- `seon.sci.eval-test`, `seon.custody-stability-test`, `seon.cluster.mcp-test`: **no red name that is
+  new against the parent.** The parent's `eval-test` stopped after 32 members. Three members it never
+  ran are red with the diff: `both-entrances…` (:2313), `compiled-runtime-metadata…` (:608, instrument
+  arglists nil) and `database-provenance…` (timeout under load). All three were red on the previous
+  lane's parent (its landing note and `tmp/fix-entry-parent-reds.txt`).
+- `seon.cluster.reply-test` (with the refers slice): 18 executed, 124 / 0.
+- Scratch boots took 2:44–4:50 (existing `from-zero-boot-takes-minutes`, over ten seconds).
+
+## The first pass (before the ruling)
+
 
 ## Broken or open first
 
