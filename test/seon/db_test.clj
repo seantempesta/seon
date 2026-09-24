@@ -2455,3 +2455,28 @@
           (is (not= before after) "a changed building declaration changes the builder")
           (is (not (identical? projection (#'db/content-projection after database)))
               "and the equal declaration content derives anew"))))))
+
+(deftest a-retained-branch-reads-with-the-jvm-builder-not-its-recorded-program
+  ;; A branch's adoption record names its historical program; the loaded code
+  ;; builds the projection, so a record naming another builder keys nothing.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            projection (db/carried-projection database)
+            row [:seon.fn/sym 'seon.schema/shape-row-in]
+            original (:seon.program/definition-digest (d/pull database [:seon.program/definition-digest] row))
+            record (or (:e (first (d/datoms database :aevt :seon.source/commit-id)))
+                       (db/q '[:find ?e . :where [?e :seon.cluster/name]] database))
+            _ (test-support/transacted!
+               connection {:tx-data [{:seon.fn/sym 'seon.schema/shape-row-in
+                                      :seon.program/definition-digest (apply str (repeat 64 "a"))}]})
+            other-program (db/commit-id (db/db connection))
+            _ (test-support/transacted!
+               connection {:tx-data [{:seon.fn/sym 'seon.schema/shape-row-in :seon.program/definition-digest original}
+                                     {:db/id record :seon.source/commit-id other-program}]})
+            retained (db/db connection)]
+        (is (not= (#'db/builder-digest database)
+                  (#'db/builder-digest (d/commit-as-db retained other-program {:secondary-indices? false})))
+            "the retained branch's record names another builder")
+        (is (identical? projection (db/carried-projection retained))
+            "its projection is the loaded builder's, not one keyed by its recorded program")))))

@@ -1427,24 +1427,50 @@
       (id/digest 64 [(into (sorted-map) (filter val) reached)]))))
 
 (defn- loaded-builder
-  "The builder digest of the program this JVM loaded at `commit`, as `database`
-  records it, memoized by that commit; with no commit, of `database`'s own rows.
+  "The builder digest of the program this JVM loaded, memoized by its commit.
 
-  A projection derives from the loaded builder's code as well as from the
-  declaration rows. The adoption record's `:seon.source/commit-id` moves after
-  load and arming (`seon.sci.eval/loaded-commit-id`); a value without one is its
-  own commit."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :uuid]] :seon.source/digest]}
-  [database commit]
-  (if-not commit
-    (builder-digest database)
-    @(cache/lookup-or-miss
-      projection-cache [::builder commit]
-      (fn [_] (delay (builder-digest
-                      (or (d/commit-as-db database commit {:secondary-indices? false})
-                          (throw (ex-info "The JVM's recorded source commit is unavailable."
-                                          {:seon.error/expected :seon.source/commit-id
-                                           :seon.error/offending commit})))))))))
+  The authority is the process, never the value read: `loaded` is
+  `seon.sci.eval/loaded-identity`, which development adoption names by commit
+  after its record commits; before any adoption it is empty and the JVM runs
+  its boot commit, which each running instance holds. A value's own adoption
+  record names its branch's historical program. While an adoption loads (an
+  unknown identity), the loaded code is mixed: an unchanged builder keeps its
+  digest, a changed one keys a projection to that adoption alone, so no mixed
+  construction is ever reused. Boot commits that disagree refuse by name. A JVM
+  with no running instance keys by the value's own commit or rows."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map [:maybe [:sequential :map]]]
+                  :seon.source/digest]}
+  [database loaded instances]
+  (let [memo (fn [commit]
+               @(cache/lookup-or-miss
+                 projection-cache [::builder commit]
+                 (fn [_] (delay (builder-digest
+                                 (or (d/commit-as-db database commit {:secondary-indices? false})
+                                     (throw (ex-info "The JVM's loaded source commit is unavailable."
+                                                     {:seon.error/expected :seon.source/commit-id
+                                                      :seon.error/offending commit}))))))))
+        boots (into #{} (keep :seon.source/commit-id) instances)]
+    (cond
+      (:seon.error/at loaded)
+      (let [target (memo (:seon.source/commit-id loaded))
+            ;; Each adopting cluster's record still names the program before this adoption.
+            priors (into #{} (keep #(:seon.source/commit-id
+                                     (d/pull (d/db (:seon.boot/cluster-connection %)) [:seon.source/commit-id]
+                                             [:seon.cluster/name (get-in % [:seon.boot/advertisement
+                                                                            :seon.boot/cluster-name])])))
+                         instances)]
+        (if (and (seq priors) (every? #(= target (memo %)) priors))
+          target
+          (id/digest 64 [::mixed-program (str (:seon.error/at loaded)) (str (:seon.source/commit-id loaded))])))
+
+      (:seon.source/commit-id loaded) (memo (:seon.source/commit-id loaded))
+      (= 1 (count boots)) (memo (first boots))
+      (seq boots) (throw (ex-info "The running instances booted different programs; the loaded projection builder is ambiguous."
+                                  {:seon.error/expected :seon.source/commit-id
+                                   :seon.error/offending boots}))
+      :else (if-let [commit (:datahike.value/commit-id (datahike.db/committed-value-identity database))]
+              (memo commit)
+              (builder-digest database)))))
 
 (defn carried-projection
   "Derive this database value's projection, memoized by what it reads.
@@ -1468,13 +1494,16 @@
   (let [as-of? (instance? AsOfDB database)
         source (if as-of? database (schema-database database))
         origin (if as-of? (schema-database database) source)
-        ;; The loaded builder (`loaded-builder`), read here on a hit: one more
-        ;; armed call per read doubled the hit cost.
-        builder (delay (let [commit (or (when (get (dbi/-schema origin) :seon.source/commit-id)
-                                          (:v (first (d/datoms origin :aevt :seon.source/commit-id))))
-                                        (:datahike.value/commit-id (datahike.db/committed-value-identity origin)))]
+        ;; The JVM's loaded builder (`loaded-builder`); a converged identity's
+        ;; memo is read here, since one more armed call per read doubled the hit cost.
+        builder (delay (let [loaded (or (some-> (find-ns 'seon.sci.eval) (ns-resolve 'loaded-identity) deref deref) {})
+                             instances (some-> (find-ns 'seon.operator.runtime) (ns-resolve 'running-instances)
+                                               deref deref vals)
+                             boots (into #{} (keep :seon.source/commit-id) instances)
+                             commit (when-not (:seon.error/at loaded)
+                                      (or (:seon.source/commit-id loaded) (when (= 1 (count boots)) (first boots))))]
                          (or (some-> (when commit (cache/lookup projection-cache [::builder commit])) deref)
-                             (loaded-builder origin commit))))]
+                             (loaded-builder origin loaded instances))))]
     (cond
       (not (declares-program? source))
       (construction-projection database)
