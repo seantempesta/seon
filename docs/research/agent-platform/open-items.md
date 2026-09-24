@@ -16,16 +16,13 @@ a restart loads code from the checkout but schema and test rows install only thr
 
 **Running lanes:** none. Default: pid restarted ~22:05Z on datahike 4157916b, ready 12.3 s, no-provider on.
 
-**Waiting on the owner:**
-1. Publication option (b8fae5bf8): recommended 3 (lane branches → root-accepted merge → fail-closed convergence),
-   with 1 (root-only checkpoints) as the interim — the interim is effectively in force now (hook paused).
-2. Authorization for a full reanalysis over 10 s (16 s after 36abe8bef) until analysis is made cheap.
-3. S3b follow-up: should an agent SCI evaluation hold the adoption read lock (adoption waits; refuses after 5 s)
-   or only check validity at entry (cannot stop an adoption that starts mid-evaluation)? Root leans: adoption waits
-   for idle boundaries ("no reload may run under an evaluation").
-4. Test-declared expected faults: the proposed marker goes into a hand list at program.cljc:209 — a smell; needs a
-   derived design before the test-branch fault marker lands.
-5. Inherited agents inside test members: run them, or only the agents a member's seeds create?
+**Owner rulings 2026-09-24 (evening):**
+1. Publication: OPTION 3 — named lane branches → root-accepted merge → fail-closed convergence (b8fae5bf8); option 1
+   (root-only checkpoints, hook paused) is the interim until it lands. Slice plan: lane plan-publication-option3-astra.
+2. Full reanalysis over 10 s (16 s) AUTHORIZED until analysis is made cheap (issue a-full-reanalysis-publication-takes-twenty-five-seconds.md).
+3. SCI evaluation vs adoption: explained in chat; ruling pending.
+4. Test-declared expected faults: YES to a derived design (no hand list at program.cljc:209) — research lane expected-faults-design.
+5. Inherited agents inside test members: explained in chat; ruling pending.
 
 **Harness (all approved):** S12, S0, S1, S3a–S3c landed; next S2/S2a (clean facts/branch) → S2b (seeds; three seed
 forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by namespace groups).
