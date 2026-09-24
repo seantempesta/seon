@@ -782,6 +782,12 @@
     [?argument :seon.fn.argument/schema ?shape]])
 
 (defn- argument-validators
+  "Each fixed arity's compiled argument validators, in argument order, or
+  the database owner's read error when the argument shapes cannot be read."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot :seon.fn/sym]
+    [:or [:map-of :seon.fn.arity/order :seon.call-preparation/argument-validators]
+     :seon.db/error-result]]}
   [database _current sym]
   (let [rows (db/q database argument-shape-query sym)]
     (or (refused-read [rows])
