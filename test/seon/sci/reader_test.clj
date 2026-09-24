@@ -636,6 +636,42 @@
               :seon.ns.refer/target-name 'difference}}
            (:seon.ns/refers (first read-events))))))
 
+(deftest namespace-clauses-follow-clojures-own-ns-grammar
+  ;; `clojure.core.specs.alpha/ns-form` owns the clause grammar; the hand
+  ;; parser read `[clojure [edn :as e] set]` as requires #{clojure}.
+  (let [[ns-event keyword-event syntax-event as-alias-event]
+        (events
+         (str "(ns prefixed (:require [clojure [edn :as e] "
+              "[set :refer [union] :rename {union u}]] "
+              "[a.b :as-alias ab] clojure.walk))\n"
+              "::e/k `u ::ab/k"))]
+    (is (= #{'clojure.edn 'clojure.set 'clojure.walk}
+           (:seon.ns/requires ns-event))
+        "prefix lists expand and :as-alias requires nothing")
+    (is (= #{{:seon.ns.alias/local 'e :seon.ns.alias/target-ns 'clojure.edn}
+             {:seon.ns.alias/local 'ab :seon.ns.alias/target-ns 'a.b}}
+           (:seon.ns/aliases ns-event)))
+    (is (= #{{:seon.ns.refer/local 'u
+              :seon.ns.refer/target-ns 'clojure.set
+              :seon.ns.refer/target-name 'union}}
+           (:seon.ns/refers ns-event)))
+    (is (= :clojure.edn/k (:seon.sci.reader/form keyword-event)))
+    (is (= 'clojure.set/union
+           (second (:seon.sci.reader/form syntax-event))))
+    (is (= :a.b/k (:seon.sci.reader/form as-alias-event))))
+  (testing "a standalone require reads prefix lists through the same grammar"
+    (is (= :clojure.edn/k
+           (:seon.sci.reader/form
+            (second (events "(require '[clojure [edn :as e]]) ::e/k"))))))
+  (testing "a nested prefix list is refused by Clojure, so no namespace is claimed"
+    (let [[ns-event declaration]
+          (events (str "(ns nested (:require [clojure [tools [reader :as r]]]))"
+                       " (defn y [])")
+                  {:seon.sci.reader/ns 'start})]
+      (is (not (contains? ns-event :seon.ns/name)))
+      (is (not (contains? ns-event :seon.ns/requires)))
+      (is (not (contains? declaration :seon.sci.reader/ns))))))
+
 (deftest standalone-require-advances-the-next-forms-reading-context
   (let [read-events
         (events

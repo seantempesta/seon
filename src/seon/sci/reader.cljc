@@ -4,6 +4,8 @@
   (:require [clojure.string :as str]
             #?(:clj [clojure.tools.reader.reader-types :as rt]
                :cljs [cljs.tools.reader.reader-types :as rt])
+            #?(:clj [clojure.spec.alpha :as s])
+            #?(:clj [clojure.core.specs.alpha])
             [sci.core :as sci]
             [seon.error.refusal :as error]))
 
@@ -71,11 +73,6 @@
         line-start (get starts (dec line) 0)]
     [line (inc (- offset line-start))]))
 
-(defn- symbol-name
-  [value]
-  (when (symbol? value)
-    value))
-
 (defn- qualified-symbol
   [namespace-name value]
   (when (symbol? value)
@@ -138,63 +135,69 @@
    :seon.ns.refer/target-name target-name})
 
 (defn- require-bindings
-  [require-spec publics]
-  (cond
-    (symbol? require-spec)
-    {:requires #{require-spec}}
+  "Bindings of one `[target options]` pair; `options` is conformed by
+  `:clojure.core.specs.alpha/libspec`, so `:refer` is `[:all :all]` or
+  `[:syms names]`."
+  [[target options] publics]
+  (let [alias (or (:as options) (:as-alias options))
+        [refer-kind referred] (:refer options)
+        renames (or (:rename options) {})
+        referred-names (case refer-kind
+                         :syms referred
+                         :all (get publics target #{})
+                         [])]
+    {:aliases
+     (cond-> #{}
+       alias (conj (alias-binding alias target)))
+     :refers
+     (into #{}
+           (map (fn [target-name]
+                  (refer-binding (get renames target-name target-name)
+                                 target
+                                 target-name)))
+           referred-names)
+     :requires
+     (cond-> #{}
+       (nil? (:as-alias options)) (conj target))
+     ::refer-all-targets
+     (cond-> #{}
+       (= :all refer-kind) (conj target))}))
 
-    (and (vector? require-spec)
-         (symbol? (first require-spec)))
-    (let [target (first require-spec)
-          options (try
-                    (apply hash-map (rest require-spec))
-                    (catch #?(:clj Throwable :cljs :default) _
-                      {}))
-          alias (or (:as options) (:as-alias options))
-          refers (:refer options)
-          renames (or (:rename options) {})
-          referred-names (cond
-                           (sequential? refers) refers
-                           (= :all refers) (get publics target #{})
-                           :else [])]
-      {:aliases
-       (cond-> #{}
-         (symbol? alias) (conj (alias-binding alias target)))
-       :refers
-       (into #{}
-             (map (fn [target-name]
-                    (refer-binding (get renames target-name target-name)
-                                   target
-                                   target-name)))
-             referred-names)
-       :requires
-       (cond-> #{}
-         (nil? (:as-alias options)) (conj target))
-       ::refer-all-targets
-       (cond-> #{}
-         (= :all refers) (conj target))})
+(defn- libspec-pair
+  [prefix [kind value]]
+  (let [[lib options] (if (= :lib kind)
+                        [value {}]
+                        [(:lib value) (:options value)])]
+    [(if prefix (symbol (str prefix "." lib)) lib) options]))
 
-    :else
-    {}))
+(defn- conformed
+  "`value` conformed by Clojure's own `clojure.core/ns` grammar
+  (`clojure.core.specs.alpha`), or nil when that grammar refuses it."
+  [spec value]
+  #?(:clj (let [result (s/conform spec value)]
+            (when-not (s/invalid? result) result))
+     :cljs nil))
 
-(defn- namespace-clauses
-  [form]
-  (let [after-name (drop 2 form)
-        after-doc (if (string? (first after-name))
-                    (next after-name)
-                    after-name)]
-    (if (map? (first after-doc))
-      (next after-doc)
-      after-doc)))
+(defn- require-pairs
+  "`[target options]` for each lib of one conformed `:require` clause.
+  The spec owns prefix lists, flags and option syntax."
+  [{:keys [body]}]
+  (mapcat (fn [[kind value]]
+            (case kind
+              :libspec [(libspec-pair nil value)]
+              :prefix-list (map #(libspec-pair (:prefix value) %)
+                                (:libspecs value))
+              :flag []))
+          body))
 
 (defn- namespace-info
   [form context]
-  (when-let [namespace-name (symbol-name (second form))]
-    (let [doc (when (string? (nth form 2 nil)) (nth form 2))
-          requires (->> (namespace-clauses form)
-                        (filter #(and (seq? %) (= :require (first %))))
-                        (mapcat rest))
-          bindings (map #(require-bindings % (::publics context)) requires)
+  (when-let [{namespace-name :ns-name doc :docstring :keys [ns-clauses]}
+             (conformed :clojure.core.specs.alpha/ns-form (rest form))]
+    (let [bindings (->> ns-clauses
+                        (filter #(= :require (first %)))
+                        (mapcat #(require-pairs (second %)))
+                        (map #(require-bindings % (::publics context))))
           alias-rows (into #{} (mapcat :aliases) bindings)
           refer-rows (into #{} (mapcat :refers) bindings)
           required-targets (into #{} (mapcat :requires) bindings)
@@ -237,8 +240,11 @@
 
 (defn- literal-require-bindings
   [form publics]
-  (map #(require-bindings (or (quoted-value %) %) publics)
-       (rest form)))
+  (map #(require-bindings % publics)
+       (require-pairs
+        (conformed :clojure.core.specs.alpha/ns-require
+                   (cons :require (map (fn [arg] (or (quoted-value arg) arg))
+                                       (rest form)))))))
 
 (declare resolved-operation)
 
