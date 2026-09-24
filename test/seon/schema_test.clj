@@ -1908,6 +1908,10 @@
                          (:seon.schema/error (ex-data e)))))
         base (schema/build-projection {::nilable-base :string} {})]
     (doseq [[form expected] [[[:maybe :string] :seon.schema/nilable-value-schema]
+                             ;; The other spelling of the same values.
+                             [[:or :nil :string] :seon.schema/nilable-value-schema]
+                             [[:or :string :nil :int] :seon.schema/nilable-value-schema]
+                             [[:or :string :int] :admitted]
                              [:string :admitted]]]
       (is (= expected
              (verdict #(schema/build-projection

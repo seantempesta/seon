@@ -8,7 +8,6 @@
             :buffer-capacity [:int {:min 1}],
             :callback-result
             [:or
-             :nil
              :map
              [:vector :seon.schema/value]
              [:set :seon.schema/value]
@@ -33,11 +32,11 @@
             :commit-drop!
             [:=>
              [:cat :seon.error/recording-observation]
-             :seon.flow/callback-result],
+             [:maybe :seon.flow/callback-result]],
             :commit-fault!
             [:=>
              [:cat :seon.error/recording-observation]
-             :seon.flow/callback-result],
+             [:maybe :seon.flow/callback-result]],
             :compute-timeout-ms [:int {:min 1}],
             :core-fault :map,
             :error-fanout
@@ -126,7 +125,7 @@
             :panic!
             [:=>
              [:cat :seon.flow/core-fault]
-             :seon.flow/callback-result],
+             [:maybe :seon.flow/callback-result]],
             :parallelism [:int {:min 1}],
             :read-core-error-mode
             [:=> [:cat] :seon.config/on-core-error],
@@ -143,7 +142,7 @@
              seon.flow/step-var?],
             :submission-id [:or :uuid :keyword :string],
             :submission-wait-ms [:int {:min 0}],
-            :io-complete! [:=> [:cat :map] :seon.flow/callback-result],
+            :io-complete! [:=> [:cat :map] [:maybe :seon.flow/callback-result]],
             :io-submission
             [:map
              [:seon.flow/submission-id :seon.flow/submission-id]

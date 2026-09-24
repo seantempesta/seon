@@ -206,6 +206,7 @@
          :explained-predicate
          [:fn {:gen/schema :int :error/message "must be an integer"} 'clojure.core/int?]
          :nilable-value [:maybe :string]
+         :nil-union-value [:or :nil :string]
          :nilable-member [:map [:one-verdict.fixture/member [:maybe :string]]]
          :nil-union-member [:map [:one-verdict.fixture/member [:or :nil :string]]]
          :bare-any [:vector :any]
@@ -227,6 +228,12 @@
       (is (= #{:admitted}
              (set (for [[_ case-name registered hooked] verdicts
                         :when (= :bare-any case-name)
+                        verdict [registered hooked]]
+                    verdict)))))
+    (testing "both nilable spellings refuse as a named value schema"
+      (is (= #{:seon.schema/nilable-value-schema}
+             (set (for [[_ case-name registered hooked] verdicts
+                        :when (#{:nilable-value :nil-union-value} case-name)
                         verdict [registered hooked]]
                     verdict)))))
     (testing "the one rule refuses an agent's incomplete contracts"

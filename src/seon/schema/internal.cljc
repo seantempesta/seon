@@ -489,8 +489,8 @@
                  e)))))))
 
 (defn assert-non-nilable-value-schema!
-  "Projection-build gate: reject a top-level nilable value schema whose inner
-   is a raw Malli built-in type — e.g. `[:maybe :int]`. In seon a stored
+  "Projection-build gate: reject a top-level nilable value schema — e.g.
+   `[:maybe :int]` or its other spelling `[:or :nil :int]`. In seon a stored
    value is NEVER nil (absent = the key is simply omitted, never stored as
    nil), so a NAMED value schema must not be nilable. Throws a guiding
    `:user-input` ex-info that hands back the copy-pasteable fix: register
@@ -504,9 +504,13 @@
   {:malli/schema
    [:=> [:cat :map :keyword [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Malli inspection receives arbitrary declaration children, including literals, predicates and incomplete candidate forms; this boundary cannot require an already valid compiled schema.", :gen/elements [nil false 0 "" :k [] {}]}]] :nil]}
   [_schemas k compiled]
-  (when (= :maybe (m/type compiled))
+  (when (nilable-union? compiled)
     (let [v (m/form compiled)
-          inner (m/form (first (m/children compiled)))]
+          present (remove #(and (m/schema? %) (= :nil (m/type %)))
+                          (m/children compiled))
+          inner (if (= 1 (count present))
+                  (m/form (first present))
+                  (into [:or] (map m/form) present))]
       (throw (ex-info
                (str "schema/register! " k ": " (pr-str v)
                     " — a registered value is never nil in seon (absent = the "
