@@ -51,6 +51,9 @@ symbol named `'sym`).
 | `:seon.task/schemas` | no | the target data model: key → Malli form, decided before code |
 | `:seon.task/done-when` | no | proofs: forms that must all return true on the task's branch; they never merge |
 | `:seon/must-read` | no | always in the brief (same key as in code) |
+| `:seon.task/entities` | no | stored data it is about, as `[attr value]` identities (a message, a record) |
+| `:seon.task/changes` | no | narrows what may change (default: the subjects); `#{}` = a data-only task (answer, research, decomposition) |
+| `:seon.task/recurs` | no | recurrence, e.g. `{:every :day}`; each run is one attempt |
 | `:seon.task/evidence` | no | paths to the notes or measurements that showed the problem |
 | `:seon.task/delivers`, `:seon.task/needs` | no | overrides only; normally derived |
 
@@ -59,7 +62,7 @@ symbol named `'sym`).
 | Derived | Rule |
 |---|---|
 | state | no `done-when` → **raised** (task type: triage); `done-when` → **specified** (implement) |
-| deliverables | function subjects + symbols the proofs reference that do not exist yet **and whose namespace is a subject** (a missing symbol is a deliverable only for the task that owns its namespace) |
+| deliverables | functions in `changes` (default: subjects) + symbols the proofs reference that do not exist yet **and whose namespace may change** (a missing symbol is a deliverable only for the task that owns its namespace); `changes #{}` delivers data only |
 | order (`needs`) | task B needs task A when B's proofs reference something A delivers |
 | changed keys | the keys of `:seon.task/schemas` |
 | plan / backlog / issue list | queries over the tasks and their derived state |
@@ -76,12 +79,22 @@ The derived plan for the eight experiment tasks puts `agents-can-validate` first
 | references unknown | a proof references something that exists nowhere and is delivered by neither this task nor one it needs |
 | unquoted symbol value | a bare qualified symbol in value position (evaluates to the Var); `*dynamic*` exempt |
 | evidence missing | an evidence path that does not exist |
+| **claimed twice** | two tasks both derive the same missing deliverable (a conflict, not an order) |
 | **green on base** | a proof that already holds before any work proves nothing (caught `one-read-for-many-notes`) |
 | **red for the wrong reason** | a proof red only because a needed task is unsettled is *blocked*, not specified; check it on a branch where its needs are satisfied |
 | (next) example values | literal arguments that fail the called function's input schema |
 
 Proofs are evaluated on a throwaway branch (`exp-base-check`), so a proof that writes cannot touch
 the shared head: nine proofs in 756 ms.
+
+## 4b. The standard proof vocabulary
+
+Proofs for every kind of task need a few functions over tasks and data; delivering them is itself a
+task (`:seon.task.task/proof-vocabulary`): `seon.task/children`, `specified?`, `settled?`,
+`accepted?` (a root or user decision, as data), `seon.message/reply-to`, `seon.finding/get`, plus
+`seon.schema/valid?`/`explain` and each detector (`seon.task/stale-docs`). With them, a question, a
+decomposition, a nightly maintenance run and a research finding all state "done" the same way
+(`docs/research/agent-platform/experiments/scenario-tasks.edn`).
 
 ## 5. What a brief is
 

@@ -1,0 +1,33 @@
+[;; 1. A user asks a question. The subject is DATA (the message), not code.
+ {:seon.task/id        :seon.message.task/answer-m-7f3a
+  :seon.task/intent    "The user asked: \"Why did my Tuesday squat volume drop?\" Answer from the stored workouts; a reply that does not answer it does not settle this."
+  :seon.task/subjects  #{seon.message}
+  :seon.task/entities  #{[:seon.message/id "m-7f3a"]}
+  :seon.task/changes   #{}
+  :seon.task/done-when [(some? (seon.message/reply-to [:seon.message/id "m-7f3a"]))
+                        (seon.task/accepted? :seon.message.task/answer-m-7f3a)]}   ; only the user or root can say it answers
+
+ ;; 2. "Build me a workout tracker": the deliverable is TASKS, small and each specified.
+ {:seon.task/id        :my.workout.task/tracker
+  :seon.task/intent    "The user wants to log workouts and see weekly volume. Decompose into small tasks: the data model first, then logging, then the weekly view; every child must be specified and pass the writer."
+  :seon.task/subjects  #{seon.task}
+  :seon.task/changes   #{}                                               ; it delivers tasks, not code
+  :seon.task/done-when [(<= 3 (count (seon.task/children :my.workout.task/tracker)))
+                        (every? seon.task/specified? (seon.task/children :my.workout.task/tracker))]}
+
+ ;; 3. Recurring maintenance: runs every night; each run is an attempt; the proof is a bound.
+ {:seon.task/id        :seon.cluster.store.task/nightly-reclaim
+  :seon.task/intent    "Unlinked branches keep their index roots until retention GC reclaims them; run it nightly and keep the store within its growth bound."
+  :seon.task/subjects  #{seon.cluster.store}
+  :seon.task/recurs    {:every :day}
+  :seon.task/done-when [(< (seon.cluster.store/growth-since-last-run-bytes) 50000000)]}
+
+ ;; 4. Research: the deliverable is a FINDING (data), not code.
+ {:seon.task/id        :seon.fn.task/why-reach-saturates
+  :seon.task/intent    "tests-reaching reports 1,720 tests for projection-validator and takes 1.9 s / 6.5 GB: find why static reach saturates for core functions and what a precise reach needs. Deliver a finding with evidence, not code."
+  :seon.task/subjects  #{seon.fn/tests-reaching seon.fn/gate-sets}
+  :seon.task/changes   #{}                                               ; data-only: it adds a finding, changes no code
+  :seon.task/schemas   {:seon.finding/finding [:map [:seon.finding/id :qualified-keyword] [:seon.finding/claim :string]
+                                                [:seon.finding/evidence [:vector :string]]]}
+  :seon.task/done-when [(seon.schema/valid? :seon.finding/finding
+                                            (seon.finding/get :seon.fn.finding/why-reach-saturates))]}]

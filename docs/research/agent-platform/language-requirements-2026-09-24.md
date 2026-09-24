@@ -50,7 +50,9 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 3.9 | A proof must be red on the base before work starts (a proof that already holds proves nothing) — checked by evaluating it on a throwaway branch | R | met (caught one task) |
 | 3.10 | A proof must be red for its OWN reason: red only because a needed task is unsettled means blocked; check each task on a branch where its needs are satisfied | R | met: about-is-a-value on the settled branch is red for "Missing schema declaration :my.note/about-symbol" |
 | 3.4 | Exits can be example tests, properties, bounds, empty detector queries, measurements or root decisions | A | examples only |
-| 3.5 | Deliverables include functions, tests, schema keys and data (findings, child tasks) | A, R | fns + keys |
+| 3.5 | Deliverables include functions, tests, schema keys and data (findings, child tasks) | A, R | fns + keys + data-only tasks (`changes #{}`) |
+| 3.11 | "What a task is about" (perspective, context, reverse links) is distinct from "what it may change" (what root may cherry-pick): research, answers and decomposition are about code they must not change | R | met: `:seon.task/changes` |
+| 3.12 | A small standard proof vocabulary lets every task kind state done the same way (children, specified?, settled?, accepted?, reply-to, finding, valid?, detectors) | R | specified as a task |
 | 3.6 | Delivered functions carry a docstring and the declared contract; agents take the shortest path the checks allow, so the checks encode the requirement | R | met in toy |
 | 3.7 | After every turn the task's own requirements run on its branch; red → re-prompt with the refusal as data; budget-bounded; escape hatch to root is itself a task | O, R | proven in toy |
 | 3.8 | Requirement test digests are frozen once reviewed; only root revises them, with the reason recorded | O, A | not yet |

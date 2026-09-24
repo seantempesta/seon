@@ -1,0 +1,10 @@
+;; The standard proof vocabulary: the few functions every kind of task's done-when needs.
+[{:seon.task/id        :seon.task.task/proof-vocabulary
+  :seon.task/intent    "Proofs must be able to ask about tasks and data: a task's children, whether a task is specified or settled, whether root or the user accepted an outcome, a message's reply, a stored finding. Without these, questions, decomposition and research tasks cannot state when they are done."
+  :seon.task/subjects  #{seon.task seon.message seon.finding}
+  :seon.task/done-when [(set? (seon.task/children :seon.task.task/proof-vocabulary))
+                        (boolean? (seon.task/specified? :seon.task.task/proof-vocabulary))
+                        (boolean? (seon.task/settled? :seon.task.task/proof-vocabulary))
+                        (boolean? (seon.task/accepted? :seon.task.task/proof-vocabulary))
+                        (nil? (seon.message/reply-to [:seon.message/id "no-such-message"]))
+                        (nil? (seon.finding/get :seon.finding/no-such-finding))]}]
