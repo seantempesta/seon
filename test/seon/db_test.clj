@@ -2432,3 +2432,26 @@
                      (fn [edges bounds] (swap! compared conj (count edges)) (compare-edges edges bounds))]
          (toggle! false))
        (is (empty? @compared) "the committed basis's comparison is reused")))))
+
+(deftest a-changed-projection-builder-misses-the-projection-cache
+  ;; A projection derives from the builder's code as well as the declaration
+  ;; rows: a changed builder derives anew, an unchanged one reuses.
+  (test-support/with-database
+    (fn [connection]
+      (let [digest #(#'db/builder-digest (db/db connection))
+            restamp! (fn [function-symbol]
+                       (test-support/transacted!
+                        connection {:tx-data [{:seon.fn/sym function-symbol
+                                               :seon.program/definition-digest
+                                               (apply str (repeat 64 (rand-nth "0123456789abcdef")))}]}))
+            database (db/db connection)
+            before (digest)
+            projection (#'db/content-projection before database)]
+        (is (identical? projection (#'db/content-projection before database)) "an unchanged builder reuses")
+        (restamp! `cluster/serve!)
+        (is (= before (digest)) "a declaration outside the builder's reach changes no projection")
+        (restamp! 'seon.schema/shape-row-in)
+        (let [after (digest)]
+          (is (not= before after) "a changed building declaration changes the builder")
+          (is (not (identical? projection (#'db/content-projection after database)))
+              "and the equal declaration content derives anew"))))))

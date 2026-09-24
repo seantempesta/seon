@@ -1348,10 +1348,11 @@
   the previous commit for a committed one. Any base derives the same
   projection; a near one recompiles only what differs. Only realized entries
   are candidates, so no derivation waits on another."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
-  [database]
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]}
+  [builder database]
   (let [context (when (instance? DB database) (:cache-context database))
-        candidates (keep (fn [[k cell]] (when (and (map? k) (realized? cell)) [k cell]))
+        ;; Another builder's rows would survive the replacement unrebuilt.
+        candidates (keep (fn [[k cell]] (when (and (map? k) (= builder (::builder k)) (realized? cell)) [k cell]))
                          @projection-cache)]
     (if (seq candidates)
       @(second (apply max-key #(revision-agreement (or context {}) (first %)) candidates))
@@ -1359,22 +1360,24 @@
 
 (defn- content-projection
   "The projection of `database`'s declaration content, memoized by that
-  content. A miss derives from its `nearest-base`."
-  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
-  [database]
-  @(cache/lookup-or-miss projection-cache [::declaration-content (declaration-content-key database)]
-                         (fn [_] (delay (schema/load-projection database (nearest-base database))))))
+  content and the loaded `builder`. A miss derives from its `nearest-base`."
+  {:malli/schema [:=> [:cat :seon.source/digest :seon.db/database-value] :seon.schema/projection]}
+  [builder database]
+  @(cache/lookup-or-miss projection-cache [::declaration-content builder (declaration-content-key database)]
+                         (fn [_] (delay (schema/load-projection database (nearest-base builder database))))))
 
 (defn- value-projection
   "The projection of a value whose `value-key` names its declaration content
-  exactly, memoized in the bounded value tier, then by content."
-  {:malli/schema [:=> [:cat [:or [:map-of :qualified-keyword :seon.schema/value]
+  exactly, memoized with the loaded `builder` in the bounded value tier, then
+  by content."
+  {:malli/schema [:=> [:cat :seon.source/digest
+                            [:or [:map-of :qualified-keyword :seon.schema/value]
                                  [:tuple :qualified-keyword :uuid [:or :int :inst]]]
                             :seon.db/database-value]
                   :seon.schema/projection]}
-  [value-key database]
-  @(cache/lookup-or-miss value-projection-cache value-key
-                         (fn [_] (delay (content-projection database)))))
+  [builder value-key database]
+  @(cache/lookup-or-miss value-projection-cache [builder value-key]
+                         (fn [_] (delay (content-projection builder database)))))
 
 (defn- as-of-key
   "An as-of view's exact identity: its committed origin's commit and its time
@@ -1407,6 +1410,42 @@
       (let [failure (projection-fallback 'seon.db/carried-projection)]
         (throw (ex-info (:seon.error/message failure) failure)))))
 
+(defn- builder-digest
+  "The projection builder's identity in `database`: the digest of the
+  definition digests reached from `seon.schema/load-projection` through
+  stored `:seon.fn/calls`: one index lookup per reached symbol, ~1.6 ms."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/digest]}
+  [database]
+  (loop [reached {} pending ['seon.schema/load-projection]]
+    (if-let [[function & more] (seq pending)]
+      (if (find reached function)
+        (recur reached more)
+        (let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
+          (recur (assoc reached function
+                        (when entity (:v (first (d/datoms database :eavt entity :seon.program/definition-digest)))))
+                 (into more (when entity (map :v (d/datoms database :eavt entity :seon.fn/calls)))))))
+      (id/digest 64 [(into (sorted-map) (filter val) reached)]))))
+
+(defn- loaded-builder
+  "The builder digest of the program this JVM loaded at `commit`, as `database`
+  records it, memoized by that commit; with no commit, of `database`'s own rows.
+
+  A projection derives from the loaded builder's code as well as from the
+  declaration rows. The adoption record's `:seon.source/commit-id` moves after
+  load and arming (`seon.sci.eval/loaded-commit-id`); a value without one is its
+  own commit."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :uuid]] :seon.source/digest]}
+  [database commit]
+  (if-not commit
+    (builder-digest database)
+    @(cache/lookup-or-miss
+      projection-cache [::builder commit]
+      (fn [_] (delay (builder-digest
+                      (or (d/commit-as-db database commit {:secondary-indices? false})
+                          (throw (ex-info "The JVM's recorded source commit is unavailable."
+                                          {:seon.error/expected :seon.source/commit-id
+                                           :seon.error/offending commit})))))))))
+
 (defn carried-projection
   "Derive this database value's projection, memoized by what it reads.
 
@@ -1421,11 +1460,21 @@
   population, as their installed schema does; they hold several versions or
   a suffix, never one older population. A speculative value's key includes
   every earlier operation of its transaction. A value holding no declaration
-  rows reads its cold boundary's construction projection or refuses by name."
+  rows reads its cold boundary's construction projection or refuses by name.
+  Every key also names the loaded builder (`loaded-builder`), so a projection
+  built by other builder code is never reused or used as a base."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.schema/projection]}
   [database]
   (let [as-of? (instance? AsOfDB database)
-        source (if as-of? database (schema-database database))]
+        source (if as-of? database (schema-database database))
+        origin (if as-of? (schema-database database) source)
+        ;; The loaded builder (`loaded-builder`), read here on a hit: one more
+        ;; armed call per read doubled the hit cost.
+        builder (delay (let [commit (or (when (get (dbi/-schema origin) :seon.source/commit-id)
+                                          (:v (first (d/datoms origin :aevt :seon.source/commit-id))))
+                                        (:datahike.value/commit-id (datahike.db/committed-value-identity origin)))]
+                         (or (some-> (when commit (cache/lookup projection-cache [::builder commit])) deref)
+                             (loaded-builder origin commit))))]
     (cond
       (not (declares-program? source))
       (construction-projection database)
@@ -1442,8 +1491,8 @@
                             (when (:datahike.cache/connection-id (:cache-context (dbi/-origin source)))
                               (assoc (projection-cache-key (dbi/-origin source))
                                      ::as-of (dbi/-time-point source))))]
-        (value-projection view-key source)
-        (content-projection source))
+        (value-projection @builder view-key source)
+        (content-projection @builder source))
 
       (datahike.db/committed-value-identity source)
       ;; Store the delay before forcing it: concurrent misses share the winning
@@ -1454,12 +1503,12 @@
       ;; A revision hit also stores its cell under the commit, so a new branch
       ;; at an equal commit hits too; Datahike's query cache keys committed
       ;; values the same way (fork `684d3290`). Both key kinds share the bound.
-      (let [commit-key [::commit (:datahike.value/commit-id (datahike.db/committed-value-identity source))]
+      (let [commit-key [::commit (:datahike.value/commit-id (datahike.db/committed-value-identity source)) @builder]
             cell (cache/lookup-or-miss
-                  projection-cache (projection-cache-key source)
+                  projection-cache (assoc (projection-cache-key source) ::builder @builder)
                   (fn [_] (cache/lookup-or-miss
                            projection-cache commit-key
-                           (fn [_] (delay (content-projection source))))))]
+                           (fn [_] (delay (content-projection @builder source))))))]
         @(cache/lookup-or-miss projection-cache commit-key (fn [_] cell)))
 
       ;; A speculative value (a report's db-after, a `:db.fn/call` argument,
@@ -1472,16 +1521,16 @@
       ;; revisions name this value's declaration content alone, so the key
       ;; memoizes it in the bounded value tier, never among the durable keys.
       (:datahike.cache/connection-id (:cache-context source))
-      (let [revision-key (projection-cache-key source)]
+      (let [revision-key (assoc (projection-cache-key source) ::builder @builder)]
         (if (cache/has? projection-cache revision-key)
           @(cache/lookup-or-miss projection-cache revision-key
-                                 (fn [_] (delay (content-projection source))))
-          (value-projection revision-key source)))
+                                 (fn [_] (delay (content-projection @builder source))))
+          (value-projection @builder revision-key source)))
 
       ;; A detached value (Datahike gives it no context: an `empty-db` or
       ;; `load-entities` basis) keys by its declaration content alone.
       :else
-      (content-projection source))))
+      (content-projection @builder source))))
 
 (defn- read-declarations
   "The declaration table for one read, or the flat refusal naming what is missing.
