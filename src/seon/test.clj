@@ -122,22 +122,23 @@
 
   The body thread reads `loaded`, the loaded program identity, then calls
   `resolve!` for the Var it runs and runs it; nothing waits for adoption. When
-  the identity was unknown at start nothing resolves or runs, and when another
-  thread changed it before the end the result is discarded: either way the
-  result carries `:seon.test.run/stopped :program-unknown` and no outcome.
+  the identity is unknown or no longer `since` (the request's, read before
+  admission) nothing resolves or runs, and when another thread changes it
+  before the end the result is discarded: either way the result carries
+  `:seon.test.run/stopped :program-unknown` and no outcome.
 
   `release!` is called exactly once, with `true` when the body outlived the
   bound (from a watcher that joins the live thread) and `false` otherwise:
   at once when the body exits inside the bound, or before rethrowing when
   the body thread never started. The caller hands all cleanup to it."
-  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :seon.test/sym
+  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :map :seon.test/sym
                        [:=> [:cat] [:or :seon.test/var :seon.error/value]] [:int {:min 1}]
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                         [:seon.test/member {:optional true} :seon.agent/execution-handle]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
-  [loaded test-symbol resolve! timeout-ms custody release!]
+  [loaded since test-symbol resolve! timeout-ms custody release!]
   (let [started? (volatile! false)]
     (try
       (let [member (:seon.test/member custody)
@@ -145,7 +146,7 @@
             task (FutureTask.
                   (bound-fn []
                     (sci.eval/call-detecting-program-change
-                     loaded `bounded-result
+                     loaded `bounded-result since
                      #(let [test-var (resolve!)]
                         (if (:seon.error/at test-var)
                           test-var
@@ -1517,7 +1518,7 @@
   fails, and each failure's cause chain reaches the member's recorded result.
   A body still live at the bound keeps its branch; `settle!` records its
   termination (and any cleanup failure) once the watcher observes its exit."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.test/sym [:int {:min 1}]
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :map :seon.test/sym [:int {:min 1}]
                        [:=> [:cat :seon.test.runner/captured-result] :nil]]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
                    [:seon.test/timings
@@ -1526,7 +1527,7 @@
                      [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
                      [:seon.test.timing/run-ms :seon.test.timing/run-ms]
                      [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
-  [request-handle test-symbol remaining-ms settle!]
+  [request-handle since test-symbol remaining-ms settle!]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
@@ -1594,7 +1595,7 @@
                       ;; always has; its fixtures find the member through
                       ;; `*member*`.
                       #(bounded-result
-                        sci.eval/loaded-identity test-symbol resolve! remaining-ms
+                        sci.eval/loaded-identity since test-symbol resolve! remaining-ms
                         {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
                          :seon.test/member child}
                         (fn [watched?]
@@ -1758,6 +1759,9 @@
             ;; One reach read over every runnable member: each member's
             ;; recording then reads the index (68 members 1,086 ms, against
             ;; 317 ms for each member read alone, 2026-09-23).
+            ;; The loaded program every member must run in: an adoption from
+            ;; here on, before or during a member, makes that member unknown.
+            since @sci.eval/loaded-identity
             reach (when (seq runnable) (runner/reach-digests database runnable))
             provenance (:seon.test.run/provenance selection)
             exclusion-rows
@@ -1850,7 +1854,7 @@
                         (if-not (pos? (remaining-ms))
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle test-symbol (remaining-ms) settle!)]
+                                (member-result request-handle since test-symbol (remaining-ms) settle!)]
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]

@@ -928,18 +928,20 @@
 ;;; record commits; a failed adoption leaves the diagnostic. Nothing waits on it.
 (defonce loaded-identity (atom {}))
 
-(def ^:dynamic ^:private *expected-identity*
-  "The loaded identity this thread's execution expects at its end: its own
-  adoptions advance it, so only another thread's change reads as one."
-  nil)
+(def ^:dynamic ^:private *expected-identities*
+  "This thread's detecting executions, innermost first, each an identity atom
+  with the value it expects at its end: its own adoptions advance them, so only
+  another thread's change (another member's included) reads as one."
+  ())
 
 (defn advance-loaded-identity!
-  "Set `identity-atom` to `value`, carrying this thread's expectation along."
+  "Set `identity-atom` to `value`, carrying this thread's expectations along."
   {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :map] :map]}
   [identity-atom value]
   (let [[old] (reset-vals! identity-atom value)]
-    (when-let [expected *expected-identity*]
-      (when (identical? old @expected) (vreset! expected value)))
+    (doseq [[held expected] *expected-identities*
+            :when (and (identical? held identity-atom) (identical? old @expected))]
+      (vreset! expected value))
     value))
 
 (defn- identity-name
@@ -952,30 +954,40 @@
 (defn call-detecting-program-change
   "Call `work`, answering its result only when the loaded program did not change.
 
-  `identity-atom` is read when `work` starts and when it ends. An unknown
-  program at start answers its diagnostic without calling `work`; a change by
-  another thread (an enclosing execution's included) answers the refusal
-  naming both identities instead of the result. This thread's own adoptions
-  advance its expectation (`advance-loaded-identity!`)."
-  {:malli/schema [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol
-                       [:=> [:cat] :any]]
-                  :any]}
-  [identity-atom operation work]
-  (let [before @identity-atom
-        expected (or *expected-identity* (volatile! before))
-        changed (fn [after]
-                  (error.refusal/diagnostic
-                   (java.util.Date.) :seon.cluster/adoption operation
-                   {:seon.error/message (str "The loaded program changed during this execution, from "
-                                             (identity-name @expected) " to " (identity-name after)
-                                             "; its result is not trusted. Rerun it.")
-                    :seon.test/not-runnable (str (identity-name @expected) " -> " (identity-name after))}))]
-    (cond
-      (:seon.error/at before) before
-      (not (identical? before @expected)) (changed before)
-      :else (let [result (binding [*expected-identity* expected] (work))
-                  after @identity-atom]
-              (if (identical? @expected after) result (changed after))))))
+  `identity-atom` is read when `work` starts and when it ends; `since` is the
+  identity the caller already committed to (an admitted request's), else the
+  start read. An unknown program at start or end answers its diagnostic, and
+  at start `work` never runs. A change by another thread since `since` or an
+  enclosing execution's start answers the refusal naming both identities
+  instead of the result. This thread's own adoptions advance its expectations
+  (`advance-loaded-identity!`)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol [:=> [:cat] :any]] :any]
+                  [:=> [:cat :seon.sci.eval/loaded-identity :qualified-symbol :map [:=> [:cat] :any]] :any]]}
+  ([identity-atom operation work]
+   (call-detecting-program-change identity-atom operation @identity-atom work))
+  ([identity-atom operation since work]
+   (let [before @identity-atom
+         enclosing (some (fn [[held expected]] (when (identical? held identity-atom) @expected))
+                         *expected-identities*)
+         expected (volatile! before)
+         changed (fn [from to]
+                   (error.refusal/diagnostic
+                    (java.util.Date.) :seon.cluster/adoption operation
+                    {:seon.error/message (str "The loaded program changed during this execution, from "
+                                              (identity-name from) " to " (identity-name to)
+                                              "; its result is not trusted. Rerun it.")
+                     :seon.test/not-runnable (str (identity-name from) " -> " (identity-name to))}))]
+     (cond
+       (:seon.error/at before) before
+       (not (identical? since before)) (changed since before)
+       (and enclosing (not (identical? enclosing before))) (changed enclosing before)
+       :else (let [result (binding [*expected-identities* (cons [identity-atom expected] *expected-identities*)]
+                            (work))
+                   after @identity-atom]
+               (cond (:seon.error/at after) after
+                     (identical? @expected after) result
+                     :else (changed @expected after)))))))
 
 (defn- loaded-source
   "The database whose adoption record names the JVM's loaded source commit.

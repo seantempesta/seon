@@ -22,14 +22,16 @@
        (catch clojure.lang.ExceptionInfo failure (ex-message failure))))
 
 (defn- member-run
-  "Run `body` as one member test through `seon.test/bounded-result` on `loaded`."
-  [loaded body]
+  "Run `body` as one member test through `seon.test/bounded-result` on `loaded`,
+  admitted at `since` (default: the identity it reads now)."
+  ([loaded body] (member-run loaded @loaded body))
+  ([loaded since body]
   (let [owned (create-ns (gensym "seon.cluster.program-change-test.member-"))
         probe (intern owned (with-meta 'probe {:test body}) nil)]
     (try (@#'seon.test/bounded-result
-          loaded (symbol probe) (constantly probe) 5000
+          loaded since (symbol probe) (constantly probe) 5000
           {:seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle nil))} (fn [_] nil))
-         (finally (remove-ns (ns-name owned))))))
+         (finally (remove-ns (ns-name owned)))))))
 
 (deftest an-adoption-proceeds-while-a-member-runs-and-the-member-reads-unknown
   (testing "no change: the member's ordinary result"
@@ -53,7 +55,29 @@
   (testing "an adoption the member runs itself is its own work"
     (let [loaded (atom {:seon.source/commit-id (random-uuid)})]
       (is (= :own (sci.eval/call-detecting-program-change
-                   loaded `own #(do (adopt! loaded (random-uuid) (constantly adopted)) :own)))))))
+                   loaded `own #(do (adopt! loaded (random-uuid) (constantly adopted)) :own))))))
+  (testing "one member's own adoption makes a concurrently running member unknown, even under one enclosing execution"
+    (let [loaded (atom {:seon.source/commit-id (random-uuid)})
+          b-entered (promise)
+          b-release (promise)
+          [a b] (sci.eval/call-detecting-program-change
+                 loaded `enclosing
+                 (fn []
+                   (let [b (future (member-run loaded #(do (deliver b-entered true) (is @b-release))))
+                         _ (is (true? (deref b-entered 1000 false)))
+                         a (member-run loaded #(is (= adopted (adopt! loaded (random-uuid) (constantly adopted)))))]
+                     (deliver b-release true)
+                     [a (deref b 5000 nil)])))]
+      (is (= 1 (:seon.test/pass-count a)) "A's own adoption keeps A's result")
+      (is (= :program-unknown (:seon.test.run/stopped b)) "B saw its program change")))
+  (testing "an adoption between admission and a member's start: the member never runs"
+    (let [loaded (atom {:seon.source/commit-id (random-uuid)})
+          since @loaded
+          ran (atom false)]
+      (adopt! loaded (random-uuid) (constantly adopted))
+      (let [result (member-run loaded since #(reset! ran true))]
+        (is (= :program-unknown (:seon.test.run/stopped result)))
+        (is (false? @ran) "admission's program is not the execution's")))))
 
 (deftest an-adoption-failing-after-roots-change-keeps-the-program-unknown-until-one-records
   (let [loaded (atom {})
@@ -82,6 +106,14 @@
         (is (= (:seon.source/commit-id @loaded) (:seon.source/commit-id refusal)))
         (is (schema/valid-candidate-value? (db/carried-projection database)
                                            :seon.test/not-runnable-error refusal))))
+    (testing "a nested entry after the execution's own adoption failed refuses by name"
+      (let [own (atom {:seon.source/commit-id (random-uuid)})
+            answer (sci.eval/call-detecting-program-change
+                    own `outer
+                    (fn [] (adopt! own (random-uuid) #(throw (ex-info "arming refused" {})))
+                      (sci.eval/call-detecting-program-change own `inner (fn [] :entered))))]
+        (is (= 'seon.cluster/call-with-program-change (:seon.error/operation answer)) "the failed adoption, named")
+        (is (= ["arming refused"] (keep :seon.error/message (:seon.error/chain answer))))))
     (testing "a later adoption that records makes execution available again"
       (let [commit (random-uuid)]
         (is (= adopted (adopt! loaded commit (constantly adopted))))
