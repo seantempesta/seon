@@ -1456,10 +1456,13 @@
                      (cond
                        steward-present {steward-id :recurring}
                        (and interrupted? agent-id) {agent-id :your-run}
-                       ;; every fault no agent answers for reaches root, with or
-                       ;; without a throwable: recorded-but-undelivered is a defect.
-                       ;; An attributed fault without one is its agent's mistake,
-                       ;; already returned to that agent in its turn.
+                       ;; a fault no agent answers for reaches the configured
+                       ;; escalation owner, with or without a throwable. The
+                       ;; shipped default leaves `escalate-to` absent (owner
+                       ;; ruling 2026-09-24): the fault stays recorded and shown,
+                       ;; and wakes no paid root turn. An attributed fault without
+                       ;; a throwable is its agent's mistake, already returned to
+                       ;; that agent in its turn.
                        (and escalation-present (nil? agent-id)) {escalate-to :no-attributable-agent}
                        :else {}))]
     (into (cond-> (into [{:seon.db.process/id process}] replacements)

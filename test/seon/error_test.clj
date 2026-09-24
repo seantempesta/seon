@@ -897,6 +897,28 @@
         (is (= 1 facts))
         (is (= {"root" 1} messages))))))
 
+(deftest a-core-fault-wakes-root-only-when-escalation-is-configured
+  ;; owner ruling 2026-09-24: nine fault-woken root turns at ~25k prompt
+  ;; tokens each ignored their fault. The shipped config leaves
+  ;; `escalate-to` absent: the fault is recorded, and root is not mailed.
+  (with-db
+    (fn [connection]
+      (let [shipped (select-keys (config/effective (db/db connection) "error-test")
+                                 [:seon.config.error/escalate-to])
+            shipped-request (merge (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
+                                           :seon.config.error/escalate-to)
+                                   shipped)]
+        (is (= {} shipped) "the shipped default names no escalation owner")
+        (test-support/transacted! connection (error/commit-tx (db/db connection) shipped-request))
+        (is (= 1 (count (db/q '[:find ?o :where [?o :seon.error.occurrence/id _]] (db/db connection)))))
+        (is (empty? (db/q '[:find ?m :where [?m :seon.message/about _]] (db/db connection)))))))
+  (with-db
+    (fn [connection]
+      (testing "a manifest naming root turns the wake back on"
+        (let [[facts messages] (commit! connection (transform-error (ex-info "boom" {})) {})]
+          (is (= 1 facts))
+          (is (= {"root" 1} messages)))))))
+
 (deftest the-storm-is-bounded-by-the-signature-count
   ;; the live falsifier's unit twin: one signature repeated forever must
   ;; not mail forever, because a message is a commit and a commit wakes
