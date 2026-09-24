@@ -72,9 +72,25 @@ That was a one-off harness cost, and I did not repeat it.
 - clj-kondo: 0 errors. The 3 shadowed-var warnings in source and the unused `seon.error` require in
   the test were already there.
 
-## Out of scope, still open
+## Follow-up, re-granted by root (bypasses accepted)
 
-- The census row `newest-row-transaction` (S2, `call_preparation.clj` ~:285) was not in my
-  assignment. An unreadable `db/history` still falls back to the current database. See
-  docs/research/agent-platform/ambiguous-nil-producers-2026-09-24.md.
-- `argument-validators` has no Malli contract. That was already true before this lane.
+- `becc992e9`, **S2 `newest-row-transaction`, partly refuted.** Before, it read the current
+  database whenever `db/history` refused. Now it falls back only on seon.db's declared no-history
+  refusal (`:seon.config/error-key :seon.config.db/keep-history?`, `db.clj` `database-view`). Any
+  other refusal is returned, and the range reads are skipped. `derive-snapshot` passes on either
+  error arm. But `datahike.api.impl/history` (`reference-code/datahike/src/datahike/api/impl.cljc:185`)
+  does not throw for a database value. So, on every input I could construct, the only refusal is
+  the declared no-history one, and the old fallback was correct for it. The new test
+  `the-row-basis-reads-history-or-refuses` covers the three real cases: a store with history
+  (positive basis), a store without history (basis = the fact's tx, and the refusal is the declared
+  one), and an unreadable row range (the read error, never 0). It passes on the parent too
+  (5 pass, 81 ms on the parent, 85 ms on the change), so **it does not discriminate**.
+- `97f9d9451`, **`argument-validators` contract:** `[:=> [:cat :seon.db/database-value
+  :seon.call-preparation/snapshot :seon.fn/sym] [:or [:map-of :seon.fn.arity/order
+  :seon.call-preparation/argument-validators] :seon.db/error-result]]`. It compiles against
+  default's carried projection. Its output arm validated the results for 50 real functions with
+  argument shapes, and the read error from a program-less database. The contract was not armed in
+  an installed run, for the reset reason above.
+- A second copy run found no change in the neighbouring tests:
+  `an-unrelated-commit-reads-the-held-snapshot` and
+  `a-report-changing-no-read-attribute-reads-its-committed-parent` pass on both copies.
