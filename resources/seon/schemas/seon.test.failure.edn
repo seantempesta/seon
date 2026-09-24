@@ -4,6 +4,8 @@
  :type [:enum {:description "The reporter's two failing assertion outcomes."} :fail :error]
  :ordinal [:int {:min 0}]
  :message :string
+ :message-blob :seon.blob/digest
+ :message-size [:int {:min 0}]
  :contexts [:vector [:tuple [:int {:min 0}] :string]]
  :expected :string
  :expected-blob :seon.blob/digest
@@ -39,6 +41,8 @@
   [:seon.test.failure/type :seon.test.failure/type]
   [:seon.test.failure/ordinal :seon.test.failure/ordinal]
   [:seon.test.failure/message {:optional true} :seon.test.failure/message]
+  [:seon.test.failure/message-blob {:optional true} :seon.test.failure/message-blob]
+  [:seon.test.failure/message-size {:optional true} :seon.test.failure/message-size]
   [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
   [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
   [:seon.test.failure/expected-blob {:optional true} :seon.test.failure/expected-blob]
@@ -61,6 +65,7 @@
   [:seon.test.failure/type :seon.test.failure/type]
   [:seon.test.failure/ordinal :seon.test.failure/ordinal]
   [:seon.test.failure/message {:optional true} :seon.test.failure/message]
+  [:seon.test.failure/message-blob {:optional true} :seon.test.failure/message-blob]
   [:seon.test.failure/contexts {:optional true} :seon.test.failure/contexts]
   [:seon.test.failure/expected {:optional true} :seon.test.failure/expected]
   [:seon.test.failure/expected-blob {:optional true} :seon.test.failure/expected-blob]

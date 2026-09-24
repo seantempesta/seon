@@ -1167,12 +1167,16 @@
                                       known-site? (assoc :seon.test.failure/file [:seon.fn.file/relative-path path]
                                                          :seon.test.failure/line line))
                             failure (-> failure
+                                        (stage-field :seon.test.failure/message :seon.test.failure/message-size :seon.test.failure/message-blob)
                                         (stage-field :seon.test.failure/expected :seon.test.failure/expected-size :seon.test.failure/expected-blob)
                                         (stage-field :seon.test.failure/actual :seon.test.failure/actual-size :seon.test.failure/actual-blob))]
                         [(assoc ordinals site (inc ordinal)) (conj failures failure)]))
                     [{} []] reports)]
-              (-> result (dissoc :seon.test.failure/reports)
-                  (assoc :seon.test/failures failures))))
+              ;; The staged failures ARE the claim; the joined text beside
+              ;; them would store every message again, inline and unbounded.
+              (cond-> (-> result (dissoc :seon.test.failure/reports)
+                          (assoc :seon.test/failures failures))
+                (seq failures) (dissoc :seon.test/failure-message))))
           (:seon.test.runner/results completion))]
     (assoc completion :seon.test.runner/results results :seon.blob/staged-writes @staged)))
 
