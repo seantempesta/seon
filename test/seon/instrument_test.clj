@@ -18,6 +18,7 @@
   That is precisely the class instrumentation exists to catch, so the
   suite reproduces the shape rather than inventing one."
   (:require [clojure.java.io :as io]
+            [clojure.set :as set]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [clojure.string :as str]
             [malli.instrument :as mi]
@@ -44,7 +45,6 @@
             [seon.sci.kernel :as kernel]
             [seon.sci.eval :as sci.eval]
             [seon.sci.admit :as admit]
-            [seon.test.arm]
             [seon.test-support :as test-support])
   (:import [java.nio.file Files LinkOption]))
 
@@ -911,30 +911,52 @@
         (ns-unmap 'seon.instrument-test candidate-name)
         (ns-unmap 'seon.instrument-test unrelated-name)))))
 
+(defn- with-disposable-namespace
+  "Run `body` with a fresh namespace of its own, removed afterwards, so a
+  test's Vars never enter a namespace another test or reload owns."
+  [body]
+  (let [namespace-name (symbol (str "seon.instrument-test.scratch-" (random-uuid)))]
+    (create-ns namespace-name)
+    (try (body namespace-name)
+         (finally (remove-ns namespace-name)))))
+
 (deftest cold-arming-keeps-acquired-predicates-without-an-ambient-binding
-  (let [projection (#'seon.test.arm/packaged-test-projection "cold-arming-regression")
-        candidate-name (symbol (str "cold-contract-" (random-uuid)))
-        candidate (intern 'seon.instrument-test candidate-name identity)
-        contract [:=> [:cat :seon.agent/id] :seon.agent/id]
-        caps (config/result-caps config/defaults)
-        arm (fn []
-              (#'instrument/arm-var! candidate contract projection projection caps)
-              {:seon.instrument/definitions
-               (:seon.instrument/definitions (meta @candidate))
-               :seon.instrument-test/value (candidate "juniper")})]
-    (try
-      (is (map? (:seon.schema.projection/predicate-functions projection)))
-      (let [bound (schema/call-with-projection projection arm)]
-        (alter-var-root candidate (constantly identity))
-        (let [cold (with-bindings {#'schema/*projection* nil
+  ;; `apply!` arms from the supplied projection's retained contract, so the
+  ;; installed wrapper validates with the predicates that projection acquired
+  ;; whether or not a projection is bound around arming or the call.
+  (with-disposable-namespace
+   (fn [namespace-name]
+     (let [contract [:=> [:cat :seon.agent/id] :seon.agent/id]
+           candidate (intern namespace-name (with-meta 'cold-contract {:malli/schema contract})
+                             identity)
+           function-symbol (symbol candidate)
+           admitted (schema/handed-projection)
+           projection (update admitted :seon.schema.projection/registry
+                              #(mr/composite-registry
+                                {function-symbol (m/schema contract {:registry %})} %))
+           arm (fn []
+                 (let [applied (instrument/apply!
+                                {:seon.config/on-core-error :panic
+                                 :seon.schema/projection projection
+                                 :seon.instrument/changed-identities #{[:seon.fn/sym function-symbol]}})]
+                   {:seon.instrument/registered (:seon.instrument/registered applied)
+                    :seon.instrument/definitions
+                    (:seon.instrument/definitions (meta @candidate))
+                    :seon.instrument-test/value (candidate "juniper")}))]
+       (is (map? (:seon.schema.projection/predicate-functions projection)))
+       (let [bound (schema/call-with-projection projection arm)
+             cold (with-bindings {#'schema/*projection* nil
                                   #'schema/*projection-state* nil}
-                     (arm))]
-          (is (= "juniper" (:seon.instrument-test/value cold)))
-          (is (seq (:seon.instrument/definitions cold)))
-          (is (= bound cold))
-          (is (thrown? Exception (candidate 42)))))
-      (finally
-        (ns-unmap 'seon.instrument-test candidate-name)))))
+                    (arm))]
+         (is (= 1 (:seon.instrument/registered cold)))
+         (is (= "juniper" (:seon.instrument-test/value cold)))
+         (is (seq (:seon.instrument/definitions cold)))
+         (is (= bound cold))
+         (is (contains? (instrument/instrumented) candidate))
+         (is (thrown? Exception
+                      (with-bindings {#'schema/*projection* nil
+                                      #'schema/*projection-state* nil}
+                        (candidate 42)))))))))
 
 (deftest prefix-related-sibling-vars-keep-their-own-contracts
   (instrumented!
@@ -1166,11 +1188,11 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest the-selection-is-declared-vars-with-schemas-and-nothing-else
-  ;; Exercise the worker's actual arming owner against the canonical fixture
+  ;; Exercise boot's arming owner, `apply!` without changed identities
+  ;; (`collect-contracts!` over every loaded namespace), against the executing
   ;; projection. Removing this one wrapper makes selection observable even
-  ;; when the launcher already armed the namespace before running the test.
+  ;; though this namespace was armed before the test ran.
   (let [projection (schema/handed-projection)
-        decision (#'seon.test.arm/arming-decision)
         boundary #'private-integer-boundary]
     (alter-var-root boundary mi/-f->original)
     (is (not (contains? (instrument/instrumented) boundary)))
@@ -1178,9 +1200,9 @@
           (mapv
            (fn [phase]
              (let [started (System/nanoTime)
-                   result (seon.test.arm/arm-contracts!
-                           decision projection "private-contracts"
-                           ['seon.instrument-test])]
+                   result (instrument/apply!
+                           {:seon.config/on-core-error :panic
+                            :seon.schema/projection projection})]
                {:seon.instrument-test/phase phase
                 :seon.instrument-test/elapsed-ms
                 (/ (double (- (System/nanoTime) started)) 1000000.0)
@@ -1196,10 +1218,12 @@
                                     :seon.instrument/instrumented])) measurements))
       (is (= (mapv :seon.instrument-test/applied measurements)
              (vec (repeat 2 (:seon.instrument-test/applied (first measurements))))))
+      (is (set/subset? (instrument/armable ['seon.instrument-test]) wrapped)
+          "every declared contract of the namespace is armed")
       (is (true? (:private (meta boundary))))
       (is (contains? wrapped #'error/value) "a public var with a schema")
       (is (contains? wrapped boundary)
-          "canonical worker arming includes a private declared contract")
+          "boot's arming includes a private declared contract")
       (is (every? #(some? (mi/-schema %)) wrapped))
       (is (= 7 (private-integer-boundary 7)))
       (doseq [[kind call]
