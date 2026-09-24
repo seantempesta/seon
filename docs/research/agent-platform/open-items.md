@@ -8,6 +8,7 @@ updated: 2026-09-24
 
 ## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
+- NO PAID AGENT CALLS (owner 2026-09-24): default runs :seon.config.ai/no-provider true (config apply, 21:3xZ; a db fact — re-apply after reset/nuke). Root reads errors via MCP (runtime_status, branch-errors) first, logs second.
 - LOAD RULE (owner 2026-09-24): lanes write and commit code only; root runs every test request and adoption serially in quiet windows. Hook publication PAUSED (.claude/seon-hook.edn) at 21:3xZ: ten lanes' test runs + every session republishing pinned default at 900% CPU / 13.5 GB, old gen 92%. After the pause: ~200%, no test requests running.
 - Owner 2026-09-24: ALL test harness work approved (S3 running; S2/S2b/S4/S5… follow in design order).
 - One-happy-path progress: wave 1 (correctness) mostly done today; wave 2: launcher compute half DELETED (d2604ede9 + bff4fac4b, −885 net: submit!!, execute-work!, capacity observer, compute in-port, 10 schemas); still owed (held files): log-line/log-report (problems.clj), dead boot fns + publication-base! (cluster.clj), dead snapshot fields (test.clj/runner.clj/seon.test.run.edn); unread :seon.config.flow.compute/* dials; stale submit!! mentions in cluster/agent.clj:39, flow skill, flow-foundation.md, 3 issues, datahike_parity.edn; wave 3 only small items done (carry-derived-projection, projection-delta, delta branch, ground-attribute-rules); wave 4 one fault route + one config read done, one test runner via the harness. Roughly a few hundred of ~13,400 lines deleted so far.
