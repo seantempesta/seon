@@ -183,31 +183,45 @@
       [(program/declaration-row
         (db/carried-projection database) event :contracted :agent)])))
 
+(defn branch-call
+  "Assign `agent-id` the branch the transacting database holds.
+
+  Invoked as `[:db.fn/call #'branch-call agent-id]`, so the writer records the
+  branch its own connection holds; custody is never inferred from a cluster
+  name, which several worlds in one store share."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  :seon.store/transaction-data]}
+  [database agent-id]
+  [[:db/add [:seon.agent/id agent-id] :seon.agent/branch
+    (get-in database [:config :branch])]])
+
 (defn creation-tx
   "Create one agent with its namespace in this database branch.
 
-  Transaction data. Context is derived from the entity graph, so agent
-  creation stores no blocks or other presentation state. The namespace
-  assignment is not unique — several agents may share one namespace — so
-  stewardship is decided inside the transaction by `steward-call`: the
-  creating agent stewards a namespace that has none yet, and never
-  displaces an existing steward."
+  Transaction data. Without an explicit `:seon.agent/branch` the agent's
+  branch is the one the transacting connection holds (`branch-call`).
+  Context is derived from the entity graph, so agent creation stores no
+  blocks or other presentation state. The namespace assignment is not
+  unique — several agents may share one namespace — so stewardship is
+  decided inside the transaction by `steward-call`: the creating agent
+  stewards a namespace that has none yet, and never displaces an existing
+  steward."
   {:malli/schema [:=> [:cat :seon.agent/creation-request]
                   :seon.agent/creation-tx]}
   [{agent-id :seon.agent/id
     namespace-name :seon.ns/name
-    cluster-name :seon.cluster/name
     branch :seon.agent/branch}]
   (let [namespace-ref [:seon.ns/name namespace-name]]
-    [[:db.fn/call #'namespace-seed-call namespace-name]
-     {:db/id (str "agent:" agent-id)
-      :seon.agent/id agent-id
-      :seon.agent/branch (or branch (registry/cluster-branch cluster-name))
-      :seon.agent/namespace namespace-ref
-      :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
-      :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
-      :seon.agent/runtime {:seon.runtime/agent (str "agent:" agent-id)}}
-     [:db.fn/call #'steward-call agent-id namespace-name]]))
+    (-> [[:db.fn/call #'namespace-seed-call namespace-name]
+         (cond-> {:db/id (str "agent:" agent-id)
+                  :seon.agent/id agent-id
+                  :seon.agent/namespace namespace-ref
+                  :seon.agent/plan {:my.plan/agent (str "agent:" agent-id)}
+                  :seon.agent/settings {:seon.config/agent (str "agent:" agent-id)}
+                  :seon.agent/runtime {:seon.runtime/agent (str "agent:" agent-id)}}
+           branch (assoc :seon.agent/branch branch))]
+        (cond-> (nil? branch) (conj [:db.fn/call #'branch-call agent-id]))
+        (conj [:db.fn/call #'steward-call agent-id namespace-name]))))
 
 (defn situation-form
   "Return the opening question and bare root form for an agent situation."
@@ -847,7 +861,10 @@
              _ (when (and create? (not (:seon.cluster/created? created)))
                  (throw (ex-info "Isolation requires a fresh owned branch."
                                  {:seon.agent/branch branch})))
-             allocated (atom nil)]
+             allocated (atom nil)
+             ;; An isolated world holds its own context state: an inherited row
+             ;; naming the parent's branch can never reach the parent's handles.
+             held-contexts (if (:seon.agent/isolate? options) (atom {}) contexts)]
          (try
            (let [borrowed (or (:seon.db/connection branch-owner)
                             (when (and isolated? (not create?) (nil? previous))
@@ -897,7 +914,7 @@
                                      {:seon.sci.eval/acquisition-recording-error failure})))
                  _ (env/replace-environment!
                     (:seon.sci.eval/projection-state base)
-                    (cond-> (assoc (env/of base) :seon.agent/context-state contexts)
+                    (cond-> (assoc (env/of base) :seon.agent/context-state held-contexts)
                       held-store (assoc :seon.store/store held-store)))
                  ctx (if (nil? agent-id)
                        base
@@ -916,7 +933,7 @@
                             :seon.sci.eval/ctx ctx
                             :seon.sci.eval/base-ctx base
                             :seon.env/environment (env/of ctx)
-                            :seon.agent/context-state contexts
+                            :seon.agent/context-state held-contexts
                             :seon.agent/branch branch
                             :seon.agent/mode (if isolated? :isolated :live)
                             :seon.agent/owns-connection?
@@ -925,7 +942,7 @@
                             (boolean (or create? (:seon.agent/owns-branch? previous)))}
                             agent-id (assoc :seon.agent/id agent-id)
                             held-store (assoc :seon.store/store held-store))]
-             (swap! contexts assoc key acquired)
+             (swap! held-contexts assoc key acquired)
              acquired)
            (catch Throwable failure
              (when-let [connection @allocated]

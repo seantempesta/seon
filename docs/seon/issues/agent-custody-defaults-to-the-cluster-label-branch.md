@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fix implemented; fixture sweep pending
 severity: high
 created: 2026-09-24
 tags: [issue, testing, custody, branch, agent]
@@ -68,3 +68,20 @@ across runs, observe its connection's branch is the world's branch, and observe
 live default's head is unchanged. Related, different cause:
 `test-fixture-worlds-inherit-the-live-clusters-errors-and-messages.md`
 (read contamination from the inherited commit).
+
+## Status (2026-09-24, lane fix-agent-custody-label)
+
+Writer fixed: `creation-tx` without an explicit branch adds
+`[:db.fn/call #'branch-call agent-id]`, which records the transacting
+database's `[:config :branch]`; an `:seon.agent/isolate?` acquisition holds a
+fresh context-state atom, so an inherited row cannot reach the parent's held
+connection. Regression: `seon.cluster.agent-custody-test` (fails 5/1 on the
+previous `agent.clj`). Landing:
+`docs/prds/agent-platform/landing/lane-fix-agent-custody-label-2026-09-24.md`.
+
+Remaining producer of the `seon.cluster.turn-test` refusals: the fixtures
+hand-write the label themselves — `(registry/cluster-branch "turn-test")` at
+`test/seon/cluster/turn_test.clj:109,138` and fifteen sites in
+`test/seon/turn_test.clj` (309, 329, 655, 909, 1096, 1144, 1196, 1287, 1360,
+1397, 1515, 2076, 2109, 2145, 2167). One scripted sweep to
+`(get-in @connection [:config :branch])` (or `creation-tx`) closes them.
