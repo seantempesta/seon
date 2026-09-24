@@ -7,6 +7,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
+            [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.fault :as fault]
             [datahike.core :as datahike]
@@ -208,6 +209,38 @@
             "no proc thread of the graph survives the throw")
         (is (= 1 (count (filter #(str/includes? % "gate-2 stop transition throws") stored)))
             (pr-str stored))))))
+
+;;; An unstored panic prints bounded text: the class regression for the
+;;; 3.18 GB stderr lines of pid 68592 (issue
+;;; unstored-panic-prints-whole-throwable-map-to-stderr). Each cause prints
+;;; through `render.value/floor` (at most 8192 chars + ellipsis); the whole
+;;; value stays on the failure's ex-data.
+(deftest an-unstored-panic-prints-bounded-text-and-keeps-the-whole-cause
+  (test-support/with-database
+    (fn [connection]
+      (let [big (apply str (repeat 51000000 \x))
+            failure (ex-info "a proc step threw" {::big big})
+            unconfigured @test-environment
+            bound (* 3 8193)
+            printed (fn [call]
+                      (let [stderr (java.io.StringWriter.)
+                            result (binding [*err* stderr] (call))]
+                        [result (str stderr)]))
+            [proc-result proc-text]
+            (printed #(#'sut/proc-failed! #'throwing-stop-step
+                                          {:seon.env/environment unconfigured}
+                                          failure))
+            [listener-result listener-text]
+            (printed #(#'store/listener-failed!
+                       unconfigured "process-1"
+                       {:listener-key ::probe :exception failure
+                        :tx-report {:tx-meta {} :db-after @connection}}))]
+        (doseq [[result text] [[proc-result proc-text] [listener-result listener-text]]]
+          (is (nil? result) "the sink returns as before; the loop continues")
+          (is (< 0 (count text) bound) (str (count text) " stderr chars"))
+          (is (str/includes? text "a proc step threw") "the cause is named"))
+        (is (identical? big (::big (ex-data failure)))
+            "the whole value stays on the throwable")))))
 
 (defn- install-test-work-launcher!
   [request]

@@ -24,6 +24,7 @@
             [seon.fault :as fault]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [held-flocks]]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [taoensso.timbre :as log])
@@ -610,10 +611,10 @@
         (binding [*out* *err*]
           (prn {:seon.error/message (ex-message panic)
                 :seon.error/operation `listener-failed!
-                :seon.fault/recorded (:seon.fault/recorded (ex-data panic))
-                :seon.error/data {:panic (Throwable->map panic)
-                                  :suppressed (mapv Throwable->map (.getSuppressed panic))
-                                  :failure (Throwable->map failure)}})
+                :seon.fault/recorded (:seon.fault/recorded (ex-data panic))})
+          ;; bounded text; `floor` names suppressed throwables per cause
+          (println (render.value/floor panic))
+          (println (render.value/floor failure))
           (flush))))
     nil))
 

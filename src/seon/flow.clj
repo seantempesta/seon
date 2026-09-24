@@ -18,6 +18,7 @@
             [seon.env :as env]
             [seon.error :as error]
             [seon.fault :as fault]
+            [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]
             [seon.schema.edn :as schema.edn])
@@ -194,8 +195,9 @@
   sliding buffer, `core.async/.../flow/impl.clj:101-102,312-316`). The writer
   decides occurrence and wake (`seon.fault/fault!`); an agent graph's
   environment names its agent, which attributes the fault to that agent's run.
-  A panic (`:panic`, or the fault not stored) is printed on stderr, whole when
-  unstored, and the loop continues: a stop transition must still exit so the graph's join
+  A panic (`:panic`, or the fault not stored) is printed on stderr, its causes
+  through `seon.render.value/floor` when unstored (bounded text; the whole
+  values stay on the throwables), and the loop continues: a stop transition must still exit so the graph's join
   completes (`impl.clj:181,317-320`)."
   {:malli/schema [:=> [:cat ::step-var :map :seon.error/throwable] :nil]}
   [step-var args failure]
@@ -210,12 +212,12 @@
         (binding [*out* *err*]
           ;; a stored fault's whole cause is its evidence; print it only
           ;; when no store holds it
-          (prn (cond-> {:seon.error/message (ex-message panic)
-                        :seon.error/operation (symbol step-var)
-                        :seon.fault/recorded receipt}
-                 (not (:seon.fault/committed? receipt))
-                 (assoc :seon.error/data {:panic (Throwable->map panic)
-                                          :failure (Throwable->map failure)})))
+          (prn {:seon.error/message (ex-message panic)
+                :seon.error/operation (symbol step-var)
+                :seon.fault/recorded receipt})
+          (when-not (:seon.fault/committed? receipt)
+            (println (render.value/floor panic))
+            (println (render.value/floor failure)))
           (flush)))))
   nil)
 

@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed
 severity: platform
 created: 2026-09-24
 tags: [errors, flow, unbounded-output, class, oom]
