@@ -245,6 +245,40 @@
        (is (true? (:seon.call-preparation/empty? plan))
            "the supplier itself declares no supplied default")))))
 
+(defn- with-program-less-database
+  "Call `body` with a database value whose schema declares no program
+  attribute, so Datahike refuses every program read: the program graph
+  cannot be read, which is not the same as a function being absent from it."
+  [body]
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write :keep-history? false}]
+    (d/create-database configuration)
+    (try
+      (with-open [held (test-support/closeable (d/connect configuration) d/release)]
+        (body @@held))
+      (finally (d/delete-database configuration)))))
+
+(deftest an-unreadable-program-graph-is-not-an-uncontracted-function
+  (test-support/with-database
+   (fn [connection]
+     (let [current (cp/snapshot @connection (projection))
+           call-state (cp/state)]
+       (testing "a function absent from a readable program graph has no plan"
+         (is (nil? (cp/plan-for @connection current 'sample/absent-function)))
+         (is (nil? (cp/plan call-state @connection current 'sample/absent-function))))
+       (with-program-less-database
+        (fn [unreadable]
+          (let [refused (cp/plan-for unreadable current 'seon.db/pull)]
+            (is (true? (:seon.db/invalid-read refused))
+                "the read error is returned, never nil \"not contracted\"")
+            (is (= 'seon.db/datoms (:seon.db/refused-read-operation refused))))
+          (is (true? (:seon.db/invalid-read
+                      (cp/plan call-state unreadable current 'seon.db/pull)))
+              "plan passes it on")
+          (is (not (contains? (:seon.call-preparation/plans @call-state)
+                              'seon.db/pull))
+              "and caches nothing, so the next call reads again")))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Supplier coherence is proved at acquisition
 ;;; ---------------------------------------------------------------------------

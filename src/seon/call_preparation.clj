@@ -704,6 +704,17 @@
 ;;; Plan derivation — one Datalog query set over the P12 argument addresses
 ;;; ---------------------------------------------------------------------------
 
+(defn- refused-read
+  "The first of `reads` that is the database owner's declared read error, or
+  nil when every read answered. An empty or nil read is an answer: nothing."
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]]
+                  [:or :nil :seon.db/error-result]]}
+  [reads]
+  (some #(when (and (map? %) (or (:seon.db/invalid-read %)
+                                 (:seon.schema/expected-value %)))
+           %)
+        reads))
+
 (defn- contract-transaction
   "The newest transaction among the function entity's own current facts, or
   nil when no function has this identity.
@@ -767,12 +778,14 @@
 
 (defn- argument-validators
   [database _current sym]
-  (into {}
-        (map (fn [[order rows]]
-               [order (mapv (fn [[_ _ entity]]
-                              (m/validator (schema-shape/compiled-in database entity)))
-                            (sort-by second rows))]))
-        (group-by first (db/q database argument-shape-query sym))))
+  (let [rows (db/q database argument-shape-query sym)]
+    (or (refused-read [rows])
+        (into {}
+              (map (fn [[order rows]]
+                     [order (mapv (fn [[_ _ entity]]
+                                    (m/validator (schema-shape/compiled-in database entity)))
+                                  (sort-by second rows))]))
+              (group-by first rows)))))
 
 (def ^:private map-entry-query
   ;; REQUIRED keys of a top-level argument map only. Selection joins BOTH the
@@ -968,24 +981,37 @@
   One query set over the P12 argument addresses joined to the acquired
   supplied-default rows. It never reads `:seon.fn/spec`, source text, a
   serialized AST string, or a hand-maintained list. Returns nil when the
-  identity is not a contracted function in this cluster's program graph."
+  identity is not a contracted function in this cluster's program graph,
+  and the database owner's read error when any of its reads could not be
+  answered: an unreadable program graph is never \"not contracted\"."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot
          :seon.fn/sym]
-    [:or :seon.call-preparation/plan :nil]]}
+    [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [database current sym]
-  (let [contract-t (contract-transaction database sym)]
-    (when (number? contract-t)
-      (let [index (by-fingerprint
-                   (:seon.call-preparation/supplied-defaults current))
-            fingerprints (vec (keys index))
-            arities (db/q database arity-query sym)
-            positional (when (seq fingerprints)
-                         (db/q database positional-query sym fingerprints))
-            entries (when (seq fingerprints)
-                      (concat (db/q database map-entry-query sym fingerprints)
-                              (db/q database named-map-entry-query sym
-                                    (:seon.schema.shape/supplied-map-entries current))))
+  (let [contract-t (contract-transaction database sym)
+        index (by-fingerprint (:seon.call-preparation/supplied-defaults current))
+        fingerprints (vec (keys index))
+        reads (when (number? contract-t)
+                {:arities (db/q database arity-query sym)
+                 :positional (when (seq fingerprints)
+                               (db/q database positional-query sym fingerprints))
+                 :map-entries (when (seq fingerprints)
+                                (db/q database map-entry-query sym fingerprints))
+                 :named-entries (when (seq fingerprints)
+                                  (db/q database named-map-entry-query sym
+                                        (:seon.schema.shape/supplied-map-entries current)))
+                 :required (db/q database required-map-entry-query sym)
+                 :required-named (db/q database required-named-map-entry-query sym
+                                       (:seon.schema.shape/required-map-entries current))})
+        refused (refused-read (vals reads))]
+    (cond
+      (not (number? contract-t)) contract-t
+      refused refused
+      :else
+      (let [{:keys [arities positional map-entries named-entries required
+                    required-named]} reads
+            entries (concat map-entries named-entries)
             positional-slots-by-arity
             (reduce (fn [acc [order position rest? fingerprint]]
                       (let [candidate (get index fingerprint)]
@@ -1026,9 +1052,7 @@
                    acc)))
              positional-slots-by-arity
              (group-by (fn [[order position _]] [order position])
-                       (concat (db/q database required-map-entry-query sym)
-                               (db/q database required-named-map-entry-query sym
-                                     (:seon.schema.shape/required-map-entries current)))))
+                       (concat required required-named)))
             validators (when (some #(> (count (:slots %)) 1)
                                    (vals slots-by-arity))
                          (argument-validators database current sym))
@@ -1084,27 +1108,29 @@
                         (keys derived-by-count)))
             variadic (first (filter :seon.call-preparation/variadic?
                                     arity-plans))]
-        (cond-> {:seon.fn/sym sym
-                 :seon.call-preparation/contract-t (long contract-t)
-                 :seon.call-preparation/basis-t
-                 (long (:seon.call-preparation/basis-t current))
-                 :seon.call-preparation/arities arity-plans
-                 :seon.call-preparation/by-supplied-count by-supplied-count
-                 :seon.call-preparation/empty?
-                 (every? (fn [arity]
-                           (and (empty? (:seon.call-preparation/slots arity))
-                                (empty? (:seon.call-preparation/entries arity))
-                                (not (:seon.call-preparation/rest-slot?
-                                      arity))))
-                         arity-plans)}
-          variadic
-          (assoc :seon.call-preparation/variadic
-                 {:seon.fn.arity/order (:seon.fn.arity/order variadic)
-                  :seon.fn.arity/min (:seon.fn.arity/min variadic)
-                  :seon.call-preparation/rest-slot?
-                  (:seon.call-preparation/rest-slot? variadic)
-                  :seon.call-preparation/entries
-                  (:seon.call-preparation/entries variadic)}))))))
+        (or
+         (refused-read [validators])
+         (cond-> {:seon.fn/sym sym
+                  :seon.call-preparation/contract-t (long contract-t)
+                  :seon.call-preparation/basis-t
+                  (long (:seon.call-preparation/basis-t current))
+                  :seon.call-preparation/arities arity-plans
+                  :seon.call-preparation/by-supplied-count by-supplied-count
+                  :seon.call-preparation/empty?
+                  (every? (fn [arity]
+                            (and (empty? (:seon.call-preparation/slots arity))
+                                 (empty? (:seon.call-preparation/entries arity))
+                                 (not (:seon.call-preparation/rest-slot?
+                                       arity))))
+                          arity-plans)}
+           variadic
+           (assoc :seon.call-preparation/variadic
+                  {:seon.fn.arity/order (:seon.fn.arity/order variadic)
+                   :seon.fn.arity/min (:seon.fn.arity/min variadic)
+                   :seon.call-preparation/rest-slot?
+                   (:seon.call-preparation/rest-slot? variadic)
+                   :seon.call-preparation/entries
+                   (:seon.call-preparation/entries variadic)})))))))
 
 (defn prepared-arities
   "Source argument-count ranges compatible with an invocation plan.
@@ -1140,11 +1166,12 @@
   per call: a redefinition necessarily commits, so a database value whose
   basis this entry was already verified against cannot be hiding a newer
   contract. Without that fence the warm path ran an aggregating Datalog
-  query on every single prepared call."
+  query on every single prepared call. A read error is returned and never
+  cached, so the next call reads again."
   {:malli/schema
    [:=> [:cat :seon.call-preparation/state :seon.db/database-value
          :seon.call-preparation/snapshot :seon.fn/sym]
-    [:or :seon.call-preparation/plan :nil]]}
+    [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [call-state database current sym]
   (let [held (get-in @call-state [:seon.call-preparation/plans sym])
         basis (long (:seon.call-preparation/basis-t current))
@@ -1168,7 +1195,7 @@
 
       :else
       (let [compiled (plan-for database current sym)]
-        (when compiled
+        (when (and compiled (not (refused-read [compiled])))
           (swap! call-state assoc-in [:seon.call-preparation/plans sym]
                  {:seon.call-preparation/contract-t
                   (:seon.call-preparation/contract-t compiled)
@@ -1448,6 +1475,13 @@
                       (:seon.call-preparation/entries answer))]
           (or @refusal filled))))))
 
+(defn- refused-call
+  "A read error that stopped preparing a call to `sym`, naming that call."
+  {:malli/schema [:=> [:cat :seon.fn/sym :seon.db/error-result]
+                  :seon.db/error-result]}
+  [sym refusal]
+  (assoc refusal :seon.call-preparation/target-symbol sym))
+
 (defn hook
   "The `:call-preparation-hook` sci calls on every direct Var call.
 
@@ -1494,9 +1528,11 @@
                                sym)
               arguments
               (let [environment (env/scope environment {:my.program/executing-ctx ctx})
-                    prepared (prepare current environment
-                                      (plan call-state database current sym)
-                                      (vec arguments))]
-                (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidate-count prepared)))
-                  (reduced prepared)
-                  prepared)))))))))
+                    plan-value (plan call-state database current sym)]
+                (if (refused-read [plan-value])
+                  (reduced (refused-call sym plan-value))
+                  (let [prepared (prepare current environment plan-value
+                                          (vec arguments))]
+                    (if (and (map? prepared) (or (:seon.call-preparation/unavailable-key prepared) (:seon.call-preparation/invalid-key prepared) (:seon.call-preparation/candidate-count prepared)))
+                      (reduced prepared)
+                      prepared)))))))))))
