@@ -68,8 +68,9 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
   checkpoint with `bin/seon init --dev default --changed <paths>` (zsh: split the list with `${=paths}`);
   102 files adopted in 11 s. Start should publish or refuse when the checkout differs from the published
   program (schema resources especially), rather than run mismatched.
+- Verification results: tmp/orchestrator/verification-queue-2026-09-24.md (8 of 17 focused regressions green; reds returned to their lanes).
 - Datahike fused-root pin: fork commit fa0cc1a7 (+19/−6, regression datahike.test.fusion-root-pin-test);
-  root runs the fork test, bumps the gitlink, pushes the fork, restarts default. force-branch! was never
+  fork test RED (the test does not reproduce the unwritten-root precondition; count 50 vs 51) — back to the lane; no gitlink bump yet. force-branch! was never
   exposed (it writes fused roots); only commit! was.
 
 ## Integration (root, at the end of the fix round)
