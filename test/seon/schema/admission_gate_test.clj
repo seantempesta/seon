@@ -4,7 +4,9 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.schema :as schema]
-            [seon.schema.admission :as admission]))
+            [seon.schema.admission :as admission]
+            [seon.schema.datahike :as schema.datahike]
+            [seon.schema.edn :as schema.edn]))
 
 (defn- findings-of-type
   [finding-type findings]
@@ -206,6 +208,7 @@
          :nilable-value [:maybe :string]
          :nilable-member [:map [:one-verdict.fixture/member [:maybe :string]]]
          :nil-union-member [:map [:one-verdict.fixture/member [:or :nil :string]]]
+         :bare-any [:vector :any]
          :exempted-any
          [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
                 :seon.schema.admission/reason "External value has no stable predicate."
@@ -220,38 +223,58 @@
            (hook-verdict projection source schema-key form)])]
     (doseq [[source case-name registered hooked] verdicts]
       (is (= registered hooked) (pr-str [source case-name])))
+    (testing "an undefined slot is admitted from every source"
+      (is (= #{:admitted}
+             (set (for [[_ case-name registered hooked] verdicts
+                        :when (= :bare-any case-name)
+                        verdict [registered hooked]]
+                    verdict)))))
     (testing "the one rule refuses an agent's incomplete contracts"
       (is (= :seon.schema/nilable-map-value
              (some (fn [[source case-name _ hooked]]
                      (when (= [:agent :nilable-member] [source case-name]) hooked))
                    verdicts))))))
 
-(deftest a-core-undefined-slot-must-justify-itself
-  ;; CLASS: c01809720 deleted the hook's only core guard, so a packaged schema
-  ;; could declare `:any`/`:some` with no recorded reason. Owner ruling
-  ;; 2026-09-24: core may use them, but only with the polymorphic-boundary
-  ;; exemption, a reason and a bounded generator.
-  (let [core-findings
-        (fn [form]
-          (findings-of-type
-           :schema-polymorphism
-           (admission/admit
-            {::admission/declarations {:core-guard.fixture/value form}
-             ::admission/registry {:existing/alpha :int}
-             ::admission/source :core})))]
-    (is (= [[:core-guard.fixture/member]] (mapv :seon.schema/path
-                       (core-findings [:map [:core-guard.fixture/member :any]])))
-        "an unjustified :any refuses, naming its path")
-    (is (seq (core-findings [:vector :some])))
-    (is (empty? (core-findings
-                 [:any {:seon.schema.admission/exemption
-                        :seon.schema.admission/polymorphic-boundary
-                        :seon.schema.admission/reason "External value has no stable predicate."
-                        :gen/schema :string}]))
-        "the recorded exemption, reason and generator justify it")
-    (is (seq (core-findings
-              [:any {:seon.schema.admission/exemption
-                     :seon.schema.admission/polymorphic-boundary
-                     :gen/schema :string}]))
-        "an exemption without its reason does not")
-    (is (empty? (core-findings [:string {:min 1}])) "a defined slot needs nothing")))
+(deftest an-undefined-slot-is-advice-a-stored-one-is-refused
+  ;; CLASS: `:any`/`:some` refused agent contracts (seon.schema.internal) and,
+  ;; after 883cc29d8, core declarations at the hook. Owner ruling 2026-09-24:
+  ;; no ban anywhere. Every source is admitted with one advisory, which the
+  ;; recorded exemption silences. Only storage refuses: a stored attribute
+  ;; needs a Datahike value type.
+  (doseq [source [:core :agent]]
+    (let [admit (fn [form]
+                  (admission/admit
+                   {::admission/declarations {:undefined-slot.fixture/value form}
+                    ::admission/registry {:existing/alpha :int}
+                    ::admission/source source}))
+          advice #(findings-of-type :schema-polymorphism (admit %))
+          contract [:=> [:cat :any] :int]]
+      (is (empty? (filter #(= :error (:level %)) (admit contract)))
+          (str source " function contract with a bare :any is admitted"))
+      (is (= [[:warning [0 0]]] (mapv (juxt :level :seon.schema/path) (advice contract)))
+          (str source " with one advisory naming the slot"))
+      (is (= 1 (count (advice [:map [:undefined-slot.fixture/a :any]
+                               [:undefined-slot.fixture/b :some]])))
+          (str source " once per declaration"))
+      (is (empty? (advice
+                   [:any {:seon.schema.admission/exemption
+                          :seon.schema.admission/polymorphic-boundary
+                          :seon.schema.admission/reason "External value has no stable predicate."
+                          :gen/schema :string}]))
+          (str source " the recorded exemption, reason and generator silence it"))
+      (is (empty? (advice [:string {:min 1}])) (str source " a defined slot needs nothing"))))
+  (testing "a stored attribute schema :any is refused: it needs a storable type"
+    (let [projection (schema/declaration-projection
+                      (assoc (schema.edn/packaged-forms)
+                             :undefined-slot.fixture/stored :any
+                             :undefined-slot.fixture/entity
+                             [:map {:seon.db/attributes true}
+                              [:undefined-slot.fixture/stored :undefined-slot.fixture/stored]]))
+          refusal (try (schema.datahike/malli->datahike-attr-in
+                        projection :undefined-slot.fixture/stored)
+                       nil
+                       (catch clojure.lang.ExceptionInfo failure failure))]
+      (is (= {::schema.datahike/attr :undefined-slot.fixture/stored
+              ::schema.datahike/form :any
+              ::schema.datahike/value-type-unavailable true}
+             (ex-data refusal))))))

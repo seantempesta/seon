@@ -69,11 +69,8 @@
           (is (= expected (:seon.schema/error maybe-refusal)) position)
           (is (= expected (:seon.schema/error or-refusal)) position)
           (is (= subject (get or-refusal expected)) position))))
-    (testing "an undefined slot refuses as its declared kind, naming the function"
-      (let [refusal (admission projection subject [:=> [:cat :any] :int])]
-        (is (= :seon.schema/undefined-contract (:seon.schema/error refusal)))
-        (is (= subject (:seon.schema/identity refusal)))
-        (is (= :any (:seon.schema/schema-type refusal)))))
+    (testing "an undefined slot is advice, never a refusal (owner ruling 2026-09-24)"
+      (is (= :admitted (admission projection subject [:=> [:cat :any] :int]))))
     (testing "no packaged core contract is refused for :nil or through the helper's contract"
       (let [contracts (core-nil-contracts)
             outcomes (for [[function-symbol contract] contracts]

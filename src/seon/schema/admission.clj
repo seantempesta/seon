@@ -387,13 +387,14 @@
            declaration
            (assoc :seon.schema.admission/declaration declaration)))))))
 
-(defn- core-polymorphism-finding
-  "Nil, or the blocking finding for the first `:any`/`:some` slot of a `:core`
-  declaration that does not justify itself. Core code may use an undefined
-  slot only with the recorded polymorphic-boundary exemption, a reason and a
-  bounded generator: `internal/permissive-positions` owns that judgement
-  (owner ruling 2026-09-24). Runs only after the declaration was admitted, so
-  its structure compiles."
+(defn- undefined-slot-finding
+  "Nil, or one advisory warning for the first `:any`/`:some` slot of a
+  declaration that does not record why it accepts anything. Undefined slots
+  are never refused (owner ruling 2026-09-24), whatever the source;
+  the recorded polymorphic-boundary exemption, reason and generator, judged by
+  `internal/permissive-positions`, silence it. A stored attribute still needs a
+  Datahike value type: `seon.schema.datahike/malli->datahike-attr-in` refuses
+  `:any` there. Runs only after the declaration was admitted."
   {:malli/schema [:=> [:cat [:or :nil :string] :keyword :seon.schema/value]
                   [:or :nil :map]]}
   [file declaration-key form]
@@ -403,15 +404,14 @@
                            (internal/permissive-positions
                             {:seon.schema/compiled (schema/structural-schema form)})))]
     (finding
-     file :error :schema-polymorphism
-     (str "Schema declaration " declaration-key " uses "
-          (pr-str (:seon.schema/definition slot)) " at "
-          (pr-str (:seon.schema/path slot))
-          " without the recorded polymorphic-boundary exemption, reason, and"
-          " bounded generator. Name the value with a predicate schema, or add"
-          " {:seon.schema.admission/exemption"
+     file :warning :schema-polymorphism
+     (str "Schema declaration " declaration-key " accepts anything at "
+          (pr-str (:seon.schema/path slot)) " ("
+          (pr-str (:seon.schema/definition slot)) "). If that is deliberate,"
+          " record why: {:seon.schema.admission/exemption"
           " :seon.schema.admission/polymorphic-boundary"
-          " :seon.schema.admission/reason \"...\" :gen/schema ...}.")
+          " :seon.schema.admission/reason \"...\" :gen/schema ...}; otherwise"
+          " name the value with a predicate schema.")
      {:seon.schema.admission/declaration declaration-key
       :seon.schema/path (:seon.schema/path slot)})))
 
@@ -425,7 +425,8 @@
   it. `::source` is the `:seon.schema.admission/source` the declarations
   will be recorded with: `:core` for packaged resource files, `:agent` for
   `::declarations`, unless the request names one. Error findings block;
-  exact-reuse and name-overlap findings are advisory warnings."
+  exact-reuse, name-overlap and
+  undefined-slot findings are advisory warnings."
   {:malli/schema [:=> [:cat :map] [:vector :map]]}
   [{::keys [registry declarations source] :as request}]
   (try
@@ -483,10 +484,9 @@
                       (keep (fn [[declaration-key form]]
                               (or (registration-finding files-by-key complete-forms
                                                         declaration-key source)
-                                  (when (= :core source)
-                                    (core-polymorphism-finding
-                                     (get files-by-key declaration-key)
-                                     declaration-key form))))))
+                                  (undefined-slot-finding
+                                   (get files-by-key declaration-key)
+                                   declaration-key form)))))
                 (sort-by key candidate-declarations))]
       (vec (concat read-findings house collisions registration
                    similarity)))

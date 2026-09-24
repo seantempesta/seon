@@ -129,6 +129,19 @@
                 :else false)))]
     (extends? compiled #{})))
 
+(defn- justified-polymorphism?
+  "Whether a polymorphic slot's own properties record the polymorphic-boundary
+   exemption, a nonblank reason and a bounded generator."
+  {:malli/schema [:=> [:cat :map] :boolean]}
+  [properties]
+  (let [reason (:seon.schema.admission/reason properties)]
+    (boolean
+     (and (= :seon.schema.admission/polymorphic-boundary
+             (:seon.schema.admission/exemption properties))
+          (string? reason) (not (str/blank? reason))
+          (some #(contains? properties %)
+                [:gen/schema :gen/elements :gen/gen :gen/return])))))
+
 (defn permissive-positions
   "Inspect schema syntax, excluding literal enum values and property data.
 
@@ -144,11 +157,7 @@
                   reference (when (m/-ref-schema? node) (m/-ref node))
                   node-id (or (reference-id node) node)
                   reason (:seon.schema.admission/reason properties)
-                  justified? (and (= :seon.schema.admission/polymorphic-boundary
-                                     (:seon.schema.admission/exemption properties))
-                                  (string? reason) (not (str/blank? reason))
-                                  (some #(contains? properties %)
-                                        [:gen/schema :gen/elements :gen/gen :gen/return]))
+                  justified? (justified-polymorphism? (or properties {}))
                   problem (cond
                             (#{:any :some} tag) :undefined
                             (and stored? (= :maybe tag)) :stored-nil
@@ -303,7 +312,8 @@
    This is the one contract-completeness rule. Every entrance reaches it
    through `seon.schema.edn/admit`: `seon.schema/register!`, activation and
    the edit hook's `seon.schema.admission/admit`, so a contract text and
-   admission source get one verdict wherever they enter.
+   admission source get one verdict wherever they enter. An undefined
+   `:any`/`:some` slot is advisory data for every source.
 
    Canonical references are not followed here; `seon.schema` recursively
    validates them with each referenced declaration's own admission source.
@@ -324,16 +334,17 @@
      (fn [schema path _children _options]
        (let [schema-type (m/type schema)
              properties (or (m/properties schema) {})]
-         (when (and authored? (contains? undefined-types schema-type))
-           (contract-error!
-            identity definition path :seon.schema/undefined-contract
-            (str identity " uses " schema-type
-                 " in an agent-authored contract. Replace the undefined slot "
-                 "with a named predicate schema, for example "
-                 "(schema/register! ::value "
-                 "[:fn {:error/message \"must be ...\" "
-                 ":gen/schema :string} 'my.domain/value?]).")
-            {:seon.schema/schema-type schema-type}))
+         ;; An undefined slot is advice, never a refusal (owner ruling
+         ;; 2026-09-24); its recorded justification silences it. A stored
+         ;; attribute still needs a Datahike value type, which
+         ;; `seon.schema.datahike` refuses where it derives storage.
+         (when (and (contains? undefined-types schema-type)
+                    (not (justified-polymorphism? properties)))
+           (vswap! advisories conj
+                   {:seon.schema.advisory/kind :seon.schema.advisory/undefined
+                    :seon.schema/identity identity
+                    :seon.schema/path (vec path)
+                    :seon.schema/schema-type schema-type}))
          (when (and authored? (= :fn schema-type))
            (let [predicate (guarded-predicate-symbol schema)
                  prebound?
