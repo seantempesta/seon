@@ -20,10 +20,6 @@
              :double
              :uuid
              :inst],
-            :capacity-observer-request
-            [:map
-             [:seon.flow/parallelism :seon.flow/parallelism]
-             [:seon.flow/active-work :seon.flow/active-work]],
             :channel
             [:fn
              {:error/message "must be a core.async channel"
@@ -37,7 +33,6 @@
             [:=>
              [:cat :seon.error/recording-observation]
              [:maybe :seon.flow/callback-result]],
-            :compute-timeout-ms [:int {:min 1}],
             :core-fault :map,
             :error-fanout
             [:map
@@ -112,10 +107,6 @@
              seon.flow/proc-launcher?],
             :launcher-configuration
             [:map
-             [:seon.config.flow.compute/queue-depth
-              :seon.config.flow.compute/queue-depth]
-             [:seon.config.flow.compute/concurrency
-              :seon.config.flow.compute/concurrency]
              [:seon.config.flow.io/queue-depth
               :seon.config.flow.io/queue-depth]
              [:seon.config.flow.io/concurrency
@@ -141,7 +132,6 @@
               :gen/gen seon.flow/step-var-generator}
              seon.flow/step-var?],
             :submission-id [:or :uuid :keyword :string],
-            :submission-wait-ms [:int {:min 0}],
             :io-complete! [:=> [:cat :map] [:maybe :seon.flow/callback-result]],
             :io-submission
             [:map
@@ -162,32 +152,12 @@
              [:seon.flow/graph :seon.flow/graph]
              [:seon.flow/started :seon.flow/started]
              [:seon.flow/active-work :seon.flow/active-work]
-             [:seon.flow/compute-executor :seon.flow/executor]
              [:seon.flow/configuration
               :seon.flow/launcher-configuration]],
             :work-launcher-request
             [:map
              [:seon.flow/configuration
               :seon.flow/launcher-configuration]
-             [:seon.env/environment :seon.env/environment]
-             [:seon.flow/launcher-step {:optional true} :seon.flow/step-var]],
-            :work-result
-            [:or
-             [:map
-              [:seon.flow/outcome [:= :seon.flow/time-limit]]
-              [:seon.flow/submission-wait-ms
-               :seon.flow/submission-wait-ms]]
-             [:map
-              [:seon.flow/outcome [:= :seon.flow/completed]]
-              [:seon.flow/value :seon.sci.admit/value]
-              [:seon.flow/submission-wait-ms
-               :seon.flow/submission-wait-ms]]],
-            :work-submission
-            [:map
-             [:seon.flow/submission-id :seon.flow/submission-id]
-             [:seon.flow/workload :seon.flow/workload]
-             [:seon.flow/work-fn :seon.flow/work-fn]
-             [:seon.flow/time-limit-ms :seon.flow/compute-timeout-ms]
              [:seon.env/environment :seon.env/environment]],
             :workload [:enum :compute :io],
             :proc-id :keyword,
@@ -205,23 +175,11 @@
    [:seon.flow/launcher-stopped :seon.flow/launcher-stopped]
    [:seon.flow/submission-id :seon.flow/submission-id]
 ]]
- :seon.flow/time-limit :seon.flow/proc-id
- :seon.flow/time-limit-error
- [:and :seon.error/base
-  [:map
-   [:seon.flow/time-limit :seon.flow/time-limit]
-]]
  :seon.flow/missing-config-facts [:vector {:min 1} :qualified-keyword]
  :seon.flow/configuration-error
  [:and :seon.error/base
   [:map
    [:seon.flow/missing-config-facts :seon.flow/missing-config-facts]
-]]
- :seon.flow/missing-launcher-submission :seon.flow/submission-id
- :seon.flow/missing-launcher-error
- [:and :seon.error/base
-  [:map
-   [:seon.flow/missing-launcher-submission :seon.flow/missing-launcher-submission]
 ]]
  :seon.flow/timeout :seon.flow/proc-id
  :seon.flow/timeout-error

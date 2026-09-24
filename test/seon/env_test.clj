@@ -123,8 +123,6 @@
 (def ^:private launcher-configuration
   (assoc (select-keys (test-support/effective-config)
                       flow/flow-workload-attributes)
-         :seon.config.flow.compute/queue-depth 8
-         :seon.config.flow.compute/concurrency 2
          :seon.config.flow.io/queue-depth 8
          :seon.config.flow.io/concurrency 4
          :seon.config.agent/turn-completion-backstop-ms 60000))
@@ -138,7 +136,6 @@
                             :seon.flow/configuration launcher-configuration}))
                         environments)
         io-observed (atom [])
-        compute-observed (atom [])
         complete-observed (atom [])
         per-launcher 8]
     (try
@@ -147,7 +144,7 @@
       ;; frame as well as from its submission. The submission's data must be
       ;; the only carrier, so each crossing must see its own environment AND
       ;; see the decoys ABSENT. While flow conveyed bindings with `bound-fn*`
-      ;; the compute work and the terminal callback both inherited these
+      ;; the work and the terminal callback both inherited these
       ;; decoys, which is exactly why the environment refusal could not yet
       ;; catch a submission that named the wrong cluster: correct and
       ;; incorrect code behaved identically.
@@ -176,24 +173,7 @@
                           [ordinal
                            (:seon.boot/cluster-name (sut/of terminal))
                            db/*conn*
-                           effect/*request-context*]))})))
-          (is (= :seon.flow/completed
-                 (:seon.flow/outcome
-                  (flow/submit!!
-                   launcher
-                   {:seon.env/environment environment
-                    :seon.flow/submission-id
-                    (keyword (str "compute-" ordinal "-" n))
-                    :seon.flow/workload :compute
-                    :seon.flow/time-limit-ms 15000
-                    :seon.flow/work-fn
-                    (fn [call]
-                      (swap! compute-observed conj
-                             [ordinal
-                              (:seon.boot/cluster-name (sut/of call))
-                              db/*conn*
-                              effect/*request-context*])
-                      ::compute-done)}))))))
+                           effect/*request-context*]))})))))
       (test-support/await-event!
        (future
          (while (< (count @complete-observed) (* 2 per-launcher))
@@ -213,62 +193,27 @@
         (is (= (* 2 per-launcher) (count @io-observed)))
         (is (= [] (wrong @io-observed))
             "io work read exactly its own submission's environment")
-        (is (= [] (wrong @compute-observed))
-            "compute work read exactly its own submission's environment")
         (is (= [] (wrong @complete-observed))
             "each terminal callback read exactly its submission's environment")
         ;; Dependence: with no conveyance left, the ONLY way any of these
         ;; three could name a cluster is the data on their submission.
         (is (= [] (conveyed @io-observed))
             "io work inherited no submitter binding")
-        (is (= [] (conveyed @compute-observed))
-            "compute work inherited no submitter binding")
         (is (= [] (conveyed @complete-observed))
             "the terminal callback inherited no submitter binding"))
       (finally
         (run! flow/stop-work-launcher! launchers)))))
 
-(deftest an-awaited-submission-carries-its-arm-and-a-detached-one-does-not
-  ;; THE CLASS: which submissions a turn's deadline latch governs. An
-  ;; AWAITED submission is the turn — the submitter blocks on it, so its
-  ;; limit must reach the worker. A DETACHED submission exists precisely to
-  ;; OUTLIVE the turn (`my.background`), so inheriting that latch would cut
-  ;; background work at the turn's deadline. Both directions are asserted
-  ;; here because a mechanism that captures unconditionally satisfies the
-  ;; first and silently inverts the second.
+(deftest a-detached-submission-carries-no-arm
+  ;; THE CLASS: a DETACHED submission exists precisely to OUTLIVE the turn
+  ;; (`my.background`), so inheriting the submitting turn's deadline latch
+  ;; would cut background work at the turn's deadline.
   (let [environment (test-support/environment "arm-carriage")
         launcher (flow/start-work-launcher!
                   {:seon.env/environment environment
                    :seon.flow/configuration launcher-configuration})
         ctx (eval/build-base-ctx (seon.schema/handed-projection))]
     (try
-      (testing "an armed submitter's arm reaches the awaited compute worker"
-        (let [observed (promise)
-              armed (kernel/arm ctx 15000)
-              submitting-arm (atom nil)]
-          (try
-            (reset! submitting-arm (kernel/current-arm))
-            (flow/submit!!
-             launcher
-             {:seon.env/environment environment
-              :seon.flow/submission-id ::armed-compute
-              :seon.flow/workload :compute
-              :seon.flow/time-limit-ms 15000
-              :seon.flow/work-fn
-              (fn [call]
-                (deliver observed
-                         {:carried (:seon.sci.kernel/arm (sut/of call))
-                          :adopted (kernel/current-arm)})
-                ::done)})
-            (finally
-              ((:seon.sci.kernel/stop! armed))))
-          (let [{:keys [carried adopted]}
-                (test-support/await-event! (future @observed) ::armed-compute)]
-            (is (identical? @submitting-arm carried)
-                "the submission carried the submitting thread's arm as data")
-            (is (identical? @submitting-arm adopted)
-                "the compute thread ran under that same arm, not unarmed"))))
-
       (testing "a DETACHED submission from an armed submitter carries no arm"
         (let [observed (promise)
               armed (kernel/arm ctx 15000)]
@@ -366,16 +311,5 @@
           (is (= 'seon.flow/submit!
                  (:seon.error/operation refusal)))))
 
-      (testing "the compute submission"
-        (let [refusal (test-support/refusal-data
-                       #(flow/submit!!
-                         launcher
-                         {:seon.flow/submission-id ::no-environment
-                          :seon.flow/workload :compute
-                          :seon.flow/time-limit-ms 1000
-                          :seon.flow/work-fn (fn [_] ::unreached)}))]
-          (is (= :input (:seon.instrument/check refusal)))
-          (is (= 'seon.flow/submit!!
-                 (:seon.error/operation refusal)))))
       (finally
         (flow/stop-work-launcher! launcher)))))

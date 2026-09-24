@@ -62,10 +62,9 @@
 ;;; to evaluate to, without a sci context.
 ;;;
 ;;; DELIBERATELY NOT DYNAMIC, and the reason is load-bearing. The run
-;;; loop submits every evaluation across `seon.flow/submit!!` onto a
-;;; compute thread (`seon.turn/submit-evaluation!!`), and flow
-;;; conveys NOTHING across that crossing but the submission's own data.
-;;; A thread-local carrier therefore reaches the SUBMITTING thread only:
+;;; loop evaluates on its proc's thread, not the fixture's, and flow
+;;; conveys no bindings across that crossing. A thread-local carrier
+;;; therefore reaches the fixture's thread only:
 ;;; the evaluator running the work reads this Var's root value, so the
 ;;; fixture's chosen evaluation is silently replaced by the default and
 ;;; every assertion downstream of it fails somewhere else. Tests inject

@@ -14,12 +14,10 @@
             [malli.core :as m]
             [malli.generator :as mg]
             [malli.instrument :as mi]
-            [seon.turn :as turn]
             [seon.config :as config]
             [seon.flow :as sut]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support])
   (:import [java.io File]
            [java.net URI]
@@ -27,8 +25,7 @@
             WebSocket WebSocket$Listener]
            [java.nio.file ClosedWatchServiceException StandardWatchEventKinds
             WatchEvent$Kind WatchService]
-           [java.util.concurrent CompletableFuture CountDownLatch
-            Future TimeUnit]))
+           [java.util.concurrent CompletableFuture CountDownLatch TimeUnit]))
 
 (def ^:private test-work-launcher (atom nil))
 
@@ -259,12 +256,6 @@
              (first (swap-vals! test-work-launcher (constantly nil)))]
     (sut/stop-work-launcher! launcher)))
 
-(defn- submit-test!!
-  [submission]
-  (sut/submit!! @test-work-launcher
-                (assoc submission
-                       :seon.env/environment @test-environment)))
-
 (def ^:private callback-schema-keys
   [:seon.flow/commit-drop!
    :seon.flow/commit-fault!
@@ -329,10 +320,9 @@
          {:procs
           {:observer
            {:proc
-            (sut/capacity-observer-proc
-             {:seon.env/environment @test-environment
-              ::sut/parallelism 1
-              ::sut/active-work (atom {})})}}
+            (sut/var-process #'join-probe-step :io
+                             {:seon.env/environment @test-environment
+                              ::join-in (async/chan)})}}
           :conns []})
         started (flow/start graph)]
     (flow/resume graph)
@@ -471,132 +461,12 @@
                               :seon.await/diagnostic {:seon.error/layer :flow
                                                       :seon.error/operation ::throwing-work}})))))))
 
-(deftest production-launcher-wedges-degrade-capacity-by-exactly-n
-  (let [parallelism 4
-        wedge-count 2
-        wedge-started (CountDownLatch. wedge-count)
-        release-wedges (CountDownLatch. 1)
-        configuration
-        (assoc test-launcher-configuration
-               :seon.config.flow.compute/queue-depth 2
-               :seon.config.flow.compute/concurrency parallelism)
-        launcher
-        (install-test-work-launcher!
-         {::sut/configuration configuration})
-        wedge-ids #{:wedge-0 :wedge-1}
-        wedges
-        (mapv
-         (fn [submission-id]
-           (future
-             (submit-test!!
-              {::sut/submission-id submission-id
-               ::sut/workload :compute
-               ::sut/time-limit-ms 25
-               ::sut/work-fn
-               (fn [{::sut/keys [started!]}]
-                 (started!)
-                 (.countDown wedge-started)
-                 (test-support/await-event! release-wedges ::release-production-wedges)
-                 ::released)})))
-         wedge-ids)]
-    (try
-      (test-support/await-event! wedge-started ::production-wedges-started)
-      (is (every? #(= ::sut/time-limit (::sut/outcome @%)) wedges))
-      (let [observer-state
-            (::flow/state
-             (flow/ping-proc
-              (::sut/graph launcher)
-              ::sut/capacity-observer))]
-        (is (= wedge-ids (::sut/active-submissions observer-state)))
-        (is (= wedge-ids (::sut/wedged-submissions observer-state)))
-        (is (= (- parallelism wedge-count)
-               (::sut/available-capacity observer-state)))
-        (is (false? (::sut/platform-threads? observer-state))))
-      (let [remaining
-            (mapv
-             (fn [submission-id]
-               (future
-                 (submit-test!!
-                  {::sut/submission-id submission-id
-                   ::sut/workload :compute
-                   ::sut/time-limit-ms 1000
-                   ::sut/work-fn
-                   (fn [{::sut/keys [started!]}]
-                     (started!)
-                     submission-id)})))
-             [:remaining-0 :remaining-1])]
-        (is (= #{:remaining-0 :remaining-1}
-               (into #{} (map (comp ::sut/value deref)) remaining))
-            "all and only the remaining compute slots make progress"))
-      (finally
-        (.countDown release-wedges)
-        (dotimes [_ wedge-count]
-          (test-support/await-event!
-           (get-in launcher [::sut/started :report-chan])
-           ::production-wedge-released
-           #(contains? wedge-ids (::sut/submission-id %))))
-        (is (empty? @(::sut/active-work launcher)))
-        (stop-test-work-launcher!)))))
-
-(deftest production-launcher-bounds-virtual-task-lifetimes
-  (let [parallelism 2
-        entered (CountDownLatch. parallelism)
-        release (CountDownLatch. 1)
-        active (atom 0)
-        maximum-active (atom 0)
-        virtual? (atom [])
-        _ (install-test-work-launcher!
-           {::sut/configuration
-            (assoc test-launcher-configuration
-                   :seon.config.flow.compute/queue-depth 3
-                   :seon.config.flow.compute/concurrency parallelism)})
-        submissions
-        (mapv
-         (fn [ordinal]
-           (future
-             (submit-test!!
-              {::sut/submission-id (keyword (str "bounded-" ordinal))
-               ::sut/workload :compute
-               ::sut/time-limit-ms 5000
-               ::sut/work-fn
-               (fn [{::sut/keys [started!]}]
-                 (started!)
-                 (let [now-active (swap! active inc)]
-                   (swap! maximum-active max now-active)
-                   (swap! virtual? conj (.isVirtual (Thread/currentThread)))
-                   (.countDown entered)
-                   (try
-                     (test-support/await-event! release ::release-bounded-work)
-                     {:seon.flow-test/ordinal ordinal}
-                     (finally
-                       (swap! active dec)))))})))
-         (range 5))]
-    (try
-      (test-support/await-event! entered ::bounded-work-entered)
-      (is (= parallelism @active))
-      (is (= parallelism @maximum-active))
-      (.countDown release)
-      (let [results (mapv deref submissions)]
-        (is (= (set (range 5))
-               (into #{}
-                     (map #(get-in % [::sut/value
-                                     :seon.flow-test/ordinal]))
-                     results)))
-        (is (every? #(= ::sut/completed (::sut/outcome %)) results))
-        (is (= parallelism @maximum-active))
-        (is (every? true? @virtual?)))
-      (finally
-        (.countDown release)
-        (stop-test-work-launcher!)))))
-
 (deftest background-io-submission-is-nonblocking-bounded-and-joined
   (let [entered (CountDownLatch. 1)
         release (CountDownLatch. 1)
         virtual? (atom [])
         configuration
         (assoc test-launcher-configuration
-               :seon.config.flow.compute/queue-depth 1
-               :seon.config.flow.compute/concurrency 1
                :seon.config.flow.io/queue-depth 1
                :seon.config.flow.io/concurrency 1
                :seon.config.agent/turn-completion-backstop-ms 60000)
@@ -644,8 +514,6 @@
          {:seon.env/environment @test-environment
           ::sut/configuration
           (assoc test-io-configuration
-                 :seon.config.flow.compute/queue-depth 1
-                 :seon.config.flow.compute/concurrency 1
                  :seon.config.agent/turn-completion-backstop-ms 20)})
         held (CountDownLatch. 1)
         ;; an executor whose one task never returns stands for a proc that
@@ -667,318 +535,6 @@
         (.countDown held)
         (.close ^java.util.concurrent.ExecutorService stand-in)
         (.close ^java.util.concurrent.ExecutorService (::sut/executor launcher))))))
-
-(deftest submission-time-limit-covers-the-pre-start-wait
-  (testing "paused before start"
-    (let [launcher
-          (install-test-work-launcher!
-           {::sut/configuration
-            (assoc test-launcher-configuration
-                   :seon.config.flow.compute/queue-depth 2
-                   :seon.config.flow.compute/concurrency 1)})
-          graph (::sut/graph launcher)]
-      (try
-        (flow/pause graph)
-        (is (= :paused
-               (::flow/status
-                (flow/ping-proc graph ::sut/work-launcher)))
-            "the launcher observes pause before the submission")
-        (let [result
-              (deref
-               (future
-                 (submit-test!!
-                  {::sut/submission-id ::paused-before-start
-                   ::sut/workload :compute
-                   ::sut/time-limit-ms 30
-                   ::sut/work-fn (fn [_] ::unexpected-start)}))
-               (* 1000 test-support/event-backstop-seconds)
-               ::did-not-settle)]
-          (is (= ::sut/time-limit (::sut/outcome result))))
-        (finally
-          (stop-test-work-launcher!)))))
-  (testing "queued behind a fully occupied owner"
-    (let [entered (CountDownLatch. 1)
-          release (CountDownLatch. 1)
-          _ (install-test-work-launcher!
-             {::sut/configuration
-              (assoc test-launcher-configuration
-                     :seon.config.flow.compute/queue-depth 2
-                     :seon.config.flow.compute/concurrency 1)})
-          occupied
-          (future
-            (submit-test!!
-             {::sut/submission-id ::occupied
-              ::sut/workload :compute
-              ::sut/time-limit-ms 30
-              ::sut/work-fn
-              (fn [{::sut/keys [started!]}]
-                (started!)
-                (.countDown entered)
-                (test-support/await-event! release ::release-occupied)
-                ::released)}))]
-      (try
-        (test-support/await-event! entered ::occupied-entered)
-        (is (= ::sut/time-limit (::sut/outcome @occupied)))
-        (let [result
-              (deref
-               (future
-                 (submit-test!!
-                  {::sut/submission-id ::queued-behind-occupied
-                   ::sut/workload :compute
-                   ::sut/time-limit-ms 30
-                   ::sut/work-fn (fn [_] ::unexpected-start)}))
-               (* 1000 test-support/event-backstop-seconds)
-               ::did-not-settle)]
-          (is (= ::sut/time-limit (::sut/outcome result))))
-        (finally
-          (.countDown release)
-          (stop-test-work-launcher!))))))
-
-(deftest saturated-submission-refuses-without-blocking-the-caller
-  (let [entered (CountDownLatch. 1)
-        release (CountDownLatch. 1)
-        launcher
-        (install-test-work-launcher!
-         {::sut/configuration
-          (assoc test-launcher-configuration
-                 :seon.config.flow.compute/queue-depth 1
-                 :seon.config.flow.compute/concurrency 1)})
-        graph (::sut/graph launcher)
-        occupied
-        (future
-          (submit-test!!
-           {::sut/submission-id ::occupied-for-refusal
-            ::sut/workload :compute
-            ::sut/time-limit-ms 60000
-            ::sut/work-fn
-            (fn [{::sut/keys [started!]}]
-              (started!)
-              (.countDown entered)
-              (.await release)
-              ::released)}))]
-    (try
-      (test-support/await-event! entered ::refusal-owner-entered)
-      (let [buffered-result (promise)
-            buffered-status (atom ::sut/queued)
-            buffered
-            {::sut/submission-id ::buffered-before-refusal
-             ::sut/workload :compute
-             ::sut/work-fn (fn [_] ::buffered-completed)
-             ::sut/result buffered-result
-             ::sut/status buffered-status}]
-        (.get ^Future
-              (flow/inject
-               graph
-               [::sut/work-launcher ::sut/compute-submission]
-               [buffered])
-              test-support/event-backstop-seconds
-              TimeUnit/SECONDS)
-        (let [refused
-              (future
-                (submit-test!!
-                 {::sut/submission-id ::refused-at-capacity
-                  ::sut/workload :compute
-                  ::sut/time-limit-ms 60000
-                  ::sut/work-fn (fn [_] ::unexpected-refused-run)}))
-              result
-              (test-support/await-event!
-               refused
-               ::saturated-submission-refused)]
-          (is (= ::sut/completed (::sut/outcome result)))
-          (is (= :compute
-                 (get-in result [::sut/value ::sut/submission-capacity])))
-          (is (= ::sut/queued @buffered-status)
-              "capacity refusal retains the already-buffered submission"))
-        (.countDown release)
-        (is (= ::released
-               (::sut/value
-                (test-support/await-event!
-                 occupied
-                 ::refusal-owner-released))))
-        (is (= ::buffered-completed
-               (::sut/value
-                (test-support/await-event!
-                 (future @buffered-result)
-                 ::buffered-submission-completed)))))
-      (finally
-        (.countDown release)
-        (stop-test-work-launcher!)))))
-
-(def ^:private launcher-probe
-  "The latches the probed launcher step signals; nil passes through."
-  (atom nil))
-
-(defn- probed-launcher-step
-  ;; the production step, handed as the launcher's `::launcher-step`
-  ;; argument: default's own Var is never redefined
-  ([] (#'sut/work-launcher-step))
-  ([args] (#'sut/work-launcher-step args))
-  ([state transition]
-   (let [{:keys [resume-transition release-resume stop-transition]} @launcher-probe]
-     (when (and resume-transition (= ::flow/resume transition))
-       (.countDown ^CountDownLatch resume-transition)
-       (test-support/await-event! release-resume ::release-work-launcher-resume-transition))
-     (let [next-state (#'sut/work-launcher-step state transition)]
-       (when (and stop-transition (= ::flow/stop transition))
-         (.countDown ^CountDownLatch stop-transition))
-       next-state)))
-  ([state input-id message] (#'sut/work-launcher-step state input-id message)))
-
-(deftest launcher-stop-precedes-a-flood-of-ready-submissions
-  (let [queue-depth 256
-        _ (reset! launcher-probe nil)
-        launcher
-        (install-test-work-launcher!
-         {::sut/launcher-step #'probed-launcher-step
-          ::sut/configuration
-          (assoc test-launcher-configuration
-                 :seon.config.flow.compute/queue-depth queue-depth
-                 :seon.config.flow.compute/concurrency 1)})
-        graph (::sut/graph launcher)
-        resume-transition (CountDownLatch. 1)
-        release-resume (CountDownLatch. 1)
-        stop-transition (CountDownLatch. 1)
-        queued
-        (mapv
-         (fn [ordinal]
-           {::sut/submission-id (keyword (str "queued-before-stop-" ordinal))
-            ::sut/workload :compute
-            ::sut/work-fn (fn [_] ::unexpected-queued-run)
-            ::sut/result (promise)
-            ::sut/status (atom ::sut/queued)})
-         (range queue-depth))]
-    (try
-      (flow/pause graph)
-      (is (= :paused
-             (::flow/status
-              (flow/ping-proc graph ::sut/work-launcher)))
-          "the launcher observes pause before its queue is filled")
-      (.get ^Future
-            (flow/inject
-             graph
-             [::sut/work-launcher ::sut/compute-submission]
-             queued)
-            test-support/event-backstop-seconds
-            TimeUnit/SECONDS)
-      (reset! launcher-probe {:resume-transition resume-transition
-                              :release-resume release-resume
-                              :stop-transition stop-transition})
-      (flow/resume graph)
-      (test-support/await-event!
-       resume-transition
-       ::work-launcher-resume-transition)
-      (flow/stop graph)
-      (.countDown release-resume)
-      (test-support/await-event!
-       stop-transition
-       ::work-launcher-stop-transition)
-      ;; the owner sets `::completed` before it delivers the result
-      ;; (flow.clj compute task), so the two counts are not one instant:
-      ;; a delivered result implies completed, and a completed one delivers
-      (let [completed (filterv #(= ::sut/completed @(::sut/status %)) queued)]
-        (is (< (count completed) queue-depth)
-            "the stop transition completes without draining the flood")
-        (is (every? #(= ::sut/completed @(::sut/status %))
-                    (filter #(realized? (::sut/result %)) queued))
-            "only work selected before the stop tap became ready can finish")
-        (is (every? #(not= ::missing (deref (::sut/result %) 1000 ::missing)) completed)
-            "every completed submission delivers its result"))
-      (finally
-        (.countDown release-resume)
-        (reset! launcher-probe nil)
-        (stop-test-work-launcher!)))))
-
-(deftest starting-a-sibling-launcher-does-not-interrupt-accepted-work
-  (let [configuration
-        (assoc test-io-configuration
-               :seon.config.flow.compute/queue-depth 2
-               :seon.config.flow.compute/concurrency 1)
-        entered-a (CountDownLatch. 1)
-        release-a (CountDownLatch. 1)
-        calls-a (atom 0)
-        launcher-a
-        (sut/start-work-launcher! {:seon.env/environment @test-environment
-                                   ::sut/configuration configuration})
-        result-a
-          (future
-            (sut/submit!!
-             launcher-a
-             {:seon.env/environment @test-environment
-              ::sut/submission-id ::cluster-a-work
-              ::sut/workload :compute
-              ::sut/time-limit-ms 5000
-              ::sut/work-fn
-              (fn [_]
-                (swap! calls-a inc)
-                (.countDown entered-a)
-                (.await release-a)
-                ::cluster-a-completed)}))]
-      (try
-        (test-support/await-event! entered-a ::cluster-a-work-entered)
-        (let [launcher-b
-              (sut/start-work-launcher!
-               {:seon.env/environment @test-environment
-                ::sut/configuration configuration})]
-          (try
-            (is (= ::cluster-b-completed
-                   (::sut/value
-                    (sut/submit!!
-                     launcher-b
-                     {:seon.env/environment @test-environment
-                      ::sut/submission-id ::cluster-b-work
-                      ::sut/workload :compute
-                      ::sut/time-limit-ms 5000
-                      ::sut/work-fn (fn [_] ::cluster-b-completed)}))))
-            (.countDown release-a)
-            (is (= ::cluster-a-completed
-                   (::sut/value
-                    (test-support/await-event!
-                     result-a
-                     ::cluster-a-work-completed))))
-            (is (= 1 @calls-a))
-            (finally
-              (sut/stop-work-launcher! launcher-b))))
-        (finally
-          (.countDown release-a)
-          (sut/stop-work-launcher! launcher-a)))))
-
-(deftest turn-evaluation-completion-is-a-flat-diagnostic-value
-  (test-support/with-database
-    (fn [connection]
-      ;; Effective configuration reads the named cluster's own row.
-      (test-support/seed-cluster! connection "flow-evaluation")
-      (let [environment (test-support/environment "flow-evaluation" connection)
-            ctx (test-support/fork-cluster-ctx connection "flow-evaluation")]
-        (install-test-work-launcher!
-         {:seon.env/environment environment
-          ::sut/configuration
-          (assoc test-launcher-configuration
-                 :seon.config.flow.compute/queue-depth 1
-                 :seon.config.flow.compute/concurrency 1)})
-        (try
-          (let [evaluation
-                (#'turn/submit-evaluation!!
-                 {:seon.env/environment environment
-                  :seon.flow/work-launcher @test-work-launcher}
-                 sci.eval/evaluate
-                 "turn-boundary-0"
-                 {:seon.cluster.eval/source
-                  "(reduce + (map (fn [n] (inc n)) (range 500)))"
-                  :seon.cluster.eval/ns [:seon.ns/name 'clojure.core]
-                  :seon.sci.eval/ctx ctx
-                  :seon.db/db @connection
-                  :seon.sci.admit/caps
-                  (config/result-caps config/defaults)
-                  :seon.sci.eval/time-limit-ms 1000
-                  :seon.config/on-core-error :panic})
-                record (:seon.sci.admit/record evaluation)]
-            (is (map? evaluation))
-            (is (= 125250 (:seon.sci.admit/value evaluation)))
-            (is (pos? (:seon.eval/fn-entries record)))
-            (is (int? (:seon.eval/duration-ms record)))
-            (is (= -1 (:seon.eval/allocated-bytes record))))
-          (finally
-            (stop-test-work-launcher!)))))))
 
 (defn- start-test-fanout!
   ([connection graph started fault-buffer-capacity monitor-buffer-capacity]
@@ -1746,10 +1302,7 @@
   (with-open [launcher
               (test-support/closeable
                (install-test-work-launcher!
-                {::sut/configuration
-                 (assoc test-launcher-configuration
-                        :seon.config.flow.compute/queue-depth 2
-                        :seon.config.flow.compute/concurrency 1)})
+                {::sut/configuration test-launcher-configuration})
                (fn [_] (stop-test-work-launcher!)))
               client
               (test-support/closeable
@@ -1794,7 +1347,7 @@
           (is (= 200 (.statusCode response)))
           (is (str/includes? (.body response) "<title>Flow Monitor</title>"))
           (is (str/includes? graph-message "~:datafy"))
-          (doseq [pid ["~:seon.flow/work-launcher" "~:seon.flow/capacity-observer"]]
+          (doseq [pid ["~:seon.flow/work-launcher"]]
             (is (str/includes? graph-message pid)
                 (str "monitor graph data names " pid)))
           (test-support/await-event!

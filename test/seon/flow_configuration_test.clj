@@ -7,7 +7,7 @@
             [seon.cluster.agent]
             [seon.flow :as sut]
             [seon.test-support :as test-support])
-  (:import [java.util.concurrent ExecutorService]))
+  (:import [java.util.concurrent Executors ExecutorService]))
 
 (defn- private-var
   [namespace-symbol function-name]
@@ -59,18 +59,15 @@
       (let [environment (test-support/environment
                          "seon.flow-configuration-test" connection)
             projection (:seon.schema/projection environment)
-            compute-executor (sut/bounded-platform-executor 1)
+            task-executor (Executors/newVirtualThreadPerTaskExecutor)
             fault-channel (async/chan)]
         (try
           (let [graph-definitions
                 [[:work-launcher
                   ((private-var 'seon.flow 'work-launcher-graph-definition)
                    {:seon.env/environment environment
-                    ::sut/parallelism 1
                     ::sut/active-work (atom {})
-                    ::sut/queue-depth 1
-                    ::sut/compute-executor compute-executor
-                    ::sut/task-executor compute-executor
+                    ::sut/task-executor task-executor
                     ::sut/io-parallelism 1
                     ::sut/io-queue-depth 1
                     ::sut/io-submissions (atom {})})]
@@ -123,10 +120,9 @@
                      (:procs graph-definition))))
                  graph-definitions)]
             (is (seq proc-facts))
-            (is (= #{:io :compute} (set (map ::workload proc-facts))))
             (is (every? #(contains? #{:io :compute} (::workload %))
                         proc-facts)
                 (pr-str proc-facts)))
           (finally
             (async/close! fault-channel)
-            (.shutdownNow ^ExecutorService compute-executor)))))))
+            (.shutdownNow ^ExecutorService task-executor)))))))
