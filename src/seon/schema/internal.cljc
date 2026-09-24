@@ -489,15 +489,17 @@
                  e)))))))
 
 (defn assert-non-nilable-value-schema!
-  "Projection-build gate: reject a top-level nilable value schema — e.g.
+  "Admission gate for a new or changed declaration: reject a top-level
+   nilable value schema — e.g.
    `[:maybe :int]` or its other spelling `[:or :nil :int]`. In seon a stored
    value is NEVER nil (absent = the key is simply omitted, never stored as
    nil), so a NAMED value schema must not be nilable. Throws a guiding
    `:user-input` ex-info that hands back the copy-pasteable fix: register
    the base type, then mark the FIELD optional at its map site.
 
-   `schemas` is accepted because projection validation passes the complete
-   population through the same gate; the decision depends only on `v`.
+   A projection build never calls it, so a population admitted under an
+   older rule (an as-of view) stays readable. `schemas` is the candidate
+   population its callers hold; the decision depends only on `v`.
    `v` is candidate data here, not an independently compiled definition:
    [[assert-compilable-schema!]] owns validity against that complete
    population."

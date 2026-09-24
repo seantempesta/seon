@@ -624,10 +624,12 @@
                definition {:registry scope}))))]
      (try
        (doseq [identity (sort-by str (remove #(contains? retained %) (keys forms)))]
+         ;; Only what makes the projection compilable. Authoring rules judge
+         ;; a new or changed declaration at its admission (`register!`,
+         ;; `projection-with-schema`, the edit hook), never an existing
+         ;; population: an as-of view keeps the rules that admitted it.
          (internal/assert-compilable-schema!
-          forms identity (get forms identity) {:registry registry})
-         (internal/assert-non-nilable-value-schema!
-          forms identity (mr/schema registry identity)))
+          forms identity (get forms identity) {:registry registry}))
        (doseq [identity (sort-by str (remove #(contains? retained %) (keys contracts)))]
          (mr/schema registry identity))
        (catch Exception failure
@@ -3394,7 +3396,10 @@
   ([db _reusable-projection] (@database-projection db)))
 
 (defn projection-with-schema
-  "Validate the projection produced by exactly one schema replacement."
+  "Validate the projection produced by exactly one schema replacement.
+
+  This is an admission: a changed definition also meets the authoring rules
+  `register!` applies, which a projection build never re-judges."
   {:malli/schema
    [:=> [:catn [::projection ::projection]
                 [::registry-key ::registry-key]
@@ -3402,6 +3407,9 @@
                 [:seon.schema/admission :map]]
     ::projection]}
   [projection schema-key definition admission]
+  (when (not= definition (get-in projection [:seon.schema.projection/forms schema-key] ::absent))
+    (internal/assert-non-nilable-value-schema!
+     (:seon.schema.projection/forms projection) schema-key (structural-schema definition)))
   (projection-with-declarations
    'seon.schema/projection-with-schema projection
    (assoc (:seon.schema.projection/forms projection) schema-key definition)

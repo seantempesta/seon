@@ -1897,11 +1897,11 @@
         (is (= ::bootstrap-referrer
                (:seon.schema.edn/unresolved-reference refused)))))))
 
-(deftest a-nilable-value-schema-gets-one-verdict-at-build-and-replacement
-  ;; CLASS: a named value schema is never nil. The full build
-  ;; (`projection-registry`) refuses `[:maybe X]`; replacement through
-  ;; `projection-with-schema` reaches the same gate for the changed key, and
-  ;; this pins that the two cannot diverge.
+(deftest a-nilable-value-schema-is-refused-at-admission-never-at-build
+  ;; CLASS: a tightened authoring rule judges a new or changed declaration at
+  ;; admission (`projection-with-schema`, `register!`, the edit hook), never a
+  ;; population it did not admit. A projection build, whole or derived from a
+  ;; base as an as-of view derives its older rows, compiles what it holds.
   (let [verdict (fn [thunk]
                   (try (thunk) :admitted
                        (catch clojure.lang.ExceptionInfo e
@@ -1912,11 +1912,15 @@
                              [[:or :nil :string] :seon.schema/nilable-value-schema]
                              [[:or :string :nil :int] :seon.schema/nilable-value-schema]
                              [[:or :string :int] :admitted]
-                             [:string :admitted]]]
+                             [:string :admitted]]
+            :let [population {::nilable-base :string ::nilable-candidate form}]]
       (is (= expected
-             (verdict #(schema/build-projection
-                        {::nilable-base :string ::nilable-candidate form} {}))
              (verdict #(schema/projection-with-schema
                         base ::nilable-candidate form
                         {:seon.schema.admission/source :agent})))
-          (pr-str form)))))
+          (str "admission " (pr-str form)))
+      (is (= :admitted
+             (verdict #(schema/build-projection population {}))
+             (verdict #(schema/build-projection
+                        population {} {:seon.schema/projection base})))
+          (str "an existing population builds " (pr-str form))))))
