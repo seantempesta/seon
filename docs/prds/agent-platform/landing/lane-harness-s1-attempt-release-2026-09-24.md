@@ -1,91 +1,145 @@
 ---
 type: landing
-status: stopped before production edits (caller conversion needs held files)
+status: landed (S1a aed1b3838, S1b d6e93ce72, test fix dbbea3113); verification partial, load-paused
 lane: harness-s1-attempt-release
 created: 2026-09-24
 issue: docs/seon/issues/an-agent-graph-steps-after-its-test-branch-store-closes.md
-design: docs/research/agent-platform/one-test-harness/design-2026-09-24.md §1 row "graphs"/"cleanup", §9c S1
+design: docs/research/agent-platform/one-test-harness/design-2026-09-24.md §1 rows "graphs"/"cleanup", §9c S1
 ---
 
 # Lane harness-s1-attempt-release — landing (2026-09-24)
 
-What exists: `acquire-context!` returns an execution handle with no routing; `arm!` takes an
-independent routing atom from its request; `release-context!` knows nothing of graphs armed over
-its connection. So a fixture branch's release closes the store under a graph a test armed with its
-own `(agent/routing)`. The target moves routing onto the handle so release can stop and join it.
+**What exists.** `acquire-context!` returned a handle with no routing, and `arm!` took an
+independent routing atom. So a fixture's `release-context!` closed and unlinked its branch while
+graphs a test had armed were still stepping over it. That is the issue's
+`ClosedChannelException`. Now the handle owns its routing. Release marks that routing released,
+under the same monitor `arm!` takes. It then disarms (stops and joins) every graph in it,
+attempting each one. Only after all of them exit does it close, unlink and forget.
 
 ## Broken things first
 
-- **Stopped by the assignment's boundary, with no source edits.** S1a's caller conversion needs
-  three files that harness-s12-deletions holds. All three surviving tests stay under
-  turn-suite-subsumption (KEEP):
-  - `test/seon/turn_test.clj:485`: `virtual-turn-fixture`, which arms at :558/:658 and disarms at :720/:757.
-  - `test/seon/turn_continue_test.clj:44`: `prove-session`, which arms at :119 and disarms at :64/:137.
-  - `test/seon/loop_proof_test.clj:76, :251, :355`: P64, P237 and P327, which arm and disarm at 12 sites.
-  An unconverted caller keeps passing its own atom. Its `disarm!` and `armed` then read a
-  different routing from the one `arm!` used, so enforcing ownership breaks these tests. Keeping
-  a request-supplied routing alongside the handle's would leave two arming paths, and the defect
-  would stay open for exactly these fixtures.
-- Live default is degraded in a way this lane does not own. `runtime_status` shows state
-  `unknown` and an NPE at `seon.problems/failed-tests` (problems.clj:386). That is Astra
-  finding 5, which is harness-s0's slice.
+- **RESTART NEEDED (`bin/seon down && bin/seon start`, root).** Live default booted before S1a,
+  so its loop handle has no `:seon.agent/routing`. Reload does not rebuild that handle.
+  - With the new `arm!`, a live agent *created* before the restart gets a fresh routing from
+    acquisition, and its arm refuses: "routing is not the one the agent's execution owns".
+  - Root was already armed, so the early return keeps it running.
+  - `cluster.clj:3606` now puts the routing on the handle at boot.
+- **Two graphs leaked into default by my counter-proof.** I temporarily removed the
+  `stop-owned-graphs!` call to show the regression fails without it (run 6440bc35b505).
+  - Agents "idle" and "stuck" stayed armed on the unlinked branch `:agent-28ccfa9a169c`. Their
+    routing atom was local to that test run and is now unreachable. That is the defect itself,
+    reproduced.
+  - Their provider stand-in was released, so they should be parked. A restart clears them.
+  - The same run hit `OutOfMemoryError: Required array length 2147483638` while *printing* a
+    failed assertion on a routing entry. That is the fix-unbounded-printed-values class
+    (runner/report printing). I did not file a new issue.
+- **My first save published a half edit.** The save hook published the `arm!` identity check
+  before callers were converted (≈20:44Z). That contaminated my "before" run d680ac9e917a. The
+  baseline below comes from recorded results as of 20:35Z instead.
+- **The shared JVM was in heavy churn.** It showed "Node not found in storage", "the blob store
+  went away", adoption-basis races, and host-bound refusals from other lanes' `db.clj`,
+  `test.clj`, `runner.clj` and `sci/eval.clj` edits. Some runs failed for these reasons, not
+  because of this change.
 
-## Evidence (read-only JVM probes, session `harness-s1`, pid 99265)
+## Evidence
 
-- The installed `:seon.agent/execution-handle` keys are name, context-state, base-ctx,
-  connection, db, commit-id, projection, ctx, environment, branch, mode, owns-connection?,
-  owns-branch? and store. There is **no routing**. The installed `:seon.agent/arm-request` keys
-  are cluster, id and **routing** (required). Probe time: 4 ms.
-- Installed Var lines match the checkout: `release-context!` :767, `arm!` :959.
-- Construction sites of `(agent/routing)`: 25 in total.
-  - One is production (`cluster.clj:3606`, the cluster's own routing).
-  - 15 are in test files that are not held: agent_call_edges, cluster/agent_arming,
-    cluster/agent, concurrency, help_trial, issue, namespace_agent_loop, oversight ×3, program,
-    render/web_debug, rereads, run4_install.
-  - 5 are in the held files above.
-  - Pass-through callers: context_blocks_fixture :273/:341, concurrency :95, cluster/armed :285.
+- **Regression** `seon.cluster.agent-test/release-joins-every-owned-graph-before-it-closes-the-branch`:
+  - Fixed: pass 10/0/0 (run 35fe46785b27, 12.4 s request). It passed again in run a46db7722e5f.
+  - Without the fix (run 6440bc35b505): 4 fail, 3 error. The connection was released
+    ("Connection has been released."), the branch was unlinked from the roster, the stuck graph
+    stayed armed, `arm!` still admitted a new graph, and the executor never terminated.
+  - What it proves: an isolated attempt with two armed graphs, one blocked in an uninterruptible
+    prelude. Release refuses; the idle graph is still joined. The stuck graph keeps its routing,
+    the connection stays readable, and the branch stays in the roster. A new arm refuses by name
+    (`:seon.error/expected :seon.agent/routing`). After exit, a second release finishes and
+    unlinks.
+- **Focused callers (run a46db7722e5f).** All of these passed:
+  - the regression;
+  - `disarm-has-a-declared-loud-turn-completion-backstop` and
+    `disarm-interrupts-an-in-flight-turn-and-records-it-interrupted`;
+  - `disarm-drops-the-route-before-closing-it` and `fenced-is-the-derived-quarantine-state`;
+  - `a-function-without-a-contract-never-enters-the-program`,
+    `canonical-agent-handle-supplies-declared-producer-outputs` and
+    `a-refused-core-row-is-recorded-and-every-agent-still-arms`;
+  - both `release-context-test` tests.
 
-## Reviewed design, ready to run once the held files are free
+  Earlier, `seon.loop-proof-test/concurrent-arms-share-one-graph` passed too (run fdff6dd693fc).
+- **Before/after over the 102 tests in the converted caller namespaces.** Baseline is recorded
+  results as of 20:35Z; "after" is current recorded results.
 
-Scope is agent.clj, seon.agent.edn and test_support, plus about 20 one-line caller edits.
+  | before → after | tests |
+  |---|---:|
+  | pass → pass | 22 |
+  | red → red | 48 |
+  | red → pass | 1 |
+  | unknown → pass | 5 |
+  | pass → red | 1 |
+  | unknown → red | 1 |
+  | red / pass → unknown | 14 |
+  | unknown → unknown | 10 |
 
-1. **S1a ownership** (about 40 source lines plus about 20 caller lines).
-   - `acquire-context!` puts `:seon.agent/routing` on every handle. An acquisition that owns
-     its connection or branch gets a fresh `(routing)`. Otherwise it inherits the routing of
-     `previous`, then the branch owner, then the source handle.
-   - The cluster's `loop-handle` result carries the cluster's routing (cluster.clj:3606).
-   - `arm!` takes routing from the execution it acquires. The request's `:seon.agent/routing`
-     is deleted from `:arm-request`.
-   - The returned `:armed` entry carries its routing, for disarm and readers.
-   - `test_support/cluster-handle` defaults routing to the executing attempt's.
-   - Each caller's `(agent/routing)` becomes `(:seon.agent/routing handle)`.
-2. **S1b release** (about 25 source lines, plus a regression of about 70 lines).
-   - Under `(locking routing …)`, `release-context!` marks the routing `:seon.agent/released`,
-     and `arm!` refuses when it sees that mark.
-   - Release then calls `disarm!` for every armed id, collecting every failure without
-     stopping at the first.
-   - If any join failed, release throws the first failure with the rest suppressed. It keeps
-     the connection, branch, context-state entry and routing, and clears the mark so a later
-     release can finish.
-   - Only then does the existing connection → unlink → state list run.
-3. **Regression** (`test/seon/cluster/release_context_test.clj`, free). It covers:
-   - setup failure after the branch is created, which leaves no routing entry and no branch;
-   - two graphs, one whose turn ignores interrupt: release refuses, the store stays open, and a
-     second release after exit closes it;
-   - concurrent arm/release, where no graph survives and there are no reads over a closed store;
-   - nested acquisition, where a child's release does not stop the parent's graphs.
+  - The one pass → red is `rereads-test/generated-read-check…`. Its cause is "Cannot interpret
+    seon.db/carried-projection: Host-bound declaration…", which comes from a foreign `db.clj`
+    edit in flight.
+  - The one unknown → red is `concurrency-test/messages-stay-on-their-connection`, a fixture
+    custody refusal ("This write names branch …") before any arm.
+  - No red in any run carries either new refusal ("routing is not the one…" or "released this
+    routing"): 0 matches in `tmp/harness-s1-attempt-release/after-3.txt`.
+  - The remaining reds match the baseline classes: hand-built agent rows without
+    `:seon.agent/branch`, `:seon.program/definition-digest` fixtures, and duration overruns
+    under load.
+- **Installed.**
+  - `bin/seon init --dev default --changed` adopted S1a at commit 6ab58e5f and S1b at 6ab58f99.
+  - Earlier probes: the installed execution handle lacked routing and the arm request required
+    one.
+  - The loaded `disarm!` line moved to 1173 after reload, so the JVM runs the edited file.
+- Raw outputs are in `tmp/harness-s1-attempt-release/`:
+  - before.txt (contaminated), after.txt, after-2.txt, after-3.txt;
+  - after-regression.txt, without-fix.txt;
+  - init-s1a.txt, init-s1b.txt.
 
 ## Change
 
-None. This note is the only file committed. No tests were run, and no before/after numbers
-exist because nothing changed. No RESET NEEDED.
+- **S1a aed1b3838** (+63 / −38 over 18 files):
+  - `acquire-context!` gives each handle a routing. A handle that owns its acquisition gets a
+    fresh one; a reacquisition takes its previous or branch owner's; a live acquisition takes
+    its source handle's.
+  - `arm!` refuses a routing its execution does not own.
+  - Schema: required on the execution handle, optional on the context source.
+  - The cluster handle carries the cluster's routing.
+  - New `test-support/attempt-routing`; `cluster-handle` defaults to it.
+  - Converted callers:
+    - 13 `(agent/routing)` sites, in agent_call_edges, concurrency, program, run4_install,
+      loop_proof ×3, rereads, turn_continue, help_trial, turn, namespace_agent_loop,
+      cluster/agent_arming, render/web_debug and issue;
+    - `cluster/agent_test`'s `armory`, whose 17 calls now take the connection;
+    - the three `oversight_test` sites are left alone: they build routing values for the
+      reader, not for arming.
+- **S1b d6e93ce72** (+100 / −12):
+  - `stop-owned-graphs!` and `throw-causes!` are new.
+  - `release-context!` stops owned graphs first.
+  - `arm!` refuses a released routing.
+  - The regression is added.
+- **dbbea3113** (+2 / −1): the regression's child-branch writes run under that branch's custody.
+- Net source lines: `agent.clj` +57/−12, `cluster.clj` +5/−2, schema +3/−1.
 
-## Options for root
+## Verification limits and remaining commands (root, quiet window)
 
-- (a) **Recommended.** Relaunch this lane after harness-s12-deletions releases turn_test,
-  turn_continue_test and loop_proof_test. It is one lane over all 20 caller sites, in two
-  commits.
-- (b) Hand the 5 held one-line conversions to harness-s12 now, as a patch this lane writes, then
-  launch S1a/S1b.
-- (c) Land S1a/S1b now with a request routing that is still accepted. This is not recommended:
-  it keeps two arming paths and leaves the defect open in the held fixtures.
+- Hook publication is paused and no further runs were started. These are still to run:
+  - `bin/test-check default --test seon.cluster.agent-test/release-joins-every-owned-graph-before-it-closes-the-branch --include-long`
+  - `bin/test-check default --ns seon.cluster.agent-test --ns seon.cluster.release-context-test --ns seon.loop-proof-test --include-long --time-limit-ms 590000`
+  - `bin/test-check default --ns seon.turn-test --ns seon.turn-continue-test --ns seon.issue-test --ns seon.cluster.agent-arming-test --ns seon.namespace-agent-loop-test --include-long --time-limit-ms 590000`
+  - `bin/test-check default --ns seon.rereads-test --ns seon.rereads-panel-test --ns seon.run4-install-test --ns seon.render.web-debug-test --ns seon.help-trial-test --ns seon.concurrency-test --ns seon.agent-call-edges-test --test seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities --include-long --time-limit-ms 590000`
+- The armed_test platform tests exercise boot arming (the handle routing at cluster.clj:3606):
+  - `bin/test --platform -- seon.cluster.armed-test` (root only).
+- Probes not committed as regressions:
+  - **Setup failure.** The existing `acquire-context!` catch releases and retires on failure; the
+    handle never exists, so there is no routing to leak. Only the source was read; I ran no probe.
+  - **Concurrent arm/release.** This is covered by the shared monitor plus the released refusal
+    asserted in the regression. There is no racing-thread test.
+  - **Nested acquisition.** A child's release does not stop the parent's graphs, because an
+    isolated child gets a fresh routing. This is asserted by construction, not tested.
+- A `with-database` fresh-store connection (`:fresh-store?`) resolves to the member's routing,
+  so its graphs are joined at member release, after the fresh store is already deleted. This is
+  the same class as before; tests disarm in `finally`.
+- No bulk or platform tier was run.
