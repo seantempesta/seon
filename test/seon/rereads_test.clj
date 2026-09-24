@@ -23,7 +23,7 @@
      (cluster/ensure-cluster-entity! connection "rereads" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "rereads" connection)
-           routing (agent/routing)]
+           routing (support/attempt-routing connection)]
        (with-open [faults (support/closeable (async/chan (async/sliding-buffer 16)) async/close!)
                    launcher (support/closeable
                              (flow/start-work-launcher!

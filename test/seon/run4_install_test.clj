@@ -23,7 +23,7 @@
      (cluster/ensure-cluster-entity! connection "run4-install" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "run4-install" connection)
-           routing (agent/routing)
+           routing (support/attempt-routing connection)
            source (some (fn [[id source]] (when (= "faef54087471" id) source))
                         (:run4/evaluations
                          (edn/read-string (slurp "test/seon/run4_replies.edn"))))]

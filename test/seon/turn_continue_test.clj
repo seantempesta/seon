@@ -41,7 +41,7 @@
            (cluster/ensure-cluster-entity! connection "loop-continue" cluster/boot-process-identity)
            (let [ctx (support/fork-cluster-ctx connection)
                  environment (support/environment "loop-continue" connection)
-                 routing (agent/routing)
+                 routing (support/attempt-routing connection)
                  requests (atom [])]
              (with-open [provider-progress (support/closeable (async/chan 1) async/close!)
                          events (support/closeable (async/chan (async/sliding-buffer 1)) async/close!)

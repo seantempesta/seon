@@ -16,7 +16,7 @@
   [connection cluster-name agent-id namespace-name]
   (let [ctx (support/fork-cluster-ctx connection cluster-name)
         environment (support/environment cluster-name connection)
-        routing (agent/routing)
+        routing (support/attempt-routing connection)
         qualified #(str namespace-name "/" %)
         target (qualified "target")
         later (qualified "later")

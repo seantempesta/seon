@@ -1469,7 +1469,7 @@
                  registration (pr-str (list 'seon.schema/register! :sample.s1/value
                                              (:sample.s1/value fixture-forms)))
                  submitted (turn/virtual-turn!
-                            {:seon.turn.loop/cluster handle :seon.agent/routing (agent/routing)
+                            {:seon.turn.loop/cluster handle :seon.agent/routing (test-support/attempt-routing connection)
                              :seon.agent/id "program-parity"
                              :seon.cluster.reply/text
                              (str/join "\n" (into [(first sources) registration] (rest sources)))})

@@ -275,6 +275,13 @@
                        :seon.error/expected :seon.agent/execution-handle
                        :seon.error/offending (if db/*conn* :no-held-handle :no-custody)}))))
 
+(defn attempt-routing
+  "The routing the executing attempt that holds `connection` arms its graphs in;
+  its release stops and joins every graph armed there before it closes."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/connection]] :seon.agent/routing]}
+  [connection]
+  (:seon.agent/routing (execution-handle connection)))
+
 (defn- cluster-names
   "Every cluster name `database` holds."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:set :seon.boot/cluster-name]]}
@@ -375,6 +382,7 @@
   [handle]
   (let [decisions config/defaults]
     (merge {:seon.agent/context-state (atom {})
+            :seon.agent/routing (attempt-routing (:seon.db/connection handle))
             :seon.cluster.wake/channel (async/chan (async/sliding-buffer 1))
             :seon.render/context-channel (async/chan (async/sliding-buffer 1))
             :seon.turn.loop/completion (async/promise-chan)

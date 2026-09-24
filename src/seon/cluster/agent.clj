@@ -934,6 +934,13 @@
                             :seon.sci.eval/base-ctx base
                             :seon.env/environment (env/of ctx)
                             :seon.agent/context-state held-contexts
+                            ;; The attempt owns the routing its graphs arm in, so
+                            ;; its release can stop and join them before closing.
+                            :seon.agent/routing
+                            (or (:seon.agent/routing previous)
+                                (:seon.agent/routing branch-owner)
+                                (when-not isolated? (:seon.agent/routing handle))
+                                (routing))
                             :seon.agent/branch branch
                             :seon.agent/mode (if isolated? :isolated :live)
                             :seon.agent/owns-connection?
@@ -1003,6 +1010,11 @@
                                 {:seon.agent/id agent-id
                                  :seon.agent/no-such-agent agent-id})))
             execution (acquire-context! handle agent-id)
+            _ (when-not (identical? routing (:seon.agent/routing execution))
+                (throw (ex-info "arm! refused: the routing is not the one the agent's execution owns."
+                                {:seon.error/message "arm! refused: the routing is not the one the agent's execution owns."
+                                 :seon.agent/id agent-id
+                                 :seon.error/expected :seon.agent/routing})))
             connection (:seon.db/connection execution)
             wake-ch (wake-channel)
             schedule-channel (async/chan (async/sliding-buffer 1))

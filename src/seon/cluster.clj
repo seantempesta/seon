@@ -3596,14 +3596,17 @@
         io-executor
         (projection-executor
          (:seon.sci.eval/projection-state (:seon.sci.eval/ctx instance)))
+        ;; The cluster owns its agents' routing; its handle carries it so each
+        ;; live acquisition, and so each arm, holds the same one.
+        routing (cluster.agent/routing)
         handle
         (assoc
          (loop-handle connection cluster-name process
                       (:seon.sci.eval/ctx instance)
                       (:seon.flow/work-launcher instance)
                       armer-channel stream-channel completion)
-         :seon.flow/executor io-executor)
-        routing (cluster.agent/routing)
+         :seon.flow/executor io-executor
+         :seon.agent/routing routing)
         ;; the render pipeline's external ports (F2 §1): the wake
         ;; channel route! delivers into, the pages channel the proc's
         ;; snapshots exit on (multed here, tapped per tab), the watched

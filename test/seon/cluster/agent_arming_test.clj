@@ -38,7 +38,7 @@
   (support/seed-cluster! connection cluster-name)
   (let [ctx (support/fork-cluster-ctx connection cluster-name)
         environment (support/environment cluster-name connection)
-        routing (agent/routing)
+        routing (support/attempt-routing connection)
         faults (async/chan (async/sliding-buffer 16))]
     (swap! routing assoc :seon.agent/fault-channel faults)
     (with-open [launcher (support/closeable

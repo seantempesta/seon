@@ -35,7 +35,7 @@
            start {:seon.db/connection conn :seon.issue/id issue-id :seon.issue/budget 3
                   :seon.ns/name 'my.agents.nsa-loop :seon.agent/branch branch
                   :seon.config.ai/no-provider true}
-           routing (agent/routing)
+           routing (support/attempt-routing conn)
            faults (async/chan (async/sliding-buffer 16))
            route-key (keyword (str *ns*) issue-id)
            environment (support/environment "nsa-loop" conn)

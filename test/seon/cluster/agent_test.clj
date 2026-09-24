@@ -214,9 +214,9 @@
                               overlay)})))
 
 (defn- armory
-  "A routing entry with a test fault channel already joined."
-  []
-  (let [routing (agent/routing)]
+  "The attempt's routing entry with a test fault channel already joined."
+  [connection]
+  (let [routing (test-support/attempt-routing connection)]
     (swap! routing assoc :seon.agent/fault-channel
            (async/chan (async/sliding-buffer 16)))
     routing))
@@ -369,7 +369,7 @@
 (deftest a-function-without-a-contract-never-enters-the-program
   (with-connection real-evaluate
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             events (database-events connection)
             source "(defn uncontracted [] 42)"
             function-symbol 'my.agents.contract-probe/uncontracted]
@@ -412,7 +412,7 @@
 (deftest system-source-submission-uses-the-ordinary-durable-run
   (with-connection real-evaluate
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
             armer-completion (async/promise-chan)
             ;; A HANDLE IS THE STORED EVALUATION'S OWN ENTITY ID, which does
@@ -571,7 +571,7 @@
 (deftest prompt-refusal-closes-without-answering-and-stops-at-the-agent-bound
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             requests (atom [])
             events (database-events connection)]
         (test-support/transacted!
@@ -625,7 +625,7 @@
                                 (map-indexed vector agent-ids)
                                 k (range (nth triggers-per-agent index))]
                             [agent-id (str "m-" agent-id "-" k)]))
-            routing (armory)
+            routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
             ledger (atom [])]
         (test-support/transacted! connection
@@ -737,7 +737,7 @@
 (deftest fenced-is-the-derived-quarantine-state
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)]
+      (let [routing (armory connection)]
         (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
         (try
           (is (false? (agent/fenced? routing "agent-a"))
@@ -764,7 +764,7 @@
 (deftest disarm-drops-the-route-before-closing-it
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             _ (test-support/transacted! connection [(config-row "agent-a" {}) {:seon.agent/id "agent-a" :seon.agent/branch (live-branch connection)}])
             entry (arm-one! connection ctx routing "agent-a" "agent-a")
             eid (:seon.agent/eid entry)
@@ -821,7 +821,7 @@
   ;; declared bound, and leaves no open turn behind.
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             turn-completion-backstop-ms 5000
             prelude-entered (CountDownLatch. 1)
             never-released (CountDownLatch. 1)
@@ -884,7 +884,7 @@
   ;; fails loudly at its declared bound and stays retryable.
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             turn-completion-backstop-ms 100
             provider-entered (CountDownLatch. 1)
             release-provider (java.util.concurrent.Semaphore. 0)
@@ -1064,7 +1064,7 @@
 (deftest install-gate-failure-closes-with-a-durable-diagnostic
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             agent-id "install-gate-chain"
             run-id "install-gate-chain-run"
             message-id "install-gate-chain-message"
@@ -1134,7 +1134,7 @@
   ;; agent after it. The changed host-bound row is M9's refusal recipe.
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             subject 'seon.render.hiccup/escape]
         (test-support/transacted! connection
                                   [(config-row "core-fault" {})
@@ -1157,7 +1157,7 @@
 (deftest canonical-agent-handle-supplies-declared-producer-outputs
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)]
+      (let [routing (armory connection)]
         (test-support/transacted! connection
                                   [(config-row "declared-agent-inputs" {})])
         (test-support/transacted! connection
@@ -1180,7 +1180,7 @@
 (deftest park-wake-test
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             ledger (atom [])]
         (test-support/transacted! connection
                                 [(agent-row connection "parked")
@@ -1223,7 +1223,7 @@
 (deftest pause-during-in-flight-call-test
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             ledger (atom [])
             release-provider (CountDownLatch. 1)
             provider-entered (CountDownLatch. 1)
@@ -1403,7 +1403,7 @@
   (with-connection
     (fn [connection ctx]
       (let [original @#'seon.turn/step
-            routing (armory)
+            routing (armory connection)
             base (handle connection ctx "hot-2026072815")
             v2-ran (atom 0)
             wrap (fn [step]
@@ -1492,7 +1492,7 @@
   (with-connection
     (fn [connection ctx]
       (let [dead "99999-1"
-            routing (armory)
+            routing (armory connection)
             ledger (atom [])
             evaluation-sources (atom [])
             evaluate fixture-evaluate]
@@ -1674,7 +1674,7 @@
       (test-support/transacted! connection
                                 [(config-row "route-trial"
                                              {:seon.config.run/max-episode-runs 100})])
-      (let [routing (armory)
+      (let [routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
             armer-handle (assoc (handle connection ctx "route-trial")
                                 :seon.cluster/name "route-trial"
@@ -1880,7 +1880,7 @@
   ;; NO basis; the agent's next trigger opens a NEW run.
   (with-connection
     (fn [connection ctx]
-      (let [routing (armory)
+      (let [routing (armory connection)
             ledger (atom [])]
         (test-support/transacted! connection
                                 [(agent-row connection "waiter")

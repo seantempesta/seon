@@ -276,7 +276,7 @@
                                     :seon.config.ai/no-provider true})
           ctx (seon.test-support/fork-cluster-ctx c)
           environment (seon.test-support/environment "issue-family-opening" c)
-          routing (seon.cluster.agent/routing)
+          routing (seon.test-support/attempt-routing c)
           faults (clojure.core.async/chan (clojure.core.async/sliding-buffer 16))]
      (swap! routing assoc :seon.agent/fault-channel faults)
      (clojure.test/is (let [observed started] (or (some? (:db-after observed)) (nat-int? (:seon.issue/count observed)) (string? (:seon.issue/id observed)))) (pr-str started))

@@ -434,7 +434,7 @@
                       :seon.flow/configuration
                       (select-keys (support/effective-config)
                                    flow/flow-workload-attributes)})
-           routing (agent/routing)
+           routing (support/attempt-routing connection)
            faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))
            transactions (atom [])

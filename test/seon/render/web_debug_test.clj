@@ -45,7 +45,7 @@
                            {:seon.agent/id "juniper" :seon.agent/namespace (support/namespace-row @connection 'my.agents.juniper)}])
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "debug-turns" connection)
-           routing (agent/routing)]
+           routing (support/attempt-routing connection)]
        (with-open [launcher (support/closeable
                               (flow/start-work-launcher!
                                {:seon.env/environment environment

@@ -73,7 +73,7 @@
      (cluster/ensure-cluster-entity! connection "running-fixture" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "running-fixture" connection)
-           routing (agent/routing)
+           routing (support/attempt-routing connection)
            faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))]
        (with-open [launcher (support/closeable
@@ -248,7 +248,7 @@
                     :seon.flow/executor
                     (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
                     :seon.db.process/id cluster/boot-process-identity})
-           routing (agent/routing)
+           routing (support/attempt-routing connection)
            faults (async/chan (async/sliding-buffer 16))
            _ (swap! routing assoc :seon.agent/fault-channel faults)
            ready (java.util.concurrent.CountDownLatch. 2)
@@ -315,7 +315,7 @@
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)
            environment (support/environment "loop-proof" connection)
-           routing (agent/routing)
+           routing (support/attempt-routing connection)
            transactions (atom [])
            faults (async/chan (async/sliding-buffer 16))
            events (async/chan (async/sliding-buffer 1))]
