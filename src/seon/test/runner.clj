@@ -95,23 +95,6 @@
       (when (instance? Throwable (:actual event))
         (throwable-signature (:actual event)))))
 
-(defn- throwable-text
-  "One reported throwable as its own diagnostic body.
-
-  Its complete message plus frames bounded by the DECLARED
-  `:seon.print/length`. THE SIGNATURE IS NOT PART OF THIS TEXT: the cause's
-  signature is the error face's own trailer, named once per distinct cause by
-  `report-error!`, and a second copy carried inside the reported value made
-  one whole face name the same signature twice."
-  [options ^Throwable failure]
-  (str/trim-newline
-   (with-out-str
-     (println (str (.getName (class failure)) ": "
-                   (or (ex-message failure) "")))
-     (doseq [frame (take (:seon.print/length options)
-                         (.getStackTrace failure))]
-       (println "    at" frame)))))
-
 (defn- report-value
   "One reported assertion value, rendered for a human reading the gate log.
 
@@ -121,10 +104,10 @@
   arrived as `{:seon.print/omitted 3458 :seon.print/prefix \"Fixture write was
   refused at the write: …\"}` and named less than the runner knew. A check that
   reports less than it observed is the failure class this project keeps
-  meeting, so the reported throwable is plain text — its complete message plus
-  frames bounded by the DECLARED print length, never the agent's budget
-  (AGENTS §2.4). The identity path (`printable`) has always done this. It is
-  the throwable's BODY (`throwable-text`), not a whole face: the error face's
+  meeting, so the reported throwable is plain text: its whole cause chain with
+  each link's message, ex-data entries and first-party frames, bounded once by
+  the value renderer's floor (`seon.render.value/floor`), never the agent's
+  budget. It is the throwable's BODY, not a whole face: the error face's
   signature trailer belongs to `report-error!`, which names it once per
   distinct cause.
 
@@ -132,7 +115,7 @@
   database value."
   [options reported-value]
   (if (instance? Throwable reported-value)
-    (throwable-text options reported-value)
+    (value/floor reported-value)
     (value/render-ai
      {:seon.render/value reported-value
       :seon.render.value/root 'seon.test.runner/assertion

@@ -323,6 +323,18 @@
             "the whole argument in the refusal's ex-data is not printed"))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
 
+(deftest a-reported-throwable-names-its-whole-cause-chain
+  (let [test-var (throwaway-test-var
+                  #(throw (ex-info "the outer refusal" {::member :the-member}
+                                   (IllegalStateException. "the root cause")))
+                  [])]
+    (try
+      (let [message (:seon.test/failure-message (runner/run-var! test-var {}))]
+        (is (str/includes? message "the outer refusal"))
+        (is (str/includes? message "the root cause") "the cause survives")
+        (is (str/includes? message ":the-member") "the ex-data survives"))
+      (finally (remove-ns (ns-name (:ns (meta test-var))))))))
+
 (deftest the-drift-snapshot-names-the-running-clusters
   (let [running (set (keys @seon.operator.runtime/running-instances))]
     (is (seq running) "a running cluster is the subject")
