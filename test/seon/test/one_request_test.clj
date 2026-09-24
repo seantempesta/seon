@@ -341,9 +341,13 @@
          (is (= :member-unfinished stop) "the run names why it stopped")
          (is (str/includes? (:seon.error/message latest) "member-unfinished") (:seon.error/message latest))
          (is (false? (sut/verified? database unstarted)) "an unknown never verifies"))
-       ;; If its exit is recorded by now it reruns and passes on the marker;
+       ;; A test world holds the program, never the execution's data, so B is
+       ;; released by redefining it: the changed row reaches the next world.
+       ;; If its old body's exit is recorded by now B reruns and passes;
        ;; otherwise it still holds and is pending. Either way C runs.
-       (support/transacted! connection [{:seon.test.one-request-test/marker "go"}])
+       (define-agent-test! handle
+         (str "(clojure.test/deftest ^{:seon.test/long \"runs until the request bound fires\" :seon.test/long-ms 15000}"
+              " b-runs-until-released (clojure.test/is true))"))
        (let [again (request)]
          (is (some #(= unstarted (:seon.test/sym %)) (:seon.test/results again))
              (str "an identical later request is admitted and reruns the unstarted member: " (sut/tally again)))
