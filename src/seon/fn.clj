@@ -1162,8 +1162,9 @@
           targets)))
 
 (defn- namespace-context
-  "Requires, aliases, refers and imports of one `ns` form, from the clause
-  facts the analyzer attached to its definition (`with-namespace-clauses`),
+  "Requires, aliases, refers and imports of one namespace (its `ns` form and
+  top-level `require`s), from the clause facts the analyzer attached to its
+  definition (`with-namespace-clauses`),
   never a second read of the file. An `:as-alias` require creates no load
   edge (clojure `load-lib`, core.clj:6074-6078); an import binds its simple
   class name, as `clojure.core/import` does. clj-kondo records no renamed
