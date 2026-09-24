@@ -1424,8 +1424,9 @@
   definition digest: a digest one value holds and the other lacks names a
   declaration that was added, changed or retracted. Only those identities are
   read and replaced (`seon.fn/reconcile-tx`) with their program-partition
-  attributes, an identity absent from the candidate retracting; callers of a changed definition interpret it at
-  acquisition. Equal programs answer `[]`; a refused read answers its refusal."
+  attributes, an identity absent from the candidate retracting, and with any
+  recomputed row (a file) they name that the world lacks. Callers of a changed
+  definition interpret it at acquisition. Equal programs answer `[]`; a refused read answers its refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
                   [:or :seon.db/tx-data :seon.error/value]]}
   [world candidate]
@@ -1452,15 +1453,26 @@
         others #(let [program (program/program-attributes (db/carried-projection candidate))]
                   (into #{} (remove (fn [a] (or (program a) (= "db" (namespace a)))))
                         (filter qualified-keyword? (keys (:schema candidate)))))
-        rows (when (and (set? changed) (seq (into present changed)))
-               (functions/published-index-rows candidate (vec present) (others)))]
+        read-rows #(functions/published-index-rows candidate (vec (sort %)) (others))
+        ;; A row names a recomputed row (its file) by identity; one the world
+        ;; lacks travels with it. The world's own file rows stay its own.
+        recomputed (:seon.program/recomputed-families
+                    (program/declaration-families (db/carried-projection candidate)))
+        lacking (fn [rows]
+                  (into #{} (filter #(and (vector? %) (= 2 (count %)) (recomputed (first %))
+                                          (nil? (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]]
+                                                      world (first %) (second %)))))
+                        (tree-seq coll? seq rows)))
+        rows (when (and (set? changed) (seq (into present changed))) (read-rows present))
+        files (when (vector? rows) (lacking rows))
+        rows (if (seq files) (read-rows (into present files)) rows)]
     (cond
       (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
       (not (set? present)) present
       (not (set? changed)) changed
       (nil? rows) []
       (:seon.error/at rows) rows
-      :else (functions/reconcile-tx world rows (vec (into present changed))))))
+      :else (functions/reconcile-tx world rows (vec (sort (into (into present changed) files)))))))
 
 ;;; A checkpoint is a shared branch named by the content it holds. The
 ;;; registry's roster serializes its creation: exactly one `branch!` call is
@@ -1503,7 +1515,10 @@
             (let [report (db/transact! connection (conj overlay {:seon.cluster/name cluster
                                                                  :seon.source/commit-id base}))]
               (when-not (:db-after report)
-                (throw (ex-info "The test world's source record was refused." report))))))
+                (throw (ex-info (str "The test world's source record was refused: "
+                                     (:seon.error/message report) " Offending: "
+                                     (pr-str (:seon.error/offending report)))
+                                report))))))
       (catch Throwable failure
         (doseq [cleanup! [#(store/release-branch! connection)
                           #(registry/retire-branch! {:seon.store/store store :seon.store/branch branch})]]

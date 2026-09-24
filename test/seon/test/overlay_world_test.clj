@@ -25,7 +25,7 @@
 
 (defn- admit!
   "Evaluate one form as an agent does and write its canonical declaration row."
-  {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] :seon.db/transaction-report]}
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] [:maybe :seon.db/transaction-report]]}
   [handle source]
   (let [connection (:seon.db/connection handle)
         evaluation (support/await-event!
@@ -41,12 +41,13 @@
                          :seon.config/on-core-error :panic})))
                     ::admitted)]
     (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
-    (support/transacted! connection [(program/declaration-row
-                                      (db/carried-projection (db/db connection))
-                                      (:seon.program/row evaluation) :all :agent)])))
+    (when-let [row (:seon.program/row evaluation)]
+      (support/transacted! connection [(program/declaration-row
+                                        (db/carried-projection (db/db connection))
+                                        row :all :agent)]))))
 
-(deftest ^{:seon.test/long "Four agent definitions, one retraction and one nested request on a fixture branch. Unmeasured (lane load rule): the sibling one-request-test nested request measured 13.8 s on default's JVM; root replaces this with the measured clock."
-           :seon.test/long-ms 30000}
+(deftest ^{:seon.test/long "Four agent definitions, one retraction and one nested request whose first checkpoint preparation measured 1.8 s (seon.config/apply-compiled!, issue test-world-preparation-spends-seconds-in-config-apply-and-unmemoized-reads): the request measured 7.1 s on default's JVM (root run 99a231f41221, 2026-09-24)."
+           :seon.test/long-ms 15000}
   an-agent-branch-request-runs-its-candidate-on-a-clean-world
   (support/with-database
    {:seon.test-support/extra-schema (support/file-store-probe-schema sentinel)}
@@ -54,9 +55,9 @@
      (let [handle (support/execution-handle connection)]
        (support/transacted! connection [{sentinel "operational"}])
        (support/transacted! connection [[:db/retractEntity [:seon.test/sym victim]]])
-       (admit! handle "(defn overlay-callee [] 1)")
-       (admit! handle "(defn overlay-caller [] (overlay-callee))")
-       (admit! handle "(defn overlay-callee [] 2)")
+       (admit! handle "(defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 1)")
+       (admit! handle "(defn overlay-caller {:malli/schema [:=> [:cat] :int]} [] (overlay-callee))")
+       (admit! handle "(defn overlay-callee {:malli/schema [:=> [:cat] :int]} [] 2)")
        (admit! handle
                (str "(clojure.test/deftest overlay-candidate-runs"
                     " (clojure.test/is (= 2 (overlay-caller)))"
@@ -75,8 +76,8 @@
 (def ^:private checkpoint-head #'sut/checkpoint-head)
 (def ^:private prepare-checkpoint! #'sut/prepare-checkpoint!)
 
-(deftest ^{:seon.test/long "One agent definition and two concurrent checkpoint preparations on a fixture branch. Unmeasured (lane load rule); root replaces this with the measured clock."
-           :seon.test/long-ms 20000}
+(deftest ^{:seon.test/long "One agent definition and two concurrent checkpoint preparations and acquisitions on a fixture branch, each bounded by the 7.1 s request measured beside it (root run 99a231f41221, 2026-09-24), dominated by the 1.8 s first preparation."
+           :seon.test/long-ms 15000}
   concurrent-first-preparation-yields-one-complete-checkpoint
   (support/with-database
    (fn [connection]
@@ -85,7 +86,7 @@
            store (:seon.store/store handle)
            effective (config/effective (db/db connection) cluster)]
        ;; A unique definition makes this checkpoint's identity new.
-       (admit! handle (str "(defn overlay-probe-" (id/id) " [] 1)"))
+       (admit! handle (str "(defn overlay-probe-" (id/id) " {:malli/schema [:=> [:cat] :int]} [] 1)"))
        (let [prepare #(future (try (clean-request-handle handle connection cluster effective)
                                    (catch clojure.lang.ExceptionInfo refusal refusal)))
              outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])

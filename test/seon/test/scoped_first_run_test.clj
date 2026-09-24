@@ -36,15 +36,16 @@
                 (defn stranger [] 2)
                 (clojure.test/deftest direct (clojure.test/is (= 1 (leaf))))
                 (clojure.test/deftest unrelated (clojure.test/is (= 2 (stranger))))")
-     (support/transacted! connection [{:seon.source/digest (apply str (repeat 64 "a"))
-                                        :seon.source/test-input-digest (apply str (repeat 64 "b"))}])
      (let [started (System/nanoTime)
            selected (sut/select {:seon.db/db (db/db connection)
                                  :seon.test.run/cluster [:seon.cluster/name "scoped-first-run"]
                                  :seon.test.run/policy :incremental
                                  :seon.test/changed ['scoped.fixture/leaf]})
-           elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
-       (is (= #{'scoped.fixture/direct}
-              (set (map :seon.test/sym (:seon.test.run/members selected))))
-           (pr-str selected))
+           elapsed-ms (/ (- (System/nanoTime) started) 1e6)
+           members (set (map :seon.test/sym (:seon.test.run/members selected)))]
+       (is (nil? (:seon.error/at selected)) (pr-str selected))
+       ;; This test's own row names `leaf` too, so it reaches it as well.
+       (is (= #{'scoped.fixture/direct} (set (filter #(= "scoped.fixture" (namespace %)) members)))
+           (pr-str members))
+       (is (> 5 (count members)) "the request never widens to every test")
        (is (< elapsed-ms 5000) (str elapsed-ms " ms"))))))
