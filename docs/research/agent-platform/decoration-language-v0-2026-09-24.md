@@ -1,145 +1,197 @@
 ---
 type: design-draft
-status: experiment v0.1 (rewritten in place; v0 is in git history) — tested on seon.schema, seon.note, seon.flow
+status: v0.3 (rewritten in place 2026-09-24; v0.1 and v0.2 are in git history) — prototyped on the live default database, not installed
 created: 2026-09-24
-scope: how code is decorated and supplemented with EDN so tasks, their data model and their proofs are data the system can load, validate, query and render into agent context
+scope: the language that decorates code and supplements it with EDN so that a task's references alone generate an agent's whole context
 ---
 
-# The decoration language, v0.1
+# The task language, v0.3
 
-**Code says what is true of the code. EDN says what is not true yet.** Everything that names
-something is a symbol or keyword; the only prose is intent; everything derivable is derived.
+**A task's references bootstrap everything the agent sees.** Code, tests, schemas and namespaces are
+already rows in the database; the language adds only the few links nothing can derive, and a task names
+what matters. Context generation walks from the task's references along typed edges and emits REPL forms;
+evaluating them at the agent's REPL entrance both teaches the REPL and delivers the data. Nothing is pulled
+because it shares a namespace.
 
-## 1. In code: two metadata keys on ordinary Clojure
+## 1. The graph
 
-```clojure
-(ns seon.note
-  "Intent, medium form: what this namespace is for, its data, its rules."
-  {:seon/must-read [`seon.db/pull]}              ; always in context for this namespace
-  (:require …))
+Every node is a row with a fully qualified identity; every edge is a value in the database.
 
-(defn render-note-html
-  "Intent: what it does and why."
-  {:malli/schema   [:=> [:cat :my.note/note] :seon.render/hiccup]
-   :seon/must-read [`seon.render.route/path]     ; always in context for this function
-   :seon/see-also  [`seon.note/render-note-ai]}  ; related; ranked
-  [note] …)
-```
-
-Links use syntax quote in code (the reader resolves aliases; nothing must load first). A custom
-`ns` clause is impossible: `clojure.core/ns` refuses it by spec (measured).
-
-## 2. In EDN: a task is intent, subjects, a target data model and proofs
-
-`resources/seon/tasks/<namespace>.edn`, one file per namespace the tasks are about, read by the
-Clojure reader without evaluation (edamame, quote on — `clojure.edn` silently misreads `'sym` as a
-symbol named `'sym`).
-
-```clojure
-{:seon.task/id        :seon.note.task/about-is-a-value     ; a keyword: never mistaken for a Var
- :seon.task/intent    "What a note is about is an observed name, not a ref …"
- :seon.task/subjects  #{seon.note/add! seon.note/add-note-call}   ; the producers that change
- :seon.task/schemas   {:my.note/about-symbol [:qualified-symbol {:description "…"}]}  ; data first
- :seon.task/done-when [(true? (seon.schema/valid? :my.note/about-symbol 'seon.db/pull))]}
-```
-
-| Authored key | Required | Meaning |
+| Node | Identity | Produced by |
 |---|---|---|
-| `:seon.task/id` | yes | qualified keyword; generated tasks derive it from producer + subject |
-| `:seon.task/intent` | yes | why: the problem or the want (the only prose) |
-| `:seon.task/subjects` | yes | symbols of the functions, tests or namespaces that change |
-| `:seon.task/schemas` | no | the target data model: key → Malli form, decided before code |
-| `:seon.task/done-when` | no | proofs: forms that must all return true on the task's branch; they never merge |
-| `:seon/must-read` | no | always in the brief (same key as in code) |
-| `:seon.task/entities` | no | stored data it is about, as `[attr value]` identities (a message, a record) |
-| `:seon.task/changes` | no | narrows what may change (default: the subjects); `#{}` = a data-only task (answer, research, decomposition) |
-| `:seon.task/recurs` | no | recurrence, e.g. `{:every :day}`; each run is one attempt |
-| `:seon.task/evidence` | no | paths to the notes or measurements that showed the problem |
-| `:seon.task/delivers`, `:seon.task/needs` | no | overrides only; normally derived |
+| function | `:seon.fn/sym` | clj-kondo analysis of source (file or REPL definition) |
+| test | `:seon.test/sym` | same analysis |
+| schema key | `:seon.schema/key` | schema declarations |
+| namespace | `:seon.ns/name` | analysis |
+| stored entity | its identity attribute, `[attr value]` | its writer |
+| task | `:seon.task/id` | EDN preload, `seon.task/create!`, detectors, errors |
+| help topic | `:seon.help/id` | EDN preload |
 
-## 3. Derived, never written (measured: 3–7 ms for eight tasks)
+| Edge | Stored as | Derived or authored | Status (live db, 2026-09-24) |
+|---|---|---|---|
+| function → functions it calls | `:seon.fn/calls` symbol* | derived | stored (includes `clojure.core` and special forms; filter to rows) |
+| function → keys it reads / writes | `:seon.fn/keywords`, `:seon.fn/writes` keyword* | derived | stored |
+| function → schema keys of its contract | — | derived | **GAP**: contract stored only as a string (`:seon.fn/spec`); `faults-form`'s keywords lack `:seon.render/unit` |
+| test → functions it calls | — | derived | **GAP**: tests have no call edge; `:seon.test/reach` is empty for a test that calls `faults-form`, saturated (1,720) for core functions |
+| schema → schema keys | `:seon.schema/references` keyword* | derived | stored |
+| namespace → namespaces | `:seon.ns/requires`, aliases | derived | stored (aliases not installed in branch SCI — fix lane running) |
+| any node → must-read | `:seon/must-read` | **authored** | **GAP**: not ingested (no attribute) |
+| any node → see-also | `:seon/see-also` | **authored** | **GAP**: not ingested |
+| help topic → topics it builds on, vocabulary it teaches | `:seon.help/needs`, `:seon.help/about` | **authored** | new |
+| task → tasks it needs | `:seon.task/needs` | **authored** (suggested by the writer) | new |
+| task → what it is about | `:seon.task/about` | derived from its proofs | new |
 
-| Derived | Rule |
+Reverse edges are free: Datahike indexes values, so "who calls f", "which tasks mention f", "which tests
+exercise f" are one indexed query each (measured: reverse lookup + dangling check 24 ms on native Datahike).
+
+## 2. What is authored
+
+**In code — ordinary Clojure, nothing custom:**
+
+```clojure
+(defn faults-form
+  "Read errors assigned to this agent: its stewarded namespaces, and its turns."   ; intent, not history
+  {:malli/schema   [:=> [:cat :seon.render/unit] [:or :nil :seon.render/form :seon.db/error-result]]
+   :seon/must-read [`seon.error/observation-selector]}                               ; always shown with it
+  [unit] …)
+```
+
+A docstring states what is true and why; incident narratives belong in tasks and evidence, not docstrings
+(`faults-form`'s current docstring is a 2026-09-16 incident log — a detector should raise that).
+
+**Schema properties:** `:description`, and `:seon/must-read` when a key is unusable without another.
+
+**A task — three keys:**
+
+```clojure
+#:seon.task{:id        :seon.error.task/faults-read-is-a-call
+            :intent    "Root's opening prints an 81,805-character error query five times (81% of its prompt).
+                        It should be a short call that returns the same errors."
+            :done-when ["(deftest opener-is-short …)" "(deftest for-agent-matches-the-query …)"]}   ; §3
+```
+
+Optional only when nothing else can say it: `:seon.task/must-read`, `:seon.task/needs`, `:seon.task/merge`
+(a pure `(fn [{:keys [base source target task]}]) → tx-data` when the default program-row copy is wrong),
+`:seon.task/attempts`, `:seon.task/schedule`. There is no authored scope: what the work touched is the
+diff, and root's decision selects from it.
+
+**A help topic** — one line, what it builds on, what it teaches:
+
+```clojure
+#:seon.help{:id :seon.help/read :needs #{:seon.help/repl}
+            :text "(source f) prints a function; (callers 'f) and (calls 'f) walk the program."
+            :about #{source callers calls}}
+```
+
+## 3. Done when: ordinary deftests through the one test pipeline
+
+`:seon.task/done-when` is a vector of deftests: symbols of existing tests, or deftest source that belongs to
+the task (a proof). Each runs through the existing `seon.test/run` on a throwaway fork of the attempt's
+branch — `branch!` → fork the SCI context → inject the connection → run the one body → record → unlink — with
+`is` failures returned as data (expected, actual, message) and re-prompted to the agent. Results key by
+proof-source digest + program digest; they never count as coverage and never merge. A proof becomes a
+permanent guarantee only when root promotes the same text into a namespace deftest.
+
+```clojure
+:seon.task/done-when
+["(deftest opener-is-short
+   (is (> 300 (count (pr-str (:seon.repl/form
+                               (seon.error/faults-form {:seon.db/db (seon.db/db)
+                                                        :seon.render/value [:seon.agent/id \"root\"]})))))))"
+ "(deftest for-agent-matches-the-query
+   (is (= (set (map :seon.error/signature (seon.error/for-agent (seon.db/db) \"root\")))
+          (set (seon.db/q '[:find [?sig ...] …] (seon.db/db) \"root\")))))"]
+```
+
+Measured (`agent-deftest-and-test-forks-2026-09-24.md`): the same deftest source through the existing owners
+on a throwaway fork takes **~130 ms** (branch + fork 48.7, evaluate 33.7, run 37.7, unlink 8.6) and
+`(seon.db/db)` in the body reaches the fork. Through `seon.test/run` today one test costs **3,320 ms**, of
+which the body is 121: a history scan (1,596 ms, `test/runner.clj:930`) and blob publication (617 ms)
+dominate, and a global drift snapshot costs 32 ms / 143 MB around a 2 ms body. Floor: a read-only proof is an
+SCI fork plus the body (< 1 ms); a real connection ~40 ms. Missing: an entrance that runs *source*, not only
+admitted rows (`test.clj:1264`), and a deftest defined at an agent's REPL returns `nil` with its failures
+lost today. v0.1–v0.2's "forms that must be truthy" and the hand-run checks are deleted.
+
+Invariant: at least one proof red on the base; run after every turn and again on the merge branch.
+
+## 4. Context generation: task → forms → transcript
+
+1. **Seeds**: the qualified symbols, schema keys and `[attr value]` entities in the task's proofs, plus its must-reads.
+2. **Tools are not subjects**: a symbol some help topic teaches (`:seon.help/about`) is vocabulary — its topic
+   is included, the symbol is never expanded. Without this rule `seon.db/q` in a proof pulled 410 callers
+   and 12 schemas (27.8 KB).
+3. **Per seed, forms by node type** — hop 1 is content, hop 2 is names the agent can follow with one call:
+
+| Seed | Content forms (hop 1) | Address forms (hop 2) |
+|---|---|---|
+| existing function | `(source f)` — doc, contract, body, once | `(callers 'f)`, `(calls 'f)` (first-party only) |
+| missing function | `;; f does not exist yet: you create it` | the namespace's intent `(doc 'ns)` |
+| schema key | `(schema :k)` | keys it references |
+| stored entity | its AI render | its refs as identities |
+| must-read | content, always | — |
+
+4. **Help is derived**: the topics whose vocabulary the opener or the proofs use, ordered by `:seon.help/needs`
+   (topological, ties by id; a cycle is refused). No fixed preamble.
+5. **Order**: `(help)`, `(task)`, `(proofs)` (red on base shows what to do), then each seed's forms in proof order.
+6. **Evaluate** the forms at the agent's REPL entrance on its branch, so every value is current; render as a
+   clojure.main transcript: `ns=> form`, printed output, value, and **end with `ns=> `**.
+
+Measured on the live default database for the task above: **4,276 characters in 10 ms**, every value real
+(`tmp/wiki-toy/opener-faults-read.txt`). The live root prompt is 680,643 characters. Excerpt:
+
+```text
+my.agents.codex=> (proofs)
+[false false]
+
+my.agents.codex=> (callers 'seon.error/faults-form)
+[seon.error/render-faults-ai seon.render/invoke-selected]
+
+my.agents.codex=> (calls 'seon.error/faults-form)
+[seon.db/carried-projection seon.db/pull seon.error/faults-input
+ seon.error/observation-selector seon.schema/projection-from-database]
+
+my.agents.codex=> (source seon.error/for-agent)
+;; seon.error/for-agent does not exist yet: you create it
+nil
+my.agents.codex=>
+```
+
+Defects the prototype showed: pprint code-dispatch lays out `(fn [db] …)` one token per line (the one
+printer must lay out data forms); callers/calls of a missing function are noise (skip); help ties sort by id,
+putting `query` before `task` (needs must express it).
+
+## 5. Derived, never authored
+
+| Derived | From |
 |---|---|
-| state | no `done-when` → **raised** (task type: triage); `done-when` → **specified** (implement) |
-| deliverables | functions in `changes` (default: subjects) + symbols the proofs reference that do not exist yet **and whose namespace may change** (a missing symbol is a deliverable only for the task that owns its namespace); `changes #{}` delivers data only |
-| order (`needs`) | task B needs task A when B's proofs reference something A delivers |
-| changed keys | the keys of `:seon.task/schemas` |
-| plan / backlog / issue list | queries over the tasks and their derived state |
+| `about` (back-references) | the proofs' symbols, keys and entities |
+| raised / ready / blocked / settled | proofs, needs, latest attempt's runs for the current task digest, decision |
+| what changed | the base→branch diff (merge classifies added / replaced / retracted; a rename is retract + add of the same body) |
+| deliveries, affected callers, reaching tests | the diff + the graph |
+| order (plan) | `needs`, topologically |
 
-The derived plan for the eight experiment tasks puts `agents-can-validate` first, then
-`about-is-a-value`, then `declared-refusals` and `guarantees` — with no hand-declared order.
+## 6. Stored model
 
-## 4. The writer refuses (validation is data)
+Task and attempt are new root entities; proof, delivery and decision are their components; proof results are
+existing test-run entities. Worked example with values: the plan page
+(https://claude.ai/artifact/N2TBGUvajfYUbu3W1sQFxj, "The task data model").
 
-| Rule | Refuses |
-|---|---|
-| shape | fails the authored schema (closed map; intent ≥ 20 chars; ≥ 1 subject) |
-| subject / must-read missing | names no function, test, namespace or loaded Var (open: a namespace the task creates) |
-| references unknown | a proof references something that exists nowhere and is delivered by neither this task nor one it needs |
-| unquoted symbol value | a bare qualified symbol in value position (evaluates to the Var); `*dynamic*` exempt |
-| evidence missing | an evidence path that does not exist |
-| **claimed twice** | two tasks both derive the same missing deliverable (a conflict, not an order) |
-| **green on base** | a proof that already holds before any work proves nothing (caught `one-read-for-many-notes`) |
-| **red for the wrong reason** | a proof red only because a needed task is unsettled is *blocked*, not specified; check it on a branch where its needs are satisfied |
-| **example violates contract** | a literal argument in a proof call fails the called function's declared input (its row's contract), checked against the registry composed (`malli.registry/composite-registry`) with the task's target schemas — caught a note example missing `:my.note/agent` in < 5 ms |
+## 7. The writer refuses
 
-Proofs are evaluated on a throwaway branch (`exp-base-check`), so a proof that writes cannot touch
-the shared head: nine proofs in 756 ms.
+Unknown references (a symbol, key or entity that resolves nowhere, except a missing function a proof calls —
+TDD); duplicate ids; `needs` cycles or unknown ids; no proof red on the base; a proof example whose literal
+arguments violate the called function's contract; a help-topic cycle.
 
-## 4b. The standard proof vocabulary
+## 8. What must change in the data before this works
 
-Proofs for every kind of task need a few functions over tasks and data; delivering them is itself a
-task (`:seon.task.task/proof-vocabulary`): `seon.task/children`, `specified?`, `settled?`,
-`accepted?` (a root or user decision, as data), `seon.message/reply-to`, `seon.finding/get`, plus
-`seon.schema/valid?`/`explain` and each detector (`seon.task/stale-docs`). With them, a question, a
-decomposition, a nightly maintenance run and a research finding all state "done" the same way
-(`docs/research/agent-platform/experiments/scenario-tasks.edn`).
+1. Tests store their direct calls (the known-good examples of a function).
+2. Contracts store their schema keys as an edge (analyzer; no string parsing at readers).
+3. `:seon/must-read` / `:seon/see-also` are ingested from metadata and schema properties.
+4. Help topics become data (today: 13 hard-coded lines + an unused seeded instruction).
+5. Docstrings state intent; incident history moves to tasks/evidence (detector).
 
-## 5. What a brief is
+## 9. Open decisions
 
-Only forms the agent can evaluate itself in its SCI context, each with its current value, in this
-order: the task; its proofs; its must-reads (read from the program rows — doc, contract, source as
-source); where its definitions go (the namespace's intent). Never a namespace dump. The same brief
-value is what the owner's debug page must render.
-
-## 6. What the dogfood runs proved and exposed
-
-- **Proved:** a Codex agent given only a brief delivered `seon.schema/valid?` and `explain` (docstring,
-  contract, one-line bodies over `projection-validator`/`projection-explainer`) in 11 forms, 11–62 ms
-  each, all proofs green in separate evaluations on branch `exp-validate-2`.
-- **Proved again, new case:** a Codex agent given only a brief created the `seon.task` namespace on branch
-  `exp-stale-docs-1` and delivered `seon.task/stale-docs` in 18 forms (5–169 ms each); it found the
-  attributes it needed from the must-read row's pull in one 9 ms step, and its result equals the
-  orchestrator's detector (the same eight `seon.flow` functions). It wrote ~20 lines over
-  `seon.db/history` where one clause over current datoms' transactions suffices: must-reads should carry
-  the idiom, not only the function. It also found that an empty result does not prove review
-  (undocumented functions are excluded) — a second detector, and a sharper intent.
-- **Proved, deletion kind:** a Codex agent removed `seon.note/note-row` and repaired its three callers from
-  a v0.2 brief in 19 forms (proofs green at runtime) — and exposed that REPL deletion records nothing and
-  warns about no callers, that the gate refuses core contracts containing `:nil` verbatim, that a
-  redefinition without a contract is silently admitted, and that branch namespaces lack their aliases.
-- **Exposed:** delivery (cherry-pick → program rows → files) does not exist; a schema declaration
-  cannot be published to a branch; `:nil` is refused in agent-authored contracts while core contracts
-  use it; `seon.schema.internal/contract-error!` crashes on a function symbol; a session's MCP server
-  predating a script change silently runs the old evaluation path (definitions did not persist).
-
-## 7. Proposed v0.2 — explicit authority, inference as advice (Astra review `astra-language-review-2026-09-24.md`; pending the owner)
-
-The independent review reproduced four bugs in the v0.1 experiment (order-dependent deliverers, hidden
-cycles, empty proofs settling, stale green settling) — fixed — and refuted the derivation rules as
-**authority** with counterexamples: a deletion task proving `(nil? (resolve 'x/old))` would "deliver"
-the name it deletes; a task that only prints `'pricing/total` would "need" the task optimizing it;
-being *about* code must not authorize *changing* it. Proposed changes:
-
-| v0.1 | v0.2 proposal |
-|---|---|
-| deliverables derived from subjects + missing symbols | `:seon.task/definitions` — the explicit set of declarations the task may add, change or retract; default none. Derivation only SUGGESTS additions for the writer to show |
-| `needs` derived from proof references | `:seon.task/needs` authored; the writer shows suggested needs (proof references to another task's definitions, and schema keys another task changes) and refuses cycles and unknown ids |
-| `changes` narrows subjects | removed; `definitions` + `schemas` are the whole program scope; a data task names `:seon.task/output` (the schema its result must satisfy) |
-| every proof red on the base | at least one proof red on the base for its own reason (the defect); others may be green invariants |
-| proofs are forms over ambient `(seon.db/db)` | proofs may be `(fn [db task attempt] …)` over an explicit world (the "pass the world explicitly" law) — owner to choose |
-| state from any green attempt | settled = the latest attempt, bound to the task's current revision, all proofs green, plus acceptance where required |
-| `recurs {:every :day}` | `:seon.task/schedule` naming an existing schedule entity (expression + zone + firing identity) |
-| `context` | `context-fn`, and chosen by kind of work, not by "has proofs" |
-| `#:seon.task{…}` | allowed in files: the namespaced map literal makes tasks shorter without a macro |
+- Proofs: deftest symbols or task-owned deftest source (recommended, §3).
+- Task identity: keywords for authored and generated tasks (recommended).
+- The entry gate's `:warn` dial.
