@@ -1,5 +1,6 @@
 (ns seon.maintenance-test
   (:require [clojure.java.io :as io]
+            [clojure.string :as str]
             [malli.registry :as mr]
             [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
@@ -395,6 +396,49 @@
         (is (true? (:seon.operator.log/rotated? result)))
         (is (zero? (.length log-file)))
         (is (= 32 (.length (io/file (str (.getCanonicalPath log-file) ".1"))))))
+      (finally
+        (test-support/delete-recursively! root)))))
+
+
+;; PrintStream writes hold the stream's own monitor (JDK PrintStream.java,
+;; `synchronized (this)`); these writers take the same monitors so the test
+;; exercises System/out and System/err exclusion without replacing either.
+(deftest rotation-keeps-every-line-written-during-it
+  (let [root (owned-root)
+        log-dir (io/file root "logs")
+        log-file (io/file log-dir "seon.log")
+        stop? (atom false)
+        written (atom 0)]
+    (try
+      (.mkdirs log-dir)
+      (spit log-file "")
+      (with-open [out (java.io.FileOutputStream. log-file true)]
+        (let [writer (fn [stream]
+                       (doto (Thread.
+                              #(while (not @stop?)
+                                 (locking stream
+                                   (.write out (.getBytes
+                                                (str (swap! written inc) "\n"))))))
+                         .start))
+              threads (mapv writer [System/out System/err])
+              results (try
+                        (doall (for [_ (range 20)]
+                                 (do (Thread/sleep 5)
+                                     (maintenance/rotate-logs!
+                                      {:seon.boot/log-dir (.getCanonicalPath log-dir)
+                                       :seon.config.maintenance/log-max-bytes 1
+                                       :seon.config.maintenance/log-retained-files 30}))))
+                        (finally
+                          (reset! stop? true)
+                          (run! #(.join ^Thread %) threads)))
+              files (filter #(.isFile ^java.io.File %)
+                            (cons log-file
+                                  (map #(io/file (str (.getCanonicalPath log-file) "." %))
+                                       (range 1 31))))
+              lines (mapcat #(str/split-lines (slurp %)) files)]
+          (is (= 20 (count (filter :seon.operator.log/rotated? results))))
+          (is (< 1000 @written))
+          (is (= (range 1 (inc @written)) (sort (map parse-long lines))))))
       (finally
         (test-support/delete-recursively! root)))))
 

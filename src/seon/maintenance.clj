@@ -462,7 +462,9 @@
   (str log-path "." index))
 
 (defn rotate-logs!
-  "Bound one live log while preserving its inode for the detached JVM."
+  "Bound one live log while preserving its inode for the detached JVM.
+  Copy and truncate run under System/out's and System/err's monitors, so a
+  line this JVM writes lands in exactly one of seon.log.1 or seon.log."
   {:malli/schema
    [:=> [:cat :seon.operator/log-request]
     [:or :seon.operator/log-result :seon.operator/failed-error]]}
@@ -482,15 +484,19 @@
               (Files/move (.toPath from) (.toPath to)
                           (into-array java.nio.file.CopyOption
                                       [StandardCopyOption/REPLACE_EXISTING])))))
-        (when (pos? retained)
-          (Files/copy (.toPath log-file)
-                      (.toPath (io/file (archive-path log-path 1)))
-                      (into-array java.nio.file.CopyOption
-                                  [StandardCopyOption/REPLACE_EXISTING])))
-        ;; The detached process keeps this inode open. Truncating it bounds
-        ;; future writes immediately; renaming it would strand the live fd.
-        (with-open [file (RandomAccessFile. log-file "rw")]
-          (.setLength file 0)))
+        ;; The detached JVM's fds 1 and 2 append to this inode through
+        ;; System/out and System/err, whose writes hold the PrintStream's
+        ;; monitor. Holding both monitors makes copy+truncate lose no line;
+        ;; renaming instead would strand the live fd.
+        (locking System/out
+          (locking System/err
+            (when (pos? retained)
+              (Files/copy (.toPath log-file)
+                          (.toPath (io/file (archive-path log-path 1)))
+                          (into-array java.nio.file.CopyOption
+                                      [StandardCopyOption/REPLACE_EXISTING])))
+            (with-open [file (RandomAccessFile. log-file "rw")]
+              (.setLength file 0)))))
       {:seon.operator.log/path log-path
        :seon.operator.log/bytes-before before
        :seon.operator.log/bytes-after (if (.isFile log-file)
