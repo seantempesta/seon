@@ -2493,48 +2493,6 @@
                (pr-str (vec (remove canonical carried)))
                " from " (pr-str (program/row-identity row)))))))
 
-(deftest a-span-past-the-captured-source-is-the-typed-refusal
-  ;; The 2026-09-16 publication class: `source-contexts` captures each file's
-  ;; bytes and the analyzer reads the same files again, so a concurrent edit
-  ;; between those two reads leaves a span addressing characters the captured
-  ;; text does not have. The seam threw a bare index exception
-  ;; (`Range [109022, 114047) out of bounds for length 114007`), which told
-  ;; publication nothing about which file changed. The span read is total now:
-  ;; a span that fits reads the captured source, and a span that does not is
-  ;; the typed refusal naming the file, the span, and the two digests.
-  (let [root (fixture-root)
-        captured-source "(ns changing.sample)\n(defn one [] 1)\n"
-        file (write-source! root "changing/sample.clj" captured-source)
-        path (.getCanonicalPath file)
-        contexts (#'seon.fn/source-contexts [file])
-        _ (spit file (str captured-source "(defn two [] 2)\n(defn three [] 3)\n"))
-        analysis (analyzer/analyze {::analyzer/paths [path]})
-        entry-named (fn [declaration]
-                      (first (filter #(= declaration (::analyzer/name %))
-                                     (::analyzer/var-definitions analysis))))
-        refusal-of (fn [read-span entry]
-                     (try (read-span contexts entry)
-                          (catch clojure.lang.ExceptionInfo failure
-                            (ex-data failure))))
-        refusal (refusal-of #'seon.fn/exact-source (entry-named 'three))
-        span-refusal (refusal-of #'seon.fn/exact-form-span (entry-named 'three))]
-    (testing "a declaration the captured text still holds reads exactly"
-      (is (= "(defn one [] 1)"
-             (#'seon.fn/exact-source contexts (entry-named 'one)))))
-    (doseq [[reader data] [["exact-source" refusal]
-                           ["exact-form-span" span-refusal]]]
-      (testing reader
-        (is (true? (:seon.fn/index-refused data))
-            (pr-str data))
-        (is (= path (:seon.fn/source-path data)))
-        (is (= (count captured-source) (:seon.fn.file/captured-length data)))
-        (is (= [4 1] (take 2 (:seon.error/offending data))))
-        (is (string? (:seon.fn.file/captured-digest data)))
-        (is (string? (:seon.fn.file/current-digest data)))
-        (is (not= (:seon.fn.file/captured-digest data)
-                  (:seon.fn.file/current-digest data))
-            "the refusal names a captured digest the file no longer carries")))))
-
 (deftest a-file-deleted-after-listing-is-the-declared-refusal
   ;; 2026-09-24 fault row 15: `full-source-refresh!` listed a dependent file,
   ;; another lane deleted it, and the read's NoSuchFileException was recorded
@@ -2556,10 +2514,10 @@
         "the whole cause is kept")))
 
 (deftest a-file-changed-after-capture-analyzes-to-the-captured-spans
-  ;; The class behind that refusal: one analysis read each file TWICE, once to
-  ;; capture the text spans are sliced from and once inside clj-kondo, so a
-  ;; concurrent edit between the two reads produced rows for text the capture
-  ;; no longer matched. `analyze` takes the captured text now and clj-kondo
+  ;; The 2026-09-16 publication class: one analysis read each file TWICE, once
+  ;; to capture the text spans are sliced from and once inside clj-kondo, so a
+  ;; concurrent edit between the two reads produced spans past the captured
+  ;; text (`Range [109022, 114047) out of bounds for length 114007`). `analyze` takes the captured text now and clj-kondo
   ;; reads it from a private mirror, so there is exactly one read of the live
   ;; file per analysis and the rows describe the captured bytes by
   ;; construction — whatever the editor does meanwhile.
