@@ -2803,6 +2803,24 @@
                      :seon.source/candidate branch)))
           (finally (d/release-materialized-db published-database)))))))
 
+(defn- publication-paths
+  "Each changed path's identity relative to `directory`, or a refusal by name.
+  A declared gitlink is its recorded pin, so its (archive-linked) directory is
+  never followed; every other path must canonicalize inside `directory`, since
+  one outside it would publish nothing while answering with a commit id."
+  {:malli/schema [:=> [:cat :string [:vector :string]] [:vector :string]]}
+  [directory changed-paths]
+  (let [escapes? #(str/starts-with? % "..")
+        relative (mapv #(fs/relative-path directory %) changed-paths)
+        ;; The pin inventory is read only when a canonical path escapes.
+        pins (when (some escapes? relative) (test.cache/gitlink-digests directory))
+        paths (mapv #(if (find pins %1) %1 %2) changed-paths relative)]
+    (when-let [outside (seq (keep (fn [[given path]] (when (escapes? path) given))
+                                  (map vector changed-paths paths)))]
+      (refused! "Changed paths lie outside the JVM's source directory."
+                {:seon.fn/root directory :seon.source/changed-paths (vec outside)}))
+    paths))
+
 (defn refresh-source!
   "Publish the current source tree onto the one `current-src` branch.
 
@@ -2846,12 +2864,7 @@
            _ (when (and development-cluster (not instance))
                (refused! "Development updates require the named cluster to be running."
                          {:seon.boot/cluster-name development-cluster}))
-           ;; A named path resolves in THIS JVM's source directory; one outside it
-           ;; would publish nothing while answering with a commit id.
-           _ (when-let [outside (seq (filter #(str/starts-with? (fs/relative-path directory %) "..")
-                                             changed-paths))]
-               (refused! "Changed paths lie outside the JVM's source directory."
-                         {:seon.fn/root directory :seon.source/changed-paths (vec outside)}))
+           changed (publication-paths directory changed-paths)
            config (resolve-bootstrap {:seon.boot/root root})
            store-dir (:seon.boot/store-dir config)
            _ (report-source-progress! "store acquisition")
@@ -2859,8 +2872,7 @@
            ;; The publication's own roots, read before any adoption reload can
            ;; re-evaluate the vars that declare them.
            roots (assoc (publication-roots) :seon.fn/root directory
-                        :seon.source/changed-paths
-                        (mapv #(fs/relative-path directory %) changed-paths))]
+                        :seon.source/changed-paths changed)]
        (try
          (report-source-progress! "source build")
          (schema/call-with-projection
