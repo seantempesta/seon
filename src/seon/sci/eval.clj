@@ -100,7 +100,6 @@
             [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [datahike.api :as d]
-            [datahike.store :as ds]
             [clojure.java.io :as io]
             [clojure.main :as main]
             [clojure.string :as str]
@@ -2629,16 +2628,6 @@
   (cache/lru-cache-factory
    {} :threshold (::program-identity-cache-size program-cache-policy)))
 
-(defn- connection-identity
-  "The store and branch a connection writes: Datahike's own connection key
-  (`[store-identity branch]`, `reference-code/datahike/src/datahike/store.cljc`
-  `store-identity`, upstream `connector.cljc` `conn-id`). Data, so a key built
-  from it holds no Connection, database or node cache."
-  {:malli/schema [:=> [:cat :seon.db/connection] [:tuple :uuid :keyword]]}
-  [connection]
-  (let [{:keys [store branch]} (:config @connection)]
-    [(ds/store-identity store) branch]))
-
 (defn- record-refusals-once!
   "Record one program's acquisition refusals once per recording target.
 
@@ -2653,11 +2642,17 @@
                                         (db/carried-projection database))))
         ;; The target's identity, never the Connection object: a released
         ;; Connection keeps its metadata and so its whole world reachable.
-        target (if-let [connection (:seon.db/connection (::custody ctx))]
-                 (connection-identity connection)
-                 commit-fault!)]
-    (if (and (or (seq (::acquisition-refusals acquired)) (seq (::agent-mistakes acquired)))
-             program target)
+        ;; `db/connection-identity` is the dependency's connection key, or the
+        ;; typed unavailable result for released custody.
+        connection (:seon.db/connection (::custody ctx))
+        target (if connection (db/connection-identity connection) commit-fault!)
+        refusals? (or (seq (::acquisition-refusals acquired)) (seq (::agent-mistakes acquired)))]
+    (cond
+      (and refusals? connection (not (:datahike/connection-id target)))
+      (assoc acquired ::acquisition-refusals-recorded? false
+             ::acquisition-recording-error target)
+
+      (and refusals? program target)
       (let [cache-key [program target]
             cell (cache/lookup-or-miss
                   refusal-recording-cache cache-key
@@ -2671,7 +2666,8 @@
                     (catch Throwable failure
                       (cache/evict refusal-recording-cache cache-key)
                       (throw failure)))))
-      (record-acquisition-refusals! ctx database acquired commit-fault!))))
+
+      :else (record-acquisition-refusals! ctx database acquired commit-fault!))))
 
 (defn acquire!
   "Acquire the program the supplied database holds in this cluster context.

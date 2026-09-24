@@ -1606,6 +1606,10 @@
      (is
       (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired)))
      (is
+      (contains? (set (map second (keys @@#'eval/refusal-recording-cache)))
+                 (db/connection-identity connection))
+      "the recording target is the dependency's connection identity, writer backend included")
+     (is
       (schema/valid-candidate-value? (schema/handed-projection)
                                     :seon.sci.eval/row-acquisition-error refusal)
       "the contained agent mistake is a durable fact")
