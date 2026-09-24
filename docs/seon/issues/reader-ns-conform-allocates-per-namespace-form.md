@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved (file ns context from clj-kondo analysis, 9bba9e000; the reader conform serves REPL forms only)
 severity: friction
 tags: [issue, reader, performance]
 ---
