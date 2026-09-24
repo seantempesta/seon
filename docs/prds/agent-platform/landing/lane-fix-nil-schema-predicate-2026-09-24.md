@@ -152,4 +152,13 @@ src +12 −5, test +48.
   twice (5.6 s, 6.1 s — whole-namespace, dominated by
   `one-contract-text-gets-one-verdict-at-every-entrance` building the packaged
   projection).
-- Size: src +31 −2, test +30.
+- Size: src +35 −2, test +30.
+
+## Totals and limits
+
+Commits 9411e8640 (S1), ab7cc7190 (bootstrap registry), the follow-up-1 test
+commit, and the follow-up-3 commit. Net: src +57 −9, test +124. Follow-ups 2 and 3
+are proven only in the snapshot; default runs 3ff123708 (row S1 only).
+**RESET NEEDED** / `start --head`, then:
+`bin/test-check default --ns seon.schema.admission-gate-test` and
+`bin/test-check default --test seon.schema-test/bootstrap-admission-compiles-referenced-attributes-in-its-own-registry`.
