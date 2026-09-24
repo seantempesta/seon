@@ -28,9 +28,10 @@
 (def server-info {:name "seon" :version "0.4.0"})
 
 ;; [root cluster session-id] -> one stateful io-prepl socket and its endpoint.
-(def clj-sessions (atom {}))
+(defonce clj-sessions (atom {}))
 (def stdout-lock (Object.))
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
+(defonce reload-state (atom {}))
 
 (defn- content-text
   {:seon.fn/projection-boundary :none}
@@ -902,7 +903,7 @@
     (case method
       "initialize"
       (send-result id {:protocolVersion "2024-11-05"
-                       :capabilities {:tools {}}
+                       :capabilities {:tools {:listChanged true}}
                        :serverInfo server-info})
 
       "notifications/initialized"
@@ -913,18 +914,25 @@
 
       "tools/call"
       (let [{:keys [name arguments]} params]
-        (send-result id (execute-tool name arguments)))
+        (let [result (execute-tool name arguments)
+              error (:error @reload-state)]
+          (send-result id (cond-> result
+                            error (update :content conj
+                                          {:type "text" :text (content-text error)})))
+          (when error (swap! reload-state dissoc :error))))
 
       (when id
         (send-error id -32601 (str "Method not found: " method))))
     (catch Throwable throwable
       (log-error "request failed:" (ex-message throwable))
       (when id
-        (send-result id
-                     (mcp-error
-                      (merge {:seon.dev.mcp/failure :request
-                              :seon.dev.mcp/error (ex-message throwable)}
-                             (ex-data throwable))))))))
+        (let [reload-error (:error @reload-state)]
+          (send-result id
+                       (mcp-error
+                        (merge {:seon.dev.mcp/failure :request
+                                :seon.dev.mcp/error (ex-message throwable)}
+                               (ex-data throwable) reload-error)))
+          (when reload-error (swap! reload-state dissoc :error)))))))
 
 (def parent-handle
   (let [parent (.parent (java.lang.ProcessHandle/current))]
@@ -954,12 +962,34 @@
   [& _]
   (log-info "Seon MCP server starting; project=" project-root)
   (start-parent-watchdog!)
-  (let [reader (BufferedReader. *in*)]
+  (let [reader (BufferedReader. *in*)
+        source (io/file project-root "script/seon/dev/mcp.clj")
+        state reload-state handler (atom @#'handle-request)]
+    (reset! state {:checked 0 :modified (.lastModified source) :tools tools})
     (loop []
       (when-let [line (.readLine reader)]
         (when-not (str/blank? line)
           (try
-            (handle-request (json/parse-string line true))
+            (let [now (System/currentTimeMillis)]
+              (when (>= (- now (:checked @state)) 1000)
+                (let [modified (.lastModified source)]
+                  (swap! state assoc :checked now)
+                  (when (not= modified (:modified @state))
+                    (let [roots (when-let [n (find-ns 'seon.dev.mcp)] (into {} (map (fn [[_ v]] [v @v]) (ns-interns n))))]
+                     (try
+                      (require 'seon.dev.mcp :reload)
+                      (doseq [[sym value] {'reload-state state 'clj-sessions clj-sessions}] (alter-var-root (ns-resolve 'seon.dev.mcp sym) (constantly value)))
+                      (let [new-tools @(ns-resolve 'seon.dev.mcp 'tools)]
+                       (when (not= (:tools @state) new-tools) (send-response {:jsonrpc "2.0" :method "notifications/tools/list_changed"}))
+                       (swap! state assoc :modified modified :tools new-tools :error nil))
+                      (reset! handler @(ns-resolve 'seon.dev.mcp 'handle-request))
+                      (log-info "reloaded" (.getPath source))
+                      (catch Throwable throwable
+                        (doseq [[v root] roots] (alter-var-root v (constantly root)))
+                        (log-error "reload failed:" (.getPath source) (ex-message throwable))
+                        (swap! state assoc :error {:seon.dev.mcp/reload-error (ex-message throwable)
+                                                   :seon.dev.mcp/file (.getPath source)})))))))
+              (@handler (json/parse-string line true)))
             (catch Throwable throwable
               (log-error "parse error:" (ex-message throwable))
               (send-error nil -32700 "Parse error"))))
