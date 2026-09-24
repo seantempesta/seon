@@ -101,7 +101,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 
 | # | Requirement | Source | Status |
 |---|---|---|---|
-| 5b.1 | What a task may change is explicit (`definitions`, `retracts`, `renames`, `schemas`, `retires`, or a data `output`); being about code grants nothing | A | prototyped: 12 tasks, 9 kinds, 0 findings |
+| 5b.1 | ~~What a task may change is explicit~~ SUPERSEDED 2026-09-24 (owner): a task authors only id, intent, done-when (+ optional must-read, needs, merge, attempts, schedule). `about` is derived from the proofs' symbols/keys; what changed is derived from the base→branch diff (merge already classifies it, `cluster/source.clj:698`); work discovered mid-task (another caller to change) needs no scope amendment; control = review of the diff + gate + the decision's subset; a target data model is a proof | O | proposed v0.3 |
 | 5b.2 | Prerequisites are explicit (`needs`); the writer suggests missing needs (calls into another task's definitions; keys another task's schemas define) and refuses cycles, unknown ids and duplicate ids | A | prototyped |
 | 5b.3 | Two tasks changing one definition is advice (declare needs or same-cause) unless an explicit needs path already orders them | R | prototyped |
 | 5b.4 | Dependencies come from CALLS, not quoted names; a proof printing `'x/f` does not depend on x/f's author | A | prototyped |
