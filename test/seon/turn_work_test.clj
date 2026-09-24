@@ -760,3 +760,25 @@
              (mapv :seon.message/id
                    (turn/unanswered-triggers (db/db connection) agent-id)))
           "each wake comes back in its own datom's transaction order"))))
+
+(deftest a-refused-agent-lookup-escapes-as-its-own-refusal
+  ;; CLASS: a refused read handed on as an id (open signature c0ae227e,
+  ;; `agent-wake-datoms` "expected an integer, got a map"). A database value
+  ;; with no installed `:seon.agent/id` makes `seon.db/q` refuse by name —
+  ;; a real refusal, no redefinition. Both wake derivations must surface
+  ;; THAT refusal, never a downstream contract error about a map.
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :schema-flexibility :write :keep-history? true}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (let [database (db/db connection)]
+        (doseq [[label derivation] [[:outside-wake-t #(turn/outside-wake-t database agent-id)]
+                                [:unanswered-wakes #(turn/unanswered-wakes database agent-id {})]]]
+          (let [refusal (try (derivation) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+            (is (:seon.db/invalid-read refusal) (str label " refuses"))
+            (is (= 'seon.db/q (:seon.db/refused-read-operation refusal))
+                (str label " names the refused read, not a seek's contract")))))
+      (finally
+        (d/release connection)
+        (d/delete-database configuration)))))

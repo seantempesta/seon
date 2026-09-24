@@ -2564,14 +2564,22 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn- agent-eid
-  "The entity id of `agent-id` on `db`, or nil.
+  "The entity id of `agent-id` on `db`, nil when no such agent, or THROWS
+  the read's refusal whole.
   The one lookup the wake seeks need: every listened attribute is a ref
-  whose value IS this entity, so the index seek is (attribute, value)."
+  whose value IS this entity, so the index seek is (attribute, value).
+  A refused read is not an id and not \"no agent\": it escapes to the
+  caller's fault route naming `seon.db/q`, never reaching a seek as a map."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+                  [:or :nil :int]]}
   [db agent-id]
-  (db/q '[:find ?agent .
-          :in $ ?agent-id
-          :where [?agent :seon.agent/id ?agent-id]]
-        db agent-id))
+  (let [eid (db/q '[:find ?agent .
+                    :in $ ?agent-id
+                    :where [?agent :seon.agent/id ?agent-id]]
+                  db agent-id)]
+    (if (:seon.db/invalid-read eid)
+      (throw (ex-info (:seon.error/message eid) eid))
+      eid)))
 
 (defn- wake-attribute-set
   "The listened attributes one derivation binds.
