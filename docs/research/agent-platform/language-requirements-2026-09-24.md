@@ -163,7 +163,16 @@ explode and the metadata larger than the actual function… tasks and references
 | 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults | lane launched |
 | 8.7 | The per-session `:seon.dev.mcp/new-faults` cursor (`e868e5ec5`) is deleted, replaced by 8.3 | lane launched |
 
-## 6. Platform gaps the runs exposed (each is itself a task)
+## 9. nil means one thing (owner 2026-09-24: "be very clear about what we mean from the start rather than hacking the contracts and having ambiguous nils")
+
+| # | Requirement | Status |
+|---|---|---|
+| 9.1 | A returned `nil` (or empty collection, or `false`) means only "nothing / absent / no work". Every failure or unknown returns its declared error value (or throws its declared refusal); never nil, a default or an empty result | ruled |
+| 9.2 | The fix is at the producers, not in contract spellings: no invented "nothing" schema; core contracts keep `:nil`/`[:maybe]` where nil truly means nothing | ruled; census running (`ambiguous-nil-producers-2026-09-24.md`) |
+| 9.3 | Catch sites either handle a declared case or resurface the whole cause (existing law); a catch that returns nil/default is a defect | law; census running |
+| 9.4 | A lookup distinguishes "no such row" (nothing) from "could not read" (declared error) | census running |
+
+ the runs exposed (each is itself a task)
 
 - Two definition authorities: REPL forms are recognized by a hand matcher (`src/seon/sci/reader.cljc:245,323`) that sees only a top-level `clojure.core/defn`, so `(do (defn …))`, `(let [..] (defn …))`, `(def f (fn …))` and defn-expanding macros bypass the entry gate and arming. Owner-directed fix: observe what an evaluation defined (evaluate in a `sci/fork`, diff namespace maps, gate/arm the created Vars from their metadata, adopt or discard the fork); clj-kondo stays the one analyzer for rows and edges. Limit: a call inside the defining form runs before the check.
 
