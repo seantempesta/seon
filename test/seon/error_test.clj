@@ -868,6 +868,19 @@
           (is (= 1 facts))
           (is (= {} messages)))))))
 
+(deftest an-unattributable-fault-without-a-throwable-is-delivered
+  ;; open-errors-triage-2026-09-24 item 2: `504062b8` ("The selected renderer
+  ;; did not return an observation.") had no exception class and no steward,
+  ;; so it was recorded and told to nobody.
+  (with-db
+    (fn [connection]
+      (let [[facts messages]
+            (commit! connection
+                     {:seon.error/message "The selected renderer did not return an observation."}
+                     {})]
+        (is (= 1 facts))
+        (is (= {"root" 1} messages))))))
+
 (deftest the-storm-is-bounded-by-the-signature-count
   ;; the live falsifier's unit twin: one signature repeated forever must
   ;; not mail forever, because a message is a commit and a commit wakes

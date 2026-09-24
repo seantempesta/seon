@@ -1451,7 +1451,11 @@
                      (cond
                        steward-present {steward-id :recurring}
                        (and interrupted? agent-id) {agent-id :your-run}
-                       (and interrupted? escalation-present) {escalate-to :no-attributable-agent}
+                       ;; every fault no agent answers for reaches root, with or
+                       ;; without a throwable: recorded-but-undelivered is a defect.
+                       ;; An attributed fault without one is its agent's mistake,
+                       ;; already returned to that agent in its turn.
+                       (and escalation-present (nil? agent-id)) {escalate-to :no-attributable-agent}
                        :else {}))]
     (into (cond-> (into [{:seon.db.process/id process}] replacements)
             digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
