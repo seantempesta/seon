@@ -160,7 +160,7 @@
                       ::literal-not-storable "Only scalar Malli literals are storable. Register a literal whose value has a native Datahike type."
                       ::enum-not-storable "Only keyword Malli enums are storable. Register keyword members."
                       ::nilable-attribute "Stored attributes cannot use `:maybe`. Register the non-nil base shape, then omit an absent key or mark its entity-map entry `{:optional true}`."
-                      "The Malli form has no Datahike value type. Register a concrete storable shape.")]
+                      "A stored attribute needs a storable Datahike value type, and this Malli form has none. Register a concrete storable shape.")]
         (throw (ex-info message {::attr attribute ::form form
                                  reason (if (= reason ::nilable-attribute) ::form true)
                                  }))))
