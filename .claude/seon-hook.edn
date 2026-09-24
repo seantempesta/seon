@@ -2,13 +2,12 @@
 ;;
 ;; bin/seon-hook runs entirely in Babashka. It does not require a running
 ;; Seon process: syntax validation happens before an edit; the canonical
-;; Markdown and docstring linters run after it; current source publication
-;; makes one synchronous prepl request to the live operator JVM and returns
-;; its terminal adoption data. Save-time test gating remains a separate cut.
+;; Markdown and docstring linters run after it. The hook never publishes:
+;; program changes reach default only through root integration (D1).
 ;; Gemini review is one asynchronous, coalesced batch per two-minute window;
 ;; it never delays edit feedback or creates parallel review workers.
 ;; Every numeric bound this hook enforces is declared here and nowhere else:
-;; the publication timeout, the review size limits, and the review call's own
+;; the review size limits, and the review call's own
 ;; bound. The hook has no numeric fallback — an absent or non-positive value
 ;; refuses by exact key path rather than substituting a literal.
 ;; SEON_HOOK_CONFIG selects a complete fixture config.
@@ -34,37 +33,11 @@
  {:enabled true
   :roots ["src" "test" "resources" "script" "bin"]}
 
- ;; THE DEFAULT CLUSTER IS THE DEVELOPMENT ENVIRONMENT (owner, 2026-09-08):
- ;; the main operator root, cluster `default`. Every admitted edit publishes
- ;; to current-src and `default` adopts it in place. No side root, no
- ;; special name; fixtures (Juniper) are data seeded into it.
- ;; 2026-09-22 02:55 (orchestrator, rule 15): PAUSED while three lanes edit src
- ;; concurrently (kind-cut, turn-parks-on-boot, base-export-timeout): a lane's
- ;; half-landed config key was adopted into default before its schema and refused
- ;; the config apply; `bin/seon status` then threw inside the JVM. Re-enable at the
- ;; coordinated restart after these lanes land, and record the resume here.
- ;; 2026-09-22 04:05 (orchestrator): RESUMED after the coordinated reset; no lane edits src.
- ;; 2026-09-22 05:05 (orchestrator): PAUSED again — every adoption rewrites ~150 MB of
- ;; Datahike index leaves (store 87 MB → 7.4 GB in 15 min with one lane editing; A2's
- ;; retention seam, cut 2). The orchestrator adopts at checkpoints with
- ;; `bin/seon init --dev default` until A2 lands; resume is recorded here.
- ;; 2026-09-24 16:5x (orchestrator, owner: one shared JVM for tests): RESUMED. The
- ;; 150 MB-per-adoption growth traced to one 105 MB failure-message datom in the last
- ;; EAVT leaf, rewritten by every new-entity commit (issue
- ;; a-hundred-megabyte-failure-message-rides-every-new-entity-commit.md); its producers
- ;; are fixed (daa833e32) and default was reset 16:03Z. Lanes own disjoint files.
- ;; 2026-09-24 21:3x (orchestrator, owner: "please ease the load on my computer"): PAUSED —
- ;; ten lanes plus every session's tool calls republishing pinned default at 900% CPU. Lanes
- ;; commit only; root adopts at checkpoints with `bin/seon init --dev default --changed`.
+ ;; Publication happens only through root integration (D1); these two keys
+ ;; select the live root and cluster that schema/contract lint queries.
  :current-source
- {:enabled false
-  :root "."
-  :cluster "default"
-  ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
-  ;; test system (results reuse everywhere) lands; it ran reaching tests in
-  ;; the development JVM after every adoption.
-  :check-tests false
-  :timeout-seconds 600}
+ {:root "."
+  :cluster "default"}
 
  ;; The standing review rubric is DATA: `:skills` names skill directories
  ;; under `.agents/skills/`, each of whose `SKILL.md` is read fresh on every

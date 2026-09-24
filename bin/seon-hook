@@ -7,8 +7,10 @@
 ;; 2. Loads configuration from .claude/seon-hook.edn
 ;; 3. Runs clj-kondo before and after Clojure edits
 ;; 4. Runs the canonical Markdown/docstring linters after an edit
-;; 5. Publishes current source, checks core faults, and schedules one bounded
-;;    asynchronous Gemini review batch
+;; 5. Schedules one bounded asynchronous Gemini review batch
+;;
+;; It never publishes: program changes reach default only through root's
+;; integration (`bin/seon init --dev default --changed ...`, D1).
 ;;
 ;; It has no running Seon-process dependency. Pure linter namespaces load
 ;; directly into Babashka only for the file type that needs them.
@@ -1612,98 +1614,6 @@
       (try (.delete (io/file review-worker-path)) (catch Exception _ nil))))
   nil)
 
-(defn- beneath?
-  [parent child]
-  (let [parent (str (.getCanonicalPath (io/file parent)) java.io.File/separator)
-        child (absolute-file-path child)]
-    (and child (str/starts-with? child parent))))
-
-(defn- source-index-path?
-  "True for first-party files admitted to the current-src publication."
-  [file-path]
-  ;; Only program inputs publish: first-party Clojure under src/ and test/, the
-  ;; shipped config manifest, and schema resources. A path outside the program
-  ;; graph (docs, tmp, logs) is a gate-selection question for bin/test, never
-  ;; a publication: on 2026-09-19 every markdown edit ran a complete
-  ;; publication and adoption of default through the retired widening clause.
-  (let [lower (some-> file-path str/lower-case)]
-    (or (and (or (str/ends-with? lower ".clj")
-                 (str/ends-with? lower ".cljc"))
-             (or (beneath? (root-file "src") file-path)
-                 (beneath? (root-file "test") file-path)))
-        (= (absolute-file-path (root-file "config/default.edn"))
-           (absolute-file-path file-path))
-        (schema-resource-path? file-path))))
-
-(defn- publish-source-paths
-  "Send one publication request and return its terminal feedback."
-  {:malli/schema [:=> [:cat [:vector :string] :map] :string]}
-  [paths config]
-  (try
-    (let [timeout-ms (* 1000 (required-positive-config config [:current-source :timeout-seconds]))
-          root (operator/canonical-root (absolute-file-path (get-in config [:current-source :root] ".")))
-          cluster (get-in config [:current-source :cluster])
-          endpoint (operator/advertisement root cluster)
-          _ (when-not endpoint
-              (throw (ex-info "No live publication endpoint; start the selected root."
-                              {:seon.operator/root root :seon.boot/cluster-name cluster})))
-          form (pr-str
-                `(do
-                   (~'seon.cluster/project-next-prepl-value!
-                    {:seon.dev.mcp/read-only? false :seon.dev.mcp/project? false})
-                   (try
-                     ;; The save gate: adopt only when the reaching tests pass on
-                     ;; the cluster's candidate branch.
-                     (let [result# (~'seon.cluster/refresh-source! ~root ~paths ~cluster
-                                    (~'seon.fs/source-directory) {:seon.source/gate? true})]
-                       (cond-> result#
-                         (:seon.source/gate result#)
-                         (update :seon.source/gate dissoc :seon.source/gate-run)))
-                     (catch Throwable failure#
-                       (merge {:seon.error/at (java.util.Date.)
-                               :seon.error/layer :seon.cluster/publication
-                               :seon.error/operation '~'seon.cluster/refresh-source!
-                               :seon.error/message (ex-message failure#)}
-                              (ex-data failure#))))))
-          result (operator/prepl-value! endpoint form timeout-ms
-                                       (fn [output] (binding [*out* *err*] (print output) (flush)))
-                                       timeout-ms)]
-      (cond
-        (:seon.error/message result) (str "refused: " (pr-str result))
-        (and (false? (get-in result [:seon.source/gate :seon.test/passed?]))
-             (get-in result [:seon.source/gate :seon.source/host-bound]))
-        (str "red after adoption (host-bound "
-             (pr-str (get-in result [:seon.source/gate :seon.source/host-bound]))
-             " change only where the files compile): "
-             (get-in result [:seon.source/gate :seon.source/tally])
-             " " (pr-str (get-in result [:seon.source/gate :seon.source/phase-ms])))
-        (false? (get-in result [:seon.source/gate :seon.test/passed?]))
-        (str "refused by the save gate; default unchanged: "
-             (get-in result [:seon.source/gate :seon.source/tally])
-             " " (pr-str (get-in result [:seon.source/gate :seon.source/phase-ms])))
-        (and (:seon.source/commit-id result)
-             (vector? (:seon.source/reloaded-namespaces result))
-             (set? (:seon.source/arming-identities result)))
-        (str "accepted: " (pr-str result))
-        :else (str "degraded: " (pr-str (operator/diagnostic
-                                        "Publication returned no complete terminal evidence."
-                                        {:seon.operator/reply result} :client-failed)))))
-    (catch Exception failure
-      (str "degraded: " (pr-str (operator/diagnostic
-                                (ex-message failure) (or (ex-data failure) {}) :client-failed))))))
-
-(defn- current-source-feedback
-  "Publish the admitted named and derived paths synchronously in one request."
-  {:malli/schema [:=> [:cat :map :map [:vector :string]] [:maybe :string]]}
-  [event config derived-paths]
-  (let [paths (->> (concat (event-file-paths event) derived-paths)
-                   (filter source-index-path?)
-                   (map absolute-file-path) distinct vec)]
-    (when (and (= (:hook_event_name event) "PostToolUse")
-               (get-in config [:current-source :enabled] true)
-               (seq paths))
-      (publish-source-paths paths config))))
-
 
 ;;; ---------------------------------------------------------------------------
 ;;; Writes no tool payload names
@@ -1956,8 +1866,7 @@
           (if refusal
             (do (log! "DERIVED_BLOCK" (str "tool=" tool-name) refusal)
                 (refuse! {:decision "block" :reason refusal} refusal))
-            (output! (feedback-response
-                      [(current-source-feedback event config (vec (:seon.hook/paths derived)))] nil))))
+            (output! {:continue true})))
         ;; a derived scan that throws has checked nothing; saying so is the
         ;; only honest answer, because silence here is what let a shell write
         ;; break the tree in the first place
@@ -2015,11 +1924,6 @@
                   refusal (or (:seon.hook.lint/refusal lint)
                               (:seon.hook.contract/refusal contract)
                               (:seon.hook/refusal derived))
-                  feedback
-                  (cond-> (vec feedback)
-                    (and (str/blank? refusal)
-                         (not (:seon.hook.schema-admission/errors? schema-admission)))
-                    (conj (current-source-feedback event config (vec (:seon.hook/paths derived)))))
                   feedback (vec feedback)]
               (when-not (str/blank? refusal) (log! "CLOJURE_REFUSAL" refusal))
               (if (str/blank? refusal)

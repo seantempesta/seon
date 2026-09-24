@@ -7,69 +7,49 @@
             [seon.operator :as operator]
             [seon.test-support :as support]))
 
-(def ^:private terminal-probe
+;; Saves never publish (D1 O0): every route to default — its advertisement,
+;; the prepl and a live-root evaluation — records instead of answering.
+(def ^:private save-probe
   '(do
      (binding [*in* (java.io.StringReader. "{}") *out* (java.io.StringWriter.)]
        (load-file "bin/seon-hook"))
-     (let [accepted {:seon.source/commit-id #uuid "b2b94a47-7638-4187-9a8f-b71b95532880"
-                     :seon.source/reloaded-namespaces '[my.note]
-                     :seon.source/arming-identities #{[:seon.fn/sym 'my.note/create]}}
-           refused {:seon.error/message "probe refusal"
-                    :seon.error/operation 'seon.cluster/refresh-source!
-                    :seon.error/layer :seon.cluster/publication}
-           requests (atom [])
-           config {:current-source {:enabled true :root "." :cluster "default"
-                                    :timeout-seconds 2}}
-           event {:hook_event_name "PostToolUse" :tool_name "Edit"
-                  :tool_input {:file_path "src/my/note.clj"}}]
-       (with-open [server (java.net.ServerSocket. 0)]
-         (.setSoTimeout server 2000)
-         (let [worker
-               (future
-                 (doseq [result [accepted refused {}]]
-                   (with-open [socket (.accept server)
-                               reader (java.io.PushbackReader. (io/reader socket))
-                               writer (io/writer socket)]
-                     (.setSoTimeout socket 2000)
-                     (swap! requests conj (edn/read reader))
-                     (.write writer (str (pr-str {:tag :out :val "arbitrary progress {[\n"}) "\n"
-                                         (pr-str {:tag :ret :val (pr-str result)}) "\n"))
-                     (.flush writer)
-                     (when-not (= ::eof (edn/read {:eof ::eof} reader))
-                       (throw (ex-info "More than one request on the connection" {}))))))
-               endpoint {:seon.boot/prepl-host "127.0.0.1"
-                         :seon.boot/prepl-port (.getLocalPort server)}
-               replies
-               (with-redefs [operator/advertisement (fn [& _] endpoint)]
-                 [(current-source-feedback event config [])
-                  (current-source-feedback event config ["src/seon/id.clj"])
-                  (current-source-feedback event (assoc-in config [:current-source :enabled] false) [])
-                  (current-source-feedback event config [])])]
-           @worker
-           (prn {:seon.probe/replies replies :seon.probe/requests @requests
-                 :seon.probe/accepted accepted :seon.probe/refused refused}))))))
+     (let [calls (atom [])
+           record (fn [route] (fn [& _] (swap! calls conj route) nil))
+           config {:lint {:enabled false} :markdown-lint {:enabled false}
+                   :docstring-lint {:enabled false} :shell-writes {:enabled false}
+                   :review {:enabled false} :schema-admission {:enabled false}
+                   :contract-compile {:enabled false}}
+           events [{:tool_name "Edit" :tool_input {:file_path "src/seon/id.clj"}}
+                   {:tool_name "Write" :tool_input {:file_path "resources/seon/schemas/error.edn"}}
+                   {:tool_name "Edit" :tool_input {:file_path "src/seon/cluster/boot.clj"}}
+                   {:tool_name "Bash" :tool_input {:command "true"}}]
+           replies (with-redefs [load-config (constantly config)
+                                 operator/advertisement (record :advertisement)
+                                 operator/prepl-value! (record :prepl)
+                                 operator/live-root-value! (record :live-root)]
+                     (mapv (fn [event]
+                             (binding [*in* (java.io.StringReader.
+                                             (json/generate-string
+                                              (assoc event :hook_event_name "PostToolUse")))]
+                               (with-out-str (-main))))
+                           events))]
+       (prn {:seon.probe/calls @calls :seon.probe/replies replies
+             :seon.probe/publisher (resolve 'current-source-feedback)}))))
 
-(deftest one-request-returns-terminal-evidence-and-pause-sends-nothing
+(deftest named-and-pathless-saves-never-publish
   (let [result (process/run-process!
-                {:seon.operator.subprocess/argv ["bb" "-e" (pr-str terminal-probe)]
+                {:seon.operator.subprocess/argv ["bb" "-e" (pr-str save-probe)]
                  :seon.operator.subprocess/directory "."
                  :seon.operator.subprocess/deadline-ms
                  (* 1000 support/event-backstop-seconds)})]
     (is (zero? (:seon.operator.subprocess/exit result))
         (:seon.operator.subprocess/error-output result))
     (when (zero? (:seon.operator.subprocess/exit result))
-      (let [observed (edn/read-string (:seon.operator.subprocess/output result))
-            [accepted refused paused degraded] (:seon.probe/replies observed)
-            requests (:seon.probe/requests observed)]
-        (is (= 3 (count requests)))
-        (is (= (str "accepted: " (pr-str (:seon.probe/accepted observed))) accepted))
-        (is (= (str "refused: " (pr-str (:seon.probe/refused observed))) refused))
-        (is (nil? paused))
-        (is (str/starts-with? degraded "degraded:"))
-        (is (every? #(= 1 (count (filter (fn [form] (and (seq? form) (= 'seon.cluster/refresh-source! (first form))))
-                                        (tree-seq coll? seq %)))) requests))
-        (is (str/includes? (pr-str (second requests)) "src/seon/id.clj"))
-        (is (not (str/includes? accepted "arbitrary progress")))))))
+      (let [observed (edn/read-string (:seon.operator.subprocess/output result))]
+        (is (= [] (:seon.probe/calls observed)))
+        (is (nil? (:seon.probe/publisher observed)))
+        (is (= 4 (count (:seon.probe/replies observed))))
+        (is (not-any? #(str/includes? % "accepted") (:seon.probe/replies observed)))))))
 
 (deftest output-does-not-extend-the-hook-terminal-bound
   (with-open [server (java.net.ServerSocket. 0)]
