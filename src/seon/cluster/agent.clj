@@ -454,7 +454,8 @@
     (vec (sort ids))))
 
 (defn steward-of
-  "The agent id stewarding `namespace-name`, or nil.
+  "The agent id stewarding `namespace-name`, or nil only when none does.
+  An unreadable database refuses with its invalid read.
 
   Stewardship is the declared `:seon.ns/steward` fact on the namespace, not
   an inversion of assignment: several agents may be assigned one namespace,
@@ -462,13 +463,16 @@
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name]
                   [:maybe :seon.agent/id]]}
   [db namespace-name]
-  (db/q '[:find ?agent-id .
-         :in $ ?namespace-name
-         :where
-         [?namespace :seon.ns/name ?namespace-name]
-         [?namespace :seon.ns/steward ?agent]
-         [?agent :seon.agent/id ?agent-id]]
-       db namespace-name))
+  (let [steward (db/q '[:find ?agent-id .
+                        :in $ ?namespace-name
+                        :where
+                        [?namespace :seon.ns/name ?namespace-name]
+                        [?namespace :seon.ns/steward ?agent]
+                        [?agent :seon.agent/id ?agent-id]]
+                      db namespace-name)]
+    (when (or (:seon.db/invalid-read steward) (:seon.schema/expected-value steward))
+      (throw (ex-info (:seon.error/message steward) steward)))
+    steward))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The agent proc steps

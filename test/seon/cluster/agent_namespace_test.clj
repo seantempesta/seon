@@ -95,7 +95,7 @@
 
 ;;; A failed read is not "nobody is assigned": `ensure-namespace-owner!` creates
 ;;; an owner agent on an empty answer, so an unreadable database must refuse.
-(deftest assigned-to-refuses-an-unreadable-database-and-answers-none-only-when-none
+(deftest assignment-reads-refuse-an-unreadable-database-and-answer-none-only-when-none
   (test-support/with-database
     (fn [connection]
       (test-support/seed-cluster! connection "test")
@@ -112,7 +112,13 @@
             refusal (try (agent/assigned-to unreadable 'my.agents.alice)
                          (catch clojure.lang.ExceptionInfo error (ex-data error)))]
         (is (true? (:seon.db/invalid-read refusal)) (pr-str refusal))
-        (is (string? (:seon.error/message refusal)))))))
+        (is (string? (:seon.error/message refusal)))
+        (testing "steward-of: nil only when no steward, a refusal when unreadable"
+          (is (= "alice" (agent/steward-of @connection 'my.agents.alice)))
+          (is (nil? (agent/steward-of @connection 'my.agents.nobody)))
+          (is (true? (:seon.db/invalid-read
+                      (try (agent/steward-of unreadable 'my.agents.alice)
+                           (catch clojure.lang.ExceptionInfo error (ex-data error)))))))))))
 
 ;;; OWNERSHIP IS THE STEWARD FACT, AND ONLY THAT. The problem line used to
 ;;; invert `:seon.agent/namespace`, which is assignment: it is not
