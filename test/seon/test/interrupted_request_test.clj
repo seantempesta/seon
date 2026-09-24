@@ -1,7 +1,8 @@
 (ns seon.test.interrupted-request-test
   "A request that throws leaves no member open, and open test evidence makes
   only its own problem family unknown."
-  (:require [clojure.string :as str]
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [malli.core :as m]
             [seon.db :as db]
@@ -99,8 +100,14 @@
        (is (true? (#'sut/green? {:seon.test/sym finished :seon.test/pass-count 1
                                  :seon.test/fail-count 0 :seon.test/error-count 0}))
            "a captured result, not yet recorded at a basis, is judged by its counts")
-       (is (= [red] (mapv :seon.test/sym (:seon.problems/failed-tests found))) "the red stays visible")
-       (is (= [interrupted] (mapv :seon.test/error-test-symbol (:seon.problems/failed-tests-unknown found))))
+       ;; The branch inherits the store's problems; judge only this fixture's members.
+       (let [members #{finished red interrupted}
+             own (fn [k rows] (set/intersection members (set (map k rows))))]
+         (is (= #{red} (own :seon.test/sym (:seon.problems/failed-tests found)))
+             "the red stays visible; the unknown and the green are not failed")
+         (is (= #{interrupted}
+                (own :seon.test/error-test-symbol (:seon.problems/failed-tests-unknown found)))
+             "the open member alone is unknown"))
        (is (str/includes? (problems/ai-prose found) (str interrupted)) "the unknown is shown by name")))))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
