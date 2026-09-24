@@ -27,4 +27,4 @@
  {:seon.task/id        :seon.note.task/guarantees
   :seon.task/intent    "No test reaches seon.note; add guarantees for add!, forget! and notes through the real writers."
   :seon.task/subjects  #{seon.note seon.note-test}
-  :seon.task/done-when [(some #{'seon.note-test/add-then-forget-round-trips} (seon.fn/tests-reaching (seon.db/db) 'seon.note/add!))]}]
+  :seon.task/done-when [(boolean (some #{'seon.note-test/add-then-forget-round-trips} (seon.fn/tests-reaching (seon.db/db) 'seon.note/add!)))]}]

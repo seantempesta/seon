@@ -63,9 +63,10 @@
 (defn derive-needs
   "Task B needs task A when B's done-when references something A delivers (and A is not B)."
   [tasks]
-  (let [deliverer (into {} (for [t tasks s (:seon.task/delivers t)] [s (:seon.task/id t)]))]
+  (let [deliverers (reduce (fn [m [s id]] (update m s (fnil conj (sorted-set)) id)) {}
+                            (for [t tasks s (:seon.task/delivers t)] [s (:seon.task/id t)]))]
     (mapv (fn [t]
-            (let [derived (set (keep #(let [owner (deliverer %)] (when (not= owner (:seon.task/id t)) owner)) (referenced t)))]
+            (let [derived (set (mapcat #(disj (get deliverers % #{}) (:seon.task/id t)) (referenced t)))]
               (assoc t :seon.task/needs (into derived (:seon.task/needs t)))))
           tasks)))
 
@@ -100,12 +101,13 @@
   (let [by-id (into {} (map (juxt :seon.task/id identity)) derived)]
     (loop [out [] done #{} left (set (keys by-id))]
       (if (empty? left) out
-          (let [ready (sort (filter #(every? done (:seon.task/needs (by-id %))) left))
-                ready (if (seq ready) ready [(first (sort left))])]
-            (recur (into out (for [id ready :let [t (by-id id)]]
-                               {:id id :state (:seon.task/state t) :needs (vec (sort (:seon.task/needs t)))
-                                :delivers (vec (sort (:seon.task/delivers t)))}))
-                   (into done ready) (reduce disj left ready)))))))
+          (let [ready (sort (filter #(every? done (:seon.task/needs (by-id %))) left))]
+            (if (empty? ready)
+              (conj out {:cycle-or-unknown-prerequisite (vec (sort left))})
+              (recur (into out (for [id ready :let [t (by-id id)]]
+                                 {:id id :state (:seon.task/state t) :needs (vec (sort (:seon.task/needs t)))
+                                  :delivers (vec (sort (:seon.task/delivers t)))}))
+                     (into done ready) (reduce disj left ready))))))))
 
 (defn branch-evaluator
   "Evaluate source strings in the SCI context of `branch` on `cluster-name` (writes stay on the branch)."
@@ -154,13 +156,15 @@
     {:seon.task.attempt/task (:seon.task/id task)
      :seon.task.attempt/branch branch
      :seon.task.attempt/results results
-     :seon.task.attempt/green? (every? #(= :green (first %)) results)}))
+     :seon.task.attempt/green? (boolean (and (seq results) (every? #(= :green (first %)) results)))}))
 
 (defn states
   "Derived from tasks + attempts: settled (an attempt with every proof green), ready (specified,
   every need settled), blocked (a need unsettled), raised."
   [derived attempts]
-  (let [settled (set (keep #(when (:seon.task.attempt/green? %) (:seon.task.attempt/task %)) attempts))]
+  ;; attempts are ordered oldest → newest; only the latest attempt of a task counts (no stale green)
+  (let [latest (reduce (fn [m a] (assoc m (:seon.task.attempt/task a) a)) {} attempts)
+        settled (set (keep (fn [[id a]] (when (:seon.task.attempt/green? a) id)) latest))]
     (into (sorted-map)
           (for [t derived :let [id (:seon.task/id t)]]
             [id (cond (settled id) :settled

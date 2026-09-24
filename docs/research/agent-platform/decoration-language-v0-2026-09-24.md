@@ -119,3 +119,23 @@ value is what the owner's debug page must render.
   cannot be published to a branch; `:nil` is refused in agent-authored contracts while core contracts
   use it; `seon.schema.internal/contract-error!` crashes on a function symbol; a session's MCP server
   predating a script change silently runs the old evaluation path (definitions did not persist).
+
+## 7. Proposed v0.2 — explicit authority, inference as advice (Astra review `astra-language-review-2026-09-24.md`; pending the owner)
+
+The independent review reproduced four bugs in the v0.1 experiment (order-dependent deliverers, hidden
+cycles, empty proofs settling, stale green settling) — fixed — and refuted the derivation rules as
+**authority** with counterexamples: a deletion task proving `(nil? (resolve 'x/old))` would "deliver"
+the name it deletes; a task that only prints `'pricing/total` would "need" the task optimizing it;
+being *about* code must not authorize *changing* it. Proposed changes:
+
+| v0.1 | v0.2 proposal |
+|---|---|
+| deliverables derived from subjects + missing symbols | `:seon.task/definitions` — the explicit set of declarations the task may add, change or retract; default none. Derivation only SUGGESTS additions for the writer to show |
+| `needs` derived from proof references | `:seon.task/needs` authored; the writer shows suggested needs (proof references to another task's definitions, and schema keys another task changes) and refuses cycles and unknown ids |
+| `changes` narrows subjects | removed; `definitions` + `schemas` are the whole program scope; a data task names `:seon.task/output` (the schema its result must satisfy) |
+| every proof red on the base | at least one proof red on the base for its own reason (the defect); others may be green invariants |
+| proofs are forms over ambient `(seon.db/db)` | proofs may be `(fn [db task attempt] …)` over an explicit world (the "pass the world explicitly" law) — owner to choose |
+| state from any green attempt | settled = the latest attempt, bound to the task's current revision, all proofs green, plus acceptance where required |
+| `recurs {:every :day}` | `:seon.task/schedule` naming an existing schedule entity (expression + zone + firing identity) |
+| `context` | `context-fn`, and chosen by kind of work, not by "has proofs" |
+| `#:seon.task{…}` | allowed in files: the namespaced map literal makes tasks shorter without a macro |
