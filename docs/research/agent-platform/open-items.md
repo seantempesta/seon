@@ -9,7 +9,7 @@ updated: 2026-09-24
 ## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
 - Harness first cuts (owner check-in 2026-09-24 "don't we have a large list of work"; root took the recommended option): harness-s12-deletions (13 independent + 54 subsumed turn tests), harness-s0-unknown-results (per-member unknown; green? run-basis-t), harness-s1-attempt-release (designed 07c8dfc7f: handles carry routing, arm! stops accepting it, release refuses new arms, joins all graphs, keeps resources on failure; waits for S12 to release 3 turn test files).
-- fix-schema-projection-rules: delete projection-delta; assert-config-display! to admission; :inst false refusal; [:maybe X] one rule.
+- delete-projection-delta-branch: after projection-delta's deletion, build-projection's projection+delta branch (compose-projection-data) may have no caller — verify and delete.
 - Publication design: three priced options DONE (b8fae5bf8, publication-under-concurrent-lanes-2026-09-24.md), awaiting owner choice: (1) root-only checkpoints, hook lint-only, 0–15 lines, 2–4 h; (2) content-derived reconciliation, 60–100 lines, 12–24 h; (3, recommended) named lane branches → root-accepted merge → fail-closed convergence, the CLAUDE.md/D1 model, 250–450 lines, 40–72 h, with (1) as its interim.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
 - Analysis key: fixed c3a225dc7 (:seon.source/analyzer-digest; 11 stale rows converged; unchanged publication 229→249 ms). OVER TEN SECONDS, needs owner authorization: every edit inside the analyzer's reach (338 declarations, 12 namespaces) now costs one full reanalysis, 24.9 s (full-source-refresh! 23.9 s, analyze-rows 13.2 s, with-declarations x866k; issue a-full-reanalysis-publication-takes-twenty-five-seconds.md). The honest fix is making full analysis cheap (clj-kondo is 5.7 s of it), not skipping it.
@@ -40,6 +40,8 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 
 - Tool: the operator cannot read PREPL values holding Vars (#'seon.test.runner/record-tx in retained tx-data) → every such hook result is "degraded". FIXED 1a3a9acbe + ce149b23d (clojure read-string, *read-eval* false, tagged-literal default; thrown values surface their own message; 8/8). Root reloaded seon.operator by hand: script/ namespaces loaded by the JVM are not published (issue script-namespaces-loaded-by-the-jvm-are-not-published.md). seon.adoption-diagnostic-test bound 1024 bytes vs 2596 (a thrown io-prepl :val carries its stack trace) — red before; decide bound vs kept trace.
 
+- Schema rules DONE: projection-delta deleted (53a038419, −38); assert-config-display! at admission (e9f6dc805); :inst refusal and [:maybe X] were already fixed (ab7cc7190, a70688cc8) — the :inst regression never ran its path because the runner hands every test a projection (1cc45977a binds it nil). 9 pre-existing reds each in seon.schema-test and seon.config-test.
+
 ## Integration (root, at the end of the fix round)
 
 1. Default already runs the nuked store from the checkout; after the running lanes land, `bin/seon down && bin/seon start`.
@@ -54,7 +56,6 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 ## Queued correctness (file held; launch when released)
 
 - error/commit-tx callers (sci/eval.clj:1889, cluster.clj:3432) still record capped faults with no blob — route through recording + evidence-stage; declare :seon.blob/staged-writes on :seon.error/recording (seon.error.edn).
-- schema.clj assert-config-display! is an authoring rule still run at projection build (would break old as-of views if tightened): move to projection-with-schema + update test/seon/config_test.clj:62.
 - test/seon/schema/datahike_test.clj unsupported-database-attributes-refuse-at-one-rule is stale (register! outside a registration delta now refuses) — retired assumption.
 - Hook publications refused when several lanes publish at once (fix-history-keeps-its-rules item 4) — publication concurrency; with adoption exclusion (da9910fec) re-measure.
 - Cold as-of projection 263–273 ms per time point, re-derived each new commit (seon.db keying) — performance.
@@ -70,7 +71,6 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 - test/runner.clj + test.clj: reach leaves omit fixture metadata (stale green); test diagnostics drop causes; `find-var` on a referred Var makes the live-cluster drift snapshot always empty (issue filed).
 - refers slice (tmp/fix-entry-2-refers.patch): needs script/seon/dev/mcp.clj, test/seon/custody_stability_test.clj, src/seon/test/runner.clj.
 - error.clj: "Resolved" shown after recurrence (error.clj:1726) — after errors-on-their-branch.
-- schema/edn.clj or schema.clj: admit with identity and no projection falsely refuses :inst declarations; projection-with-schema vs activation disagree on [:maybe X] value schemas.
 - schema/admission.clj: restore one core guard — core :any/:some must carry the exemption + reason annotation.
 - Ambiguous-nil producers: census running → per-file fix lanes; then add the one-sentence rule to the data-oriented-clojure skill.
 - Tests red at HEAD before today: seon.db-test (19, EDN codec fixture), seon.sci.reader-test (19, symbols-as-strings), mcp_test fake connection, bounded-boundary-census (34 script subjects), shell time-limit fixture, fn-test members over 5 s bound, resume-turn test 16.7 s.
