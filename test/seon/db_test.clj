@@ -296,7 +296,11 @@
            report (db/transact! connection [])
            result (binding [db/*conn* connection]
                     (db/transact! []))
-           refusal (db/transact! connection (test-support/agent-tx @connection 42))
+           ;; A canonical agent row whose id the writer's schema refuses.
+           refusal (db/transact! connection
+                                 (mapv #(cond-> % (and (map? %) (:seon.agent/id %))
+                                          (assoc :seon.agent/id 42))
+                                       (test-support/agent-tx @connection "refused-shape")))
            findings (->> (seon.fn/contract-findings (db/db connection))
                          (filterv #(= "seon.db" (namespace (:seon.fn/sym %)))))
            transaction-findings
@@ -1120,19 +1124,13 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted!
-                  connection
-                  [{:seon.ns/name 'my.agents.db-shared}
-                   {:seon.agent/id "db-shared-first"
-                    :seon.agent/namespace
-                    [:seon.ns/name 'my.agents.db-shared]}])
+      connection (test-support/agent-tx @connection "db-shared-first" 'my.agents.db-shared))
      (let [accepted
            (binding [db/*conn* connection]
              (db/transact!
-              [{:seon.agent/id "db-shared-second"
-                :seon.agent/namespace
-                [:seon.ns/name 'my.agents.db-shared]}]))]
-       (is (some? (:db-after accepted))
-           "a second agent assigned the same namespace commits")
+              (test-support/agent-tx @connection "db-shared-second" 'my.agents.db-shared)))]
+       (is (some? (:seon.db/tx accepted))
+           (str "a second agent assigned the same namespace commits " (pr-str accepted)))
        (is (nil? (get-in (:schema @connection)
                          [:seon.agent/namespace :db/unique]))
            "because the installed schema declares no uniqueness on it")
@@ -1855,13 +1853,13 @@
        (let [basis (db/basis-t (db/db connection))
              refusal (db/transact! connection [entity])]
          (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
-         (is (= :seon.program/analyzed-source-digest (:seon.db/attribute refusal))
+         (is (= :seon.program/definition-digest (:seon.db/attribute refusal))
              "the refusal names the missing required key")
          (is (= :seon.error/unknown (:seon.db/offending refusal)))
          (is (= identities (get-in refusal [:seon.error/data :seon.db/entity]))
              "the refusal names the entity by its identity attributes")
          (is (= basis (db/basis-t (db/db connection))) "the incomplete create commits nothing")))
-     (test-support/transacted! connection [{:seon.ns/name 'seon.source.test.complete}])
+     (test-support/transacted! connection [(test-support/namespace-row @connection 'seon.source.test.complete)])
      (is (some? (:db/id (db/pull (db/db connection) '[:db/id]
                                  [:seon.ns/name 'seon.source.test.complete])))
          "a create carrying every required key of its schema is admitted")
@@ -1882,7 +1880,7 @@
            function (symbol (str namespace-name) "target")]
        (test-support/transacted!
         connection (into (test-support/agent-tx @connection "root")
-                     [{:seon.ns/name namespace-name}
+                     [(test-support/namespace-row @connection namespace-name)
                       (test-support/program-fn-row (db/db connection) function "(defn target [] nil)")
                       [:db.fn/call #'schedule/root-maintenance-seed-call]]))
        (let [task-id (first (sort (db/q '[:find [?id ...] :where [_ :seon.schedule.task/id ?id]]
@@ -1924,7 +1922,7 @@
                  :seon.program/schema-forms forms})]
        (test-support/transacted!
         connection
-        [{:seon.ns/name 'sample.arity}
+        [(test-support/namespace-row (db/db connection) 'sample.arity)
          row
          (assoc (test-support/program-fn-row (db/db connection) caller "(defn caller [x] (target x))")
                 :seon.schema.admission/source :agent
@@ -1973,12 +1971,10 @@
        (is (= basis (:max-tx @connection)))
        (test-support/transacted!
         connection
-        [{:seon.ns/name 'sample.render}
-         (assoc (test-support/program-fn-row (db/db connection) renderer "(defn ai [value] value)")
-                :seon.schema.admission/source :agent
-                :seon.fn/source "(defn ai [value] value)"
-                :seon.fn/arglists "([value])"
-                :seon.fn/private? false)
+        [(test-support/namespace-row (db/db connection) 'sample.render)
+         (test-support/program-fn-row
+          (db/db connection) renderer
+          "(defn ai {:malli/schema [:=> [:cat :seon.schema/value] :string]} [value] (pr-str value))")
          row])
        (let [refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym renderer]]])]
          (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))

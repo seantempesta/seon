@@ -179,11 +179,12 @@
           (assoc (merge (test-support/program-fn-row database function-symbol source)
                         (contract-facts function-symbol spec source arglists))
                  :seon.fn/spec (pr-str spec)))]
-    [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
+    [(test-support/namespace-row database 'sample)
      (program/with-contract-facts
-      {:seon.program/row {:seon.schema/key :sample/marker
-                          :seon.schema/form ":int"
-                          :seon.schema.admission/source :core}
+      {:seon.program/row (program/declaration-row
+                          (db/carried-projection database)
+                          {:seon.schema/key :sample/marker :seon.schema/form ":int"}
+                          :all :core)
        :seon.program/compile-options compile-options
        :seon.program/predicate-functions predicate-functions
        :seon.program/schema-keys #{:sample/marker}
@@ -336,7 +337,7 @@
   (test-support/with-database
    (fn [connection]
      (test-support/transacted! connection
-                               [{:seon.ns/name 'sample :seon.ns/source "(ns sample)"}
+                               [(test-support/namespace-row (db/db connection) 'sample)
                                 (test-support/program-fn-row
                                  (db/db connection) 'sample/nowhere "(defn nowhere [] nil)")
                                 {:seon.call-preparation/key :sample/absent
@@ -396,8 +397,7 @@
                                                (projection))
            first-plan (cp/plan call-state first-database first-snapshot
                                'sample/target)]
-       (test-support/transacted! connection [{:seon.ns/name 'unrelated
-                                              :seon.ns/source "(ns unrelated)"}])
+       (test-support/transacted! connection [(test-support/namespace-row @connection 'unrelated)])
        (let [next-database @connection
              next-snapshot (cp/current-snapshot call-state next-database
                                                 (projection))]
@@ -945,7 +945,7 @@
        (is (every? attributes (cp/row-attributes))
            "precise supplied-default declaration dependencies remain")
        (is (db/read-evidence-current? @connection evidence))
-       (test-support/transacted! connection [{:seon.ns/name 'unrelated-evidence-one}])
+       (test-support/transacted! connection [(test-support/namespace-row @connection 'unrelated-evidence-one)])
        (is (db/read-evidence-current? @connection evidence)
            "cold plan derivation is independent of unrelated settlement facts")
        (let [warm-captured (atom [])
@@ -956,7 +956,7 @@
                  (cp/plan call-state @connection current sym)))
              warm-evidence (db/read-evidence @warm-captured)]
          (is (= invocation-plan warm-plan))
-         (test-support/transacted! connection [{:seon.ns/name 'unrelated-evidence-two}])
+         (test-support/transacted! connection [(test-support/namespace-row @connection 'unrelated-evidence-two)])
          (is (db/read-evidence-current? @connection warm-evidence)
              "warm contract revalidation does not become a semantic read"))
        (test-support/transacted!

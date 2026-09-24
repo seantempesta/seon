@@ -43,7 +43,7 @@
                      :seon.cluster/name "test"
                      :seon.ns/name 'my.agents.alice}))
       (test-support/transacted! connection
-                              [{:seon.ns/name 'my.agents.reassigned}
+                              [(test-support/namespace-row @connection 'my.agents.reassigned)
                                {:seon.agent/id "alice"
                                 :seon.agent/namespace
                                 [:seon.ns/name 'my.agents.reassigned]}])
@@ -130,23 +130,16 @@
     (fn [connection]
       (test-support/seed-cluster! connection "test")
       (test-support/transacted! connection
-                              [{:seon.ns/name 'example.unowned
-                                :seon.ns/source "(ns example.unowned)"
-                                :seon.schema.admission/source :agent}
-                               {:seon.ns/name 'example.assigned
-                                :seon.ns/source "(ns example.assigned)"
-                                :seon.schema.admission/source :agent}
-                               {:seon.ns/name 'example.owned
-                                :seon.ns/source "(ns example.owned)"
-                                :seon.schema.admission/source :agent}
-                               {:seon.agent/id "owner"
-
-                                :seon.agent/namespace
-                                [:seon.ns/name 'example.owned]}
+                              (into [(test-support/namespace-row @connection 'example.unowned)
+                                     (test-support/namespace-row @connection 'example.assigned)
+                                     (test-support/namespace-row @connection 'example.owned)]
+                                    (test-support/agents-tx @connection ["owner" "worker"])))
+      ;; An agent that works in a namespace it did not create stewards nothing.
+      (test-support/transacted! connection
+                              [{:seon.agent/id "owner"
+                                :seon.agent/namespace [:seon.ns/name 'example.owned]}
                                {:seon.agent/id "worker"
-
-                                :seon.agent/namespace
-                                [:seon.ns/name 'example.assigned]}])
+                                :seon.agent/namespace [:seon.ns/name 'example.assigned]}])
       (test-support/transacted! connection
                               [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
                                 [:seon.agent/id "owner"]]])

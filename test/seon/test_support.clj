@@ -275,14 +275,25 @@
                        :seon.error/expected :seon.agent/execution-handle
                        :seon.error/offending (if db/*conn* :no-held-handle :no-custody)}))))
 
-(defn- seeded-cluster-name
-  "The one cluster this fixture stood up, DERIVED, or nil when it seeded none."
+(defn- cluster-names
+  "Every cluster name `database` holds."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:set :seon.boot/cluster-name]]}
   [database]
-  (let [names (sort (db/q '[:find [?name ...]
-                            :where [_ :seon.cluster/name ?name]]
-                          database))]
-    (when (= 1 (count names))
-      (first names))))
+  (set (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] database)))
+
+(defn- seeded-cluster-name
+  "The one cluster this fixture stood up, else the executing handle's own.
+   A fixture branch inherits the rows of the database its handle acquired
+   (`:seon.db/db`); the clusters `database` adds to those are the ones it seeded."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/connection] :seon.db/database-value]
+                  [:or :nil :seon.boot/cluster-name]]}
+  [connection database]
+  (let [handle (execution-handle connection)
+        present (cluster-names database)
+        seeded (remove (cluster-names (:seon.db/db handle)) present)]
+    (cond
+      (= 1 (count seeded)) (first seeded)
+      (and (empty? seeded) (present (:seon.cluster/name handle))) (:seon.cluster/name handle))))
 
 (defn fork-cluster-ctx
   "Fork the executing handle's context onto `connection` through the production fork.
@@ -293,7 +304,7 @@
                   [:=> [:cat :seon.db/connection [:maybe :seon.boot/cluster-name]]
                    :seon.sci.eval/ctx]]}
   ([connection]
-   (fork-cluster-ctx connection (seeded-cluster-name (db/db connection))))
+   (fork-cluster-ctx connection (seeded-cluster-name connection (db/db connection))))
   ([connection cluster-name]
    (let [handle (execution-handle connection)
          database (db/db connection)
@@ -696,7 +707,8 @@
 
 (defn agent-tx
   "Create one fixture agent through `seon.cluster.agent/creation-tx`.
-   The agent joins the one cluster the fixture database holds; its namespace
+   The agent joins the cluster the fixture seeded, else the executing
+   handle's own cluster; its namespace
    defaults to `my.agents.<agent-id>`."
   {:malli/schema [:function
                   [:=> [:cat :seon.db/database-value :seon.agent/id]
@@ -710,8 +722,8 @@
     {:seon.agent/id agent-id
      :seon.ns/name namespace-name
      :seon.cluster/name
-     (or (seeded-cluster-name database)
-         (throw (ex-info "A fixture agent needs exactly one cluster in its database."
+     (or (seeded-cluster-name nil database)
+         (throw (ex-info "A fixture agent needs the one cluster its fixture seeded, or its handle's own."
                          {:seon.error/operation 'seon.test-support/agent-tx
                           :seon.error/expected :seon.cluster/name
                           :seon.error/offending
