@@ -882,6 +882,23 @@
         (kernel/mark-installed! ctx function-symbol)
         true))))
 
+(defn- install-refusing-root!
+  "Bind `function-symbol` to a function that throws `refusal` when called.
+
+  Callers analyze against the Var; only a call that reaches it refuses, by name."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :qualified-symbol :seon.sci.eval/interpretation-error]
+                  [:= :unavailable]]}
+  [ctx function-symbol refusal]
+  (let [namespace-name (symbol (namespace function-symbol))
+        var-name (symbol (name function-symbol))]
+    (sci/add-namespace! ctx namespace-name
+                        {var-name (sci/new-var var-name
+                                               (fn refused [& _]
+                                                 (throw (ex-info (:seon.error/message refusal) refusal)))
+                                               {:ns (sci/create-ns namespace-name)})})
+    (kernel/mark-installed! ctx function-symbol)
+    :unavailable))
+
 (defn- interpretation-error
   "Refuse a row whose branch definition cannot execute in this context."
   {:malli/schema [:=> [:cat :qualified-symbol :string]
@@ -1055,14 +1072,30 @@
                            (when-let [loaded (::loaded-database snapshot)]
                              (let [previous (db/pull loaded '[*] [:seon.fn/sym function-symbol])]
                                (when (and previous (host-bound-row? previous)) previous)))))
+              ;; A host-bound row overrides a compiled Var only when its
+              ;; namespace is loaded and its own definition differs. An
+              ;; unchanged caller of a changed definition, or a row whose
+              ;; namespace this JVM never loaded, has no Var to override: it
+              ;; refuses by name when called instead of refusing the program.
+              ;; Agent rows and evaluations keep the returned refusal.
+              unloaded? (nil? (find-ns namespace-name))
+              unbound? (and host-row
+                            (= :core (:seon.schema.admission/source committed))
+                            (not (or evaluated? (::evaluated? row)))
+                            (or unloaded?
+                                (not (overridden-row? (::loaded-database snapshot) committed))))
               refusal (when host-row
                         (interpretation-error function-symbol
                           (str (if (contains? host-row :seon.fn/host-bound?)
                                  "Host-bound declaration "
                                  "Declaration with no :seon.fn/host-bound? fact ")
                                (:seon.fn/sym host-row)
-                               " must change through the loaded source files.")))
+                               (cond unloaded? " is in a namespace this JVM has not loaded; load its source files to call it."
+                                     unbound? " is unchanged but calls a definition this branch changes; it runs only from the loaded source files."
+                                     :else " must change through the loaded source files."))))
               result
+              (if unbound?
+                (install-refusing-root! ctx function-symbol refusal)
               (or refusal
                   (if-not interpreted?
                     (if (install-jvm-root! ctx function-symbol) :jvm :unavailable)
@@ -1082,7 +1115,7 @@
                                 (or (:seon.instrument/registration-observation refusal)
                                     (:seon.config/error-key refusal)))
                           (throw failure))
-                        (interpretation-failure function-symbol failure)))))]
+                        (interpretation-failure function-symbol failure))))))]
           (if (map? result)
             (do (sci/eval-form ctx (list 'ns-unmap (list 'quote namespace-name)
                                        (list 'quote (symbol (name function-symbol)))))
@@ -1091,7 +1124,8 @@
              :seon.sci.eval/installed (if (= :unavailable result) 0 1)
              :seon.sci.eval/load-state result
              :seon.sci.eval/load-result
-             {:seon.sci.eval/load-state result :seon.fn/sym function-symbol}})))
+             (cond-> {:seon.sci.eval/load-state result :seon.fn/sym function-symbol}
+               unbound? (assoc :seon.error/message (:seon.error/message refusal)))})))
 
       :seon.schema/key
       {:seon.schema/projection

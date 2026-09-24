@@ -337,3 +337,44 @@
                   (is (= edited-commit (:loaded stable)))
                   (is (contains? (:refused stable) subject)
                       "a branch opened before the adoption keeps its own row, which refuses by name"))))))))))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program with two changed rows whose closures reach four declarations."
+           :seon.test/long-ms 8000}
+  an-unoverridden-host-bound-declaration-refuses-by-name-only-when-called
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [changed 'seon.render/invoke-producer
+             caller 'seon.render/render-form-value
+             unloaded-changed 'seon.cluster.reload-measure/measured-request
+             unloaded 'seon.cluster.reload-measure/-main
+             before (db/db connection)
+             host-bound? #(true? (:seon.fn/host-bound? (db/pull before [:seon.fn/host-bound?] [:seon.fn/sym %])))
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before (db/carried-projection before))
+                                   {:seon.sci.eval/loaded-connection connection})
+             _ (support/transacted! connection
+                 (mapv (fn [sym]
+                         [:db/add [:seon.fn/sym sym] :seon.program/definition-digest
+                          (id/digest 64 ["unoverridden-host-bound" (str sym)])])
+                       [changed unloaded-changed]))
+             edited (db/db connection)
+             acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db edited}))
+             view (acquisition-view ctx)
+             refusal-of (fn [sym]
+                          (try (sci/eval-string* ctx (str "(" sym ")")) nil
+                               (catch Exception failure
+                                 (some #(:seon.sci.eval/refused-function (ex-data %))
+                                       (take-while some? (iterate ex-cause failure))))))]
+         (println "UNOVERRIDDEN-HOST-BOUND-MS" (:ms acquired) (:interpreted-count view))
+         (is (false? (host-bound? changed)) "the changed helper interprets")
+         (is (every? host-bound? [caller unloaded-changed unloaded]))
+         (is (some? (find-ns (symbol (namespace caller)))) "the caller's namespace is loaded")
+         (is (nil? (find-ns (symbol (namespace unloaded)))) "this JVM never loaded the measurement namespace")
+         (is (every? (:interpreted view) [changed caller unloaded-changed unloaded])
+             "each changed row's closure reaches its host-bound caller")
+         (is (= #{} (:refused view)) "no host-bound declaration without a compiled Var to override refuses the acquisition")
+         (is (= caller (refusal-of caller)) "an unchanged caller of a changed definition refuses by name when called")
+         (is (= unloaded-changed (refusal-of unloaded-changed)) "a changed row in an unloaded namespace refuses by name when called")
+         (is (= unloaded (refusal-of unloaded)) "its unchanged caller refuses by name when called")))))))
