@@ -1,94 +1,124 @@
 # Lane fix-error-evidence-whole — 2026-09-24
 
-## Broken, and why this lane stopped before editing
+## Broken, or not proven
 
-**The fix cannot be made inside `src/seon/error.clj` alone.** The whole
-evidence is not lost where it is capped. It is lost when the prepared evidence
-is returned to callers, and only one of the seven callers publishes it.
+- **No regression for the step fix (eb14a2f22).** A test cannot make
+  `next-agent-work` refuse without `with-redefs`, which the laws forbid, or a
+  store-close race. I tried making a listened attribute unindexed so that
+  `wake/declarations-refusal` would fire, but Datahike refused the schema
+  alteration ("Update not supported for these schema attributes"). The proof
+  is live only (see Evidence).
+- **The underlying cause is not fixed.** Agent graphs on test fixture branches
+  keep stepping after their store closes. Filed as
+  `docs/seon/issues/an-agent-graph-steps-after-its-test-branch-store-closes.md`.
+- **`seon.fault-test/record-mode-stores-the-whole-fault-and-wakes-the-responsible-agent`
+  fails its 1000 ms bound.** It took 1093 ms and then 1172 ms, with machine
+  load average 9–11 from hook test runs. Its blob assertions pass.
+  - This change adds no work on that path. The same prepare and stage calls
+    run, plus `evidence-stage` at about 0.005 ms.
+  - A parent-commit timing was not taken: the one-JVM rule forbids a second
+    JVM.
+- **The `:seon.error/recording` schema** (resources/seon/schemas/seon.error.edn:213)
+  does not declare `:seon.blob/staged-writes`. The map is open, so it
+  validates, but the key should be declared. That file is outside this lane,
+  so it needs a grant.
+- **Where the gap remains.** `error/commit-tx` callers still record a capped
+  fault with no blob, because `commit-tx` returns only transaction data. They
+  are `sci/eval.clj:1889`, `cluster.clj:3432` and `cluster_test`. A fact that
+  already carries a `prepare-result` blob (the rendered offending value) is
+  not restaged.
+- **Staging behaviour change in `fault/record!`.** It used to stage a blob
+  whenever `data-size` exceeded the blob threshold (4096), even when the fact
+  was not capped. It now stages only capped facts. An uncapped fact already
+  holds its whole evidence inline, so no cause is lost.
+- **Foreign reds seen during verification, not caused by this lane:**
+  - `seon.schedule-test/returned-and-thrown-handler-errors-use-the-existing-root-wake`:
+    the fixture inherits four `seon.render/unknown` errors from default's head,
+    so its counts read 5 instead of 1.
+  - `seon.turn-loop-test/a-refused-terminal-commit-still-closes-the-run` and
+    `a-refused-batch-settlement…`: the fixture write is refused on
+    `:seon.program/definition-digest`.
+  - `seon.turn-loop-test/a-refused-phase-escalates…`: its phase-failed source
+    maps to no declared schema.
+  - `seon.turn-loop-test/delivery-rows-projects-rows-and-every-refusal-transaction`:
+    it stubs `error-tx` through `with-redefs` with the wrong arity. It would
+    also now see an extra `:seon.blob/staged-writes []` key.
+- **Publication was refused at 17:43Z** by a foreign file's static analysis
+  (`test/my/program_mutation_test.clj`: unresolved `program/ns-unmap!` and
+  others). The last hunk, `vec` around the batch refusal's staged writes, may
+  not be installed yet.
 
-- `seon.error/prepare` (error.clj:510–668) already keeps the whole admitted
-  evidence as `:seon.error/data-content` (admitted under the 8 MB result caps),
-  apart from the fact's capped `:seon.error/data-edn`.
-- `seon.error/recording` (error.clj:~1466) uses `prepare` but returns only
-  `:seon.error/fact`, `:seon.error/value` and `:seon.db/tx-data`.
-  `data-content` is dropped, and no blob is staged.
-- Only `seon.fault/record!` (fault.clj:97–108) calls `prepare` itself. It
-  stages `data-content` through `blob/stage!` and publishes it with
-  `blob/with-publication!` alongside its commit.
-- Every `error/recording` caller that is not `fault/record!` commits a capped
-  fact with no blob. That covers turn.clj `refusal-terminal-data` (3670), the
-  batch refusal (3745), `error-tx`/`commit-tx` (3356, 3410), the AI attempt
-  (4061, 4080), and schedule.clj:484. Root's render fault took one of the turn
-  paths.
-- `recording` cannot publish by itself. It is pure over a database value, and
-  a blob must be published under the reachability permit that
-  `blob/with-publication!` holds through the commit
-  (reference-code/datahike/src/datahike/gc_guard.cljc:190, 286–316). The
-  callers own their commits, so each caller would have to publish the staged
-  write.
+## What changed
 
-## Evidence (default, read-only, JVM mode)
+- **`seon.error/evidence-stage`** is a new function. Given a connection and a
+  capped fact with no blob, it calls `blob/stage!` on `data-content`, sets
+  `:seon.error/data-blob`, and returns `:seon.blob/staged-writes`.
+- **`recording`** calls `evidence-stage` with the request's
+  `:seon.db/connection`, then dissociates the connection before the value
+  reaches the transaction function. It returns the staged writes. The 6-arity
+  forwards the cluster's connection.
+- **Callers now publish the staged writes with their commit:**
+  - turn `refusal-terminal-data` (its commit already runs `with-publication!`);
+  - turn batch refusal (now wrapped in `with-publication!`);
+  - turn `error-tx` (now calls `recording`), threaded through `delivery-rows`
+    into the evaluation settlement's staged writes;
+  - turn AI attempt;
+  - `schedule/settle!`, which prepares and stages outside the transaction
+    function and hands the fact to `settle-call`;
+  - `fault/record!`, which deletes its own staging and uses `evidence-stage`.
+- **`seon.turn/step`** now throws a refused `next-agent-work` whole to the
+  graph's fault route instead of passing it to `turn`. This came from the
+  root follow-up.
+  - The situation value outside its schema came from none of the three
+    candidate commits. The unhandled error arm dates from 820d0ab60.
+  - The value itself was a `seon.db/q` read refusal
+    (`ClosedChannelException`) on a test agent branch.
 
-- The stored occurrence 46155 (`:seon.error.occurrence/id "38c7ba4a96f4"`,
-  turn `38c5a9b4d625`, declared schema `:seon.render/request-error`) has:
-  - `:seon.error/data-size 25879` and `:seon.error/capped? true`;
-  - a `data-edn` of 1342 chars whose remainder is
-    `{:seon.sci.admit/reason :over-bound :seon.sci.admit/bytes 7889}`;
-  - **no `:seon.error.occurrence/data-blob`** and no `:seon.error/chain`;
-  - no `:seon.render.unknown/reason`. The declared schema does not include that
-    key, so the occurrence's selected source attributes cannot keep it either.
-- Reproduced today's path: a `seon.render/unknown` observation (reason
-  `:time-limit`) plus `:seon.render/refused-member`, with a 25 000-char
-  offending message, run through `seon.error/prepare` under default's effective
-  caps and `max-evidence-bytes 16384`:
-  - it took 2.06 ms;
+## Evidence
+
+- **Before the fix**, on default, root's occurrence 46155 (turn
+  `38c5a9b4d625`) had:
+  - `data-size 25879`, with 1342 chars of capped `data-edn`;
+  - a remainder marked `:over-bound`;
+  - no blob and no `:seon.render.unknown/reason`.
+- **Reproduction** (`seon.error/prepare`, default caps, max-evidence 16384):
   - `data-content` was 27 860 bytes and contained the reason;
-  - the fact's `data-edn` did not contain the reason;
-  - `:seon.error/data-blob` was nil.
-- Baseline for an ordinary under-cap fault: `prepare` averaged 0.967 ms warm
-  over 100 calls, uncapped, with data-size 2565.
+  - the fact did not contain it, and `data-blob` was nil.
+- **After the fix, same probe** (tmp/fix-error-evidence-whole/probe.clj):
+  - the over-cap `recording` sets the fact's `data-blob` to `360e1b6d…` and
+    stages 27 560 bytes;
+  - the under-cap staged writes are `[]`.
+- **Regression:** `bin/test-check default --ns seon.error-evidence-test`
+  passed 9/9 (run a7dfca5f146a). It covers two cases:
+  - the turn path through `turn/settle!`, where the capped inline text lacks
+    the tail marker and the blob contains it;
+  - the `fault/fault!` path, with the same assertions.
+- **`seon.fault-test`:** 32 pass and 1 fail, the timing bound above.
+- **Step fix, live:**
+  - the last `seon.turn/turn` contract fault is from 17:29:32Z;
+  - after installation, the same class records as a `seon.db/q` read refusal
+    from `seon.turn/step` (signature `d3ef61b6…`, branch
+    `:agent-96b7917bed55`), with blob `a11ac961…`.
 
-## Options (for root; recommendation marked)
+## Numbers
 
-1. **(Recommended) `recording` stages the whole evidence and callers publish
-   it.**
-   - What changes: when the fact is capped (or over the blob threshold),
-     `recording` calls `blob/stage!` on `data-content`, sets
-     `:seon.error/data-blob` to the digest, and returns
-     `:seon.blob/staged-writes`. `commit-call` already writes the occurrence's
-     `data-blob` ref (error.clj:1443, 1457).
-   - Each caller passes those staged writes to the `with-publication!` it
-     already runs, or wraps its transact in one:
-     - turn.clj: four sites (turn already collects `:seon.blob/staged-writes`
-       for its settlements);
-     - schedule.clj:484;
-     - fault.clj deletes its own staging (about −12 lines) and uses the
-       recording's staged writes.
-   - Cost: about +15 lines in error.clj, +10 in turn.clj and +3 in
-     schedule.clj, with −12 in fault.clj. An under-cap fault adds one boolean
-     test, about 0 ms.
-   - Guarantee: every capped fault keeps its whole value in the blob tier,
-     reachable through the digest, and published atomically with its root.
-   - Sacrifice: needs ownership of turn.clj, schedule.clj and fault.clj.
-2. **An eager `blob/put!` inside `prepare` when the request carries
-   `:seon.db/connection`.**
-   - This mirrors `prepare-result` (error.clj:463). The 6-arity `recording`
-     would forward the cluster's connection. Only error.clj changes, about
-     +8 lines.
-   - Sacrifice: the blob is published outside the commit's permit. A sweep
-     between `put!` and the commit can reclaim it and leave a dangling digest.
-     That is the same race `prepare-result` already has, and it gives a
-     function that is otherwise pure over a database value a side effect.
-3. **Declare `:seon.render.unknown/*` on `:seon.render/request-error`.**
-   - The occurrence would then keep the reason and the producer.
-   - This fixes only this instance. It does not keep the whole cause.
+- **Under-cap fault, before:**
+  - `prepare`: 0.967 ms per call (100 warm calls);
+  - `recording`: 0.898 ms per call.
+- **Under-cap fault, after:**
+  - `evidence-stage`: 0.004–0.006 ms;
+  - `recording` with a connection: 0.720 ms, against 0.737 ms without one
+    (same load);
+  - added cost is about 0 ms.
+- **Over-cap turn settlement:** under 1000 ms, asserted by the regression.
+- **Net lines:**
+  - 5c968dd34: +71 −34 across four source files, plus the 89-line test;
+  - eb14a2f22: +6.
+- **RESET NEEDED:** no.
 
-## Changed paths, commits, verification limits
+## Commits
 
-- Changed: this note only. There are no source or test edits, and the net
-  source/test lines are 0.
-- Regression not written: until a publishing path exists, "an over-cap
-  evidence is recoverable in full from its blob" would be red on every caller
-  except `fault/record!`.
-- No `bin/test-check` was run, because no code changed. No branch was created,
-  and no background shells were started.
+- 0b807c175: first landing note (stop and options)
+- 5c968dd34: whole evidence staged on every recording path, plus regression
+- eb14a2f22: refused next-work derivation escapes as its own refusal
+- this note and the issue file
