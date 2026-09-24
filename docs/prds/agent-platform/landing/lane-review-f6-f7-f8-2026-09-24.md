@@ -1,6 +1,6 @@
 ---
 type: landing
-status: F6 and F8 committed code only (owner load rule); F7 stopped with options; unadopted
+status: F6, F7, F8 committed code only (owner load rule); unadopted; one-time kondo fill needed
 lane: review-f6-f7-f8
 created: 2026-09-24
 design: docs/research/agent-platform/review-landings-2026-09-24.md F6, F7, F8
@@ -8,29 +8,37 @@ design: docs/research/agent-platform/review-landings-2026-09-24.md F6, F7, F8
 
 # Lane review-f6-f7-f8 (2026-09-24)
 
-Findings F6, F7, F8 of `docs/research/agent-platform/review-landings-2026-09-24.md`.
-F6 and F8 landed. F7 is **stopped with options**: no derived macro source exists
-within the size limit.
+Findings F6, F7, F8 of `docs/research/agent-platform/review-landings-2026-09-24.md`,
+all landed. For F7, root ruled option 1 after this lane's first stop.
 
 ## Broken or open first
 
-- **F7 is not fixed.** `seon.fn/host-macro?` (`src/seon/fn.clj:813`) still reads
-  `find-ns`/`ns-resolve`. The reason and three priced options are below.
-- **Pre-existing red found (outside scope; `fn_test.clj` is owned only for new regressions):**
-  `seon.fn-test/namespace-context-reads-clauses-from-the-publication-analysis`
-  (`test/seon/fn_test.clj:2490`) asserts that a top-level `(require '[clojure.data :as data])`
-  is not a clause. Its expected `:requires` leaves out `clojure.data`, and `:aliases` must be
-  exactly `{e clojure.edn ab a.b}`. The analyzer has attributed top-level requires since
-  `a209c6d3f` / fix-ns-from-kondo. A probe of `seon.fn/namespace-context` on that exact
-  fixture returned `:requires #{clojure.test clojure.set clojure.edn clojure.data clojure.walk}`
-  and `:aliases {ab a.b, data clojure.data, e clojure.edn}`. I expect the test is red on
-  HEAD. It was not run, per the load rule. The fix is in the test only: add `clojure.data`
-  and `data`, and delete the "a later require is no clause" message. Owner: whoever holds
-  `test/seon/fn_test.clj`.
-- The F6 prose assertion (`interrupted_request_test.clj`, "the unknown is shown by name")
-  still reads the whole `problems/ai-prose`. If the prose bound (fix-problems-prose-bound)
-  elides names when many inherited unknowns exist, it can fail for the same inherited-world
-  reason. F6 named only lines 102/103, so this was not changed.
+- **RESET NEEDED? No, but a ONE-TIME FILL IS NEEDED before the next publication.** With
+  `a9449b7c3` adopted, any call into a namespace SCI does not interpret and clj-kondo
+  never analyzed refuses publication by name. The checkout cache holds no dependency
+  entries today, so publication of `src/` will refuse until root runs, from the checkout
+  root, in a quiet window:
+  `clj-kondo --lint "$(clojure -Spath)" --dependencies --parallel --copy-configs --config '{:output {:canonical-paths true}}'`
+  (`seon.fn/dependency-analysis-command`). It is not timed here; core.async's jar alone
+  took 227 ms, and a rerun of a skip-marked jar took 3 ms. Record the clock row.
+- **AGENTS.md:306's command is stale (a high-priority defect; root's file).** With
+  `--skip-lint`, clj-kondo only copies configs and writes no analysis
+  (`clj_kondo/core.clj:126-129`; sequential `process-files` analyzes nothing under
+  skip-lint without analysis, `impl/core.clj:468`). Probe: `:dependencies true :skip-lint true`
+  on the core.async jar wrote 0 cache entries in 4.7 ms, including with `:parallel`.
+  Without canonical paths, a jar entry is named by its bare entry name
+  (`impl/core.clj:289-291`). The analyzer's stale check reads that as `::source-absent`
+  and deletes it (observed). The corrected command is the one above. The same stale
+  command appears in `docs/seon/issues/kondo-does-not-resolve-datalog-parser-generated-variable-constructor.md:13`.
+- **Possible new refusals (not run):** a fixture analysis with its own cache that calls a
+  dependency or other non-interpreted namespace now refuses instead of silently reading
+  the JVM. The runtime (stdin) analysis runs with the cache disabled, so an agent form
+  calling a non-interpreted dependency now refuses too. That is correct by the rule, but
+  it is a behaviour change.
+- I reloaded `seon.fn.analyzer` in default for probes; that drops its instrumentation
+  wrappers until re-armed. `seon.fn` was not reloaded.
+- The F6 prose assertion ("the unknown is shown by name") still reads the whole
+  `problems/ai-prose`, and could elide under many inherited unknowns (fix-problems-prose-bound).
 
 ## F6: commit `15539cd68`
 
@@ -67,51 +75,31 @@ Net +7 lines.
   on row 2. It would fail before the fix, because `namespace-context` returned a context.
 - Net +38 lines across 3 files.
 
-## F7: stopped, three options
+## F7: commit `a9449b7c3` (root ruled option 1)
 
-**What the REPL showed:**
-- clj-kondo *does* derive the fact. With core.async's jar analyzed into a cache
-  (`clj-kondo.core/run!` with `:canonical-paths true`, 306 ms), `seon.fn.analyzer/analyze`
-  of a `go-loop` caller given that `::cache-root` returns `:macro true` on the `go-loop`
-  usage. The fact derives from the dependency's source and does not depend on load order.
-- The checkout's shared cache `.clj-kondo/.cache/v1` has **no dependency entries at all**
-  (492 clj entries, all first-party or fixture). No code populates them, so without that
-  cache `go-loop` arrives with no `:macro`.
-- A jar cache written *without* canonical paths records inner filenames like
-  `clojure/core/async.clj`. `stale-cache-entries` classifies those as `::source-absent` and
-  deletes them (observed: the entry disappeared after one `analyze`). Any population step
-  must write canonical `jar:` filenames.
-- If I refused "unknown" from today's analysis, every call into a non-interpreted
-  dependency would be refused, because the cache knows none of them. That would break
-  publication.
-
-**Options (simplest viable first):**
-1. **Refuse by name only where kondo cannot resolve the macro, after a one-time dependency
-   cache population.** Add `bin/seon`/boot step to lint the classpath jars with
-   `:dependencies true :canonical-paths true` into the shared cache. kondo skip-marks each
-   jar by name and config hash, so reruns are cheap. `host-bound-callers` uses
-   `::analyzer/macro`, and `analyze` reports the namespaces a usage targets that have no
-   cache or built-in entry, which refuse by name.
-   Guarantee: deterministic facts from source. Cost: about 40–60 lines across analyzer, fn
-   and boot. The cold lint of about 100 jars is unmeasured; extrapolated from 0.3–0.75 s
-   for core.async it is tens of seconds, which is over the 10-second rule, so it needs
-   owner authorization and a clock row. Sacrifice: new dependency-arity findings may
-   surface at publication; the finding gate needs checking.
-   **Recommended**, because it is the only option that derives the fact at the boundary.
-2. **`requiring-resolve` at classification.** Loading the target namespace makes the JVM
-   fact the same whatever the load order (3 lines; an unloadable namespace refuses by name).
-   Guarantee: determinism against load order only. It is keyed by the launched classpath,
-   which `seon.cluster.source` already reports as "JVM RESTART NEEDED" when it changes.
-   Sacrifice: analysis loads dependency namespaces as a side effect, and the fact still
-   comes from the JVM, not from analysis. The finding rules this out as unkeyed.
-3. **Treat every var usage into a non-interpreted, non-first-party namespace as host-bound**
-   unless kondo marks it a non-macro. That is roughly equivalent to "refuse unknown as
-   host-bound".
-   Guarantee: conservative and deterministic. Cost: about 5 lines. Sacrifice: with today's
-   empty dependency cache, most program functions calling any dependency become host-bound
-   (SCI cannot interpret branch overrides of them). That is a large behaviour change.
-
-Root rules. Nothing was edited for F7.
+- `seon.fn.analyzer/analyze` returns `::unanalyzed-namespaces`: the targets of var usages
+  that this run does not define and that have no cache file or built-in resource. They
+  are looked up in kondo's own order (`impl/cache.clj:23-31`; `:clj` then `:cljc`,
+  `:185-187`). `invoke-kondo` returns its `::cache-root`.
+- `host-bound-callers` no longer calls `host-macro?` (deleted). A call (a usage with an
+  arity) into a non-interpreted namespace is host-bound when kondo marks it `:macro`. If
+  its namespace is unanalyzed, the declared `:seon.fn/index-refused` refusal names
+  `::unresolved-targets` and the fill command.
+- Canonical cache entries survive the check: after the command's options wrote core.async
+  into a scratch cache, two `analyze` runs left `clojure.core.async.transit.json` in
+  place. The writer, not the check, owned the bug; the stale-check docstring now says so.
+- Probes (analyzer reloaded): with the filled cache, `go-loop` is `:macro true` and
+  `::unanalyzed-namespaces` is `#{}`; without a cache it is `#{clojure.core.async}`, and
+  `clojure.string` (built-in) is never unanalyzed. The `seon.fn` side was not executed
+  live (not reloaded; see above).
+- Regression: `a-dependency-macro-sci-cannot-expand-is-host-bound` first asserts the
+  refusal (targets `<!`, `chan`, `go-loop`, and the message carrying the command). It then
+  runs the same fill into the fixture's own cache and asserts looping true, channel and
+  plain false. The loaded JVM plays no part: core.async is loaded throughout, yet the
+  unanalyzed run refuses.
+- Also in this commit: `namespace-context-reads-clauses-from-the-publication-analysis`
+  now expects the top-level `clojure.data` require and its `data` alias.
+- Net source about +42 lines (fn.clj about +18, analyzer about +24); tests +20.
 
 ## Verification limits and what root runs
 
@@ -125,8 +113,10 @@ Root runs, serially:
 - `bin/test-check default --test seon.fn-test/a-top-level-require-rename-is-refused-by-name`
 - `bin/test-check default --test seon.fn.analyzer-test/namespace-clauses-are-every-require-clj-kondo-attributes-to-the-namespace`
 - `bin/test-check default --test seon.fn-test/namespace-context-reads-clauses-from-the-publication-analysis`
-  (expected red before this lane; see above)
+  (fixed in `a9449b7c3`)
+- `bin/test-check default --test seon.fn-test/a-dependency-macro-sci-cannot-expand-is-host-bound` (it lints core.async into its fixture cache)
+- After the fill: one publication of `src/` (e.g. `bin/seon init` or the next adoption), expecting no `::unresolved-targets` refusal
 
-Commits: `15539cd68` (F6), `e66b50448` (F8), plus this note. Released paths:
+Commits: `15539cd68` (F6), `e66b50448` (F8), `a9449b7c3` (F7 and the stale clause test), plus this note. Released paths:
 `test/seon/test/interrupted_request_test.clj`, `src/seon/fn.clj`, `src/seon/fn/analyzer.clj`,
 `test/seon/fn_test.clj`, `test/seon/fn/analyzer_test.clj` (not edited), and this landing note.
