@@ -590,13 +590,16 @@
            projection forms changed-identities
            (or admission {:seon.schema.admission/source :agent}))
           ;; Bootstrap has no database-derived projection yet. Its small
-          ;; declaration population retains the complete-population gate.
-          (schema/assert-complete-contract!
+          ;; declaration population retains the complete-population gate,
+          ;; after the authoring rule projection-with-schema applies.
+          (do
+           (schema/assert-config-display! (select-keys forms changed-identities))
+           (schema/assert-complete-contract!
            {:seon.schema/identity identity
             :seon.schema/definition (get forms identity)
             :seon.schema/forms forms
             :seon.schema/admission
-            (or admission {:seon.schema.admission/source :agent})}))
+            (or admission {:seon.schema.admission/source :agent})})))
         ;; Activation has no distinguished producer: every declaration must
         ;; compile and resolve in the complete population before publication.
         (schema/build-projection forms))

@@ -61,9 +61,14 @@
             (is (contains? strings label) (str attribute))))
         (let [attribute (first (sort (keys dials)))
               incomplete (update-in forms [attribute 1] dissoc :seon.config/display-label)
-              refusal (try (schema/build-projection incomplete)
+              refusal (try (schema/projection-with-schema
+                            projection attribute (get incomplete attribute)
+                            {:seon.schema.admission/source :agent})
                            nil
                            (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+          ;; An authoring rule judges admission; a build of a population
+          ;; admitted under an older rule (an as-of view) stays readable.
+          (is (some? (schema/build-projection incomplete)))
           (is ((schema/projection-validator projection :seon.schema/validation-refusal)
                refusal))
           (is (= :seon.config/display-label (:seon.schema/expected-value refusal)))

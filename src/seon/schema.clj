@@ -1344,8 +1344,12 @@
                :seon.schema/registration-outside-delta true
                }))))
 
-(defn- assert-config-display!
-  "Refuse a per-agent dial whose declaration cannot name its settings row."
+(defn assert-config-display!
+  "Admission gate: refuse a per-agent dial that cannot name its settings row.
+
+   Called for new or changed declarations only (`projection-with-schema`,
+   bootstrap `schema.edn/admit`); a projection build never re-judges an
+   admitted population, so an as-of view stays readable."
   {:malli/schema [:=> [:cat :map] :nil]}
   [forms]
   (doseq [[attribute definition] forms
@@ -1381,8 +1385,7 @@
     [:=> [:catn [::forms :map]] ::projection]]}
   ([] (declaration-projection (declaration-population)))
   ([forms]
-   (let [_ (assert-config-display! forms)
-         predicates (into {} (keep (fn [sym]
+   (let [predicates (into {} (keep (fn [sym]
                                     (when-let [f (runtime-predicate sym)] [sym f])))
                           (into #{} (mapcat predicate-symbols-in) (vals forms)))
          dependencies (canonical-reference-graph forms predicates)
@@ -2249,7 +2252,6 @@
               (= (predicate-functions-in supplied)
                  (select-keys predicate-functions
                               (into #{} (mapcat predicate-symbols-in) (vals forms)))))
-         _ (when-not reuse-declarations? (assert-config-display! forms))
          schema-dependencies
          (if reuse-declarations?
            (:seon.schema.projection/schema-dependencies supplied)
@@ -2845,8 +2847,7 @@
                          :seon.schema/validate-render-contracts? validate-render-contracts?})
 
       :else
-      (let [_ (assert-config-display! (select-keys forms changed-keys))
-            canonical-keys
+      (let [canonical-keys
             (into (reduce disj
                           (or (:seon.schema.projection/canonical-keys projection)
                               (set (keys old-forms)))
@@ -3371,7 +3372,8 @@
   [projection schema-key definition admission]
   (when (not= definition (get-in projection [:seon.schema.projection/forms schema-key] ::absent))
     (internal/assert-non-nilable-value-schema!
-     (:seon.schema.projection/forms projection) schema-key (structural-schema definition)))
+     (:seon.schema.projection/forms projection) schema-key (structural-schema definition))
+    (assert-config-display! {schema-key definition}))
   (projection-with-declarations
    'seon.schema/projection-with-schema projection
    (assoc (:seon.schema.projection/forms projection) schema-key definition)
