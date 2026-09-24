@@ -37,11 +37,14 @@ files. It also makes the fixture name the cluster it seeded.
   cluster's rows: default's error message and its "root" agent. Filed as
   `docs/seon/issues/test-fixture-worlds-inherit-the-live-clusters-errors-and-messages.md`.
 - **Publication is refused.** At 17:07Z every save was refused with "branch
-  :cluster-default-candidate still has a connection in this process". Because of
-  this, my last db_test edit is **not installed or proven**. That edit is the
+  :cluster-default-candidate still has a connection in this process". It
+  cleared on its own a few minutes later. My last db_test edit then published,
+  after commit 88e3bfb32. That edit is the
   `transaction-success-and-refusal-shapes-are-declared` fixture: a canonical
   `agent-tx` row with its id replaced by 42, instead of calling `agent-tx` with 42,
-  which its contract refuses. Filed as
+  which its contract refuses. Run 6014cbf51b17 gave 9 pass / 0 fail / 1 error, and
+  the error is foreign live-cluster drift (`status-faulted-…` added by a concurrent
+  test). Filed as
   `docs/seon/issues/publication-refuses-while-the-candidate-branch-holds-a-connection.md`.
 - **`seon.shell.jvm-test` is not this class.** Its "Publish the canonical program
   into a physical store…" lines are declared-long exclusions of
@@ -126,7 +129,7 @@ All runs used `bin/test-check default --ns NS`.
 
 ## Verification limits
 
-- The db_test `42` fixture edit is unpublished (see above).
+- The db_test `42` fixture member passed its assertions, but it was not green: it carried foreign drift.
 - The whole call-preparation namespace was not run green. Only its class members
   were run, because the request itself crashed (foreign).
 - No class regression was added. The existing members are the regression: they
