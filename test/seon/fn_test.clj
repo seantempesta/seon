@@ -2535,6 +2535,26 @@
                   (:seon.fn.file/current-digest data))
             "the refusal names a captured digest the file no longer carries")))))
 
+(deftest a-file-deleted-after-listing-is-the-declared-refusal
+  ;; 2026-09-24 fault row 15: `full-source-refresh!` listed a dependent file,
+  ;; another lane deleted it, and the read's NoSuchFileException was recorded
+  ;; as a core fault. A deletion during a refresh is an expected outcome: the
+  ;; declared analysis refusal the operator request returns as refused.
+  (let [file (write-source! (fixture-root) "deleted/sample.clj" "(ns deleted.sample)\n")
+        _ (io/delete-file file)
+        failure (try (#'seon.fn/source-contexts [file]) nil
+                     (catch clojure.lang.ExceptionInfo failure failure))
+        refusal (ex-data failure)]
+    (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
+         refusal)
+        (pr-str refusal))
+    (is (= :analysis (:seon.cluster.source/phase refusal)))
+    (is (= :refused (:seon.cluster.boot/disposition refusal))
+        "the operator request returns it as refused, never a core fault")
+    (is (= [(.getPath file)] (:seon.source/changed-paths refusal)))
+    (is (instance? java.nio.file.NoSuchFileException (ex-cause failure))
+        "the whole cause is kept")))
+
 (deftest a-file-changed-after-capture-analyzes-to-the-captured-spans
   ;; The class behind that refusal: one analysis read each file TWICE, once to
   ;; capture the text spans are sliced from and once inside clj-kondo, so a

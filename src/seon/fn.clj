@@ -125,9 +125,23 @@
                            (partition 2 1 line-starts))))}))
 
 (defn- source-context
+  "The captured text of one listed file. A file deleted between its listing
+  and this read is the declared analysis source-change refusal
+  (`:seon.fn/index-refused-error`), never a core fault: the next refresh sees
+  the deletion as a change and removes its declarations."
   [file]
-  (text-context (String. (Files/readAllBytes (.toPath ^java.io.File file))
-                         StandardCharsets/UTF_8)))
+  (try
+    (text-context (String. (Files/readAllBytes (.toPath ^java.io.File file))
+                           StandardCharsets/UTF_8))
+    (catch java.nio.file.NoSuchFileException missing
+      (let [message "Source changed during analysis; a listed file was deleted before it was read."]
+        (throw (ex-info message
+                        {:seon.fn/index-refused true
+                         :seon.cluster.boot/disposition :refused
+                         :seon.cluster.source/phase :analysis
+                         :seon.error/message message
+                         :seon.source/changed-paths [(.getPath ^java.io.File file)]}
+                        missing))))))
 
 (defn- source-contexts
   [files]
