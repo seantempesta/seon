@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: blocking
 created: 2026-09-24
 tags: [issue, sci, acquisition, branch, interpretation]
@@ -68,3 +68,21 @@ the same rows refused on the unresolved alias. The producer is
 not a use of a dependency macro SCI cannot expand, so these rows are classified
 interpretable (`:seon.fn/host-bound? false`). Marking such uses host-bound
 there would route them to the existing by-name refusing root.
+
+## Resolved (2026-09-24, lane fix-env-macro-callers)
+
+`seon.fn/host-bound-callers` now marks a declaration host-bound when its body
+uses a macro Var loaded in this JVM from a namespace SCI does not interpret.
+SCI's own namespaces (`sci.impl.namespaces/namespaces`), the declared interpreter
+bindings (`seon.program/base-context-injected-symbols`, which covers `clojure.test`)
+and the first-party program's namespaces all count as interpreted.
+The macro fact is the loaded Var's `:macro` metadata. clj-kondo does not mark
+`clojure.core.async/go-loop` as a macro because its cache has no dependency
+analysis. The rule is conservative: it also marks callers of `taoensso.timbre`
+macros, which expand correctly in SCI. There are 11 rows in all.
+Regression: `seon.fn-test/a-dependency-macro-sci-cannot-expand-is-host-bound`.
+
+Evidence and limits are in
+`docs/prds/agent-platform/landing/lane-fix-env-macro-callers-2026-09-24.md`.
+Stored rows for files not republished since the fix keep the old value, because
+publication reindexes only changed paths.

@@ -9,6 +9,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.fn.analyzer :as analyzer]
+            [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.opts :as sci.opts]
             [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
@@ -802,27 +803,60 @@
 
 (declare source-span)
 
+(defn- host-macro?
+  "True when `target` names a macro Var this JVM has loaded. clj-kondo marks
+   `:macro` only where it analyzed the definition (its built-in and checkout
+   caches), so a dependency macro such as `clojure.core.async/go-loop` arrives
+   unmarked; the loaded Var is the one SCI would copy and expand."
+  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
+  [target]
+  (let [host (some-> (find-ns (symbol (namespace target)))
+                     (ns-resolve (symbol (name target))))]
+    (boolean (and (var? host) (:macro (meta host))))))
+
+(defn- interpreted-namespaces
+  "Namespaces whose macros expand in SCI: SCI's own (`sci.impl.namespaces/namespaces`),
+   the declared interpreter bindings, and the first-party program's namespaces."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :seon.schema/projection] [:set :symbol]]}
+  [analysis first-party-functions projection]
+  (-> (set (keys sci.namespaces/namespaces))
+      (into (map (comp symbol namespace)) (program/base-context-injected-symbols projection))
+      (into (map (comp symbol namespace)) first-party-functions)
+      (into (map ::analyzer/name) (::analyzer/namespace-definitions analysis))))
+
 (defn- host-bound-callers
   "Declarations whose own body uses an unadmitted class or a host-bound operation.
-   Import calls remain host-bound under the program declaration rule.
+   Import calls remain host-bound under the program declaration rule. A JVM
+   macro from a namespace SCI does not interpret is host-bound: SCI hands it
+   SCI's `&env`, which `clojure.core.async/go` reads as compiler locals.
    Kondo supplies resolved class names and declaration ownership in one pass;
-   this is membership in SCI's admitted classes, never another resolver."
-  {:malli/schema [:=> [:cat :map] [:set :qualified-symbol]]}
-  [analysis]
-  (into
-   (into #{}
+   this is membership in SCI's admitted classes and interpreted namespaces, never another resolver."
+  {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :seon.schema/projection]
+                  [:set :qualified-symbol]]}
+  [analysis first-party-functions projection]
+  (let [interpreted (interpreted-namespaces analysis first-party-functions projection)]
+    (-> #{}
+        (into
          (comp
           (remove #(contains? sci.opts/default-classes (symbol (::analyzer/class %))))
           (remove #(#{"java.lang.Throwable" "java.lang.Error"} (::analyzer/class %)))
           (keep usage-caller))
          (::analyzer/java-class-usages analysis))
-   (comp
-    (filter #(some? (::analyzer/arity %)))
-    (filter #(#{'clojure.core/reify 'clojure.core/proxy
-                'clojure.core/definterface 'clojure.core/import}
-              (usage-symbol %)))
-    (keep usage-caller))
-   (::analyzer/var-usages analysis)))
+        (into
+         (comp
+          (filter #(some? (::analyzer/arity %)))
+          (filter #(#{'clojure.core/reify 'clojure.core/proxy
+                      'clojure.core/definterface 'clojure.core/import}
+                    (usage-symbol %)))
+          (keep usage-caller))
+         (::analyzer/var-usages analysis))
+        (into
+         (comp
+          (filter #(when-let [target (usage-symbol %)]
+                     (and (not (interpreted (symbol (namespace target))))
+                          (host-macro? target))))
+          (keep usage-caller))
+         (::analyzer/var-usages analysis)))))
 
 (defn- host-bound-declaration?
   "The defining form and its own body facts decide; callers inherit nothing."
@@ -855,7 +889,7 @@
     ::analyzer/findings]))
 
 (defn- analyzed-form
-  [analysis function-rows program-row]
+  [analysis function-rows program-row projection]
   (let [program-symbol (or (:seon.fn/sym program-row)
                            (:seon.test/sym program-row))
         first-party-functions
@@ -865,7 +899,7 @@
         (call-targets-by-caller analysis first-party-functions)
         references (references-by-caller analysis first-party-functions)
         used-keywords (keywords-by-holder analysis)
-        host-bound (host-bound-callers analysis)
+        host-bound (host-bound-callers analysis first-party-functions projection)
         writes (writes-by-writer analysis)
         call-arities
         (call-arities-by-caller
@@ -966,14 +1000,17 @@
              spans :seon.fn/source-spans
              analyzed-source :seon.fn/source
              function-rows :seon.fn/function-rows}
-            (runtime-analysis-batch database resolved)]
+            (runtime-analysis-batch database resolved)
+            projection (or (db/carried-projection database)
+                           (schema/projection-from-database database))]
         (mapv (fn [request [first-row last-row]]
                 (analyzed-form
                  (source-analysis analysis first-row last-row)
                  function-rows
                  (some-> (:seon.program/row request)
                          (assoc :seon.program/analyzed-source-digest
-                                (:seon.fn.file/digest (text-context analyzed-source))))))
+                                (:seon.fn.file/digest (text-context analyzed-source))))
+                 projection))
               requests spans)))))
 
 (defn analyze-form
@@ -1159,9 +1196,9 @@
 
   `schema-targets` are the declaration population's targets of the invoked
   attributes, already restricted to program functions (`program-targets`)."
-  [analysis first-party-functions contexts schema-targets]
+  [analysis first-party-functions contexts schema-targets projection]
   (let [used-keywords (keywords-by-holder analysis)
-        host-bound (host-bound-callers analysis)
+        host-bound (host-bound-callers analysis first-party-functions projection)
         invocations (invocations-by-definition analysis)
         invoked-attributes (into #{} (mapcat val) invocations)
         declared-calls
@@ -1253,7 +1290,9 @@
                                (population-targets
                                 (db/carried-projection database)
                                 (invoked-attributes submitted))
-                               functions))
+                               functions)
+              (or (db/carried-projection database)
+                  (schema/projection-from-database database)))
         ;; The analysis `ns` form is widened by interpreter refers; identity
         ;; uses the namespace's own facts, as the indexer does.
         resolver-context (stored-namespace-context namespace-row)]
@@ -2192,7 +2231,8 @@
                                                (population-targets
                                                 projection
                                                 (invoked-attributes analysis))
-                                               first-party-functions))
+                                               first-party-functions)
+                                              projection)
                        canonical-path
                        [])
                   findings)))))
@@ -2272,7 +2312,8 @@
                                       (program-targets
                                        database
                                        (population-targets projection (invoked-attributes analysis))
-                                       functions))
+                                       functions)
+                                      projection)
           row-shapes (program/shapes-in projection)]
       (mapv (fn [file]
               (let [path (.getCanonicalPath ^java.io.File file)]
