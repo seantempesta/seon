@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, wave/future-runtime-lint]
 ---
@@ -23,13 +23,34 @@ qualifiers from source, then compares them with canonical namespaces extracted
 from `:seon.fn/sym`. The namespace row already carries the alias table, but
 that table is not applied at this selection boundary.
 
-This issue remains evidence from source review until a focused REPL example
-falsifies or confirms it; it did not block the edit-hook reliability change.
+The REPL example below falsifies the described failure on the current owner.
 
 ## Owner
 
-`seon.fn.analyzer/analyze-forms`, using the namespace row's indexed aliases as
-the one resolution authority.
+`seon.fn/runtime-analysis-batch` (the deleted `seon.fn.analyzer/analyze-forms`
+moved there; `seon.fn/analyze-forms` calls it). Stubs are no longer selected
+by source qualifiers: the prelude holds only the calling namespace's own
+functions, kondo resolves aliases through the synthesized `ns` form built from
+the namespace row, and `resolvable-runtime-function-rows` checks the canonical
+symbols against the database.
+
+## Verification (2026-09-24, lane fix-fn-correctness)
+
+Default JVM (pid 46768, started 16:02:59Z), JVM mode,
+`(#'seon.fn/runtime-analysis-batch db [{:namespace-name 'seon.fn :form-source
+"(defn probe-x [] (analyzer/program-prelude []) (analyzer/no-such-fn-xyz 1) (nosuch/thing))"}])`:
+
+- `analyzer/program-prelude` is a usage `:to seon.fn.analyzer` with alias
+  `analyzer`, and the function rows carry the canonical
+  `seon.fn.analyzer/program-prelude`.
+- Findings: `[]`: no false unresolved namespace or var.
+- The unresolved `analyzer/no-such-fn-xyz` and `nosuch/thing` contribute no
+  row and no finding (unchanged behaviour: stdin analysis runs without the
+  dependency cache).
+
+Residue, not this issue's failure: `analyzer/referenced-program-namespaces`
+still returns raw qualifiers, so the synthesized form carries a bogus
+`(:require [analyzer] ...)`. It produced no finding in the probe.
 
 ## Acceptance
 
