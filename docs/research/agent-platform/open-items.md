@@ -9,7 +9,7 @@ updated: 2026-09-24
 ## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
 - sweep-hand-built-ns-rows: scripted conversion of 52 test files to test-support/namespace-row.
-- review-test-harness-astra: review of one-test-harness/design-2026-09-24.md → astra-review-2026-09-24.md; then to the owner.
+- revise-test-harness-astra: in-place revision of one-test-harness/design-2026-09-24.md after the review (218aa33dc); then to the owner.
 - fix-affected-callers-interpret (sci/eval.clj): a branch changing one :core function refuses its whole acquisition because
   interpreted callers cannot resolve privates, def Vars and dependency aliases (docs/seon/issues/affected-callers-fail-to-interpret-against-uninstalled-bindings.md). Blocking: most branch tests.
 - fix-unbounded-printed-values: root cause of the OOMs (class 1 below).
