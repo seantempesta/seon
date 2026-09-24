@@ -40,6 +40,28 @@ all landed. For F7, root ruled option 1 after this lane's first stop.
 - The F6 prose assertion ("the unknown is shown by name") still reads the whole
   `problems/ai-prose`, and could elide under many inherited unknowns (fix-problems-prose-bound).
 
+## F7 follow-ups (root reports after adoption)
+
+- `d1ff2e02c` unblocks publication. `init --dev default` refused `dev-cache`: the `:test`
+  alias's `.` puts `dev_cache.clj` on the classpath outside `deps.edn`'s source roots,
+  and the stale check deleted its hand-written entry as `::foreign`. `classpath-source`
+  now treats as first-party the file the system loader finds under the checkout,
+  outside every `:local/root`. `invoke-kondo` lints the files of unanalyzed first-party
+  namespaces into the cache and reruns, and the stale check keeps an entry whose source
+  is that file. Probe: with the entry absent, the first analysis of
+  `dependency_cache_test.clj` took 123 ms and wrote it; the second took 35 ms, kept it,
+  and left nothing unanalyzed.
+- The second commit replaces the shell command with
+  `(seon.fn.analyzer/analyze-dependencies!)`, evaluated at the loaded JVM's REPL. It
+  lints `java.class.path` (the launched alias's classpath, extra deps included) minus
+  the first-party entries (probe: 262 entries; excluded are `test`, `script`, `.`,
+  `src`, `resources`; `reference-code/core.async.flow-monitor/src` is kept as a local
+  root). It uses `:dependencies :parallel :copy-configs` and canonical paths. It was
+  not run here: root's fill already exists, and a rerun relints the local-root
+  directories.
+- Root: run `(seon.fn.analyzer/analyze-dependencies!)` in default for the next fill,
+  and record its clock row. AGENTS.md should name this form.
+
 ## F6: commit `15539cd68`
 
 `test/seon/test/interrupted_request_test.clj`: both assertions now intersect the failed and

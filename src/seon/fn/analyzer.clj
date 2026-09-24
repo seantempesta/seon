@@ -443,6 +443,28 @@
           (comp (keep :to) (filter symbol?) (distinct) (remove defined) (remove analyzed?))
           (:var-usages analysis))))
 
+(defn analyze-dependencies!
+  "Fill the checkout's clj-kondo cache from the classpath this JVM runs with
+  (its alias's extra deps included): every entry outside the checkout or under
+  a `:local/root`, never a project root, whose namespaces are first-party
+  (`classpath-source`). One-time setup, root's to run; kondo skip-marks each
+  jar (clj_kondo/impl/core.clj:489-506). `--skip-lint` would only copy configs
+  (clj_kondo/core.clj:126-129); canonical paths name a jar entry `<jar>:<entry>`
+  (impl/core.clj:289-291), which `stale-cache-entries` keeps."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (let [checkout (.getCanonicalPath (io/file "."))
+        {::keys [dependency-roots]} (roots-of checkout)
+        first-party? #(and (or (= % checkout) (str/starts-with? % (str checkout java.io.File/separator)))
+                           (not (under? dependency-roots %)))
+        entries (into [] (comp (map #(.getCanonicalPath (io/file ^String %))) (remove first-party?))
+                      (enumeration-seq (java.util.StringTokenizer. (System/getProperty "java.class.path")
+                                                                   java.io.File/pathSeparator)))]
+    (select-keys (clj-kondo/run! {:lint entries :dependencies true :parallel true :copy-configs true
+                                  :config-dir config-directory :cache-dir cache-directory
+                                  :config {:output {:canonical-paths true}}})
+                 [:summary])))
+
 (defn forget-namespaces!
   "Remove superseded declarations from one explicitly owned resolver cache."
   {:malli/schema [:=> [:cat :string [:set :symbol]] :nil]}

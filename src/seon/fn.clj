@@ -804,12 +804,10 @@
 (declare source-span)
 
 (def dependency-analysis-command
-  "The one-time fill of the checkout's clj-kondo cache from the publication
-  classpath. `--skip-lint` would only copy configs (clj_kondo/core.clj:126-129);
-  canonical paths name each jar entry `<jar>:<entry>` (clj_kondo/impl/core.clj:289-291),
-  which the analyzer's stale check keeps as immutable by coordinate."
-  (str "clj-kondo --lint \"$(clojure -Spath)\" --dependencies --parallel --copy-configs"
-       " --config '{:output {:canonical-paths true}}'"))
+  "The one-time fill of the checkout's clj-kondo cache from the classpath the
+  loaded JVM runs with (`seon.fn.analyzer/analyze-dependencies!`), evaluated at
+  that JVM's REPL: a shell `clojure -Spath` names another alias's classpath."
+  "(seon.fn.analyzer/analyze-dependencies!)")
 
 (defn- unresolved-macro-refusal
   "Refuse calls whose target namespace SCI does not interpret and clj-kondo
@@ -819,7 +817,7 @@
   (when (seq targets)
     (let [message (str "Cannot classify host binding: clj-kondo holds no analysis of "
                        (str/join ", " (sort (into #{} (map namespace) targets)))
-                       ". Repopulate the checkout's cache: " dependency-analysis-command)]
+                       ". Fill the checkout's cache from this JVM's classpath at its REPL: " dependency-analysis-command)]
       (throw (ex-info message {:seon.fn/index-refused true
                                :seon.cluster.source/phase :analysis
                                :seon.error/message message
