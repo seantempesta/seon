@@ -1,8 +1,11 @@
 (ns my.agent-test
   (:require [clojure.test :refer [deftest is]]
             [seon.agent :as agent]
+            [seon.cluster.agent :as cluster.agent]
+            [seon.config :as config]
             [seon.db :as db]
             [seon.schema :as schema]
+            [seon.sci.eval :as sci]
             [seon.test-support :as support]))
 
 (deftest settings-are-one-owned-component-with-a-derived-render-pair
@@ -54,3 +57,40 @@
                                connection "settings-owner")))
        (is (= first-id (component)))
        (is (= {:my.agent/turns-left 0} (agent/settings @connection "other-owner")))))))
+
+(defn- held-branch
+  "Evaluate (my.agent/branch) for `agent-id` in `handle`'s context; its value or refusal."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.agent/id] :any]}
+  [handle agent-id]
+  (let [result (sci/evaluate
+                {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle)
+                 :seon.db/db (db/db (:seon.db/connection handle))
+                 :seon.agent/id agent-id
+                 :seon.cluster.eval/ns [:seon.ns/name 'user]
+                 :seon.cluster.eval/source (pr-str (list 'my.agent/branch {:seon.agent/id agent-id}))
+                 :seon.sci.eval/time-limit-ms 5000
+                 :seon.sci.admit/caps (config/result-caps config/defaults)
+                 :seon.config/on-core-error :panic})]
+    (or (:seon.cluster.eval/error result) (:seon.sci.admit/value result))))
+
+(deftest branch-mode-is-the-acquisition-decision-not-a-cluster-label
+  ;; The member branch inherits default's cluster rows. Before the fix the mode
+  ;; compared the agent row's branch with the label branch of an arbitrary
+  ;; cluster row, so an agent live on the member's branch read :isolated.
+  (let [parent (support/execution-handle db/*conn*)
+        connection (:seon.db/connection parent)
+        parent-branch (get-in @connection [:config :branch])
+        created! #(support/transacted! connection
+                                       (cluster.agent/creation-tx
+                                        {:seon.agent/id % :seon.ns/name (symbol (str "my.agents." %))
+                                         :seon.cluster/name "default"}))
+        _ (run! created! ["mode-live" "mode-isolated"])
+        live (cluster.agent/acquire-context! parent "mode-live")
+        isolated (cluster.agent/acquire-context! parent "mode-isolated" {:seon.agent/isolate? true})]
+    (try
+      (is (= {:seon.agent/branch parent-branch :seon.agent/mode :live}
+             (held-branch live "mode-live")))
+      (is (= {:seon.agent/branch (:seon.agent/branch isolated) :seon.agent/mode :isolated}
+             (held-branch isolated "mode-isolated")))
+      (is (not= parent-branch (:seon.agent/branch isolated)))
+      (finally (cluster.agent/release-context! isolated)))))

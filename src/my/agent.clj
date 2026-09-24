@@ -3,7 +3,6 @@
   (:refer-clojure :exclude [identity])
   (:require [seon.agent :as agent]
             [seon.db :as db]
-            [seon.cluster.registry :as registry]
             [seon.run :as run]))
 
 (defn identity
@@ -58,16 +57,24 @@
                    (:seon.db/connection request) (:seon.agent/id request)))
 
 (defn branch
-  "Read my explicit custody branch and its live or isolated mode."
-  {:malli/schema [:=> [:cat :my.plan/request]
+  "Read the branch my context holds and its live or isolated mode.
+
+  The branch is the one my supplied connection holds. The mode is the one my
+  acquisition of that branch decided (seon.cluster.agent/acquire-context!),
+  read from its context-state entry; neither is derived from a cluster name.
+
+  Example:
+  (my.agent/branch)"
+  {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]
+                             [:my.program/context :my.program/context]]]
                   [:map [:seon.agent/branch :seon.agent/branch]
                    [:seon.agent/mode :seon.agent/mode]]]}
-  [{database :seon.db/db agent-id :seon.agent/id}]
-  (let [branch (:seon.agent/branch
-                (db/pull database '[:seon.agent/branch] [:seon.agent/id agent-id]))
-        cluster (db/q '[:find ?name . :where [_ :seon.cluster/name ?name]] database)]
-    (when-not (and branch cluster)
-      (throw (ex-info "Agent branch and cluster must both be present."
-                      {:seon.agent/id agent-id})))
-    {:seon.agent/branch branch
-     :seon.agent/mode (if (= branch (registry/cluster-branch cluster)) :live :isolated)}))
+  [{agent-id :seon.agent/id
+    {connection :seon.db/connection contexts :seon.agent/context-state} :my.program/context}]
+  ;; Mode is relative to the acquiring parent, so only this agent's own entry answers.
+  (let [held (get-in (db/db connection) [:config :branch])
+        mode (:seon.agent/mode (get (some-> contexts deref) [held agent-id]))]
+    (when-not (and held mode)
+      (throw (ex-info "No acquisition of this agent holds its connection's branch."
+                      {:seon.agent/id agent-id :seon.agent/branch held})))
+    {:seon.agent/branch held :seon.agent/mode mode}))
