@@ -2225,23 +2225,18 @@
   "Run one test member body `work` while no adoption on `lock` reloads or arms.
   While `validity` holds a failed adoption's diagnostic the loaded program is
   unknown: `work` never starts and that diagnostic is the answer."
-  {:malli/schema [:function
-                  [:=> [:cat [:fn seon.cluster/program-change-lock?]
-                        [:=> [:cat] [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]]
-                   [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]
-                  [:=> [:cat [:fn seon.cluster/program-change-lock?] [:fn seon.cluster/program-validity?]
-                        [:=> [:cat] [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]]
-                   [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]]}
-  ([lock work] (call-excluding-adoption lock program-validity work))
-  ([^java.util.concurrent.locks.ReentrantReadWriteLock lock validity work]
-   ;; A member nested in a member's body already runs inside the exclusion; a
-   ;; second hold would queue behind a waiting adoption that waits for the first.
-   (if (identical? lock *member-lock*)
-     (work)
-     (let [held (.readLock lock)]
-       (.lock held)
-       (try (or @validity (binding [*member-lock* lock] (work)))
-            (finally (.unlock held)))))))
+  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock :seon.cluster/program-validity
+                       [:=> [:cat] [:or :seon.test.runner/captured-result :seon.error/value]]]
+                  [:or :seon.test.runner/captured-result :seon.error/value]]}
+  [^java.util.concurrent.locks.ReentrantReadWriteLock lock validity work]
+  ;; A member nested in a member's body already runs inside the exclusion; a
+  ;; second hold would queue behind a waiting adoption that waits for the first.
+  (if (identical? lock *member-lock*)
+    (work)
+    (let [held (.readLock lock)]
+      (.lock held)
+      (try (or @validity (binding [*member-lock* lock] (work)))
+           (finally (.unlock held))))))
 
 (defn- call-with-program-change
   "Call `change` once no test member holds `lock`, waiting at most the longest
@@ -2251,7 +2246,7 @@
   Before `change` touches a root, `validity` marks the loaded program toward
   `commit-id` unknown; only `change` returning (its record committed) clears
   it. A throw keeps the mark, with its cause, after unlocking."
-  {:malli/schema [:=> [:cat [:fn seon.cluster/program-change-lock?] [:fn seon.cluster/program-validity?]
+  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock :seon.cluster/program-validity
                        :seon.db/database-value :seon.source/commit-id [:=> [:cat] :seon.source/adoption-result]]
                   :seon.source/adoption-result]}
   [^java.util.concurrent.locks.ReentrantReadWriteLock lock validity database commit-id change]

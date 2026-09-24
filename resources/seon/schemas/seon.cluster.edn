@@ -1,4 +1,11 @@
-#:seon.cluster{:cluster
+#:seon.cluster{:program-change-lock
+               [:fn {:error/message "must be the read-write lock excluding test members from adoption"}
+                seon.cluster/program-change-lock?]
+               :program-validity
+               [:fn {:error/message "must be the atom holding a program exclusion's validity"
+                     :gen/gen seon.flow/atom-reference-generator}
+                seon.cluster/program-validity?]
+               :cluster
                [:map
                 {:seon.db/attributes true
                  :seon.render/ai seon.cluster/render-ai

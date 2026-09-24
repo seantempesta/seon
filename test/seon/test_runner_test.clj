@@ -313,7 +313,8 @@
                   #(is true)
                   [(fn [_] (error/problem-sentence [huge] {} nil nil))])]
     (try
-      (let [result (#'sut/bounded-result test-var 5000 {:seon.sci.eval/ctx (sci/init {})}
+      (let [result (#'sut/bounded-result (java.util.concurrent.locks.ReentrantReadWriteLock. true) (atom nil)
+                                         (symbol test-var) (constantly test-var) 5000 {:seon.sci.eval/ctx (sci/init {})}
                                          (fn [_] nil))
             message (:seon.test/failure-message result)]
         (is (= 1 (:seon.test/error-count result)))

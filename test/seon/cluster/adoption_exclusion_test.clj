@@ -6,11 +6,12 @@
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.schema :as schema]
+            [seon.test]
             [seon.test-support :as support]))
 
 (defn- queued?
   "Wait up to one second for `expected` threads queued on `lock`."
-  {:malli/schema [:=> [:cat [:fn seon.cluster/program-change-lock?] [:int {:min 1}]] :boolean]}
+  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock [:int {:min 1}]] :boolean]}
   [^java.util.concurrent.locks.ReentrantReadWriteLock lock expected]
   (let [deadline (+ (System/nanoTime) 1000000000)]
     (loop []
@@ -103,3 +104,39 @@
       (is (= `member (:seon.test/sym (member))))
       (is (= 1 @entries)))
     (remove-ns (symbol scratch))))
+
+(deftest a-member-resolves-its-test-inside-the-exclusion-and-an-unknown-program-starts-nothing
+  (let [lock (java.util.concurrent.locks.ReentrantReadWriteLock. true)
+        validity (atom nil)
+        database (db/db (:seon.db/connection (support/execution-handle nil)))
+        owned (create-ns (gensym "seon.cluster.adoption-exclusion-test.member-"))
+        probe (intern owned (with-meta 'probe {:test #(is true)}) nil)
+        resolutions (atom [])
+        resolve! #(do (swap! resolutions conj (::installed (meta probe))) probe)
+        custody {:seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle nil))}
+        run! #(@#'seon.test/bounded-result lock validity (symbol probe) resolve! 5000 custody (fn [_] nil))]
+    (try
+      (testing "resolution waits for an adoption holding the exclusion and sees what it installed"
+        (let [entered (promise) release (promise)
+              adoption (future (@#'cluster/call-with-program-change
+                                lock validity database (random-uuid)
+                                (fn [] (deliver entered true) @release
+                                  (alter-meta! probe assoc ::installed :adopted)
+                                  {:seon.source/reloaded-namespaces [] :seon.source/arming-identities #{}})))
+              _ (is (true? (deref entered 1000 false)))
+              member (future (run!))]
+          (is (queued? lock 1) "the member queues behind the adoption")
+          (is (empty? @resolutions) "nothing resolved under the adoption")
+          (deliver release true)
+          @adoption
+          (is (= 1 (:seon.test/pass-count (deref member 5000 nil))))
+          (is (= [:adopted] @resolutions))))
+      (testing "an unknown program resolves nothing and stops the request"
+        (reset! resolutions [])
+        (is (string? (try (@#'cluster/call-with-program-change lock validity database (random-uuid)
+                            #(throw (ex-info "arming refused" {})))
+                          (catch clojure.lang.ExceptionInfo failure (ex-message failure)))))
+        (let [result (run!)]
+          (is (= :program-unknown (:seon.test.run/stopped result)))
+          (is (empty? @resolutions))))
+      (finally (remove-ns (ns-name owned))))))

@@ -123,45 +123,59 @@
 (def ^:private program-change
   (delay (requiring-resolve 'seon.cluster/program-change)))
 
+(def ^:private program-validity
+  (delay (requiring-resolve 'seon.cluster/program-validity)))
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
+
+  The body thread takes `lock`'s exclusion, THEN calls `resolve!` for the Var
+  it runs, so no adoption replaces, deletes or recreates it in between. While
+  `validity` names an unknown loaded program nothing resolves or runs: the
+  result carries `:seon.test.run/stopped :program-unknown` and no outcome.
 
   `release!` is called exactly once, with `true` when the body outlived the
   bound (from a watcher that joins the live thread) and `false` otherwise:
   at once when the body exits inside the bound, or before rethrowing when
   the body thread never started. The caller hands all cleanup to it."
-  {:malli/schema [:=> [:cat :seon.test/var [:int {:min 1}]
+  {:malli/schema [:=> [:cat :seon.cluster/program-change-lock :seon.cluster/program-validity
+                       :seon.test/sym
+                       [:=> [:cat] [:or :seon.test/var :seon.error/value]] [:int {:min 1}]
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                         [:seon.test/member {:optional true} :seon.agent/execution-handle]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
-  [test-var timeout-ms custody release!]
+  [lock validity test-symbol resolve! timeout-ms custody release!]
   (let [started? (volatile! false)]
     (try
-      (let [test-symbol (symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))
-            markers (program/test-markers (meta test-var) (meta (:ns (meta test-var))))
-            ;; The SCI arm interrupts interpreted bodies at the declared per-test
-            ;; bound; `duration-failures` fails any body that completes over it.
-            body-bound (or (:seon.test/long-ms markers) 5000)
-            member (:seon.test/member custody)
+      (let [member (:seon.test/member custody)
             ;; No development adoption reloads or arms while this body runs.
             task (FutureTask.
                   (bound-fn []
                     (@call-excluding-adoption
-                     @@program-change
-                     #(with-test-loader
-                      (fn [] (if (var? test-var)
-                         ;; A host body runs unarmed, with no inherited cluster
-                         ;; custody, as a JVM test body always has: it may
-                         ;; evaluate its own SCI contexts, which another arm on
-                         ;; this thread would refuse.
-                         (binding [*member* member]
-                           (runner/run-var! test-var {}))
-                         (sci.eval/run-test
-                          (assoc (dissoc custody :seon.test/member)
-                                 :seon.test/var test-var
-                                 :seon.sci.eval/time-limit-ms body-bound))))))))
+                     lock validity
+                     #(let [test-var (resolve!)]
+                        (if (:seon.error/at test-var)
+                          test-var
+                          (with-test-loader
+                           (fn [] (if (var? test-var)
+                              ;; A host body runs unarmed, with no inherited cluster
+                              ;; custody, as a JVM test body always has: it may
+                              ;; evaluate its own SCI contexts, which another arm on
+                              ;; this thread would refuse.
+                              (binding [*member* member]
+                                (runner/run-var! test-var {}))
+                              ;; The SCI arm interrupts interpreted bodies at the
+                              ;; declared per-test bound; `duration-failures` fails
+                              ;; any body that completes over it.
+                              (sci.eval/run-test
+                               (assoc (dissoc custody :seon.test/member)
+                                      :seon.test/var test-var
+                                      :seon.sci.eval/time-limit-ms
+                                      (or (:seon.test/long-ms
+                                           (program/test-markers (meta test-var) (meta (:ns (meta test-var)))))
+                                          5000)))))))))))
             thread (.unstarted (Thread/ofVirtual) task)
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol
@@ -182,9 +196,10 @@
             (do
               (release! false)
               (let [result (.get task)]
-                (if (:seon.test/not-runnable result)
-                  (failed (:seon.error/message result) true)
-                  (assoc result :seon.test.run/terminated? true))))
+                (cond (= :seon.cluster/adoption (:seon.error/layer result))
+                      (assoc (failed (:seon.error/message result) true) :seon.test.run/stopped :program-unknown)
+                      (:seon.error/at result) (failed (:seon.error/message result) true)
+                      :else (assoc result :seon.test.run/terminated? true))))
             (do
               (watch-exit!)
               (failed (str "Test " test-symbol " did not exit within "
@@ -1509,47 +1524,45 @@
                   :seon.test.timing/run-ms executed
                   :seon.test.timing/release-ms @release-ms})]
     (try
-      (let [started (System/nanoTime)
-            ctx (:seon.sci.eval/ctx child)
-            test-var (resolve-test
-                      {:seon.db/db (:seon.db/db child)
-                       :seon.db/connection (:seon.db/connection child)
-                       :seon.test/identity test-symbol
-                       :seon.sci.eval/ctx ctx
-                       :seon.schema/projection (:seon.schema/projection child)
-                       :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
-                                                   (clojure.lang.RT/baseLoader))})
-            resolved (elapsed started)
+      (let [ctx (:seon.sci.eval/ctx child)
+            resolved (volatile! 0.0)
+            ;; Resolved on the body thread inside the adoption exclusion.
+            resolve! #(let [started (System/nanoTime)]
+                        (try (resolve-test
+                              {:seon.db/db (:seon.db/db child)
+                               :seon.db/connection (:seon.db/connection child)
+                               :seon.test/identity test-symbol
+                               :seon.sci.eval/ctx ctx
+                               :seon.schema/projection (:seon.schema/projection child)
+                               :seon.test/class-loader (or (:seon.test/class-loader (sci.eval/acquired-program ctx))
+                                                           (clojure.lang.RT/baseLoader))})
+                             (finally (vreset! resolved (elapsed started)))))
             started (System/nanoTime)
             ;; A member over one second reports what the armed definitions did.
             profile-mark (profile/begin)
             registry-before (runner/live-cluster-schema-states)
-            result (if (:seon.error/at test-var)
-                     (failed (:seon.error/message test-var))
-                     (do
-                       (vreset! handed? true)
-                       (schema/call-with-projection
-                        (:seon.schema/projection child)
-                        ;; An agent (SCI) test is the member branch's own work,
-                        ;; so its elided `seon.db` arities reach that branch. A
-                        ;; host test body inherits no custody, as a JVM test body
-                        ;; always has; its fixtures find the member through
-                        ;; `*member*`.
-                        #(bounded-result
-                          test-var remaining-ms
-                          (if (var? test-var)
-                            {:seon.sci.eval/ctx ctx :seon.test/member child}
-                            {:seon.sci.eval/ctx ctx
-                             :seon.db/connection (:seon.db/connection child)})
-                          (fn [watched?]
-                            (release! watched?)
-                            (when watched?
-                              (settle! (with-cleanup-failure
-                                        (assoc (failed (str "Test " test-symbol
-                                                            " exited after its request bound."))
-                                               :seon.test.run/terminated? true))))
-                            nil)))))
-            executed (elapsed started)
+            result (do
+                     (vreset! handed? true)
+                     (schema/call-with-projection
+                      (:seon.schema/projection child)
+                      ;; An agent (SCI) test is the member branch's own work,
+                      ;; so its elided `seon.db` arities reach that branch. A
+                      ;; host test body inherits no custody, as a JVM test body
+                      ;; always has; its fixtures find the member through
+                      ;; `*member*`.
+                      #(bounded-result
+                        @@program-change @@program-validity test-symbol resolve! remaining-ms
+                        {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
+                         :seon.test/member child}
+                        (fn [watched?]
+                          (release! watched?)
+                          (when watched?
+                            (settle! (with-cleanup-failure
+                                      (assoc (failed (str "Test " test-symbol
+                                                          " exited after its request bound."))
+                                             :seon.test.run/terminated? true))))
+                          nil))))
+            executed (- (elapsed started) @resolved)
             explanation (profile/explain-slow profile-mark)
             drifted (runner/schema-restore-drift
                      (runner/restore-live-cluster-schema! registry-before))
@@ -1567,7 +1580,7 @@
                              (assoc :seon.agent/branch (:seon.agent/branch child))
                              explanation
                              (assoc :seon.profile/explanation explanation))
-         :seon.test/timings (timing resolved executed)})
+         :seon.test/timings (timing @resolved executed)})
       (catch Throwable failure
         (when-not @handed? (release! false))
         (when-let [cleanup @cleanup-failure] (.addSuppressed failure cleanup))
@@ -1784,8 +1797,12 @@
                         (if-not (pos? (remaining-ms))
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle test-symbol (remaining-ms) settle!)
-                                committed (runner/commit-results!
+                                (member-result request-handle test-symbol (remaining-ms) settle!)]
+                          ;; An unknown loaded program started nothing: this
+                          ;; member and the rest keep no outcome, so read unknown.
+                          (if-let [cause (:seon.test.run/stopped result)]
+                            (assoc outcome ::stopped (vec remaining) ::stop-cause cause)
+                          (let [committed (runner/commit-results!
                                            recording
                                            (recording-completion
                                             batch-provenance [(dissoc result :seon.agent/branch)]
@@ -1806,7 +1823,7 @@
                                              ::stopped (vec (next remaining)) ::stop-cause :member-unfinished)
                               (and (platform? test-symbol) (not (green? result)))
                               (assoc outcome ::stopped (vec (next remaining)) ::stop-cause :platform-red)
-                              :else (recur (next remaining) outcome))))
+                              :else (recur (next remaining) outcome))))))
                         outcome))
                     (catch Throwable failure
                       (try
