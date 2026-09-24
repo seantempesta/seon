@@ -276,3 +276,23 @@
                                :seon.test/error-count])))
           (is (nil? (:seon.test/failing-assertions after)))
           (is (nil? (:seon.test/failure-message after))))))))
+
+(defn- throwaway-test-var
+  "One test Var in its own throwaway namespace, with optional once fixtures."
+  {:malli/schema [:=> [:cat :seon.instrument/callable [:vector :seon.instrument/callable]]
+                  :seon.test/var]}
+  [body fixtures]
+  (let [namespace-object (create-ns (symbol (str "runner.probe" (random-uuid))))]
+    (alter-meta! namespace-object assoc :clojure.test/once-fixtures fixtures)
+    (doto (intern namespace-object 'probe) (alter-meta! assoc :test body))))
+
+(deftest a-value-testing-label-is-captured-as-its-printed-string
+  (let [test-var (throwaway-test-var
+                  #(testing [:seon.fn/sym 'a/b] (is (= 1 2) "a value label")) [])]
+    (try
+      (let [result (runner/run-var! test-var {})]
+        (is (= 1 (:seon.test/fail-count result)) (pr-str result))
+        (is (zero? (:seon.test/error-count result)) (pr-str result))
+        (is (= [[[0 "[:seon.fn/sym a/b]"]]]
+               (mapv :seon.test.failure/contexts (:seon.test.failure/reports result)))))
+      (finally (remove-ns (ns-name (:ns (meta test-var))))))))

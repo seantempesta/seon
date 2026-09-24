@@ -192,7 +192,10 @@
     (find event :actual) (assoc :seon.test.failure/actual (printable {} (:actual event)))
     (:message event) (assoc :seon.test.failure/message (str (:message event)))
     (seq test/*testing-contexts*)
-    (assoc :seon.test.failure/contexts (mapv vector (range) (reverse test/*testing-contexts*)))
+    ;; A label prints as `clojure.test/testing-contexts-str` prints it, by `str`
+    ;; (`reference-code/clojure/src/clj/clojure/test.clj:307`);
+    ;; the stored context is its string, whatever value the label was.
+    (assoc :seon.test.failure/contexts (mapv vector (range) (map str (reverse test/*testing-contexts*))))
     (:file event) (assoc :seon.test.failure/reported-file (str (:file event)))
     (and (integer? (:line event)) (pos? (:line event)))
     (assoc :seon.test.failure/line (:line event))
