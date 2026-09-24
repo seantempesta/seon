@@ -67,14 +67,15 @@
   ;; in wording are the same problem, and this fixture would be lying if
   ;; it pretended otherwise (it did, first time round).
   ([connection] (commit-error! connection :seon.db/rejected))
-  ([connection cause]
+  ([connection cause] (commit-error! connection cause now))
+  ([connection cause at]
    (db/transact!
     connection
     (error/commit-tx
      @connection
      {:seon.error/declared-schema :seon.error/normalization-error
       :seon.error/source
-      {:seon.error/at now
+      {:seon.error/at at
        :seon.error/layer :seon.problems-test/fixture
        :seon.error/operation (symbol "seon.problems-test" (name cause))
        :seon.error/message "boom"
@@ -87,7 +88,7 @@
       :seon.error/id (str "err-" (name cause) "-"
                           (count (db/q '[:find ?e :where [?e :seon.error/id _]]
                                       @connection)))
-      :seon.error/at now
+      :seon.error/at at
       :seon.error/process live
       :seon.sci.admit/caps caps
       ;; no escalate-to: this suite is about the DERIVATION, and a
@@ -328,6 +329,26 @@
           (is (= [2 1] (mapv :seon.problems/occurrences entries))
               "worst-recurring first, so the pattern is the first thing
                read rather than something to scan for"))))))
+
+(deftest a-resolved-fault-stays-closed-until-it-recurs
+  (with-db
+    (fn [connection]
+      (let [open (fn [] (->> (:seon.problems/error-signatures (found connection))
+                             (problems/open-faults @connection)
+                             (filterv #(= 'seon.problems-test/rejected (:seon.error/operation %)))))
+            _ (is (:db-after (commit-error! connection)))
+            [entry] (open)
+            signature (:seon.error/signature entry)]
+        (is (= 1 (count (open))) "a recorded fault with no resolution is open")
+        (is (:db-after (problems/resolve! connection signature)))
+        (is (= [] (open)) "a resolution after the latest occurrence closes it")
+        (is (= 1 (count (:seon.problems/error-signatures (found connection))))
+            "history is kept: the signature is still a stored fact")
+        (is (:db-after (commit-error! connection :seon.db/rejected (java.util.Date.))))
+        (is (= [signature] (mapv :seon.error/signature (open)))
+            "a later occurrence re-opens the same signature")
+        (is (:seon.error/at (problems/resolve! connection (apply str (repeat 64 "0"))))
+            "resolving an unrecorded signature is refused, not a silent no-op")))))
 
 (deftest every-committed-error-fact-shape-is-projectable
   (with-db
