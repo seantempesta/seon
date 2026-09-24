@@ -5,7 +5,8 @@
             [datahike.api :as d]
             [edamame.core :as e]
             [malli.core :as m]
-            [malli.error :as me]))
+            [malli.error :as me]
+            [malli.registry :as mr]))
 
 (def authored-schema
   "What an author writes. Everything else is derived; overrides are allowed but rare."
@@ -166,3 +167,38 @@
                       (= :raised (:seon.task/state t)) :raised
                       (every? settled (:seon.task/needs t)) :ready
                       :else :blocked)]))))
+
+(defn brief
+  "A v0.1 brief: the task, its proofs, its must-reads read from program rows (all real forms)."
+  [db task]
+  (let [row (fn [s] (d/pull db '[:seon.fn/doc :seon.fn/spec :seon.fn/source] [:seon.fn/sym s]))
+        form (fn [s] (list 'seon.db/pull '(seon.db/db) ''[:seon.fn/doc :seon.fn/spec :seon.fn/source] [:seon.fn/sym (list 'quote s)]))]
+    (str/join "\n\n"
+              (concat
+               [(str ";; Your task.\n" (with-out-str (clojure.pprint/pprint (select-keys task [:seon.task/id :seon.task/intent :seon.task/delivers]))))
+                (str ";; Done when every form here returns true on your branch, each in its own evaluation.\n"
+                     (with-out-str (clojure.pprint/pprint (:seon.task/done-when task))))]
+               (for [[i s] (map-indexed vector (sort (:seon/must-read task))) :let [r (row s)]]
+                 (str ";; Must read: " s "\nr" (+ 3 i) " => " (pr-str (form s)) "\n;; doc: " (:seon.fn/doc r)
+                      "\n;; contract: " (:seon.fn/spec r) "\n" (:seon.fn/source r)))))))
+
+(defn- literal? [x] (not (some #(or (seq? %) (symbol? %)) (tree-seq coll? seq x))))
+
+(defn example-findings
+  "Literal arguments in proof calls that fail the called function's declared input (single-arity
+  :=> contracts), checked against the registry plus the task's own target schemas."
+  [db registry task]
+  (let [reg (mr/composite-registry (or (:seon.task/schemas task) {}) registry)]
+    (vec (for [call (mapcat #(filter (fn [x] (and (seq? x) (qualified-symbol? (first x)))) (tree-seq coll? seq %))
+                            (:seon.task/done-when task))
+               :let [f (first call) args (vec (rest call))
+                     spec (some-> (d/q '[:find ?s . :in $ ?f :where [?e :seon.fn/sym ?f] [?e :seon.fn/spec ?s]] db f)
+                                  e/parse-string)]
+               :when (and spec (= :=> (first spec)) (vector? (second spec)) (= :cat (first (second spec))))
+               :let [inputs (vec (rest (second spec)))]
+               [i arg] (map-indexed vector args)
+               :when (and (< i (count inputs)) (literal? arg))
+               :let [ex (try (m/explain (nth inputs i) arg {:registry reg}) (catch Exception ex {:error (ex-message ex)}))]
+               :when ex]
+           {:task (:seon.task/id task) :rule :example-violates-contract :fn f :argument i
+            :why (if (:error ex) (:error ex) (me/humanize ex))}))))

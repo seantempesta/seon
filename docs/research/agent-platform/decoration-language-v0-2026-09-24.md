@@ -82,7 +82,7 @@ The derived plan for the eight experiment tasks puts `agents-can-validate` first
 | **claimed twice** | two tasks both derive the same missing deliverable (a conflict, not an order) |
 | **green on base** | a proof that already holds before any work proves nothing (caught `one-read-for-many-notes`) |
 | **red for the wrong reason** | a proof red only because a needed task is unsettled is *blocked*, not specified; check it on a branch where its needs are satisfied |
-| (next) example values | literal arguments that fail the called function's input schema |
+| **example violates contract** | a literal argument in a proof call fails the called function's declared input (its row's contract), checked against the registry composed (`malli.registry/composite-registry`) with the task's target schemas — caught a note example missing `:my.note/agent` in < 5 ms |
 
 Proofs are evaluated on a throwaway branch (`exp-base-check`), so a proof that writes cannot touch
 the shared head: nine proofs in 756 ms.

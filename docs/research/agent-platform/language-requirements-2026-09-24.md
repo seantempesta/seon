@@ -64,7 +64,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 4.1 | Links resolve (program row, loaded Var, or delivered by this task or one it needs) | O, R | met |
 | 4.2 | Requirements exercise what the task changes (a delivered symbol, subject, or changed key) | R | met |
 | 4.3 | No unquoted symbol in value position (it evaluates to the Var's value); `*dynamic*` exempt | R | met |
-| 4.4 | Requirement example values satisfy the called function's input schema (against target schemas + registry) | R | next |
+| 4.4 | Requirement example values satisfy the called function's input schema (against target schemas + registry) | R | met (single-arity contracts; literal arguments) |
 | 4.5 | A raised task (no requirements) can only be triaged | R | met |
 | 4.6 | Evidence paths exist | R | met |
 | 4.7 | Measured: 9 ms over eight tasks against the real program database; caught six real mistakes in the orchestrator's own writing | R | — |
