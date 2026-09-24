@@ -764,7 +764,7 @@
    (and (identical? channel (get (:seon.agent/channels @routing) agent-eid))
         (async.protocols/closed? channel))))
 
-(declare disarm!)
+(declare disarm! arm-graph! stop-graph!)
 
 (defn- throw-causes!
   "Rethrow the first of `causes` whole, carrying every later one as suppressed."
@@ -777,15 +777,16 @@
 (defn- stop-owned-graphs!
   "Stop and join every graph armed in the owned `routing`, refusing new arms.
 
-  Under the routing's monitor, which `arm!` holds too, the routing is marked
-  released, then every armed agent is disarmed, each attempted even after an
-  earlier join fails. Any failure throws with the mark kept, so no new graph
+  The routing is marked released in one `swap-vals!`, so no later arm is
+  claimed; arms already in flight settle, then every armed agent is disarmed,
+  each attempted even after an earlier join fails. Any failure throws with the mark kept, so no new graph
   arms: the caller keeps its connection, branch and custody for diagnosis and
   a later release, which joins what remains."
   {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
   [routing]
-  (locking routing
-    (swap! routing assoc :seon.agent/released? true)
+  (let [marked (second (swap-vals! routing assoc :seon.agent/released? true))]
+    ;; each arm's failure reaches its own caller through the shared delay
+    (doseq [arming (vals (::arming marked))] (try @arming (catch Throwable _ nil)))
     (let [causes (into [] (keep (fn [agent-id]
                                   (try (disarm! {:seon.agent/id agent-id :seon.agent/routing routing})
                                        nil
@@ -1044,109 +1045,130 @@
   of the turn transform — so the wedge cannot return through the
   arming gap. Returns the armed entry.
 
-  Routing owns graph lifecycle serialization, including direct source
-  installers racing the armer proc. The existing entry check and graph
-  publication occur under the same monitor as disarm, so concurrent callers
-  acquire one graph and teardown cannot remove its replacement. Refuses an agent id with
+  No monitor: `swap-vals!` claims the agent in the routing value with a
+  delay of `arm-graph!`, so concurrent callers (the armer proc, direct
+  source installers) deref one arming and acquire one graph. A released
+  routing or a stop in flight refuses by name rather than waiting. Refuses an agent id with
   no committed entity — the armer derives its set from facts, so a
   missing entity is a caller bug, never a nil routing key."
   {:malli/schema [:=> [:cat :seon.agent/arm-request]
                   :seon.agent/armed]}
+  [{agent-id :seon.agent/id routing :seon.agent/routing :as request}]
+  (let [reserve (fn [current]
+                  (if (or (:seon.agent/released? current)
+                          (get-in current [::stopping agent-id])
+                          (get-in current [::arming agent-id])
+                          (get-in current [:seon.agent/armed agent-id]))
+                    current
+                    (assoc-in current [::arming agent-id] (delay (arm-graph! request)))))
+        current (second (swap-vals! routing reserve))
+        refuse (fn [message expected]
+                 (throw (ex-info message {:seon.error/message message
+                                          :seon.agent/id agent-id
+                                          :seon.error/expected expected})))
+        previous (get-in current [:seon.agent/armed agent-id])
+        ^ExecutorService executor (:seon.flow/executor previous)]
+    (cond
+      (:seon.agent/released? current)
+      (refuse "arm! refused: the owning execution has released this routing." :seon.agent/routing)
+      (get-in current [::stopping agent-id])
+      (refuse "arm! refused: the agent's graph is stopping." :seon.agent/graph-exited)
+      (get-in current [::arming agent-id]) @(get-in current [::arming agent-id])
+      (not (.isShutdown executor)) previous
+      ;; A previous graph whose stop missed its deadline keeps its entry: its
+      ;; executor's termination is the exit fact, so no new graph overlaps it.
+      (.isTerminated executor)
+      (do (disarm! {:seon.agent/id agent-id :seon.agent/routing routing})
+          (arm! request))
+      :else (refuse "arm! refused: the agent's previous graph has not exited."
+                    :seon.agent/graph-exited))))
+
+(defn- arm-graph!
+  "Start, publish and prime one agent's graph under the arming claim `arm!` reserved.
+  Publication clears the claim; a failure clears it and rethrows whole."
+  {:malli/schema [:=> [:cat :seon.agent/arm-request] :seon.agent/armed]}
   [{handle :seon.turn.loop/cluster
     agent-id :seon.agent/id
     routing :seon.agent/routing}]
-  (locking routing
-   (when (:seon.agent/released? @routing)
-     (throw (ex-info "arm! refused: the owning execution has released this routing."
-                     {:seon.error/message "arm! refused: the owning execution has released this routing."
-                      :seon.agent/id agent-id
-                      :seon.error/expected :seon.agent/routing})))
-   ;; A previous graph whose stop missed its deadline keeps its entry: its
-   ;; executor's termination is the exit fact, so no new graph overlaps it.
-   (when-let [^ExecutorService previous
-              (:seon.flow/executor (armed routing agent-id))]
-     (when (.isShutdown previous)
-       (if (.isTerminated previous)
-         (disarm! {:seon.agent/id agent-id :seon.agent/routing routing})
-         (throw (ex-info "arm! refused: the agent's previous graph has not exited."
-                         {:seon.error/message "arm! refused: the agent's previous graph has not exited."
-                          :seon.agent/id agent-id
-                          :seon.error/expected :seon.agent/graph-exited})))))
-   (or (armed routing agent-id)
-      (let [connection (:seon.db/connection handle)
-            eid (db/q '[:find ?agent .
-                       :in $ ?id
-                       :where [?agent :seon.agent/id ?id]]
-                     @connection agent-id)
-            _ (when (nil? eid)
-                (throw (ex-info "arm! refused: no such agent in facts."
-                                {:seon.agent/id agent-id
-                                 :seon.agent/no-such-agent agent-id})))
-            execution (acquire-context! handle agent-id)
-            _ (when-not (identical? routing (:seon.agent/routing execution))
-                (throw (ex-info "arm! refused: the routing is not the one the agent's execution owns."
-                                {:seon.error/message "arm! refused: the routing is not the one the agent's execution owns."
-                                 :seon.agent/id agent-id
-                                 :seon.error/expected :seon.agent/routing})))
-            connection (:seon.db/connection execution)
-            wake-ch (wake-channel)
-            schedule-channel (async/chan (async/sliding-buffer 1))
-            completion (async/chan 1)
-            turn-backstop-state (atom nil)
-            settings (merge (config/effective @connection (:seon.cluster/name handle))
-                            (ai/agent-overlay @connection agent-id))
-            turn-completion-backstop-ms
-            (:seon.config.agent/turn-completion-backstop-ms settings)
-            _ (async/>!! completion :seon.agent/ready)
-            agent-handle (assoc (merge handle execution)
-                                :seon.sci.eval/ctx (:seon.sci.eval/base-ctx execution)
-                                :seon.sci.eval/projection-state
-                                (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
-                                :seon.sci.eval/agent-ctx (:seon.sci.eval/ctx execution)
-                                :seon.cluster.wake/armer-channel
-                                (:seon.cluster.wake/channel handle)
-                                :seon.cluster.wake/channel wake-ch
-                                :seon.schedule/channel schedule-channel
-                                :seon.turn.loop/completion completion
-                                :seon.agent/fault-channel (:seon.agent/fault-channel @routing)
-                                :seon.agent/turn-backstop-state turn-backstop-state
-                                :seon.config.agent/turn-completion-backstop-ms
-                                turn-completion-backstop-ms
-                                :seon.agent/turn-thread (AtomicReference.))
-            {graph :seon.flow/graph started :seon.flow/started
-             executor :seon.flow/executor}
-            (seon.flow/start-graph!
-             {:seon.flow/projection-state
-              (:seon.sci.eval/projection-state agent-handle)
-              :seon.flow/graph-definition
-              (graph-definition
-               {:seon.turn.loop/cluster agent-handle
-                :seon.agent/id agent-id})
-              :seon.flow/joins
-              {:seon.agent/error-fanout
-               (fn [{started :seon.flow/started}]
-                 (seon.flow/join-error-fanout!
-                  {:seon.flow/started started
-                   :seon.flow/fault-channel (:seon.agent/fault-channel @routing)
-                   :seon.flow/tag {:seon.agent/id agent-id}}))}})
-            entry {:seon.agent/id agent-id
-                   :seon.agent/eid eid
-                   :seon.turn.loop/cluster agent-handle
-                   :seon.flow/graph graph
-                   :seon.flow/started started
-                   :seon.flow/executor executor
-                   :seon.cluster.wake/channel wake-ch
-                   :seon.schedule/channel schedule-channel
-                   :seon.turn.loop/completion completion
-                   :seon.agent/turn-backstop-state turn-backstop-state}]
-        (swap! routing
-               (fn [current]
-                 (-> current
-                     (assoc-in [:seon.agent/armed agent-id] entry)
-                     (assoc-in [:seon.agent/channels eid] wake-ch))))
-        ;; the arm prime — every mailbox arm primes exactly once
-        (async/offer! wake-ch :seon.agent/wake)
-        entry))))
+  (try
+    (let [connection (:seon.db/connection handle)
+          eid (db/q '[:find ?agent .
+                     :in $ ?id
+                     :where [?agent :seon.agent/id ?id]]
+                   @connection agent-id)
+          _ (when (nil? eid)
+              (throw (ex-info "arm! refused: no such agent in facts."
+                              {:seon.agent/id agent-id
+                               :seon.agent/no-such-agent agent-id})))
+          execution (acquire-context! handle agent-id)
+          _ (when-not (identical? routing (:seon.agent/routing execution))
+              (throw (ex-info "arm! refused: the routing is not the one the agent's execution owns."
+                              {:seon.error/message "arm! refused: the routing is not the one the agent's execution owns."
+                               :seon.agent/id agent-id
+                               :seon.error/expected :seon.agent/routing})))
+          connection (:seon.db/connection execution)
+          wake-ch (wake-channel)
+          schedule-channel (async/chan (async/sliding-buffer 1))
+          completion (async/chan 1)
+          turn-backstop-state (atom nil)
+          settings (merge (config/effective @connection (:seon.cluster/name handle))
+                          (ai/agent-overlay @connection agent-id))
+          turn-completion-backstop-ms
+          (:seon.config.agent/turn-completion-backstop-ms settings)
+          _ (async/>!! completion :seon.agent/ready)
+          agent-handle (assoc (merge handle execution)
+                              :seon.sci.eval/ctx (:seon.sci.eval/base-ctx execution)
+                              :seon.sci.eval/projection-state
+                              (:seon.sci.eval/projection-state (:seon.sci.eval/ctx execution))
+                              :seon.sci.eval/agent-ctx (:seon.sci.eval/ctx execution)
+                              :seon.cluster.wake/armer-channel
+                              (:seon.cluster.wake/channel handle)
+                              :seon.cluster.wake/channel wake-ch
+                              :seon.schedule/channel schedule-channel
+                              :seon.turn.loop/completion completion
+                              :seon.agent/fault-channel (:seon.agent/fault-channel @routing)
+                              :seon.agent/turn-backstop-state turn-backstop-state
+                              :seon.config.agent/turn-completion-backstop-ms
+                              turn-completion-backstop-ms
+                              :seon.agent/turn-thread (AtomicReference.))
+          {graph :seon.flow/graph started :seon.flow/started
+           executor :seon.flow/executor}
+          (seon.flow/start-graph!
+           {:seon.flow/projection-state
+            (:seon.sci.eval/projection-state agent-handle)
+            :seon.flow/graph-definition
+            (graph-definition
+             {:seon.turn.loop/cluster agent-handle
+              :seon.agent/id agent-id})
+            :seon.flow/joins
+            {:seon.agent/error-fanout
+             (fn [{started :seon.flow/started}]
+               (seon.flow/join-error-fanout!
+                {:seon.flow/started started
+                 :seon.flow/fault-channel (:seon.agent/fault-channel @routing)
+                 :seon.flow/tag {:seon.agent/id agent-id}}))}})
+          entry {:seon.agent/id agent-id
+                 :seon.agent/eid eid
+                 :seon.turn.loop/cluster agent-handle
+                 :seon.flow/graph graph
+                 :seon.flow/started started
+                 :seon.flow/executor executor
+                 :seon.cluster.wake/channel wake-ch
+                 :seon.schedule/channel schedule-channel
+                 :seon.turn.loop/completion completion
+                 :seon.agent/turn-backstop-state turn-backstop-state}]
+      (swap! routing
+             (fn [current]
+               (-> current
+                   (assoc-in [:seon.agent/armed agent-id] entry)
+                   (assoc-in [:seon.agent/channels eid] wake-ch)
+                   (update ::arming dissoc agent-id))))
+      ;; the arm prime — every mailbox arm primes exactly once
+      (async/offer! wake-ch :seon.agent/wake)
+      entry)
+    (catch Throwable failure
+      (swap! routing update ::arming dissoc agent-id)
+      (throw failure))))
 
 (defn- interrupt-turn!
   "Interrupt the stopping agent's in-flight turn transform, if one runs.
@@ -1270,38 +1292,60 @@
   put an ordinary teardown into the same state and the recognition
   would become a guess."
   {:malli/schema [:=> [:cat :seon.agent/disarm-request] :nil]}
+  [{agent-id :seon.agent/id routing :seon.agent/routing :as request}]
+  (let [reserve (fn [current]
+                  (if (or (get-in current [::arming agent-id])
+                          (get-in current [::stopping agent-id])
+                          (nil? (get-in current [:seon.agent/armed agent-id])))
+                    current
+                    (assoc-in current [::stopping agent-id] (delay (stop-graph! request)))))
+        current (second (swap-vals! routing reserve))]
+    (if-let [arming (get-in current [::arming agent-id])]
+      ;; An arm in flight settles first so its graph is the one stopped; its
+      ;; failure reaches its own caller through the same delay.
+      (do (try @arming (catch Throwable _ nil))
+          (disarm! request))
+      (some-> (get-in current [::stopping agent-id]) deref)))
+  nil)
+
+(defn- stop-graph!
+  "Stop, interrupt and join one armed graph under the stopping claim `disarm!`
+  reserved, then drop its route before closing it. The claim is cleared on
+  exit; a graph that missed its bound keeps its entry."
+  {:malli/schema [:=> [:cat :seon.agent/disarm-request] :nil]}
   [{agent-id :seon.agent/id
     routing :seon.agent/routing
     deadline-nanos :seon.await/deadline-nanos}]
-  (locking routing
-   (when-let [entry (armed routing agent-id)]
-    (let [{connection :seon.db/connection
-           timeout-ms :seon.config.agent/turn-completion-backstop-ms}
-          (:seon.turn.loop/cluster entry)]
-      (flow/stop (:seon.flow/graph entry))
-      (interrupt-turn! entry)
-      (when (seon.flow/join-graph!
-             (into
-              (select-keys entry [:seon.flow/executor])
-              {:seon.await/bound
-              {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
-               :seon.await/config-value timeout-ms
-               :seon.await/deadline-nanos
-               (or deadline-nanos (+ (System/nanoTime) (* 1000000 timeout-ms)))}
-              :seon.await/diagnostic {:seon.error/layer :seon.agent/agent-graph
-                                      :seon.error/operation `disarm!
-                                      :seon.error/expected :seon.agent/graph-exited}}))
-        (turn-completion-failure! entry (open-turn! connection agent-id) timeout-ms)))
-    (cancel-turn-backstop! entry)
-    (record-interruption! entry)
-    (swap! routing
-           (fn [current]
-             (-> current
-                 (update :seon.agent/armed dissoc agent-id)
-                 (update :seon.agent/channels dissoc
-                         (:seon.agent/eid entry)))))
-    (async/close! (:seon.cluster.wake/channel entry))
-    (async/close! (:seon.turn.loop/completion entry))))
+  (try
+    (let [entry (armed routing agent-id)]
+      (let [{connection :seon.db/connection
+             timeout-ms :seon.config.agent/turn-completion-backstop-ms}
+            (:seon.turn.loop/cluster entry)]
+        (flow/stop (:seon.flow/graph entry))
+        (interrupt-turn! entry)
+        (when (seon.flow/join-graph!
+               (into
+                (select-keys entry [:seon.flow/executor])
+                {:seon.await/bound
+                {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+                 :seon.await/config-value timeout-ms
+                 :seon.await/deadline-nanos
+                 (or deadline-nanos (+ (System/nanoTime) (* 1000000 timeout-ms)))}
+                :seon.await/diagnostic {:seon.error/layer :seon.agent/agent-graph
+                                        :seon.error/operation `disarm!
+                                        :seon.error/expected :seon.agent/graph-exited}}))
+          (turn-completion-failure! entry (open-turn! connection agent-id) timeout-ms)))
+      (cancel-turn-backstop! entry)
+      (record-interruption! entry)
+      (swap! routing
+             (fn [current]
+               (-> current
+                   (update :seon.agent/armed dissoc agent-id)
+                   (update :seon.agent/channels dissoc
+                           (:seon.agent/eid entry)))))
+      (async/close! (:seon.cluster.wake/channel entry))
+      (async/close! (:seon.turn.loop/completion entry)))
+    (finally (swap! routing update ::stopping dissoc agent-id)))
   nil)
 
 ;;; ---------------------------------------------------------------------------

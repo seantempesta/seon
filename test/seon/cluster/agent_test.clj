@@ -1034,6 +1034,53 @@
             (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
               (agent/release-context! attempt))))))))))
 
+(deftest ^{:seon.test/long "Two isolated-attempt arms as the release test above (arming measured 1,495 ms there), then a release that joins both idle graphs."
+           :seon.test/long-ms 15000}
+  concurrent-arm-and-release-never-deadlock
+  (with-connection
+    (fn [connection _ctx]
+      (let [parent (test-support/execution-handle connection)
+            attempt (agent/acquire-context!
+                     parent nil {:seon.agent/isolate? true
+                                 :seon.cluster.registry/from (db/commit-id @connection)})
+            child (:seon.db/connection attempt)
+            routing (armory child)
+            cluster-handle (handle child (test-support/fork-cluster-ctx child "arm-release") "arm-release")
+            start (CountDownLatch. 1)
+            arm #(agent/arm! {:seon.turn.loop/cluster cluster-handle
+                              :seon.agent/id % :seon.agent/routing routing})
+            outcome (fn [agent-id]
+                      (future (test-support/await-event! start ::start)
+                              (try (arm agent-id)
+                                   (catch clojure.lang.ExceptionInfo refusal
+                                     (:seon.error/expected (ex-data refusal))))))]
+        (db/call-with-custody {:seon.db/connection child}
+          #(test-support/transacted!
+            child (into (created-agent-tx child "arm-release" "racer-a")
+                        (created-agent-tx child "arm-release" "racer-b"))))
+        (try
+        (let [arms (mapv outcome ["racer-a" "racer-b" "racer-a"])
+              release (future (test-support/await-event! start ::start)
+                              (agent/release-context! attempt))]
+          (.countDown start)
+          (let [armed (mapv #(test-support/await-event! % ::arm-settled) arms)]
+            (is (nil? (test-support/await-event! release ::released))
+                "release completes while arms race it")
+            (doseq [result armed]
+              (is (or (= :seon.agent/routing result) (map? result))
+                  "an arm either acquired its graph or refused the released routing by name")
+              (when (map? result)
+                (is (.isTerminated ^java.util.concurrent.ExecutorService (:seon.flow/executor result))
+                    "every graph an arm started was joined by the release"))))
+          (is (= {} (:seon.agent/armed @routing)))
+          (is (= :seon.agent/routing (:seon.error/expected (test-support/refusal-data #(arm "racer-b"))))
+              "a late arm refuses the released routing by name")
+          (is (not (contains? (registry/roster (:seon.store/store attempt))
+                              (:seon.agent/branch attempt)))))
+          (finally
+            (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
+              (agent/release-context! attempt))))))))
+
 (deftest concurrent-acquisitions-of-one-key-build-once
   ;; The first caller is held just after it reserves the key until the second
   ;; caller has observed that reservation, so the overlap is certain, not timed.
