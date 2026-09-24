@@ -1570,11 +1570,15 @@
       "good [x] (inc x))")]
     (test-support/transacted!
                  connection
-                 [#:seon.agent{:id agent-id,
-                               :namespace
-                               #:seon.ns{:name namespace-name,
-                                         :source "(ns acquire.poison)"}}
-                  (test-support/program-fn-row
+                 [(test-support/namespace-row (db/db connection) namespace-name)])
+    (test-support/transacted!
+                 connection
+                 (agent/creation-tx {:seon.cluster/name "poison-acquire"
+                                     :seon.agent/id agent-id
+                                     :seon.ns/name namespace-name}))
+    (test-support/transacted!
+                 connection
+                 [(test-support/program-fn-row
                    (db/db connection) 'acquire.poison/bad
                    "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))")
                   (test-support/program-fn-row (db/db connection)
