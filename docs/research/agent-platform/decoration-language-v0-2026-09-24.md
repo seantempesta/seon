@@ -32,7 +32,7 @@ Every node is a row with a fully qualified identity; every edge is a value in th
 | function → functions it calls | `:seon.fn/calls` symbol* | derived | stored (includes `clojure.core` and special forms; filter to rows) |
 | function → keys it reads / writes | `:seon.fn/keywords`, `:seon.fn/writes` keyword* | derived | stored |
 | function → schema keys of its contract | — | derived | **GAP**: contract stored only as a string (`:seon.fn/spec`); `faults-form`'s keywords lack `:seon.render/unit` |
-| test → functions it calls | — | derived | **GAP**: tests have no call edge; `:seon.test/reach` is empty for a test that calls `faults-form`, saturated (1,720) for core functions |
+| test → functions it calls | `:seon.fn/calls` on the test row | derived | stored: 29,375 edges on 2,106 tests (`fn.clj:602,641`); `:seon.test/reach` is execution evidence, not calls |
 | schema → schema keys | `:seon.schema/references` keyword* | derived | stored |
 | namespace → namespaces | `:seon.ns/requires`, aliases | derived | stored (aliases not installed in branch SCI — fix lane running) |
 | any node → must-read | `:seon/must-read` | **authored** | **GAP**: not ingested (no attribute) |
@@ -61,18 +61,23 @@ A docstring states what is true and why; incident narratives belong in tasks and
 
 **Schema properties:** `:description`, and `:seon/must-read` when a key is unusable without another.
 
-**A task lives on the code it is about** (requirements §7): one entry in the element's attribute map,
-and the tests that prove it name it. The task file is the backstop for what has no code home.
+**A task is data plus references** (requirements §7): the entity lives in the task file or the database; the code
+it is about lists its id; the tests that prove it name its id.
 
 ```clojure
+;; resources/seon/tasks/seon.cluster.source.edn
+#:seon.task{:id     :seon.cluster.source.task/merge-adds-and-retracts
+            :intent "An addition or deletion refuses, so no new function can ever land; classify and copy
+                     additions and retractions like replacements."}
+
+;; src/seon/cluster/source.clj — the reference, where an agent reads before editing
 (defn prepare-merge!
   "Test candidate's replacements since its merge base … and answer the proposal accept-merge! takes."
-  {:seon/tasks   {:seon.cluster.source.task/merge-adds-and-retracts
-                  "An addition or deletion refuses, so no new function can ever land; classify and copy
-                   additions and retractions like replacements."}
+  {:seon/tasks   #{:seon.cluster.source.task/merge-adds-and-retracts}
    :malli/schema [...]}
   […] …)
 
+;; test/seon/cluster/source_test.clj — the proof names the task
 (deftest ^{:seon/task :seon.cluster.source.task/merge-adds-and-retracts} an-added-function-merges
   (is …))
 ```
@@ -168,7 +173,15 @@ Defects the prototype showed: pprint code-dispatch lays out `(fn [db] …)` one 
 printer must lay out data forms); callers/calls of a missing function are noise (skip); help ties sort by id,
 putting `query` before `task` (needs must express it).
 
-## 4b. Execution model: checkpoints (owner 2026-09-24)
+## 4b. Execution model: checkpoints (owner 2026-09-24; corrected by review 82d87392b)
+
+Review counterexamples (P0): a fork is not a frozen value — redefining the PARENT's `f` after forking is seen by the
+child (`[2 3]`), and a child's `swap!` on an inherited atom changes the parent. Rules: a published checkpoint is never
+evaluated into or mutated again; successors are new forks; checkpoints hold no attempt atoms, result handles or
+connections; after a definition change its callers are reinterpreted from the database; each live checkpoint keeps an
+ordinary branch head so Datahike GC retains its commit (a remembered commit id is not a retention root); cache the
+opening's FORM PLAN, never its evaluated values (new data changes answers without a program change); compiled
+validators are shared by full content, callables and fault recorders bound per execution.
 
 A checkpoint is an immutable pair: a Datahike commit and an SCI context value (persistent namespace maps;
 `sci/fork` 0.006 ms). Levels, keyed by content: base (loaded program, aliases, armed wrappers) → cluster
@@ -205,7 +218,6 @@ arguments violate the called function's contract; a help-topic cycle.
 
 ## 8. What must change in the data before this works
 
-1. Tests store their direct calls (the known-good examples of a function).
 2. Contracts store their schema keys as an edge (analyzer; no string parsing at readers).
 3. `:seon/must-read` / `:seon/see-also` are ingested from metadata and schema properties.
 4. Help topics become data (today: 13 hard-coded lines + an unused seeded instruction).
@@ -215,8 +227,9 @@ arguments violate the called function's contract; a help-topic cycle.
 
 `tmp/wiki-toy/experiment/scratch/loop.clj` on branch `exp-loop-faults`: tests defined, vocabulary defined,
 the opening derived from the task and evaluated at the agent entrance (1.3 KB, 107 ms), then scripted steps
-each evaluated with its result appended; total 522 ms. It exposed: printed output is dropped by the
-evaluation entrance (`(source 'f)` shows `nil`); the task was already green on default's rows while the JVM
+each evaluated with its result appended; total 522 ms. CORRECTED by review 82d87392b: printed output is returned in
+`:seon.cluster.eval/output` (the harness ignored it), and the harness's `(proofs)` treated a body's truthiness as a pass
+(a failing `is` followed by a passing one returned true), so its `[true true]` proves nothing. It also showed: the task was already green on default's rows while the JVM
 still ran the old code; a reused branch carries private state between attempts (each attempt needs a fresh
 branch); the alias defect (`db/` unresolved); the `contract-error!` crash hiding the real refusal.
 
