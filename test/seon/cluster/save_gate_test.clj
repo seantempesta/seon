@@ -80,6 +80,11 @@
       (is (false? (:seon.fn/host-bound? (db/pull database [:seon.fn/host-bound?] [:seon.fn/sym interpretable]))))
       (is (= [host] (cluster/host-bound-declarations
                      [database] #{[:seon.fn/sym host] [:seon.fn/sym interpretable]}))))
+    (testing "a changed :core test is host-bound: its one executable body is the compiled Var"
+      (let [core-test 'seon.cluster.save-gate-test/a-change-reaches-its-target-only-through-green-reaching-tests]
+        (is (= :core (:seon.schema.admission/source
+                      (db/pull database [:seon.schema.admission/source] [:seon.test/sym core-test]))))
+        (is (= [core-test] (cluster/host-bound-declarations [database] #{[:seon.test/sym core-test]})))))
     (testing "the change is adopted before its red reaching test is answered"
       (let [before (db/commit-id database)
             write! (writing "gate-host-red" "(= 1 2)")

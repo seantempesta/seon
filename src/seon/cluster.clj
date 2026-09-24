@@ -2175,6 +2175,63 @@
                      namespace-name)))
         (reload-order namespaces requires)))
 
+;;; No reload runs under a test member: a member body holds the read side of
+;;; `program-change` for its whole run, development adoption the write side
+;;; from unmap to arming. Fair, so a queued adoption holds back later members.
+(defonce program-change (java.util.concurrent.locks.ReentrantReadWriteLock. true))
+
+(defn program-change-lock?
+  "True for the read-write lock that excludes test members from adoption."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? java.util.concurrent.locks.ReentrantReadWriteLock value))
+
+(schema/register-core-predicate! 'seon.cluster/program-change-lock? program-change-lock?)
+
+(def ^:dynamic ^:private *member-lock*
+  "The exclusion whose read side this thread's test member holds; conveyed to
+  threads the body binds, so an adoption the member itself runs is its own work."
+  nil)
+
+(defn call-excluding-adoption
+  "Run one test member body `work` while no adoption on `lock` reloads or arms."
+  {:malli/schema [:=> [:cat [:fn seon.cluster/program-change-lock?]
+                       [:=> [:cat] [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]]
+                  [:or :seon.test.runner/captured-result :seon.test/not-runnable-error]]}
+  [^java.util.concurrent.locks.ReentrantReadWriteLock lock work]
+  ;; A member nested in a member's body already runs inside the exclusion; a
+  ;; second hold would queue behind a waiting adoption that waits for the first.
+  (if (identical? lock *member-lock*)
+    (work)
+    (let [held (.readLock lock)]
+      (.lock held)
+      (try (binding [*member-lock* lock] (work)) (finally (.unlock held))))))
+
+(defn- call-with-program-change
+  "Call `change` once no test member holds `lock`, waiting at most the longest
+  declared member body bound on `database`; beyond it refuse by name, never
+  interrupting a member. A member's own adoption runs inside its exclusion."
+  {:malli/schema [:=> [:cat [:fn seon.cluster/program-change-lock?]
+                       :seon.db/database-value [:=> [:cat] :seon.source/adoption-result]]
+                  :seon.source/adoption-result]}
+  [^java.util.concurrent.locks.ReentrantReadWriteLock lock database change]
+  (if (identical? lock *member-lock*)
+    (change)
+    (let [exclusive (.writeLock lock)]
+      (when-not (or (.tryLock exclusive)
+                    (let [bound-ms (max 5000 (or (db/q '[:find (max ?ms) . :where [_ :seon.test/long-ms ?ms]]
+                                                       database)
+                                                 0))]
+                      (or (.tryLock exclusive bound-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+                          (refused! (str "Development adoption waited " bound-ms " ms, the longest declared"
+                                         " member bound, and " (.getReadLockCount lock)
+                                         " running test member(s) had not exited.")
+                                    {:seon.cluster.source/phase :adoption
+                                     :seon.test/time-limit-ms bound-ms}))))
+        (refused! "Development adoption could not exclude running test members."
+                  {:seon.cluster.source/phase :adoption}))
+      (try (change) (finally (.unlock exclusive))))))
+
 (declare process-identity)
 
 (def ^:private adoption-identity-attribute?
@@ -2591,48 +2648,56 @@
     (verify-development-sources! published-database (fs/source-directory) namespaces)
     (adopt-rows! connection published identities published-database)
     (report-source-progress! "development loaded definitions")
-    ;; Clojure reload leaves removed interns behind. Remove only definitions
-    ;; whose identity is absent from the published database.
-    (doseq [[attribute function-symbol] deleted-identities
-            :when (#{:seon.fn/sym :seon.test/sym} attribute)]
-      (let [qualified (symbol function-symbol)
-            namespace-name (symbol (namespace qualified))
-            local-name (symbol (name qualified))]
-        (when (find-ns namespace-name)
-          (ns-unmap namespace-name local-name))))
-    ;; A changed caller reloaded before its changed callee fails on the
-    ;; callee's new Var, so the order follows the declared requires facts.
-    (let [reloaded (load-development-definitions! namespaces (namespace-requires published-database namespaces))
-          arming-identities (development-arming-identities published-database namespaces changed-identities)]
-      (verify-development-sources! published-database (fs/source-directory) (set reloaded))
-      (report-source-progress! "development JVM instrumentation")
-      (schema/call-with-projection
-       projection
-       (fn []
-         (let [effective (config/effective previous-database cluster-name)
-               _ (when (or (:seon.config/error-key effective)
-                   (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
-                   (refused! "Development instrumentation configuration is unavailable."
-                             effective))
-               result (instrument/apply!
-                       {:seon.config/on-core-error
-                        (:seon.config/on-core-error effective)
-                        :seon.flow/commit-fault!
-                        (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
-                        :seon.sci.admit/caps (config/result-caps effective)
-                        :seon.config.error/max-evidence-bytes
-                        (:seon.config.error/max-evidence-bytes effective)
-                        :seon.schema/projection projection
-                        :seon.instrument/changed-identities
-                        arming-identities
-                        :seon.profile/definition-digests
-                        (definition-digests published-database
-                                            (into [] (comp (filter #(= :seon.fn/sym (first %)))
-                                                           (map second))
-                                                  arming-identities))})]
-           (when (arming-refused? effective arming-identities result)
-             (refused! "Development JVM instrumentation did not restore contracts."
-                       result)))))
+    ;; Unmap, reload and arm exclude every running test member: none sees
+    ;; its program change under it, and none starts until arming is done.
+    (let [{reloaded :seon.source/reloaded-namespaces arming-identities :seon.source/arming-identities}
+          (call-with-program-change
+           program-change previous-database
+           (fn []
+          ;; Clojure reload leaves removed interns behind. Remove only definitions
+          ;; whose identity is absent from the published database.
+          (doseq [[attribute function-symbol] deleted-identities
+                  :when (#{:seon.fn/sym :seon.test/sym} attribute)]
+            (let [qualified (symbol function-symbol)
+                  namespace-name (symbol (namespace qualified))
+                  local-name (symbol (name qualified))]
+              (when (find-ns namespace-name)
+                (ns-unmap namespace-name local-name))))
+          ;; A changed caller reloaded before its changed callee fails on the
+          ;; callee's new Var, so the order follows the declared requires facts.
+          (let [reloaded (load-development-definitions! namespaces (namespace-requires published-database namespaces))
+                arming-identities (development-arming-identities published-database namespaces changed-identities)]
+            (verify-development-sources! published-database (fs/source-directory) (set reloaded))
+            (report-source-progress! "development JVM instrumentation")
+            (schema/call-with-projection
+             projection
+             (fn []
+               (let [effective (config/effective previous-database cluster-name)
+                     _ (when (or (:seon.config/error-key effective)
+                         (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
+                         (refused! "Development instrumentation configuration is unavailable."
+                                   effective))
+                     result (instrument/apply!
+                             {:seon.config/on-core-error
+                              (:seon.config/on-core-error effective)
+                              :seon.flow/commit-fault!
+                              (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
+                              :seon.sci.admit/caps (config/result-caps effective)
+                              :seon.config.error/max-evidence-bytes
+                              (:seon.config.error/max-evidence-bytes effective)
+                              :seon.schema/projection projection
+                              :seon.instrument/changed-identities
+                              arming-identities
+                              :seon.profile/definition-digests
+                              (definition-digests published-database
+                                                  (into [] (comp (filter #(= :seon.fn/sym (first %)))
+                                                                 (map second))
+                                                        arming-identities))})]
+                 (when (arming-refused? effective arming-identities result)
+                   (refused! "Development JVM instrumentation did not restore contracts."
+                             result)))))
+            {:seon.source/reloaded-namespaces reloaded
+             :seon.source/arming-identities arming-identities})))]
       ;; The record means rows, reload and instrumentation succeeded.
       ;; SCI acquires this database on first use; it does no work here.
       (report-source-progress! "development adoption record")
@@ -2727,17 +2792,26 @@
         gate))))
 
 (defn host-bound-declarations
-  "The changed functions SCI cannot interpret in any of `databases`: a true
-  `:seon.fn/host-bound?`, or no such fact (unknown is never interpretable)."
+  "The changed declarations SCI cannot interpret in any of `databases`: a
+  function with a true `:seon.fn/host-bound?` or no such fact (unknown is never
+  interpretable), and a `:core` test, whose one executable body is the Var
+  `seon.test/resolve-test` requires from the compiled file."
   {:malli/schema [:=> [:cat [:vector :seon.db/database-value] :seon.reconcile/adopt-identities]
-                  [:vector :seon.fn/sym]]}
+                  [:vector [:or :seon.fn/sym :seon.test/sym]]]}
   [databases identities]
-  (let [symbols (into [] (keep (fn [[a v]] (when (= :seon.fn/sym a) v))) identities)]
-    (into [] (comp (mapcat #(db/q '[:find [?symbol ...] :in $ [?symbol ...]
-                                    :where [?e :seon.fn/sym ?symbol]
-                                    [(get-else $ ?e :seon.fn/host-bound? true) ?bound]
-                                    [(true? ?bound)]]
-                                  % symbols))
+  (let [changed (fn [attribute] (into [] (keep (fn [[a v]] (when (= attribute a) v))) identities))
+        functions (changed :seon.fn/sym)
+        tests (changed :seon.test/sym)]
+    (into [] (comp (mapcat #(concat
+                             (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+                                     :where [?e :seon.fn/sym ?symbol]
+                                     [(get-else $ ?e :seon.fn/host-bound? true) ?bound]
+                                     [(true? ?bound)]]
+                                   % functions)
+                             (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+                                     :where [?e :seon.test/sym ?symbol]
+                                     [?e :seon.schema.admission/source :core]]
+                                   % tests)))
                    (distinct))
           databases)))
 
@@ -2746,9 +2820,9 @@
   into `source` first, then answer the tests reaching `identities` there. Red
   is returned at once; the answer names the host-bound declarations."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.reconcile/adopt-identities
-                       [:vector :seon.fn/sym] :seon.instrument/callable]
+                       [:vector [:or :seon.fn/sym :seon.test/sym]] :seon.instrument/callable]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
-                   [:seon.source/host-bound [:vector :seon.fn/sym]]
+                   [:seon.source/host-bound [:vector [:or :seon.fn/sym :seon.test/sym]]]
                    [:seon.source/phase-ms [:map-of :keyword :double]]]]}
   [source identities host-bound adopt!]
   (let [started (System/nanoTime)
@@ -2776,7 +2850,7 @@
                        [:vector :string]
                        [:map [:seon.fn/root :string] [:seon.source/roots :seon.source/roots]]]
                   [:map [:seon.test/passed? :boolean] [:seon.source/tally :string]
-                   [:seon.source/host-bound {:optional true} [:vector :seon.fn/sym]]]]}
+                   [:seon.source/host-bound {:optional true} [:vector [:or :seon.fn/sym :seon.test/sym]]]]]}
   [held-store instance published changed-paths roots]
   (let [connection (:seon.boot/cluster-connection instance)
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
