@@ -731,8 +731,11 @@
                                       (functions/gate-sets {:seon.db/db database
                                                             :seon.fn/seeds requested-changed})))
                                 #{})
+            ;; A first run widens to every test only when the request names
+            ;; nothing: named changes, tests or namespaces select their reach.
+            scoped? (or (seq requested-changed) (seq identities) (seq namespaces))
             candidates
-            (if (or first-run? (#{:all :full} policy))
+            (if (or (and first-run? (not scoped?)) (#{:all :full} policy))
               (selection-read! (db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database))
               (into (into (into identities (if (= :named policy) requested-reached reached))
                           (keys pending))
