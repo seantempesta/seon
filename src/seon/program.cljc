@@ -32,7 +32,12 @@
    same bridge that projects them onto stored schema declarations."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
-  (let [registry (:seon.schema.projection/registry projection)
+  ;; A function of the projection value, derived once per projection
+  ;; (~50 ms each over the packaged population).
+  (#?(:clj schema/projection-cache-value :cljs (fn [_ _ derive] (derive)))
+   projection ::program-attributes
+   (fn []
+    (let [registry (:seon.schema.projection/registry projection)
         forms (:seon.schema.projection/forms projection)
         definitions (map #(mr/schema registry %) (keys forms))
         program (filter #(= :seon.program
@@ -50,7 +55,7 @@
         (when properties?
           (let [project (requiring-resolve 'seon.schema.datahike/storable-properties-in)]
             (mapcat #(keys (project projection %)) (keys forms))))
-        :cljs []))))
+        :cljs []))))))
 
 (defn edn-round-trip-symbol?
   "Whether `value` is a symbol whose printed EDN reads back as that symbol.
