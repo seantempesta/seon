@@ -373,9 +373,10 @@
                {:seon.config.ai/model model}))))
 
 (defn- failed-tests
-  "Current failed executions from admitted member facts."
+  "Current failed executions from admitted member facts, with each test whose
+  latest execution recorded no outcome kept as its own typed unknown."
   {:malli/schema [:=> [:cat :seon.db/database-value]
-                  [:or :seon.test/results :seon.test/execution-error :seon.db/invalid-read-error
+                  [:or :seon.test/latest-results :seon.test/execution-error :seon.db/invalid-read-error
                    :seon.schema/missing-projection-error]]}
   [database]
   (let [symbols (db/q '[:find [?symbol ...]
@@ -383,7 +384,8 @@
         results (if (:seon.error/at symbols) symbols
                     (test.runner/latest-results database symbols))]
     (if (:seon.error/at results) results
-        (filterv #(or (pos? (:seon.test/fail-count %))
+        (filterv #(or (:seon.error/at %)
+                      (pos? (:seon.test/fail-count %))
                       (pos? (:seon.test/error-count %))) results))))
 
 ;;; ---------------------------------------------------------------------------
@@ -426,10 +428,11 @@
         stale (stale-vars db)
         missing-model-rows (missing-models db)
         ;; Unknown test evidence makes its own family unknown, never the rest.
+        [unknown failed-tests] (if (:seon.error/at tests) [[tests] []]
+                                   (mapv vec ((juxt filter remove) :seon.error/at tests)))
         found (cond-> {}
-                (:seon.error/at tests) (assoc :seon.problems/failed-tests-unknown [tests])
-                (and (not (:seon.error/at tests)) (seq tests))
-                (assoc :seon.problems/failed-tests tests)
+                (seq unknown) (assoc :seon.problems/failed-tests-unknown unknown)
+                (seq failed-tests) (assoc :seon.problems/failed-tests failed-tests)
                 (seq signatures) (assoc :seon.problems/error-signatures signatures)
                 (seq failed) (assoc :seon.problems/failed-runs failed)
                 (seq errored) (assoc :seon.problems/errored-receipts errored)

@@ -3,6 +3,7 @@
   only its own problem family unknown."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [malli.core :as m]
             [seon.db :as db]
             [seon.problems :as problems]
             [seon.test :as sut]
@@ -11,9 +12,10 @@
 
 (def ^:private finished 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol)
 (def ^:private interrupted 'seon.id-test/data-shape-and-explicit-length-determine-identity)
+(def ^:private red 'seon.id-test/printed-identity-ignores-the-callers-print-bindings)
 
 (defn- admitted-run!
-  "Admit both members and record `finished` green; `interrupted` stays open."
+  "Admit three members in one run: `finished` green, `red` red; `interrupted` stays open."
   [connection]
   (let [handle (support/execution-handle connection)
         database (db/db connection)
@@ -26,7 +28,7 @@
                    :seon.test.run/include-long? false
                    :seon.test.run/members
                    (mapv #(hash-map :seon.test.member/symbol % :seon.test.member/reasons #{:named})
-                         [finished interrupted])}
+                         [finished red interrupted])}
         completion (fn [results]
                      {:seon.db/db database
                       :seon.test.runner/results results
@@ -40,6 +42,10 @@
                    (completion [{:seon.test/sym finished
                                  :seon.test.member/began? true :seon.test.member/ended? true
                                  :seon.test/pass-count 1 :seon.test/fail-count 0
+                                 :seon.test/error-count 0}
+                                {:seon.test/sym red
+                                 :seon.test.member/began? true :seon.test.member/ended? true
+                                 :seon.test/pass-count 0 :seon.test/fail-count 1
                                  :seon.test/error-count 0}]))]
     (is (not (:seon.error/at committed)) (pr-str committed))
     {:seon.test.run/id (:seon.test.run/id provenance) ::completion (completion [])}))
@@ -67,23 +73,42 @@
            "a second observation writes nothing")))))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
-  unknown-test-evidence-leaves-the-other-problem-families-derivable
+  one-incomplete-member-is-its-own-unknown-and-its-run-mates-stay-readable
   (support/with-database
    (fn [connection]
-     (admitted-run! connection)
-     (let [found (problems/problems (db/db connection) {})]
-       (is (not (:seon.error/at found)) "problems answers the family map")
-       (is (= :seon.test/population-unknown
-              (:seon.test/execution-refusal (first (:seon.problems/failed-tests-unknown found))))
-           (pr-str found))
-       (is (not (contains? found :seon.problems/failed-tests)))))))
+     (let [{run-id :seon.test.run/id} (admitted-run! connection)
+           database (db/db connection)
+           never 'seon.id-test/no-execution-is-recorded-for-this-symbol
+           registry {:registry (:seon.schema.projection/registry (db/carried-projection database))}
+           latest (runner/latest-results database [finished red interrupted never])
+           by-symbol (group-by (some-fn :seon.test/sym :seon.test/error-test-symbol) latest)
+           unknown (first (by-symbol interrupted))
+           found (problems/problems database {})]
+       (is (m/validate :seon.test/latest-results latest registry)
+           (pr-str (m/explain :seon.test/latest-results latest registry)))
+       (is (= [finished interrupted red] (sort (keys by-symbol))) "never-run is absent")
+       (is (= [1 0 0] (map (first (by-symbol finished)) [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])))
+       (is (= 1 (:seon.test/fail-count (first (by-symbol red)))))
+       (is (m/validate :seon.test/result-unknown unknown registry) (pr-str unknown))
+       (is (= [:seon.test.run/id run-id] (:seon.test/run unknown)) "the unknown keeps its run")
+       (is (not-any? #(contains? unknown %) [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count])
+           "an unknown carries no counts")
+       (is (= (dissoc unknown :seon.error/at)
+              (dissoc (sut/recorded-result database interrupted) :seon.error/at)))
+       (is (false? (sut/verified? database interrupted)) "unknown never verifies")
+       (is (true? (#'sut/green? {:seon.test/sym finished :seon.test/pass-count 1
+                                 :seon.test/fail-count 0 :seon.test/error-count 0}))
+           "a captured result, not yet recorded at a basis, is judged by its counts")
+       (is (= [red] (mapv :seon.test/sym (:seon.problems/failed-tests found))) "the red stays visible")
+       (is (= [interrupted] (mapv :seon.test/error-test-symbol (:seon.problems/failed-tests-unknown found))))
+       (is (str/includes? (problems/ai-prose found) (str interrupted)) "the unknown is shown by name")))))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   a-huge-assertion-message-is-a-blob-and-readiness-reads-only-counts
   (support/with-database
    (fn [connection]
      (support/seed-cluster! connection "default")
-     (let [{completion ::completion} (admitted-run! connection)
+     (let [{run-id :seon.test.run/id completion ::completion} (admitted-run! connection)
            huge (apply str (repeat (* 10 1024 1024) \x))
            committed (runner/commit-results!
                       connection
@@ -103,10 +128,13 @@
        (is (not (:seon.error/at committed)) (pr-str (select-keys committed [:seon.error/message])))
        (is (integer? threshold) "the seeded cluster declares the blob threshold")
        (is (= #{[(count huge) true]}
-              (set (db/q '[:find ?size ?blob? :where [?r :seon.test.report/id]
+              ;; This run's reports only: the branch inherits the store's.
+              (set (db/q '[:find ?size ?blob? :in $ ?run-id
+                           :where [?run :seon.test.run/id ?run-id] [?run :seon.test.run/members ?m]
+                           [?m :seon.test.member/failures ?r]
                            [?r :seon.test.failure/message-size ?size]
                            [?r :seon.test.failure/message-blob ?blob]
-                           [(string? ?blob) ?blob?]] database)))
+                           [(string? ?blob) ?blob?]] database run-id)))
            "the member's report names the message by blob digest and size")
        (is (>= threshold (longest '[:find [?m ...] :where [_ :seon.test.failure/message ?m]]))
            "no stored assertion message is inline above the threshold")

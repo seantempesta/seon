@@ -1351,7 +1351,8 @@
   ([database test-symbol]
    (let [result (recorded-result database test-symbol)]
      (cond
-       (:seon.test/unknown result) false
+       ;; A member's typed unknown is unverified; a failed read refuses.
+       (or (:seon.test/unknown result) (and (:seon.error/at result) (:seon.test/run result))) false
        (:seon.error/at result) result
        (not (and (pos? (:seon.test/pass-count result))
                  (zero? (:seon.test/fail-count result))
@@ -1372,7 +1373,8 @@
   ([database test-symbol program-digest]
    (let [result (recorded-result database test-symbol)]
      (cond
-       (:seon.test/unknown result) false
+       ;; A member's typed unknown is unverified; a failed read refuses.
+       (or (:seon.test/unknown result) (and (:seon.error/at result) (:seon.test/run result))) false
        (:seon.error/at result) result
        :else (and (pos? (:seon.test/pass-count result))
                   (zero? (:seon.test/fail-count result))
@@ -1612,7 +1614,8 @@
   64)
 
 (defn- green?
-  {:malli/schema [:=> [:cat :seon.test/result] :boolean]}
+  "Judge counts alone: a captured, reused or recorded result all carry them."
+  {:malli/schema [:=> [:cat :seon.test.runner/captured-result] :boolean]}
   [result]
   (and (pos? (:seon.test/pass-count result 0))
        (zero? (:seon.test/fail-count result 0))

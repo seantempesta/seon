@@ -79,6 +79,12 @@
               {:optional true}
               :seon.test/failure-message]],
             :results [:vector :seon.test/result],
+            :result-unknown
+            [:and {:description "One test whose latest admitted execution recorded no completed outcome: its symbol and run stay visible, it carries no counts, and it never reads as green or reuses an older result."}
+             :seon.error/base
+             [:map [:seon.test/error-test-symbol :seon.test/error-test-symbol] [:seon.test/run :seon.test/run]
+              [:seon.test/execution-refusal :seon.test/execution-refusal]]],
+            :latest-results [:vector [:or :seon.test/result :seon.test/result-unknown]],
             :test
             [:map
              {:seon.db/attributes true

@@ -1564,9 +1564,11 @@
 
 (defn- recorded-member-results
   "The recorded results of `test-symbols` in one admitted `run`, by symbol:
-  one member read, one report query and one report pull for the whole set."
+  one member read, one report query and one report pull for the whole set.
+  A member without a completed outcome is its own typed unknown, so the
+  others' evidence stays readable and the unknown is never counted."
   {:malli/schema [:=> [:cat :seon.db/database-value :map [:sequential :seon.test/sym]]
-                  [:map-of :seon.test/sym :seon.test/result]]}
+                  [:map-of :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]]]}
   [database run test-symbols]
   (let [members (execution-members database (:seon.test.run/id run) (mapv symbol test-symbols))
         report-rows (execution-read
@@ -1586,8 +1588,20 @@
     (into {}
           (map (fn [member]
                  (let [member-reports (mapv #(dissoc (get pulled (second %)) :db/id)
-                                            (get reports (:db/id member)))]
-                   [(:seon.test.member/symbol member)
+                                            (get reports (:db/id member)))
+                       test-symbol (:seon.test.member/symbol member)
+                       run-ref [:seon.test.run/id (:seon.test.run/id run)]]
+                   [test-symbol
+                    (if-not (and (:seon.test.member/completed-tx member)
+                                 (every? integer? (map member [:seon.test.member/pass-count
+                                                               :seon.test.member/fail-count
+                                                               :seon.test.member/error-count])))
+                      {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/execution
+                       :seon.error/operation 'seon.test.runner/recorded-member-results
+                       :seon.error/message "This test's latest admitted execution recorded no completed outcome."
+                       :seon.error/expected :completed-member :seon.error/offending test-symbol
+                       :seon.test/execution-refusal :seon.test/population-unknown
+                       :seon.test/error-test-symbol test-symbol :seon.test/run run-ref}
                     (cond-> (merge base
                                    {:seon.test/sym (:seon.test.member/symbol member)
                                     :seon.test/pass-count (:seon.test.member/pass-count member)
@@ -1601,7 +1615,7 @@
                       ;; Reports only: text is built where it is shown
                       ;; (`seon.test/failure-message`), never per read.
                       (seq member-reports)
-                      (assoc :seon.test.failure/reports member-reports))])))
+                      (assoc :seon.test.failure/reports member-reports)))])))
           members)))
 
 (defn commit-results!
@@ -1737,10 +1751,11 @@
 
 (defn latest-results
   "Read the latest native admitted execution of each requested test.
-  Missing executions are absent; incomplete latest executions refuse rather
-  than exposing an older green. Snapshot evidence never certifies this branch."
+  Missing executions are absent; an incomplete latest execution is that test's
+  `:seon.test/result-unknown`, never an older green. A failed read refuses the
+  whole answer. Snapshot evidence never certifies this branch."
   {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :qualified-symbol]]
-                  [:or :seon.test/results :seon.test/execution-error]]}
+                  [:or :seon.test/latest-results :seon.test/execution-error]]}
   [database test-symbols]
   (try
     (let [rows (execution-read
@@ -1765,15 +1780,7 @@
                                            :seon.test.run/basis-t :seon.test.run/program-digest]
                                           [:seon.test.run/id run-id]))
                             results (recorded-member-results database run (mapv first rows))]
-                        (for [[sym] rows
-                              :let [result (get results sym)]]
-                          (if (and (:seon.test.member/completed-tx result)
-                                   (every? integer? (map result [:seon.test/pass-count
-                                                                :seon.test/fail-count
-                                                                :seon.test/error-count])))
-                            result
-                            (execution-refusal! 'seon.test.runner/latest-results run-id
-                                                :seon.test/population-unknown :completed-member sym))))))
-           (sort-by :seon.test/sym)
+                        (map (comp results first) rows))))
+           (sort-by (some-fn :seon.test/sym :seon.test/error-test-symbol))
            vec))
     (catch Exception failure (result-read-error "latest-results" failure))))
