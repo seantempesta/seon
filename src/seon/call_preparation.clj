@@ -1508,10 +1508,10 @@
    [:=> [:cat :map :seon.schema/value :seon.schema/arguments] :seon.schema/value]}
   [ctx callee arguments]
   ;; The per-call pass-through reads a map member, derefs the connection and
-  ;; compares one basis. Their armed wrappers validated the ctx, database,
-  ;; projection and whole snapshot on every call (~87 us of ~93 us per call,
-  ;; 2026-09-23), so this path calls their definitions directly, as
-  ;; `seon.instrument` does on its own hot path; their other callers stay armed.
+  ;; compares one basis. It calls those three definitions unarmed for cost,
+  ;; not recursion (no armed wrapper re-enters SCI): armed, env/of, db/db and
+  ;; current-snapshot add 2.9 + 2.2 + 10.4 us to a ~8.5 us hook that runs on
+  ;; every SCI Var call (default, 2026-09-24). Their other callers stay armed.
   (let [call-state (get ctx carrier)
         environment ((mi/-f->original env/of) ctx)
         projection (:seon.schema/projection ctx)
