@@ -1,0 +1,71 @@
+[;; RENAME: one relationship, callers repaired atomically.
+ #:seon.task{:id :seon.fn.task/tests-reaching-is-gate-set
+             :intent "seon.fn/tests-reaching is a compatibility spelling of gate-set; callers should use one name."
+             :about #{seon.fn}
+             :renames {seon.fn/tests-reaching seon.fn/gate-set}
+             :done-when [(nil? (resolve 'seon.fn/tests-reaching))
+                         (vector? (seon.fn/gate-set (seon.db/db) 'seon.note/add!))]}
+
+ ;; COMPARE: three independent attempts at one task; root picks one or a hybrid.
+ #:seon.task{:id :seon.task.task/stale-docs-detector
+             :intent "Documentation must not drift silently: a function whose source changed after its docstring is potentially out of date."
+             :about #{seon.task}
+             :definitions #{seon.task/stale-docs}
+             :attempts 3
+             :must-read #{seon.db/q seon.db/db}
+             :done-when [(set? (seon.task/stale-docs (seon.db/db) 'seon.flow))
+                         (every? qualified-symbol? (seon.task/stale-docs (seon.db/db) 'seon.flow))]}
+
+ ;; UI: the proof is an observation plus a decision; rendered hiccup is not paint.
+ #:seon.task{:id :seon.render.web.task/notes-page-shows-subjects
+             :intent "The notes page must show each note's subject as a link a person can follow."
+             :about #{seon.render.web seon.note}
+             :definitions #{seon.note/render-note-html}
+             :needs #{:seon.note.task/render-any-subject :seon.task.task/proof-vocabulary}
+             :done-when [(seon.task/observed? :seon.render.web.task/notes-page-shows-subjects :seon.observation/screenshot)
+                         (seon.task/accepted? :seon.render.web.task/notes-page-shows-subjects)]}
+
+ ;; RECURRING: a named schedule; each firing is an attempt; a receipt as well as a bound.
+ #:seon.task{:id :seon.cluster.store.task/nightly-reclaim
+             :intent "Reclaim eligible unlinked branches nightly; keep growth below 50 MB between runs."
+             :about #{seon.cluster.store}
+             :schedule [:seon.schedule/id "root/nightly-reclaim"]
+             :definitions #{seon.cluster.store/growth-bytes}
+             :needs #{:seon.task.task/proof-vocabulary}
+             :done-when [(seon.maintenance/completed? :seon.cluster.store.task/nightly-reclaim)
+                         (< (seon.cluster.store/growth-bytes) 50000000)]}
+
+ ;; QUESTION: about data; the result is data; only the user or root can say it answers.
+ #:seon.task{:id :seon.message.task/answer-m-7f3a
+             :needs #{:seon.task.task/proof-vocabulary}
+             :intent "Explain Tuesday's squat-volume drop from the stored workouts."
+             :entities #{[:seon.message/id "m-7f3a"]}
+             :output :seon.message/message
+             :done-when [(some? (seon.message/reply-to [:seon.message/id "m-7f3a"]))
+                         (seon.task/accepted? :seon.message.task/answer-m-7f3a)]}
+
+ ;; RESEARCH: about code it must not change; the output is a finding.
+ #:seon.task{:id :seon.fn.task/why-reach-saturates
+             :needs #{:seon.task.task/proof-vocabulary}
+             :intent "Explain why tests-reaching reports 1,720 tests for projection-validator (1.9 s, 6.5 GB) and what precise reach needs."
+             :about #{seon.fn/tests-reaching seon.fn/gate-sets}
+             :output :seon.finding/finding
+             :done-when [(seon.task/accepted? :seon.fn.task/why-reach-saturates)]}
+
+ ;; DECOMPOSE: the output is tasks.
+ #:seon.task{:id :my.workout.task/tracker
+             :needs #{:seon.task.task/proof-vocabulary}
+             :intent "Plan a workout tracker: the data model, logging, and a weekly volume view."
+             :output :seon.task/task
+             :done-when [(<= 3 (count (seon.task/children :my.workout.task/tracker)))
+                         (every? seon.task/specified? (seon.task/children :my.workout.task/tracker))
+                         (seon.task/accepted? :my.workout.task/tracker)]}
+
+ ;; PLATFORM: the proof vocabulary every task kind above uses.
+ #:seon.task{:id :seon.task.task/proof-vocabulary
+             :intent "Proofs must be able to ask about tasks and data: children, specified?, accepted?, observed?, a message's reply, a maintenance receipt."
+             :about #{seon.task seon.message seon.maintenance}
+             :definitions #{seon.task/children seon.task/specified? seon.task/accepted? seon.task/observed?
+                            seon.message/reply-to seon.maintenance/completed?}
+             :done-when [(set? (seon.task/children :seon.task.task/proof-vocabulary))
+                         (false? (seon.task/accepted? :seon.task.task/proof-vocabulary))]}]

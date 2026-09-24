@@ -1,0 +1,29 @@
+[#:seon.task{:id :seon.note.task/about-is-a-value
+             :intent "What a note is about is an observed name, not a ref; one value attribute per value type."
+             :about #{seon.note}
+             :schemas {:my.note/about-symbol [:qualified-symbol {:description "The function, test or namespace this note is about."}]
+                       :my.note/about-key    [:qualified-keyword {:description "The schema key or task this note is about."}]}
+             :retires #{:my.note/about}
+             :definitions #{seon.note/add! seon.note/add-note-call}
+             :needs #{:seon.schema.task/agents-can-validate}
+             :done-when [(true? (seon.schema/valid? :my.note/about-symbol 'seon.db/pull))
+                         (true? (seon.schema/valid? :my.note/about-key :my.note/content))]}
+
+ #:seon.task{:id :seon.note.task/render-any-subject
+             :intent "Note renderers are hard-wired to plan items; a note about anything else renders as \"a related record\"."
+             :about #{seon.note}
+             :definitions #{seon.note/render-note-ai seon.note/render-note-html seon.note/note-line seon.note/note-html}
+             :needs #{:seon.note.task/about-is-a-value}
+             :done-when [(clojure.string/includes?
+                          (seon.note/render-note-ai #:my.note{:id "n1" :agent [:seon.agent/id "root"] :content "slow"
+                                                              :about-symbol 'seon.db/pull})
+                          "seon.db/pull")]}
+
+ ;; DELETE: success is absence, and no caller breaks.
+ #:seon.task{:id :seon.note.task/drop-note-row
+             :intent "note-row only calls note-value: an indirection with no role. Delete it and call note-value directly."
+             :about #{seon.note}
+             :retracts #{seon.note/note-row}
+             :definitions #{seon.note/add-note! seon.note/forget! seon.note/notes}
+             :done-when [(nil? (resolve 'seon.note/note-row))
+                         (vector? (seon.note/notes (seon.db/db) "root"))]}]

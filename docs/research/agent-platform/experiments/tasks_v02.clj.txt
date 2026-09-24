@@ -1,0 +1,125 @@
+(ns scratch.tasks-v02
+  "Experiment v0.2: authority is explicit (definitions, needs, output); inference only SUGGESTS.
+  Throwaway; compare with scratch.tasks-v01 on the same tasks."
+  (:require [clojure.set :as set]
+            [clojure.string :as str]
+            [datahike.api :as d]
+            [edamame.core :as e]
+            [malli.core :as m]
+            [malli.error :as me]))
+
+(def task-schema
+  "What an author writes in v0.2."
+  [:map {:closed true}
+   [:seon.task/id :qualified-keyword]
+   [:seon.task/intent [:string {:min 1}]]
+   [:seon.task/about {:optional true} [:set :symbol]]                 ; perspective + context; grants nothing
+   [:seon.task/entities {:optional true} [:set [:tuple :qualified-keyword :any]]]
+   [:seon.task/definitions {:optional true} [:set :qualified-symbol]] ; the ONLY program scope it may add/change
+   [:seon.task/retracts {:optional true} [:set :qualified-symbol]]    ; definitions it must delete
+   [:seon.task/renames {:optional true} [:map-of :qualified-symbol :qualified-symbol]]
+   [:seon.task/schemas {:optional true} [:map-of :qualified-keyword :any]] ; target forms
+   [:seon.task/retires {:optional true} [:set :qualified-keyword]]    ; schema keys it removes
+   [:seon.task/output {:optional true} :qualified-keyword]            ; schema of a DATA result
+   [:seon.task/needs {:optional true} [:set :qualified-keyword]]
+   [:seon.task/parent {:optional true} :qualified-keyword]
+   [:seon.task/done-when {:optional true} [:vector {:min 1} :any]]
+   [:seon.task/attempts {:optional true} [:int {:min 1 :max 5}]]      ; independent attempts to compare
+   [:seon.task/schedule {:optional true} [:tuple [:= :seon.schedule/id] :string]]
+   [:seon/must-read {:optional true} [:set :qualified-symbol]]
+   [:seon.task/must-read {:optional true} [:set :qualified-symbol]]  ; same meaning; natural inside #:seon.task{}
+   [:seon.task/evidence {:optional true} [:set :string]]])
+
+(defn read-dir
+  "Every task under `dir`, read as Clojure data without evaluation."
+  [dir]
+  (vec (mapcat #(e/parse-string (slurp %) {:quote true :deref false :fn false :regex false})
+               (sort (filter #(str/ends-with? (str %) ".edn") (map str (file-seq (java.io.File. dir))))))))
+
+(defn exists?
+  "A function, test or namespace row, or a loaded Var."
+  [db s]
+  (boolean (or (d/q '[:find ?e . :in $ ?s :where [?e :seon.fn/sym ?s]] db s)
+               (d/q '[:find ?e . :in $ ?s :where [?e :seon.test/sym ?s]] db s)
+               (d/q '[:find ?e . :in $ ?s :where [?e :seon.ns/name ?s]] db s)
+               (try (find-var s) (catch Exception _ nil)))))
+
+(defn calls
+  "Symbols in CALL position in a task's proofs (a quoted name is data, not a dependency)."
+  [task]
+  (letfn [(walk [x] (cond (and (seq? x) (= 'quote (first x))) []
+                          (seq? x) (concat (when (qualified-symbol? (first x)) [(first x)]) (mapcat walk (rest x)))
+                          (coll? x) (mapcat walk x)
+                          :else []))]
+    (set (mapcat walk (:seon.task/done-when task)))))
+
+(defn keys-used
+  "Qualified keywords a task's proofs mention."
+  [task]
+  (set (filter qualified-keyword? (tree-seq coll? seq (:seon.task/done-when task)))))
+
+(defn suggestions
+  "Advice, never authority: needs and definitions the writer shows the author to confirm or dismiss."
+  [db tasks task]
+  (let [others (remove #(= (:seon.task/id %) (:seon.task/id task)) tasks)
+        defined-by (fn [s] (sort (keep #(when ((:seon.task/definitions % #{}) s) (:seon.task/id %)) others)))
+        schema-by (fn [k] (sort (keep #(when (contains? (:seon.task/schemas %) k) (:seon.task/id %)) others)))
+        missing (remove #(exists? db %) (calls task))]
+    {:suggest-needs (set/difference (set (concat (mapcat defined-by (calls task)) (mapcat schema-by (keys-used task))))
+                                    (set (:seon.task/needs task)))
+     :suggest-definitions (set/difference (set (remove (fn [s] (seq (defined-by s))) missing))
+                                          (set (:seon.task/definitions task)))}))
+
+(defn cycles
+  "Tasks that cannot be ordered: a cycle or an unknown prerequisite."
+  [tasks]
+  (let [by-id (into {} (map (juxt :seon.task/id identity)) tasks)]
+    (loop [done #{} left (set (keys by-id))]
+      (let [ready (filter #(every? done (:seon.task/needs (by-id %))) left)]
+        (cond (empty? left) #{}
+              (empty? ready) left
+              :else (recur (into done ready) (reduce disj left ready)))))))
+
+(defn reachable
+  "Every task id reachable from `id` through explicit needs."
+  [tasks id]
+  (let [by-id (into {} (map (juxt :seon.task/id identity)) tasks)]
+    (loop [seen #{} todo [id]]
+      (if-let [x (first todo)]
+        (let [ns (remove seen (:seon.task/needs (by-id x)))]
+          (recur (into seen ns) (into (subvec (vec todo) 1) ns)))
+        seen))))
+
+(defn findings
+  "Refusals (authority errors) and advice (suggestions), as data."
+  [db tasks]
+  (let [ids (frequencies (map :seon.task/id tasks))]
+    (vec (concat
+          (for [[id n] ids :when (> n 1)] {:task id :rule :duplicate-id})
+          (for [id (sort (cycles tasks))] {:task id :rule :cycle-or-unknown-prerequisite})
+          (for [[s owners] (group-by first (for [t tasks s (:seon.task/definitions t)] [s (:seon.task/id t)]))
+                :let [ids (map second owners)]
+                :when (and (> (count ids) 1)
+                           ;; already ordered by an explicit needs path: nothing to advise
+                           (not (some (fn [a] (some (fn [b] (and (not= a b) ((reachable tasks a) b))) ids)) ids)))]
+            {:task (vec (sort (map second owners))) :rule :advice/same-definition :sym s
+             :why "two tasks change one definition: declare needs between them, or same-cause"})
+          (for [t tasks
+                f (concat
+                   (when-let [ex (m/explain task-schema t)] [{:rule :shape :why (me/humanize ex)}])
+                   (for [s (:seon.task/about t)
+                         :when (not (or (exists? db s)
+                                        ;; a namespace the task itself creates, by its explicit definitions
+                                        (some #(= (str s) (namespace %)) (:seon.task/definitions t))))]
+                     {:rule :about-missing :sym s})
+                   (for [s (:seon.task/retracts t) :when (not (exists? db s))] {:rule :retracts-missing :sym s})
+                   (for [[old _] (:seon.task/renames t) :when (not (exists? db old))] {:rule :rename-source-missing :sym old})
+                   (for [s (calls t) :when (not (or (exists? db s) ((:seon.task/definitions t #{}) s)
+                                                    (some #((:seon.task/definitions % #{}) s) tasks)))]
+                     {:rule :calls-unknown :sym s})
+                   (when (and (empty? (:seon.task/done-when t)) (seq (:seon.task/definitions t)))
+                     [{:rule :definitions-without-proof}])
+                   (let [{:keys [suggest-needs suggest-definitions]} (suggestions db tasks t)]
+                     (concat (for [n suggest-needs] {:rule :advice/needs? :task-needed n})
+                             (for [s suggest-definitions] {:rule :advice/definition? :sym s}))))]
+            (assoc f :task (:seon.task/id t)))))))
