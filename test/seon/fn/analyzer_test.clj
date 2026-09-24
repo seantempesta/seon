@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.test :refer [deftest is testing]]
             [seon.fn.analyzer :as analyzer]
+            [seon.schema :as schema]
             [seon.test-support :as test-support]))
 
 (defn- fixture-directory
@@ -307,3 +308,27 @@
           (testing "reply synthesis leaves builtin build analysis intact"
             (is (empty? (filter builtin-defect?
                                 (::analyzer/findings after))))))))))
+
+(deftest a-source-changed-during-analysis-is-the-declared-refusal
+  ;; A source whose modification time stays after every rebuilt cache entry is
+  ;; the concurrent edit: rebuilding cannot make its entry answer for its bytes.
+  (let [directory (fixture-directory (str (random-uuid)))
+        cache-root (.getPath (io/file directory "cache"))
+        callee (write-fixture! directory "race_callee.clj" "(ns race-callee) (defn f [x] x)")
+        caller (write-fixture! directory "race_caller.clj"
+                               "(ns race-caller (:require [race-callee :as c])) (c/f 1)")]
+    (try
+      (analyzer/analyze {::analyzer/paths [callee] ::analyzer/cache-root cache-root})
+      (.setLastModified (io/file callee) (+ (System/currentTimeMillis) 3600000))
+      (let [refusal (try (analyzer/analyze {::analyzer/paths [caller]
+                                            ::analyzer/cache-root cache-root})
+                         nil
+                         (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+        (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
+             refusal))
+        (is (= :analysis (:seon.cluster.source/phase refusal)))
+        (is (= :refused (:seon.cluster.boot/disposition refusal))
+            "the operator request returns it as refused, never a core fault")
+        (is (= [callee] (:seon.source/changed-paths refusal))))
+      (finally
+        (test-support/delete-recursively! directory)))))

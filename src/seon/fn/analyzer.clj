@@ -327,7 +327,8 @@
 
   The rerun is the whole cost of a stale entry; with none, the check reads
   only the entries of the namespaces the analysis used. `::cache` reports
-  what was examined, rebuilt and deleted."
+  what was examined, rebuilt and deleted. An entry still stale after the
+  rebuild throws the declared analysis source-change refusal."
   {:malli/schema [:=> [:cat [:map [:lint [:vector :string]]]]
                   [:map [::cache [:map [::examined :int] [::stale [:vector :map]]
                                   [::rebuilt [:vector :string]]]]]]}
@@ -369,9 +370,20 @@
           (clj-kondo/run! (assoc options :lint sources)))
         (let [rerun (clj-kondo/run! options)
               remaining (::stale (check rerun))]
+          ;; An entry still stale after its rebuild was changed by a concurrent
+          ;; source edit: the declared analysis source-change refusal
+          ;; (`:seon.fn/index-refused-error`), naming the changed paths. The
+          ;; operator request returns it as refused (`seon.cluster.boot/request!`).
           (when (seq remaining)
-            (throw (ex-info "clj-kondo cache entries changed again during analysis."
-                            {::stale remaining
+            (throw (ex-info "Source changed during analysis; clj-kondo cache entries changed again."
+                            {:seon.fn/index-refused true
+                             :seon.cluster.boot/disposition :refused
+                             :seon.cluster.source/phase :analysis
+                             :seon.error/message "Source changed during analysis; clj-kondo cache entries changed again."
+                             :seon.source/changed-paths
+                             (into [] (comp (map #(or (::source %) (::cache-file %))) (distinct))
+                                   remaining)
+                             ::stale remaining
                              ::lint (:lint options)})))
           (assoc rerun ::cache {::examined examined ::stale stale ::rebuilt sources}))))))
 
