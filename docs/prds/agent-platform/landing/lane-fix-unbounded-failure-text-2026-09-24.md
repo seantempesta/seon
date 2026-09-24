@@ -2,7 +2,7 @@
 type: landing
 lane: fix-unbounded-failure-text
 created: 2026-09-24
-status: three commits; slice 2 refuted (no instrument refusal change); default not yet running them
+status: seven commits; slice 2 refuted (no instrument refusal change); default not yet running them
 ---
 
 # Lane fix-unbounded-failure-text (2026-09-24)
@@ -71,6 +71,56 @@ status: three commits; slice 2 refuted (no instrument refusal change); default n
 **Next slice, not done:** the provenance-revision fix for `program-written-since?`
 ([issue](../../../seon/issues/the-admission-program-write-check-scans-program-attribute-history.md)).
 It needs a declared provenance key, the `seon.test` caller and the runner, about 20 lines.
+
+## Follow-up commits (root's second assignment)
+
+5. **`a9cb654d7` test: revert checkpoint `ab7e4a643`'s batch recording and its test.** This
+   applies review finding 2 of
+   `docs/research/agent-platform/review-checkpoint-ab7e4a643-2026-09-24.md`. Before the
+   revert, `git apply --reverse --check` of exactly the `src/seon/test.clj` hunk and the two
+   `test/seon/test/admission_digest_test.clj` hunks succeeded against HEAD `9b5eefbb7`.
+   Per-member recording is restored. After the revert,
+   `--ns seon.test.admission-digest-test` (`03af2e9d7b2d`) ran two members. The removed
+   test's stale row reported "no executable test Var", which is expected because the
+   scratch store still held the row. `an-admission-confirms-the-tested-digest-without-deriving-the-program`
+   ran 7.8 s against a 5 s bound, in the admit-run cost class. I have no parent figure for
+   that member.
+6. **`802dbd926` runner: the drift snapshot reads the running clusters from their owner Var**
+   ([issue](../../../seon/issues/runner-live-cluster-snapshot-reads-a-referred-var-with-find-var.md)).
+   Regression `the-drift-snapshot-names-the-running-clusters`: 1 fail on the parent, green
+   on mine (`0e2b6deeb96f`).
+7. **`8be073cfb` runner: a reach leaf is the declaration's stored definition digest.** Row 9
+   of the cross-cutting census. For a `:seon.test/fixture`-only change written through
+   `program/declaration-row`, on the scratch default: parent `{:digest-changed? true,
+   :reach-changed? false}`, mine `{:reach-changed? true}`. Regression
+   `a-metadata-only-change-changes-the-reach-digest` is green (`d03e11535db2`, 6.7 s
+   including `with-database`; it is over the 5 s bound only under this root's load, on its
+   first run. The reused rerun `ecde2a761fcb` does not prove it again). A missing digest leaf
+   stays `:seon.error/unknown`, as a missing row already was. A required-attribute write
+   refuses such a row, but two unknown leaves still hash equal, so this is a reuse hole
+   for rows written before the digest became required. The next slice is for
+   `reach-digests` to refuse an unknown leaf by name. Timing: the first `reach-digests` over
+   40 tests after reload took 11.9 s cold, of which `seon.id/digest` was 1.8 s over 1,414
+   calls. Warm calls took 0 ms. The new leaf computes no digest for fn/test rows, and the
+   parent cold figure was not measured.
+8. **`7e18d08f3` runner: a reported throwable renders its whole bounded cause chain.** Row 7.
+   `runner/throwable-text` (outermost message and frames only) is deleted, and
+   `report-value` uses `seon.render.value/floor`, so the stored `:seon.test/failure-message`
+   and the gate face now carry causes and bounded ex-data. This also answers
+   [a fixture refusal loses its diagnostic at the test reporter](../../../seon/issues/a-fixture-refusal-loses-its-diagnostic-at-the-test-reporter.md)
+   for the face text. Regression `a-reported-throwable-names-its-whole-cause-chain`: 2
+   fails on the parent (cause and ex-data missing), green on mine (`c733d05a25a9`).
+   `repeated-identical-errors-have-one-whole-face` (`8797bab38bf1`) and
+   `captures-counts-and-failure-identities-per-test` (`2005e061149d`) are still green.
+   There is a limit here. `floor` walks causes with its own `causes`/`link-lines`
+   (`src/seon/render/value.clj`), not `seon.error.refusal/chain`, and that file is outside
+   this lane. The identity/`:actual` path (`printable`) still prints only a throwable's
+   outermost class and message. I kept that on purpose, because failure identities must
+   not churn with frame lines.
+
+Proof root: a fresh `git archive 9b5eefbb7` plus runner.clj and test_runner_test.clj, ready
+in 178.8 s. The parent was HEAD's runner.clj, reloaded into that same JVM with
+`require :reload`, and then mine was reloaded. Both roots were stopped and deleted.
 
 ## Evidence (before / after)
 
