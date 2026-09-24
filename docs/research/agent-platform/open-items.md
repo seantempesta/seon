@@ -14,10 +14,9 @@ LOAD RULE: lanes write and commit code; root runs every test request and adoptio
 PAUSED; root publishes at checkpoints with `bin/seon init --dev default --changed <paths>` (zsh: `${=paths}`), because
 a restart loads code from the checkout but schema and test rows install only through publication.
 
-**BLOCKER (~23:00Z): every adoption refuses** "clj-kondo holds no analysis of dev-cache" since F7 (a9449b7c3): first-party
-namespaces on the JVM classpath outside the publication roots (dev_cache.clj, build.clj at the repo root) are classified as
-unanalyzed dependencies, and the analyzer's stale check deletes any cache entry written for them. Lane review-f7-kondo-macro-facts
-is fixing it as a priority. Until then nothing new installs on default (committed but unadopted: 9d0edab08, d86123e7d, dd513b3f3).
+**Adoption unblocked (~23:10Z):** d1ff2e02c (first-party = file under the checkout outside every :local/root; analyzed, kept
+by the stale check) + 366355e2f (fill = `(seon.fn.analyzer/analyze-dependencies!)`, 5.9 s warm). New hang under investigation:
+a nested in-process seon.test/run inside a member never exits (seon.test-reaching-test long-test case).
 
 **Owner rulings 2026-09-24 (evening):**
 1. Publication: OPTION 3 — named lane branches → root-accepted merge → fail-closed convergence (b8fae5bf8); option 1
