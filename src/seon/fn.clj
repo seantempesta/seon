@@ -1473,6 +1473,7 @@
     [(declared-edge ?caller ?target)
      [?caller :seon.fn/invokes ?attribute]
      [?holder ?attribute ?symbol]
+     [(symbol? ?symbol)]
      [?target :seon.fn/sym ?symbol]]])
 
 (def ^:private test-reach-rules
@@ -1517,6 +1518,37 @@
        (failing-function ?caller)
        (call-edge ?caller ?target)]]))
 
+(defn- ground-attribute-rules
+  "Instantiate each rule naming `?attribute` once per candidate attribute.
+  Datahike scans every datom for a pattern whose attribute is a variable bound
+  by an earlier clause, but reads one index slice for a ground attribute
+  (docs/seon/issues/datahike-bound-attribute-variable-scans-the-store.md).
+  Candidates are every declared reference and invoked attribute; each ground
+  rule keeps the clause that bound `?attribute`. A ground pattern seeks its
+  value in that attribute's index, so an instance is kept only when the
+  attribute's installed value type agrees with the rule's use of the value:
+  a ref attribute where the value is an entity, any other where it is not.
+  The symbol guard keeps a string-encoded value out of the symbol index."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector [:vector :seon.schema/value]]]
+                  [:or [:vector [:vector :seon.schema/value]] :seon.db/invalid-read-error]]}
+  [database rules]
+  (let [declared (db/q '[:find [?attribute ...]
+                         :where [?declaration :seon.fn/reference-to :seon.fn/sym]
+                                [?declaration :seon.schema/key ?attribute]] database)
+        invoked (db/q '[:find [?attribute ...] :where [_ :seon.fn/invokes ?attribute]] database)
+        consistent? (fn [[_ & clauses] attribute]
+                      (let [value (some (fn [[_ a v]] (when (= '?attribute a) v)) clauses)]
+                        (= (= :db.type/ref (get-in (:schema database) [attribute :db/valueType]))
+                           (boolean (some #(= value (first %)) clauses)))))]
+    (or (some #(when (:seon.db/invalid-read %) %) [declared invoked])
+        (let [candidates (sort (into (set declared) invoked))]
+          (into [] (mapcat (fn [rule]
+                             (if (some #{'?attribute} (flatten rule))
+                               (for [attribute candidates :when (consistent? rule attribute)]
+                                 (walk/postwalk-replace {'?attribute attribute} rule))
+                               [rule])))
+                rules)))))
+
 (defn- declared-reference-edges
   "Owned handlers and explicit invokers reach their current declared targets.
   Data rows may name a target by symbol or reference; keyword readers do not
@@ -1524,9 +1556,12 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or [:set [:tuple :int :int]] :seon.db/invalid-read-error]]}
   [database]
-  (db/q '[:find ?caller ?target :in $ %
-          :where (declared-edge ?caller ?target)]
-        database declared-reference-rules))
+  (let [rules (ground-attribute-rules database declared-reference-rules)]
+    (if (:seon.db/invalid-read rules)
+      rules
+      (db/q '[:find ?caller ?target :in $ %
+              :where (declared-edge ?caller ?target)]
+            database rules))))
 
 (defn- gate-set-in
   "Reverse-walk names, including a seed whose definition has been removed."
@@ -1631,16 +1666,22 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   [:or :seon.program/unresolved-report :seon.error/value :seon.db/invalid-read-error :seon.schema/validation-refusal]]}
   [database]
-  (let [rows (db/q '[:find ?attribute ?caller ?callee
-                     :in $ [?attribute ...]
-                     :where [?entity ?attribute ?caller]
-                            [?entity :seon.program/analyzed-source-digest]
-                            [?entity :seon.fn/calls ?callee]
-                            [(namespace ?callee) ?namespace-name]
-                            [(clojure.core/symbol ?namespace-name) ?namespace]
-                            [_ :seon.ns/name ?namespace]
-                            (not-join [?callee] [_ :seon.fn/sym ?callee])]
-                   database [:seon.fn/sym :seon.test/sym])
+  (let [rows (reduce
+              (fn [rows attribute]
+                ;; A scalar attribute reads its index slice; a collection-bound
+                ;; attribute variable scans every datom (ground-attribute-rules).
+                (let [found (db/q '[:find ?attribute ?caller ?callee
+                                    :in $ ?attribute
+                                    :where [?entity ?attribute ?caller]
+                                           [?entity :seon.program/analyzed-source-digest]
+                                           [?entity :seon.fn/calls ?callee]
+                                           [(namespace ?callee) ?namespace-name]
+                                           [(clojure.core/symbol ?namespace-name) ?namespace]
+                                           [_ :seon.ns/name ?namespace]
+                                           (not-join [?callee] [_ :seon.fn/sym ?callee])]
+                                  database attribute)]
+                  (if (map? found) (reduced found) (into rows found))))
+              #{} [:seon.fn/sym :seon.test/sym])
         stale (db/q '[:find ?test ?callee
                       :where [?entity :seon.test/sym ?test]
                              [?entity :seon.test/reach ?callee]
@@ -1680,6 +1721,15 @@
   [database function-symbol]
   (gate-set database function-symbol))
 
+(defn- ground-test-reach-rules
+  "The test-reach rules with their declared attributes ground, or throw its refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:vector [:vector :seon.schema/value]]]}
+  [database]
+  (let [rules (ground-attribute-rules database test-reach-rules)]
+    (if (:seon.db/invalid-read rules)
+      (throw (ex-info (:seon.error/message rules) rules))
+      rules)))
+
 (defn currently-failing-functions
   "Function symbols reached by a test whose latest committed result is red.
 
@@ -1693,7 +1743,7 @@
                :where
                (failing-function ?function)
                [?function :seon.fn/sym ?function-symbol]]
-             database test-reach-rules)
+             database (ground-test-reach-rules database))
        sort
        vec))
 
@@ -1718,7 +1768,7 @@
                     (tested ?function)
                     [?function :seon.fn/sym ?function-symbol]
                     [?function :seon.fn/private? false]]
-                  database test-reach-rules))]
+                  database (ground-test-reach-rules database)))]
     (->> (set/difference public-functions tested-functions)
          sort
          vec)))
@@ -2146,14 +2196,19 @@
         affected (when database
                    (loop [selected changed
                           pending selected]
-                     (let [parents (db/q '[:find [?symbol ...]
-                                            :in $ [?target ...] [?edge ...]
-                                            :where [?caller ?edge ?target]
-                                                   [?caller :seon.fn/sym ?symbol]]
-                                          database (vec pending)
-                                          [:seon.fn/calls :seon.effect/capability])
-                           _ (when (:seon.error/at parents)
-                               (throw (ex-info (:seon.error/message parents) parents)))
+                     ;; One scalar edge attribute per read: a collection-bound
+                     ;; attribute variable scans every datom (ground-attribute-rules).
+                     (let [parents (into [] (mapcat
+                                             (fn [edge]
+                                               (let [found (db/q '[:find [?symbol ...]
+                                                                   :in $ [?target ...] ?edge
+                                                                   :where [?caller ?edge ?target]
+                                                                          [?caller :seon.fn/sym ?symbol]]
+                                                                 database (vec pending) edge)]
+                                                 (if (:seon.error/at found)
+                                                   (throw (ex-info (:seon.error/message found) found))
+                                                   found))))
+                                         [:seon.fn/calls :seon.effect/capability])
                            added (set/difference (set parents) selected)]
                        (if (seq added) (recur (into selected added) added) selected))))
         rows-by-symbol (fn [function-symbol]
