@@ -1414,7 +1414,12 @@
                                   :seon.error.occurrence/first-at (or (:seon.error.occurrence/first-at old) at)
                                   :seon.error.occurrence/last-at at
                                   :seon.error.occurrence/process [:seon.db.process/id process]
-                                  :seon.error.occurrence/message (:seon.error/message fact)})
+                                  :seon.error.occurrence/message (:seon.error/message fact)
+                                  ;; where it happened: this transaction's own branch,
+                                  ;; unless a core fault's cluster copy names its origin
+                                  :seon.error.occurrence/branch
+                                  (or (:seon.error.occurrence/branch request)
+                                      (get-in database [:config :branch]))})
                      (:seon.error/dropped-fault-count fact)
                      (assoc :seon.error/dropped-fault-count
                             (+ (or (:seon.error/dropped-fault-count old) 0)
@@ -1493,8 +1498,12 @@
          signature (:seon.error/signature fact)
          agent-id (second (:seon.error/agent fact))
          turn-id (second (:seon.error/run fact))
+         origin (:seon.error.occurrence/branch request)
          occurrence-id (id/id (into (sorted-map)
                                    (cond-> {:seon.error/signature signature}
+                                     ;; a copy from another branch never merges with this branch's own
+                                     (and origin (not= origin (get-in database [:config :branch])))
+                                     (assoc :seon.store/branch origin)
                                      agent-id (assoc :seon.agent/id agent-id)
                                      turn-id (assoc :seon.turn/id turn-id)
                                      (nil? turn-id) (assoc :seon.db.process/id (:seon.error/process fact)))))

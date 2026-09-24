@@ -191,7 +191,8 @@
                :seon.config.error/escalate-to]
               [:seon.config.error/max-evidence-bytes
                :seon.config.error/max-evidence-bytes]
-              [:seon.error/fact {:optional true} :seon.error/fact]],
+              [:seon.error/fact {:optional true} :seon.error/fact]
+              [:seon.error.occurrence/branch {:optional true} :seon.error.occurrence/branch]],
              :error
              [:map {:seon.db/attributes true
                     :seon.render/ai seon.error/render-ai
