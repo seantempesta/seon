@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 tags: [issue, sci, eval, bounds]
 ---
@@ -52,3 +52,7 @@ the render profile?
 
 Not covered: compiled host code that prints to `clojure.core/*out*`. It is not
 captured, because only SCI's `*out*` is bound.
+
+## Resolution
+
+Landed in `fbbc9c596` as ruled by root: output streams under `max-bytes`.
