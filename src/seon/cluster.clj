@@ -663,6 +663,18 @@
           (into (sorted-map)
                 (map (fn [[family rows]] [family (count rows)]))
                 problems))
+        ;; Each OPEN fault (no resolution after its latest occurrence), as
+        ;; its signature, operation, latest occurrence and cause-chain head;
+        ;; the full chain is the occurrence's evidence blob in the database.
+        open-faults
+        (when (and connection ready (not unavailable))
+          (mapv (fn [{fact :seon.error/fact :as entry}]
+                  (merge (select-keys entry [:seon.error/signature :seon.error/operation
+                                             :seon.problems/occurrences])
+                         (select-keys fact [:seon.error.occurrence/last-at :seon.error/message
+                                            :seon.error/exception-class :seon.error/frame])))
+                (problems/open-faults (db/db connection)
+                                      (vec (:seon.problems/error-signatures problems)))))
         readiness-face
         (when ready
           (dissoc ready :seon.problems/problems))]
@@ -678,14 +690,17 @@
                (instrument/replaced-roots (program-function-files (db/db connection)))
                {:seon.dev.mcp/replaced-roots-unknown
                 "The cluster has no database connection; replaced roots cannot be observed."})
+             ;; Health is derived from open faults, never from a connection's
+             ;; existence: unknown without the problems to read.
              :seon.dev.mcp/health
-             (if connection :observed :unknown)
+             (cond (nil? open-faults) :unknown (seq open-faults) :faulted :else :observed)
              :seon.dev.mcp/flow
              (if (and connection (:seon.flow/graph instance))
                (schema/call-with-projection-state
                 projection-state
                 #(oversight/flow-status (db/db connection) instance))
                :unknown)}
+      (seq open-faults) (assoc :seon.dev.mcp/open-faults open-faults)
       problem-counts (assoc :seon.dev.mcp/problem-counts problem-counts)
       unavailable (assoc :seon.dev.mcp/problems-unavailable unavailable)
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
