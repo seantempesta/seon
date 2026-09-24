@@ -794,7 +794,10 @@
     turn-completion-backstop-ms
     ;; The provider stand-in never reaches a network; a long provider
     ;; allowance keeps the turn's own active bound out of the race, so the
-    ;; observed bound is disarm's declared one.
+    ;; observed bound is disarm's declared one. The machine's manifest may
+    ;; assert no-provider, which skips the prompt prelude these tests block
+    ;; in; the stand-in refuses before any provider call, so none is paid.
+    :seon.config.ai/no-provider :seon.config/absent
     :seon.config.ai/timeout-ms 60000
     :seon.config.ai.backup/model :seon.config/absent
     :seon.config.ai.retry/maximum-retries 0
