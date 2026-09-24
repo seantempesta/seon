@@ -25,6 +25,7 @@
             [malli.core :as m]
             [seon.error.refusal :as error.refusal]
             [seon.fn :as seon.fn]
+            [seon.fn.analyzer :as analyzer]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -91,21 +92,55 @@
     :features #{:clj}
     :readers (fn [tag] (fn [value] (tagged-literal tag value)))}))
 
-(defn- namespace-context
-  "The indexer's own alias/refer context for the file's `ns` form.
+(def ^:private no-namespace-context
+  "The context of a text with no `ns` form: nothing aliased or referred."
+  {:requires #{} :aliases {} :refers {} :imports {}})
 
-  Handed to `seon.fn`'s namespace reader through the text context it uses,
-  so symbol qualification is the indexer's rule, not a copy of it."
-  {:malli/schema [:=> [:cat :string :string [:sequential [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Top-level source forms are arbitrary read data.", :gen/elements [nil false 0 "" :k [] {}]}]]] :map]}
-  [path text forms]
-  (if-let [ns-form (first (filter #(and (seq? %) (= 'ns (first %))) forms))]
-    (let [{:keys [row col end-row end-col]} (meta ns-form)]
-      (@#'seon.fn/namespace-context
-       {path (@#'seon.fn/text-context text)}
-       {:seon.fn.analyzer/filename path
-        :seon.fn.analyzer/row row :seon.fn.analyzer/col col
-        :seon.fn.analyzer/end-row end-row :seon.fn.analyzer/end-col end-col}))
-    {:aliases {} :refers {}}))
+(defn- through-ns-form
+  "The text up to the end of its `ns` form, or nil when it has none.
+
+  A prefix keeps every row and column of the form, and the namespace context
+  reads only the form's clauses, so analysing it answers as the whole file
+  does (all 442 checkout files, 2026-09-24) at a fifteenth of the cost."
+  {:malli/schema [:=> [:cat :string] [:maybe :string]]}
+  [text]
+  (when-some [ns-form (first (filter #(and (seq? %) (= 'ns (first %)))
+                                     (read-source text)))]
+    (let [{:keys [end-row end-col]} (meta ns-form)
+          lines (str/split text #"\n" -1)]
+      (subs text 0 (+ (reduce + (map #(inc (count %)) (take (dec end-row) lines)))
+                      (dec end-col))))))
+
+(defn- namespace-contexts
+  "The indexer's own alias/refer context for each text's `ns` form, by path.
+
+  One `seon.fn.analyzer/analyze` over each text through its `ns` form, keyed
+  by canonical path (the analysis mirror resolves only canonical paths), then
+  `seon.fn/namespace-context` on each namespace definition: symbol
+  qualification is the indexer's rule, not a copy of it. The analysis writes a
+  private clj-kondo cache, so a reconstructed text never answers for the
+  checkout's namespace of the same name in the shared cache."
+  {:malli/schema [:=> [:cat [:map-of :string :string]] [:map-of :string :map]]}
+  [texts]
+  (let [paths (into {} (map (fn [path] [(.getCanonicalPath (io/file path)) path]))
+                    (keys texts))
+        cache (.toFile (java.nio.file.Files/createTempDirectory
+                        "contracts-compile-kondo"
+                        (make-array java.nio.file.attribute.FileAttribute 0)))]
+    (try
+      (into {}
+            (map (fn [entry]
+                   [(get paths (:seon.fn.analyzer/filename entry))
+                    (@#'seon.fn/namespace-context entry)]))
+            (:seon.fn.analyzer/namespace-definitions
+             (analyzer/analyze
+              {:seon.fn.analyzer/sources
+               (into {} (keep (fn [[path text]]
+                                (when-some [prefix (through-ns-form text)]
+                                  [(.getCanonicalPath (io/file path)) prefix])))
+                     texts)
+               :seon.fn.analyzer/cache-root (.getPath cache)})))
+      (finally (@#'seon.fn.analyzer/delete-tree! cache)))))
 
 (defn declared-contracts
   "Every `:malli/schema` declared in one source text, as the indexer stores it.
@@ -113,10 +148,9 @@
   Each entry names its file, row, column and definition; `::stored` is the
   contract after the indexer's qualification, canonicalization and EDN round
   trip, or `::read-refusal` when that round trip itself refuses."
-  {:malli/schema [:=> [:cat :string :string] [:vector :map]]}
-  [path text]
+  {:malli/schema [:=> [:cat :string :string :map] [:vector :map]]}
+  [path text context]
   (let [forms (read-source text)
-        context (namespace-context path text forms)
         namespace-name (or (some #(when (and (seq? %) (= 'ns (first %)))
                                     (second %))
                                  forms)
@@ -227,7 +261,8 @@
   [root projection {::keys [stored read-refusal] :as entry}]
   (if read-refusal
     (assoc entry ::chain read-refusal
-           ::reason "the stored contract does not read back as EDN")
+           ::reason (str "the indexer refuses to store it: "
+                         (:seon.error/message (first read-refusal))))
     (let [{::keys [bound unresolved]} (predicate-bindings root [stored])]
       (if (seq unresolved)
         (assoc entry ::chain []
@@ -283,9 +318,12 @@
                          candidate)
                        (packaged-projection root))
         texts (merge (into {} (map (fn [path] [path (slurp path)])) paths)
-                     sources)]
+                     sources)
+        contexts (namespace-contexts texts)]
     (into []
-          (comp (mapcat (fn [[path text]] (declared-contracts path text)))
+          (comp (mapcat (fn [[path text]]
+                          (declared-contracts path text
+                                              (get contexts path no-namespace-context))))
                 (keep #(contract-refusal root projection %))
                 (map finding))
           (sort-by key texts))))
@@ -307,8 +345,14 @@
 ;;; ---------------------------------------------------------------------------
 
 (deftest every-declared-contract-compiles-against-the-packaged-projection
-  (let [files (source-files ["src" "test"])
-        contracts (into [] (mapcat #(declared-contracts % (slurp %))) files)
+  (let [texts (into {} (map (fn [path] [path (slurp path)]))
+                    (source-files ["src" "test"]))
+        contexts (namespace-contexts texts)
+        contracts (into []
+                        (mapcat (fn [[path text]]
+                                  (declared-contracts path text
+                                                      (get contexts path no-namespace-context))))
+                        texts)
         projection (packaged-projection ".")
         findings (into [] (comp (keep #(contract-refusal "." projection %))
                                 (map finding))
@@ -339,8 +383,10 @@
   (let [findings (check {::sources historical-sources})
         by-file (group-by :filename findings)]
     (is (= (set (keys historical-sources)) (set (keys by-file))))
-    (testing "an anonymous predicate names its unresolved predicate"
-      (is (every? #(str/includes? (:message %) "has no admitted callable")
+    (testing "an anonymous predicate is refused where the indexer stores it"
+      ;; `schema/canonical-definition`'s armed return contract refuses a form
+      ;; that is not EDN-readable Malli before any compile is attempted.
+      (is (every? #(str/includes? (:message %) "EDN-readable Malli form")
                   (concat (get by-file "test/seon/cluster/release_context_test.clj")
                           (get by-file "src/seon/db.clj")))))
     (testing "an incomplete form names the Malli refusal"
