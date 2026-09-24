@@ -224,7 +224,7 @@
                     [:map
                      [:seon.dev.mcp/cluster :seon.boot/cluster-name]
                      [:seon.dev.mcp/health
-                      [:enum :observed :unknown]]]]]
+                      [:enum :observed :faulted :unknown]]]]]
                   [:seon.operator/footprint
                    {:optional true}
                    :seon.operator/footprint]]
