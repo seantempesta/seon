@@ -143,3 +143,16 @@ attempting each one. Only after all of them exit does it close, unlink and forge
   so its graphs are joined at member release, after the fresh store is already deleted. This is
   the same class as before; tests disarm in `finally`.
 - No bulk or platform tier was run.
+
+## Follow-up after root's restart (pid 35641)
+
+- **Cause:** after the restart, the machine manifest asserts `:seon.config.ai/no-provider true`
+  for every compiled cluster row. A read-only probe confirmed that `compile-manifest` for a fresh
+  cluster yields `true` and so does default's effective config, while `config/defaults` yields
+  nil. With no-provider set, `turn.clj:4429` skips `prompt/prompt`, so the stand-in latch in the
+  regression and in both disarm backstop tests never fired.
+- **Fix:** `provider-backstop-config` states `:seon.config.ai/no-provider :seon.config/absent`
+  explicitly. The same probe showed the compiled row then omits the key. The prompt stand-in
+  refuses before any provider call, so no provider is ever called and nothing is paid.
+- **Not rerun** (LOAD RULE). Root reruns:
+  - `bin/test-check default --test seon.cluster.agent-test/release-joins-every-owned-graph-before-it-closes-the-branch --test seon.cluster.agent-test/disarm-has-a-declared-loud-turn-completion-backstop --test seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted --include-long`
