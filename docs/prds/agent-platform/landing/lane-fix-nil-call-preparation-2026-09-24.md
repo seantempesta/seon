@@ -25,7 +25,7 @@ scope: Census rows `hook` and `plan-for` in docs/research/agent-platform/ambiguo
   no armed wrapper re-enters SCI. It would cost +15.6 µs on a hook of about 8.5 µs, and the hook
   runs on every SCI Var call. That is about +180%, far over the 20% bound. I kept the bypasses and
   replaced the stale cost comment (87-of-93 µs) with today's measurements. The owner has to rule on this.
-- In the copy runs of the whole namespace, 13 tests fail the **same way on HEAD and on the change**.
+- In the copy runs of the whole namespace, 14 tests fail the **same way on HEAD and on the change**.
   The causes are fixture writes refused at `:seon.program/definition-digest`, and copy-ns probe
   identities that are absent from the program rows. These come from the harness and the stale JVM,
   not from this diff.
