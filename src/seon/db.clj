@@ -3745,13 +3745,19 @@
     ;; `:db-after`, `datahike/writer.cljc:118`, whose context is speculative,
     ;; `datahike/db.cljc:444`), so no commit id can name it; its datoms can. Datom equality compares e, a
     ;; and v (`datahike/datom.cljc:106`), which is all the gate reads.
+    ;; A committed value is named by its commit id (Datahike derives it from
+    ;; content), so the first write on a fresh branch of a shared commit hits
+    ;; without reading its ~78,000 arity datoms (114 ms) to build the key.
     @(cache/lookup-or-miss
       arity-base-cache
-      [::arity-content (mapv (fn [attribute]
-                               [attribute (if (get (dbi/-schema database) attribute)
-                                            (vec (d/datoms database :aevt attribute))
-                                            [])])
-                             arity-attributes)]
+      (let [{:datahike.cache/keys [committed? commit-id]} (:cache-context database)]
+        (if (and committed? commit-id)
+          [::arity-commit commit-id]
+          [::arity-content (mapv (fn [attribute]
+                                   [attribute (if (get (dbi/-schema database) attribute)
+                                                (vec (d/datoms database :aevt attribute))
+                                                [])])
+                                 arity-attributes)]))
       (fn [_] (delay (derive))))))
 
 (defn- report-arity-comparison
