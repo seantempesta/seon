@@ -302,9 +302,8 @@ assignments; use verify/falsify/probe language. Resume usage-limited agents only
 owner authorization, retaining their identity. Make paid provider runs deliberate.
 
 Treat unresolved dependency/protocol Vars in clj-kondo as stale cache until disproven:
-repopulate from the publication classpath with `clj-kondo --lint "$(clojure -Spath)"
---dependencies --parallel --copy-configs --config '{:output {:canonical-paths true}}'`
-(`seon.fn/dependency-analysis-command`; `--skip-lint` writes no cache), never the test alias's `.`. Do not change
+repopulate it at the loaded JVM's REPL with `(seon.fn.analyzer/analyze-dependencies!)`, which lints the
+classpath that JVM runs with minus the checkout's own roots (~6 s warm; `seon.fn/dependency-analysis-command`). Do not change
 correct code to satisfy stale analysis. Clean owned shells/disposable roots before
 reporting, but preserve uncertain resources and unresolved evidence. Inspect actual
 live holders, never a self-matching process search; roots younger than the oldest live
