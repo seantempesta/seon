@@ -2516,44 +2516,6 @@
            :seon.schema.projection/fingerprint
            (projection-fingerprint-from-data composed))))
 
-(defn projection-delta
-  "Return the row-keyed pure-data difference from `base` to `composed`.
-
-   This is the ordinary value stored by the divergence cache. Runtime objects
-   and population-wide indexes are never included."
-  ;; the two arguments are NAMED DISTINCTLY, which sounds obvious and
-  ;; was not: `:catn` refuses duplicate keys, so binding both to
-  ;; `::projection` made this contract uncompilable — and nothing ever
-  ;; compiled it, so it sat here unenforced until instrumentation
-  ;; collected it (2026-07-27, the first thing `seon.instrument` found)
-  {:malli/schema [:=> [:catn [::base :map] [::composed :map]] :map]}
-  [base composed]
-  (let [base (projection-pure-data base)
-        composed (projection-pure-data composed)
-        keyed
-        [:seon.schema.projection/forms
-         :seon.schema.projection/schema-admissions
-         :seon.schema.projection/function-admissions
-         :seon.schema.projection/function-source-admissions
-         :seon.schema.projection/schema-dependencies
-         :seon.schema.projection/function-contracts
-         :seon.schema.projection/function-dependencies
-         :seon.schema.projection/shape-rows]]
-    (reduce
-     (fn [delta key]
-       (let [base-values (get base key {})
-             changed
-             (into (sorted-map)
-                   (filter (fn [[identity value]]
-                             (not= value (get base-values identity))))
-                   (get composed key {}))]
-         (cond-> delta (seq changed) (assoc key changed))))
-     {:seon.schema.projection/artifact-exports
-      (:seon.schema.projection/artifact-exports composed)
-      :seon.schema.projection/pure-predicate-symbols
-      (:seon.schema.projection/pure-predicate-symbols composed)}
-     keyed)))
-
 (defn materialize-projection
   "Rematerialize registry/options over preproved pure projection data."
   {:malli/schema

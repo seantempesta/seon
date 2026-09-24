@@ -1138,18 +1138,16 @@
                    [:seon.schema.projection/function-contracts
                     'seon.schema-test.incremental/accept])))))
 
-(deftest pure-projection-composition-materializes-compiled-entity-indexes
+(deftest pure-projection-data-materializes-compiled-entity-indexes
   (test-support/with-database
    (fn [_connection]
      (let [base (schema/handed-projection)
            changed (schema/projection-with-schema
                     base ::optional-entity
-                    [:map {:seon.db/attributes true}
+                    [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                      [:seon.agent/id {:optional true} :seon.agent/id]]
                     {:seon.schema.admission/source :core})
-           data (schema/compose-projection-data
-                 (schema/projection-pure-data base)
-                 (schema/projection-delta base changed))
+           data (schema/projection-pure-data changed)
            restored (schema/materialize-projection (edn/read-string (pr-str data)))]
        (is (not (contains? data :seon.schema.projection/registry)))
        (is (not (contains? data :seon.schema.projection/shape-index)))
