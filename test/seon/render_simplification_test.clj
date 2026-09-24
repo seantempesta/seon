@@ -1086,3 +1086,20 @@
        (is (= :seon.render/profile (:seon.render/refused-member unnamed)))
        (is (= :seon.boot/cluster-name (:seon.error/member unnamed)))
        (is (= "2" (:seon.eval/shown evaluation)) (pr-str evaluation))))))
+
+(deftest a-carried-partial-profile-is-refused-at-request-profile
+  ;; THE CLASS: a request carrying a profile missing its declared keys passed
+  ;; through request-profile and failed deep in seon.error/prepare-result and
+  ;; seon.print/fit. The entry refuses it by the member that carried it; a
+  ;; complete profile and a named refusal still pass unchanged.
+  (let [profile @@#'seon.render/default-agent-profile
+        refusal (try (seon.render/request-profile
+                      {:seon.render/profile {:seon.render.profile/token-budget 10}})
+                     nil
+                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+    (is (identical? profile (seon.render/request-profile {:seon.render/profile profile})))
+    (is (= :input (:seon.instrument/check refusal)) (pr-str refusal))
+    (is (= 'seon.render/request-profile (:seon.error/operation refusal)))
+    (is (some #(= [:seon.render/profile :seon.render.profile/id] (:seon.error/path %))
+              (:seon.error/problems refusal))
+        (pr-str (:seon.error/problems refusal)))))

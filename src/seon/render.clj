@@ -122,11 +122,19 @@
                 (some-> (:seon.sci.eval/ctx request) sci.kernel/context-projection)))))
 
 (defn request-profile
-  "Return the profile carried by one request, deriving it once when absent."
-  {:malli/schema [:=> [:cat :map]
+  "Return the profile carried by one request, deriving it once when absent.
+  A carried refusal is returned as this member's refusal; a carried value
+  that is neither is the caller's mistake, refused at this entry by the
+  member that carried it."
+  {:malli/schema [:=> [:cat [:map [:seon.render/profile {:optional true}
+                                   [:or :seon.render.profile/profile
+                                    :seon.error/value]]]]
                   [:or :seon.render.profile/profile :seon.render/request-error]]}
   [request]
-  (or (:seon.render/profile request)
+  (if-let [carried (:seon.render/profile request)]
+    (cond-> carried
+      (and (:seon.error/at carried) (not (:seon.render/refused-member carried)))
+      (assoc :seon.render/refused-member :seon.render/profile))
       (if-let [projection (or (:seon.schema/projection request)
                               (some-> (:seon.db/db request) db/carried-projection)
                               (schema/handed-projection))]
