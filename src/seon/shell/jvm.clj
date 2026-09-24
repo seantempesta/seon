@@ -277,6 +277,28 @@
           (or evaluation-first? (kernel/deadline-reached?)) :evaluation-limit
           :else :shell-limit)))))
 
+(defn- reap!
+  "Terminate the child's tree through the process owner. Nil once every
+  captured member's exit is observed; otherwise the await owner's timeout
+  error, after one more grace, naming the survivors whose exit never arrived.
+  The caller then keeps their pipes and capture tasks: they end only at exit."
+  {:malli/schema [:=> [:cat :map [:vector :seon.cluster.process/identity] [:int {:min 1}] :map]
+                  [:or :nil :seon.await/timeout-error]]}
+  [process-record captured grace-ms observation]
+  (when-let [survivors (not-empty (cluster.process/terminate-subprocess!
+                                   process-record captured grace-ms grace-ms))]
+    (let [waited (await/await!
+                  {:seon.await/bound {:seon.await/config-attribute :seon.config.shell/termination-grace-ms
+                                      :seon.await/config-value grace-ms}
+                   :seon.await/diagnostic
+                   {:seon.error/layer :my.shell/execution
+                    :seon.error/operation 'seon.cluster.process/terminate-subprocess!
+                    :seon.error/expected "the exit of every captured process"
+                    :seon.error/offending survivors
+                    :seon.error/data observation}
+                   :seon.await/future (cluster.process/subprocess-exit survivors)})]
+      (when (:seon.await/elapsed-ms waited) waited))))
+
 (defn- output-descriptor
   [_connection captured effective]
   (let [size (:seon.blob/size captured)
@@ -340,51 +362,53 @@
                                     (:seon.config.shell/time-limit-ms
                                      effective)
                                     captured)]
-        (if (= :exited disposition)
-          (let [_ (cluster.process/terminate-subprocess! process-record @captured grace-ms grace-ms)
-                evidence (finish-evidence connection stdout-task stderr-task
-                                          effective)
-                input (task-result input-task effective ::stdin)]
-            (cond
-              (:seon.await/elapsed-ms evidence) evidence
-              (:seon.await/elapsed-ms input) input
-              :else
-              (merge {:my.shell/argv argv
-                      :my.shell/cwd (:my.shell/cwd request)
-                      :my.shell/exit (.exitValue child)}
-                     evidence)))
-          ;; Both limits reap the tree before this frame goes away — the
-          ;; handler owns its resource, so no arm of this function can return
-          ;; while its child is still alive. The `:interrupted` disposition is
-          ;; what stamps `:seon.effect/interrupted-at` on the receipt, so the
-          ;; process and the receipt terminate together or not at all.
-          (do
-            (cluster.process/terminate-subprocess! process-record @captured grace-ms grace-ms)
+        ;; Every arm reaps first; a survivor's unfinished exit is the result,
+        ;; never a success or a terminated claim, and its capture tasks stay.
+        (if-let [unfinished (reap! process-record @captured grace-ms
+                                   {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)})]
+          unfinished
+          (if (= :exited disposition)
             (let [evidence (finish-evidence connection stdout-task stderr-task
                                             effective)
-                  input
-                  (try
-                    (task-result input-task effective ::stdin)
-                    (catch Throwable _ nil))]
+                  input (task-result input-task effective ::stdin)]
               (cond
                 (:seon.await/elapsed-ms evidence) evidence
                 (:seon.await/elapsed-ms input) input
                 :else
-                (assoc
-                 (seon.error.refusal/diagnostic (java.util.Date.) :my.shell/execution 'seon.shell.jvm/execute
-                  {:seon.error/message (if (= :evaluation-limit disposition)
-          "The process was terminated at the evaluation deadline."
-          "The process was terminated at the configured shell deadline.")
-        :seon.error/offending argv
-        :my.shell/terminated-pid (.pid child)
-        :my.shell/limiting-config-key (if (= :evaluation-limit disposition)
-          :seon.config.eval/time-limit-ms :seon.config.shell/time-limit-ms)
-        :seon.error/member :my.shell/argv
-        :seon.error/expected "process exit before its deadline"
-        :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)})
-                 :seon.effect/disposition :interrupted))))))
+                (merge {:my.shell/argv argv
+                        :my.shell/cwd (:my.shell/cwd request)
+                        :my.shell/exit (.exitValue child)}
+                       evidence)))
+            ;; The tree is reaped, so the `:interrupted` disposition — what
+            ;; stamps `:seon.effect/interrupted-at` on the receipt — is true:
+            ;; the process and the receipt terminate together or not at all.
+              (let [evidence (finish-evidence connection stdout-task stderr-task
+                                              effective)
+                    input
+                    (try
+                      (task-result input-task effective ::stdin)
+                      (catch Throwable _ nil))]
+                (cond
+                  (:seon.await/elapsed-ms evidence) evidence
+                  (:seon.await/elapsed-ms input) input
+                  :else
+                  (assoc
+                   (seon.error.refusal/diagnostic (java.util.Date.) :my.shell/execution 'seon.shell.jvm/execute
+                    {:seon.error/message (if (= :evaluation-limit disposition)
+            "The process was terminated at the evaluation deadline."
+            "The process was terminated at the configured shell deadline.")
+          :seon.error/offending argv
+          :my.shell/terminated-pid (.pid child)
+          :my.shell/limiting-config-key (if (= :evaluation-limit disposition)
+            :seon.config.eval/time-limit-ms :seon.config.shell/time-limit-ms)
+          :seon.error/member :my.shell/argv
+          :seon.error/expected "process exit before its deadline"
+          :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)})
+                   :seon.effect/disposition :interrupted))))))
       (catch InterruptedException interrupted
-        (cluster.process/terminate-subprocess! process-record @captured grace-ms grace-ms)
+        (when-let [unfinished (reap! process-record @captured grace-ms
+                                     {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)})]
+          (.addSuppressed interrupted (ex-info (:seon.error/message unfinished) unfinished)))
         (.interrupt (Thread/currentThread))
         (throw interrupted)))))
 

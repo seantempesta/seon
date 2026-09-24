@@ -159,8 +159,10 @@
   "Terminate every captured identity plus the root's current tree: TERM each,
   wait up to `grace-ms` for all to exit, force survivors, then await actual exit
   within `cleanup-ms`. Every signal first verifies `(pid, start-instant)`.
-  Returns true when no captured identity survives."
-  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector :seon.cluster.process/identity] [:int {:min 0}] [:int {:min 0}]] :boolean]}
+  Returns the captured identities still alive after `cleanup-ms`: empty only
+  when every exit was observed. A survivor (a member this JVM may not signal,
+  or one blocked in the kernel) is the caller's to keep owning, never ended."
+  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector :seon.cluster.process/identity] [:int {:min 0}] [:int {:min 0}]] [:vector :seon.cluster.process/identity]]}
   [process-record launch-identities grace-ms cleanup-ms]
   (let [^Process child (:proc process-record)
         identities (vec (distinct (concat launch-identities
@@ -184,7 +186,18 @@
     (await-all! grace-ms)
     (signal! #(.destroyForcibly ^java.lang.ProcessHandle %))
     (await-all! cleanup-ms)
-    (not-any? same-subprocess-handle identities)))
+    (filterv same-subprocess-handle identities)))
+
+(defn subprocess-exit
+  "A future completing when every one of `identities` has exited; an
+  identity already gone contributes nothing."
+  {:malli/schema [:=> [:cat [:vector :seon.cluster.process/identity]] :seon.flow/future]}
+  [identities]
+  (java.util.concurrent.CompletableFuture/allOf
+   (into-array java.util.concurrent.CompletableFuture
+               (keep #(when-let [^java.lang.ProcessHandle handle (same-subprocess-handle %)]
+                         (.onExit handle))
+                      identities))))
 
 (defn run-process!
   "Run one foreign argv under a deadline, or an explicitly declared event-silence bound.

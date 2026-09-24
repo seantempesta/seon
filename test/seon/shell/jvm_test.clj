@@ -3,7 +3,10 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [my.shell :as shell]
+            [babashka.process :as bp]
             [seon.blob :as blob]
+            [seon.cluster.process :as cluster.process]
+            [seon.cluster.process-test :as process-test]
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
@@ -151,6 +154,29 @@
   [field]
   (let [separator (.indexOf ^String field "=")]
     [(subs field 0 separator) (subs field (inc separator))]))
+
+(deftest a-survivor-of-termination-is-the-unfinished-result-never-terminated
+  (let [{parent ::process-test/parent survivor ::process-test/identity} (process-test/zombie)
+        record (bp/process ["/bin/sleep" "30"] {:out :discard :err :discard})
+        root (.toHandle ^Process (:proc record))
+        observation {:my.shell/argv ["/bin/sleep" "30"] :my.shell/cwd "."}]
+    (try
+      (let [unfinished ((shell-private 'reap!) record
+                        (conj (cluster.process/subprocess-tree-identities root) survivor)
+                        100 observation)]
+        (testing "the missing terminal event is named: the survivors' exit, under the grace fact"
+          (is (= :seon.config.shell/termination-grace-ms (:seon.await/config-attribute unfinished)))
+          (is (= [survivor] (:seon.error/offending unfinished)))
+          (is (= 'seon.cluster.process/terminate-subprocess! (:seon.await/requested-operation unfinished)))
+          (is (= observation (:seon.error/data unfinished))))
+        (testing "nothing claims termination; the survivor is still owned"
+          (is (not (contains? unfinished :my.shell/terminated-pid)))
+          (is (not (contains? unfinished :seon.effect/disposition)))
+          (is (cluster.process/process-identity-alive? survivor))))
+      (finally (.destroyForcibly ^Process parent)))
+    (testing "an observed exit of every member releases with no error"
+      (let [record (bp/process ["/bin/sleep" "30"] {:out :discard :err :discard})]
+        (is (nil? ((shell-private 'reap!) record [] 100 observation)))))))
 
 (deftest capture-task-completion-is-bounded-and-interrupts-only-that-task
   (let [started (promise)

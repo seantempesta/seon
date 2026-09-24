@@ -33,13 +33,13 @@
   (let [{record ::record identities ::identities}
         (start-tree "(trap '' TERM; exec /bin/sleep 30) & /bin/sleep 30" 3)
         started (System/nanoTime)
-        reaped? (process/terminate-subprocess! record identities 500 2000)
+        left (process/terminate-subprocess! record identities 500 2000)
         elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
     (is (= 3 (count identities)) (pr-str identities))
     (testing "the root obeyed TERM, the grandchild needed the force after grace"
       (is (= 143 (.exitValue ^Process (:proc record))))
       (is (<= 500 elapsed-ms 2500) (str elapsed-ms " ms")))
-    (is (true? reaped?))
+    (is (= [] left))
     (is (= [] (survivors identities)))))
 
 (deftest a-well-behaved-tree-exits-on-term-without-force
@@ -51,10 +51,10 @@
                          "while :; do /bin/sleep 0.1; done' & wait")
                     3)
         started (System/nanoTime)
-        reaped? (process/terminate-subprocess! record identities 5000 2000)
+        left (process/terminate-subprocess! record identities 5000 2000)
         elapsed-ms (quot (- (System/nanoTime) started) 1000000)]
     (try
-      (is (true? reaped?))
+      (is (= [] left))
       (is (= [] (survivors identities)))
       (testing "every member exited on TERM inside the grace"
         (is (= 143 (.exitValue ^Process (:proc record))) "the root died of TERM, not KILL")
@@ -63,6 +63,29 @@
       (finally
         (.delete marker)
         (Files/deleteIfExists directory)))))
+
+(defn zombie
+  "A real process no signal can end: a child exited but unreaped by its living
+  perl parent, which the caller must destroy. Returns the parent and the
+  zombie's identity. On macOS (2026-09-24) the zombie stays alive through
+  SIGKILL until its parent exits."
+  []
+  (let [parent (.start (ProcessBuilder.
+                        ["/usr/bin/perl" "-e" "my $c=fork(); if($c==0){exit 0} print \"$c\\n\"; STDOUT->flush(); sleep 30"]))
+        pid (Long/parseLong (.readLine (java.io.BufferedReader.
+                                        (java.io.InputStreamReader. (.getInputStream parent)))))
+        handle (.get (java.lang.ProcessHandle/of pid))]
+    {::parent parent
+     ::identity (first (process/subprocess-tree-identities handle))}))
+
+(deftest a-survivor-of-the-cleanup-bound-is-returned-never-reported-reaped
+  (let [{parent ::parent survivor ::identity} (zombie)
+        {record ::record identities ::identities} (start-tree "/bin/sleep 30" 1)]
+    (try
+      (is (= [survivor] (process/terminate-subprocess! record (conj identities survivor) 100 100)))
+      (is (process/process-identity-alive? survivor) "the owner ended nothing it did not observe")
+      (is (= [] (survivors identities)))
+      (finally (.destroyForcibly ^Process parent)))))
 
 (deftest an-exited-or-unknown-generation-never-matches-a-process
   (let [record (bp/process ["/bin/sleep" "30"])
