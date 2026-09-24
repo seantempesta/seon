@@ -648,19 +648,6 @@
    :requires
    (set (:seon.ns/requires row))})
 
-(defn- caller-bindings
-  "A namespace row's bindings plus the aliases its loaded JVM namespace made
-  outside the `ns` form, such as `my.edit`'s top-level
-  `(require '[seon.effect :as effect])`. An interpreted caller analyzes
-  against the names its compiled namespace reaches; the row's own aliases win."
-  {:malli/schema [:=> [:cat [:map [:seon.ns/name :symbol]]]
-                  [:map [:aliases [:map-of :symbol :symbol]] [:imports :map]
-                   [:refers [:map-of :symbol :qualified-symbol]] [:requires [:set :symbol]]]]}
-  [row]
-  (cond-> (row-bindings row)
-    (find-ns (:seon.ns/name row))
-    (update :aliases #(merge (update-vals (ns-aliases (:seon.ns/name row)) ns-name) %))))
-
 (defn- program-row-identity
   "The declared identity carried by one program row, or nil."
   [row]
@@ -795,9 +782,9 @@
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
-       ctx namespace-name (assoc (caller-bindings namespace-row) :refers {}))
+       ctx namespace-name (assoc (row-bindings namespace-row) :refers {}))
       (sci/install-namespace-bindings! ctx namespace-name
-                                       (caller-bindings namespace-row))
+                                       (row-bindings namespace-row))
       (let [event (one-event source namespace-name ctx (count source))]
         (sci/binding [sci/ns (sci/create-ns namespace-name)]
           (sci/eval-form ctx (:seon.sci.reader/form event)))
@@ -1605,7 +1592,7 @@
         installs
         (for [row namespace-rows
               :let [namespace-name (:seon.ns/name row)
-                    {:keys [aliases refers]} (caller-bindings row)]
+                    {:keys [aliases refers]} (row-bindings row)]
               [target interns]
               (cons [namespace-name (some-> (find-ns namespace-name) own-bindings)]
                     (for [target (distinct (concat (vals aliases)

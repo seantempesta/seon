@@ -156,12 +156,8 @@
     [:ns :name :from :from-var :alias :auto-resolved :keys-destructuring
      :lang])))
 
-(defn- entry-position
-  [entry]
-  [(get entry ::filename "") (get entry ::row 0) (get entry ::col 0)])
-
 (defn- entry-order
-  "Every `analyze` vector's sort key; it leads with `entry-position`."
+  "Every `analyze` vector's sort key, leading with filename, row and column."
   [entry]
   [(get entry ::filename "")
    (get entry ::row 0)
@@ -539,38 +535,31 @@
                          [(:row (meta node)) (:col (meta node))])))))
            nodes)}))
 
-(defn- entries-within
-  "The entries of one sorted `analyze` vector positioned inside `span`'s form:
-  a binary search for its start, then a scan to its end."
-  [entries span]
-  (let [start (entry-position span)
-        end [(::filename span) (::end-row span) (::end-col span)]
-        index (loop [low 0 high (count entries)]
-                (if (< low high)
-                  (let [middle (quot (+ low high) 2)]
-                    (if (neg? (compare (entry-position (nth entries middle)) start))
-                      (recur (inc middle) high)
-                      (recur low middle)))
-                  low))]
-    (into [] (take-while #(not (pos? (compare (entry-position %) end))))
-          (subvec entries index))))
-
 (defn- with-namespace-clauses
-  "Each `ns` form's clause facts, as clj-kondo recorded them inside its span:
-  requires (`::clause-usages`), `:refer` var usages, `:import` class usages
-  (clj_kondo/impl/analyzer/namespace.clj:700-702) and bare `:rename`
-  keywords, whose renamed local clj-kondo does not record."
+  "Each `ns` definition's clause facts. clj-kondo attributes every require
+  and `:refer` to the namespace that made it (`:from`), whether in the `ns`
+  form or a top-level `require` (clj_kondo/impl/analyzer/namespace.clj:721,771;
+  :refer usages :220-231). A class import and a bare `:rename` keyword carry
+  no `:from`, so they are the ones positioned inside the `ns` form (:702);
+  clj-kondo records no renamed local. Each fact vector is indexed once."
   [analysis]
-  (update analysis ::namespace-definitions
-          (partial mapv
-                   (fn [definition]
-                     (let [within #(entries-within (get analysis %) definition)]
+  (let [unqualified #(update-keys % (comp keyword name))
+        usages (group-by ::from (::namespace-usages analysis))
+        refers (group-by ::from (filter ::refer (::var-usages analysis)))
+        in-files (fn [entries] (group-by ::filename entries))
+        imports (in-files (filter ::import (::java-class-usages analysis)))
+        renames (in-files (filter #(and (= "rename" (::name %)) (not (::ns %))) (::keywords analysis)))
+        within (fn [by-file definition]
+                 (filterv #(contains-position? (unqualified definition) (unqualified %))
+                          (get by-file (::filename definition))))]
+    (update analysis ::namespace-definitions
+            (partial mapv
+                     (fn [{namespace-name ::name :as definition}]
                        (assoc definition
-                              ::clause-usages (within ::namespace-usages)
-                              ::clause-refers (filterv ::refer (within ::var-usages))
-                              ::clause-imports (filterv ::import (within ::java-class-usages))
-                              ::clause-renames (filterv #(and (= "rename" (::name %)) (not (::ns %)))
-                                                        (within ::keywords))))))))
+                              ::clause-usages (get usages namespace-name [])
+                              ::clause-refers (get refers namespace-name [])
+                              ::clause-imports (within imports definition)
+                              ::clause-renames (within renames definition)))))))
 
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.

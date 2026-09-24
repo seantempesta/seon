@@ -229,3 +229,23 @@
         (is (= [callee] (:seon.source/changed-paths refusal))))
       (finally
         (test-support/delete-recursively! directory)))))
+
+(deftest namespace-clauses-are-every-require-clj-kondo-attributes-to-the-namespace
+  (let [directory (fixture-directory (str (random-uuid)))
+        file (write-fixture! directory "clauses.clj" "")
+        analysis
+        (try
+          (analyzer/analyze
+           {::analyzer/sources
+            {file (str "(ns analyzer.fixture.clauses\n"
+                       "  (:require [clojure.string :as str]))\n"
+                       "(require '[clojure.set :as set :refer [union]])\n"
+                       "(defn f [m] [(str/trim \"\") (set/union) (union) (:rename m)])\n")}})
+          (finally (test-support/delete-recursively! directory)))
+        [definition] (::analyzer/namespace-definitions analysis)]
+    (is (= #{['str 'clojure.string] ['set 'clojure.set]}
+           (into #{} (map (juxt ::analyzer/alias ::analyzer/to)) (::analyzer/clause-usages definition)))
+        "a top-level require is a clause of the namespace that made it")
+    (is (= ['union] (mapv ::analyzer/name (::analyzer/clause-refers definition))))
+    (is (= [] (::analyzer/clause-renames definition))
+        "a :rename keyword read outside the ns form is not a clause")))
