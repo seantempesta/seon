@@ -29,13 +29,15 @@ Two census rows (§9, "nil means one thing"), fixed at their producers.
   `startInstant` for every live pid probed, including 0 (kernel), 1 (launchd) and a
   zombie grandchild. The refusal branch is exercised only by reading the code. No
   test forces it, because that would need Var redefinition.
-- **Flaky neighbour test.** `a-well-behaved-tree-exits-on-term-without-force` (from lane
-  fix-process-tree) failed its TERM-trap-marker assertion in 1 of 2 runs with HEAD's
-  `process.clj` and in 1 of 4 runs with this change. It fails the same way either side
-  of this change. Filed at `docs/seon/issues/process-test-term-trap-marker-is-intermittently-absent.md`.
+- **Flaky neighbour test, now fixed in the fixture (resumed slice).**
+  `a-well-behaved-tree-exits-on-term-without-force` lost its TERM-trap marker because
+  the JDK closes the child's stdout/stderr pipes when the root exits. The trapping shell's
+  "Terminated: 15" line then got SIGPIPE. The owner was not at fault. The same property
+  holds in production for `seon.shell.jvm` and `run-process!`, and needs an owner ruling.
+  See `docs/seon/issues/process-test-term-trap-marker-is-intermittently-absent.md`.
 - **Callers left as they are, out of ownership.** `script/seon/dev/state.clj:7-8`
-  aliases `process-start-instant` and `process-identity-alive?`, but nothing calls
-  them (rg), so they are deletion candidates. `seon.cluster/read-advertisement`
+  aliased `process-start-instant` and `process-identity-alive?` with no caller. The aliases
+  were deleted in the resumed slice. `seon.cluster/read-advertisement`
   (`cluster.clj` ~3700) wraps `live?` in `(catch Throwable _ nil)`, which turns the new
   refusal back into "no advertisement". That is the same class, in another owner's file.
   `web.clj` needs no change: the throw propagates through `(first …)`.
@@ -95,7 +97,21 @@ of wall time. `seon.shell.jvm`, `seon.cluster`, `seon.dev.state`, `seon.render.w
 - `test/seon/cluster/agent_namespace_test.clj`: +21
 - Commits: `d0ca6de68` (process, with the flake issue), `8adf64a56` (agent).
 
-Not done: census S3, the `steward-of` contract gap (`[:maybe :seon.agent/id]` over a `db/q`
-that can return an invalid read). It is the next row in this file.
+## Resumed slice (root re-grant)
+
+- `steward-of` (census S3): an invalid read now throws the invalid read. Before, the armed
+  output contract refused with the misleading "expected a string, got a map" (live default,
+  scratch namespace). After: ex-data `{:seon.db/invalid-read true}`; `"root"` for
+  `my.agents.root`; nil for `my.agents.nobody`. Its regression assertions joined the
+  renamed `assignment-reads-refuse-an-unreadable-database-and-answer-none-only-when-none`.
+  Commit `b7d4582cf` (agent.clj +12/−8, test +8/−2).
+- Flake: the fixture's output goes to `/dev/null`. In a snapshot the test was green 15/15;
+  before, it failed about 1 run in 3, and a direct owner probe wrote the marker 0/10 times.
+  An owner reorder (root signalled last) was tried: 10/10 in one probe, 7/8 in another,
+  because the root can also exit on its own. It was reverted, and the owner is unchanged.
+  Commit `1ad298a5a` (test +8/−2).
+- `script/seon/dev/state.clj`: the two aliases and the now-unused `seon.cluster.process`
+  require were deleted. rg found no caller in src/, test/, script/ or bin/, and dependents
+  load. Commit `f053f9477` (−4/+1).
 
 No reset is needed. Adoption into default is root's.
