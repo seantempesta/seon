@@ -1,0 +1,2295 @@
+[{:task/exit
+  {:kind :property,
+   :sketch
+   "one generated population of property schemas (incl. [:inst {:description ..}]) is accepted by admission iff it compiles as an armed contract"},
+  :task/trigger-query
+  "(for [s candidate-schemas] [(admission/admit s) (m/schema s {:registry projection})]) -> rows where one accepts and the other throws",
+  :audit/relevance-why
+  "cited src/seon/schema/form.cljc and seon.test.runner/claim-member are gone; :inst now mapped in src/seon/schema/datahike.clj:25,136; the property-level disagreement is unverified",
+  :issue/title "Instant vector admission and instrumentation disagree",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Workaround (:and alias) landed instead of the regression; a clear case of a two-boundary property test.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed
+  ["schema admission entry fn"
+   "the Malli compile of the same form against the packaged projection"
+   "the refused log line"],
+  :issue/path "docs/seon/issues/instant-vector-admission-and-instrumentation-disagree.md",
+  :task/subject
+  {:namespaces [seon.schema.admission seon.instrument],
+   :symbols [],
+   :keys [:malli.core/infinitely-expanding-schema]},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "host and SCI invalid calls never execute the body; :record returns the committed refusal, :panic throws it; fast tier green on the error and arm namespaces"},
+  :task/trigger-query
+  "armed functions whose :malli/schema output lacks :seon.error/base yet whose body can return a declared error schema (checker over contracts x body error unions)",
+  :audit/relevance-why
+  "acquisition landed (src/seon/instrument.clj:459-488 carries :seon.flow/commit-fault!, refuses :record without it); note stays open for integration proof and the generic-return declaration gaps",
+  :issue/title "Instrumentation record mode has no acquired fault recorder",
+  :task/split
+  ["declare base + error alternatives on seon.db/pull output"
+   "same for seon.error.refusal/refusal"
+   "same for seon.render.value/transacted and seon.sci.kernel/failure-value"
+   "integration proof: record/panic regression on host and SCI"],
+  :audit/relevance :live,
+  :audit/notes
+  "Chronological log of stops; the note is a lane diary, not a task. Top section contradicts later sections.",
+  :task/size :large,
+  :task/trigger :test-failure,
+  :task/context-needed
+  ["program-facts §1q rule for declared-schema alternatives"
+   "the generic helpers' current :malli/schema outputs"
+   "the real-SCI recorder regression"],
+  :issue/path "docs/seon/issues/instrumentation-record-mode-has-no-acquired-fault-recorder.md",
+  :task/subject
+  {:namespaces [seon.instrument seon.sci.eval seon.db seon.error.refusal seon.render.value seon.sci.kernel],
+   :symbols
+   [seon.instrument/wrap-interpreted
+    seon.db/pull
+    seon.render.value/transacted
+    seon.sci.kernel/failure-value],
+   :keys [:seon.flow/commit-fault! :seon.config/on-core-error]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch "no armed first-party Var reports empty constant-pool deps when its original has deps"},
+  :task/trigger-query "(count (filter #(and (armed? %) (empty? (fn-deps %))) first-party-vars)) > 0",
+  :audit/relevance-why
+  "seon.instrument/arm-var! still at src/seon/instrument.clj:768 and keeps :malli.instrument/original (:793,:829); no first-party fn-deps inspection seam exists yet, so the issue is prospective",
+  :issue/title "Instrumented Vars hide their constant pool from runtime dependency inspection",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Conditional on building a runtime dependency view at all; could be a design-gap until that seam exists.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["orchard.xref/fn-deps source" "arm-var! wrapper construction"],
+  :issue/path
+  "docs/seon/issues/instrumented-vars-hide-their-constant-pool-from-runtime-dependency-inspection.md",
+  :task/subject
+  {:namespaces [seon.instrument], :symbols [seon.instrument/arm-var!], :keys [:malli.instrument/original]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "the named test passes via bin/test-check with one primary assertion per state and no .length on absent evidence"},
+  :task/trigger-query
+  "latest :seon.test run evidence for seon.blob-test/interrupted-staging-leaves-the-store-unchanged is red",
+  :audit/relevance-why
+  "test still at test/seon/blob_test.clj:129; src/seon/blob.clj:291 now comments that the staging file is retained on interruption; failure evidence dates from 2026-08-05",
+  :issue/title "Preserve the interrupted blob staging artifact until it can be observed",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Likely closable by one rerun; a staleness detector (issue older than its cited test's last green) would have caught it.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["blob staged-write path" "the test body"],
+  :issue/path "docs/seon/issues/interrupted-blob-staging-leaves-no-observable-artifact.md",
+  :task/subject
+  {:namespaces [seon.blob seon.blob-test],
+   :symbols [seon.blob-test/interrupted-staging-leaves-the-store-unchanged],
+   :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :root-decision,
+   :sketch
+   "owner rules: isolated data roots carry the invoking checkout's source authority, or scratch roots are retired and the note is superseded"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "bin/seon exists; no cited symbol; the scratch-root workflow it describes conflicts with the one-shared-JVM ruling, so the need may be retired",
+  :issue/title "Isolated operator init requires source files inside its root",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Operator workflow issue whose premise (lanes use scratch roots) was later ruled out; candidate supersede.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["bin/seon init/start help" "one-shared-JVM ruling"],
+  :issue/path "docs/seon/issues/isolated-operator-init-requires-a-source-checkout.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :measurement,
+   :sketch
+   "clock row: source-only publication spends ~0 ms in issue indexing; one-note change indexes only that note"},
+  :task/trigger-query "publication clock rows where phase :issue-index > 100 ms on a source-only change",
+  :audit/relevance-why
+  "option 2 (changed note paths) appears landed: src/seon/cluster/source.clj:513-523 passes :seon.source/changed-paths; but seon.issue/notes still reads the whole directory each call",
+  :issue/title "Issue indexing at publication costs 13 s and 89k datoms per complete build",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Note's 'decision boundary' section is likely already ruled/landed (README describes changed-paths behaviour); needs close-out, not work.",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["the publication clock script output" "index-issues! and seon.issue/notes"],
+  :issue/path "docs/seon/issues/issue-indexing-at-publication-costs-13-seconds.md",
+  :task/subject
+  {:namespaces [seon.cluster.source seon.issue],
+   :symbols [seon.cluster.source/publish! seon.issue/index! seon.issue/index-tx seon.issue/notes],
+   :keys [:seon.source/changed-paths]},
+  :task/needs [],
+  :task/work :measure,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch "the test completes through seon.test/run under its declared bound with positive assertions"},
+  :task/trigger-query
+  "[:find ?run :where [?run :seon.test/name 'seon.issue-test/issue-worker-creation-is-atomic] [?run :seon.test/outcome :timeout]]",
+  :audit/relevance-why
+  "seon.issue-test/issue-worker-creation-is-atomic still at test/seon/issue_test.clj:379; bounded runner src/seon/test.clj present",
+  :issue/title "Issue worker creation does not complete within its in-process test bound",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Likely the same whole-store scan cost traced in the opening-turn note.",
+  :task/size :medium,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed
+  ["a thread/phase sample of the pending operation at the bound" "profiled armed calls of start!"],
+  :issue/path "docs/seon/issues/issue-worker-creation-in-process-test-exceeds-bound.md",
+  :task/subject
+  {:namespaces [seon.issue seon.test],
+   :symbols [seon.issue-test/issue-worker-creation-is-atomic seon.issue/start! seon.test/run],
+   :keys [:seon.test/remaining-ms]},
+  :task/needs ["docs/seon/issues/issue-worker-opening-turn-closes-and-no-reply-turn-opens.md"],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "an-issue-worker-started-on-its-candidate-branch-runs-there-alone passes; each opening form < 100 ms on default"},
+  :task/trigger-query
+  "opening evaluations per turn with elapsed > 1000 ms (evaluation duration facts grouped by turn)",
+  :audit/relevance-why
+  "installation-covers-program-change? still at src/seon/sci/eval.clj:1157 (called :1273), the remaining traced cost; seon.turn/resume-turn present",
+  :issue/title "An issue worker's opening takes the whole reply wait, so its reply turn opens too late",
+  :task/split
+  ["make installation-covers-program-change? cost follow changed rows, not the store"
+   "derive the declared plan once per turn, not per appended form"],
+  :audit/relevance :live,
+  :audit/notes
+  "Title premise was refuted by its own trace; the task is a performance fix. Good example of a refuted premise preserved as data.",
+  :task/size :medium,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed
+  ["250 ms sampler output" "installation-covers-program-change? body" "generate-turn plan derivation"],
+  :issue/path "docs/seon/issues/issue-worker-opening-turn-closes-and-no-reply-turn-opens.md",
+  :task/subject
+  {:namespaces [seon.sci.eval seon.turn],
+   :symbols [seon.turn/resume-turn seon.turn/next-agent-work seon.issue/start!],
+   :keys [:seon.turn.work/situation]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "one bounded reproduction of submit! on a closed turn returns a terminal result within the test bound, recording requested turn id and existing turn facts"},
+  :task/trigger-query
+  "log/event count of :run-exists refusals for one turn identity > N within one submission",
+  :audit/relevance-why
+  "seon.context-blocks-fixture/submit! still at test/seon/context_blocks_fixture.clj; observed 2026-09-09 on a scratch cluster (a workflow since ruled out); retry-on-run-exists loop not re-verified",
+  :issue/title "Juniper submission repeatedly refuses an existing turn",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "An unbounded retry loop in a fixture: an 'every retry declares a bound' detector would find this class.",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["submit! retry branch" "virtual-turn! run-exists refusal shape"],
+  :issue/path "docs/seon/issues/juniper-submission-repeats-existing-turn-refusals.md",
+  :task/subject
+  {:namespaces [seon.context-blocks-fixture seon.turn],
+   :symbols [seon.context-blocks-fixture/submit!],
+   :keys []},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "note moved to archive with status resolved citing db4efb4fd"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "note records 'Applied in db4efb4fd'; src/seon/cluster/store.clj:170-182 emits :keep-history? explicitly; status never closed",
+  :issue/title "State a position on `:keep-history?` instead of inheriting it",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes
+  "Fixed-but-open: body says applied, frontmatter says open. A detector 'note body contains Applied/Resolved but status open' would find this class.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["the note's own triage section"],
+  :issue/path "docs/seon/issues/keep-history-is-on-by-default-without-a-decision.md",
+  :task/subject
+  {:namespaces [seon.cluster.store], :symbols [seon.cluster.store/datahike-configuration], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other,
+   :sketch "fresh-cache clj-kondo resolves parser.type/->Variable and still flags a nonexistent ->Nope"},
+  :task/trigger-query
+  "(clj-kondo lint src/seon/db.clj) findings of type :unresolved-var naming parser.type/->Variable",
+  :audit/relevance-why
+  "parser.type/->Variable still called at src/seon/db.clj:682; .clj-kondo/config.edn has no deftrecord lint-as entry",
+  :issue/title "Kondo does not resolve datalog-parser's generated Variable constructor",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Exit is a lint run, not a Clojure test; the task model needs a 'tool output is empty' exit kind.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["datalog-parser type.cljc deftrecord macro" ".clj-kondo/config.edn"],
+  :issue/path "docs/seon/issues/kondo-does-not-resolve-datalog-parser-generated-variable-constructor.md",
+  :task/subject {:namespaces [seon.db], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :tooling,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "two real :redundant-declare findings at one row/col produce two distinct :seon.lint/id rows"},
+  :task/trigger-query "group kondo findings by [owner type row col] having count > 1 (before hashing)",
+  :audit/relevance-why "src/seon/fn.clj:1356 still hashes [owner finding-type row col] only",
+  :issue/title "Lint identities collide for multiple findings at one location",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Model task: small, named owner, example-test exit, the error is the trigger.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["lint-rows" "actual clj-kondo output for two findings at one position"],
+  :issue/path "docs/seon/issues/lint-identities-collide-for-multiple-findings-at-one-location.md",
+  :task/subject
+  {:namespaces [seon.fn],
+   :symbols [seon.fn/lint-rows seon.fn/assert-one-row-per-identity!],
+   :keys [:seon.lint/id]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "renaming an identity attribute in a resource (on a branch) either yields consistent shapes or a refusal naming the loaded identity and the forms' stamp"},
+  :task/trigger-query
+  "(not= seon.program/identity-attributes (derive-identity-attributes (seon.schema.edn/packaged-forms)))",
+  :audit/relevance-why
+  "seon.program/identity-attributes (src/seon/program.cljc:17) is now derived from packaged-forms, but still at load time, so a resource edit before reload can still disagree; refusal message not re-checked",
+  :issue/title "A schema-resource edit without adoption makes every in-process test run refuse",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Two readings of one fact at two times: a 'values vs places' law violation detectable by comparing the loaded constant with the live derivation.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["identity-attributes and authored-shapes" "the 2026-09-17 probe forms"],
+  :issue/path "docs/seon/issues/live-resources-outrun-the-loaded-program-identity-list.md",
+  :task/subject
+  {:namespaces [seon.program seon.schema.edn seon.test.runner],
+   :symbols
+   [seon.program/identity-attributes
+    seon.program/authored-shapes
+    seon.program/shapes
+    seon.schema.edn/packaged-forms],
+   :keys [:seon.program/row-schema]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "note archived"},
+  :task/trigger-query "skill text model names not in (config default model rows)",
+  :audit/relevance-why
+  "status closed; .agents/skills/llm-providers/SKILL.md:60 now names deepseek-flash as cluster default (ce8783a3b); note still in open folder",
+  :issue/title "The provider skill names a retired default model",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes
+  "Closed note not moved to archive/; 'closed' is also not a lifecycle status in README (resolved|superseded).",
+  :task/size :small,
+  :task/trigger :staleness,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/llm-provider-skill-names-retired-default-model.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :closed}
+ {:task/exit
+  {:kind :property,
+   :sketch
+   "generated combined-arm values validate against exactly one branch of each semantic union (or are refused by name)"},
+  :task/trigger-query
+  "for each multi-map :or node in the compiled projection, generate merged-arm values and report those validating against >1 branch",
+  :audit/relevance-why
+  "no evidence of discriminants added; cited resources/seon/schema.edn moved to resources/seon/schemas/*.edn; not re-measured",
+  :issue/title "Give open map unions explicit discriminants",
+  :task/split
+  ["one task per union family (6), each adding a discriminant at its producer + declaration with the property test"],
+  :audit/relevance :live,
+  :audit/notes
+  "The detector already exists as a measurement; it is a natural recurring query-generated task set.",
+  :task/size :large,
+  :task/trigger :query-finding,
+  :task/context-needed
+  ["the six union declarations"
+   "precedents :my.run/disposition and :seon.flow/outcome"
+   "each union's producer"],
+  :issue/path "docs/seon/issues/map-unions-have-no-explicit-discriminants.md",
+  :task/subject
+  {:namespaces [],
+   :symbols [],
+   :keys
+   [:seon.ai/request
+    :seon.ai/target
+    :seon.render/surface
+    :my.message/value
+    :seon.ai/completion
+    :seon.flow/work-call]},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a map-valued JVM-mode eval projects its value, or the refusal names the missing state and carries the raw value"},
+  :task/trigger-query
+  "MCP result envelopes where :seon.error/operation = seon.cluster/mcp-effective after a successful evaluation",
+  :audit/relevance-why
+  "seon.cluster/mcp-effective still at src/seon/cluster.clj:325 with that refusal at :342; observed 2026-09-23",
+  :issue/title "MCP `eval_clj` refuses a map result with \"no cluster projection state\"",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Same family as the MCP projection notes; one 'projection never replaces a successful value' property covers all.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["mcp-effective and its projection-state source" "the intermittent session trace"],
+  :issue/path "docs/seon/issues/mcp-eval-refuses-map-results-without-cluster-projection-state.md",
+  :task/subject
+  {:namespaces [seon.cluster], :symbols [seon.cluster/mcp-effective], :keys [:seon.error/layer]},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "thrown ex-info in jvm mode projects class, message, first first-party frame; the fallback diagnostic validates; nil failure is not passed"},
+  :task/trigger-query "MCP envelopes with :seon.error/operation seon.cluster/mcp-projection-error",
+  :audit/relevance-why
+  "reopened 2026-09-23; seon.cluster/mcp-projection-error still at src/seon/cluster.clj:384, callers :510 and :549",
+  :issue/title "MCP exception projection is opaque after the kind removal",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "A resolved->recurred history in one note; the regression promised at resolution was never landed, which is why it recurred.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["mcp-projection-error and callers :366/:510/:549" "refusal/diagnostic contract"],
+  :issue/path "docs/seon/issues/mcp-exception-projection-is-opaque-after-the-kind-removal.md",
+  :task/subject
+  {:namespaces [seon.cluster seon.error.refusal],
+   :symbols [seon.cluster/mcp-projection-error seon.error.refusal/diagnostic],
+   :keys [:seon.error/message]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "the note's probe returns :malli/schema and :probe/x for both spellings in JVM and SCI modes"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "found 2026-09-24; script/seon/dev/mcp.clj pr-str/edn round-trips forms (:102,:355); cause unverified",
+  :issue/title "MCP JVM evaluation drops reader metadata on a `defn` name",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Raised by a dogfood agent; exit test is written in the note verbatim. Best-formed note in the set.",
+  :task/size :small,
+  :task/trigger :user-request,
+  :task/context-needed ["script/seon/dev/mcp.clj eval path" "resources/seon/operator/prepl.clj"],
+  :issue/path "docs/seon/issues/mcp-jvm-eval-drops-reader-metadata-on-a-defn-name.md",
+  :task/subject {:namespaces [seon.dev.mcp], :symbols [], :keys [:malli/schema]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :property,
+   :sketch
+   "for generated ordinary values (strings, small maps, refusals), JVM-mode projection returns the value or a refusal carrying cause and raw value"},
+  :task/trigger-query "MCP envelopes carrying a projection failure whose evaluation outcome was :ok",
+  :audit/relevance-why
+  "projection path src/seon/cluster.clj:384-549 and seon.render.value/artifact-value present; observations run to 2026-09-22 but no single cause",
+  :issue/title "MCP JVM result projection fails for small string results",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "An observation log with five unrelated sightings; overlaps the exception-projection and map-result notes. Should merge into one projection-totality task.",
+  :task/size :medium,
+  :task/trigger :error,
+  :task/context-needed ["projection fallback chain" "each dated observation's envelope"],
+  :task/duplicate-of "docs/seon/issues/mcp-exception-projection-is-opaque-after-the-kind-removal.md",
+  :issue/path "docs/seon/issues/mcp-jvm-small-result-projection-fails-during-live-adoption.md",
+  :task/subject
+  {:namespaces [seon.cluster seon.render.value],
+   :symbols [seon.cluster/mcp-effective seon.render.value/artifact-value],
+   :keys []},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a substituted handle whose identity is dead but pid live with another start time still fires the MCP exit action"},
+  :task/trigger-query nil,
+  :audit/relevance-why "script/seon/dev/mcp.clj:940 still calls .onExit on the parent ProcessHandle",
+  :issue/title "Fence the MCP parent watchdog by captured process identity",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Derived from reading JDK bytecode, not an observed failure; low-probability risk.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["ProcessHandleImpl onExit javap evidence" "mcp_bridge_test parent-exit test"],
+  :issue/path "docs/seon/issues/mcp-parent-watchdog-can-follow-a-reused-pid.md",
+  :task/subject {:namespaces [seon.dev.mcp], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "runtime_status on a root with one advertisement lists it; on a root with none returns a typed 'no advertisements under ROOT' value"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "execute-runtime-status (script/seon/dev/mcp.clj:734) still returns :seon.dev.mcp/clusters [] when the selected cluster has no row",
+  :issue/title "MCP runtime_status lists no clusters for an explicit live root",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Half the note is unrelated REPL-unavailable sightings appended by lanes; absence-as-health class.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["execute-runtime-status and discovery-rows" "eval_clj's advertisement census"],
+  :issue/path "docs/seon/issues/mcp-runtime-status-lists-no-clusters-for-an-explicit-root.md",
+  :task/subject {:namespaces [seon.dev.mcp], :symbols [], :keys [:seon.dev.mcp/clusters]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "SCI (dir my.note) and a refused seon.db/q display the flat refusal with no #object text"},
+  :task/trigger-query
+  "MCP :seon.dev.mcp/text values matching an #object[...ExceptionInfo projection failed] string",
+  :audit/relevance-why
+  "seon.sci.kernel/invoke and seon.db/q exist; last observed 2026-09-15 before the error-family cut; not re-probed",
+  :issue/title "MCP SCI error projection passes a nil database",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Same projection-totality family as the JVM MCP notes.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["SCI error-render request construction"],
+  :issue/path "docs/seon/issues/mcp-sci-error-projection-passes-a-nil-database.md",
+  :task/subject
+  {:namespaces [seon.dev.mcp seon.sci.kernel], :symbols [seon.sci.kernel/invoke], :keys [:seon.db/db]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test, :sketch "session loss with unchanged (pid,start) reports lost session, not restart"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "script/seon/dev/mcp.clj:233 still throws 'Named CLJ session ended with the cluster restart.' without comparing process identity",
+  :issue/title "MCP session loss claims a restart without process evidence",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Two-line fix; a diagnostic asserting an unobserved cause.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["session cache code near mcp.clj:225" "advertisement process identity"],
+  :issue/path "docs/seon/issues/mcp-session-loss-claims-unobserved-restart.md",
+  :task/subject {:namespaces [seon.dev.mcp], :symbols [], :keys [:seon.dev.mcp/failure]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test, :sketch "the named turn test passes with exactly two messages and chain depth 1"},
+  :task/trigger-query
+  "[:find ?m :where [?m :seon.message/from ?a] [?m :seon.message/to ?a]] ; self-addressed messages",
+  :audit/relevance-why
+  "seon.cluster.loop/asked-value gone (now private seon.turn/asked-value at src/seon/turn.clj:3364); test still at test/seon/cluster/turn_test.clj; 2026-09-15 re-verify was UNVERIFIABLE-WITHOUT-GATE",
+  :issue/title "Derive a completion reply from the triggering message",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Blocker severity with no current evidence; a self-addressed-message query is a cheap standing detector.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["current asked-value and reply" "the test body with current send API"],
+  :issue/path
+  "docs/seon/issues/message-completion-replies-from-the-wrong-agent-and-duplicates-the-trigger.md",
+  :task/subject
+  {:namespaces [seon.turn seon.cluster.message],
+   :symbols
+   [seon.cluster.turn-test/a-turn-delivers-what-a-form-asks-to-send-and-still-finishes
+    seon.cluster.message/reply],
+   :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :measurement,
+   :sketch
+   "clock row: move after one committed definition change completes in seconds, every phase >1 s justified"},
+  :task/trigger-query "clock rows for operation :move-to-head with total > 10 s",
+  :audit/relevance-why "measured 2026-09-23; changed-source-paths still at src/seon/cluster/boot.clj:135",
+  :issue/title "Move to HEAD takes a minute or more, not seconds",
+  :task/split
+  ["replace per-path pull in changed-source-paths with one query"
+   "class cache from committed inputs (babashka-process AOT patch)"
+   "adoption skips reloading namespaces loaded from the same bytes"
+   "one-file publication sub-second (separate note)"],
+  :audit/relevance :live,
+  :audit/notes "Phase table is already a task split; exemplary for measurement-driven decomposition.",
+  :task/size :large,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["the phase table" "tmp/mth-evidence logs"],
+  :issue/path "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md",
+  :task/subject {:namespaces [seon.cluster.boot seon.cluster.source seon.cluster], :symbols [], :keys []},
+  :task/needs ["docs/seon/issues/a-three-file-changed-path-publication-takes-a-minute.md"],
+  :task/work :measure,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "same failing assertion recorded before and after a line move keeps both positions; forged content with the same signature still refuses"},
+  :task/trigger-query
+  "refusals with :seon.test/report-conflict where stored and new rows differ only in :seon.test.failure/line",
+  :audit/relevance-why
+  "src/seon/test/runner.clj:996 now separates report-position-attributes (line, file, contexts) from the captured signature, which suggests a fix; not verified by test",
+  :issue/title "Moving a failing assertion conflicts with its immutable report",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Possibly fixed without closing the note.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["report-row and the immutable comparison"],
+  :issue/path "docs/seon/issues/moving-a-failing-assertion-conflicts-with-its-immutable-report.md",
+  :task/subject
+  {:namespaces [seon.test.runner],
+   :symbols [seon.test.runner/record-tx seon.test.runner/report-row],
+   :keys [:seon.test.failure/line]},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other, :sketch "archive note; optional detector: required input keys all mentioned in docstring"},
+  :task/trigger-query
+  "public my.* functions whose docstring omits a required key of their :malli/schema input map",
+  :audit/relevance-why
+  "functions renamed my.fs/write! and my.shell/run! (src/my/fs.clj:57, src/my/shell.clj:26); both docstrings now name the nested/required keys",
+  :issue/title "`my.fs/write` and `my.shell/run` docstrings hide their own request shapes",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes
+  "Its detector (docstring vs contract required keys) is a strong recurring query-generated task.",
+  :task/size :small,
+  :task/trigger :user-request,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/my-fs-write-docstring-hides-its-own-request-shape.md",
+  :task/subject
+  {:namespaces [my.fs my.shell],
+   :symbols [my.fs/write! my.shell/run!],
+   :keys [:my.fs/content :my.fs/precondition :my.shell/cwd]},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch
+   "sci-evaluation-has-one-first-party-owning-namespace passes; census query returns #{\"seon.sci.eval\"}"},
+  :task/trigger-query "callers of sci.core/* outside seon.sci.eval in the program graph",
+  :audit/relevance-why
+  "my.program/native! (src/my/program.clj:507) now delegates to seon.sci.eval/evaluate-native! via requiring-resolve",
+  :issue/title "The SCI ownership census now finds my.program/native!",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes
+  "A census test is literally a query-driven task generator; requiring-resolve may hide the call from static census, worth checking that it is not an evasion.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/my-program-native-evaluation-adds-a-second-sci-owner.md",
+  :task/subject {:namespaces [my.program seon.sci.eval], :symbols [my.program/native!], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "generic ref walk from a namespace row reaches alias/refer target namespace rows; fresh SCI acquisition reconstructs identical aliases"},
+  :task/trigger-query
+  "[:find ?a :where [?a :db/ident ?k] [(namespace ?k) ?n] [(contains? #{\"seon.ns.alias\" \"seon.ns.refer\"} ?n)] [?a :db/valueType :db.type/symbol]]",
+  :audit/relevance-why
+  "resources/seon/schemas/seon.ns.alias.edn:9 and seon.ns.refer.edn:9 still declare /target-ns attributes; not verified whether valueType is ref or symbol",
+  :issue/title "Connect namespace alias and refer targets with refs",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Schema change with RESET/branch adoption; cited resources/seon/schema.edn is split into schemas/.",
+  :task/size :medium,
+  :task/trigger :review-finding,
+  :task/context-needed
+  ["both binding writers (fn.clj, sci/eval.clj)" "the two schema resources" "requires-to-refs landing note"],
+  :issue/path "docs/seon/issues/namespace-binding-targets-are-symbols-not-refs.md",
+  :task/subject
+  {:namespaces [seon.fn seon.sci.eval],
+   :symbols [],
+   :keys [:seon.ns.alias/target-ns :seon.ns.refer/target-ns :seon.ns/requires]},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other,
+   :sketch
+   "browser probe at wide and 390 px widths: function summaries visible in the fitted prefix, no nested scroll boxes dominating"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "src/seon/render/web.clj and resources/public/css/input.css exist; renderer fix landed 2026-09-06 but browser acceptance outstanding; web namespace is being shrunk",
+  :issue/title "Give namespace and debug content a usable layout",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Exit needs browser paint evidence; the task model needs a visual/screenshot exit kind.",
+  :task/size :medium,
+  :task/trigger :user-request,
+  :task/context-needed ["screenshots" "debug_browser_probe script" "owner's rejection of the UI"],
+  :issue/path "docs/seon/issues/namespace-layout-confines-most-content-to-scroll-boxes.md",
+  :task/subject {:namespaces [seon.render.web seon.render.ns], :symbols [seon.print/fit], :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "live regression: GET / and /agent/<id> on a fresh cluster emit first byte within the declared bound or a typed diagnostic"},
+  :task/trigger-query "web request log rows with first-byte > declared page bound",
+  :audit/relevance-why "no cited file:line or date; Drive 1 era observation; web renderer since reworked",
+  :issue/title "Bound namespace-page first-byte latency below the observer timeout",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Stale evidence with no citation; first step is a re-measure.",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["initial-paint handler" "render walk timing"],
+  :issue/path "docs/seon/issues/namespace-page-first-byte-exceeds-ten-seconds.md",
+  :task/subject {:namespaces [seon.render.web], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :measure,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a failed block renders a typed diagnostic with path, selected renderer and failure; no bare placeholder on the root page"},
+  :task/trigger-query "(count (re-seq #\"renderer unavailable\" (page-html \"/\"))) > 0",
+  :audit/relevance-why
+  "bare \"renderer unavailable\" still emitted at src/seon/render/web.clj:398,:510, src/seon/render/walk.clj:797 and src/seon/render.clj:973",
+  :issue/title "Replace repeated renderer-unavailable placeholders with evidence",
+  :task/split
+  ["verify lazy-acquisition fix (named-invocation-acquires-the-lazy-program-on-first-use) after adoption"
+   "replace the four placeholder sites with the failure's diagnostic render"],
+  :audit/relevance :live,
+  :audit/notes "Ugly-output-is-a-defect class; string count over page HTML is a trivial detector.",
+  :task/size :medium,
+  :task/trigger :query-finding,
+  :task/context-needed
+  ["the walk's failure value" "unit-html fallback branches" "lazy-acquisition regression"],
+  :issue/path "docs/seon/issues/namespace-page-repeats-renderer-unavailable.md",
+  :task/subject
+  {:namespaces [seon.render.web seon.render.walk seon.render],
+   :symbols [seon.render.web/unit-html seon.render/invoke-selected seon.sci.eval/acquire!],
+   :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "render of seon.flow's require summary names real namespaces/aliases or explicit unknowns"},
+  :task/trigger-query "rendered namespace summaries containing \"[nil :as nil]\"",
+  :audit/relevance-why
+  "src/seon/render/ns.clj exists; observed 2026-09-06 on hot-loaded code; explicitly deferred by owner",
+  :issue/title "Render actual namespace identities in dependency summaries",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Deferred by owner ruling; a task needs a 'deferred/parked' state.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed ["seon.render.ns require summary fn" "pulled :seon.ns/requires value for seon.flow"],
+  :issue/path "docs/seon/issues/namespace-require-summary-renders-nil-identities.md",
+  :task/subject {:namespaces [seon.render.ns], :symbols [], :keys [:seon.ns/requires]},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "two agents cover one namespace and make independent attributable changes; issue start creates distinct attempts"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  ":seon.ns/steward still declared in resources/seon/schemas/seon.ns.edn:29 and read by seon.agent (src/seon/agent.clj:19-33); seon.cluster.agent/steward-call at src/seon/cluster/agent.clj:137; :seon.issue/agent scalar",
+  :issue/title "Namespace responsibility and issue workers are singular",
+  :task/split
+  ["rule the responsibility/attempt data model"
+   "schema: cardinality-many responsibility + attempt identity"
+   "convert steward-call and seon.agent readers"
+   "issue/plan owner generalised to non-defect tasks"],
+  :audit/relevance :live,
+  :audit/notes
+  "This is the task-model itself: generalising issue workers into tasks. Central to the audit's purpose.",
+  :task/size :large,
+  :task/trigger :owner-ruling,
+  :task/context-needed
+  ["namespace-agents design 2026-09-19" "schema audit B supplement" "design-namespace-agent-context-draft"],
+  :issue/path "docs/seon/issues/namespace-responsibility-and-issue-workers-are-singular.md",
+  :task/subject
+  {:namespaces [seon.cluster.agent seon.issue seon.agent],
+   :symbols [seon.cluster.agent/steward-call seon.issue/start!],
+   :keys [:seon.ns/steward :seon.issue/agent :seon.agent/namespace]},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "after (ns-unmap *ns* 'String), static admission of bare String reports the unresolved-class finding SCI raises"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "(keep :seon.ns.import/target-class) still at src/seon/fn/analyzer.clj:702 and src/seon/fn.clj:805; clj-kondo lacks negative imports",
+  :issue/title "Make static admission honor removed default imports",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Needs an upstream clj-kondo representation; blocked on dependency.",
+  :task/size :medium,
+  :task/trigger :review-finding,
+  :task/context-needed ["clj-kondo namespace prelude representation" "the two keep sites"],
+  :issue/path "docs/seon/issues/negative-import-masks-escape-static-admission.md",
+  :task/subject
+  {:namespaces [seon.fn seon.fn.analyzer seon.sci.eval],
+   :symbols [],
+   :keys [:seon.ns.import/target-class :seon.ns.import/local]},
+  :task/needs [],
+  :task/work :upstream,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "archive as superseded by the bin/test rewrite"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "bin/test is now 65 lines with no test-run.txt overlay; cited bin/test:493-534 no longer exists",
+  :issue/title "A nested test snapshot overwrites its fresh run claim",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Cited line numbers beyond file length: a trivial staleness detector.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/nested-test-snapshot-overwrites-its-fresh-run-claim.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch "no test polls flow/ping; render tests await a completed-pass report on the Flow report channel"},
+  :task/trigger-query "test functions calling flow/ping or Thread/sleep inside a loop",
+  :audit/relevance-why
+  "agent polling done (0 await-until in test/seon/cluster/agent_test.clj); remaining render proc ping polling in render/web tests per 2026-09-15 continuation",
+  :issue/title "Publish graph transitions instead of polling them in tests",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Mostly done; residue is one render proc report.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["Flow report channel API" "render proc pass completion"],
+  :issue/path "docs/seon/issues/observable-graph-transitions-are-polled-in-tests.md",
+  :task/subject
+  {:namespaces [seon.render.web seon.cluster.agent],
+   :symbols [seon.cluster.agent/arm!],
+   :keys [:seon.cluster.agent/armed]},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit {:kind :example-test, :sketch "a cluster with N armed agents holds exactly one listener key"},
+  :task/trigger-query "(count (keys @(:listeners (meta (seon.cluster.boot/connection \"default\"))))) > 1",
+  :audit/relevance-why
+  "src/seon/schedule.clj:776-784 still listens with a random-uuid key per proc; wake.clj router and call_preparation listener present",
+  :issue/title "One cluster holds 2 + N Datahike listeners, and one fixed key is silently replaced",
+  :task/split
+  ["schedule proc derives interest from the router's wake instead of its own listener"
+   "call-preparation listener removed or keyed per context with unwatch"],
+  :audit/relevance :live,
+  :audit/notes "The trigger query IS the probe; live-state detector.",
+  :task/size :medium,
+  :task/trigger :query-finding,
+  :task/context-needed ["flow usage audit D3 §5 step 6" "the three listener sites"],
+  :issue/path "docs/seon/issues/one-cluster-holds-two-plus-n-datahike-listeners.md",
+  :task/subject
+  {:namespaces [seon.cluster.wake seon.schedule seon.call-preparation],
+   :symbols [seon.cluster.boot/connection],
+   :keys [:seon.agent/route :seon.call-preparation/rows]},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit
+  {:kind :root-decision, :sketch "owner picks candidate 1/2/3 or rules it subsumed by per-agent branches"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "no cited code; the shared-tree publication model persists; the dogfood plan (agents on own branches) is the intended answer",
+  :issue/title "One lane's intermediate edit refuses adoption for every lane",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Probably subsumed by 'our agents are Seon agents on their own branches'.",
+  :task/size :large,
+  :task/trigger :design-gap,
+  :task/context-needed ["dogfood ruling (agents on named branches)" "publication hook path"],
+  :issue/path "docs/seon/issues/one-lanes-intermediate-edit-refuses-adoption-for-every-lane.md",
+  :task/subject {:namespaces [seon.cluster.source], :symbols [], :keys []},
+  :task/needs ["docs/seon/issues/live-resources-outrun-the-loaded-program-identity-list.md"],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "the web and SCI samples join lifecycle-generators-make-a-fresh-sample-each-generation and pass"},
+  :task/trigger-query "opaque schema predicates whose :gen/gen derefs a delay (grep generator policy)",
+  :audit/relevance-why
+  "delayed http-kit server and mult still at src/seon/render/web.clj:112,133; delayed (sci/init {}) at src/seon/sci/eval.clj:165",
+  :issue/title "Stop opaque contract generators from sharing live process objects",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Partial progress tracked inline with strikethrough; a good checklist-shaped note.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["the three delay sites" "the standing regression table"],
+  :issue/path "docs/seon/issues/opaque-contract-generators-share-live-process-objects.md",
+  :task/subject
+  {:namespaces [seon.render.web seon.sci.eval],
+   :symbols [seon.public-contract-test/lifecycle-generators-make-a-fresh-sample-each-generation],
+   :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test, :sketch "generated opening text contains the every-line-starts-with-; sentence"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "src/seon/cluster/instruction.clj:19-20 still says only 'Prose lines are kept as ;; comments.'",
+  :issue/title "Teach that every prose line needs a comment marker",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Residual of a closed issue held back by file ownership; a one-line edit that sat for a week.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["opening instruction string" "refusal-grammar landing"],
+  :issue/path "docs/seon/issues/opening-does-not-explain-per-line-comment-markers.md",
+  :task/subject {:namespaces [seon.cluster.instruction], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :property,
+   :sketch
+   "accreting an irrelevant fact adds no generated opening entry; every discovery entry has a demanded path to an action"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.bootstrap/pull-result still at src/seon/bootstrap.clj:579 (cited 135-208 moved); opening/context design is being replaced by the namespace-agent context draft",
+  :issue/title "Opening generator pushes undemanded candidates",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Likely superseded by 'select context around the task' in the new context design.",
+  :task/size :medium,
+  :task/trigger :review-finding,
+  :task/context-needed
+  ["evolving-session review" "live-pull attribution report" "namespace-agent context draft"],
+  :issue/path "docs/seon/issues/opening-generator-pushes-undemanded-candidates.md",
+  :task/subject
+  {:namespaces [seon.bootstrap seon.render.walk],
+   :symbols [seon.bootstrap/pull-result seon.render.walk/ordered-episode],
+   :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "archive as superseded"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "bin/test-fast and test/seon/dev/fresh_operator_test.clj no longer exist; bin/test rewritten",
+  :issue/title "Operator fast iterations end on unattributed TERM",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Observation-only note with no subject left.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/operator-fast-iterations-end-on-unattributed-term.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch "no production code derives the operator root from directory names; boot value carries it"},
+  :task/trigger-query
+  "production functions calling .getName compared to string literals on path objects (analysis query)",
+  :audit/relevance-why
+  "src/seon/cluster.clj:862-863 still tests (= \"clusters\" ...) and (= \"data\" ...) names; bootstrap_drive.clj is gone so the wrong-caller example is obsolete",
+  :issue/title "Operator-root inference guesses from directory names and is silently wrong",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["cluster.clj:855-870" "boot value shape"],
+  :issue/path "docs/seon/issues/operator-root-inference-guesses-from-directory-names.md",
+  :task/subject {:namespaces [seon.cluster], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "status on an explicit foreign live root reports advertisements; start/stop still enforce creator identity"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  ":seon.operator/root-creator-mismatch no longer appears in src/ or script/; operator rewritten as script/seon/operator.clj",
+  :issue/title "Let read-only status inspect a live root owned by another process",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Likely obsolete; one probe closes it.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["script/seon/operator.clj status path"],
+  :issue/path "docs/seon/issues/operator-status-refuses-foreign-live-root.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "archive as superseded"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "script/seon/fresh_operator.clj is gone; no :test-results reader in script/seon/operator.clj",
+  :issue/title "Operator test status still reads the retired results branch",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "",
+  :task/size :small,
+  :task/trigger :staleness,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/operator-test-status-still-reads-retired-results-branch.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "a withheld completion publisher makes cluster/stop! fail within the declared bound (regression present?)"},
+  :task/trigger-query
+  "blocking takes (<!!, deref without timeout) in production lifecycle functions (analysis query over call sites)",
+  :audit/relevance-why
+  "cluster stop now races armer quiescence via seon.await/await! with a bound (src/seon/cluster.clj:3615-3630); stop-error-fanout! takes :seon.await/bound (src/seon/flow.clj:1348); no <!! left in cluster.clj",
+  :issue/title "Orderly-stop completion joins have no bound",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes
+  "Looks fixed; blocker still open. Close after confirming the never-settling regression exists.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/orderly-stop-completion-joins-have-no-bound.md",
+  :task/subject {:namespaces [seon.cluster seon.flow seon.await], :symbols [seon.await/await!], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "system turn after a successful model attempt renders history without contract refusal; read preview refreshes forms depending on private bindings"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "headline fixed (system-turn invoked before ordinary open); two integration boundaries unverified; seon.render.transcript/render-history-ai still exists",
+  :issue/title "Verify private-read preview and attempted-history integration",
+  :task/split
+  ["regression: system turn after attempted model history"
+   "regression: private-binding read refresh in preview"],
+  :audit/relevance :unknown,
+  :audit/notes "Title was rewritten to the residual; the filename still names the fixed problem.",
+  :task/size :medium,
+  :task/trigger :test-failure,
+  :task/context-needed ["loop-proof landing" "system-turn fn"],
+  :issue/path "docs/seon/issues/ordinary-turns-do-not-use-the-additive-system-turn.md",
+  :task/subject
+  {:namespaces [seon.turn seon.render.transcript],
+   :symbols [seon.loop-proof-test/virtual-loop-end-to-end seon.render.transcript/render-history-ai],
+   :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query, :sketch "after republishing one changed contract, the orphan-node query returns 0"},
+  :task/trigger-query
+  "[:find (count ?n) :where [?n :seon.fn.ast/type] (not [_ :seon.fn/ast ?n]) (not [_ :seon.fn.ast/child ?n]) (not [_ :seon.fn.ast/children ?n]) ...]",
+  :audit/relevance-why
+  "seon.issue.detect/entity-map-without-pair exists; writer path not re-probed since 2026-09-16",
+  :issue/title "Orphan AST nodes outlive the declaration that held them",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Prototype of a query-born task: the query found it, the query is the exit.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed ["contract-AST writer" "component attribute list"],
+  :issue/path "docs/seon/issues/orphan-ast-nodes-outlive-the-declaration-that-held-them.md",
+  :task/subject
+  {:namespaces [seon.fn seon.issue.detect],
+   :symbols [seon.issue.detect/entity-map-without-pair],
+   :keys [:seon.fn/ast :seon.fn.ast/type]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch
+   "zero-bypass assertion covers installed and script sink facts; adding an annotated script leaf changes totals"},
+  :task/trigger-query "(seon.fn/output-path-report) totals vs static seon.fn/rows over script/ leaves",
+  :audit/relevance-why
+  "seon.fn/source-roots (src/seon/fn.clj:32) still src/test; script/seon/dev/mcp.clj present; fresh_operator.clj renamed script/seon/operator.clj",
+  :issue/title "Include non-installed operator and MCP leaves in the sink proof",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Vacuous-proof class: a diagnostic that passes over an incomplete subject.",
+  :task/size :medium,
+  :task/trigger :review-finding,
+  :task/context-needed ["universal-output-floor diagnostic" "script sink metadata"],
+  :issue/path "docs/seon/issues/output-sink-query-excludes-operator-and-mcp-scripts.md",
+  :task/subject
+  {:namespaces [seon.fn], :symbols [seon.fn/output-path-report seon.fn/rows seon.fn/source-roots], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "1000 calls with unchanged resources perform one parse; touching a resource performs a second (then archive)"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "packaged-forms now reads a core.cache lookup keyed on declaration-stamp (src/seon/schema/edn.clj:381-401), the proposed fix",
+  :issue/title "`packaged-forms` per-call resource reads recur at every new caller",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Fixed-but-open; the promised regression may be missing.",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/packaged-forms-per-call-reads-recur-at-every-new-caller.md",
+  :task/subject {:namespaces [seon.schema.edn], :symbols [seon.schema.edn/packaged-forms], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other, :sketch "each surviving parallel-only failure names its shared resource or is shown fixed"},
+  :task/trigger-query
+  "tests whose recorded outcome differs between parallel and isolated runs of the same program digest",
+  :audit/relevance-why
+  "most named tests are gone (seon.dev.fresh-operator-test ns deleted, boot-test member missing); bin/test no longer has a nine-worker pool; agent-test properties remain",
+  :issue/title "Classify parallel-only test failures by their shared resource",
+  :task/split ["drop rows for deleted tests" "one task per surviving test"],
+  :audit/relevance :unknown,
+  :audit/notes "Mostly obsolete by deletion; the flaky-classification detector itself is valuable.",
+  :task/size :large,
+  :task/trigger :test-failure,
+  :task/context-needed ["parallel runner measurement 2026-08-10"],
+  :issue/path "docs/seon/issues/parallel-test-stress-exposes-eleven-isolation-sensitive-tests.md",
+  :task/subject
+  {:namespaces [seon.cluster.agent-test seon.sci.eval-test],
+   :symbols
+   [seon.cluster.agent-test/n-agent-parallel-turns-property
+    seon.cluster.agent-test/wake-routing-conservation-property],
+   :keys []},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "seon.cluster.source-test publication regressions pass under armed contracts via seon.test/run"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "nested-runner half fixed in ac51f1a8b816; publication members depend on the published test base deleted by 1.3d commit 5 (tests now run on branches)",
+  :issue/title "Platform fixtures refuse function-schema acquisition",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Cause (stale fixture projection) is the fixture base that was deleted; probably obsolete.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["test-system fork landing 2026-09-23"],
+  :issue/path "docs/seon/issues/platform-fixtures-refuse-function-schema-acquisition.md",
+  :task/subject
+  {:namespaces [seon.schema seon.cluster.source],
+   :symbols [seon.schema/projection-registry seon.test.runner/duration-failures],
+   :keys [:seon.test/time-limit-ms]},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch
+   "platform admission reach query returns no refused platform members; complete platform tier runs"},
+  :task/trigger-query
+  "platform tests whose call/reference reach includes a declared destructive owner (seon.test.runner/destructive-owner-rows)",
+  :audit/relevance-why
+  "seon.operator/reap-dead-roots! and cleanup-root-under-lock! no longer exist as src namespace fns; destructive-owner rule now lives at src/seon/test.clj:213-238",
+  :issue/title "Platform admission refuses the Flow census through scheduler reach",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Same class as platform-tier-rejects-small-publication-fixture-observations.",
+  :task/size :medium,
+  :task/trigger :test-failure,
+  :task/context-needed ["destructive-owner-rows" "the refusal path EDN"],
+  :issue/path "docs/seon/issues/platform-flow-census-reaches-root-cleanup-through-scheduler.md",
+  :task/subject
+  {:namespaces [seon.test seon.test.runner seon.schedule],
+   :symbols
+   [seon.flow-configuration-test/every-built-graph-proc-declares-a-specific-workload
+    seon.test-support/populate-published-operator-root!],
+   :keys []},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "platform selection admits isolated publication fixtures whose deletes are confined to their own root"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "the regression the-canonical-platform-tier-preserves-file-local-uncertainty no longer exists in seon.test.runner-test; bin/test now boots HEAD from an archive",
+  :issue/title "Platform tier rejects publication fixture observations",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["tmp/test-system-indexed-final.log"],
+  :task/duplicate-of "docs/seon/issues/platform-flow-census-reaches-root-cleanup-through-scheduler.md",
+  :issue/path "docs/seon/issues/platform-tier-rejects-small-publication-fixture-observations.md",
+  :task/subject {:namespaces [seon.test.runner seon.cluster.source], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other, :sketch "pin updated to a fixed Posh revision, or note superseded as out of scope"},
+  :task/trigger-query nil,
+  :audit/relevance-why "only reference-code/posh cited; Posh is comparative research, not a Seon dependency",
+  :issue/title "Fix or record the Posh cardinality-one pull-analysis arity defect",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Not a Seon defect; should not be an issue in the program's schedule. Candidate supersede.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["posh pull_analyze.cljc:131-160"],
+  :issue/path "docs/seon/issues/posh-cardinality-one-pull-analysis-has-an-arity-defect.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :upstream,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "named test completes via seon.test/run within bound; post-adoption check returns terminal evidence"},
+  :task/trigger-query "check completions missing for :seon.test/check within :seon.test/check-time-limit-ms",
+  :audit/relevance-why
+  "my.message-test/a-contract-forbidden-argument-is-a-value-the-agent-reads still exists; seon.test/check not found as a def (automatic post-adoption check may be gone)",
+  :issue/title "Post-adoption check times out on the message contract test",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Single sighting 2026-09-15.",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["current adoption check path"],
+  :issue/path "docs/seon/issues/post-adoption-check-times-out-on-message-contract-test.md",
+  :task/subject
+  {:namespaces [seon.test my.message],
+   :symbols [my.message-test/a-contract-forbidden-argument-is-a-value-the-agent-reads],
+   :keys [:seon.test/check-time-limit-ms]},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "move to archive/"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "status resolved: published test base and --prepare-head-base deleted in 1.3d commit 5; note not moved to archive/",
+  :issue/title "`bin/test --prepare-head-base` reads the live checkout's `resources/`, not HEAD",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Resolved by deletion; 'Do not repair in place' disposition is a good model.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/prepare-head-base-reads-the-live-checkouts-resources.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :resolved}
+ {:task/exit
+  {:kind :root-decision,
+   :sketch
+   "owner picks among the priced options in publication-dissolution-2026-09-20; then a regression: stale loaded producer cannot stamp current disk digest"},
+  :task/trigger-query
+  "publication facts whose :seon.source/toolchain-digest equals disk digest while loaded producer Var source digest differs",
+  :audit/relevance-why
+  "cluster.clj refresh-source! still publishes before development-source-refresh! reloads (per note); fresh_operator.clj cited is gone; historical sections cite deleted index/ancestor machinery",
+  :issue/title "Publication can record the disk toolchain digest while executing older producer code",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Reopened note whose top half contradicts its 'Historical resolution'; needs rewriting to current state.",
+  :task/size :medium,
+  :task/trigger :review-finding,
+  :task/context-needed ["publication-dissolution landing" "loaded-toolchain probe patch"],
+  :issue/path "docs/seon/issues/priming-indexes-with-the-live-jvms-loaded-code.md",
+  :task/subject
+  {:namespaces [seon.cluster seon.cluster.source seon.fn],
+   :symbols [seon.fn/rows],
+   :keys [:seon.source/toolchain-digest]},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch
+   "no error entity with a signature lacks occurrences; refusal text renders 'expected an integer of at least 1, got 0'"},
+  :task/trigger-query "[:find ?e :where [?e :seon.error/signature] (not [?e :seon.error/occurrences _])]",
+  :audit/relevance-why
+  "resources/seon/schemas/seon.problems.edn:102 still [:int {:min 1}]; error-signatures sums occurrence counts (src/seon/problems.clj:110-116); third writer not verified removed",
+  :issue/title "`problems` refuses its own zero-occurrence signature",
+  :task/split
+  ["one error writer: find and remove the third flat-fact writer"
+   "humaniser renders Malli properties and offending value when types match"],
+  :audit/relevance :live,
+  :audit/notes
+  "Two defects in one note; 'expected an integer, got an integer' is a recurring refusal-grammar class.",
+  :task/size :medium,
+  :task/trigger :error,
+  :task/context-needed ["all writers of :seon.error/signature" "refusal humaniser for min constraints"],
+  :issue/path "docs/seon/issues/problems-refuses-its-own-zero-occurrence-signature.md",
+  :task/subject
+  {:namespaces [seon.problems seon.error],
+   :symbols [seon.problems/problems seon.error/recording seon.error/commit-call],
+   :keys [:seon.problems/occurrences :seon.error/occurrences]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit {:kind :empty-query, :sketch "same as sibling"},
+  :task/trigger-query "[:find ?e :where [?e :seon.error/signature] (not [?e :seon.error/occurrences _])]",
+  :audit/relevance-why "same code as the sibling note; also 2026-09-20 sighting of missing :seon.error/at",
+  :issue/title "Runtime health rejects an error signature with no occurrences",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Duplicate filed the same day by a different lane.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :task/duplicate-of "docs/seon/issues/problems-refuses-its-own-zero-occurrence-signature.md",
+  :issue/path "docs/seon/issues/problems-rejects-signatures-with-no-occurrences.md",
+  :task/subject
+  {:namespaces [seon.problems],
+   :symbols [seon.problems/problems seon.problems/error-signatures],
+   :keys [:seon.problems/occurrences :seon.error/at]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other,
+   :sketch "the two remaining strings corrected; vocabulary grep for banned terms empty in src/"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "src/seon/flow.clj:2 still says 'used by the standing testbed'; instruction.clj:19 still teaches ';;' prose",
+  :issue/title "Make production docstrings describe the surviving runtime",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Overlaps the opening comment-marker note on the same instruction string.",
+  :task/size :small,
+  :task/trigger :staleness,
+  :task/context-needed ["vocabulary.md" "reply grammar owner"],
+  :task/duplicate-of "docs/seon/issues/opening-does-not-explain-per-line-comment-markers.md",
+  :issue/path "docs/seon/issues/production-docstrings-teach-deleted-semantics.md",
+  :task/subject {:namespaces [seon.flow seon.cluster.instruction], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "seon.fn-test contract-findings-ranks-each-incomplete-function-contract passes armed"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "four reconciliation errors repaired 2026-09-21 (db/db connection); contract-findings registry mismatch remains; no symbols cited to probe",
+  :issue/title "Program graph tests do not carry their current contract projection",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Blocker severity for what remains one test.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["contract-findings and its supplied projection"],
+  :issue/path "docs/seon/issues/program-graph-tests-do-not-carry-their-current-contract-projection.md",
+  :task/subject {:namespaces [seon.fn seon.db], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "removing a namespace with an unused schema retracts schema row and Datahike attribute; a schema with live data refuses with contexts unchanged"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "my.program/remove-ns! (src/my/program.clj:562) still refuses namespaces owning schemas; schema-attribute-change-tx remains private at src/seon/turn.clj:1016",
+  :issue/title "Namespace retraction needs the existing schema writer seam",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "",
+  :task/size :medium,
+  :task/trigger :design-gap,
+  :task/context-needed ["turn.clj row-tx deletion arm" "remove-ns! refusal"],
+  :issue/path "docs/seon/issues/program-namespace-retraction-needs-shared-schema-writer.md",
+  :task/subject
+  {:namespaces [my.program seon.turn seon.schema],
+   :symbols [my.program/remove-ns! seon.schema/unregister!],
+   :keys []},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "a chain of 200 replacements retains memory bounded by one whole build; incremental projection still equals full build"},
+  :task/trigger-query "retained heap after N replacement derivations minus whole-build heap, grows with N",
+  :audit/relevance-why
+  "seon.schema/projection-with-declarations and projection-registry present; measured 2026-09-23 (~190 KB/generation)",
+  :issue/title "Projection replacement generations retain replaced compiled schemas",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Memory bound as exit; test harness needs a heap measurement primitive.",
+  :task/size :medium,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed
+  ["malli lazy-registry cache* and -ref-schema options" "tmp/lane-incdecl/mem2.clj probe"],
+  :issue/path "docs/seon/issues/projection-replacement-generations-retain-replaced-compiled-schemas.md",
+  :task/subject
+  {:namespaces [seon.schema],
+   :symbols
+   [seon.schema/projection-with-declarations
+    seon.schema/projection-registry
+    seon.schema-test/an-incremental-projection-equals-its-full-build],
+   :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "seon.cluster.prompt-test passes armed with immutable earlier prompts asserted"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.cluster.prompt-test/a-held-run-without-a-trigger-refuses no longer exists; namespace may have been rewritten",
+  :issue/title "Prompt tests retain incompatible turn fixtures",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Named failing test deleted; likely obsolete.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["current prompt-test namespace"],
+  :issue/path "docs/seon/issues/prompt-tests-retain-incompatible-turn-fixtures.md",
+  :task/subject {:namespaces [seon.cluster.prompt], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "a prospective issue with lookup-ref tests renders each test's symbol and the done condition"},
+  :task/trigger-query
+  "rendered AI text of (my.program/breaks ...) containing ': not verified' with empty test name",
+  :audit/relevance-why
+  "seon.issue/status-text still at src/seon/issue.clj:824; my.program/breaks present; fix not evident",
+  :issue/title "Prospective issue refs render as unnamed checks",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Also records a 21.6 s / 4 GB breaks evaluation, an unfiled over-bound measurement.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed ["status-text/status-view" "a breaks plan value"],
+  :issue/path "docs/seon/issues/prospective-issue-refs-render-as-unnamed-checks.md",
+  :task/subject
+  {:namespaces [seon.issue my.program],
+   :symbols [seon.issue/status-text seon.issue/status-view my.program/breaks],
+   :keys [:seon.test/sym :seon.issue/issue]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a-lost-model-call-leaves-a-durable-readable-reason passes: next prompt contains the credential failure reason"},
+  :task/trigger-query "error occurrences of an agent's own turn not present in its next acquired prompt",
+  :audit/relevance-why "seon.error/faults-form still at src/seon/error.clj:1786; visibility decision open",
+  :issue/title "Provider failure diagnostic is absent from the next prompt",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Waits on an owner ruling with priced options already written.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["turn-test-reds-cache landing (three priced options)" "faults-form query"],
+  :issue/path "docs/seon/issues/provider-failure-diagnostic-is-absent-from-next-prompt.md",
+  :task/subject {:namespaces [seon.error seon.context], :symbols [seon.error/faults-form], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "pure request-body tests: DeepSeek row emits only max_tokens, Kimi K3 row only max_completion_tokens"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "resources/seon/schemas/seon.config.ai.edn:47 still hard-codes [\"max_tokens\" identity]",
+  :issue/title "Make the provider descriptor own its output-token wire key",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Triggered by an upstream API deprecation; external-doc staleness trigger.",
+  :task/size :small,
+  :task/trigger :dependency-change,
+  :task/context-needed ["provider descriptor schema" "seon.ai request builder" "Kimi API doc"],
+  :issue/path "docs/seon/issues/provider-output-token-wire-key-is-hard-coded.md",
+  :task/subject {:namespaces [seon.ai], :symbols [], :keys [:seon.config.ai/max-tokens :seon.ai/wire]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch
+   "manifest rows equal adopted default facts; reference names only current models/owners; weekday windows representable"},
+  :task/trigger-query
+  "config model rows vs adopted default facts (price fields differ); reference doc model names not in config",
+  :audit/relevance-why
+  "docs/seon/reference/llm-adapters.md:77 still names deepseek-v4-flash and :178 src/seon/cluster/loop.clj; seon.ai/thinking-inert-settings gone",
+  :issue/title "Reconcile provider references and weekday pricing semantics",
+  :task/split
+  ["update llm-adapters.md to current owners"
+   "top_p thinking classification check"
+   "weekday-aware off-peak windows schema"
+   "manifest-vs-adopted comparison"],
+  :audit/relevance :live,
+  :audit/notes
+  "Bundle of four unrelated drifts; manifest-vs-live comparison is a generic staleness detector.",
+  :task/size :large,
+  :task/trigger :dependency-change,
+  :task/context-needed ["DeepSeek rate card" "config/default.edn model rows"],
+  :issue/path "docs/seon/issues/provider-reference-and-price-schedule-drift.md",
+  :task/subject {:namespaces [seon.ai], :symbols [], :keys [:seon.ai.model/deepseek-off-peak-windows]},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other, :sketch "archive; optionally file content-keyed cache as upstream clj-kondo task"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "closed 2026-09-23 by ea9a4e3e9 (seon.fn.analyzer/analyze rebuilds stale entries); note left in open folder; residual mtime-not-content limit",
+  :issue/title "Publication analysis reads a stale clj-kondo cache entry for an unindexed callee",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "'closed' status outside the README lifecycle.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :issue/path
+  "docs/seon/issues/publication-analysis-reads-a-stale-kondo-cache-entry-for-an-unindexed-caller-target.md",
+  :task/subject {:namespaces [seon.fn.analyzer], :symbols [seon.fn.analyzer/analyze], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :closed}
+ {:task/exit
+  {:kind :measurement,
+   :sketch "script produces a clock row against an already-held root/cluster with no worktree and no reset"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "docs/prds/steward-platform/research/measure-publication-path-2026-09-22.sh:13 still runs git worktree add",
+  :issue/title "The publication clock script requires a worktree and a from-zero start",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Measurement tooling lives in a research dir; laws require committed measurement scripts in test/ or script/.",
+  :task/size :small,
+  :task/trigger :owner-ruling,
+  :task/context-needed ["the script" "one-JVM and no-worktree rulings"],
+  :issue/path "docs/seon/issues/publication-clock-script-requires-a-worktree-and-a-from-zero-start.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :tooling,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other,
+   :sketch "archive; keep the 'refusal must retain the rejected row' lesson in the error-data law"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "both named fixtures (seon.test-runner-test/consecutive-cache-invocations-reuse-the-published-base, concurrent-bin-test-invocations-both-reach-their-tallies) no longer exist; published base deleted",
+  :issue/title "Publication issue indexing refuses in the runner's real-store fixtures",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Subject deleted.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/publication-issue-indexing-refuses-in-test-runner-fixtures.md",
+  :task/subject
+  {:namespaces [seon.cluster.source seon.issue], :symbols [seon.cluster.source/index-issues!], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "inject an Error into one konserve write: commit fails, connection stays at prior head, fresh connection reads every node; open refuses a damaged store by name"},
+  :task/trigger-query
+  "for each roster head, child addresses of fused roots where (not (k/exists? store addr))",
+  :audit/relevance-why
+  "fixes (a) superv.async fork pinned (deps.edn:40-41) and (b) -XX:+ExitOnOutOfMemoryError (deps.edn:159) landed; (c) open-time head-node existence check not found in src/seon/cluster/store.clj",
+  :issue/title "A published head references index nodes that were never written",
+  :task/split
+  ["regression: injected write Error leaves prior head durable"
+   "store open verifies head child nodes (60 ms)"
+   "collection safety proof before enabling collect?"],
+  :audit/relevance :live,
+  :audit/notes "Critical severity; exemplary forensic evidence and priced options.",
+  :task/size :large,
+  :task/trigger :error,
+  :task/context-needed
+  ["preserved store tmp/orchestrator/heap-2026-09-23/store-broken"
+   "Datahike writer commit! path"
+   "superv go-try- semantics"],
+  :issue/path "docs/seon/issues/published-head-references-never-written-index-nodes.md",
+  :task/subject
+  {:namespaces [seon.cluster.store seon.maintenance],
+   :symbols [seon.maintenance/collect!],
+   :keys [:seon.config.maintenance/collect?]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit {:kind :example-test, :sketch "a test with 1,500 reach members reads and retracts all of them"},
+  :task/trigger-query
+  "all pull selectors in src/ naming a cardinality-many attribute without an explicit :limit (static analysis over pull patterns)",
+  :audit/relevance-why
+  "reach reads moved (seon.test.runner/reach-memberships at src/seon/test/runner.clj:911 via reach-entries); cited test.clj:63 and runner.clj:2229 sites changed; pull usage not re-verified",
+  :issue/title "`pull` caps cardinality-many at 1000, so recorded reach reads truncate silently",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Class-level: a static pull-selector audit is the task generator (CLAUDE.md: never silently truncate pulls).",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["datahike pull_api +default-limit+" "reach-entries"],
+  :issue/path
+  "docs/seon/issues/pull-caps-cardinality-many-at-1000-so-recorded-reach-reads-truncate-silently.md",
+  :task/subject
+  {:namespaces [seon.test seon.test.runner seon.db],
+   :symbols [seon.test.runner/reach-memberships seon.db/q],
+   :keys [:seon.test/reach]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "AI render of a nested pull shows the selected steward; (dir ns) lists declared schemas"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "no cited code; 2026-09-09 capture; namespace/dir renderers since reworked and steward is being retired",
+  :issue/title "Raw identity projection hides a selected steward",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Two unrelated defects (render of lookup ref, dir omits schemas) in one note.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed ["context-blocks capture 2026-09-09"],
+  :issue/path "docs/seon/issues/raw-identity-projection-hides-selected-steward.md",
+  :task/subject {:namespaces [seon.render], :symbols [], :keys [:seon.ns/steward :seon.ns/name]},
+  :task/needs ["docs/seon/issues/namespace-responsibility-and-issue-workers-are-singular.md"],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch
+   "no caller of handed-projection/projection-fallback remains; reads take the carried projection only"},
+  :task/trigger-query
+  "callers of seon.schema/handed-projection or seon.db/projection-fallback (program graph reach)",
+  :audit/relevance-why
+  "35 references to schema/handed-projection or seon.db/projection-fallback remain in src/",
+  :issue/title "Remove remaining explicitly supplied thread projection compatibility",
+  :task/split ["one task per remaining caller namespace, each converting to explicit carried projection"],
+  :audit/relevance :live,
+  :audit/notes "A deletion task measured by a shrinking caller count; ideal query-generated split.",
+  :task/size :large,
+  :task/trigger :review-finding,
+  :task/context-needed ["P1 ambient-state landing" "plan step 1.4 (delete ambient projection transport)"],
+  :issue/path "docs/seon/issues/read-and-admission-producers-still-require-thread-projections.md",
+  :task/subject
+  {:namespaces [seon.db seon.schema], :symbols [seon.db/projection-fallback seon.db/db], :keys []},
+  :task/needs [],
+  :task/work :refactor,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "a step that throws cancels its turn backstop; no 600 s backstop fault follows a step fault"},
+  :task/trigger-query
+  "stored core faults whose :seon.error/op is :seon.agent/turn-completion-backstop following a :step fault of the same agent",
+  :audit/relevance-why
+  "main defect resolved (src/seon/db.clj:1162 guards (when source ...), regression seon.db-test/a-retained-read-whose-plan-names-no-source-is-answered-by-replay); backstop-cancel-on-failure item in seon.turn/step stays open",
+  :issue/title
+  "Read-evidence currency hands a nil source to the index check; root's turn faults, and its backstop fires 600 s later",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Found by profile max (600,001 ms) — a measurement-over-bound detector over profiling cells found a real defect.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["seon.turn/step backstop arm/cancel" "the two stored faults"],
+  :issue/path "docs/seon/issues/read-evidence-currency-hands-a-nil-source-to-index-evidence.md",
+  :task/subject
+  {:namespaces [seon.turn seon.db],
+   :symbols [seon.turn/step seon.db/read-evidence-current?],
+   :keys [:seon.config.agent/turn-completion-backstop-ms]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :other,
+   :sketch
+   "archive; record the model-run decision (maintenance failure does not open a paid run) where root's policy lives"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.operator/reap-dead-roots! no longer exists in src/ or script/; regression reported landed at test/seon/operator_test.clj:368",
+  :issue/title "Report malformed root claims in the reap result",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes
+  "Filename names a refuted diagnosis; carries an unrecorded design ruling about maintenance-failure wakes.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/reap-dead-roots-calls-delete-recursively-with-a-nil-path.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a real publication preserves 1,001 admitted members and execution readers accept the retained evidence"},
+  :task/trigger-query
+  "runs whose :seon.test.run/selection-tx > the database's own history (tx not in this branch's lineage)",
+  :audit/relevance-why
+  "wildcard-pull cut fixed (44b51bab0); publish! now forks the previous published commit (per 2026-09-23 note elsewhere), which may keep tx refs meaningful; not verified",
+  :issue/title "Rebuilt test evidence refers to another transaction history",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "",
+  :task/size :medium,
+  :task/trigger :error,
+  :task/context-needed ["results-reuse landing" "publication dissolution spec item 1"],
+  :issue/path "docs/seon/issues/rebuilt-test-evidence-refers-to-another-transaction-history.md",
+  :task/subject
+  {:namespaces [seon.cluster.source seon.test.runner], :symbols [], :keys [:seon.test.run/selection-tx]},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :property,
+   :sketch
+   "program-digest of as-of basis T equals the digest stored by the run at T; one function change makes them unequal"},
+  :task/trigger-query
+  "(for [run runs] (not= (:seon.test.run/program-digest run) (program-digest (d/as-of db (:seon.test.run/basis-t run)))))",
+  :audit/relevance-why
+  "seon.test.runner/program-digest and seon.test/verified? still exist; downgraded off the success path (reach digest ruling)",
+  :issue/title "Recomputed program digest disagrees with the stored run digest",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Or delete the whole-program digest if no reader needs it.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed ["test-attribution plan 2026-09-15"],
+  :issue/path "docs/seon/issues/recomputed-program-digest-disagrees-with-the-stored-run-digest.md",
+  :task/subject
+  {:namespaces [seon.test.runner seon.test],
+   :symbols [seon.test.runner/program-digest seon.test/verified?],
+   :keys [:seon.test.run/program-digest]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test, :sketch "selection-derives-bases-obligations-and-exact-symbol-reach passes armed"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "fixture repaired 2026-09-21 (cause was synthetic completion fixture); selection-test member symbol only mentioned, not re-run",
+  :issue/title "Recorded selection completion leaves changed members pending",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Likely closable by one run.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["fixture repair notes"],
+  :issue/path "docs/seon/issues/recorded-selection-completion-leaves-changed-members-pending.md",
+  :task/subject
+  {:namespaces [seon.test seon.fn],
+   :symbols [seon.test/admit-run seon.fn/declared-reference-edges],
+   :keys []},
+  :task/needs ["docs/seon/issues/gate-selection-refusal-contracts-only-distinguish-markers.md"],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a cancelled host database query reports observable termination or :unknown execution, never 'cancelled' as stopped"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "coverage half fixed: seon.fn/functions-without-tests (src/seon/fn.clj:1700) derives the union from tests without pairs; cancelled-host-query termination half remains",
+  :issue/title "Recursive call coverage outlives its cancelled future",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Bound-admission law: timeout is not termination.",
+  :task/size :medium,
+  :task/trigger :review-finding,
+  :task/context-needed ["Datahike query interruption support" "seon.await"],
+  :issue/path "docs/seon/issues/recursive-call-coverage-outlives-its-cancelled-future.md",
+  :task/subject {:namespaces [seon.fn seon.db], :symbols [seon.fn/functions-without-tests], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "cross-arity candidate rejected, same-arity accepted (regression present); archive"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.schema/function-accepts-and-returns-in? (src/seon/schema.clj:3997) used by seon.render at src/seon/render.clj:298",
+  :issue/title "Check a render candidate's input and output on the same arity",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Implemented 2026-09-05; left open for an unrelated confirmation error.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/render-candidate-checks-mix-different-arities.md",
+  :task/subject
+  {:namespaces [seon.schema seon.render],
+   :symbols [seon.schema/function-accepts-and-returns-in? seon.render/candidates],
+   :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :property,
+   :sketch
+   "bare :any, the named alias and [:schema props :seon.schema/value] make the same coherence decision"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "cited src/seon/schema.clj:1454 has moved; seon.error/edit-prose exists; not re-probed",
+  :issue/title "Follow transparent Malli schema wrappers when checking renderer inputs",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Malli already owns transparent deref (m/deref-recursive); a dependency-seam task.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed ["malli.core -deref-all / m/deref-recursive" "renderer coherence check"],
+  :issue/path "docs/seon/issues/render-contract-coherence-stops-at-a-transparent-schema-wrapper.md",
+  :task/subject
+  {:namespaces [seon.schema seon.error], :symbols [seon.error/edit-prose], :keys [:seon.schema/value]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "seon.render-simplification-test passes; a deliberately failed assertion prints a bounded diagnostic"},
+  :task/trigger-query "test logs > 10 MB, or failed assertions whose printed value exceeds a size bound",
+  :audit/relevance-why
+  "seon.test-runner-test/gate-completions-travel-as-a-file-not-as-code gone; bin/test-fast gone; render-simplification-test state not re-run",
+  :issue/title "Render fixture failures print the entire SCI context",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Gigabyte logs: output size is a measurable exit.",
+  :task/size :medium,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["current render fixture helpers"],
+  :issue/path "docs/seon/issues/render-fixtures-dump-context-on-stale-assertions.md",
+  :task/subject {:namespaces [seon.render], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "same stored value renders with viewer A's local renderer and viewer B's default, directly and nested"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.render/selection exists; my.plan/render-item-html gone; walk subject to redesign",
+  :issue/title "Carry the viewing namespace through direct and nested rendering",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "",
+  :task/size :medium,
+  :task/trigger :design-gap,
+  :task/context-needed ["owner's customization rule" "render selection stages"],
+  :issue/path "docs/seon/issues/render-selection-loses-the-viewing-namespace.md",
+  :task/subject
+  {:namespaces [seon.render seon.render.walk],
+   :symbols [seon.render/selection],
+   :keys [:seon.render/hiccup :seon.render/html]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "rerun the codec regression via seon.test/run; green or first failing assertion inspected"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "fixture seon.schema.datahike-test/agent-authored-render-symbols-cross-the-transaction-function-codec exists; published test base it depended on was deleted; production sequence succeeded 2026-09-21",
+  :issue/title "Renderer codec fixture reports no declared contract",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "One rerun likely closes it.",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/renderer-codec-fixture-loses-a-declared-contract.md",
+  :task/subject {:namespaces [seon.schema.datahike], :symbols [seon.turn/row-tx], :keys []},
+  :task/needs [],
+  :task/work :test,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "each divergence row promoted to passing (gate fails if a known divergence unexpectedly passes)"},
+  :task/trigger-query "rows of seon.repl-parity-test tagged :known-divergence (metadata query)",
+  :audit/relevance-why
+  "test/seon/repl_parity_test.clj still carries :known-divergence rows (:108); *1/*e rows ruled retired 2026-09-23 await deletion",
+  :issue/title "The REPL-parity gate proves 24 divergences from stock Clojure",
+  :task/split
+  ["delete retired C1-C5 *1/*e rows"
+   "one task per remaining divergence family (seq printing, clojure.repl helpers, error faces, stdout/stderr, Var faces, float infinity, ns-unmap isolation)"],
+  :audit/relevance :live,
+  :audit/notes
+  "Best existing task generator in the codebase: a metadata-tagged test table where each red row is a task and the gate enforces promotion.",
+  :task/size :large,
+  :task/trigger :test-failure,
+  :task/context-needed ["parity mining checklist" "print-path design"],
+  :issue/path "docs/seon/issues/repl-parity-divergences.md",
+  :task/subject
+  {:namespaces [seon.repl-parity-test seon.sci.eval seon.print],
+   :symbols [seon.sci.eval/evaluate seon.sci.admit/result-handle],
+   :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :property,
+   :sketch
+   "for generated reply texts (empty, prose-only, forms), sources returns a value satisfying its declared output"},
+  :task/trigger-query "stored faults whose operation is seon.cluster.reply/sources with invalid-output",
+  :audit/relevance-why
+  "seon.cluster.reply/sources exists; named regression seon.ai-stream-fold-test/... gone; bounded repair 2026-09-21 with proof pending, re-observed 2026-09-23 on scratch",
+  :issue/title "Reply sources return a vector member under a map contract",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Out-of-order dated sections; generative property is the natural exit.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed ["sources contract" "fresh-default reproduction forms"],
+  :issue/path "docs/seon/issues/reply-sources-return-contract-disagrees-with-vector-results.md",
+  :task/subject
+  {:namespaces [seon.cluster.reply],
+   :symbols [seon.cluster.reply/sources seon.schema.internal/assert-error-declaration!],
+   :keys [:seon.cluster.reply/text :seon.cluster.reply/no-forms-error]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :measurement,
+   :sketch "deleting a representative bloated store shape completes near rm -rf time with progress events"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.fs/delete-recursively! now has progress-reporter (src/seon/fs.clj:257); representative-scale measurement still owed",
+  :issue/title "Reset deletes a bloated store one lstat at a time",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Store GC now owns reclamation; nuke deletes; may be moot.",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["current store fanout shape"],
+  :issue/path "docs/seon/issues/reset-deletes-a-bloated-store-one-lstat-at-a-time.md",
+  :task/subject {:namespaces [seon.fs], :symbols [seon.fs/delete-recursively!], :keys []},
+  :task/needs [],
+  :task/work :measure,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a foreign holder is refused naming pid, start instant and liveness; reset with a slow-exiting republish child still ends started"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "src/seon/cluster/store.clj:420-426 still distinguishes only held-elsewhere vs held-by-this-process, no holder pid/start",
+  :issue/title
+  "Reset's refork refuses \"held elsewhere\" without naming the holder, after its own republish",
+  :task/split ["name the holder in held-elsewhere" "phase completion waits for child exit"],
+  :audit/relevance :live,
+  :audit/notes "Reset pipeline rewritten since; defect 2 may be obsolete.",
+  :task/size :medium,
+  :task/trigger :error,
+  :task/context-needed ["flock owner record" "reset pipeline phases"],
+  :issue/path "docs/seon/issues/reset-refork-refuses-held-elsewhere-without-naming-the-holder.md",
+  :task/subject
+  {:namespaces [seon.cluster.store],
+   :symbols [seon.cluster.store/open-store!],
+   :keys [:seon.cluster.store/held-elsewhere]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "move to archive"},
+  :task/trigger-query nil,
+  :audit/relevance-why "closed 2026-09-23 by a6fd07c8e; note still in open folder",
+  :issue/title "RESTART NEEDED refuses the publication a restart should make",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/restart-needed-refuses-the-publication-a-restart-should-make.md",
+  :task/subject {:namespaces [seon.cluster.source], :symbols [seon.cluster.source/classify-paths], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :closed}
+ {:task/exit {:kind :empty-query, :sketch "archive"},
+  :task/trigger-query "(empty? (seon.fn/callers db sym)) for public/private program functions",
+  :audit/relevance-why
+  "resolved; restorable-node absent from src/seon/sci/admit.clj; note still in open folder",
+  :issue/title "`seon.sci.admit/restorable-node` has no caller after the shown-text cut",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Canonical query-generated deletion task: callerless function.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/restorable-node-has-no-caller-after-the-shown-text-cut.md",
+  :task/subject {:namespaces [seon.sci.admit], :symbols [seon.sci.admit/restorable-node], :keys []},
+  :task/needs [],
+  :task/work :delete,
+  :issue/status :resolved}
+ {:task/exit
+  {:kind :root-decision,
+   :sketch
+   "owner accepts retirement-is-a-fact design; then the four writers emit one retirement shape and the second validator is deleted"},
+  :task/trigger-query "entities holding only an identity attribute that fail their entity schema",
+  :audit/relevance-why
+  "design submitted, implementation awaits review; program-only fallback validator region in src/seon/db.clj not verified removed",
+  :issue/title "Retained identities have no declared retirement state",
+  :task/split
+  ["rule the design"
+   "declare retirement fact in schemas"
+   "convert program exact replacement"
+   "convert issue index/adopt"
+   "reference-only minting positive fact"
+   "delete fallback validator"],
+  :audit/relevance :live,
+  :audit/notes "",
+  :task/size :large,
+  :task/trigger :design-gap,
+  :task/context-needed ["retirement-is-a-fact design 2026-09-16"],
+  :issue/path "docs/seon/issues/retained-identities-have-no-declared-retirement-state.md",
+  :task/subject {:namespaces [seon.db seon.program seon.issue], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :empty-query,
+   :sketch "no :seon.render/form in src/ or schemas; selection has two outputs; render tests green"},
+  :task/trigger-query
+  "(rg -c \"seon.render/form\" src resources/seon/schemas) or schema properties naming :seon.render/form",
+  :audit/relevance-why "46 occurrences of seon.render/form remain across src/ and resources/seon/schemas/",
+  :issue/title "The retired form projection is still declared and selected at HEAD",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Scripted mechanical sweep; count is the progress measure.",
+  :task/size :medium,
+  :task/trigger :owner-ruling,
+  :task/context-needed ["ruling 44" "selection chain"],
+  :issue/path "docs/seon/issues/retired-form-projection-still-declared-and-selected.md",
+  :task/subject
+  {:namespaces [seon.render seon.bootstrap seon.render.walk],
+   :symbols [seon.render/schema-stage],
+   :keys [:seon.render/form]},
+  :task/needs [],
+  :task/work :delete,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "set status resolved and archive"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "resolved 2026-09-23: seon.schema/refuse-unresolved-reference! with regressions seon.schema-test/retiring-a-referenced-member-names-every-referrer; frontmatter still open",
+  :issue/title "Retiring a contract-referenced schema member refuses as raw Malli",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "Fixed-but-open.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/retiring-a-contract-referenced-schema-member-refuses-as-raw-malli.md",
+  :task/subject {:namespaces [seon.schema], :symbols [seon.schema/refuse-unresolved-reference!], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "retract a targeted pattern's entity: unrelated entities wake only the intended wildcard"},
+  :task/trigger-query
+  "listen patterns whose :seon.listen/entity was retracted in history (d/history) but pattern survives",
+  :audit/relevance-why
+  "src/seon/cluster/wake.clj:409 reads :seon.listen/entity as optional; schema still optional ref",
+  :issue/title "Retracting a listened entity broadens its pattern",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Optional-ref sweep semantics law applied to one schema; a general detector: optional refs whose absence means 'any'.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["seon.listen schema" "wake matcher" "audit B"],
+  :issue/path "docs/seon/issues/retracting-a-listened-entity-broadens-the-pattern.md",
+  :task/subject {:namespaces [seon.cluster.wake], :symbols [], :keys [:seon.listen/entity]},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch "under cluster A compute saturation, cluster B completes a representative eval within its bound"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "resources/seon/operator/runtime.clj:17-22 still one bounded platform executor at availableProcessors",
+  :issue/title "Give the shared compute executor per-cluster fairness",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Prospective; no observed starvation.",
+  :task/size :medium,
+  :task/trigger :design-gap,
+  :task/context-needed ["ruling #51" "core.async flow executor wiring"],
+  :issue/path "docs/seon/issues/root-compute-executor-has-no-per-cluster-fairness.md",
+  :task/subject {:namespaces [seon.flow], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "an agent with no plan shows an explicit empty plan value (like notes' []) in its AI render"},
+  :task/trigger-query "declared opening reads whose AI render text is exactly \"nil\"",
+  :audit/relevance-why
+  "no code cited beyond seon.cluster.status/agents; 2026-09-09/10 prompt captures; plan renderer since reworked",
+  :issue/title "Root's empty plan read shows nil",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Absence-as-nil presentation class; a detector over rendered opening text is trivial.",
+  :task/size :small,
+  :task/trigger :query-finding,
+  :task/context-needed ["root prompt capture" "plan AI render fn"],
+  :issue/path "docs/seon/issues/root-empty-plan-read-shows-nil.md",
+  :task/subject {:namespaces [my.plan seon.cluster.status], :symbols [seon.cluster.status/agents], :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :measurement,
+   :sketch "one scheduled maintenance task reaches a provider attempt with context under budget"},
+  :task/trigger-query
+  "turns closed with a 'prompt still needs N estimated tokens against a M-token budget' refusal",
+  :audit/relevance-why "no code cited; 2026-08-14 Drive 1 evidence; root context design is being replaced",
+  :issue/title "Keep root maintenance context within the provider budget",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes
+  "Directly addressed by the 'smaller focused contexts per task' direction; this is the motivating failure.",
+  :task/size :medium,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["namespace-agent context draft" "maintenance task list"],
+  :issue/path "docs/seon/issues/root-maintenance-context-exceeds-provider-budget.md",
+  :task/subject {:namespaces [seon.context seon.maintenance], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :design-decision,
+  :issue/status :open}
+ {:task/exit
+  {:kind :measurement,
+   :sketch "warm root requests on a fixed population stay < 300 ms with sampler overhead separated"},
+  :task/trigger-query "web request timing rows for / with warm latency > 300 ms",
+  :audit/relevance-why
+  "seon.render.web/candidate-call-ids and seon.db/replay-read present; measured 2026-09-10 only",
+  :issue/title "Root warm requests can exceed 300 ms during read-evidence replay",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "",
+  :task/size :small,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["root_walk_probe.py sampler"],
+  :issue/path "docs/seon/issues/root-page-warm-read-evidence-replay-exceeds-300ms.md",
+  :task/subject
+  {:namespaces [seon.render.web seon.db],
+   :symbols [seon.render.web/candidate-call-ids seon.db/read-evidence-current? seon.db/replay-read],
+   :keys []},
+  :task/needs [],
+  :task/work :measure,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch "fresh cluster root turns settle without backstop; core faults always carry first-party frames"},
+  :task/trigger-query
+  "stored faults with :seon.await/backstop-fired for :seon.render/context-acquisition, and core faults with no first-party frames",
+  :audit/relevance-why
+  "src/seon/cluster/prompt.clj exists; query uses retired :seon.error/kind; 2026-09-07 evidence",
+  :issue/title "Root's turns on a fresh dev cluster hit the context-acquisition backstop",
+  :task/split
+  ["reproduce backstop on a fresh branch" "faults without frames: stored chain must include Seon frames"],
+  :audit/relevance :unknown,
+  :audit/notes "The evidence query in the note uses a deleted attribute; notes' own queries go stale.",
+  :task/size :medium,
+  :task/trigger :error,
+  :task/context-needed ["fresh cluster reproduction"],
+  :issue/path "docs/seon/issues/root-turns-on-a-fresh-dev-cluster-hit-the-context-acquisition-backstop.md",
+  :task/subject
+  {:namespaces [seon.cluster.prompt seon.render], :symbols [], :keys [:seon.config.eval/time-limit-ms]},
+  :task/needs [],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "archive as superseded"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "test concurrent-bin-test-invocations-both-reach-their-tallies and the worker launcher were deleted with bin/test's worker gate",
+  :issue/title "Launcher failure reports repeat complete classpaths",
+  :task/split [],
+  :audit/relevance :obsolete,
+  :audit/notes "",
+  :task/size :small,
+  :task/trigger :test-failure,
+  :task/context-needed [],
+  :issue/path "docs/seon/issues/runner-launcher-failures-repeat-complete-classpaths.md",
+  :task/subject {:namespaces [], :symbols [], :keys []},
+  :task/needs [],
+  :task/work :docs,
+  :issue/status :open}
+ {:task/exit
+  {:kind :bound-test,
+   :sketch
+   "the regression records a terminal result with assertions inside its bound; the missing terminal event is named"},
+  :task/trigger-query
+  "[:find ?run :where [?run :seon.test/name 'seon.loop-proof-test/running-fixture-settles-its-seeded-wake] [?run :seon.test/outcome :timeout]]",
+  :audit/relevance-why
+  "seon.loop-proof-test/running-fixture-settles-its-seeded-wake still exists; 2026-09-16 timeouts with agent-already-running",
+  :issue/title "Running fixture regression exceeds its in-process execution bound",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Same slow-opening class likely; agent-already-running recurs across several notes.",
+  :task/size :medium,
+  :task/trigger :measurement-over-bound,
+  :task/context-needed ["turn refusal agent-already-running path"],
+  :issue/path "docs/seon/issues/running-fixture-regression-exceeds-in-process-bound.md",
+  :task/subject
+  {:namespaces [seon.loop-proof-test seon.turn],
+   :symbols [seon.loop-proof-test/running-fixture-settles-its-seeded-wake seon.test/run],
+   :keys [:seon.test/remaining-ms]},
+  :task/needs ["docs/seon/issues/issue-worker-opening-turn-closes-and-no-reply-turn-opens.md"],
+  :task/work :investigate,
+  :issue/status :open}
+ {:task/exit {:kind :other, :sketch "browser view of a runtime block shows no db ids or #inst literals"},
+  :task/trigger-query "rendered HTML containing bare numeric db ids or #inst literals",
+  :audit/relevance-why
+  "runtime pair improved (237c4c572, 881c720f4); generic referenced-entity-ids header still in src/seon/render/web.clj:1148-1178 but now resolves identities; adoption unsealed",
+  :issue/title "The runtime block's HTML is raw ids and instants",
+  :task/split [],
+  :audit/relevance :unknown,
+  :audit/notes "Owner-voiced UI complaint with a concrete spec; exit is visual.",
+  :task/size :small,
+  :task/trigger :user-request,
+  :task/context-needed ["owner's wanted block description"],
+  :issue/path "docs/seon/issues/runtime-block-html-is-raw-ids-and-instants.md",
+  :task/subject {:namespaces [seon.render.web], :symbols [seon.db/identity-attributes], :keys []},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "a form requiring [seon.foo :as foo] and calling foo/bar receives the seon.foo/bar stub with no unresolved finding"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.fn.analyzer/referenced-program-namespaces (src/seon/fn/analyzer.clj:755) still takes raw qualifiers without alias resolution",
+  :issue/title "Resolve namespace aliases before selecting runtime lint stubs",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes "Unfalsified review finding; first step a REPL example.",
+  :task/size :small,
+  :task/trigger :review-finding,
+  :task/context-needed ["namespace row alias table"],
+  :issue/path "docs/seon/issues/runtime-lint-does-not-resolve-namespace-aliases.md",
+  :task/subject
+  {:namespaces [seon.fn.analyzer],
+   :symbols [seon.fn.analyzer/analyze-forms seon.fn.analyzer/referenced-program-namespaces],
+   :keys [:seon.ns.alias/target-ns]},
+  :task/needs ["docs/seon/issues/namespace-binding-targets-are-symbols-not-refs.md"],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "an :example/amount change matching an authored listen opens one no-provider turn, answered once; unrelated attribute does not"},
+  :task/trigger-query nil,
+  :audit/relevance-why
+  "seon.turn wake-attribute-set (src/seon/turn.clj:2569) and agent-wake-datoms still seek only schema-derived listened attributes; no :seon.listen/ read in turn.clj",
+  :issue/title "Include runtime listen patterns in durable turn eligibility",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Needed for data-triggered tasks: a listen pattern is exactly 'data triggers a focused task'.",
+  :task/size :medium,
+  :task/trigger :design-gap,
+  :task/context-needed ["wake/work derivation" "listen pattern schema"],
+  :issue/path "docs/seon/issues/runtime-listens-do-not-yet-participate-in-turn-eligibility.md",
+  :task/subject
+  {:namespaces [seon.turn seon.cluster.wake],
+   :symbols [seon.cluster.wake/agent-wake-datoms],
+   :keys [:seon.listen/attribute]},
+  :task/needs ["docs/seon/issues/retracting-a-listened-entity-broadens-the-pattern.md"],
+  :task/work :fix,
+  :issue/status :open}
+ {:task/exit
+  {:kind :example-test,
+   :sketch
+   "runtime_status returns health data or an evidence-complete refusal when problems answers a refusal"},
+  :task/trigger-query "[:find ?e :where [?e :seon.error/signature] (not [?e :seon.error/occurrences _])]",
+  :audit/relevance-why
+  "same seon.problems/problems contract; 2026-09-23 new sighting counts keys of a refusal value at cluster.clj:629",
+  :issue/title "Runtime status refuses an error occurrence count",
+  :task/split [],
+  :audit/relevance :live,
+  :audit/notes
+  "Third note for the same producer; the 2026-09-23 count-on-refusal defect is new and distinct.",
+  :task/size :small,
+  :task/trigger :error,
+  :task/context-needed [],
+  :task/duplicate-of "docs/seon/issues/problems-refuses-its-own-zero-occurrence-signature.md",
+  :issue/path "docs/seon/issues/runtime-status-refuses-error-occurrence-count.md",
+  :task/subject
+  {:namespaces [seon.problems seon.cluster],
+   :symbols [seon.problems/problems],
+   :keys [:seon.problems/occurrences :seon.error/at]},
+  :task/needs [],
+  :task/work :fix,
+  :issue/status :open}]
