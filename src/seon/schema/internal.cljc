@@ -13,7 +13,16 @@
             [malli.registry :as mr]
             [malli.util :as mu]))
 
-(def ^:private undefined-types #{:any :some :nil})
+(def ^:private undefined-types #{:any :some})
+
+(defn- nilable-union?
+  "`[:maybe X]`, or `[:or ... :nil ...]`, which accepts the same values."
+  {:malli/schema [:=> [:cat [:fn 'malli.core/schema?]] :boolean]}
+  [schema]
+  (case (m/type schema)
+    :maybe true
+    :or (boolean (some #(and (m/schema? %) (= :nil (m/type %))) (m/children schema)))
+    false))
 
 (defn- reference-id
   "A ref name together with the options carrying its resolving registry."
@@ -182,7 +191,7 @@
     (visit compiled [] false false #{})))
 
 (defn- contract-error!
-  {:malli/schema [:=> [:cat :keyword :seon.schema/value [:seqable :seon.schema/value] :qualified-keyword :string :map] :nil]}
+  {:malli/schema [:=> [:cat [:or :keyword :qualified-symbol] :seon.schema/value [:seqable :seon.schema/value] :qualified-keyword :string :map] :nil]}
   [identity definition path error message data]
   (throw
    (ex-info
@@ -352,14 +361,15 @@
                      "function, then re-register this contract after the "
                      "execution planner admits that graph.")
                 {:seon.schema/predicate unproved}))))
-         (when (= :maybe schema-type)
+         (when (nilable-union? schema)
            (cond
              (and authored? (map-value-maybe? compiled path))
              (contract-error!
               identity definition path :seon.schema/nilable-map-value
               (str identity
-                   " uses `[:maybe ...]` as a map value. Optional means the "
-                   "key is absent: remove `:maybe` and put "
+                   " uses a nilable union (`[:maybe ...]` or `[:or :nil ...]`) as a "
+                   "map value. Optional means the key is absent: remove the "
+                   "nil alternative and put "
                    "`{:optional true}` on the map entry.")
               {})
 
