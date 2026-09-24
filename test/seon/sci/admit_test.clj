@@ -426,6 +426,28 @@
            (:seon.sci.admit/record admitted))
         "the diagnostics the caller measured travel through untouched")))
 
+(deftest an-over-bound-string-is-refused-without-printing-it
+  ;; THE CLASS: a leaf was printed whole before the bound refused it, so a
+  ;; refusal cost time in the value's size (measured 2026-09-24: ~230 ms for
+  ;; a 10 MB string on default; 1.2 s per MB inside contract refusals). A
+  ;; string's printed size is known from the string, so the refusal reports
+  ;; the same bytes without printing (4 ms measured).
+  (let [n 10000000
+        text (apply str (repeat n \a))
+        empty-node-bytes (count (admit/canonical-edn
+                                 {:seon.print/face :seon.print/string
+                                  :seon.print/value ""}))
+        started (System/nanoTime)
+        admitted (admit/admit
+                  (request text (:interrupt-fn (armed))
+                           (assoc caps :seon.config.eval.result/max-bytes 4096)))
+        elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+    (is (= :over-bound (:seon.sci.admit/reason admitted)))
+    (is (= (+ n empty-node-bytes) (:seon.sci.admit/bytes admitted))
+        "the bytes reached are exactly what printing the leaf would emit")
+    (is (< elapsed-ms 100.0)
+        (str "refusing a 10 MB leaf took " elapsed-ms " ms"))))
+
 (deftest a-value-under-the-bound-is-stored-whole-however-wide-or-deep
   ;; The display caps are GONE. Width, depth and string length are
   ;; presentation decisions made where AI context is generated; storage

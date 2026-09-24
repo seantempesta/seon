@@ -113,21 +113,18 @@
                             :else 3)))))
         total))))
 
-(defn- write!
-  "Emit one fragment, or stop the walk because the storage bound is reached.
+(defn- refuse-over-bound!
+  "Stop the walk when `total` bytes reached crosses the storage bound.
 
-  The bound is checked BEFORE the fragment lands, so nothing past it is ever
-  built. The size reported is the bytes REACHED — everything emitted plus the
+  The size reported is the bytes REACHED — everything emitted plus the
   fragment that crossed the bound — because `:seon.sci.admit/bytes` is declared as a
   measurement, and a diagnostic that reads as a measurement and is a constant
   is the one thing a diagnostic may not be."
-  [state ^String text]
-  (let [bound (:max-bytes state)
-        emitted (long @(:bytes state))
-        total (+ emitted (utf8-length text))]
-    (when (and bound (> total (long bound)))
+  [state total]
+  (let [bound (:max-bytes state)]
+    (when (and bound (> (long total) (long bound)))
       (throw (ex-info "value admission reached its storage bound"
-                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.admit/projection 'seon.sci.admit/write!
+                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.admit/projection 'seon.sci.admit/refuse-over-bound!
                        {:seon.error/message "Value admission reached its byte bound; request a smaller value or a larger declared bound."
                         :seon.error/offending total
                         ::bound-bytes bound
@@ -135,6 +132,16 @@
                         ::projection-observation {:seon.error.evidence/attribute ::bytes
                                                   :seon.error.evidence/value total}
                         :seon.error/member :seon.config.eval.result/max-bytes}))))
+    nil))
+
+(defn- write!
+  "Emit one fragment, or stop the walk because the storage bound is reached.
+
+  The bound is checked BEFORE the fragment lands, so nothing past it is ever
+  built."
+  [state ^String text]
+  (let [total (+ (long @(:bytes state)) (utf8-length text))]
+    (refuse-over-bound! state total)
     (vreset! (:bytes state) total)
     (.append ^StringBuilder (:builder state) text)
     nil))
@@ -188,6 +195,40 @@
   (write! state (canonical-edn node))
   node)
 
+(def ^:private empty-string-leaf-bytes
+  "Bytes of a string node whose string is empty: everything but its chars."
+  (utf8-length (canonical-edn {::print/face ::print/string ::print/value ""})))
+
+(defn- escaped-char-count
+  "How many chars of one string the readable printer escapes.
+
+  `print-method String` writes each `char-escape-string` char, all ASCII, as
+  two bytes (`reference-code/clojure/src/clj/clojure/core_print.clj:203-221`),
+  so each one adds one byte to the string's own UTF-8 length."
+  ^long [^String text]
+  (let [length (.length text)]
+    (loop [index 0
+           total 0]
+      (if (< index length)
+        (recur (inc index)
+               (case (.charAt text index)
+                 (\newline \tab \return \" \\ \formfeed \backspace) (inc total)
+                 total))
+        total))))
+
+(defn- string-leaf!
+  "Emit one string node, refusing it at the bound BEFORE printing it.
+
+  A string's printed size is known from the string, so one over the bound is
+  never printed whole to learn that it is too big, and the size it reports is
+  the same one printing it would reach."
+  [state ^String text]
+  (refuse-over-bound! state (+ (long @(:bytes state))
+                               (long empty-string-leaf-bytes)
+                               (utf8-length text)
+                               (escaped-char-count text)))
+  (leaf! state {::print/face ::print/string ::print/value text}))
+
 ;;; The walk is ITERATIVE. Every container it opens becomes a frame on an
 ;;; explicit stack, and its children are handed back to the loop instead of
 ;;; being visited by a nested call. JVM recursion here made the CALL STACK the
@@ -233,9 +274,9 @@
 
       ;; A STRING IS ADMITTED WHOLE. The character cap that used to clip it
       ;; here was a display decision; the storage bound is what stops a
-      ;; runaway string now, and it stops it while the bytes are emitted.
+      ;; runaway string now, and it stops it before the string is printed.
       (string? value)
-      {::node (leaf! state {::print/face ::print/string ::print/value value})}
+      {::node (string-leaf! state value)}
 
       ;; A registry predicate, not a class roster, decides which reference
       ;; values are identities in data. The identity itself re-enters this
