@@ -98,3 +98,11 @@ re-observation:
   (`seon.cluster/recover-runs!`).
 - Still open: the readiness schema should be the union
   (`resources/seon/schemas/seon.boot.edn:114`).
+
+## Point 2 closed (lane fix-problems-prose-bound, 2026-09-24)
+
+Commit e33009381 keeps each unknown test as its own entry and derives every other
+family from the same value. Live default showed 562–649 failed tests, 1 unknown entry,
+and every other family present. The prose over them is now bounded by the value
+renderer (landing `docs/prds/agent-platform/landing/lane-fix-problems-prose-bound-2026-09-24.md`).
+Points 1 (runner call site, JVM-exit members) and the readiness schema union stay open.

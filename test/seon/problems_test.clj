@@ -23,6 +23,7 @@
             [seon.db :as db]
             [seon.config :as config]
             [seon.error :as error]
+            [seon.ai.tokens :as tokens]
             [seon.problems :as problems]
             [seon.render.hiccup :as hiccup]
             [seon.schema]
@@ -509,3 +510,24 @@
        (is (= 'seon.problems/problems
               (get-in result [:seon.error/data :seon.db/operation])))
        (is (= 1 (count (str/split-lines (str warnings)))))))))
+
+(deftest six-hundred-failed-tests-render-within-the-profile-bound
+  ;; 649 live failed tests were 313,589 characters of prose with no bound.
+  (let [profile {:seon.render.profile/id :seon.render.profile/agent
+                 :seon.render.profile/token-budget 15000
+                 :seon.render.profile/max-depth 8
+                 :seon.render.profile/max-children 32
+                 :seon.render.profile/composition :multiline}
+        failed (mapv (fn [i]
+                       {:seon.test/sym (symbol "seon.fake-test" (str "t-" i))
+                        :seon.test/pass-count 0 :seon.test/fail-count 1 :seon.test/error-count 0
+                        :seon.test/failure-message (str "expected: (= " i " 0)\n" (str/join (repeat 400 "x")))})
+                     (range 600))
+        text (problems/ai-prose {:seon.problems/failed-tests failed :seon.render/profile profile})
+        shown (count (re-seq #"Test seon\.fake-test/t-\d+" text))
+        omitted (some->> text (re-find #":seon\.print/omitted (\d+)") second parse-long)]
+    (is (<= (tokens/estimate text) 15000) "the prose fits the profile's token budget")
+    (is (pos? shown) "whole failed-test lines are shown")
+    (is (= 600 (+ shown (or omitted 0))) "the elision names every omitted test")
+    (is (str/includes? text "(seon.print/value-at (seon.problems/problems (seon.db/db) {}) [:seon.problems/failed-tests])")
+        "the elision names the requery for the full failed-test list")))

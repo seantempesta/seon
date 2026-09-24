@@ -66,6 +66,9 @@
             [seon.db :as db]
             [seon.turn :as turn]
             [seon.error :as error]
+            [seon.config :as config]
+            [seon.render :as render]
+            [seon.render.value :as render.value]
             [seon.render.test :as test-render]
             [seon.test :as test]
             [seon.test.runner :as test.runner]
@@ -584,31 +587,47 @@
   "`:seon.render/ai` — concise steering, derived from the families.
   Failed plan forms keep their lines; a deferred agent gains the
   episode-cap line (F1 §7), present exactly while the derivation says
-  so and gone the moment an outside trigger resets it."
+  so and gone the moment an outside trigger resets it.
+
+  BOUNDED ONCE, BY THE VALUE RENDERER. Each family's lines stay under the
+  family's own key and index, so the one presentation bound
+  (`seon.render.value/render-ai` under the request's render profile) keeps
+  whole lines and its elision names the omitted count, the family path and
+  the requery form over `problems`. 649 failed tests were 313,589 characters
+  unbounded (default, 2026-09-24)."
   {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
   [found]
-  (->> (concat
-        (for [entry (:seon.problems/failed-tests found)]
-          (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
-        (for [entry (:seon.problems/failed-tests-unknown found)]
-          (str "Test evidence unknown: " (:seon.error/message entry)
-               " Offending: " (pr-str (:seon.error/offending entry))))
-        (for [entry (:seon.problems/errored-receipts found)]
-          (str "Form " (:seon.cluster.eval/ordinal entry)
-               " failed during evaluation: "
-               (:seon.cluster.eval/error entry)
-               ". The run did not retry it. Inspect receipt "
-               (:seon.cluster.eval/id entry)
-               " and revise the remaining plan from current facts."))
-        (for [entry (:seon.problems/deferred-agents found)]
-          (str "Agent " (:seon.agent/id entry) " has run "
-               (:seon.turn.work/episode-runs entry)
-               " self-triggered runs since the last outside trigger; "
-               (:seon.problems/deferred-count entry)
-               " triggers are deferred until one arrives."))
-        (map stale-var-ai (:seon.problems/stale-vars found))
-        (map missing-model-ai (:seon.problems/missing-models found)))
-       (str/join "\n")))
+  (let [lines
+        {:seon.problems/failed-tests
+         (for [entry (:seon.problems/failed-tests found)]
+           (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
+         :seon.problems/failed-tests-unknown
+         (for [entry (:seon.problems/failed-tests-unknown found)]
+           (str "Test evidence unknown: " (:seon.error/message entry)
+                " Offending: " (pr-str (:seon.error/offending entry))))
+         :seon.problems/errored-receipts
+         (for [entry (:seon.problems/errored-receipts found)]
+           (str "Form " (:seon.cluster.eval/ordinal entry)
+                " failed during evaluation: "
+                (:seon.cluster.eval/error entry)
+                ". The run did not retry it. Inspect receipt "
+                (:seon.cluster.eval/id entry)
+                " and revise the remaining plan from current facts."))
+         :seon.problems/deferred-agents
+         (for [entry (:seon.problems/deferred-agents found)]
+           (str "Agent " (:seon.agent/id entry) " has run "
+                (:seon.turn.work/episode-runs entry)
+                " self-triggered runs since the last outside trigger; "
+                (:seon.problems/deferred-count entry)
+                " triggers are deferred until one arrives."))
+         :seon.problems/stale-vars (map stale-var-ai (:seon.problems/stale-vars found))
+         :seon.problems/missing-models (map missing-model-ai (:seon.problems/missing-models found))}
+        profile (or (:seon.render/profile found)
+                    (render/agent-render-profile config/defaults))]
+    (render.value/render-ai
+     {:seon.render/value (into {} (keep (fn [[family rows]] (when (seq rows) [family (vec rows)]))) lines)
+      :seon.render.value/root `ai-prose
+      :seon.render/profile (assoc profile :seon.print/requery-id '(seon.problems/problems (seon.db/db) {}))})))
 
 (defn log-report
   "The whole value as log lines, newest concern first.
