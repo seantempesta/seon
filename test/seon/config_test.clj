@@ -446,24 +446,24 @@
            (:seon.config/cluster (:seon.config/desired-row compiled))))))
 
 (deftest explicit-absence-is-a-decision-never-a-stored-value
-  (is ((schema/projection-validator (schema/handed-projection) :seon.config/manifest) {:seon.config.error/escalate-to config/absent})
+  (is ((schema/projection-validator (schema/handed-projection) :seon.config/manifest) {:seon.config.run/max-episode-runs config/absent})
       "the derived manifest schema admits explicit absence for an optional dial")
   (let [baseline (config/compile-manifest {:seon.boot/cluster-name "default"})
         omitted (config/compile-manifest {:seon.boot/cluster-name "default" :seon.config/manifest {}})
         absent
         (config/compile-manifest
          {:seon.boot/cluster-name "default" :seon.config/manifest
-          {:seon.config.error/escalate-to config/absent}})
+          {:seon.config.run/max-episode-runs config/absent}})
         effective (:seon.config/effective absent)
         row (:seon.config/desired-row absent)]
-    (is (= "root"
-           (:seon.config.error/escalate-to
+    (is (= 100
+           (:seon.config.run/max-episode-runs
             (:seon.config/effective baseline))
-           (:seon.config.error/escalate-to
+           (:seon.config.run/max-episode-runs
             (:seon.config/effective omitted)))
         "omission inherits the shipped default; it never means retraction")
-    (is (not (contains? effective :seon.config.error/escalate-to)))
-    (is (not (contains? row :seon.config.error/escalate-to)))
+    (is (not (contains? effective :seon.config.run/max-episode-runs)))
+    (is (not (contains? row :seon.config.run/max-episode-runs)))
     (is (not-any? nil? (vals row)))
     (is (not= (:seon.config/effective baseline)
               (:seon.config/effective absent)))

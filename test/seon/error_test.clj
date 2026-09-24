@@ -933,11 +933,12 @@
                             database (db/db connection)]
                         [(count (:seon.error/occurrences (db/pull database '[:seon.error/occurrences]
                                                                   (:seon.error/ref recording))))
-                         (frequencies (db/q '[:find [?to ...] :in $ ?signature
-                                              :where [?message :seon.message/about ?signature]
-                                                     [?message :seon.message/to ?agent]
-                                                     [?agent :seon.agent/id ?to]]
-                                            database signature))]))]
+                         (frequencies (map second
+                                           (db/q '[:find ?message ?to :in $ ?signature
+                                                   :where [?message :seon.message/about ?signature]
+                                                          [?message :seon.message/to ?agent]
+                                                          [?agent :seon.agent/id ?to]]
+                                                 database signature)))]))]
         (is (= {} shipped) "the shipped default names no escalation owner")
         (is (= [1 {}] (record! 'seon.error-test/unowned-fault-with-the-shipped-dial shipped))
             "recorded, and nobody is mailed")

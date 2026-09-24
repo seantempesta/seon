@@ -73,16 +73,18 @@
                                           :seon.error.occurrence/blob-digest])]
            (is (string? digest) (pr-str occurrence))
            (is (str/includes? (str (blob/get connection digest)) "inner root cause"))))
-       (testing "the writer wakes the configured responsible agent (root by default)"
-         (is (= "root" (:seon.config.error/escalate-to
-                        (config/effective (db/db connection) "fault-record"))))
-         (is (contains? woken "root")))
+       (testing "the shipped config names no escalation owner, so nobody is woken
+       (owner ruling 2026-09-24: an unowned fault wakes no paid root turn)"
+         (is (nil? (:seon.config.error/escalate-to
+                    (config/effective (db/db connection) "fault-record"))))
+         (is (empty? woken)))
        (is (< elapsed-ms 1000.0) (str "one synchronous fault write took " elapsed-ms " ms"))))))
 
 (deftest panic-mode-stores-then-throws-its-receipt-and-a-rethrow-is-not-recounted
   (test-support/with-database
    (fn [connection]
-     (let [environment (world connection "fault-panic" {:seon.config/on-core-error :panic})
+     (let [environment (world connection "fault-panic" {:seon.config/on-core-error :panic
+                                                            :seon.config.error/escalate-to "root"})
            failure (nested-failure)
            panic (try (fault/fault! environment failure context) nil
                       (catch clojure.lang.ExceptionInfo thrown thrown))
@@ -101,7 +103,7 @@
          (is (identical? wrapped propagated) "found through a cause-preserving wrapper")
          (is (= 1 (:seon.error.occurrence/count (first (:seon.error/occurrences row))))
              "the propagation counted once")
-         (is (contains? woken "root")))))))
+         (is (contains? woken "root") "a manifest naming root wakes it"))))))
 
 (deftest an-unknown-write-outcome-panics-in-both-modes-without-retry
   (doseq [mode [:record :panic]]

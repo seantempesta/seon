@@ -13,20 +13,31 @@ documented "record, no escalation message" meaning.
 
 ## Broken or not done first
 
-1. **Three tests I do not own assert the old shipped default and will go red.**
-   They need a one-line update each, from their owner or root:
-   - `test/seon/fault_test.clj:76-79`: `"root"` is the effective
-     `escalate-to` and `(contains? woken "root")`. Now the dial is absent and
-     root is not woken. Either assert no root wake, or give that world a
-     manifest with `escalate-to "root"`.
-   - `test/seon/cluster/armed_test.clj:166`: `(= "root" (:seon.config.error/escalate-to handle))`.
-   - `test/seon/config_test.clj:459-463`: `explicit-absence-is-a-decision-never-a-stored-value`
-     expects the baseline to be `"root"`. The absent-vs-baseline `not=` at
-     :467 also goes false. That test needs a different optional dial, or an
-     overlay naming "root".
-   Others may be affected: any test that expects a root escalation message
-   from a seeded cluster without naming `escalate-to`. `config_application_test`
-   and `schedule_test` name it explicitly and are unaffected.
+1. **Root's first run of the regression failed: 1 pass, 4 fail, 5,892 ms
+   against the 5,000 ms bound.** It counted every fact and message on the
+   test branch, which inherits default's 16 live fault rows and messages
+   (class 6). Follow-up commit:
+   - Each arm now records under its own `:seon.error/operation`, so it has its
+     own signature, and counts only that signature's occurrences and messages.
+     A read-only probe showed the operation enters the signature and the
+     message does not.
+   - Both arms share one `with-db`. The first version had two, and each
+     one forks and seeds a branch.
+   - Recording a fault took 6 ms in a read-only probe on default. The branch
+     fixture is the rest of the time. If the rerun still goes over 5 s, the
+     cost is `with-db`'s fork plus seed, not the fault path. Then time it
+     separately rather than raising the bound.
+   The three stale tests are updated in the same commit (files free per the
+   ledger):
+   - `test/seon/fault_test.clj`. The record-mode test now asserts that the
+     shipped config has no `escalate-to` and that nobody is woken. The
+     panic-mode test's manifest names `"root"`, and it asserts root is woken.
+   - `test/seon/cluster/armed_test.clj:166`. The handle has no `escalate-to`.
+   - `test/seon/config_test.clj`
+     `explicit-absence-is-a-decision-never-a-stored-value`. It now exercises
+     `:seon.config.run/max-episode-runs`, which is optional with a shipped
+     100. A probe showed that explicit absence removes it from both the
+     effective map and the row.
 2. **A stale docstring in a file I don't own.** `src/seon/fault.clj:186-188`
    says "(root by default)". That is no longer true.
 3. **RESET NEEDED is not claimed, but default keeps waking root until it adopts.**
@@ -86,9 +97,9 @@ documented "record, no escalation message" meaning.
 ## Root runs
 
 - `bin/test-check default --test seon.error-test/a-core-fault-wakes-root-only-when-escalation-is-configured`
+- `bin/test-check default --ns seon.fault-test`
+- `bin/test-check default --test seon.config-test/explicit-absence-is-a-decision-never-a-stored-value`
+- `bin/test-check default --ns seon.cluster.armed-test` (48 s pool member; its metadata already justifies this)
 - `bin/test-check default --ns seon.error-test`
-- `bin/test-check default --ns seon.fault-test` (expected red at :79 until updated)
-- `bin/test-check default --ns seon.config-test` (expected red in explicit-absence test)
-- `bin/test-check default --ns seon.cluster.armed-test` (expected red at :166)
 - Adopt: reload `seon.config`, `bin/seon config apply`, then check
   `(find (seon.config/effective (seon.db/db (seon.cluster.boot/connection "default")) "default") :seon.config.error/escalate-to)` is nil.
