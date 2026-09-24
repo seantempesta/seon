@@ -2473,28 +2473,45 @@
                (pr-str (vec (remove canonical carried)))
                " from " (pr-str (program/row-identity row)))))))
 
-(deftest namespace-context-reads-clauses-by-clojures-own-ns-grammar
-  ;; fn.clj kept a second clause parser: `[clojure [edn :as e] set]` threw
-  ;; (`apply hash-map` over an odd prefix list) and a bare `clojure.set` was
-  ;; dropped. The one reader (`seon.sci.reader`, clojure.core.specs.alpha) owns them.
-  (let [source (str "(ns sample.clauses (:require [clojure [edn :as e] set] clojure.walk"
-                    " [a.b :as-alias ab] [clojure.test :refer [deftest] :rename {deftest dt}])"
-                    " (:import [java.io File] java.util.UUID))")
-        entry {::analyzer/filename "sample" ::analyzer/row 1 ::analyzer/col 1
-               ::analyzer/end-row 1 ::analyzer/end-col (inc (count source))}
-        context (#'seon.fn/namespace-context {"sample" (#'seon.fn/text-context source)} entry)]
+(defn- analyzed-namespace-contexts
+  "Each fixture source's namespace context, from one publication analysis."
+  [sources]
+  (let [root (.getCanonicalPath (fixture-root))
+        analysis (analyzer/analyze
+                  {::analyzer/sources (into {} (map (fn [[path text]] [(str root "/" path) text]))
+                                            sources)})]
+    (into {}
+          (map (fn [entry]
+                 [(::analyzer/name entry)
+                  (try (#'seon.fn/namespace-context entry)
+                       (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))]))
+          (::analyzer/namespace-definitions analysis))))
+
+(deftest namespace-context-reads-clauses-from-the-publication-analysis
+  ;; A file's ns clauses come from the clj-kondo analysis publication already
+  ;; ran, never a second read: 78161085b read them through the reader's
+  ;; clojure.core.specs.alpha conform, 320 MB and 124 ms per 441-file pass.
+  (let [contexts
+        (analyzed-namespace-contexts
+         {"clauses.clj"
+          (str "(ns sample.clauses (:require [clojure [edn :as e] set] clojure.walk"
+               " [a.b :as-alias ab] [clojure.test :refer [deftest is]])"
+               " (:import [java.io File] java.util.UUID))\n"
+               "(require '[clojure.data :as data])\n")
+          "prefix.clj" "(ns sample.prefix (:require [clojure [edn :as e]]))\n"
+          "renamed.clj" "(ns sample.renamed (:require [clojure.test :refer [deftest] :rename {deftest dt}]))\n"})
+        context (get contexts 'sample.clauses)]
     (is (= '#{clojure.edn clojure.set clojure.walk clojure.test} (:requires context))
-        ":as-alias creates no load edge; prefix members and bare libs do")
+        ":as-alias creates no load edge; prefix members and bare libs do; a later require is no clause")
     (is (= '{e clojure.edn ab a.b} (:aliases context)))
-    (is (= '{dt clojure.test/deftest} (:refers context)))
+    (is (= '{deftest clojure.test/deftest is clojure.test/is} (:refers context)))
     (is (= '{File java.io.File UUID java.util.UUID} (:imports context))
         "a bare dotted import binds its simple class name")
-    (testing "a prefix list whose only member carries options"
-      (let [source "(ns sample.prefix (:require [clojure [edn :as e]]))"]
-        (is (= '{e clojure.edn}
-               (:aliases (#'seon.fn/namespace-context
-                          {"sample" (#'seon.fn/text-context source)}
-                          (assoc entry ::analyzer/end-col (inc (count source)))))))))))
+    (is (= '{e clojure.edn} (:aliases (get contexts 'sample.prefix)))
+        "a prefix list whose only member carries options")
+    (is ((schema/projection-validator (schema/handed-projection) :seon.fn/index-refused-error)
+         (get contexts 'sample.renamed))
+        "clj-kondo records no renamed local: a :rename is refused by name, never mis-bound")))
 
 (deftest a-file-deleted-after-listing-is-the-declared-refusal
   ;; 2026-09-24 fault row 15: `full-source-refresh!` listed a dependent file,

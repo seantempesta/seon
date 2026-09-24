@@ -112,10 +112,14 @@
    (present-values entry [:name :doc :meta :lang :in-ns])))
 
 (defn- namespace-usage
+  "One require. clj-kondo marks an `:as-alias` require only on its alias
+  symbol's metadata (`analyze-libspec`, clj_kondo/impl/analyzer/namespace.clj:243-262);
+  `::as-alias` keeps that fact as data."
   [entry]
-  (merge
-   (location entry)
-   (present-values entry [:from :to :alias :lang])))
+  (cond-> (merge
+           (location entry)
+           (present-values entry [:from :to :alias :lang]))
+    (:as-alias (meta (:alias entry))) (assoc ::as-alias true)))
 
 (defn- var-definition
   [entry]
@@ -152,7 +156,12 @@
     [:ns :name :from :from-var :alias :auto-resolved :keys-destructuring
      :lang])))
 
+(defn- entry-position
+  [entry]
+  [(get entry ::filename "") (get entry ::row 0) (get entry ::col 0)])
+
 (defn- entry-order
+  "Every `analyze` vector's sort key; it leads with `entry-position`."
   [entry]
   [(get entry ::filename "")
    (get entry ::row 0)
@@ -530,6 +539,39 @@
                          [(:row (meta node)) (:col (meta node))])))))
            nodes)}))
 
+(defn- entries-within
+  "The entries of one sorted `analyze` vector positioned inside `span`'s form:
+  a binary search for its start, then a scan to its end."
+  [entries span]
+  (let [start (entry-position span)
+        end [(::filename span) (::end-row span) (::end-col span)]
+        index (loop [low 0 high (count entries)]
+                (if (< low high)
+                  (let [middle (quot (+ low high) 2)]
+                    (if (neg? (compare (entry-position (nth entries middle)) start))
+                      (recur (inc middle) high)
+                      (recur low middle)))
+                  low))]
+    (into [] (take-while #(not (pos? (compare (entry-position %) end))))
+          (subvec entries index))))
+
+(defn- with-namespace-clauses
+  "Each `ns` form's clause facts, as clj-kondo recorded them inside its span:
+  requires (`::clause-usages`), `:refer` var usages, `:import` class usages
+  (clj_kondo/impl/analyzer/namespace.clj:700-702) and bare `:rename`
+  keywords, whose renamed local clj-kondo does not record."
+  [analysis]
+  (update analysis ::namespace-definitions
+          (partial mapv
+                   (fn [definition]
+                     (let [within #(entries-within (get analysis %) definition)]
+                       (assoc definition
+                              ::clause-usages (within ::namespace-usages)
+                              ::clause-refers (filterv ::refer (within ::var-usages))
+                              ::clause-imports (filterv ::import (within ::java-class-usages))
+                              ::clause-renames (filterv #(and (= "rename" (::name %)) (not (::ns %)))
+                                                        (within ::keywords))))))))
+
 (defn analyze
   "Analyze captured source text, complete source roots, or individual files.
 
@@ -618,6 +660,7 @@
         attributed (group-by #(if (:class %) :java-class-usages :var-usages)
                              (attributed-usages (assoc raw-analysis :var-quotes quotes)))
         analysis (merge raw-analysis attributed)]
+    (with-namespace-clauses
     {::namespace-definitions
      (filterv jvm-entry?
               (normalized-entries analysis :namespace-definitions namespace-definition))
@@ -635,7 +678,7 @@
               (normalized-entries analysis :java-class-usages
                                   #(merge (location %)
                                           (present-values % [:class :method-name :call :lang
-                                                             :from :from-var]))))
+                                                             :from :from-var :import]))))
      ::protocol-impls
      (normalized-entries analysis :protocol-impls
                          #(merge (location %)
@@ -653,7 +696,7 @@
           vec)
      ;; Which cache entries the analysis found stale and rebuilt: the
      ;; publication's cache-miss count.
-     ::cache (::cache result)}))
+     ::cache (::cache result)})))
 
 (defn- stored-arglists
   [serialized]

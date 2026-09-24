@@ -21,7 +21,6 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.schema.internal :as schema.internal]
-            [seon.sci.reader :as reader]
             [clj-kondo.impl.utils :as kondo.utils]
             [seon.test.accretion :as accretion])
   (:import [java.nio.charset StandardCharsets]
@@ -191,43 +190,6 @@
                                           StandardCharsets/UTF_8)))))]
     [(offset (::analyzer/row entry) (::analyzer/col entry))
      (offset (::analyzer/end-row entry) (::analyzer/end-col entry))]))
-
-(declare stored-namespace-context)
-
-(defn- import-bindings
-  "`[local class]` pairs of one `:import` spec; a bare `java.util.UUID`
-  imports `UUID`, as `clojure.core/import` does."
-  [spec]
-  (cond
-    (symbol? spec)
-    (let [class-name (name spec)]
-      [[(symbol (subs class-name (inc (or (str/last-index-of class-name ".") -1)))) spec]])
-
-    (and (sequential? spec) (symbol? (first spec)))
-    (map (fn [class-name]
-           [class-name (symbol (str (first spec) "." class-name))])
-         (rest spec))
-
-    :else []))
-
-(defn- namespace-context
-  "Requires, aliases and refers of one `ns` form, read by the one reader
-  (`seon.sci.reader/read`, which conforms clauses by Clojure's own
-  `clojure.core.specs.alpha` ns grammar); imports from the form it read.
-  A form that grammar refuses, as Clojure's `ns` does, carries no bindings."
-  [contexts entry]
-  (let [source (exact-source contexts entry)
-        events (reader/read {::reader/text source
-                             :seon.config.eval.result/max-source (count source)})
-        _ (when (map? events)
-            (throw (ex-info (str "Namespace form could not be read: " (:seon.error/message events))
-                            (assoc events :seon.fn/index-refused true))))
-        read-event (first (filter :seon.ns/name events))]
-    (assoc (stored-namespace-context read-event)
-           :imports (into {} (comp (filter #(and (seq? %) (= :import (first %))))
-                                   (mapcat rest)
-                                   (mapcat import-bindings))
-                          (::reader/form read-event)))))
 
 (defn- qualify-schema-symbols [form {:keys [aliases refers]}]
   (walk/postwalk
@@ -1162,6 +1124,36 @@
                        [attribute (set kept)])))
           targets)))
 
+(defn- namespace-context
+  "Requires, aliases, refers and imports of one `ns` form, from the clause
+  facts the analyzer attached to its definition (`with-namespace-clauses`),
+  never a second read of the file. An `:as-alias` require creates no load
+  edge (clojure `load-lib`, core.clj:6074-6078); an import binds its simple
+  class name, as `clojure.core/import` does. clj-kondo records no renamed
+  local, so a `:rename` is refused by name."
+  {:malli/schema [:=> [:cat :map]
+                  [:map [:requires [:set :symbol]]
+                   [:aliases [:map-of :symbol :symbol]]
+                   [:refers [:map-of :symbol :qualified-symbol]]
+                   [:imports [:map-of :symbol :symbol]]]]}
+  [{::analyzer/keys [clause-usages clause-refers clause-imports clause-renames]}]
+  (when-some [rename (first clause-renames)]
+    (let [message "A file's ns :rename is not indexed: clj-kondo's analysis records no renamed local."]
+      (throw (ex-info message {:seon.fn/index-refused true
+                               :seon.cluster.source/phase :analysis
+                               :seon.error/message message
+                               ::analysis-entry rename}))))
+  {:requires (into #{} (comp (remove ::analyzer/as-alias) (map ::analyzer/to)) clause-usages)
+   :aliases (into {} (comp (filter ::analyzer/alias)
+                           (map (juxt ::analyzer/alias ::analyzer/to))) clause-usages)
+   :refers (into {} (map (fn [{::analyzer/keys [to] target-name ::analyzer/name}]
+                           [target-name (symbol (str to) (str target-name))]))
+                 clause-refers)
+   :imports (into {} (map (fn [{class-name ::analyzer/class}]
+                            [(symbol (subs class-name (inc (or (str/last-index-of class-name ".") -1))))
+                             (symbol class-name)]))
+                  clause-imports)})
+
 (defn- analysis-rows-by-file
   "Rows by file, with source-observed writes independent of schema membership.
 
@@ -1206,7 +1198,7 @@
         (into {}
               (map (fn [entry]
                      [(::analyzer/name entry)
-                      (assoc (namespace-context contexts entry)
+                      (assoc (namespace-context entry)
                              :namespace-meta (::analyzer/meta entry))]))
               (::analyzer/namespace-definitions analysis))]
     (reduce
