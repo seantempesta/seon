@@ -738,7 +738,10 @@
             candidates
             (if (or (and first-run? (not scoped?)) (#{:all :full} policy))
               (selection-read! (db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database))
-              (into (into (into identities (if (= :named policy) requested-reached reached))
+              ;; A test named as changed is itself a member; the walk from
+              ;; it finds only tests reaching it.
+              (into (into (into (into identities (if (= :named policy) requested-reached reached))
+                                (when (= :incremental policy) requested-changed))
                           (keys pending))
                     (concat
                      (when (and (= :incremental policy) (not work?))
