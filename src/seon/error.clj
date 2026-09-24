@@ -291,8 +291,10 @@
 (defn- classifying-error-data
   "Present current and proposed base observations, in declared priority order,
   then a Throwable's cause chain. Over the bound the chain keeps each link's
-  class, message and first-party frames; its `ex-data` is the remainder whose
-  size the marker reports. Without it an over-bound fault kept no cause at all."
+  class, message and the first-party frame that raised it; its `ex-data` and
+  deeper frames are the remainder whose size the marker reports (a link's whole
+  first-party stack is kilobytes under a deep caller, and a partition over the
+  bound keeps nothing). Without it an over-bound fault kept no cause at all."
   {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable]]
                   [:or :map :seon.error/base]]}
   [source failure]
@@ -304,7 +306,11 @@
                           (when-let [entry (find candidates member)] entry)))
                   classifying-error-keys)
       failure (assoc :seon.error/chain
-                     (mapv #(dissoc % :seon.error/data) (error.refusal/chain failure))))))
+                     (mapv (fn [link]
+                             (cond-> (dissoc link :seon.error/data :seon.error/frames)
+                               (:seon.error/frames link)
+                               (assoc :seon.error/frames [(first (:seon.error/frames link))])))
+                           (error.refusal/chain failure))))))
 
 (defn- bounded-error-admission
   "Admit complete evidence, retaining classifying observations on overflow."

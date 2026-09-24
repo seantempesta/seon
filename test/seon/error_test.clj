@@ -888,36 +888,62 @@
   ;; open-errors-triage-2026-09-24 item 2: `504062b8` ("The selected renderer
   ;; did not return an observation.") had no exception class and no steward,
   ;; so it was recorded and told to nobody.
+  ;; Counted by this fault's own occurrence: a test world inherits the live
+  ;; cluster's error rows and messages. Escalation is set by `commit-request`.
   (with-db
     (fn [connection]
-      (let [[facts messages]
-            (commit! connection
-                     {:seon.error/message "The selected renderer did not return an observation."}
-                     {})]
-        (is (= 1 facts))
-        (is (= {"root" 1} messages))))))
+      (let [text (str "The selected renderer did not return an observation. " (random-uuid))]
+        (test-support/transacted!
+         connection
+         (error/commit-tx (db/db connection)
+                          (commit-request {:seon.error/message text}
+                                          {:seon.config.error/escalate-to "root"})))
+        (is (= #{["root" 1]}
+               (set (db/q '[:find ?to (count ?message)
+                       :in $ ?text
+                       :where
+                       [?occurrence :seon.error.occurrence/message ?text]
+                       [?error :seon.error/occurrences ?occurrence]
+                       [?error :seon.error/signature ?signature]
+                       [?message :seon.message/about ?signature]
+                       [?message :seon.message/to ?agent]
+                       [?agent :seon.agent/id ?to]]
+                     (db/db connection) text))))))))
 
 (deftest a-core-fault-wakes-root-only-when-escalation-is-configured
   ;; owner ruling 2026-09-24: nine fault-woken root turns at ~25k prompt
   ;; tokens each ignored their fault. The shipped config leaves
   ;; `escalate-to` absent: the fault is recorded, and root is not mailed.
+  ;; Each arm has its own operation, hence its own signature, and counts only
+  ;; its own rows: the test branch inherits the cluster's live faults.
   (with-db
     (fn [connection]
       (let [shipped (select-keys (config/effective (db/db connection) "error-test")
                                  [:seon.config.error/escalate-to])
-            shipped-request (merge (dissoc (commit-request (transform-error (ex-info "boom" {})) {})
-                                           :seon.config.error/escalate-to)
-                                   shipped)]
+            record! (fn [operation dial]
+                      (let [recording (error/recording
+                                       (db/db connection)
+                                       (merge (dissoc (commit-request {:seon.error/message "an unowned core fault"
+                                                                       :seon.error/operation operation}
+                                                                      {})
+                                                      :seon.config.error/escalate-to)
+                                              dial))
+                            signature (get-in recording [:seon.error/fact :seon.error/signature])
+                            _ (test-support/transacted! connection (:seon.db/tx-data recording))
+                            database (db/db connection)]
+                        [(count (:seon.error/occurrences (db/pull database '[:seon.error/occurrences]
+                                                                  (:seon.error/ref recording))))
+                         (frequencies (db/q '[:find [?to ...] :in $ ?signature
+                                              :where [?message :seon.message/about ?signature]
+                                                     [?message :seon.message/to ?agent]
+                                                     [?agent :seon.agent/id ?to]]
+                                            database signature))]))]
         (is (= {} shipped) "the shipped default names no escalation owner")
-        (test-support/transacted! connection (error/commit-tx (db/db connection) shipped-request))
-        (is (= 1 (count (db/q '[:find ?o :where [?o :seon.error.occurrence/id _]] (db/db connection)))))
-        (is (empty? (db/q '[:find ?m :where [?m :seon.message/about _]] (db/db connection)))))))
-  (with-db
-    (fn [connection]
-      (testing "a manifest naming root turns the wake back on"
-        (let [[facts messages] (commit! connection (transform-error (ex-info "boom" {})) {})]
-          (is (= 1 facts))
-          (is (= {"root" 1} messages)))))))
+        (is (= [1 {}] (record! 'seon.error-test/unowned-fault-with-the-shipped-dial shipped))
+            "recorded, and nobody is mailed")
+        (is (= [1 {"root" 1}] (record! 'seon.error-test/unowned-fault-with-root-named
+                                       {:seon.config.error/escalate-to "root"}))
+            "a manifest naming root turns the wake back on")))))
 
 (deftest the-storm-is-bounded-by-the-signature-count
   ;; the live falsifier's unit twin: one signature repeated forever must
