@@ -499,52 +499,37 @@
   "The deftest's ordered `:seon.test/seed` entries as owned occurrences.
 
   A symbol (form 2) is its qualified name; literal entity maps (form 1) keep
-  the attributes they write; an inline `(fn [input] ...)` (form 3) keeps the
-  first-party functions the test's own analysis reached from it and the
-  declared attributes its literal maps name. Values stay in the test source."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map :qualified-symbol
-                       [:set :qualified-symbol] :any]
+  the attributes they write; an inline `(fn [input] ...)` (form 3) keeps only
+  its ordinal. Values stay in the test source."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :qualified-symbol :any]
                   [:vector :seon.test.seed/occurrence]]}
-  [projection context test-symbol reached entries]
+  [projection context test-symbol entries]
   (when-not (vector? entries)
     (seed-refused! :unknown-form test-symbol nil {:seon.error/offending entries}))
-  (let [registry (:seon.schema.projection/registry projection)
-        present #(cond-> {} (seq %2) (assoc %1 (into (sorted-set) %2)))]
-    (into []
-          (map-indexed
-           (fn [ordinal entry]
-             (assoc
-              (cond
-                (symbol? entry)
-                {:seon.test.seed/function
-                 (or (when (qualified-symbol? entry) (seed-symbol context entry))
-                     (seed-refused! :unqualified-symbol test-symbol ordinal
-                                    {:seon.error/offending entry}))}
+  (into []
+        (map-indexed
+         (fn [ordinal entry]
+           (assoc
+            (cond
+              (symbol? entry)
+              {:seon.test.seed/function
+               (or (when (qualified-symbol? entry) (seed-symbol context entry))
+                   (seed-refused! :unqualified-symbol test-symbol ordinal
+                                  {:seon.error/offending entry}))}
 
-                (and (seq? entry) ('#{fn fn* clojure.core/fn} (first entry)))
-                (let [nodes (tree-seq coll? seq entry)]
-                  (merge
-                   (present :seon.test.seed/calls
-                            (filter reached (mapcat (fn [authored]
-                                                      [(seed-symbol context authored)
-                                                       (when (simple-symbol? authored)
-                                                         (symbol (namespace test-symbol) (str authored)))])
-                                                    (filter symbol? nodes))))
-                   (present :seon.test.seed/writes
-                            (filter #(and (qualified-keyword? %)
-                                          (not= "seon.test.seed" (namespace %))
-                                          (mr/schema registry %))
-                                    (mapcat keys (filter map? nodes))))))
+              ;; Its calls and reads are the test's own analysis; derive, never copy.
+              (and (seq? entry) ('#{fn fn* clojure.core/fn} (first entry)))
+              {}
 
-                (or (map? entry) (and (vector? entry) (every? map? entry)))
-                (present :seon.test.seed/writes
-                         (literal-seed-writes projection test-symbol ordinal
-                                              (if (map? entry) [entry] entry)))
+              (or (map? entry) (and (vector? entry) (every? map? entry)))
+              (let [writes (literal-seed-writes projection test-symbol ordinal
+                                                (if (map? entry) [entry] entry))]
+                (cond-> {} (seq writes) (assoc :seon.test.seed/writes writes)))
 
-                :else
-                (seed-refused! :unknown-form test-symbol ordinal {:seon.error/offending entry}))
-              :seon.test.seed/ordinal ordinal)))
-          entries)))
+              :else
+              (seed-refused! :unknown-form test-symbol ordinal {:seon.error/offending entry}))
+            :seon.test.seed/ordinal ordinal)))
+        entries))
 
 (def ^:private seed-contract
   "The one contract a named seed function declares, in `:seon.fn/spec` form."
@@ -571,12 +556,10 @@
             :let [row (when-not (removed function-symbol)
                         (or (get authored function-symbol) (read-row function-symbol)))
                   data {:seon.test.seed/function function-symbol}]]
-      (cond
-        (nil? row) (seed-refused! :missing-function test-symbol ordinal data)
-        (nil? (:seon.fn/spec row)) (seed-refused! :uncontracted-function test-symbol ordinal data)
-        (not= seed-contract (:seon.fn/spec row))
-        (seed-refused! :contract-mismatch test-symbol ordinal
-                       (assoc data :seon.fn/spec (:seon.fn/spec row)))))))
+      (when-let [rule (cond (nil? row) :missing-function
+                            (nil? (:seon.fn/spec row)) :uncontracted-function
+                            (not= seed-contract (:seon.fn/spec row)) :contract-mismatch)]
+        (seed-refused! rule test-symbol ordinal (merge data (select-keys row [:seon.fn/spec])))))))
 
 ;; Emit one fact per keyword. Datahike reads a two-element collection beginning
 ;; with a unique-identity attribute as one lookup ref
@@ -700,9 +683,6 @@
         (when-let [[_ seeds] (find metadata :seon.test/seed)] (not= [] seeds))
         (assoc :seon.test/seed
                (seed-occurrences projection (get namespace-contexts namespace-name) qualified
-                                 (into #{} (map symbol)
-                                       (concat (get calls-by-caller qualified)
-                                               (get references qualified)))
                                  (:seon.test/seed metadata))))
 
             (function-definition? entry)

@@ -15,15 +15,15 @@ language-requirements 7.9b.
 
 ## Broken or open first
 
-- **Over budget.** `src/seon/fn.clj` has +137 net lines (146 added, 9 removed), and the schemas add
-  +33. That is above the ~100 guide. Where the lines go: seven named refusal rules
-  (`seed-refused!` 12 lines, `assert-seed-contracts!` 27), the three entry forms (`seed-occurrences` 45),
-  literal validation (`literal-seed-writes` 18), resolving names through aliases (`seed-symbol` 9), and
-  wiring (about 20, 8 of them only re-indented).
-  Smaller alternative for root to rule on: drop the form-3 `:seon.test.seed/calls`/`writes` extraction
-  (about 15 lines). Those calls already sit on the test's own `:seon.fn/calls`, so the occurrence copy
-  mirrors derived data the design asked for.
-- **SCI evaluation seam not covered.** A deftest evaluated in an agent's SCI context builds its row
+- **Budget.** The first commit, `7716e29e7`, added 146 lines to `fn.clj`, which was over the ~100 guide.
+  - Root ruled to shrink it, and the follow-up commit is net −20 in `fn.clj` and −2 in the schema.
+  - An inline `(fn ...)` occurrence now keeps only its ordinal. Its calls and reads are derived from
+    the test row's own analysis, so `:seon.test.seed/calls` is gone.
+  - The three contract rules now compute one rule keyword and make one `seed-refused!` call.
+  - The four detection-site refusals stay as written; turning them into data would not have shrunk
+    the code.
+  - The total is now about +117 in `fn.clj` and +31 in the schemas.
+- **SCI evaluation seam not covered (routed to S2b-c by root).** A deftest evaluated in an agent's SCI context builds its row
   from the loaded Var in `seon.sci.eval` through `analyze-form`, not through `var-row`. So it stores
   no occurrences and gets no seed validation there. The fix belongs to the owner of
   `src/seon/sci/eval.clj` (not owned here). `seon.fn/source-rows`, which that file calls at :468,
@@ -41,7 +41,7 @@ language-requirements 7.9b.
 
 - `resources/seon/schemas/seon.test.seed.edn` (new): `:seon.test.seed/input` (`:seon.db/db`),
   `/tx-data`, `/value` (open map: optional `/tx-data`, `:seon.config/manifest`), `/ordinal`,
-  `/function` (indexed edge symbol), `/writes`, `/calls`, `/occurrence` (entity map), `/refused` (enum
+  `/function` (indexed edge symbol), `/writes`, `/occurrence` (entity map), `/refused` (enum
   of seven rules), `/refused-error` (over `:seon.error/message`, rendered by `seon.error/index-refusal-prose`).
 - `resources/seon/schemas/seon.test.edn`: `:seon.test/seed` is a vector of owned components
   (`:seon.db/component-schema :seon.test.seed/occurrence`), declared on `:seon.test/test`. Declaring it
@@ -52,7 +52,7 @@ language-requirements 7.9b.
   - Form 1 records the written attributes. Each value is validated with
     `schema/explain-candidate-value` (Malli `explainer`).
   - Form 2 records the qualified symbol, resolved through the namespace's aliases.
-  - Form 3 records the reached calls and the declared map keys.
+  - Form 3 records only its ordinal; its calls and reads derive from the test's own analysis.
   - An empty vector adds no key, so the definition digest does not change.
   - `assert-seed-contracts!` resolves each named seed against the batch rows plus the writer's
     database, minus removed rows. It then compares `:seon.fn/spec` with
@@ -67,7 +67,7 @@ language-requirements 7.9b.
   metadata carry no `:from-var`, so the occurrence stores the written keys itself.
 - `build-artifact` on a three-form fixture produced
   `[{ordinal 0 writes #{:seon.test/skip-reason}} {ordinal 1 function probe.seed-test/week-37}
-  {ordinal 2 calls #{probe.seed-test/helper} writes #{:seon.test/skip-reason}}]`.
+  {ordinal 2}]` after the follow-up (the first commit also recorded calls and writes for this entry)`.
   The occurrences survived `canonical-row` shape filtering. `build-artifact` took 59.7 ms;
   `build-projection` took 442.9 ms.
 - The refusals each name their rule, test, ordinal and member. Rules covered: missing-function,

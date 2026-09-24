@@ -54,8 +54,7 @@
 (def ^:private stored-in-order
   [{:seon.test.seed/ordinal 0 :seon.test.seed/writes #{:seon.test/skip-reason}}
    {:seon.test.seed/ordinal 1 :seon.test.seed/function 'sample.seeded-test/week}
-   {:seon.test.seed/ordinal 2 :seon.test.seed/calls #{'sample.seeded-test/helper}
-    :seon.test.seed/writes #{:seon.test/skip-reason}}])
+   {:seon.test.seed/ordinal 2}])
 
 (deftest seed-entries-of-all-three-forms-are-admitted-and-stored-in-order
   (with-seeded-root
@@ -73,7 +72,7 @@
              (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) rows []))
              (let [pulled (db/pull (db/db connection)
                                    [{:seon.test/seed [:seon.test.seed/ordinal :seon.test.seed/function
-                                                      :seon.test.seed/writes :seon.test.seed/calls]}]
+                                                      :seon.test.seed/writes]}]
                                    [:seon.test/sym 'sample.seeded-test/seeded])]
                (is (= stored-in-order
                       (->> (:seon.test/seed pulled)
