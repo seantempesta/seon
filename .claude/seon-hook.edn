@@ -53,8 +53,11 @@
  ;; EAVT leaf, rewritten by every new-entity commit (issue
  ;; a-hundred-megabyte-failure-message-rides-every-new-entity-commit.md); its producers
  ;; are fixed (daa833e32) and default was reset 16:03Z. Lanes own disjoint files.
+ ;; 2026-09-24 21:3x (orchestrator, owner: "please ease the load on my computer"): PAUSED —
+ ;; ten lanes plus every session's tool calls republishing pinned default at 900% CPU. Lanes
+ ;; commit only; root adopts at checkpoints with `bin/seon init --dev default --changed`.
  :current-source
- {:enabled true
+ {:enabled false
   :root "."
   :cluster "default"
   ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
