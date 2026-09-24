@@ -92,7 +92,7 @@ it prints the `config/effective` refusal whole
   `report-committer-loss!`, so the refusal is printed rather than thrown. The
   flow owner should give the committer a reader result that can carry a refusal.
 
-**f2e164bdb**: `seon.cluster/read-advertisement` deleted (−30 lines).
+**f2e164bdb**: `seon.cluster/read-advertisement` deleted (−26 lines).
 `rg read-advertisement` over src/ test/ script/ bin/ resources/ found only its
 own definition. In default's database, the only reverse references to its row
 are 5 `:seon.test/adoption-identities` (test evidence), with no calls.
@@ -112,5 +112,5 @@ mcp), which were not investigated.
 - After the move, `seon.cluster/read-advertisement` resolves to no Var and no row.
   `core-error-mode` has a row, and for `"default"` it answered `:panic`.
 
-Net: cluster.clj +32/−38 across the three commits, tests +55.
+Net: cluster.clj +34/−38 across the three commits (read-advertisement −26), tests +56.
 The scratch root was taken down and deleted after these runs.
