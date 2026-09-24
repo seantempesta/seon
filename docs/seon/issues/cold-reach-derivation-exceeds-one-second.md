@@ -28,3 +28,10 @@ where it should grow with the number of changed rows.
 
 Done when a cold 20-test reach read takes under 1 s, and the profile names no
 per-query declaration cost.
+
+Update (2026-09-24, same lane): the index is now shared by program content across
+branches (`reach-holders`), so the cold cost is paid once per program content, not
+once per branch. A cold derivation for 200 tests still took 5.6 to 6.5 s. Most of it
+was the per-test closure walk in `reach-entry` (26 of 28 ms for a closure of 1,853
+names) and `reach-facts` queries. After any program write, `reach-refresh` re-reads
+every requested test's facts (1.2 s for 200 tests).

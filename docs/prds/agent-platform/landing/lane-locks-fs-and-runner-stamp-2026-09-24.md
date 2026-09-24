@@ -89,6 +89,37 @@ Lock audit rows 4 and 5 (`docs/research/agent-platform/lock-audit-2026-09-24.md`
   file. The hook recorded an analysis refusal against cluster-default
   (`seon.fn/assert-clean-analysis!`, signature e4bcf833…). The file lints clean now.
 
+## Follow-up 3: the nested-request hang (root thread dump, tmp/orchestrator/hang-threads.txt)
+
+- **Cause, confirmed:** 572af5fb9 keyed the index by branch connection. Every member
+  or nested request runs on a new branch, so each one derived every runnable test's
+  reach from cold. The dump is inside `reach-entry`, which walks a closure: a test
+  whose closure reaches `seon.test-support` visits 1,853 names in 28–45 ms, and the
+  default program has 2,139 tests. 4b487b5ac would also have derived cold on every
+  branch, because its `usable` check compared `(:config database)`, which carries
+  `:branch`.
+- **Fix:** the holders now form a process-wide core.cache LRU, `reach-holders`,
+  keyed by what reach reads: `[store #{[entity definition-digest]} #{[entity
+  schema-form]}]`. Two indexed queries supply that key (8.8 and 3.3 ms on default).
+  Any branch with equal program rows shares one index. A second LRU,
+  `reach-lineage`, maps a connection or commit to the holder it last read and that
+  read's basis. When a value's program content changes, it derives incrementally
+  from that ancestor since the recorded basis. The config and commit comparisons
+  are gone, and `::reach-derivations` still counts misses.
+- **Scratch-namespace probe on lane branches, 200 tests:**
+  - cold: 5,638–6,517 ms
+  - a sibling fresh branch after a non-program write: 70 ms, no derivation
+  - a return to the first branch: 16 ms, a hit
+  - two program transactions on a branch: 1,212 ms, `reach-computed 0` and one
+    derivation. The 1.2 s is the existing `reach-refresh`, which re-reads every
+    requested test's facts after any program write.
+- **Not fixed:** a cold derivation of the whole program still costs about 1 minute,
+  once per program content. `docs/seon/issues/cold-reach-derivation-exceeds-one-second.md`
+  stays open: its per-query cost, and the per-test closure walk that shares no work
+  between tests, remain.
+- New regression: `a-fresh-branch-with-unchanged-program-rows-derives-nothing`. The
+  concurrent test now accepts a hit from equal content derived earlier.
+
 ## What changed
 
 1. `src/seon/fs/jvm.clj` `write` (a6236daa1). `locking write-serialization` moves

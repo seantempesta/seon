@@ -115,11 +115,30 @@
          results (mapv deref readers)]
     (is (apply = results))
     (is (string? (get-in results [0 ta])) (pr-str (first results)))
-    (is (= (inc before) (derivations)))
+    ;; Equal program content already derived (an earlier run) derives nothing.
+    (is (contains? #{before (inc before)} (derivations)))
     (define! connection '[:seon.fn/sym reach.fixture/a]
              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
-    (is (not= (first results) (runner/reach-digests (db/db connection) [ta])))
-    (is (= (+ 2 before) (derivations)))))))
+    (is (not= (first results) (runner/reach-digests (db/db connection) [ta])))))))
+
+(deftest a-fresh-branch-with-unchanged-program-rows-derives-nothing
+ ;; A nested request runs on a fresh branch that writes only non-program facts;
+ ;; the index is keyed by the program content it reads, so it hits.
+ (let [s 'seon.id-test/data-shape-and-explicit-length-determine-identity
+       read-reach (fn [write?]
+              (support/with-database
+               (fn [connection]
+                (when write?
+                 (support/transacted! connection [[:db/add [:seon.test/sym s] :seon.test/pass-count 1]]))
+                (let [database (db/db connection)]
+                 [(runner/reach-digests database [s])
+                  (:seon.test.runner/reach-derivations
+                   (some-> (#'runner/reach-cache database) deref deref))]))))
+       [digests derivations] (read-reach false)
+       [again again-derivations] (read-reach true)]
+  (is (string? (get digests s)) (pr-str digests))
+  (is (= digests again))
+  (is (= derivations again-derivations) "the fresh branch derived no entry")))
 
 (deftest reaching-is-the-program-graph-relation
   (support/with-database

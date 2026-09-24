@@ -859,57 +859,81 @@
                                         (map #(vector ::reach-schema %) schema-keys)))
      ::reach-function-count (count names)}))
 (defonce ^:private reach-holders
-  ;; The index follows its branch across contract and schema writes, so it is
-  ;; keyed by the attached connection, not the projection; LRU bounds retention.
+  ;; Keyed by the program content reach reads (each row's definition digest or
+  ;; schema form, with its entity): every branch with equal program rows shares
+  ;; one index, whatever else it wrote. LRU bounds retention.
   (cache/lru-cache-factory {} :threshold 16))
-(defn- reach-cache
- "The reach index's holder for the database's attached branch connection."
+(defonce ^:private reach-lineage
+  ;; The holder a commit or connection last read, with that value's basis, so a
+  ;; later value on the same lineage derives incrementally since that basis.
+  (cache/lru-cache-factory {} :threshold 64))
+(defn- reach-commit
+  "The store and commit a committed database value is, or nil."
+  [database]
+  (let [value (db/committed-value-identity database)]
+    (when (:datahike.value/commit-id value)
+      [(first (:datahike.value/connection-id value)) (:datahike.value/commit-id value)])))
+(defn- reach-content
+  "What every reach row derives from: each definition digest and schema form by entity."
+  [database]
+  (let [definitions (db/q '[:find ?e ?d :where [?e :seon.program/definition-digest ?d]] database)
+        forms (db/q '[:find ?e ?f :where [?e :seon.schema/form ?f]] database)]
+    (doseq [result [definitions forms] :when (map? result)]
+      (throw (ex-info "Reach content unavailable." result)))
+    [definitions forms]))
+(defn- lineage-keys [database]
+  (let [{:datahike.cache/keys [connection-id generation]} (:cache-context database)]
+    [[connection-id generation] (reach-commit database)]))
+(defn- reach-ancestor
+ "What this connection or a parent commit last read: its holder and the basis it
+ was read at. Since that basis this value holds only its lineage's own writes."
  [database]
- (let [{:datahike.cache/keys [connection-id generation]} (:cache-context database)]
-  (when connection-id
-   (cache/lookup-or-miss reach-holders [connection-id generation (:config database)]
-                         (fn [_] (atom nil))))))
+ (let [[store] (reach-commit database)
+       basis (db/basis-t database)]
+  (some #(when-let [entry (cache/lookup reach-lineage %)]
+           (when (<= (::basis entry) basis) entry))
+        (cons (first (lineage-keys database))
+              (map #(vector store %) (:datahike/parents (:meta database)))))))
+(defn- ancestor-index
+ "The ancestor holder's index, re-based on the basis the ancestor was read at."
+ [{holder ::holder basis ::basis}]
+ (some-> holder deref deref (assoc ::reach-basis basis)))
+(defn- reach-cache
+ "The reach index's holder for the database's program content, or nil when uncommitted."
+ [database]
+ (when-let [[store] (reach-commit database)]
+  (cache/lookup-or-miss reach-holders [store (reach-content database)] (fn [_] (atom nil)))))
 (defn- reach-entries
- "Derive selected reach digests, incrementally on the database's carried cache.
- Result-only transactions invalidate nothing. A cache retains only one basis;
- older or different branch values derive independently and never replace it."
+ "Derive selected reach digests from the index of equal program content, else
+ incrementally from a parent commit's. Uncommitted values derive independently."
  [database test-symbols]
  (if (empty? test-symbols)
    {}
  (try
- (let [holder (reach-cache database)
-       configuration (:config database)
-       value-identity (db/committed-value-identity database)
+ (let [ancestor (reach-ancestor database)
+       holder (reach-cache database)
        derive-index (fn [previous]
                 (let [index (if (and (= (db/basis-t database) (::reach-basis previous))
                                     (every? #(get-in previous [::reach-symbols %]) test-symbols))
                               previous (reach-refresh database previous test-symbols))
                       missing (remove #(get-in index [::reach-digests % ::reach-refs]) test-symbols)
                       index (reduce (fn [i s] (assoc-in i [::reach-digests s] (reach-entry i s))) index missing)]
-                 (assoc index ::reach-config configuration ::reach-attributes reach-attributes
-                        ::reach-value-identity value-identity ::reach-computed (count missing))))]
+                 (assoc index ::reach-attributes reach-attributes ::reach-computed (count missing))))]
+  (when holder
+   (doseq [k (lineage-keys database)]
+    (cache/miss reach-lineage k {::holder holder ::basis (db/basis-t database)})))
   (if holder
-   ;; The holder's value is a delay of the newest index: equal database values
-   ;; deref one derivation, a newer value claims by compare-and-set, and a
-   ;; failed claim is withdrawn so its exception never becomes the cache.
+   ;; The holder's value is a delay of the newest index for this content: equal
+   ;; content derefs one derivation, a wider request claims by compare-and-set,
+   ;; and a failed claim is withdrawn so its exception never becomes the cache.
    (loop []
     (let [claimed @holder
-          previous (some-> claimed deref)
-          revisions (reach-revisions database)
-          ;; Equal reach-attribute revisions name the same reach rows at any basis.
+          own (some-> claimed deref)
+          previous (or own (some-> ancestor ancestor-index))
           ;; An index read with other attributes (code before a reload) is not reused.
-          usable (and value-identity (= configuration (::reach-config previous))
-                      (= reach-attributes (::reach-attributes previous))
-                      (or (< (::reach-basis previous 0) (db/basis-t database))
-                          (= value-identity (::reach-value-identity previous))
-                          (and revisions (= revisions (::reach-revisions previous)))))]
-     (cond
-      (and usable (= value-identity (::reach-value-identity previous))
-           (every? #(get-in previous [::reach-digests % ::reach-refs]) test-symbols))
-      (select-keys (::reach-digests previous) test-symbols)
-      (not (and value-identity (or usable (nil? previous))))
-      (select-keys (::reach-digests (derive-index nil)) test-symbols)
-      :else
+          usable (= reach-attributes (::reach-attributes previous))]
+     (if (and own usable (every? #(get-in own [::reach-digests % ::reach-refs]) test-symbols))
+      (select-keys (::reach-digests own) test-symbols)
       (let [claim (delay (assoc (derive-index (when usable previous))
                                 ::reach-derivations (inc (::reach-derivations previous 0))))]
        (if (compare-and-set! holder claimed claim)
@@ -918,8 +942,7 @@
               (compare-and-set! holder claim claimed)
               (throw failure)))
         (recur))))))
-   (let [index (derive-index nil)]
-    (select-keys (::reach-digests index) test-symbols))))
+   (select-keys (::reach-digests (derive-index nil)) test-symbols)))
  (catch Exception failure
   (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording `reach-entries
    {:seon.error/message (str "Reach digest unavailable: " (ex-message failure))
