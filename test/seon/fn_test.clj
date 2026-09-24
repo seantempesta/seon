@@ -785,26 +785,6 @@
         (is (str/includes? (ex-message failure)
                            (::analyzer/message finding)))))))
 
-(deftest source-context-is-derived-once-per-file-population
-  (let [root (fixture-root)
-        _ (write-source!
-           root "sample/once.clj"
-           (str "(ns sample.once)\n"
-                "(defn one [] 1)\n"
-                "(defn two [] 2)\n"
-                "(defn three [] 3)\n"))
-        read-form-var (ns-resolve 'seon.fn 'read-jvm-form)
-        read-form (var-get read-form-var)
-        reads (atom 0)]
-    (with-redefs-fn
-      {read-form-var
-       (fn [source]
-         (swap! reads inc)
-         (read-form source))}
-      #(seon.fn/build-manifest {:seon.fn/roots [(.getPath root)]}))
-    (is (= 1 @reads)
-        "the namespace form is parsed once, not once per declaration")))
-
 (deftest publication-veto-is-exactly-the-cant-load-finding-classes
   (let [root (fixture-root)
         source-file
@@ -2492,6 +2472,29 @@
           (str "the canonical row dropped "
                (pr-str (vec (remove canonical carried)))
                " from " (pr-str (program/row-identity row)))))))
+
+(deftest namespace-context-reads-clauses-by-clojures-own-ns-grammar
+  ;; fn.clj kept a second clause parser: `[clojure [edn :as e] set]` threw
+  ;; (`apply hash-map` over an odd prefix list) and a bare `clojure.set` was
+  ;; dropped. The one reader (`seon.sci.reader`, clojure.core.specs.alpha) owns them.
+  (let [source (str "(ns sample.clauses (:require [clojure [edn :as e] set] clojure.walk"
+                    " [a.b :as-alias ab] [clojure.test :refer [deftest] :rename {deftest dt}])"
+                    " (:import [java.io File] java.util.UUID))")
+        entry {::analyzer/filename "sample" ::analyzer/row 1 ::analyzer/col 1
+               ::analyzer/end-row 1 ::analyzer/end-col (inc (count source))}
+        context (#'seon.fn/namespace-context {"sample" (#'seon.fn/text-context source)} entry)]
+    (is (= '#{clojure.edn clojure.set clojure.walk clojure.test} (:requires context))
+        ":as-alias creates no load edge; prefix members and bare libs do")
+    (is (= '{e clojure.edn ab a.b} (:aliases context)))
+    (is (= '{dt clojure.test/deftest} (:refers context)))
+    (is (= '{File java.io.File UUID java.util.UUID} (:imports context))
+        "a bare dotted import binds its simple class name")
+    (testing "a prefix list whose only member carries options"
+      (let [source "(ns sample.prefix (:require [clojure [edn :as e]]))"]
+        (is (= '{e clojure.edn}
+               (:aliases (#'seon.fn/namespace-context
+                          {"sample" (#'seon.fn/text-context source)}
+                          (assoc entry ::analyzer/end-col (inc (count source)))))))))))
 
 (deftest a-file-deleted-after-listing-is-the-declared-refusal
   ;; 2026-09-24 fault row 15: `full-source-refresh!` listed a dependent file,

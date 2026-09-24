@@ -21,6 +21,7 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.schema.internal :as schema.internal]
+            [seon.sci.reader :as reader]
             [clj-kondo.impl.utils :as kondo.utils]
             [seon.test.accretion :as accretion])
   (:import [java.nio.charset StandardCharsets]
@@ -191,15 +192,16 @@
     [(offset (::analyzer/row entry) (::analyzer/col entry))
      (offset (::analyzer/end-row entry) (::analyzer/end-col entry))]))
 
-(defn- read-jvm-form [source]
-  (binding [*read-eval* false]
-    (read {:read-cond :allow :features #{:clj}}
-          (java.io.PushbackReader. (java.io.StringReader. source)))))
+(declare stored-namespace-context)
 
-(defn- import-bindings [spec]
+(defn- import-bindings
+  "`[local class]` pairs of one `:import` spec; a bare `java.util.UUID`
+  imports `UUID`, as `clojure.core/import` does."
+  [spec]
   (cond
     (symbol? spec)
-    [[(symbol (name spec)) spec]]
+    (let [class-name (name spec)]
+      [[(symbol (subs class-name (inc (or (str/last-index-of class-name ".") -1)))) spec]])
 
     (and (sequential? spec) (symbol? (first spec)))
     (map (fn [class-name]
@@ -208,43 +210,24 @@
 
     :else []))
 
-(defn- namespace-context [contexts entry]
-  (let [form (read-jvm-form (exact-source contexts entry))]
-    (reduce
-     (fn [context clause]
-       (case (first clause)
-         :require
-         (reduce
-          (fn [context spec]
-            (if-not (and (vector? spec) (symbol? (first spec)))
-              context
-              (let [target (first spec)
-                    options (apply hash-map (rest spec))
-                    require-alias (or (:as options) (:as-alias options))
-                    renames (or (:rename options) {})
-                    referred (if (vector? (:refer options))
-                               (:refer options) [])]
-                ;; `:as-alias` without `:as` only creates the namespace
-                ;; (clojure `load-lib`, core.clj:6074-6078): no load edge.
-                (cond-> context
-                  (or (:as options) (not (:as-alias options)))
-                  (update :requires conj target)
-                  require-alias (assoc-in [:aliases require-alias] target)
-                  (seq referred)
-                  (update :refers into
-                          (map (fn [target-name]
-                                 [(get renames target-name target-name)
-                                  (symbol (str target) (str target-name))]))
-                          referred)))))
-          context
-          (rest clause))
-
-         :import
-         (update context :imports into (mapcat import-bindings (rest clause)))
-
-         context))
-     {:aliases {} :refers {} :imports {} :requires #{}}
-     (filter seq? (drop 2 form)))))
+(defn- namespace-context
+  "Requires, aliases and refers of one `ns` form, read by the one reader
+  (`seon.sci.reader/read`, which conforms clauses by Clojure's own
+  `clojure.core.specs.alpha` ns grammar); imports from the form it read.
+  A form that grammar refuses, as Clojure's `ns` does, carries no bindings."
+  [contexts entry]
+  (let [source (exact-source contexts entry)
+        events (reader/read {::reader/text source
+                             :seon.config.eval.result/max-source (count source)})
+        _ (when (map? events)
+            (throw (ex-info (str "Namespace form could not be read: " (:seon.error/message events))
+                            (assoc events :seon.fn/index-refused true))))
+        read-event (first (filter :seon.ns/name events))]
+    (assoc (stored-namespace-context read-event)
+           :imports (into {} (comp (filter #(and (seq? %) (= :import (first %))))
+                                   (mapcat rest)
+                                   (mapcat import-bindings))
+                          (::reader/form read-event)))))
 
 (defn- qualify-schema-symbols [form {:keys [aliases refers]}]
   (walk/postwalk
