@@ -4743,11 +4743,18 @@
                                (:seon.cluster.eval/source form) namespace-name
                                (nil? (next remaining)) evaluation)
                               evaluation)
+              ;; A refused disposition replaces the form's result through the
+              ;; ONE constructor of an evaluation settled without its result.
+              ;; A hand-built map here lacked `:seon.cluster.eval/ns`,
+              ;; ending namespace, print options and admission record, so
+              ;; `settle-batch!` refused the whole turn (root turn 62279,
+              ;; `default`, 2026-09-23 16:44Z) and the refusal never reached
+              ;; the agent that earned it.
               evaluation
               (if (:seon.turn/invalid-disposition-source evaluation)
-                {:seon.sci.admit/value evaluation
-                 :seon.eval/shown (pr-str evaluation)
-                 :seon.cluster.eval/error (:seon.error/message evaluation)}
+                (sci.eval/unrun-evaluation
+                 {:seon.sci.admit/value evaluation
+                  :seon.cluster.eval/ns (:seon.cluster.eval/ns form)})
                 evaluation)
               evaluation
               (merge (select-keys source [:seon.eval/origin])
