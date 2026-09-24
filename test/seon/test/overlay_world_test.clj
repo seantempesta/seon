@@ -40,7 +40,7 @@
                          :seon.sci.eval/time-limit-ms 5000
                          :seon.config/on-core-error :panic})))
                     ::admitted)]
-    (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
+    (is (nil? (:seon.cluster.eval/error evaluation)) (str (:seon.cluster.eval/error evaluation)))
     (when-let [row (:seon.program/row evaluation)]
       (support/transacted! connection [(program/declaration-row
                                         (db/carried-projection (db/db connection))
@@ -76,37 +76,39 @@
 (def ^:private checkpoint-head #'sut/checkpoint-head)
 (def ^:private prepare-checkpoint! #'sut/prepare-checkpoint!)
 
-(deftest ^{:seon.test/long "One agent definition and two concurrent checkpoint preparations and acquisitions on a fixture branch, each bounded by the 7.1 s request measured beside it (root run 99a231f41221, 2026-09-24), dominated by the 1.8 s first preparation."
+(deftest ^{:seon.test/long "Two concurrent first preparations and acquisitions on a fixture branch: a first preparation measured 1.7-1.8 s (config apply) and a request 7.1 s on default's JVM (root run 99a231f41221, 2026-09-24)."
            :seon.test/long-ms 15000}
   concurrent-first-preparation-yields-one-complete-checkpoint
   (support/with-database
    (fn [connection]
      (let [handle (support/execution-handle connection)
-           cluster (:seon.cluster/name handle)
            store (:seon.store/store handle)
-           effective (config/effective (db/db connection) cluster)]
-       ;; A unique definition makes this checkpoint's identity new.
-       (admit! handle (str "(defn overlay-probe-" (id/id) " {:malli/schema [:=> [:cat] :int]} [] 1)"))
-       (let [prepare #(future (try (clean-request-handle handle connection cluster effective)
-                                   (catch clojure.lang.ExceptionInfo refusal refusal)))
-             outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])
-             handles (filterv :seon.db/connection outcomes)
-             heads (set (map :seon.source/commit-id handles))
-             checkpoints (filterv #(and (str/starts-with? (name %) (str "checkpoint-" cluster "-"))
-                                        (heads (registry/branch-commit-id {:seon.store/store store
-                                                                           :seon.store/branch %})))
-                                  (registry/roster store))]
-         (try
-           (is (seq handles) (pr-str outcomes))
-           (is (= 1 (count heads)) "every acquirer shares one prepared head")
-           (is (= 1 (count checkpoints)) (pr-str checkpoints))
-           (is (every? #(or (:seon.db/connection %)
-                            (= :seon.test/prepared-checkpoint (:seon.error/expected (ex-data %))))
-                       outcomes)
-               "the other caller reuses the complete checkpoint or is pushed back by name")
-           (finally
-             (run! agent/release-context! handles)
-             (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) checkpoints))))))))
+           ;; A cluster of its own gives this checkpoint a new identity.
+           cluster (str "concurrent-" (id/id))
+           base (:seon.source/commit-id (db/pull (db/db connection) [:seon.source/commit-id]
+                                                 [:seon.cluster/name (:seon.cluster/name handle)]))
+           _ (support/seed-cluster! connection cluster)
+           _ (support/transacted! connection [{:seon.cluster/name cluster :seon.source/commit-id base}])
+           effective (config/effective (db/db connection) cluster)
+           prepare #(future (try (clean-request-handle handle connection cluster effective)
+                                 (catch clojure.lang.ExceptionInfo refusal refusal)))
+           outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])
+           handles (filterv :seon.db/connection outcomes)
+           ;; Handles hold whole worlds: report only their kind, never print them.
+           summary (mapv #(if (:seon.db/connection %) :handle (ex-message %)) outcomes)
+           checkpoints (filterv #(str/starts-with? (name %) (str "checkpoint-" cluster "-"))
+                                (registry/roster store))]
+       (try
+         (is (seq handles) (pr-str summary))
+         (is (= 1 (count checkpoints)) (pr-str checkpoints))
+         (is (some? (checkpoint-head store (first checkpoints) cluster base)) "the one checkpoint is complete")
+         (is (every? #(or (:seon.db/connection %)
+                          (= :seon.test/prepared-checkpoint (:seon.error/expected (ex-data %))))
+                     outcomes)
+             (str "the other caller reuses the complete checkpoint or is pushed back by name: " (pr-str summary)))
+         (finally
+           (run! agent/release-context! handles)
+           (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) checkpoints)))))))
 
 (deftest a-checkpoint-without-its-source-record-is-never-read
   (let [member (support/execution-handle nil)
@@ -114,23 +116,14 @@
         cluster (:seon.cluster/name member)
         candidate (db/db (:seon.db/connection member))
         base (:seon.source/commit-id (db/pull candidate [:seon.source/commit-id] [:seon.cluster/name cluster]))
-        prepare! (fn [overlay]
-                   (let [branch (keyword (str "half-checkpoint-" (id/id)))]
-                     (is (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch branch
-                                                                    :seon.cluster.registry/from base})))
-                     (is (nil? (checkpoint-head store branch cluster base)) "a created, unprepared branch is not ready")
-                     [branch (try (prepare-checkpoint! store branch cluster (config/effective candidate cluster)
-                                                       (cluster.process/id (cluster.process/current-identity))
-                                                       base overlay candidate)
-                                  (catch clojure.lang.ExceptionInfo refusal refusal))]))
-        [refused failure] (prepare! [[:db/add "absent" ::absent-attribute "x"]])
-        [prepared outcome] (prepare! [])]
+        branch (keyword (str "half-checkpoint-" (id/id)))]
+    (is (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch branch
+                                                   :seon.cluster.registry/from base})))
     (try
-      (is (instance? clojure.lang.ExceptionInfo failure) "the refused final write throws")
-      (is (not (contains? (registry/roster store) refused)) "a failed preparation retires its branch")
-      (is (nil? (checkpoint-head store refused cluster base)))
-      (is (nil? outcome))
-      (is (= (registry/branch-commit-id {:seon.store/store store :seon.store/branch prepared})
-             (checkpoint-head store prepared cluster base))
+      (is (nil? (checkpoint-head store branch cluster base)) "a created, unprepared branch is not ready")
+      (is (nil? (prepare-checkpoint! store branch cluster (config/effective candidate cluster)
+                                     (cluster.process/id (cluster.process/current-identity)) base candidate)))
+      (is (= (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})
+             (checkpoint-head store branch cluster base))
           "the source record, written last, completes it")
-      (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch prepared})))))
+      (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch branch})))))

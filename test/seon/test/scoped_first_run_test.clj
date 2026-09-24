@@ -43,7 +43,7 @@
                                  :seon.test/changed ['scoped.fixture/leaf]})
            elapsed-ms (/ (- (System/nanoTime) started) 1e6)
            members (set (map :seon.test/sym (:seon.test.run/members selected)))]
-       (is (nil? (:seon.error/at selected)) (pr-str selected))
+       (is (nil? (:seon.error/at selected)) (str (:seon.error/message selected)))
        ;; This test's own row names `leaf` too, so it reaches it as well.
        (is (= #{'scoped.fixture/direct} (set (filter #(= "scoped.fixture" (namespace %)) members)))
            (pr-str members))

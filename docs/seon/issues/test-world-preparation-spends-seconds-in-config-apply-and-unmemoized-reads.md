@@ -32,12 +32,26 @@ slow for what they return:
   took 28–44 ms. `seon.db/q` over the same range took 0.5 ms, and raw
   Datahike took 2 ms. The overlay uses `q` for that reason.
 
+## Update (lane harness-s2-overlay-s2c, after the two-level world)
+
+The checkpoint now holds boot's facts only, keyed by base, cluster, effective
+config and process, so the config apply runs once per such identity (measured
+950 ms). The overlay is written per request onto the request's private branch.
+That one 15-datom transaction measured 935 ms and 896 ms, of which
+`seon.db/write-report-error` took 834 ms over six writes. Each write is on a
+fresh branch connection whose projection was just derived
+(`schema/projection-from-database`), so per-projection plans such as
+`write-attribute-plans` are presumably rebuilt on every write. Unverified: name
+the cache key before fixing.
+
 ## Wanted
 
 - A first preparation under one second. Name which part of
   `seon.config/apply-compiled!` is proportional to the whole config, and
   remove it.
 - `seon.program/program-attributes` memoized as a function of its projection.
+- The checked writer's final check under one second on a fresh branch connection
+  (`seon.db/write-report-error`).
 - `seon.db/datoms` output checking that does not cost 20× the read.
 
 ## Evidence

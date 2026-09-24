@@ -174,6 +174,45 @@ reproduced in a throwaway namespace.
     - a real `seon.fn/rows` index of a new tmp file.
   - Its exact cause is therefore unproven. The named refusal will identify it on the next run.
 
+## Third follow-up (root: concurrent OOM, preparation cost, one-request reds)
+
+1. **The OOM sink was this lane's own test.** `concurrent-first-preparation-...` printed
+   `(pr-str outcomes)` as an assertion message. Its outcomes are execution handles, which hold
+   connections, database values and SCI contexts, so printing them builds a string over 2 GB.
+   - The test now prints only a summary: `:handle` or the refusal message.
+   - It uses a cluster of its own (seed-cluster! plus a source record), so its checkpoint is
+     genuinely first.
+   - The losing caller's refusal carries only the branch keyword. Every test-world throw goes
+     through `world-refusal`: message, operation, and at most 400 characters of the offending
+     value.
+2. **Preparation cost.**
+   - The checkpoint now holds boot's facts only. Its identity is base, cluster, sorted
+     effective config and process, with the overlay no longer part of it. Every request with
+     equal inputs therefore shares one preparation, measured at 950 ms.
+   - Each request writes its overlay onto its private branch after acquisition. That write
+     measured 935 ms and 896 ms for 15 datoms, and the world's digest map equals the
+     candidate's.
+   - Before this change, every distinct overlay paid a fresh 1.7–1.8 s preparation. Now a
+     request with an empty overlay pays nothing, and a non-empty overlay pays about 0.1 s to
+     compute plus about 0.9 s to write.
+   - The write cost is `seon.db/write-report-error` (834 ms over 6 writes). It is added to the
+     filed issue.
+   - `seon.program/program-attributes` memoization belongs to `src/seon/program.cljc`, which
+     this lane does not own.
+3. **The two one-request reds** (`test/seon/test/one_request_test.clj` is free in the ledger,
+   not this lane's file, so it is not edited).
+   - `a-stopped-requests-unstarted-member-...:351`: `b-runs-until-released` waits on a
+     `:seon.test.one-request-test/marker` datom written on the execution branch. That datom is
+     operational data, and clean worlds do not inherit data (owner ruling, design §2). So B
+     loops again in the second request, the request stops on B, and `c-after` stays pending.
+     - Proposed fix for the file's owner: release B through the program instead. Redefine
+       `b-runs-until-released` as `(clojure.test/is true)` with `define-agent-test!` before the
+       second request. That is a program row, so the overlay carries it. An S2b seed would
+       also do.
+   - `an-unexited-member-...:203` (`executed-count` 1 where 0 was expected) is not diagnosed.
+     Admission reads the recording connection, which this lane did not change. A failure of the
+     same assertion was already recorded when I first read default's results.
+
 ## Root runs (serially, after adopting the three commits)
 
 1. `bin/test-check default --test seon.test.scoped-first-run-test/a-first-incremental-request-naming-a-change-selects-only-its-reach`
