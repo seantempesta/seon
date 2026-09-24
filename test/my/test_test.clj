@@ -25,7 +25,7 @@
         :seon.source/test-input-digest (id/digest 64 [::owned-test-inputs])}])
      (support/transacted! connection
                           [{:seon.agent/id "owner"
-                            :seon.agent/namespace {:seon.ns/name 'my.agents.owner}}])
+                            :seon.agent/namespace (support/namespace-row @connection 'my.agents.owner)}])
      (let [base (support/fork-cluster-ctx connection)
            _ (evaluation/acquire! {:seon.sci.eval/ctx base :seon.db/db (db/db connection)})
            ctx (:seon.sci.eval/ctx

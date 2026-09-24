@@ -33,8 +33,8 @@
    (fn [connection]
      (test-support/transacted!
                   connection
-                  [{:seon.ns/name 'my.gen.planner}
-                   {:seon.ns/name 'my.gen.alpha}
+                  [(test-support/namespace-row @connection 'my.gen.planner)
+                   (test-support/namespace-row @connection 'my.gen.alpha)
                    {:seon.agent/id "planner"
                     :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
                    {:seon.agent/id "alpha"

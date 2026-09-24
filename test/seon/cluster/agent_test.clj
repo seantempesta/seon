@@ -24,7 +24,6 @@
             [seon.bootstrap :as bootstrap]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.program :as program]
             [seon.turn :as turn]
             [seon.cluster.prompt :as prompt]
 
@@ -247,8 +246,7 @@
   {:seon.agent/id agent-id
    :seon.agent/branch (live-branch connection)
    :seon.agent/namespace
-   (let [row {:seon.ns/name (symbol (str "my.agents." agent-id))}]
-     (assoc row :seon.program/definition-digest (program/definition-digest row)))})
+   (test-support/namespace-row @connection (symbol (str "my.agents." agent-id)))})
 
 (defn- create-generated-agent!
   [connection cluster-name agent-id]
@@ -444,8 +442,7 @@
                           (:seon.sci.eval/projection-state ctx))})]
           (test-support/transacted!
                        connection
-                       [(let [row {:seon.ns/name 'my.agents.source-agent-moved}]
-                          (assoc row :seon.program/definition-digest (program/definition-digest row)))
+                       [(test-support/namespace-row @connection 'my.agents.source-agent-moved)
                         {:seon.agent/id "source-agent"
                          :seon.agent/namespace
                          [:seon.ns/name 'my.agents.source-agent-moved]}])

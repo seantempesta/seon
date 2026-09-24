@@ -5,7 +5,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.sci.eval :as evaluation]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.program :as seon-program]))
 
 (deftest retraction-refuses-before-context-mutation-and-removes-clean-declarations
   (support/with-database
@@ -80,10 +81,12 @@
      (support/seed-cluster! connection "program-namespace-fixture")
      (support/transacted!
       connection
-      [{:seon.ns/name 'my.disposable.program
-        :seon.schema.admission/source :agent
-        :seon.ns/aliases #{{:seon.ns.alias/local 'text
-                            :seon.ns.alias/target-ns 'clojure.string}}}
+      [(seon-program/declaration-row
+        (db/carried-projection @connection)
+        {:seon.ns/name 'my.disposable.program :seon.ns/source "(ns my.disposable.program)"
+         :seon.ns/aliases #{{:seon.ns.alias/local 'text
+                             :seon.ns.alias/target-ns 'clojure.string}}}
+        :all :agent)
        (support/program-fn-row (db/db connection) (symbol "my.disposable.program" "target") "(defn target [] 42)")
        (assoc (support/program-fn-row (db/db connection) (symbol "my.disposable.program" "caller") "(defn caller [] (target))")
               :seon.fn/calls #{(symbol "my.disposable.program" "target")})])

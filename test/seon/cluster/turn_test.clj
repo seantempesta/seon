@@ -1580,34 +1580,38 @@
             namespace-result
             (db/transact!
              connection
-             [{:seon.ns/name 'authored.target
-               :seon.schema.admission/source :agent
-               :seon.ns/source "(ns authored.target)"}
-              {:seon.ns/name 'authored.consumer
-               :seon.schema.admission/source :agent
-               :seon.ns/source "(ns authored.consumer)"
-               :seon.ns/requires [[:seon.ns/name 'authored.target]]
-               :seon.ns/aliases
-               [{:seon.ns.alias/local 'target
-                 :seon.ns.alias/target-ns 'authored.target}]
-               :seon.ns/refers
-               [{:seon.ns.refer/local 'plus
-                 :seon.ns.refer/target-ns 'authored.target
-                 :seon.ns.refer/target-name 'increment}]}
-              {:seon.ns/name 'alias.cycle-a
-               :seon.schema.admission/source :agent
-               :seon.ns/source "(ns alias.cycle-a)"
-               :seon.ns/aliases
-               [{:seon.ns.alias/local 'b
-                 :seon.ns.alias/target-ns 'alias.cycle-b}
-                {:seon.ns.alias/local 'ghost
-                 :seon.ns.alias/target-ns 'not.loaded}]}
-              {:seon.ns/name 'alias.cycle-b
-               :seon.schema.admission/source :agent
-               :seon.ns/source "(ns alias.cycle-b)"
-               :seon.ns/aliases
-               [{:seon.ns.alias/local 'a
-                 :seon.ns.alias/target-ns 'alias.cycle-a}]}])
+             [(test-support/namespace-row @connection 'authored.target)
+              (program/declaration-row
+               (db/carried-projection @connection)
+               {:seon.ns/name 'authored.consumer
+                :seon.ns/source "(ns authored.consumer)"
+                :seon.ns/requires #{'authored.target}
+                :seon.ns/aliases
+                [{:seon.ns.alias/local 'target
+                  :seon.ns.alias/target-ns 'authored.target}]
+                :seon.ns/refers
+                [{:seon.ns.refer/local 'plus
+                  :seon.ns.refer/target-ns 'authored.target
+                  :seon.ns.refer/target-name 'increment}]}
+               :all :agent)
+              (program/declaration-row
+               (db/carried-projection @connection)
+               {:seon.ns/name 'alias.cycle-a
+                :seon.ns/source "(ns alias.cycle-a)"
+                :seon.ns/aliases
+                [{:seon.ns.alias/local 'b
+                  :seon.ns.alias/target-ns 'alias.cycle-b}
+                 {:seon.ns.alias/local 'ghost
+                  :seon.ns.alias/target-ns 'not.loaded}]}
+               :all :agent)
+              (program/declaration-row
+               (db/carried-projection @connection)
+               {:seon.ns/name 'alias.cycle-b
+                :seon.ns/source "(ns alias.cycle-b)"
+                :seon.ns/aliases
+                [{:seon.ns.alias/local 'a
+                  :seon.ns.alias/target-ns 'alias.cycle-a}]}
+               :all :agent)])
             function-result
             (db/transact!
              connection

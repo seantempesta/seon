@@ -249,7 +249,7 @@
             function-symbol 'source-deletion-probe/value
             fn-identity [:seon.fn/sym function-symbol]]
         (test-support/transacted! connection
-                                  [{:seon.ns/name 'source-deletion-probe}
+                                  [(test-support/namespace-row @connection 'source-deletion-probe)
                                    (test-support/program-fn-row
                                     (db/db connection) function-symbol
                                     "(ns source-deletion-probe) (defn value [] 1)")])
