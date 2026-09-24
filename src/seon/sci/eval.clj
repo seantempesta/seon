@@ -727,17 +727,18 @@
 (defn- instrumentation-config
   "Read the contract dial and admission caps from this database value.
 
-  A database with no admissible caps cannot arm a contract in either dial.
-  The caps member is whatever
-  `result-caps` returned: the caps map, or the refusal naming the first
-  config key it wanted. `instrument/wrap-interpreted` is the one seam that
-  decides what to do with each."
+  `:seon.config/on-core-error` is a required dial, so an effective config
+  always names it; its absence means the read refused, and that typed refusal
+  is thrown rather than defaulting the fault policy. The caps member is
+  whatever `result-caps` returned; `instrument/wrap-interpreted` decides what
+  to do with it."
   [db]
   (let [effective (database-effective-config db)]
-    (merge {:seon.config/on-core-error
-            (or (:seon.config/on-core-error effective) :record)
-            :seon.sci.admit/caps (config/result-caps effective)}
-           (select-keys effective [:seon.config.error/max-evidence-bytes]))))
+    (when-not (:seon.config/on-core-error effective)
+      (throw (ex-info (:seon.error/message effective) effective)))
+    (merge (select-keys effective [:seon.config/on-core-error
+                                   :seon.config.error/max-evidence-bytes])
+           {:seon.sci.admit/caps (config/result-caps effective)})))
 
 (defn- install-function-contract!
   [ctx committed projection db]
@@ -1074,7 +1075,12 @@
                         (install-function-from-database! ctx db function-symbol))
                       :interpreted
                       (catch Throwable failure
-                        (when (:seon.instrument/registration-observation (error/refusal failure))
+                        ;; An unarmable contract or an unreadable cluster
+                        ;; config is not this row's fault: it refuses the
+                        ;; acquisition instead of blaming the row.
+                        (when (let [refusal (error/refusal failure)]
+                                (or (:seon.instrument/registration-observation refusal)
+                                    (:seon.config/error-key refusal)))
                           (throw failure))
                         (interpretation-failure function-symbol failure)))))]
           (if (map? result)
