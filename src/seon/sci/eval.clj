@@ -2381,11 +2381,6 @@
    ::base-context-cache-reason
    "A base context holds a whole interpreted program; four recent program identities cover the live branch and concurrent test requests without retaining an unbounded population."})
 
-;; The same core.cache wrapped LRU seon.db's projection memo and
-;; datahike.schema-cache use.
-(defonce ^:private acquisition-attribute-cache
-  (cache/lru-cache-factory {} :threshold 8))
-
 (defonce ^:private program-identity-cache
   (cache/lru-cache-factory
    {} :threshold (::program-identity-cache-size program-cache-policy)))
@@ -2400,18 +2395,17 @@
   The program partition (`seon.program/program-attributes`), the projection's own
   read set (`seon.schema/projection-attributes`), the contract dials an interpreted
   wrapper arms with (`seon.config/dial-attributes`) and the loaded source commit.
-  Memoized by the projection's fingerprint, which names its declaration population."
+  Retained on the projection's own holder (`schema/projection-cache-value`), so
+  two populations whose fingerprints collide never share a derivation."
   {:malli/schema [:=> [:cat :seon.schema/projection] [:set :qualified-keyword]]}
   [projection]
-  @(cache/lookup-or-miss
-    acquisition-attribute-cache
-    (:seon.schema.projection/fingerprint projection)
-    (fn [_]
-      (delay
-       (-> (program/program-attributes projection)
-           (into schema/projection-attributes)
-           (into (config/dial-attributes projection))
-           (conj :seon.config/cluster :seon.source/commit-id))))))
+  (schema/projection-cache-value
+   projection ::acquisition-attributes
+   (fn []
+     (-> (program/program-attributes projection)
+         (into schema/projection-attributes)
+         (into (config/dial-attributes projection))
+         (conj :seon.config/cluster :seon.source/commit-id)))))
 
 (defn- revision-basis
   "The part of a value's Datahike cache-context that names its attribute revisions.
