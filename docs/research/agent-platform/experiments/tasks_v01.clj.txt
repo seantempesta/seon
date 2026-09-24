@@ -1,0 +1,121 @@
+(ns scratch.tasks-v01
+  "Experiment v0.1: authored tasks carry only id, intent, subjects, target schemas and done-when;
+  deliverables, order, changed keys, context and state are DERIVED. Throwaway."
+  (:require [clojure.string :as str]
+            [datahike.api :as d]
+            [edamame.core :as e]
+            [malli.core :as m]
+            [malli.error :as me]))
+
+(def authored-schema
+  "What an author writes. Everything else is derived; overrides are allowed but rare."
+  [:map {:closed true}
+   [:seon.task/id :qualified-keyword]
+   [:seon.task/intent [:string {:min 20}]]
+   [:seon.task/subjects [:set {:min 1} :symbol]]
+   [:seon.task/schemas {:optional true} [:map-of :qualified-keyword :any]]
+   [:seon.task/done-when {:optional true} [:vector {:min 1} :any]]
+   [:seon/must-read {:optional true} [:set :qualified-symbol]]
+   [:seon.task/evidence {:optional true} [:set :string]]
+   [:seon.task/delivers {:optional true} [:set :qualified-symbol]]  ; override only
+   [:seon.task/needs {:optional true} [:set :qualified-keyword]]])  ; override only
+
+(defn read-dir
+  "Every task in every EDN file under `dir`, read as Clojure data without evaluation."
+  [dir]
+  (vec (mapcat #(e/parse-string (slurp %) {:quote true :deref false :fn false :regex false})
+               (filter #(str/ends-with? (str %) ".edn") (file-seq (java.io.File. dir))))))
+
+(defn exists?
+  "A program row, a loaded Var, or a namespace row."
+  [db s]
+  (boolean (or (d/q '[:find ?e . :in $ ?s :where [?e :seon.fn/sym ?s]] db s)
+               (d/q '[:find ?e . :in $ ?s :where [?e :seon.test/sym ?s]] db s)
+               (d/q '[:find ?e . :in $ ?s :where [?e :seon.ns/name ?s]] db s)
+               (try (find-var s) (catch Exception _ nil)))))
+
+(defn referenced
+  "Every qualified symbol a task's done-when forms mention (called or quoted)."
+  [task]
+  (set (filter qualified-symbol? (tree-seq coll? seq (:seon.task/done-when task)))))
+
+(defn derive-task
+  "Authored task + database value -> the full task. Pure."
+  [db task]
+  (let [missing (set (remove #(exists? db %) (referenced task)))
+        fn-subjects (set (filter qualified-symbol? (:seon.task/subjects task)))
+        ;; a task delivers a missing symbol only when the symbol's namespace is one of its subjects
+        subject-nss (set (map #(if (qualified-symbol? %) (symbol (namespace %)) %) (:seon.task/subjects task)))
+        owned-missing (set (filter #(subject-nss (symbol (namespace %))) missing))]
+    (cond-> (assoc task
+                   :seon.task/keys (set (keys (:seon.task/schemas task)))
+                   :seon.task/context (if (seq (:seon.task/done-when task)) 'seon.task/implement 'seon.task/triage)
+                   :seon.task/state (if (seq (:seon.task/done-when task)) :specified :raised)
+                   ::missing missing)
+      (not (:seon.task/delivers task))
+      (assoc :seon.task/delivers (into fn-subjects owned-missing)))))
+
+(defn derive-needs
+  "Task B needs task A when B's done-when references something A delivers (and A is not B)."
+  [tasks]
+  (let [deliverer (into {} (for [t tasks s (:seon.task/delivers t)] [s (:seon.task/id t)]))]
+    (mapv (fn [t]
+            (let [derived (set (keep #(let [owner (deliverer %)] (when (not= owner (:seon.task/id t)) owner)) (referenced t)))]
+              (assoc t :seon.task/needs (into derived (:seon.task/needs t)))))
+          tasks)))
+
+(defn findings
+  "Authored shape, then the v0 rules over the derived tasks."
+  [db authored derived]
+  (let [by-id (into {} (map (juxt :seon.task/id identity)) derived)
+        delivered-by-needs (fn [t] (set (mapcat #(:seon.task/delivers (by-id %)) (:seon.task/needs t))))]
+    (vec (concat
+          (for [a authored :let [ex (m/explain authored-schema a)] :when ex]
+            {:task (:seon.task/id a) :rule :shape :why (me/humanize ex)})
+          (for [t derived
+                f (concat
+                   (for [s (:seon.task/subjects t) :when (not (exists? db s))] {:rule :subject-missing :sym s})
+                   (for [s (:seon/must-read t) :when (not (exists? db s))] {:rule :must-read-missing :sym s})
+                   (for [s (::missing t) :when (not (or ((:seon.task/delivers t) s) ((delivered-by-needs t) s)))]
+                     {:rule :references-unknown :sym s})
+                   (for [p (:seon.task/evidence t) :when (not (.exists (java.io.File. (str "/Users/sean/src/seon/" p))))]
+                     {:rule :evidence-missing :path p}))]
+            (assoc f :task (:seon.task/id t)))))))
+
+(defn plan
+  "Tasks in derived dependency order with their derived state."
+  [derived]
+  (let [by-id (into {} (map (juxt :seon.task/id identity)) derived)]
+    (loop [out [] done #{} left (set (keys by-id))]
+      (if (empty? left) out
+          (let [ready (sort (filter #(every? done (:seon.task/needs (by-id %))) left))
+                ready (if (seq ready) ready [(first (sort left))])]
+            (recur (into out (for [id ready :let [t (by-id id)]]
+                               {:id id :state (:seon.task/state t) :needs (vec (sort (:seon.task/needs t)))
+                                :delivers (vec (sort (:seon.task/delivers t)))}))
+                   (into done ready) (reduce disj left ready)))))))
+
+(defn branch-evaluator
+  "Evaluate source strings in the SCI context of `branch` on `cluster-name` (writes stay on the branch)."
+  [cluster-name branch]
+  (let [instance (get @@(ns-resolve 'seon.cluster (symbol "running-instances")) cluster-name)
+        cluster (:seon.turn.loop/cluster instance)
+        handle ((requiring-resolve 'seon.cluster.agent/acquire-context!)
+                (assoc cluster :seon.store/store (:seon.store/store instance)) nil {:seon.agent/branch branch})]
+    (fn [source]
+      ((requiring-resolve 'seon.sci.eval/evaluate)
+       {:seon.cluster.eval/source source :seon.cluster.eval/ns [:seon.ns/name 'user]
+        :seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+        :seon.sci.eval/time-limit-ms 30000 :seon.config/on-core-error (:seon.config/on-core-error cluster)}))))
+
+(defn red-on-base
+  "Evaluate each done-when form of each specified task; a proof that already holds proves nothing."
+  [evaluate derived]
+  (vec (for [t derived :when (seq (:seon.task/done-when t))
+             [i form] (map-indexed vector (:seon.task/done-when t))
+             :let [r (evaluate (pr-str form))
+                   v (:seon.sci.admit/value r)
+                   err (:seon.cluster.eval/error r)]]
+         {:task (:seon.task/id t) :proof i
+          :on-base (cond err :red-error (true? v) :GREEN-ALREADY :else :red)
+          :detail (or (some-> err (subs 0 (min 120 (count err)))) (pr-str v))})))

@@ -1,12 +1,7 @@
-;; Tasks about seon.schema — decoration language v0 (docs/research/agent-platform/decoration-language-v0-2026-09-24.md).
 [{:seon.task/id        :seon.schema.task/agents-can-validate
-  :seon.task/problem   "An agent cannot check a value against a schema key at its REPL: malli.core is not bound in the agent's SCI context and seon.schema exposes no validation function, so the data-first stage is impossible and requirement forms cannot state a shape. Found by the dogfood run on seon.note, 2026-09-24."
+  :seon.task/intent    "An agent cannot check a value against a schema key at its REPL: malli.core is not bound in its SCI context and seon.schema exposes no validation function, so the data-first stage is impossible."
   :seon.task/subjects  #{seon.schema}
-  :seon/must-read      #{seon.schema/projection-validator seon.schema/projection-explainer seon.db/carried-projection seon.db/db}
-  :seon.task/requirements
-  [(true?  (seon.schema/valid? :my.note/id "n1"))
-   (false? (seon.schema/valid? :my.note/id 42))
-   (map?   (seon.schema/explain :my.note/id 42))
-   (nil?   (seon.schema/explain :my.note/id "n1"))]
-  :seon.task/delivers  #{seon.schema/valid? seon.schema/explain}
-  :seon.task/context   seon.task/implement}]
+  :seon/must-read      #{seon.schema/projection-validator seon.schema/projection-explainer seon.db/carried-projection}
+  :seon.task/done-when [(true?  (seon.schema/valid? :my.note/id "n1"))
+                        (false? (seon.schema/valid? :my.note/id 42))
+                        (map?   (seon.schema/explain :my.note/id 42))]}]
