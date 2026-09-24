@@ -1065,7 +1065,7 @@
             terminal-data (private-loop-fn 'evaluation-terminal-data)]
         (test-support/transacted!
                      connection
-                     [{:seon.ns/name 'my.agents.undisposed-agent}
+                     [(test-support/namespace-row @connection 'my.agents.undisposed-agent)
                       {:seon.agent/id agent-id
                        :seon.agent/namespace
                        [:seon.ns/name 'my.agents.undisposed-agent]}
@@ -1287,7 +1287,7 @@
                       :seon.boot/cluster-name "loop-test"})
       (test-support/transacted! connection
                               (into (test-support/agent-tx @connection "agent-a")
-                                [{:seon.ns/name 'user}
+                                [(test-support/namespace-row @connection 'user)
                                
                                  {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "go"}]))
       (body connection))))

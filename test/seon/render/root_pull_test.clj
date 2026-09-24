@@ -8,7 +8,8 @@
             [seon.render.walk :as walk]
             [seon.render.web :as web]
             [seon.schema :as schema]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.program :as program]))
 
 (def ^:private root-pull-schema
   [{:db/ident ::root-id
@@ -425,11 +426,17 @@
    (fn [connection]
      (let [tx (db/transact!
                connection
-               [{:seon.ns/name 'root-walk.required}
-                {:seon.ns/name 'root-walk.subject
-                 :seon.ns/requires #{'root-walk.required}}
-                {:seon.ns/name 'root-walk.dependent
-                 :seon.ns/requires #{'root-walk.subject}}
+               [(support/namespace-row @connection 'root-walk.required)
+                (program/declaration-row
+                 (db/carried-projection @connection)
+                 {:seon.ns/name 'root-walk.subject :seon.ns/source "(ns root-walk.subject)"
+                  :seon.ns/requires #{'root-walk.required}}
+                 :all :agent)
+                (program/declaration-row
+                 (db/carried-projection @connection)
+                 {:seon.ns/name 'root-walk.dependent :seon.ns/source "(ns root-walk.dependent)"
+                  :seon.ns/requires #{'root-walk.subject}}
+                 :all :agent)
                 (support/program-fn-row
                  (db/db connection) 'root-walk.subject/unrelated
                  "(defn unrelated {:malli/schema [:=> [:cat] :nil]} [] nil)")])

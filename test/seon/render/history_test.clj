@@ -44,7 +44,7 @@
                    (schema/canonical-schema-rows)))
      (support/transacted!
              connection
-             [{:seon.ns/name 'fixture.history}
+             [(support/namespace-row @connection 'fixture.history)
               {:seon.agent/id "history-agent"
                :seon.agent/namespace [:seon.ns/name 'fixture.history]}
               {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me."}])
@@ -145,7 +145,7 @@
             (schema/canonical-schema-rows)))
      (support/transacted!
       connection
-      [{:seon.ns/name 'fixture.neighbour}
+      [(support/namespace-row @connection 'fixture.neighbour)
        {:seon.agent/id "neighbour-agent"
         :seon.agent/namespace [:seon.ns/name 'fixture.neighbour]}])
      (let [database (db/db connection)

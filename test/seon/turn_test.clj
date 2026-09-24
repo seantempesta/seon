@@ -863,7 +863,7 @@
                           :seon.cluster.eval/ordinal 0
                           :seon.eval/shown "nil"
                           :seon.program/row row}))))]
-        (support/transacted! connection [{:seon.ns/name namespace-name}])
+        (support/transacted! connection [(support/namespace-row @connection namespace-name)])
         (settle-row!
          "pending-test-run" "pending-test-agent"
          {:seon.test/sym test-symbol
@@ -1649,8 +1649,7 @@
         (support/transacted!
                 connection
                 (into (support/agents-tx @connection [agent-a agent-b])
-                  [{:seon.ns/name namespace-name
-                    :seon.schema.admission/source :agent}]))
+                  [(support/namespace-row @connection namespace-name)]))
         (doseq [[run-id agent-id] [[run-a agent-a] [run-b agent-b]]]
           (support/transacted!
                   connection

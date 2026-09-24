@@ -42,7 +42,7 @@
      (cluster/ensure-cluster-entity! connection "debug-turns" cluster/boot-process-identity)
      (support/transacted! connection
                           [{:seon.agent/id "root" :seon.agent/namespace {:seon.ns/name 'my.agents.root}}
-                           {:seon.agent/id "juniper" :seon.agent/namespace {:seon.ns/name 'my.agents.juniper}}])
+                           {:seon.agent/id "juniper" :seon.agent/namespace (support/namespace-row @connection 'my.agents.juniper)}])
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "debug-turns" connection)
            routing (agent/routing)]
@@ -353,7 +353,7 @@
      (let [written
            (db/transact!
             connection
-            [{:seon.ns/name 'my.agents.history-probe}
+            [(support/namespace-row @connection 'my.agents.history-probe)
              {:db/id "history-agent" :seon.agent/id "history-probe"
               :seon.agent/namespace [:seon.ns/name 'my.agents.history-probe]
               :seon.agent/runtime {:seon.runtime/agent "history-agent"
@@ -421,7 +421,7 @@
      (let [written
            (support/transacted!
             connection
-            [{:seon.ns/name 'my.agents.thinking-probe}
+            [(support/namespace-row @connection 'my.agents.thinking-probe)
              {:db/id "thinking-agent" :seon.agent/id "thinking-probe"
               :seon.agent/namespace [:seon.ns/name 'my.agents.thinking-probe]}
              {:db/id "thinking-turn" :seon.turn/id "thinking-probe-turn"
@@ -881,7 +881,7 @@
   (let [agent-written
         (support/transacted!
          connection
-         [{:seon.ns/name 'my.agents.outline-probe}
+         [(support/namespace-row @connection 'my.agents.outline-probe)
           {:seon.agent/id "outline-probe"
            :seon.agent/namespace [:seon.ns/name 'my.agents.outline-probe]}])
         opening

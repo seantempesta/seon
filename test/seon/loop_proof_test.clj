@@ -345,9 +345,9 @@
                {:seon.boot/cluster-name "loop-proof"
                 :seon.config/manifest {:seon.config.ai/no-provider true}}))
              {:seon.agent/id "other"
-              :seon.agent/namespace {:seon.ns/name 'my.agents.other}}
+              :seon.agent/namespace (support/namespace-row @connection 'my.agents.other)}
              {:seon.agent/id "unobserved"
-              :seon.agent/namespace {:seon.ns/name 'my.agents.unobserved}}])
+              :seon.agent/namespace (support/namespace-row @connection 'my.agents.unobserved)}])
            _ (is (some? (:db-after configured)) (pr-str configured))
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)

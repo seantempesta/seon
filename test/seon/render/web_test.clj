@@ -61,7 +61,8 @@
             [seon.sci.kernel :as sci.kernel]
             [seon.test-support :as support]
             [seon.turn :as turn]
-            [starfederation.datastar.clojure.api :as datastar])
+            [starfederation.datastar.clojure.api :as datastar]
+            [seon.program :as program])
   (:import [java.util.concurrent CompletableFuture CountDownLatch]
            [java.net BindException URI URLEncoder]
            [java.net.http HttpClient HttpRequest HttpRequest$BodyPublishers
@@ -1902,7 +1903,10 @@ handle))}}
                     (pr-str [:seon.ns/name namespace-name]) "UTF-8")
             path (URLEncoder/encode (pr-str [:seon.ns/source]) "UTF-8")]
         (support/transacted! connection
-                           [{:seon.ns/name namespace-name :seon.ns/source huge}])
+                           [(program/declaration-row
+                             (db/carried-projection @connection)
+                             {:seon.ns/name namespace-name :seon.ns/source huge}
+                             :all :agent)])
         (let [response (fetch server (str "/data?entity=" entity
                                           "&path=" path "&offset=0"))
               body (.body response)]
@@ -1926,7 +1930,10 @@ handle))}}
      (let [namespace-name 'my.agents.ai-bound-source
            huge (apply str (repeat (* 5 1024 1024) "x"))]
        (support/transacted! connection
-                            [{:seon.ns/name namespace-name :seon.ns/source huge}])
+                            [(program/declaration-row
+                              (db/carried-projection @connection)
+                              {:seon.ns/name namespace-name :seon.ns/source huge}
+                              :all :agent)])
        (let [database @connection
              ctx (support/fork-cluster-ctx connection)
              profile (render/agent-render-profile config/defaults)

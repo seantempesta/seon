@@ -8,7 +8,8 @@
             [seon.render.ns :as render.ns]
             [seon.render.test :as render.test]
             [seon.render.walk :as walk]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.program :as program]))
 
 (defn- exercise-pair
   [entity-lookup expected-ai expected-html]
@@ -17,7 +18,7 @@
      (let [report
            (support/transacted! connection
              (into (support/agent-tx @connection "entity-pairs-agent")
-               [{:seon.ns/name 'entity-pairs.fixture}
+               [(support/namespace-row @connection 'entity-pairs.fixture)
               
                 (support/program-fn-row (db/db connection) 'entity-pairs.fixture/function
                                         "(defn function [] true)")
@@ -105,10 +106,13 @@
      (support/seed-cluster! connection "namespace-page")
      (support/transacted!
       connection
-      [{:seon.ns/name 'fixture.namespace-page
-        :seon.ns/source
-        "(ns fixture.namespace-page (:require [seon.id]))\n\n(def own-marker true)"
-        :seon.ns/requires ['seon.id]}
+      [(program/declaration-row
+        (db/carried-projection @connection)
+        {:seon.ns/name 'fixture.namespace-page
+         :seon.ns/source
+         "(ns fixture.namespace-page (:require [seon.id]))\n\n(def own-marker true)"
+         :seon.ns/requires ['seon.id]}
+        :all :agent)
        {:seon.agent/id "namespace-page-agent"
         :seon.agent/namespace [:seon.ns/name 'fixture.namespace-page]}])
      (let [database (db/db connection)
