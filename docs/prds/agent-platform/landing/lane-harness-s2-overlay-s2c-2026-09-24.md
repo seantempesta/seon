@@ -1,6 +1,6 @@
 ---
 type: landing
-status: committed bbb2efd86 464bca11b 41f2f0b53, code only (owner load rule); unadopted; no test request run
+status: committed bbb2efd86 464bca11b 41f2f0b53 4da02fcea, code only (owner load rule); unadopted; no test request run
 lane: harness-s2-overlay-s2c
 created: 2026-09-24
 design: docs/research/agent-platform/one-test-harness/design-2026-09-24.md §2 steps 1 and 4, §9c row S2
@@ -108,6 +108,48 @@ serializes who prepares it, and it is read only when a fact shows it is complete
 | checkpoint preparation on a disposable branch | head before = nil. Prepared world's full digest map = live default's, `:seon.agent/id` rows = []. Preparation 1,700 / 1,807 ms |
 | refused preparation (overlay writing an absent attribute) | throws "The test world's source record was refused."; branch retired; `checkpoint-head` nil |
 | completion read | 8.6 ms incomplete, 54 ms then 12 ms complete. It was 116 ms through `source/database`, whose projection derivation it no longer uses |
+
+## Follow-up after root's first run (4da02fcea)
+
+**Root's reds and their causes.** Each was read from recorded failures on default, then
+reproduced in a throwaway namespace.
+
+1. **`scoped-first-run-test` selected `#{}`.** The fixture wrote a second
+   `:seon.source/digest` seal. Selection then refused with
+   `:seon.test/input-evidence-unavailable`, and a refusal has no members. The selector change
+   itself works: on the published base plus the fixture rows it selects `scoped.fixture/direct`.
+   It also selects the file's own test, whose row names `scoped.fixture/leaf`. The fixture no
+   longer writes a seal. It now asserts no refusal, the fixture's own members `#{direct}`, and
+   fewer than 5 members overall.
+2. **`overlay-world-test`.** The fixture functions had no contracts, so admission refused them
+   with "declares no :malli/schema". The helper then passed a nil row to
+   `seon.program/declaration-row`. The functions now declare `[:=> [:cat] :int]`, and the helper
+   writes a row only when the evaluation produced one. Both long tests now use the measured
+   7.1 s request as their basis, with bound 15 s.
+3. **"The test world's source record was refused"** (in `seon.test-reaching-test`).
+   - Fixture rows name their file by identity (`:seon.fn/file [:seon.fn.file/relative-path p]`).
+     File rows are a recomputed family, not digest-compared, so the published base lacks a new
+     fixture file and the lookup refused.
+   - The overlay now also carries any recomputed row its rows name that the world lacks; the
+     world keeps its own file rows. Probe: live default plus a new agent file referenced by
+     `my.agents.root/largest` gives a 17-datom overlay that applies onto the published base,
+     with the file row present.
+   - The thrown error now includes the refusal's message and offending value.
+4. **The other reaching reds are mostly the preparation cost.**
+   - `failed-results-with-native-datoms-remain-recordable` measured 5,112 ms and
+     `fixture-observations-remain-stale` 6,258 ms, both against a 5 s bound. Each nested request
+     has a new overlay, so it pays the 1.8 s first preparation (see the filed issue).
+   - `reach-digests-follow-only-changed-closures:100` (1 computed where 0 was expected) and
+     `the-declared-opt-in-includes-the-long-test:541` (executed 0) are not diagnosed here.
+5. **`one-request-test` `passed? false` with 0 fail and 0 error.** This is consistent with
+   declared-long members being excluded when the run omits `--include-long`. Not diagnosed.
+
+**Rerun (root):**
+- `bin/test-check default --test seon.test.scoped-first-run-test/a-first-incremental-request-naming-a-change-selects-only-its-reach`
+- `bin/test-check default --ns seon.test.overlay-world-test --include-long`
+- `bin/test-check default --ns seon.test-reaching-test`
+- `bin/test-check default --ns seon.test.one-request-test --include-long`
+- `bin/test-check default --test seon.test.clean-world-test/a-member-world-is-the-loaded-program-with-boot-facts-only`
 
 ## Root runs (serially, after adopting the three commits)
 
