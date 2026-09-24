@@ -64,6 +64,14 @@
   [{:keys [:seon.db/connection :seon.source.test/marker]}]
   (test-support/transacted! connection [{:seon.source.test/marker marker}]))
 
+(defonce ^:private handed-database (atom nil))
+
+(defn populate-recording!
+  "Record the previous database publication hands its population, then populate."
+  [request]
+  (reset! handed-database (:seon.source/previous-database request))
+  (populate! request))
+
 (defn populate-blocked!
   [request]
   (.countDown ^CountDownLatch @blocked-entered)
@@ -241,6 +249,21 @@
                 (is (= expected-markers (markers connection)))
                 (finally
                   (d/release connection))))))))))
+
+(deftest ^{:seon.test/fixture-observation
+           "A database branch cannot isolate the physical-store scratch branch publication opens at its published commit."}
+  publication-hands-its-commit-projection-unstamped
+  (with-store
+    (fn [opened]
+      (let [a (publish opened digest-a)]
+        (publish opened digest-b 'seon.cluster.source-test/populate-recording!
+                 {:seon.source/expected-commit-id (:seon.source/commit-id a)
+                  :seon.source/previous-database nil})
+        (let [handed @handed-database
+              committed (source/commit-database opened (:seon.source/commit-id a))]
+          (is (nil? (:seon.schema/projection (meta handed))))
+          (is (identical? (db/carried-projection committed)
+                          (db/carried-projection handed))))))))
 
 (deftest source-tombstone-provenance-does-not-prevent-live-removal
   (test-support/with-database

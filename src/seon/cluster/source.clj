@@ -609,7 +609,7 @@
             (let [previous-database
                   (when expected-commit
                     (or (:seon.source/previous-database populate-request)
-                        (db/carry-derived-projection (d/db connection))))]
+                        (d/db connection)))]
             ;; Reconcile on the published history. The scratch isolates refused
             ;; work; no test evidence is copied into a new history.
             (let [missing (filterv
