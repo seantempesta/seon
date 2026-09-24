@@ -73,3 +73,36 @@
              (is (= [#{origin (branch cluster)}] (mapv :seon.error.occurrence/branch seen)))
              (is (= [2] (mapv :seon.error.occurrence/count seen))))))))))
 
+(deftest a-fault-is-delivered-and-shown-open-once-per-opening
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (test-support/agents-tx @connection ["root"]))
+     (let [fault! (fn [at] (record! connection at
+                                    {:seon.error/source {:clojure.core.async.flow/ex (ex-info "boom" {})}
+                                     :seon.error/declared-schema :seon.flow/exception-error
+                                     :seon.config.error/escalate-to "root"}))
+           message-datoms #(count (db/q '[:find ?m ?tx :where [?m :seon.message/about ?s]
+                                                              [?e :seon.error/signature ?s]
+                                                              [?e :seon.error/occurrences ?o]
+                                                              [?o :seon.error.occurrence/message "boom"]
+                                                              [?m :seon.message/content _ ?tx]]
+                                        (db/history (db/db connection))))
+           shown #(pr-str (error/render-html {:seon.db/db (db/db connection)
+                                              :seon.render/value {:seon.error/signature %}}))
+           at (java.util.Date.)
+           _ (fault! at)]
+       (testing "the opening occurrence is delivered once; a repeat while open is not"
+         (is (= 1 (message-datoms)))
+         (fault! (java.util.Date.))
+         (is (= 1 (message-datoms))))
+       (let [signature (db/q '[:find ?s . :where [?e :seon.error/signature ?s]
+                                                 [?e :seon.error/occurrences ?o]
+                                                 [?o :seon.error.occurrence/message "boom"]]
+                             (db/db connection))]
+         (is (:db-after (problems/resolve! connection signature)))
+         (testing "a resolved signature renders resolved"
+           (is (re-find #"\"Resolved\"" (shown signature))))
+         (fault! (java.util.Date.))
+         (testing "a recurrence after the resolution re-opens and re-delivers"
+           (is (re-find #"recurred after its resolution" (shown signature)))
+           (is (= 2 (message-datoms)))))))))

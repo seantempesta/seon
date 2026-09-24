@@ -1146,7 +1146,7 @@
                            :recurring "This fault belongs to a namespace assigned to you."
                            nil)
                          (str "Inspect error " id ". Signature: " signature ".")
-                         "Further occurrences share this record and do not send another notification."])))))
+                         "Further occurrences share this record and send no notification until it is resolved."])))))
 
 (defn ai-prose
   "`:seon.render/ai` — AI-attempt evidence or a legacy error notice.
@@ -1304,26 +1304,41 @@
                    [?agent :seon.agent/id ?id]]
           database function)))
 
-(defn- recurrence
-  "Sum the root's occurrences or preserve the database's declared refusal."
+(defn resolved?
+  "Whether a resolution follows the latest occurrence: the transaction instant of
+  `:seon.error/resolved-tx` is at or after `latest-at` (`seon.problems/open-faults`)."
+  {:malli/schema [:=> [:cat [:or :nil :inst] [:or :nil :inst]] :boolean]}
+  [resolution-at latest-at]
+  (boolean (and resolution-at (or (nil? latest-at) (not (pos? (compare latest-at resolution-at)))))))
+
+(defn- opening
+  "The opening this occurrence starts, or nil while its signature stays open:
+  0 for the first occurrence, the resolution's transaction id for a recurrence
+  after it. Delivery is once per opening; a refusal is preserved."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature]
-                  [:or [:int {:min 0}] :seon.db/error-result]]}
+                  [:or :nil [:int {:min 0}] :seon.db/error-result]]}
   [database signature]
   (let [row (db/pull database
-                     '[{(:seon.error/occurrences :limit nil)
-                        [:seon.error.occurrence/count]}]
-                     [:seon.error/signature signature])]
-    (if (and (inst? (:seon.error/at row))
-             (qualified-keyword? (:seon.error/layer row))
-             (qualified-symbol? (:seon.error/operation row)))
-      row
-      (reduce + 0 (map :seon.error.occurrence/count (:seon.error/occurrences row))))))
+                     '[{:seon.error/resolved-tx [:db/id :db/txInstant]}
+                       {(:seon.error/occurrences :limit nil) [:seon.error.occurrence/last-at]}]
+                     [:seon.error/signature signature])
+        resolution (:seon.error/resolved-tx row)]
+    (cond
+      (and (inst? (:seon.error/at row))
+           (qualified-keyword? (:seon.error/layer row))
+           (qualified-symbol? (:seon.error/operation row))) row
+      (empty? (:seon.error/occurrences row)) 0
+      (resolved? (:db/txInstant resolution)
+                 (last (sort (keep :seon.error.occurrence/last-at (:seon.error/occurrences row)))))
+      (:db/id resolution))))
 
 (defn- message-tx
-  {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id :seon.error/reason :map]
+  {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id :seon.error/reason :map
+                       [:int {:min 0}]]
                   :map]}
-  [fact sender recipient reason notification]
-  {:seon.message/id (id/id [(:seon.error/signature fact) recipient])
+  [fact sender recipient reason notification opening]
+  ;; one message per opening: a re-opened signature is a new message, so it wakes again
+  {:seon.message/id (id/id (cond-> [(:seon.error/signature fact) recipient] (pos? opening) (conj opening)))
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
    :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
@@ -1354,7 +1369,7 @@
         escalation-present (when escalate-to (agent-exists? database escalate-to))
         steward-id (steward database fact)
         steward-present (when (string? steward-id) (agent-exists? database steward-id))
-        occurrences (recurrence database signature)
+        opened (opening database signature)
         read-refusal (some (fn [observation]
                              (when (and (map? observation)
                                         (inst? (:seon.error/at observation))
@@ -1363,7 +1378,7 @@
                                observation))
                            [(when-not (:seon.error.occurrence/id old) old)
                             agent-present turn-present escalation-present
-                            steward-id steward-present occurrences])]
+                            steward-id steward-present opened])]
     (if read-refusal
       read-refusal
       (let [projection (or (db/carried-projection database)
@@ -1390,7 +1405,6 @@
         fact (cond-> fact (nil? agent-id) (dissoc :seon.error/agent)
                          (nil? turn-id) (dissoc :seon.error/run))
         count (inc (or (:seon.error.occurrence/count old) 0))
-        first-occurrence? (zero? occurrences)
         interrupted? (some? (:seon.error/exception-class fact))
         evidence (select-keys fact [:seon.error/process :seon.error/proc :seon.error/op
                                    :seon.error/result-id :seon.error/shown
@@ -1433,7 +1447,7 @@
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
         notification {:seon.error/notification-id signature}
-        recipients (when first-occurrence?
+        recipients (when (int? opened)
                      (cond
                        steward-present {steward-id :recurring}
                        (and interrupted? agent-id) {agent-id :your-run}
@@ -1448,7 +1462,7 @@
           (keep (fn [[recipient reason]]
                   (message-tx fact (or agent-id
                                       (when escalation-present escalate-to)
-                                      steward-id) recipient reason notification)))
+                                      steward-id) recipient reason notification opened)))
           recipients)))))
 
 (defn recording
@@ -1779,7 +1793,14 @@
         [[:p {:class "seon-error-occurrences"} (str "Occurrences: " n)]])
       (when (:seon.error/signature value)
         [[:p {:class "seon-error-resolution"}
-          (if (:seon.error/resolved-tx value) "Resolved" "Open")]])
+          (let [resolution (:seon.error/resolved-tx value)
+                tx (if (map? resolution) (:db/id resolution) resolution)
+                at (when (and tx (:seon.db/db unit))
+                     (:db/txInstant (db/pull (:seon.db/db unit) [:db/txInstant] tx)))]
+            (cond (nil? resolution) "Open"
+                  (nil? at) "Resolution time unknown"
+                  (resolved? at (:seon.error/at value)) "Resolved"
+                  :else "Open: recurred after its resolution"))]])
       (when turn-ref
         [[:p {:class "seon-error-run"}
           [:a {:href (render.route/path :seon.render.route/data {}

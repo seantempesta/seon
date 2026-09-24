@@ -150,7 +150,7 @@
           (is (str/includes? (pr-str (error/render-faults-html [:seon.agent/id "error-graph-steward"] database)) "same error"))
           (is (= 1 (:seon.render.transcript/count (first (#'seon.render.transcript/fault-problems database "error-graph-steward" [])))))
           (is (:db-after (db/transact! connection [[:db/add (:seon.error/ref a) :seon.error/resolved-tx "datomic.tx"]])))
-          (is (str/includes? (pr-str (error/render-html (read-error))) "Resolved"))
+          (is (str/includes? (pr-str (error/render-html {:seon.db/db (db/db connection) :seon.render/value (read-error)})) "Resolved"))
           (is ((schema/projection-validator (schema/handed-projection) :seon.error/fact) (:seon.error/fact (first (#'seon.problems/error-signatures (db/db connection)))))))
         (let [flat (error/recording (db/db connection)
                                   (commit-request {:seon.error/message "flat error", :seon.error/operation (quote seon.id/valid?)} {}))]
