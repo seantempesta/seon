@@ -246,17 +246,20 @@
            "the supplier itself declares no supplied default")))))
 
 (defn- with-program-less-connection
-  "Call `body` with a connection whose schema declares no program attribute,
-  so Datahike refuses every program read: the program graph cannot be read,
-  which is not the same as a function being absent from it."
-  [body]
-  (let [configuration {:store {:backend :memory :id (random-uuid)}
-                       :schema-flexibility :write :keep-history? false}]
-    (d/create-database configuration)
-    (try
-      (with-open [held (test-support/closeable (d/connect configuration) d/release)]
-        (body @held))
-      (finally (d/delete-database configuration)))))
+  "Call `body` with a history-less connection whose schema declares no
+  program attribute beyond `initial-tx`, so Datahike refuses every other
+  program read: the program graph cannot be read, which is not the same as
+  a function being absent from it."
+  ([body] (with-program-less-connection [] body))
+  ([initial-tx body]
+   (let [configuration {:store {:backend :memory :id (random-uuid)}
+                        :schema-flexibility :write :keep-history? false
+                        :initial-tx initial-tx}]
+     (d/create-database configuration)
+     (try
+       (with-open [held (test-support/closeable (d/connect configuration) d/release)]
+         (body @held))
+       (finally (d/delete-database configuration))))))
 
 (deftest an-unreadable-program-graph-is-not-an-uncontracted-function
   (test-support/with-database
@@ -279,6 +282,30 @@
             (is (not (contains? (:seon.call-preparation/plans @call-state)
                                 'seon.db/pull))
                 "and caches nothing, so the next call reads again"))))))))
+
+(deftest the-row-basis-reads-history-or-refuses
+  (let [basis #'cp/newest-row-transaction
+        attributes (cp/row-attributes)]
+    (testing "a store with history answers from its history view"
+      (test-support/with-database
+       (fn [connection]
+         (is (pos-int? (basis @connection attributes))))))
+    (testing "a store kept without history answers from its current value"
+      (with-program-less-connection
+       (mapv (fn [attribute] {:db/ident attribute :db/valueType :db.type/keyword
+                              :db/cardinality :db.cardinality/one})
+             attributes)
+       (fn [connection]
+         (let [report (d/transact connection
+                                  [{:seon.call-preparation/key :sample/marker}])]
+           (is (= :seon.config.db/keep-history?
+                  (:seon.config/error-key (db/history @connection)))
+               "the store's history refusal is the declared no-history case")
+           (is (= (:max-tx (:db-after report)) (basis @connection attributes)))))))
+    (testing "an unreadable row range is the basis's read error, never 0"
+      (with-program-less-connection
+       (fn [connection]
+         (is (true? (:seon.db/invalid-read (basis @connection attributes)))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Supplier coherence is proved at acquisition

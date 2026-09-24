@@ -282,6 +282,17 @@
 
           :else nil)))))
 
+(defn- refused-read
+  "The first of `reads` that is the database owner's declared read error, or
+  nil when every read answered. An empty or nil read is an answer: nothing."
+  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]]
+                  [:or :nil :seon.db/error-result]]}
+  [reads]
+  (some #(when (and (map? %) (or (:seon.db/invalid-read %)
+                                 (:seon.schema/expected-value %)))
+           %)
+        reads))
+
 (defn- newest-row-transaction
   "The newest transaction that asserted OR retracted any row fact.
 
@@ -302,11 +313,16 @@
   ;; whose change can affect preparation, so it is kept out of the sink.
   (binding [db/*read-evidence-sink* nil]
     (let [history (db/history database)
-          source (if (or (:seon.db/invalid-read history) (:seon.schema/expected-value history))
+          ;; Only the declared no-history refusal means "read the current
+          ;; value"; any other refused history read is this basis's error.
+          source (if (= :seon.config.db/keep-history?
+                        (:seon.config/error-key history))
                    database
                    history)
-          ranges (mapv #(db/datoms source :aevt %) attributes)]
-      (or (first (filter :seon.db/invalid-read ranges))
+          ranges (when-not (refused-read [source])
+                   (mapv #(db/datoms source :aevt %) attributes))]
+      (or (refused-read [source])
+          (refused-read ranges)
           (transduce (comp cat (map :tx)) max 0 ranges)))))
 
 (defn- by-fingerprint
@@ -501,7 +517,7 @@
           (or (:seon.db/invalid-read prepared) (:seon.schema/expected-value prepared))
           prepared
 
-          (:seon.db/invalid-read basis)
+          (refused-read [basis])
           basis
 
           :else
@@ -703,17 +719,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Plan derivation — one Datalog query set over the P12 argument addresses
 ;;; ---------------------------------------------------------------------------
-
-(defn- refused-read
-  "The first of `reads` that is the database owner's declared read error, or
-  nil when every read answered. An empty or nil read is an answer: nothing."
-  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]]
-                  [:or :nil :seon.db/error-result]]}
-  [reads]
-  (some #(when (and (map? %) (or (:seon.db/invalid-read %)
-                                 (:seon.schema/expected-value %)))
-           %)
-        reads))
 
 (defn- contract-transaction
   "The newest transaction among the function entity's own current facts, or
