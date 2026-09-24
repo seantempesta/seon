@@ -12,12 +12,28 @@ updated: 2026-09-24
 - review-test-harness-astra: review of one-test-harness/design-2026-09-24.md → astra-review-2026-09-24.md; then to the owner.
 - fix-affected-callers-interpret (sci/eval.clj): a branch changing one :core function refuses its whole acquisition because
   interpreted callers cannot resolve privates, def Vars and dependency aliases (docs/seon/issues/affected-callers-fail-to-interpret-against-uninstalled-bindings.md). Blocking: most branch tests.
-- fix-test-world-refusals (diagnose first): fixture writes refused with :seon.error/unknown for the definition digest
-  (bootstrap-test; 63 of a 65-test save gate red), and test worlds missing the :seon.config.agent/turn-completion-backstop-ms dial.
+- fix-unbounded-printed-values: root cause of the OOMs (class 1 below).
+- fix-agent-custody-label (agent.clj): class 2 below.
 
 Landed today and no longer blocking: start --head gitlinks, unbounded failure text (then nuke, data/ 136→5.3 GB), host-bound
 rows refuse only when called (f2bc7088a). Tool smell: every seon.sci.branch-execution-test member is marked long, so
 `bin/test-check --ns` runs 0 of them without --include-long.
+
+## Recurring classes — root causes, not symptoms (owner 2026-09-24: "step back and find root causes")
+
+1. **Unbounded printed values kill default** (3 OOMs: 105 MB datom, 557M-char `is` message, 18:08Z 13.9 GB heap dump).
+   Contract refusals rightly carry live world objects (connection, ctx, projection) in ex-data; some text sink prints them
+   whole to stdout (seon.log lines of 18 MB–1,052 MB; the log reached 3.7 GB). Each earlier fix bounded one producer; the
+   class needs its one bounded sink (law "Apply presentation limits once"). Lane fix-unbounded-printed-values.
+2. **Custody inferred from a label, not the held connection** (agent.clj:205 → 43 "fresh owned branch" refusals; latent
+   live-root escape through a shared context-state atom). Lane fix-agent-custody-label.
+3. **Hand-built rows in fixtures** (ns, fn and test rows missing required digests → most save-gate reds). The rows should
+   come from canonical writers; sweep-hand-built-ns-rows is widened to fn/test rows; the harness's seeds replace the rest.
+4. **Every save runs a heavy save gate on the shared JVM** (65 reaching tests, ~100 s, 274% CPU; refresh-source! 107 s max;
+   call-with-projection 34,393 calls / 362 s). With reds from class 3 each also prints class 1's giant errors. Cost follows
+   the whole reach, not the changed inputs — the projection-passed-explicitly item and the harness's per-member cost target.
+5. **Tests redefine default's Vars** (four replaced roots from web_debug_test). Harness S-slices + redef census.
+Rule while fixing: code on the one-happy-path deletion list is deleted or routed to its surviving owner, never repaired.
 
 ## Integration (root, at the end of the fix round)
 
