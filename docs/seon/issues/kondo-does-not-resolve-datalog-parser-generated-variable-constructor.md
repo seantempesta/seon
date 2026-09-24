@@ -10,7 +10,7 @@ tags: [issue, clj-kondo, dependency, static-analysis]
 2026-09-17 reset Tier 1 verification: standalone clj-kondo reports
 `Unresolved var: parser.type/->Variable` at candidate `src/seon/db.clj:580` (the unchanged call is at HEAD line 579).
 Repopulating with the production classpath using
-`clj-kondo --lint "$(clojure -Spath)" --dependencies --skip-lint --copy-configs`
+`clj-kondo --lint "$(clojure -Spath)" --dependencies --parallel --copy-configs --config '{:output {:canonical-paths true}}'` (corrected 2026-09-24: `--skip-lint` writes no cache)
 and re-linting preserves that finding. No other error is reported in the
 integrator's five source/test paths.
 

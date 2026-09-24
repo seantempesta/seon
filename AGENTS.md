@@ -303,7 +303,8 @@ owner authorization, retaining their identity. Make paid provider runs deliberat
 
 Treat unresolved dependency/protocol Vars in clj-kondo as stale cache until disproven:
 repopulate from the publication classpath with `clj-kondo --lint "$(clojure -Spath)"
---dependencies --skip-lint --copy-configs`, never the test alias's `.`. Do not change
+--dependencies --parallel --copy-configs --config '{:output {:canonical-paths true}}'`
+(`seon.fn/dependency-analysis-command`; `--skip-lint` writes no cache), never the test alias's `.`. Do not change
 correct code to satisfy stale analysis. Clean owned shells/disposable roots before
 reporting, but preserve uncertain resources and unresolved evidence. Inspect actual
 live holders, never a self-matching process search; roots younger than the oldest live
