@@ -3441,6 +3441,19 @@
                                 environment))}}
      :conns []}))
 
+(defn- core-error-mode
+  "The cluster's `:seon.config/on-core-error` dial, never a default. A config
+  read refusal is printed whole and answers nil, which `seon.fault/policy`
+  turns into a panic: an unreadable dial cannot select record mode."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
+                  [:or :nil :seon.config/on-core-error]]}
+  [db cluster-name]
+  (let [effective (config/effective db cluster-name)]
+    (or (:seon.config/on-core-error effective)
+        (binding [*out* *err*]
+          (println (str "SEON CORE-ERROR MODE UNREADABLE (panic): " (pr-str effective)))
+          (flush)))))
+
 (defn arm-agents!
   "Arm the cluster's shared graph, fan-out, routing listener and prime.
   The armer acquires agent graphs only for current work or stored schedules.
@@ -3517,10 +3530,7 @@
                :seon.flow/fault-buffer-capacity 64
                :seon.flow/monitor-buffer-capacity 64
                :seon.flow/read-core-error-mode
-               (fn []
-                 (or (:seon.config/on-core-error
-                      (config/effective (db/db connection) cluster-name))
-                     :record))
+               #(core-error-mode (db/db connection) cluster-name)
                :seon.flow/commit-fault!
                (fn [fault]
                  (fault/record! connection cluster-name process
