@@ -1,9 +1,0 @@
-[{:seon.task/id        :seon.flow.task/durable-faults-cross-dropping-channels
-  :seon.task/intent    "Core faults travel through a counted dropping buffer; under overload an admitted fault can be dropped. Every admitted core fault must be recorded and delivered under overload."
-  :seon.task/subjects  #{seon.flow/counted-dropping-buffer seon.fault/fault!}
-  :seon.task/evidence  #{"docs/seon/issues/durable-faults-cross-dropping-channels.md"}}
-
- {:seon.task/id        :seon.flow.task/stop-transition-faults-are-kept
-  :seon.task/intent    "An error thrown in a proc's stop transition goes to an already-closed error channel and is dropped; it must be recorded and delivered before resources are released."
-  :seon.task/subjects  #{seon.flow/var-process seon.fault/fault!}
-  :seon.task/evidence  #{"docs/seon/issues/flow-stop-transition-errors-are-dropped-on-a-closed-error-channel.md"}}]

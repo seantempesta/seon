@@ -1,7 +1,0 @@
-[{:seon.task/id        :seon.schema.task/agents-can-validate
-  :seon.task/intent    "An agent cannot check a value against a schema key at its REPL: malli.core is not bound in its SCI context and seon.schema exposes no validation function, so the data-first stage is impossible."
-  :seon.task/subjects  #{seon.schema}
-  :seon/must-read      #{seon.schema/projection-validator seon.schema/projection-explainer seon.db/carried-projection}
-  :seon.task/done-when [(true?  (seon.schema/valid? :my.note/id "n1"))
-                        (false? (seon.schema/valid? :my.note/id 42))
-                        (map?   (seon.schema/explain :my.note/id 42))]}]
