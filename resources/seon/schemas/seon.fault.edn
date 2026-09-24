@@ -1,9 +1,8 @@
 #:seon.fault{:recording
              [:tuple
-              {:description "What `seon.fault/record!` observed: the recorded fact (or the pre-fact message), the write outcome, whether the signature was already stored, and the occurrence lookup ref."}
+              {:description "What `seon.fault/record!` observed: the recorded fact (or the pre-fact message), the write outcome, and the occurrence lookup ref."}
               :map
               [:or [:= :seon.flow/committed] :map :seon.error/throwable]
-              :boolean
               [:or :nil [:tuple [:= :seon.error.occurrence/id] :seon.error.occurrence/id]]],
              :policy [:enum :record :panic],
              :committed? :boolean,

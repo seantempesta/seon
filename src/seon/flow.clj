@@ -187,28 +187,36 @@
 
 (schema.edn/load! {})
 
-(defn- stop-failed!
-  "Record a stop transition's throw as one core fault, loudly in both modes.
-  Flow's loop would absorb it and park forever on a control channel `stop`
-  already cleared (`core.async/.../flow/impl.clj:181,317-320`); returning the
-  state instead lets the loop exit, so the graph's join completes. A panic
-  (`:panic`, or the fault not stored) is this seam's declared case: the graph
-  is stopping anyway, so it is printed whole and the loop still exits."
+(defn- proc-failed!
+  "Record one proc step's throw as one core fault on the proc's own thread.
+  Every arity Flow would catch goes here, so a fault reaches the writer
+  synchronously and no buffer can drop it (Flow's own error channel is a
+  sliding buffer, `core.async/.../flow/impl.clj:101-102,312-316`). The writer
+  decides occurrence and wake (`seon.fault/fault!`); an agent graph's
+  environment names its agent, which attributes the fault to that agent's run.
+  A panic (`:panic`, or the fault not stored) is printed on stderr, whole when
+  unstored, and the loop continues: a stop transition must still exit so the graph's join
+  completes (`impl.clj:181,317-320`)."
   {:malli/schema [:=> [:cat ::step-var :map :seon.error/throwable] :nil]}
   [step-var args failure]
   (try
     (fault/fault! (env/of args) failure
-                  {:seon.error/layer :flow
-                   :seon.error/operation (symbol step-var)
-                   :seon.db.process/id (process/id (process/current-identity))})
+                  (merge {:seon.error/layer ::proc
+                          :seon.error/operation (symbol step-var)
+                          :seon.db.process/id (process/id (process/current-identity))}
+                         (select-keys (env/of args) [:seon.agent/id])))
     (catch Throwable panic
-      (binding [*out* *err*]
-        (prn {:seon.error/message (ex-message panic)
-              :seon.error/operation (symbol step-var)
-              :seon.fault/recorded (:seon.fault/recorded (ex-data panic))
-              :seon.error/data {:panic (Throwable->map panic)
-                                :failure (Throwable->map failure)}})
-        (flush))))
+      (let [receipt (:seon.fault/recorded (ex-data panic))]
+        (binding [*out* *err*]
+          ;; a stored fault's whole cause is its evidence; print it only
+          ;; when no store holds it
+          (prn (cond-> {:seon.error/message (ex-message panic)
+                        :seon.error/operation (symbol step-var)
+                        :seon.fault/recorded receipt}
+                 (not (:seon.fault/committed? receipt))
+                 (assoc :seon.error/data {:panic (Throwable->map panic)
+                                          :failure (Throwable->map failure)})))
+          (flush)))))
   nil)
 
 (defn var-process
@@ -250,17 +258,18 @@
    (env/refuse-absent-environment! args ::var-process)
    (let [launcher
          (flow/process
-          ;; every arity dispatches through the Var (hot reload); only a
-          ;; throwing stop transition is caught, so the loop still exits
+          ;; every arity dispatches through the Var (hot reload); a throwing
+          ;; transition or transform is one fault through `fault!`, and the
+          ;; proc keeps its state
           (fn
             ([] (step-var))
             ([init-args] (step-var init-args))
             ([state transition]
-             (if (= ::flow/stop transition)
-               (try (step-var state transition)
-                    (catch Throwable failure (stop-failed! step-var args failure) state))
-               (step-var state transition)))
-            ([state input message] (step-var state input message)))
+             (try (step-var state transition)
+                  (catch Throwable failure (proc-failed! step-var args failure) state)))
+            ([state input message]
+             (try (step-var state input message)
+                  (catch Throwable failure (proc-failed! step-var args failure) [state nil]))))
           (assoc options :workload workload))]
      (reify
        core.protocols/Datafiable
@@ -655,15 +664,7 @@
                     ::active-count)
                   dec))
         (if-let [throwable (::throwable message)]
-          {::flow/error
-           [#::flow{:pid (::flow/pid state)
-                    :status :running
-                    :cid (if (= :io (::workload message))
-                           ::io-submission
-                           ::compute-submission)
-                    :msg (::work message)
-                    :op ::work
-                    :ex throwable}]}
+          (proc-failed! #'work-launcher-step state throwable)
           {::flow/report
            [{::pid (::flow/pid state)
              ::event ::work-complete
@@ -1105,7 +1106,7 @@
      [state nil]
      (try
        (let [mode (read-core-error-mode)
-             [fact outcome previously-reported?]
+             [fact outcome]
              ((if (::dropped-fault-count fault) commit-drop! commit-fault!)
               {:seon.error/source fault
                :seon.error/declared-schema
@@ -1114,37 +1115,18 @@
                  (or (:seon.error/declared-schema (meta (ex-data (::flow/ex fault))))
                      :seon.flow/exception-error))})
              signature (:seon.error/signature fact)
-             repeated? (and signature (contains? seen-signatures signature))
-             already-reported?
-             (or repeated? previously-reported?)
+             committed? (= ::committed outcome)
+             ;; one line per signature per JVM, but only for a stored fault:
+             ;; a failed write panics every time (`seon.fault/policy`)
+             repeated? (and committed? signature (contains? seen-signatures signature))
              next-state (cond-> state
                           signature (update ::seen-signatures conj signature)
-                          (= ::committed outcome) (update ::committed inc))
-             reported (assoc fault
-                             ::fault-fact fact
-                             ::commit-outcome outcome
-                             ::core-error-mode mode)
-             commit-refused?
-             (not= ::committed outcome)]
-         (cond
-           already-reported?
+                          committed? (update ::committed inc))]
+         (if (or repeated? (= :record (fault/policy mode committed?)))
            [next-state nil]
-
-           (= :record mode)
-           (do
-             (when commit-refused? (panic! reported))
-             [next-state nil])
-
-           (= :panic mode)
-           (do
-             (panic! reported)
-             [(update next-state ::panicked inc) nil])
-
-           :else
-           (throw
-            (ex-info
-             "Unknown :seon.config/on-core-error value."
-             {::core-error-mode mode}))))
+           (do (panic! (assoc fault ::fault-fact fact ::commit-outcome outcome
+                              ::core-error-mode mode))
+               [(update next-state ::panicked inc) nil])))
        (catch Throwable failure
          (report-committer-loss!
           {::flow/pid ::fault-committer

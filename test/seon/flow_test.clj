@@ -37,6 +37,12 @@
   ;; in this namespace names.
   (delay (test-support/environment "seon.flow-test")))
 
+(defn- recording-environment
+  "A configured fixture cluster: the fault writer reads its dials."
+  [connection]
+  (test-support/apply-config! connection "seon.flow-test" {})
+  (test-support/environment "seon.flow-test" connection))
+
 (def ^:private test-launcher-configuration
   (select-keys (test-support/effective-config)
                sut/flow-workload-attributes))
@@ -67,10 +73,9 @@
          {::sut/graph-definition
           {:procs
            {::earliest-fault
-            {:proc (sut/var-process #'earliest-resume-fault-step
-                                    :io
-                                    {:seon.env/environment
-                                     @test-environment})}}
+            ;; a bare Flow proc: `var-process` would record the throw
+            ;; itself, and this test observes Flow's own error channel
+            {:proc (flow/process #'earliest-resume-fault-step {:workload :io})}}
            :conns []}
           ::sut/joins
           {::error-tap
@@ -179,7 +184,7 @@
 (deftest a-throwing-stop-transition-is-one-stored-fault-and-a-completed-join
   (test-support/with-database
     (fn [connection]
-      (let [environment (test-support/environment "seon.flow-test" connection)
+      (let [environment (recording-environment connection)
             {::sut/keys [graph executor]}
             (sut/start-graph!
              {::sut/graph-definition
@@ -345,7 +350,7 @@
                  [{::fault-id (random-uuid)
                    ::fault-proc (::flow/pid fault)
                    ::fault-message message}])
-    [{:seon.error/signature signature} ::sut/committed false]))
+    [{:seon.error/signature signature} ::sut/committed nil]))
 
 (defn- committed-faults
   [database]
@@ -378,6 +383,60 @@
      [?drop :seon.error/proc ?proc]
      [?drop :seon.error.occurrence/message ?message]]
    database))
+
+;;; A throw during ordinary work: before, it waited in Flow's sliding error
+;;; channel (100) and the fan-out's dropping buffer (64), which lost or
+;;; collapsed a burst. Now each throw is written on the proc's own thread, so
+;;; nothing waits in a buffer. Three throws, at ~115 ms per warm fault write.
+(def ^:private work-throws 3)
+
+(defn- throwing-work-step
+  ([] {:ins {::work "One message the transform throws on."} :outs {} :workload :io})
+  ([args] (assoc args ::flow/in-ports {::work (::work args)}))
+  ([state _transition] state)
+  ([_state _input message] (throw (ex-info "work throws" {::message message}))))
+
+(deftest a-proc-throw-during-work-is-one-occurrence-never-dropped
+  (test-support/with-database
+    (fn [connection]
+      (let [environment (recording-environment connection)
+            in (async/chan work-throws)
+            transactions (database-events connection)
+            {::sut/keys [graph executor started]}
+            (sut/start-graph!
+             {::sut/graph-definition
+              {:procs {::throwing-work
+                       {:proc (sut/var-process #'throwing-work-step :io
+                                               {:seon.env/environment environment
+                                                ::work in})}}
+               :conns []}})
+            counted #(db/q '[:find (sum ?count) . :with ?occurrence
+                             :where [?occurrence :seon.error.occurrence/message ?message]
+                                    [(clojure.string/includes? ?message "work throws")]
+                                    [?occurrence :seon.error.occurrence/count ?count]]
+                           %)
+            t0 (System/nanoTime)]
+        (try
+          (async/onto-chan!! in (range work-throws) false)
+          (test-support/await-event! (::channel transactions) ::every-throw-stored
+                                     #(= work-throws (counted (:db-after %))))
+          (let [elapsed-ms (/ (- (System/nanoTime) t0) 1e6)]
+            (is (= work-throws (counted @connection)) "every throw reached the writer")
+            (is (= 1 (count (db/q '[:find [?occurrence ...]
+                                    :where [?occurrence :seon.error.occurrence/message ?message]
+                                           [(clojure.string/includes? ?message "work throws")]]
+                                  @connection)))
+                "equal throws are one occurrence, counted")
+            (is (nil? (async/poll! (:error-chan started)))
+                "nothing waits in Flow's error channel")
+            (is (< elapsed-ms 2000.0) (str work-throws " fault writes took " elapsed-ms " ms")))
+          (finally
+            (stop-database-events! connection transactions)
+            (flow/stop graph)
+            (sut/join-graph! {::sut/executor executor
+                              :seon.await/bound (join-bound 2000)
+                              :seon.await/diagnostic {:seon.error/layer :flow
+                                                      :seon.error/operation ::throwing-work}})))))))
 
 (deftest production-launcher-wedges-degrade-capacity-by-exactly-n
   (let [parallelism 4
@@ -1188,7 +1247,7 @@
               (is (str/includes? (first lines) message)
                   "the stderr sink receives the whole normalized message")))))
 
-    (testing "a rebuilt proc does not print a signature already durable"
+    (testing "a signature stored by an earlier JVM prints again in this one"
       (test-support/with-database
         (fn [connection]
           (configure! connection)
@@ -1228,8 +1287,8 @@
                         @connection)
                   lines (str/split-lines (str stderr-writer))]
               (is (= ::sut/committed durable-outcome))
-              (is (empty? duplicate-stderr)
-                  "the durable signature suppresses output after rebuild")
+              (is (seq duplicate-stderr)
+                  "a durable signature is no reason for this JVM to stay silent")
               (is (contains? signature-set
                              (:seon.error/signature durable-fact)))
               (is (= 2 (count signature-set)))
@@ -1237,72 +1296,40 @@
                   "the rebuilt proc commits the repeated occurrence too")
               (is (= signature-set (::sut/seen-signatures final-state)))
               (is (= 2 (::sut/committed final-state)))
-              (is (= 1 (::sut/panicked final-state)))
-              (is (= 1 (count lines))
-                  "one genuinely new signature remains visible")
+              (is (= 2 (::sut/panicked final-state)))
+              (is (= 2 (count lines)) "each signature prints once in this JVM")
               (is (str/includes?
-                   (first lines)
+                   (second lines)
                    (db/q '[:find ?message .
                            :where
                            [?error :seon.error/throwable-class "java.lang.IllegalStateException"]
                            [?error :seon.error.occurrence/message ?message]]
                          @connection))))))
 
-    (testing "a dead writer still emits each signature only once"
-      (test-support/with-database
-        (fn [connection]
-          (configure! connection)
-          (let [emitted-facts (atom [])
-                writer-refusal
-                {:seon.error/message
-                 "Writer is shut down; release and reconnect."}
-                initial-state
-                (committer-step
-                 {::sut/fault-channel (async/chan 1)
-                  ::sut/read-core-error-mode (constantly :panic)
-                  ::sut/commit-fault!
-                  #(commit-core-fault! connection "fault-test" "process-2"
-                                       caps %)
-                  ::sut/panic!
-                  (fn [fact]
-                    (swap! emitted-facts conj (::sut/fault-fact fact))
-                    (emit-core-fault!
-                     {:seon.config.eval.result/blob-threshold inline-ceiling}
-                     fact))})
-                transaction-attempts (atom 0)
-                final-state (atom nil)
-                stderr-writer (java.io.StringWriter.)
-                _
-                (binding [*err* stderr-writer]
-                  (with-redefs [db/transact! (fn [_connection _transaction-data]
-                                               (swap! transaction-attempts inc)
-                                               writer-refusal)]
-                    (reset!
-                     final-state
-                     (reduce
-                      (fn [state fault]
-                        (first (committer-step state ::sut/core-fault fault)))
-                      initial-state
-                      [repeated-fault repeated-fault distinct-fault]))))
-                stderr (str stderr-writer)
-                lines (str/split-lines stderr)]
-            (is (= 2 (count lines))
-                "the repeated signature and the distinct signature print once")
-            (is (= 2 (count (::sut/seen-signatures @final-state))))
-            (is (= 3 @transaction-attempts)
-                "every occurrence reaches the writer")
-            (is (zero? (::sut/committed @final-state)))
-            (is (= 2 (::sut/panicked @final-state)))
-            (is (every? #(str/includes? % "durable record refused") lines))
-            (is (every? #(str/includes? % "signature ") lines))
-            (is (= 2 (count @emitted-facts)))
-            (is (every? #(str/includes? stderr (:seon.error/message %))
-                        @emitted-facts)
-                "the last-resort sink receives each whole normalized message")
-            (is (empty?
-                 (db/q '[:find ?error
-                         :where [?error :seon.error/signature _]]
-                       @connection))))))))))
+    (testing "a failed write panics every time, an already-seen signature included"
+      (let [attempts (atom 0)
+            emitted (atom [])
+            writer-refusal {:seon.error/message "Writer is shut down; release and reconnect."}
+            initial-state
+            (committer-step
+             {::sut/fault-channel (async/chan 1)
+              ::sut/read-core-error-mode (constantly :record)
+              ::sut/commit-fault!
+              (fn [{fault :seon.error/source}]
+                (swap! attempts inc)
+                [{:seon.error/signature (.getName (class (::flow/ex fault)))
+                  :seon.error/message (ex-message (::flow/ex fault))}
+                 writer-refusal nil])
+              ::sut/panic! #(swap! emitted conj (::sut/fault-fact %))})
+            final-state
+            (reduce (fn [state fault] (first (committer-step state ::sut/core-fault fault)))
+                    initial-state
+                    [repeated-fault repeated-fault distinct-fault])]
+        (is (= 3 @attempts) "every occurrence reaches the writer")
+        (is (= 3 (count @emitted) (::sut/panicked final-state))
+            "the repeated signature's second failed write still panics")
+        (is (zero? (::sut/committed final-state)))
+        (is (= 2 (count (::sut/seen-signatures final-state)))))))))
 
 (deftest stopping-the-fanout-awaits-an-active-fault-commit
   (let [{::keys [graph started] :as testbed} (source-testbed)

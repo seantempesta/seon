@@ -29,24 +29,14 @@
          [?run :seon.turn/id ?id]]
        db agent-id))
 
-(defn- previously-reported-fault-signature?
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature] :boolean]}
-  [database signature]
-  (some?
-   (db/q '[:find ?error .
-           :in $ ?signature
-           :where [?error :seon.error/signature ?signature]]
-         database signature)))
-
 (defn record!
   "Commit one escaped Throwable as one durable fact per delivery.
 
-  TOTAL, never throws. Returns `[fact outcome previously-reported? occurrence]`
+  TOTAL, never throws. Returns `[fact outcome occurrence]`
   (`:seon.fault/recording`), deriving
   `fact` and its content signature before the transaction attempt. Every
-  delivery reaches the writer; `previously-reported?` lets the Flow committer
-  suppress only stderr/panic output for a signature already seen in facts.
-  `outcome` is `:seon.flow/committed` or the transaction failure value.
+  delivery reaches the writer. `outcome` is `:seon.flow/committed` or the
+  transaction failure value.
 
   Everything it needs is read fresh: the dials from the config
   singleton, the attribution from the database value at the fault's
@@ -56,9 +46,8 @@
   render proc — attributes to NO run, and that is correct rather than
   missing: it is not a run's fault. The serial-era fallback query is
   gone (F2 §3.3). It goes through
-  `db/transact!`, which never throws. The signature query and Flow's
-  process-local signature set bound notification only; recurrence remains the
-  query-derived count of committed facts."
+  `db/transact!`, which never throws. Recurrence is the query-derived count of
+  committed facts; whether a fault is open is `seon.problems/open-faults`."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name :seon.db.process/id
                        :seon.sci.admit/caps :seon.error/recording-observation]
                   :seon.fault/recording]}
@@ -119,10 +108,7 @@
                                  (:seon.flow/dropped-fault-digest source-fault)))
           recording (error/recording db (assoc request :seon.error/fact prepared-fact))
           transaction-data (:seon.db/tx-data recording)
-          fact (:seon.error/fact recording)
-          signature (:seon.error/signature fact)
-          previously-reported?
-          (previously-reported-fault-signature? db signature)]
+          fact (:seon.error/fact recording)]
       (try
         (let [result (blob/with-publication!
                       connection (if staged [staged] [])
@@ -130,9 +116,9 @@
           [fact (if (db/database-value? (:db-after result))
                   :seon.flow/committed
                   result)
-           previously-reported? (:seon.error.occurrence/ref recording)])
+           (:seon.error.occurrence/ref recording)])
         (catch Throwable failure
-          [fact failure previously-reported? (:seon.error.occurrence/ref recording)])))
+          [fact failure (:seon.error.occurrence/ref recording)])))
     (catch Throwable failure
       ;; `error/commit-tx` is total. This last-resort shape is only for a
       ;; failure before its fact exists, so no content signature is available
@@ -143,7 +129,7 @@
                         (when (instance? Throwable cause)
                           (str (.getName (class cause)) ": " (ex-message cause)))
                         (str fault))]
-        [{:seon.error/message message} failure false nil]))))
+        [{:seon.error/message message} failure nil]))))
 
 
 (defn policy
@@ -186,7 +172,7 @@
                  (config/result-caps (config/effective (db/db connection) cluster-name)))
         agent-id (:seon.agent/id context)
         throwable? (instance? Throwable failure)
-        [fact outcome _ occurrence]
+        [fact outcome occurrence]
         (record! connection cluster-name (:seon.db.process/id context) caps
                  {:seon.error/source
                   (cond-> (if throwable? {::flow.core/ex failure} failure)

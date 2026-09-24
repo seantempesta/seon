@@ -19,14 +19,13 @@
              :let [message (or (:seon.error/message fault)
                                (ex-message (if (instance? Throwable fault)
                                              fault (::async.flow/ex fault))))
-                   [fact outcome reported?]
+                   [fact outcome]
                    (fault/record! connection "absent-fault-cluster"
                     "fault-message-test" (config/result-caps config/defaults)
                     {:seon.error/source fault
                      :seon.error/declared-schema :seon.flow/exception-error})
                    output (java.io.StringWriter.)]]
        (is (not= ::flow/committed outcome))
-       (is (false? reported?))
        (binding [*err* output]
          (#'cluster/emit-core-fault!
           {} {::flow/fault-fact fact ::flow/commit-outcome outcome
