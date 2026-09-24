@@ -44,3 +44,27 @@ Inside a `seon.test/run` member: `support/with-database`, stamp
 Host-bound affected callers and rows in unloaded namespaces no longer refuse
 the acquisition (lane fix-unloaded-host-bound-row, 2026-09-24). This issue is
 the interpretable remainder of the same closure.
+
+## Progress (2026-09-24, lane fix-affected-callers-interpret)
+
+Fixed in `src/seon/sci/eval.clj`: `install-caller-host-bindings!` gives each
+interpreted caller's SCI namespace its loaded namespace's remaining interns
+(private helpers, `def`/`defonce`), the `clojure.core` names SCI does not carry
+(`spit`), and the public Vars of every alias and refer target its row declares
+(`async/chan`, `ring/router`, `running-instances`). An unchanged interpretable
+caller in a namespace this JVM has not loaded (22 test-namespace rows in the
+recipe) binds the by-name refusing root, as host-bound ones already did.
+Regression: `seon.sci.branch-execution-test/interpreted-callers-resolve-unchanged-names-to-compiled-vars`.
+
+Still open, so the status stays open: an interpretable caller that expands a JVM
+macro reading `&env` still refuses the acquisition. Observed when
+`seon.cluster.turn-test` is loaded: `render-proc-for` and
+`with-render-context-proc` use `async/go-loop`, and SCI hands the copied macro
+symbols where it expects `Compiler$LocalBinding` ("class clojure.lang.Symbol
+cannot be cast to class clojure.lang.Compiler$LocalBinding"). Before this fix
+the same rows refused on the unresolved alias. The producer is
+`seon.fn/host-bound-callers` (`src/seon/fn.clj:805`): it marks
+`reify`/`proxy`/`definterface`/`import` and unadmitted classes host-bound but
+not a use of a dependency macro SCI cannot expand, so these rows are classified
+interpretable (`:seon.fn/host-bound? false`). Marking such uses host-bound
+there would route them to the existing by-name refusing root.

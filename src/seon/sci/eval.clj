@@ -1078,18 +1078,24 @@
               ;; namespace this JVM never loaded, has no Var to override: it
               ;; refuses by name when called instead of refusing the program.
               ;; Agent rows and evaluations keep the returned refusal.
+              ;; An unchanged caller in an unloaded namespace has neither a
+              ;; compiled Var nor its namespace's other interns to analyze
+              ;; against, so it refuses by name when called too.
               unloaded? (nil? (find-ns namespace-name))
-              unbound? (and host-row
+              unbound? (and interpreted?
                             (= :core (:seon.schema.admission/source committed))
                             (not (or evaluated? (::evaluated? row)))
-                            (or unloaded?
-                                (not (overridden-row? (::loaded-database snapshot) committed))))
-              refusal (when host-row
+                            (if host-row
+                              (or unloaded?
+                                  (not (overridden-row? (::loaded-database snapshot) committed)))
+                              (and unloaded?
+                                   (not (overridden-row? (::loaded-database snapshot) committed)))))
+              refusal (when (or host-row unbound?)
                         (interpretation-error function-symbol
-                          (str (if (contains? host-row :seon.fn/host-bound?)
-                                 "Host-bound declaration "
-                                 "Declaration with no :seon.fn/host-bound? fact ")
-                               (:seon.fn/sym host-row)
+                          (str (cond (nil? host-row) "Declaration "
+                                     (contains? host-row :seon.fn/host-bound?) "Host-bound declaration "
+                                     :else "Declaration with no :seon.fn/host-bound? fact ")
+                               (:seon.fn/sym (or host-row committed))
                                (cond unloaded? " is in a namespace this JVM has not loaded; load its source files to call it."
                                      unbound? " is unchanged but calls a definition this branch changes; it runs only from the loaded source files."
                                      :else " must change through the loaded source files."))))
@@ -1560,6 +1566,45 @@
            (map (fn [[local-name host-var]]
                   [local-name (copy-host-var host-var sci-namespace)]))
            intern-map))))
+
+(defn- install-caller-host-bindings!
+  "Bind the compiled Vars an interpreted caller's source names but no program row installs.
+
+  An interpreted declaration's namespace receives its loaded JVM namespace's
+  remaining interns (private helpers, `def`/`defonce` Vars); each alias and
+  refer target its namespace row declares receives that loaded namespace's
+  public Vars. Existing SCI bindings win: first-party copies, interpreted
+  definitions and SCI's own `clojure.*` namespaces are never replaced, and
+  `clojure.core` is left to SCI. A target this JVM has not loaded stays
+  absent, so its caller refuses by name."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:sequential :map]] :nil]}
+  [ctx namespace-rows]
+  (let [sci-core (get-in @(:env ctx) [:namespaces 'clojure.core])
+        ;; clojure.core names SCI does not carry (spit) bind in the caller's
+        ;; own namespace; SCI's interrupt-aware core is never replaced.
+        own-bindings
+        (fn [host]
+          (merge (into {} (filter (fn [[local-name host-var]]
+                                    (and (= 'clojure.core (ns-name (.ns ^clojure.lang.Var host-var)))
+                                         (not (contains? sci-core local-name)))))
+                       (ns-refers host))
+                 (ns-interns host)))
+        installs
+        (for [row namespace-rows
+              :let [namespace-name (:seon.ns/name row)
+                    {:keys [aliases refers]} (row-bindings row)]
+              [target interns]
+              (cons [namespace-name (some-> (find-ns namespace-name) own-bindings)]
+                    (for [target (distinct (concat (vals aliases)
+                                                   (map (comp symbol namespace) (vals refers))))
+                          :when (not= 'clojure.core target)]
+                      [target (some-> (find-ns target) ns-publics)]))
+              :when (seq interns)]
+          [target interns])]
+    (doseq [[target interns] installs
+            :let [present (get-in @(:env ctx) [:namespaces target])]]
+      (install-host-namespace! ctx target (remove (fn [[local-name]] (contains? present local-name))
+                                                  interns)))))
 
 (def ^:private program-documentation-selector
   [:seon.fn/sym :seon.fn/doc :seon.fn/doc-order :seon.fn/arglists :seon.fn/spec
@@ -2190,6 +2235,10 @@
     (install-first-party-namespaces!
      ctx namespace-assertions all-namespace-rows
      all-function-rows)
+    ;; Interpreted callers analyze against every other name their compiled
+    ;; namespace reaches; only this branch's rows become SCI definitions.
+    (install-caller-host-bindings!
+     ctx (keep all-namespace-row-by-name (keys function-rows-by-ns)))
     ;; Copy inherited Vars into this generation before analyzing any caller.
     ;; SCI definitions then replace roots in those same Vars; a caller analyzed
     ;; before its callee must not retain the old generation's copied root.

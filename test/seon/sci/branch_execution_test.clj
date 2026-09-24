@@ -50,6 +50,7 @@
         (db/carry-connection-projection-state!
           child (eval/projection-state @child (db/carried-projection captured)))
         (db/call-with-custody {} #(body child))
+        nil
         (finally (d/release child))))
     (finally (d/delete-branch! connection branch))))
 
@@ -378,3 +379,45 @@
          (is (= caller (refusal-of caller)) "an unchanged caller of a changed definition refuses by name when called")
          (is (= unloaded-changed (refusal-of unloaded-changed)) "a changed row in an unloaded namespace refuses by name when called")
          (is (= unloaded (refusal-of unloaded)) "its unchanged caller refuses by name when called")))))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting the reverse closure (77 declarations) of one changed hiccup helper; measured 1,426 ms."
+           :seon.test/long-ms 12000}
+  interpreted-callers-resolve-unchanged-names-to-compiled-vars
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       (let [changed 'seon.render.hiccup/class-value
+             before (db/db connection)
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before (db/carried-projection before))
+                                   {:seon.sci.eval/loaded-connection connection})
+             _ (support/transacted! connection
+                 [[:db/add [:seon.fn/sym changed] :seon.program/definition-digest
+                   (id/digest 64 ["caller-host-bindings" (str changed)])]])
+             acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
+             view (acquisition-view ctx)
+             ;; derive-page reads the private def stream-strip-id, serve! and
+             ;; selected-instance the referred defonce running-instances,
+             ;; handler the dependency alias ring/router.
+             callers '[seon.render.web/derive-page seon.render.web/handler
+                       seon.cluster/serve! seon.cluster.boot/selected-instance]
+             running @@(resolve 'seon.operator.runtime/running-instances)
+             cluster-name (first (keep (fn [[k v]] (when (map? v) k)) running))]
+         (is (every? (:interpreted view) (conj callers changed)) "the changed helper's closure reaches each caller")
+         (is (= (zipmap callers (repeat :interpreted))
+                (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
+                                 (when (some #{sym} callers) [sym state])))
+                      (:seon.sci.eval/load-results (:value acquired))))
+             "each caller is an SCI definition, analyzed against its private def, referred defonce and dependency alias")
+         (is (some? cluster-name) "this JVM runs a cluster instance")
+         (is (identical? (get running cluster-name)
+                         (sci/eval-string* ctx (str "(seon.cluster.boot/selected-instance " (pr-str cluster-name) ")")))
+             "the interpreted caller reads the compiled defonce Var's value")
+         ;; A caller expanding a JVM macro that reads &env (async/go-loop in a
+         ;; loaded test namespace) still refuses: the host-bound classification
+         ;; gap recorded in the affected-callers issue, not an unbound name.
+         (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
+                            (map :seon.error/message
+                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
+             (pr-str {:ms (:ms acquired) :interpreted (:interpreted-count view)}))))))))
