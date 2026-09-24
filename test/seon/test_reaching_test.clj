@@ -55,12 +55,12 @@
                {:seon.schema.admission/source :core :seon.test/sym tb :seon.test/source "(deftest b-test (is (= 1 (b 1))))" :seon.fn/calls [b]}]
          _ (is (:db-after (db/transact! connection rows)))
          initial (runner/reach-digests (db/db connection) [ta tb])
-         stats (fn [] (select-keys (:seon.test.runner/reach-index
-                                   (meta (:seon.sci.eval/projection-state (meta (db/db connection)))))
-                                   [:seon.test.runner/reach-updated :seon.test.runner/reach-computed]))]
+         index (fn [] (some-> (#'runner/reach-cache (db/db connection)) deref deref))
+         stats (fn [] (select-keys (index) [:seon.test.runner/reach-updated :seon.test.runner/reach-computed]))
+         derived (:seon.test.runner/reach-derivations (index))]
     (is (= 2 (count initial)))
     (is (= initial (runner/reach-digests (db/db connection) [ta tb])))
-    (is (= 0 (:seon.test.runner/reach-computed (stats))))
+    (is (= derived (:seon.test.runner/reach-derivations (index))))
     (doseq [tx [[[:db/add [:seon.fn/sym a] :seon.fn/source "(defn a [x] (str x))"]]
                 [[:db/add [:seon.fn/sym a] :seon.fn/spec "[:=> [:cat :seon.test/sym] :string]"]]
                 [[:db/add [:seon.schema/key :seon.test/sym] :seon.schema/form "[:string {:min 2}]"]]]]
@@ -74,6 +74,30 @@
      (is (:db-after (db/transact! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])))
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
      (is (= {:seon.test.runner/reach-updated 0 :seon.test.runner/reach-computed 0} (stats))))))))
+
+(deftest concurrent-reach-reads-of-one-value-derive-once
+ ;; The index is a delay held as the cache's value: equal database values
+ ;; share one derivation, a changed value derives again.
+ (support/with-database
+  (fn [connection]
+   (let [f 'reach.fixture/once ft 'reach.fixture/once-test
+         derivations #(:seon.test.runner/reach-derivations
+                       (some-> (#'runner/reach-cache (db/db connection)) deref deref) 0)]
+    (is (:db-after (db/transact! connection
+                    [{:db/id "fn-once" :seon.fn/ns [:seon.ns/name 'seon.test-reaching-test] :seon.schema.admission/source :core :seon.fn/sym f :seon.fn/source "(defn once [x] x)" :seon.fn/spec "[:=> [:cat :int] :int]"}
+                     {:seon.schema.admission/source :core :seon.test/sym ft :seon.test/source "(deftest once-test (is (= 1 (once 1))))" :seon.fn/calls [f]}])))
+    (let [database (db/db connection)
+          before (derivations)
+          start (java.util.concurrent.CountDownLatch. 1)
+          readers (mapv (fn [_] (future (.await start) (runner/reach-digests database [ft]))) (range 4))
+          _ (.countDown start)
+          results (mapv deref readers)]
+     (is (apply = results))
+     (is (string? (get-in results [0 ft])))
+     (is (= (inc before) (derivations)))
+     (is (:db-after (db/transact! connection [[:db/add [:seon.fn/sym f] :seon.fn/source "(defn once [x] (inc x))"]])))
+     (is (not= (first results) (runner/reach-digests (db/db connection) [ft])))
+     (is (= (+ 2 before) (derivations))))))))
 
 (deftest reaching-is-the-program-graph-relation
   (support/with-database

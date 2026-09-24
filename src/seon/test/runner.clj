@@ -857,11 +857,12 @@
                                 (concat (map #(vector ::reach-symbol %) names)
                                         (map #(vector ::reach-schema %) schema-keys)))
      ::reach-function-count (count names)}))
-(defn- reach-cache [database]
- (or (:seon.sci.eval/projection-state (meta database))
-     (when-let [projection (db/carried-projection database)]
-      (schema/projection-cache-value projection
-       [::reach-cache (:config database)] #(atom nil)))))
+(defn- reach-cache
+ "The reach index's holder, retained by the database's carried projection."
+ [database]
+ (when-let [projection (db/carried-projection database)]
+  (schema/projection-cache-value projection
+   [::reach-cache (:config database)] #(atom nil))))
 (defn- reach-entries
  "Derive selected reach digests, incrementally on the database's carried cache.
  Result-only transactions invalidate nothing. A cache retains only one basis;
@@ -882,8 +883,12 @@
                  (assoc index ::reach-config configuration ::reach-attributes reach-attributes
                         ::reach-value-identity value-identity ::reach-computed (count missing))))]
   (if holder
-   (locking holder
-    (let [previous (::reach-index (meta holder))
+   ;; The holder's value is a delay of the newest index: equal database values
+   ;; deref one derivation, a newer value claims by compare-and-set, and a
+   ;; failed claim is withdrawn so its exception never becomes the cache.
+   (loop []
+    (let [claimed @holder
+          previous (some-> claimed deref)
           revisions (reach-revisions database)
           ;; Equal reach-attribute revisions name the same reach rows at any basis.
           ;; An index read with other attributes (code before a reload) is not reused.
@@ -891,11 +896,22 @@
                       (= reach-attributes (::reach-attributes previous))
                       (or (< (::reach-basis previous 0) (db/basis-t database))
                           (= value-identity (::reach-value-identity previous))
-                          (and revisions (= revisions (::reach-revisions previous)))))
-          index (derive-index (when usable previous))]
-     (when (and value-identity (or usable (nil? previous)))
-      (alter-meta! holder assoc ::reach-index index))
-     (select-keys (::reach-digests index) test-symbols)))
+                          (and revisions (= revisions (::reach-revisions previous)))))]
+     (cond
+      (and usable (= value-identity (::reach-value-identity previous))
+           (every? #(get-in previous [::reach-digests % ::reach-refs]) test-symbols))
+      (select-keys (::reach-digests previous) test-symbols)
+      (not (and value-identity (or usable (nil? previous))))
+      (select-keys (::reach-digests (derive-index nil)) test-symbols)
+      :else
+      (let [claim (delay (assoc (derive-index (when usable previous))
+                                ::reach-derivations (inc (::reach-derivations previous 0))))]
+       (if (compare-and-set! holder claimed claim)
+        (try (select-keys (::reach-digests @claim) test-symbols)
+             (catch Exception failure
+              (compare-and-set! holder claim claimed)
+              (throw failure)))
+        (recur))))))
    (let [index (derive-index nil)]
     (select-keys (::reach-digests index) test-symbols))))
  (catch Exception failure
