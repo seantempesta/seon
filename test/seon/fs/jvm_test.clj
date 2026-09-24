@@ -363,6 +363,37 @@
                          (String. (Files/readAllBytes path)
                                   StandardCharsets/UTF_8))))))))
 
+(deftest concurrently-staged-writes-have-one-whole-winner
+  ;; Staging and fsync run outside the recheck-and-move section, so both
+  ;; writers stage at once; the precondition recheck at the move decides.
+  (with-temp-tree
+    (fn [root]
+      (let [path (.resolve root "staged-race.txt")
+            effective (policy root)
+            text (fn [c] (apply str (repeat (* 2 1024 1024) c)))]
+        (dotimes [round 8]
+          (let [before (.getBytes (str "round " round) StandardCharsets/UTF_8)
+                _ (write-octets! path before)
+                start (CountDownLatch. 1)
+                write-one (fn [c]
+                            (.await start)
+                            ((handler 'write)
+                             {:my.fs/path "staged-race.txt"
+                              :my.fs/content {:my.fs/text (text c)}
+                              :my.fs/precondition {:my.fs/expected-digest (sha-256 before)}}
+                             effective))
+                writers [(future (write-one \a)) (future (write-one \b))]
+                _ (.countDown start)
+                results (mapv deref writers)
+                winner (first (filter :my.fs/changed? results))
+                on-disk (String. (Files/readAllBytes path) StandardCharsets/UTF_8)]
+            (is (= 1 (count (filter :my.fs/changed? results))))
+            (is (= 1 (count (filter #(string? (:my.fs/stale-digest %)) results))))
+            (is (= (:my.fs/after-digest winner)
+                   (sha-256 (.getBytes on-disk StandardCharsets/UTF_8))))
+            (is (contains? #{(text \a) (text \b)} on-disk))
+            (is (= [path] (paths-in root)))))))))
+
 (deftest blob-backed-content-is-streamed-and-digest-verified
   (with-temp-tree
     (fn [root]

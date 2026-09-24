@@ -674,57 +674,60 @@
   [request effective]
   (let [path (:my.fs/path request)]
     (try
-      (locking write-serialization
-        (let [{directory :seon.fs.jvm/directory
-               entry-name :seon.fs.jvm/name
-               streams :seon.fs.jvm/streams}
-              (parent-access path effective)]
-          (try
-            (let [write-limit (:seon.config.fs/max-write-bytes effective)
-                  read-limit (:seon.config.fs/max-read-bytes effective)
-                  precondition (:my.fs/precondition request)
-                  before (precondition-state directory entry-name path
-                                             precondition read-limit)
-                  content (content-info (:my.fs/content request) write-limit)
-                  proposed (:seon.fs.jvm/digest content)]
-              (if (= proposed (:my.fs/before-digest before))
-                (merge {:my.fs/path path
-                        :my.fs/changed? false
-                        :my.fs/after-digest proposed
-                        :my.fs/bytes-written
-                        (:seon.fs.jvm/file-bytes content)}
-                       before)
-                (let [{stage-name :seon.fs.jvm/stage-name
-                       staged-content :seon.fs.jvm/content}
-                      (stage-content! directory (:my.fs/content request)
-                                      write-limit)
-                      moved? (volatile! false)]
-                  (try
+      (let [{directory :seon.fs.jvm/directory
+             entry-name :seon.fs.jvm/name
+             streams :seon.fs.jvm/streams}
+            (parent-access path effective)]
+        (try
+          (let [write-limit (:seon.config.fs/max-write-bytes effective)
+                read-limit (:seon.config.fs/max-read-bytes effective)
+                precondition (:my.fs/precondition request)
+                before (precondition-state directory entry-name path
+                                           precondition read-limit)
+                content (content-info (:my.fs/content request) write-limit)
+                proposed (:seon.fs.jvm/digest content)]
+            (if (= proposed (:my.fs/before-digest before))
+              (merge {:my.fs/path path
+                      :my.fs/changed? false
+                      :my.fs/after-digest proposed
+                      :my.fs/bytes-written
+                      (:seon.fs.jvm/file-bytes content)}
+                     before)
+              (let [{stage-name :seon.fs.jvm/stage-name
+                     staged-content :seon.fs.jvm/content}
+                    (stage-content! directory (:my.fs/content request)
+                                    write-limit)
+                    moved? (volatile! false)]
+                (try
+                  ;; No filesystem compares a digest at the rename, so only
+                  ;; this JVM's recheck-and-move excludes; staging and fsync
+                  ;; run outside it. External writers are detected, not excluded.
+                  (locking write-serialization
                     (precondition-state directory entry-name path
                                         precondition read-limit)
                     (.move ^SecureDirectoryStream directory stage-name
-                           ^SecureDirectoryStream directory entry-name)
-                    (vreset! moved? true)
-                    (merge {:my.fs/path path
-                            :my.fs/changed? true
-                            :my.fs/after-digest
-                            (:seon.fs.jvm/digest staged-content)
-                            :my.fs/bytes-written
-                            (:seon.fs.jvm/file-bytes staged-content)}
-                           before)
-                    (catch AtomicMoveNotSupportedException _
-                      (refuse! :my.fs/atomic-write-unsupported
-                               true
-                               "The filesystem refused an atomic file move."
-                               {:my.fs/path path}))
-                    (finally
-                      (when-not @moved?
-                        (try
-                          (.deleteFile ^SecureDirectoryStream directory
-                                       stage-name)
-                          (catch NoSuchFileException _))))))))
-            (finally
-              (close-streams! streams)))))
+                           ^SecureDirectoryStream directory entry-name))
+                  (vreset! moved? true)
+                  (merge {:my.fs/path path
+                          :my.fs/changed? true
+                          :my.fs/after-digest
+                          (:seon.fs.jvm/digest staged-content)
+                          :my.fs/bytes-written
+                          (:seon.fs.jvm/file-bytes staged-content)}
+                         before)
+                  (catch AtomicMoveNotSupportedException _
+                    (refuse! :my.fs/atomic-write-unsupported
+                             true
+                             "The filesystem refused an atomic file move."
+                             {:my.fs/path path}))
+                  (finally
+                    (when-not @moved?
+                      (try
+                        (.deleteFile ^SecureDirectoryStream directory
+                                     stage-name)
+                        (catch NoSuchFileException _))))))))
+          (finally
+            (close-streams! streams))))
       (catch Throwable error
         (error-value error :my.fs/write-failed true "The file write failed."
                      {:my.fs/path path})))))
