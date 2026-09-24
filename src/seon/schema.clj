@@ -2045,21 +2045,25 @@
             (not-empty (into #{} (keep (fn [[k properties _]]
                                         (when (and (keyword? k) (not= k ::m/default)
                                                    (not (:optional properties))) k)))
-                             entries))]
+                             entries))
+            renderers (into {}
+                            (filter
+                             (fn [[property declaration]]
+                               (and (qualified-keyword? property)
+                                    (= "seon.render" (namespace property))
+                                    (qualified-symbol? declaration))))
+                            props)]
+        ;; A map with no required attribute is still a shape when it is an
+        ;; entity or declares its render pair: a value carrying any of its
+        ;; declared attributes and validating is of that schema.
         (when (or (seq required-attrs)
-                  (and (:seon.db/attributes props)
-                       (seq entries)))
+                  (and (seq entries)
+                       (or (:seon.db/attributes props) (seq renderers))))
           (merge
             {:seon.schema/key schema-key
              :seon.schema/required-attrs required-attrs
              :seon.schema/entity? (boolean (:seon.db/attributes props))}
-            (into {}
-                  (filter
-                   (fn [[property declaration]]
-                     (and (qualified-keyword? property)
-                          (= "seon.render" (namespace property))
-                          (qualified-symbol? declaration))))
-                  props)))))))
+            renderers))))))
 
 (defn- validate-declarations!
   "Validate `schema-keys` and `function-symbols` of one compiled candidate

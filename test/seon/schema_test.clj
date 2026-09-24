@@ -910,6 +910,28 @@
                first
                :seon.schema/key)))))
 
+(deftest an-all-optional-map-declaring-a-render-pair-is-a-shape
+  ;; `:seon.problems/problems` has this form: every family optional, absent
+  ;; when empty, and a declared AI/HTML pair to render it through.
+  (let [forms {:seon.schema-test/family [:vector :string]
+               :seon.schema-test/report
+               [:map {:seon.render/ai 'seon.schema-test/render-ai
+                      :seon.render/html 'seon.schema-test/render-html}
+                [:seon.schema-test/family {:optional true}
+                 :seon.schema-test/family]
+                [:seon.schema-test/other {:optional true} [:vector :int]]]}
+        projection (schema/build-projection forms)
+        value {:seon.schema-test/family ["one"]}]
+    (is (= [[:seon.schema-test/report 'seon.schema-test/render-ai]]
+           (mapv (juxt :seon.schema/key :seon.render/ai)
+                 (schema/matching-shapes-in projection value)))
+        "the declared pair is selected for a value of its schema")
+    (is (empty? (schema/matching-shapes-in projection {}))
+        "an empty map carries none of the schema's attributes")
+    (is (empty? (schema/matching-shapes-in
+                 projection {:seon.schema-test/other ["x"]}))
+        "a value that does not validate is not of the schema")))
+
 (deftest agent-authored-function-input-maps-accrete
   (is (empty?
        (schema/assert-complete-contract!
