@@ -1,11 +1,8 @@
 (ns seon.dev.state
   "Atomic tooling records; process-root lifecycle is owned by boot and the store."
-  (:require [babashka.fs :as fs] [clojure.edn :as edn]
-            [seon.cluster.process :as process])
+  (:require [babashka.fs :as fs] [clojure.edn :as edn])
   (:import [java.nio.channels FileChannel]
            [java.nio.file OpenOption StandardOpenOption]))
-(def process-start-instant process/process-start-instant)
-(def process-identity-alive? process/process-identity-alive?)
 (defn read-edn
   "Read one EDN state record when it exists."
   [path]
