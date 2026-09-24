@@ -2078,10 +2078,12 @@
     ;; Imports are explicit namespace facts. Install their named classes before
     ;; the namespace bindings resolve them; SCI is containment, not a security
     ;; boundary, and the program graph—not a hand list—declares the set.
-    (install-declared-classes! ctx namespace-rows)
+    (install-declared-classes! ctx all-namespace-rows)
     ;; Create every namespace and publish aliases first. Alias targets need not
-    ;; exist: this is the effective behavior of SCI's `:as-alias` too.
-    (doseq [[namespace-name row] namespace-row-by-name]
+    ;; exist: this is the effective behavior of SCI's `:as-alias` too. Every
+    ;; program namespace needs its reader context, interpreted or not: an
+    ;; agent's first definition in a clean namespace is analysed against it.
+    (doseq [[namespace-name row] all-namespace-row-by-name]
       (sci/install-namespace-bindings!
        ctx namespace-name (assoc (row-bindings row) :refers {})))
     ;; Namespace declarations establish aliases/imports first; compiled host
