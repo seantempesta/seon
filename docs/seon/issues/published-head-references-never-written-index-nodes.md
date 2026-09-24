@@ -8,6 +8,11 @@ tags: [issue, datahike, store, write-path, durability]
 
 # A published head references index nodes that were never written
 
+The 2026-09-24 occurrences of `Node not found in storage.` (18:07:30Z, 21:14:14Z, 21:19:42Z)
+have a different cause, and no on-disk data was lost. A committed database holds its fused
+roots only through a soft reference, and those roots are never written
+(`a-committed-database-holds-its-fused-roots-only-softly.md`).
+
 ## Observation
 
 Twice on 2026-09-23 default's store refused a read with Datahike's
