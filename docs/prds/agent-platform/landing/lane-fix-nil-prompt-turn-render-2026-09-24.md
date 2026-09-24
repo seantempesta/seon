@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (4 commits); installed proof on default pending root's checkout restart
+status: landed (4 commits); installed on default (checkout, hook publication on) and regressions green there
 lane: fix-nil-prompt-turn-render
 created: 2026-09-24
 report: docs/research/agent-platform/ambiguous-nil-producers-2026-09-24.md
@@ -16,15 +16,15 @@ profile, which broke every contracted-call failure's rendering.
 
 ## Broken first
 
-- **Installed proof on default is not recorded yet.** All proof below comes from a
-  `git archive` snapshot root, HEAD `3ff123708` plus this diff. Root then ruled
-  that lanes must not boot snapshot roots. The snapshot was stopped and deleted:
-  pid 61720 exited, and its directory was removed. Default was still running with
-  hook publication off, so it does not have these commits yet.
-  **RESET NEEDED / adoption:** once default runs the checkout, run
-  `bin/test-check default --ns seon.render-simplification-test`, then
-  `--ns seon.cluster.prompt-test` and `--ns seon.turn-test`. Then confirm that
-  open faults `c3a91308…` and `17ae2cc0…` stop recurring.
+- **Namespace runs on installed default are blocked by a foreign publication.**
+  At 16:58Z, every member of `bin/test-check default --ns seon.cluster.prompt-test`
+  refused with "Cannot interpret seon.cluster.reload-measure/-main: Host-bound
+  declaration … must change through the loaded source files". The run also
+  reported "source 6ab5559a… published but not yet adopted". That cluster file
+  belongs to another lane. The single-test runs below executed before it. My
+  earlier namespace comparison comes from a `git archive` snapshot root, which
+  root has since ruled out. The snapshot was stopped (pid 61720 exited) and
+  deleted.
 - **Other reds remain in the three namespaces**, both at HEAD and with the diff:
   - timeouts: tests running 10–18 s against the 5 s bound, with load average
     9–23;
@@ -114,7 +114,30 @@ profile, which broke every contracted-call failure's rendering.
 - Not done from the row 6 plan: deleting `request-projection`'s context
   fallback. Only the reorder was granted.
 
-## Evidence (snapshot root, HEAD `3ff123708` + diff; load average 9–23)
+## Installed evidence (default pid 70372, from the checkout at `c25741f78`, 16:57Z)
+
+| `bin/test-check default --test …` | result |
+|---|---|
+| `render-simplification-test/an-evaluation-renders-with-the-profile-its-caller-names` | pass 5, 859 ms |
+| `render-simplification-test/a-supplied-projection-is-the-one-a-render-asks` | pass 1, 1972 ms |
+| `render-simplification-test/a-refused-database-read-is-not-an-absent-database` | pass 4, 865 ms |
+| `prompt-test/an-unread-usage-history-is-not-an-empty-one` | pass 4, 938 ms |
+| `turn-test/an-unbound-result-settles-red-and-unreadable-shown-text-does-not` | pass 9, 2219 ms |
+| `turn-test/an-agent-dial-read-that-refuses-is-not-an-absent-dial` | pass 3, 2639 ms |
+
+- The live reproduction on branch `fix-nil-prompt-profile-2` (now retired) worked:
+  `(defn g "d" {:malli/schema [:=> [:cat :int] :int]} [x] x)`, then `(g "a")`
+  returned the full `fix-nil-profile-probe/g refused argument 0` error value.
+  `(seon.ai.tokens/estimate 5)` did the same.
+- `runtime_status` open faults: none from `seon.error/prepare-result`. The only
+  one is a `transact!` InterruptedException at 16:53:16Z, during boot.
+- Faults `c3a91308…` and `17ae2cc0…` were in the store that root nuked, so their
+  non-recurrence was checked as the absence of that signature class, not by
+  their counts.
+- Neither namespace run found a `prepare-result refused` occurrence (0 in
+  `prompt-test`, 0 in `render-simplification-test`).
+
+## Snapshot evidence (HEAD `3ff123708` + diff; load average 9–23; before root's no-snapshot ruling)
 
 | test (snapshot) | result |
 |---|---|
