@@ -123,3 +123,37 @@
                      (concat (for [n suggest-needs] {:rule :advice/needs? :task-needed n})
                              (for [s suggest-definitions] {:rule :advice/definition? :sym s}))))]
             (assoc f :task (:seon.task/id t)))))))
+
+(defn- clip-lines [s n]
+  (let [ls (str/split-lines (or s ""))] (str/join "\n" (cond-> (vec (take n ls)) (> (count ls) n) (conj (str ";; … " (- (count ls) n) " more lines: evaluate the form above"))))))
+
+(defn brief
+  "What an agent receives for `task`: real forms it can re-evaluate, and their current values.
+  Built only from the task's own references — never a namespace dump."
+  [db tasks state-of task]
+  (let [row (fn [s] (d/pull db '[:seon.fn/doc :seon.fn/spec :seon.fn/source] [:seon.fn/sym s]))
+        callers (fn [s] (vec (sort (d/q '[:find [?c ...] :in $ ?s :where [?e :seon.fn/calls ?s] [?e :seon.fn/sym ?c]] db s))))
+        src (fn [s] (let [r (row s)] (if (:seon.fn/source r)
+                                        (str "r => (seon.db/pull (seon.db/db) '[:seon.fn/doc :seon.fn/spec :seon.fn/source] [:seon.fn/sym '" s "])\n"
+                                             ";; contract: " (:seon.fn/spec r) "\n" (clip-lines (:seon.fn/source r) 14))
+                                        (str ";; " s " does not exist yet — you define it"))))
+        sec (fn [title body] (when (seq (str/trim (str body))) (str ";; ── " title "\n" body)))]
+    (str/join "\n\n"
+              (keep identity
+                    [(sec "Your task" (str (:seon.task/intent task) "\n;; id " (:seon.task/id task)))
+                     (sec "Done when every form returns true, each in its own evaluation"
+                          (str/join "\n" (map pr-str (:seon.task/done-when task))))
+                     (sec "It needs"
+                          (str/join "\n" (for [n (sort (:seon.task/needs task))] (str (pr-str n) "  ;; " (name (state-of n))))))
+                     (sec "Target data model (decide this first)"
+                          (str/join "\n" (for [[k f] (:seon.task/schemas task)] (str (pr-str k) " " (pr-str f)))))
+                     (sec "Its result must satisfy" (some-> (:seon.task/output task) pr-str))
+                     (sec "You may change" (str/join "\n\n" (map src (sort (:seon.task/definitions task)))))
+                     (sec "You must delete (and repair every caller)"
+                          (str/join "\n\n" (for [s (sort (:seon.task/retracts task))] (str (src s) "\n;; callers: " (pr-str (callers s))))))
+                     (sec "You must rename (callers repaired in the same change)"
+                          (str/join "\n\n" (for [[a b] (:seon.task/renames task)] (str a " → " b "\n;; callers of " a ": " (pr-str (callers a))))))
+                     (sec "Must read" (str/join "\n\n" (map src (sort (concat (:seon/must-read task) (:seon.task/must-read task))))))
+                     (sec "Stored data it is about" (str/join "\n" (map pr-str (:seon.task/entities task))))
+                     (when (:seon.task/attempts task)
+                       (sec "Comparison" (str (:seon.task/attempts task) " independent attempts get this same brief on separate branches; root compares them and keeps one or a hybrid.")))]))))
