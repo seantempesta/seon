@@ -1,7 +1,7 @@
 (ns seon.test.clean-world-test
   "A cluster's test member runs in the loaded published program plus the facts
-  boot seeds for a cluster: none of the cluster's agents, turns, messages or
-  errors reach it."
+  boot seeds for a cluster and the cluster's differing program rows: none of
+  its agents, turns, messages or errors reach it."
   (:require [clojure.test :refer [deftest is]]
             [seon.cluster.boot :as boot]
             [seon.cluster.process :as cluster.process]
@@ -19,9 +19,8 @@
         base (:seon.source/commit-id
               (db/pull live [:seon.source/commit-id] [:seon.cluster/name cluster]))
         published (source/database (:seon.store/store member) base)
-        pairs (fn [database attribute] (map (juxt :e :v) (db/datoms database :aevt attribute)))
-        installed (filter #(get-in published [:schema %])
-                          (program/program-attributes (db/carried-projection world)))
+        program-attributes (program/program-attributes (db/carried-projection world))
+        digests #(program/digest-map % {:seon.program/max-datoms 100000})
         entity (fn [database lookup] (:db/id (db/pull database [:db/id] lookup)))
         boot-facts (set (keep identity
                               [(entity world [:seon.cluster/name cluster])
@@ -36,14 +35,17 @@
     (doseq [attribute [:seon.agent/id :seon.error/id :seon.message/about :seon.turn/id]]
       (is (empty? (db/datoms world :aevt attribute))
           (str "the member inherits no " attribute " rows")))
-    (is (< 100 (count installed)) "the program partition is derived from entity schemas")
-    (is (empty? (remove #(= (pairs published %) (pairs world %)) installed))
-        "every program-partition attribute holds exactly the published commit's rows")
+    (is (< 100 (count program-attributes)) "the program partition is derived from entity schemas")
+    (is (= (digests live) (digests world))
+        "the member's program is its cluster's: the published commit plus the differing rows")
     (is (= base (:seon.source/commit-id
                  (db/pull world [:seon.source/commit-id] [:seon.cluster/name cluster])))
         "the world records the program it was branched from")
     (is (= (config/effective live cluster) (config/effective world cluster))
         "boot's config facts carry the cluster's effective configuration")
     (is (seq added))
-    (is (= #{} (reduce disj (set (map :e added)) boot-facts))
-        "only the cluster, config and process entities are added to the published commit")))
+    (is (= #{} (into #{} (comp (remove (comp boot-facts :e))
+                               (remove (comp program-attributes :a))
+                               (map :e))
+                     added))
+        "beside program rows only the cluster, config and process entities are added")))

@@ -1416,16 +1416,65 @@
 (def ^:private seed-cluster-facts!
   (delay (requiring-resolve 'seon.cluster/seed-cluster-facts!)))
 
+(defn- program-overlay-tx
+  "Transaction data putting `candidate`'s differing program rows onto `world`.
+
+  Entity ids differ between lineages, so declarations compare by stored
+  definition digest: a digest one value holds and the other lacks names a
+  declaration that was added, changed or retracted. Only those identities are
+  read and replaced (`seon.fn/reconcile-tx`) with their program-partition
+  attributes, an identity absent from the candidate retracting; callers of a changed definition interpret it at
+  acquisition. Equal programs answer `[]`; a refused read answers its refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                  [:or :seon.db/tx-data :seon.error/value]]}
+  [world candidate]
+  (let [families (vec (:seon.program/compared-families
+                       (program/declaration-families (db/carried-projection candidate))))
+        ;; One query per value (0.5 ms on 10,779 declarations; the armed
+        ;; `db/datoms` read of the same range measured 44 ms).
+        by-digest (fn [database]
+                    (let [found (db/q '[:find ?digest ?e :where [?e :seon.program/definition-digest ?digest]]
+                                      database)]
+                      (if (:seon.error/at found) found (into {} found))))
+        [held offered :as maps] (mapv by-digest [world candidate])
+        named (fn [database digests other]
+                (let [rows (db/pull-many database families
+                                         (into [] (keep (fn [[digest e]] (when-not (get other digest) e)))
+                                               digests))]
+                  (if (:seon.error/at rows) rows
+                      (into #{} (mapcat (fn [row] (keep #(when-some [v (get row %)] [% v]) families)))
+                            rows))))
+        present (when-not (some :seon.error/at maps) (named candidate offered held))
+        changed (when (set? present) (named world held offered))
+        ;; Only the program partition carries over: another writer's fact on
+        ;; a row (a namespace's steward agent) names data the world lacks.
+        others #(let [program (program/program-attributes (db/carried-projection candidate))]
+                  (into #{} (remove (fn [a] (or (program a) (= "db" (namespace a)))))
+                        (filter qualified-keyword? (keys (:schema candidate)))))
+        rows (when (and (set? changed) (seq (into present changed)))
+               (functions/published-index-rows candidate (vec present) (others)))]
+    (cond
+      (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
+      (not (set? present)) present
+      (not (set? changed)) changed
+      (nil? rows) []
+      (:seon.error/at rows) rows
+      :else (functions/reconcile-tx world rows (vec (into present changed))))))
+
 (defn- clean-request-handle
-  "Acquire the request's world: the loaded published program plus boot's facts.
+  "Acquire the request's world: the loaded published program, boot's facts and
+  the execution's differing program rows.
 
   The base is the source commit the recording cluster's adoption record names:
   the program this JVM loaded, which admission records as the run's
   `:seon.test.run/loaded-commit-id`. A published commit holds program rows only,
-  so no agent, turn, message or error of the cluster is inherited. On it boot's
+  so no agent, turn, message or error of the execution is inherited. On it boot's
   writer puts the cluster's effective config, taken as its complete manifest,
-  and the cluster entity, then the fork's source record. Members branch from
-  the returned head. A refused write releases the branch and throws."
+  and the cluster entity; then one transaction writes the execution value's
+  differing program rows (`program-overlay-tx`) with the fork's source record,
+  so an agent branch tests its candidate program, never its operational data.
+  Members branch from the returned head. A refused write releases the branch
+  and throws."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
                        :seon.cluster/name :seon.config/effective]
                   :seon.agent/execution-handle]}
@@ -1447,8 +1496,12 @@
                                    :seon.config/desired-row (assoc effective :seon.config/cluster cluster)
                                    :seon.config/resolved-attributes (set (keys effective))}
                                   (cluster.process/id (cluster.process/current-identity)))
-            (let [report (db/transact! connection [{:seon.cluster/name cluster
-                                                     :seon.source/commit-id base}])]
+            (let [overlay (program-overlay-tx (db/db connection)
+                                              (db/db (:seon.db/connection execution)))
+                  _ (when (:seon.error/at overlay)
+                      (throw (ex-info "The test world's program overlay could not be read." overlay)))
+                  report (db/transact! connection (conj overlay {:seon.cluster/name cluster
+                                                                 :seon.source/commit-id base}))]
               (when-not (:db-after report)
                 (throw (ex-info "The test world's source record was refused." report))))))
       (let [database (db/db connection)]
@@ -1699,8 +1752,8 @@
   Each executed member is an isolated agent for one body: a fresh branch off
   the request's world through `seon.cluster.agent/acquire-context!`. A cluster's
   world is its loaded published program plus boot's cluster facts, holding none
-  of its agents, turns, messages or errors; an isolated execution's world is
-  its own captured value (`clean-request-handle`). The body
+  of its agents, turns, messages or errors, plus the execution's differing
+  program rows, so an agent branch tests its candidate (`clean-request-handle`). The body
   under that branch's custody (`seon.sci.eval/run-test`), its result recorded
   on the recording connection, and the branch unlinked by
   `release-context!` after the body's thread exits. The request is bounded by
@@ -1830,17 +1883,11 @@
                                                              [?member :seon.test.member/symbol ?symbol]]
                                                     (:db-after report)
                                                     (:seon.test.run/id batch-provenance)))})))
-                ;; A cluster's request branches from its loaded program with
-                ;; boot's facts, never from its operational data. An isolated
-                ;; attempt may hold candidate program rows that program lacks,
-                ;; so until base plus overlay its request branches from its own
-                ;; value, which a clean request's member already is.
+                ;; Every request, a cluster's or an isolated attempt's, branches
+                ;; from its loaded program with boot's facts and its execution's
+                ;; differing program rows, never from its operational data.
                 request-handle (when (seq ordered)
-                                 (if (= :isolated (:seon.agent/mode execution))
-                                   (@acquire-context! execution nil
-                                                      {:seon.agent/isolate? true
-                                                       :seon.cluster.registry/from (db/commit-id database)})
-                                   (clean-request-handle execution recording cluster effective)))
+                                 (clean-request-handle execution recording cluster effective))
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [settle! (fn [result]
