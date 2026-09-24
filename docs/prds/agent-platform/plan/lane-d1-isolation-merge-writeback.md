@@ -1,21 +1,32 @@
 ---
 type: plan
-status: implementation specification; proof gates explicit
+status: revised 2026-09-24 for owner ruling option 3
 created: 2026-09-21
 lane: D1
 depends-on: [A1, A2, B1, B2, B3, B4]
-tags: [agent-platform, isolation, merge, write-back, datahike-branch, sci-fork]
+tags: [agent-platform, isolation, merge, write-back, datahike-branch]
 ---
 
 # Lane D1 — branch, edit, test, review, merge and write back
 
 ## 0. Purpose
 
-Seon agents change code on their own branch, and outside agents use the same door.
-They receive entry validation and affected-test feedback while their work stays isolated.
-The orchestrator acts as root, reviewing changes and accepting them or sending them back.
-Changes reach the shared program and files only through a tested, reviewed merge.
-Compose the existing branch, submission, test and source owners around immutable inputs.
+Seon already has branch, submission, test and source owners. Compose them around
+immutable captured inputs; D1 supplies the reviewed merge and export, not another harness.
+
+**Ruled model and interim (owner 2026-09-24).** [Publication option 3](../../../research/agent-platform/publication-under-concurrent-lanes-2026-09-24.md#exactly-three-priced-options)
+(`b8fae5bf8`) is the target: Claude/Codex filesystem edits become program rows on their
+named lane branch, combined candidates are tested on an intermediate branch, named root
+acceptance is checked at the writer, and accepted bytes reach default through staged
+write-back and fail-closed convergence. Option 1 is **in force now**: hook publication
+is paused, lanes retain whole-file holds and commit their owned paths, and only root
+integrates coherent checkpoints. This is an operational constraint, not proof that all
+execution is automatically excluded. Default publication costs **0 ms per lane save**;
+branch feedback and accepted integration have separate costs. Only root publishes the
+accepted bytes into default; failed convergence leaves affected execution unavailable
+until rows, loaded behavior, armed contracts and the record agree. JVM effects are not
+rolled back. Option 2's content comparison is used at integration, not as a per-save
+reconciler of everyone's unfinished checkout.
 
 **The path.** Start from the namespace context and edit a named branch. Each submission
 gets validation and test feedback. Root reviews its diff and requests acceptance or
@@ -24,16 +35,25 @@ destination head **H**. It builds intermediate branch **S** from H plus the prop
 changes, keeping conflicts there for repair. The mandatory gate tests that combined
 program. Named root/owner acceptance installs exactly the tested proposal if H is still
 current, producing accepted commit **M**. The source owner stages and verifies M's file
-changes, installs and commits the complete set, then loads code, installs contract
-checks and records convergence before affected execution resumes. No second approval
-or push follows.
+changes, installs and commits the complete set, then finishes rows → load → arm → record
+before affected execution resumes. Exclusion begins before accepted destination rows
+change and spans export/convergence; M alone is not readiness. No second approval or push follows.
 
 This is a target, not installed proof. The [implementation contracts and historical evidence](../../../research/agent-platform/d1-evidence-2026-09-23.md#implementation-contracts)
 contain exact data shapes, source navigation and detailed proof records; the explicitly
-normative contracts there are part of this plan. Fenced historical archives are not.
+normative contracts there are part of this plan except where this revision supersedes
+their ordering, checkpoint lifecycle or slice accounting. Fenced historical archives are not.
 Owner rulings `a29faf5a6`, `38863a0c8`, `215c32d9a`, `5ec049cfd`, `eb709fcb8` and review
 folds `7523dd510`, `6f5ec198a` govern this account. D1 composes the work; B1 owns analysis,
 publication and MCP, B2 execution/context, B3 tasks/configuration, B4 tests/evidence.
+
+**Claude/Codex day to day — five lines (activate branch steps as §9 proves them).**
+
+1. Take whole-file ownership and a named lane branch; use the shared REPL with explicit root/cluster/branch.
+2. Submit captured filesystem edits to that branch; until available, commit held files for root's checkpoint.
+3. Read branch-local diagnostics and request focused `seon.test/run` feedback when the owner load rule permits.
+4. Send B/C/H, the diff and evidence to root; repair conflicts on S and request named acceptance, never self-adopt.
+5. Let accepted staged write-back update default; await convergence, then release holds and retire only after exit.
 
 ## 1. Requirements summary
 
@@ -53,7 +73,7 @@ Each requirement is proved by its stage checklist, including the normative detai
 | R10 | Compare canonical definition digests; transfer stable identities and complete refs. | 4 |
 | R11 | Root explicitly accepts; conflicts retain disjoint work on S and create root tasks. | 4–5 |
 | R12 | Acceptance checks tested H, proposal and lineage; evidence survives cleanup. | 5 |
-| R13 | Load → arm → record is exclusive; failed convergence leaves execution unavailable. | 7 |
+| R13 | Rows → load → arm → record is exclusive; failed convergence leaves execution unavailable. | 7 |
 | R14 | Export proves captured bytes, canonical analysis and actual callable behavior. | 6 |
 | R15 | Partial installs/restarts resume the same export; commit only its paths, never push. | 6 |
 | R16 | File-only changes join the same gate with their required platform proof. | 6 |
@@ -97,6 +117,18 @@ run on both branches. Context delegates to `seon.cluster.prompt/prompt`
 (`src/seon/cluster/prompt.clj:418`), returning rendered text and its basis/contributions.
 No alternate evaluator, agent registry, outside-only context or version counter.
 
+Checkpoint and attempt ownership comes from [one harness §§1–2, S2/S3/S4](../../../research/agent-platform/one-test-harness/design-2026-09-24.md#9c-ordered-cuts-gross-additions-and-proof-costs)
+and [language §4b](../../../research/agent-platform/decoration-language-v0-2026-09-24.md#4b-execution-model-checkpoints-owner-2026-09-24-corrected-by-review-82d87392b).
+S2 supplies a clean base plus branch differences, retractions and affected callers;
+S4 owns attempt custody/effects/exit. D1 adds no checkpoint cache or attempt constructor.
+A published database/SCI checkpoint is never evaluated into again; keep a branch head
+for GC retention. Each attempt/proof forks it with fresh connections, recorders and
+private mutable state. A successor checkpoint is a new fork; checkpoint changes discard
+scratch, while durable program rows survive. Cache opening form plans, not evaluated
+values; share validators by content and bind callables per execution. SCI `fork`
+(`reference-code/sci/src/sci/core.cljc:345`, `fcbd88628`) alone freezes neither a
+mutating parent nor an inherited atom. This supersedes D1's earlier context-update recipe.
+
 **Cost and recovery.** Measure branch/open/acquisition/arming and their total; work
 follows one assigned agent and changed definitions, not cluster startup. Context render
 must fit within the <1 s overhead target. Red work remains editable. Timeout is not exit.
@@ -137,6 +169,17 @@ non-settling SCI evaluator. `host-eval` remains JVM inspection only. Malli suppl
 schema compilation/errors; built-ins such as `:=>`, `:cat`, `:int` remain legal.
 Test-first uses the existing reach index in reverse. First prove it records test calls
 to not-yet-defined symbols; do not invent another detector or schema parser.
+
+Filesystem submissions capture owned paths and explicit deletions against the lane's
+last admitted file bases, analyze those bytes with B1's resolver inputs, and write through
+the same declaration admission to that **named branch**, never implicit `current-src` or
+default. Dirty shared files are authoring inputs, not permission to load them. The target
+keeps unaccepted bytes in source-owner staging outside live load paths (no worktree);
+the interim instead holds dirty checkout files and defers conflicting root integrations.
+Host-bound/file-only inputs remain staged and refused for ordinary SCI execution until
+their required platform proof exists. Missing saves, first observation and deletions
+are content differences; no session event acknowledges publication. MCP private `def`
+state alone is neither durable submission nor the program tested by `seon.test/run`.
 
 **Cost and recovery.** Checks follow proposed forms, schema dependencies and test lookups,
 not the whole program. Install the listener before submission and reconcile durable
@@ -247,7 +290,7 @@ writer confirms that the tested destination H is still current.
 
 1. Under the current rule, every function in the combined program has a well-formed,
    fully namespaced Malli schema and ≥1 reaching test. Changed functions also need
-   test-first basis evidence. Changed-only coverage is recommended but not yet ruled (§10).
+   test-first basis evidence. This revision retains that scope; option 3 does not narrow it.
 2. Required tests are all current static reaching tests **union explicit task tests**,
    including disconnected task tests and declared-long members. Missing coverage/unknown
    dependencies refuse by name; observed past reach is diagnostic. Validate schemas, final
@@ -255,7 +298,10 @@ writer confirms that the tested destination H is still current.
 3. Every required member has positive executed/reused evidence for immutable S and its
    proposal. Missing, red, unfinished, excluded or unknown blocks acceptance. No required
    member disappears through eligibility. Refusal is not empty successful selection.
-4. Accept exactly the tested proposal with H's original writer precondition. If H moved,
+4. The writer validates named root/owner acceptance of this exact S/proposal and its
+   evidence, alongside H's original precondition; a branch name, green result or caller
+   assertion is not acceptance. Close dependent execution before advancing the accepted
+   destination and retain that unavailability through export/convergence. If H moved,
    refuse before mutation, rebuild S against new H, recompute conflicts/obligations and
    obtain valid combined proof. Never accept an untested subset. Only acceptance settles
    the shared task; report its outcome through the existing history owner.
@@ -273,8 +319,11 @@ blocks under current scope; it does not justify running the whole suite.
 `seon.test/run` executes S with its matching database/context and explicit result-recording
 connection. Fixtures/resolution must not substitute `current-src` or the database holding
 results for S. Reused members retain their actual tested basis. `accept-merge!`
-(`src/seon/cluster/source.clj:786`) uses the maintained Datahike guarded writer with Seon's
-final-report validator. M retains H/C/S ancestry or B4's equivalent durable S/result lineage;
+(`src/seon/cluster/source.clj:797` at `82332488f`) uses the maintained Datahike guarded writer with Seon's
+final-report validator (`reference-code/datahike/src/datahike/writing.cljc:880–904`,
+`merge!` in `versioning.cljc:738`, gitlink `4157916b5`). The writer, not a pre-read,
+checks the expected head; Datahike supplies lineage, not semantic conflict resolution.
+M retains H/C/S ancestry or B4's equivalent durable S/result lineage;
 retain an explicit reference when results live elsewhere. Use immutable commits, not branch names.
 
 **Cost and recovery.** Measure selection, admission, bodies, recording and release separately;
@@ -344,15 +393,41 @@ contract checks match it. Database acceptance alone cannot make JVM mutations at
 
 **Requirements and proof — R13.**
 
-1. B1's existing evaluation/adoption boundary excludes conflicting reloads and dependent
-   evaluations through **load → arm → record**. Failed load/arm leaves affected execution
-   unavailable; an unchanged adoption record is not health. Keep the host REPL reachable.
+1. B1 completes S3's existing evaluation/adoption boundary: mark unavailable before
+   the first row/root mutation and exclude conflicting reloads and dependent evaluations
+   through **rows → load → arm → record**, including projection readiness. This starts
+   before acceptance changes the destination rows/head and spans export; failure leaves
+   affected execution unavailable; an unchanged adoption record is not health. Keep the host REPL reachable.
 2. Prove interleaved adoptions, partial namespace reload failure, new/replaced Var wrappers
    and an old branch's indirect call. Differing definitions/contracts and affected callers
    must stay isolated; an uninterpretable caller refuses by name, never silently runs host code.
 3. Until exclusion is proven, the orchestrator alone integrates; lanes never self-adopt.
    A dirty required namespace/schema dependency defers only that integration. Whole-file
    holds, digest checks and lint-only hooks remain.
+
+**Installed part and remaining proof.** Harness S3a `d77a9461a` marks the program unknown
+before JVM changes and keeps it unknown after failure; S3b `389d2d265` resolves test
+callables inside exclusion; S3c `548d7b6f4` adds run-level loaded provenance. These are
+landed work, not D1 additions. [S3's landing](../landing/lane-harness-s3-program-validity-2026-09-24.md)
+names remaining evaluation/render/seed exclusion, fault storage/delivery and per-member
+provenance gaps. At revision `82332488f`, `cluster.clj:2730–2737` still writes rows before
+exclusion; `test.clj:1052` records a run's basis before later members execute. Complete
+those at S3's owners: validity and callable resolution must share exclusion through
+actual exit, self-adoption defers, and each member proves the program it really ran.
+An entry-only validity check cannot exclude an adoption that starts during execution.
+Keep the existing conservative whole-program unknown scope until narrower exclusion is
+proved. A lock release after failure never restores readiness; error storage/delivery
+uses the ordinary error route, with the REPL still reachable.
+
+Read-only revision evidence (MCP JVM, explicit root `/Users/sean/src/seon`, `default`,
+2026-09-24 22:13:33Z): `stored-path-digests` equals `path-digests` for `cluster.clj`,
+`test.clj`, `cluster/source.clj`, `seon.cluster.edn` and `seon.test.run.edn`;
+`@seon.cluster/program-validity` returned nil, and both exclusion Vars resolved with
+explicit lock/validity arguments. Form **21.075 ms**, PREPL **36 ms**, shared used heap
+**1,593,275,440 bytes** (not allocation). Status: PID 39156, start 21:55:31Z, alive but
+faulted, 16 open signatures; status observation max **2,077 ms** includes problem reads
+(`failed-tests` max 1,851 ms), not publication cost. Row equality/Var presence is not
+behavior or arming proof. No JVM was started; no test, branch mutation or reload ran for this revision.
 
 **Mechanism, cost and recovery.** B1's adoption owner uses ordinary `require :reload`
 and B2's installer (`src/seon/sci/eval.clj:1206`). Work follows changed declarations and
@@ -363,36 +438,67 @@ cannot undo JVM effects. No lane reset/restart supplies this proof.
 
 ## 9. Build order
 
-O codes identify implementation slices, not additional workflow stages. **O3a is the
-first implementation**, after its file holder releases it. O1a/b preparation can proceed
-on free files. Runtime proof follows health → O0 → O1a/b/d + O2a/c → proven O3 acceptance
-→ O1c/O2b activation → narrow O4 → two-branch demonstration. Never activate warned
-definitions or retire fixed gating before acceptance is proven.
+O codes are cuts at the existing owners, in the order below; they replace the former
+O3a-first schedule. **S1/S2/S3/S4 are the harness's work**, not a second D1 implementation.
+S3a–c have landed; adopt/prove their remaining guarantees before depending on them.
+S2 clean checkpoints depend on S1/S3; S4 shares S1/S3 and precedes effectful attempts.
+Whole-file holders integrate every producer/consumer change; D1 waits on or hands work
+to that owner. No delegation or runtime work is authorized by this document revision.
 
-| Slice / owner | Work and prerequisite | Stage acceptance checklist | Deletes; added-source cap |
+Every named cut caps **all gross added source/schema/caller/regression lines at 100**,
+not net growth. Figures below are budgets, not measured diffs; reuse existing regressions.
+If the cut cannot fit, stop and reprice/split at a loadable seam before editing production.
+All rows have **0 ms default publication/save**. Branch submission and ordinary accepted
+merge/export/convergence each target **<1,000 ms** overhead, excluding measured selected
+test bodies. Phase targets share that total, not separate
+one-second allowances. Harness warm overhead targets ≤150 ms separately. Changed bytes,
+definitions and required dependency closure determine work; unrelated saves do none.
+First preparation and wide macro/type/platform work require separate clocks, allocation,
+causing functions and justification; >10 s still needs owner authorization and an issue.
+
+| Ordered cut / owner files (existing families include their callers/tests) | Dependency and smallest composition; retirement | Probe required before dependent cut | Gross + cap; cost target |
 |---|---|---|---|
-| O3a / B4+D1, first | Complete content-valid selection and proposal binding. | [Gate/accept](#6-stage-5--gate-and-accept) | Reached-seed veto and subset loop; ≤100. |
-| O0 / B1 holder | Verify/adopt its `:as-alias` correction; commit/acquisition evidence. | [Branch](#2-stage-1--branch-and-namespace-context) | False load edge; no new D1 code. |
-| O1a / B2+B3+D1 | Branch lifecycle, retained base, task-only custody/addressing. | [Branch](#2-stage-1--branch-and-namespace-context) | Bare-branch plumbing; ≤80. |
-| O1b / B1+B2 | Durable submission, retry and terminal reconciliation. | [REPL](#3-stage-2--writing-code-at-the-repl) | Non-settling SCI evaluator; ≤100. |
-| O1d / B2+B1+B3 | Ordinary namespace context and quality feedback. | [Branch](#2-stage-1--branch-and-namespace-context), [feedback](#4-stage-3--feedback) | Outside-only context/instructions; ≤80. |
-| O2a / B2 | Retain unchanged context; update changed definitions/dependents. | [Convergence](#8-stage-7--jvm-convergence) | Per-call full-program derivation; ≤60. |
-| O2c / B2+B4 | Batch/report installation; install + check <1 s combined. | [Feedback](#4-stage-3--feedback) | Installation store scan; ≤60. |
-| O3b / D1+B1 | Review, conflict repair, named accept/send-back; after O3a/execution proof. Review overhead <1 s excluding bodies. | [Preparation](#5-stage-4--root-review-and-preparation), [gate](#6-stage-5--gate-and-accept) | Raw JVM-only acceptance/duplicate checks; ≤80. |
-| O1c / B2+B3+B4 | Dials/diagnostics/warn lifecycle and automatic feedback; after O3. | [REPL](#3-stage-2--writing-code-at-the-repl), [feedback](#4-stage-3--feedback) | Fixed definition gate and all callers; ≤100. |
-| O2b / B2+D1 | Settle batch/report; after O3. Preserve surviving candidate evaluation and writer conflict-basis check. | [REPL](#3-stage-2--writing-code-at-the-repl) | Superseded pre-install gate work only; ≤60. |
-| O4a / B1+D1 | Captured replacement staging/round trip. | [Export](#7-stage-6--file-export-and-recovery) | Function-only override inventory; ≤100. |
-| O4b / B1+D1 | Recovery, commit and exclusive convergence, including restart admission. | [Export](#7-stage-6--file-export-and-recovery), [convergence](#8-stage-7--jvm-convergence) | Independent lane adoption; ≤100. |
-| Demonstration / D1 | Two branches complete the path below. | All stages | No new mechanism. |
-| O5 / B1+B4+D1 | Wider/file-origin export with destinations/platform proof. | [Export](#7-stage-6--file-export-and-recovery) | Shared-candidate save publication; split per owner, each ≤100. |
-| O6/O7 / B1+D1 | Ship guidance with interfaces; branch diff replaces program-only ledger rows, file holds remain. | All linked interfaces | Obsolete instructions; docs only. |
+| O0 / B1: `bin/seon-hook`, `.claude/seon-hook.edn`, `test/seon/dev/hook_test.clj` | Keep interim paused; delete automatic publication entry/call sites. Keep named-path lint and root's explicit integration entrance. | Named/pathless saves, including schema and host-bound paths, never call publication or change default. | 30; save publication 0 ms, lint measured separately. |
+| O1a / S2 owner: `src/seon/cluster/{agent,registry,boot}.clj`, `src/seon/sci/eval.clj`, agent/cluster schemas | After S1/S3, S2 clean/overlay/retention and installed alias proof; D1 consumes retained B and clean checkpoint handle. O2a's context work belongs to S2. | Reacquire after parent advance: B fixed, no parent sentinel, private atom or mutable parent leak; retain checkpoint through child acquisition. | 40 D1 adapter lines; submission acquisition ≤150 ms warm. |
+| O1b / B1+B2: `script/seon/dev/mcp.clj`, `src/seon/cluster/agent.clj` | After O1a/S4; durable `submit-source!`, terminal reconciliation and ordinary attempt custody. Delete non-settling SCI submission arm; keep read-only JVM inspection. | Retry same request: one durable run; disconnect after settlement reconciles; body/effects stay on branch and release waits for exit. | 100; submission <1,000 ms, changed forms only. |
+| O1f / B1: `src/seon/cluster{,/source}.clj`, `src/seon/fn.clj`, source schemas, MCP caller | After O1a; captured filesystem inputs plus expected lane head through existing analysis/admission. No implied shared publication/reload. | Two lanes change one callee differently; direct/indirect calls and contracts differ, default unchanged; stale lane head refuses. | 100; submission <1,000 ms, O(changed bytes + affected closure). |
+| O1g / B1: same source/MCP owners and publication regression | After O1f; explicit additions/deletions and source-owner staging outside live paths; reconcile admitted content, not event timestamps. | Missed/refused save and deletion remain pending on resubmit; unrelated dirty/held dependency is named and deferred before load. | 80; submission <1,000 ms; unchanged admitted inputs skip analysis. |
+| O1d / B2+B3: `src/my/program.clj`, `src/seon/cluster/prompt.clj`, `src/seon/issue.clj` | After O1a/S4; ordinary namespace/task context and owner feedback; delete outside-only context. | Equal inputs give inside/outside context equality; opening plan reused but changed data changes evaluated answers. | 70; submission context contribution <1,000 ms. |
+| O2c / B2+B4: `src/seon/sci/eval.clj`, `src/my/test.clj`, `src/seon/test.clj` | After S2/S3/S4 and O1b/f; coalesce writer reports, call one `seon.test/run`; delete installation store scan. | Retraction and changed test select correct before/after dependencies; reads/result recording launch no test. | 80; submission install + selection/record <1,000 ms plus bodies. |
+| O3a / B4: `src/seon/test.clj`, test request/run/member schemas and readers | After S3 actual-member provenance and O2c; complete obligation + content-valid reuse. Prepare replacement for reached-seed veto; retire with O3c. S3 owns validity/provenance. | Two reaching tests (one red), later one-test green still refuses; task/long/unknown member cannot disappear; full reuse writes/runs nothing. | 100; integration selection <1,000 ms; work follows obligations. |
+| O3b / D1+B1: `src/seon/program.cljc`, `src/seon/cluster/source.clj`, `test/seon/cluster/merge_test.clj` | After O3a; B/C/H three-way additions/replacements/retractions and retained S; replace replacement-only refusal. | Conflict plus disjoint delta survives on S; repair tests the combined H + C delta; H/default unchanged. | 100; integration preparation <1,000 ms plus combined bodies. |
+| O3c / D1+B3: `src/seon/cluster/source.clj`, `src/my/program.clj`, `src/seon/issue.clj`, issue schema (B3 owns task migration) | After O3b; named root decision bound to S/proposal/evidence at guarded writer; delete reached-seed veto and accept's subset loop together. | Missing/wrong acceptance, changed S or moved H refuses with no partial write; rebuild and retest; retained evidence retrievable after unlink. | 100; integration acceptance <1,000 ms, no repeated test execution. |
+| O1c / B2+B3: `src/seon/{config,turn}.clj`, `src/seon/sci/eval.clj`, eval-config/program schemas | After O3c; four entry dials and shared diagnostics; convert fixed gate and all callers. | Strict refusal enters nothing; warned malformed contract removes stale wrapper; repair arms on fresh acquisition and test fork. | 100; submission <1,000 ms, proposed forms/schema reach. |
+| O2b / B2: `src/seon/turn.clj`, `src/seon/sci/eval.clj`, submission regression | After O1c; retire only superseded pre-install gate; preserve candidate evaluation and writer conflict basis. | Successful reply joins actual exit, installed rows and terminal feedback; failed install cannot return success. | 60; submission <1,000 ms, one batch/report. |
+| O4a / B1+D1: `src/seon/cluster/source.clj`, `src/seon/edit{,/jvm}.clj`, `src/seon/fs/jvm.clj` | After O3c; narrow replacement export from M under whole-file holds; reuse exact-span splice/precondition owners. | Two spans in one file plus second-file resolver change round-trip to identical declarations; stale base/symlink refuses, neighbors unchanged. | 100; integration export <1,000 ms, touched bytes only. |
+| O4b / B1: `src/seon/cluster/{source,boot}.clj`, `src/seon/fs/jvm.clj`, `test/seon/cluster/export_test.clj` | After O4a; retain original/desired set and M before first move, resume same export/commit; no journal owner. | Interrupt after first file; mixed set stays unavailable; resume/commit only accepted paths; restart proof belongs to root's platform checkpoint. | 100; integration recovery <1,000 ms excluding authorized boot, touched set only. |
+| O4c / S3+B1+B2: `src/seon/cluster.clj`, `src/seon/sci/eval.clj`, `src/seon/render/web.clj`, S3 regression | After O4b and S3's exclusion/delivery/provenance completion; include rows, readiness and record in existing boundary. No second validity atom/lock. | Partial reload/arm/record failure, interleaved adoption, render/eval/seed entry and self-adoption: never execute unknown, preserve full cause/delivery, REPL reachable. | 100 D1 integration lines; integration convergence <1,000 ms for ordinary closure. |
+| O5a / B1+D1: `src/seon/cluster/source.clj`, `src/seon/{edit,fn}.clj`, declaration schemas | After O4c; expand export to additions/retractions/new namespaces with explicit destinations. | Add + delete round-trip; surviving reference refuses; retired symbol absent and branch callers run intended body. | 100; integration <1,000 ms, changed declarations/bytes. |
+| O5b / B1+B4: `src/seon/cluster/source.clj`, `src/seon/schema/admission.clj`, `src/seon/test.clj` | After O5a; file-only/host-bound/resource inputs join same candidate gate and staged export. | Incremental schema+consumer adoption; host-bound proposal runs required platform proof or defers, never old-body SCI fallback. | 100; save 0 ms; ordinary integration <1,000 ms; platform body/boot separately authorized. |
+| O6 / B1: `bin/seon-hook`, `.claude/seon-hook.edn`, `test/seon/dev/hook_test.clj`, lane guidance | After O1g/O2c feedback proof; remove session-digest acknowledgement and derived-write scan; retain named-path syntax/Markdown/docstring lint. | First event, missed/refused event, deletion and same-byte resubmit all compare to admitted branch content; no hook publication route remains. | 50; no per-save whole-tree digest walk; explicit submission <1,000 ms. |
+| O7 / D1: `test/seon/cluster/{merge,export}_test.clj`, D1 guidance | After preceding cuts and shared harness proof; two-branch demonstration below, no new runtime owner. | End-to-end B/C/H/S/M → files → actual call; guidance names installed interfaces and exact limits. | 80; submission and integration <1,000 ms plus measured bodies; save publication 0 ms. |
 
-Caps count additions, not net lines. If a slice exceeds ~100, split preparation from
-its atomic producer/consumer conversion or price the smaller existing seam first.
-Aggregate targets remain provisional pending a disjoint revised ledger: source 355,
-schemas 40, maintained fork 40, test additions 300. Charge moved code once. Report the
-responsible seam and cost if revised scope exceeds these; do not claim the old target met.
-Reprice O4b before code if B1's existing bootstrap/convergence boundary cannot supply it.
+**Counted retirement, checkout `82332488f` (physical lines, including internal blanks).**
+O0 deletes `bin/seon-hook:1615–1705`: **91 lines**, the publication-only path predicates,
+`publish-source-paths` and `current-source-feedback`, plus its two caller expressions
+at 1960/2022. O6 deletes digest/scan helpers at 1727–1728 (**2**), 1730–1792 (**63**),
+`record-digests!` at 1807–1814 (**8**) and `derived-write-feedback` at 1816–1866 (**51**):
+**124 lines**, hence **215 counted hook body lines** total, before caller/config/comment
+cleanup. Keep `event-agent` (1794–1805): the edit log still calls it. Config blocks
+`:shell-writes` and publication-only `:current-source` leaves leave with their callers.
+Preserve `:current-source` root/cluster lookup used by schema/contract lint (495, 594, 596)
+until B1 converts those readers; do not delete their configuration accidentally. No
+credit for deleting the shared root integration/analyzer. Named edit lint remains;
+pathless writes receive authoritative lint at explicit branch submission. Root compares
+accepted staged bytes against published/adopted content, including deletions and no-op
+publication with unfinished convergence; never consume every lane's dirty files.
+
+Harness work is charged only to S1/S2/S3/S4; the former D1 aggregate 355/40/40/300 is
+superseded, not silently claimed met. Option 3's research estimate (250–450 production/
+schema additions, 200–350 test additions, 40–72 h across owners) remains provisional:
+per-cut caps above are ceilings, not their sum as an estimate. Before implementation,
+root records disjoint actual budgets and any excess against that price. Net deletion
+never excuses a >100-addition slice; no new machinery replaces the retired hook path.
 
 **Demonstration.** Two real tasks on separate branches edit → get feedback → review →
 repair conflict → gate → accept → export → converge → call. Include a schema guarantee,
@@ -417,22 +523,18 @@ another lane's breakage as authority to change its files/sessions.
 
 ## 10. Open decisions for the owner
 
-**Merge contract/coverage scope is the open policy decision.** Costs are engineering
-estimates. All choices still require every affected/task test and changed-function
-test-first proof, irrespective of entry dials. Whole-program scope remains in force.
+No new policy decision is required to apply the publication ruling. Option 3, option 1's
+interim, whole-program contract/coverage scope, combined reaching/task proof, named root
+acceptance, whole-file holds and fail-closed convergence are settled. Do not reopen them
+as alternatives. Use existing cluster-qualified addressing and prove scoped delivery;
+copying messages or adding an outside-agent registry is not a candidate design.
 
-| Option, recommendation first | Guarantee | Cost and tradeoff |
-|---|---|---|
-| **Changed functions only — recommended** | Changed functions contracted and reached; untouched gaps visible to root. | About half a day in O3a; gives up inherited-population compliance. |
-| **Whole combined program — current rule** | Every function meets contract/coverage policy. | Census plus multi-day namespace repair as needed; narrow merges wait on inherited gaps. |
-| **Per-cluster scope dial** | Mandatory gate within declared scope. | About one day plus whole-program repairs where selected; adds policy and loses a uniform guarantee. Do not implement before ruling. |
-
-B2/B3 must also settle the addressing interface before startup. Prefer existing
-cluster-qualified addressing with scoped delivery/history proof. Shared-only addressing
-costs additional cross-branch custody/read-evidence integration for a simpler sender
-address. Copying messages is rejected because it creates another authority.
-
-Everything else is settled: branches with internal custody, orchestrator as root,
-named acceptance, gated write-back/commit without second approval, no push, host-bound
-export deferred from the first loop. No merge-critical roster, approval counter, file
-exception, automatic settlement merge or separate loader.
+S3's reported entry-check-versus-exclusion question is resolved by the existing law:
+exclusion lasts through actual exit. Its incomplete per-member provenance is required
+work under harness §5, not an optional relaxation. S2/S4 own checkpoint/attempt choices.
+If an existing owner cannot supply a required guarantee within a cut's price, stop only
+that dependent production cut and present **exactly three priced options**, simplest
+viable constraint first, recommendation marked, each with guarantee, gross additions,
+engineering hours, save/merge cost and sacrifice. Do not invent alternatives before
+that concrete incompatibility exists. This revision authorizes no implementation or
+runtime proof; root reviews the design before assigning production work.
