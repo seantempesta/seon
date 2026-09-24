@@ -17,7 +17,7 @@ A computation receives its environment, immutable database value,
 schema projection, and render profile. Capture one database value for
 one pure derivation; don't reread a connection at each leaf. The public
 database functions accept explicit inputs and return boundary errors
-(`q`, `src/seon/db.clj:2245`; `pull`, `:2478`; `transact!`, `:4591`).
+(`q`, `src/seon/db.clj:2292`; `pull`, `:2515`; `transact!`, `:4537`).
 
 Use `seon.db` for first-party database work. Agent elision is an
 evaluation service, not permission for a JVM caller to omit custody.
@@ -46,14 +46,22 @@ Optional stored values are absent; stored nilable shapes refuse at
 shape choices and datahike for transaction/query mechanics.
 
 Every function, private included, requires a complete Malli contract
-(`AGENTS.md:271`). `collect-contracts!` (`src/seon/instrument.clj:810-820`)
+(`AGENTS.md:271`). `collect-contracts!` (`src/seon/instrument.clj:847-857`)
 walks every loaded namespace's `ns-interns`, so private declarations are armed
 too. Authored incomplete slots and predicate-contract omissions are checked by
-`assert-complete-schema!` (`src/seon/schema/internal.cljc:291`); live
-instrumentation's owner is `apply!` (`src/seon/instrument.clj:839`). Named schemas describe genuinely
+`assert-complete-schema!` (`src/seon/schema/internal.cljc:300`); live
+instrumentation's owner is `apply!` (`src/seon/instrument.clj:876`). Named schemas describe genuinely
 polymorphic values; do not use an undefined contract to suppress a refusal.
 Map keys are fully namespaced. Failures at agent boundaries are flat
 error values, not a second success/failure envelope.
+
+`nil`, `false` and empty mean only "nothing exists". A producer that cannot
+read, parse, resolve or decide returns its declared error or typed unknown,
+and every reader passes that on or refuses: never a catch that returns nil,
+an `or` default over a value that can be an error, or one nil for both "no
+such row" and "could not read". Core contracts may keep `:nil` where nil
+truly means nothing; fix the producer, not the contract's spelling
+(`docs/research/agent-platform/ambiguous-nil-producers-2026-09-24.md`).
 
 ## Derive state and preserve observations
 
