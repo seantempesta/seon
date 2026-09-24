@@ -48,8 +48,13 @@
  ;; Datahike index leaves (store 87 MB → 7.4 GB in 15 min with one lane editing; A2's
  ;; retention seam, cut 2). The orchestrator adopts at checkpoints with
  ;; `bin/seon init --dev default` until A2 lands; resume is recorded here.
+ ;; 2026-09-24 16:5x (orchestrator, owner: one shared JVM for tests): RESUMED. The
+ ;; 150 MB-per-adoption growth traced to one 105 MB failure-message datom in the last
+ ;; EAVT leaf, rewritten by every new-entity commit (issue
+ ;; a-hundred-megabyte-failure-message-rides-every-new-entity-commit.md); its producers
+ ;; are fixed (daa833e32) and default was reset 16:03Z. Lanes own disjoint files.
  :current-source
- {:enabled false
+ {:enabled true
   :root "."
   :cluster "default"
   ;; 2026-09-20 (owner): the post-adoption test check is OFF until the new
