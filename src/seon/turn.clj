@@ -88,6 +88,17 @@
       staged (assoc ::reply-blob (:seon.blob/digest staged))
       (nil? staged) (assoc ::reply text))))
 
+(defn unbound-value?
+  "True when a live result contains SCI's unbound value."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "SCI admission inspects arbitrary result values for nested unbound markers, including scalars and nil; no candidate shape can be required before this inspection."
+                         :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (boolean
+   (some (fn [node]
+           (instance? sci.impl.vars.SciUnbound node))
+         (tree-seq coll? seq value))))
+
 (defn evaluation-facts
   "Project a completed evaluation into its existing settlement facts."
   {:malli/schema [:=> [:cat :seon.turn/evaluation-facts-request]
@@ -96,8 +107,13 @@
            :seon.cluster.eval/ordinal :seon.sci.eval/evaluation
            :seon.problems/form-problem :my.turn/value]
     settlement-evaluation :seon.turn.loop/settlement-evaluation}]
+  ;; AN UNBOUND RESULT IS RED AT ITS PRODUCER. Only the live value can show
+  ;; SCI's unbound marker; its shown text (`#object[...]`) is not EDN, so a
+  ;; reader of the stored receipt could never recover it.
   (let [error (or (:seon.cluster.eval/error evaluation)
-                  (:seon.cluster.eval/error form-problem))]
+                  (:seon.cluster.eval/error form-problem)
+                  (when (unbound-value? (:seon.sci.admit/value evaluation))
+                    "The admitted result contains an unbound var."))]
     (cond-> {:seon.turn/id id
              :seon.cluster.eval/ordinal ordinal}
       (:seon.eval/origin settlement-evaluation)
@@ -1707,11 +1723,11 @@
        db run-eid))
 
 (defn- receipt-value
+  "The receipt's shown value, its shown text when that is not one EDN value,
+  or nil when the receipt shows nothing."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/value]]}
   [receipt]
-  (some-> (:seon.eval/shown receipt)
-          (#(try (edn/read-string %)
-                 (catch Throwable _
-                   nil)))))
+  (some-> (:seon.eval/shown receipt) repl/shown-value))
 
 (defn- unfinished-warning
   "The first form recovery closed before it started, and the missing count."
@@ -2339,17 +2355,6 @@
 ;;; Routed-problem settlement — derived, never stored
 ;;; ---------------------------------------------------------------------------
 
-(defn unbound-value?
-  "True when a live result contains SCI's unbound value."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
-                         :seon.schema.admission/reason "SCI admission inspects arbitrary result values for nested unbound markers, including scalars and nil; no candidate shape can be required before this inspection."
-                         :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (boolean
-   (some (fn [node]
-           (instance? sci.impl.vars.SciUnbound node))
-         (tree-seq coll? seq value))))
-
 (defn problem-id
   "The receipt identity naming one form's derived problem."
   {:malli/schema [:=> [:cat :seon.turn/id
@@ -2372,13 +2377,15 @@
 
 
 (defn red-receipt?
-  "True when a terminal receipt is red: error, interruption, or unbound."
+  "True when a terminal receipt is red: error or interruption.
+
+  An unbound result is red through the error its settlement records
+  ([[evaluation-facts]]); shown text is never read back to decide."
   {:malli/schema [:=> [:cat :map] :boolean]}
   [receipt]
   (boolean
    (or (:seon.cluster.eval/error receipt)
-       (:seon.cluster.eval/interrupted-at receipt)
-       (unbound-value? (receipt-value receipt)))))
+       (:seon.cluster.eval/interrupted-at receipt))))
 
 (defn resume-artifact?
   "True when this ordinal's failure belongs to interrupted process history.

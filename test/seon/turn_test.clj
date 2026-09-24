@@ -16,6 +16,8 @@
             [seon.render.transcript :as transcript]
             [seon.render.web :as web]
             [seon.repl :as repl]
+            [seon.render :as render]
+            [seon.sci.eval :as sci.eval]
             [seon.test-support :as support]
             [seon.turn :as turn]
             [clojure.main :as main]
@@ -2339,3 +2341,53 @@
                              [?turn :seon.turn/id "claim-next"]
                              [?turn :seon.turn/handled ?message]
                              [?message :seon.message/id ?id]] database)))))))))
+
+(deftest an-unbound-result-settles-red-and-unreadable-shown-text-does-not
+  ;; THE CLASS: red-receipt? read SCI's unbound marker back out of shown text,
+  ;; which prints as `#object[...]` and is not EDN, so the read failed to nil
+  ;; and a stored unbound receipt answered green. The settlement records it.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection
+                          (into (support/agent-tx @connection "unbound-receipt")
+                                [(namespace-row 'user)
+                                 {:seon.turn/id "unbound-receipt-turn"
+                                  :seon.turn/agent [:seon.agent/id "unbound-receipt"]
+                                  :seon.turn/opened-tx "datomic.tx"}]))
+     (let [ctx (support/fork-cluster-ctx connection)
+           configuration (support/effective-config)]
+       (doseq [[ordinal source red?] [[0 "(do (declare unbound-probe) [unbound-probe])" true]
+                                      [1 "#'clojure.core/inc" false]
+                                      [2 "{:example/plain 1}" false]]]
+         (support/transacted! connection
+                              (turn/receipt-start-tx
+                               {:seon.turn/id "unbound-receipt-turn"
+                                :seon.cluster.eval/ordinal ordinal
+                                :seon.cluster.eval/at (java.util.Date.)}))
+         (let [evaluation (sci.eval/evaluate
+                           {:seon.cluster.eval/source source
+                            :seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                            :seon.render/profile (render/agent-render-profile configuration)
+                            :seon.sci.admit/caps (config/result-caps configuration)
+                            :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms configuration)
+                            :seon.config/on-core-error :panic})
+               [settled] (turn/settlement-projection {:seon.db/connection connection} evaluation)
+               facts (turn/evaluation-facts
+                      {:seon.turn/id "unbound-receipt-turn"
+                       :seon.cluster.eval/ordinal ordinal
+                       :seon.sci.eval/evaluation evaluation
+                       :seon.turn.loop/settlement-evaluation settled})
+               _ (support/transacted! connection (turn/receipt-settle-tx facts))
+               receipt (db/q '[:find (pull ?e [*]) .
+                               :in $ ?ordinal
+                               :where [?e :seon.cluster.eval/ordinal ?ordinal]
+                               [?e :seon.cluster.eval/run ?run]
+                               [?run :seon.turn/id "unbound-receipt-turn"]]
+                             (db/db connection) ordinal)]
+           (is (string? (:seon.eval/shown receipt)) (pr-str receipt))
+           (is (= red? (turn/red-receipt? receipt)) source)
+           (is (= red? (= :unrouted-red
+                          (:seon.turn.work/form-state
+                           (turn/form-settlement (db/db connection)
+                                                 (:seon.cluster.eval/id receipt)))))
+               source)))))))
