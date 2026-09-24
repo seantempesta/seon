@@ -349,7 +349,9 @@
   `:released`, so there is no `:config` to identify and the dependency's
   `connection-id` has nothing to dispatch on. That is an unavailable
   observation, which is a typed value here — never a throw out of an
-  identity projection, and never a silent nil."
+  identity projection, and never a silent nil. Liveness is read from the
+  wrapped state by `connection?`, because dereferencing a released
+  connection throws in Datahike's `deref-conn`."
   {:malli/schema
    [:=> [:cat [:or :seon.db/connection :seon.error/value]]
     [:or :seon.db/connection-identity :seon.error/value]]}
@@ -357,7 +359,7 @@
   (cond
     (not (connection-object? connection)) connection
 
-    (not (map? (:config @connection)))
+    (not (connection? connection))
     (error-value
      'seon.db/connection-identity
      ::released-connection

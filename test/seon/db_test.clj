@@ -6,6 +6,7 @@
             [datahike.core :as datahike]
             [datahike.db]
             [datahike.pull-api :as pull-api]
+            [datahike.store :as datahike.store]
             [datahike.tools :as datahike.tools]
             [datahike.writer :as datahike.writer]
             [datahike.writing :as datahike.writing]
@@ -1462,6 +1463,26 @@
                                             :seon.config/error (db/history)))))
       (finally
         (d/release connection)
+        (d/delete-database configuration)))))
+
+(deftest connection-identity-answers-a-released-connection-with-its-typed-value
+  (let [configuration {:store {:backend :memory :id (random-uuid)}
+                       :keep-history? false}
+        _ (d/create-database configuration)
+        connection (d/connect configuration)]
+    (try
+      (is (= {:datahike/connection-id
+              (datahike.store/connection-id (:config @connection))}
+             (db/connection-identity connection))
+          "a live connection answers the dependency's own identity")
+      (d/release connection)
+      (let [released (db/connection-identity connection)]
+        (is (schema/valid-candidate-value? (schema/handed-projection)
+                                          :seon.error/value released))
+        (is (true? (:seon.db/released-connection released))
+            "a released connection answers the declared value, never a throw")
+        (is (= 'seon.db/connection-identity (:seon.error/operation released))))
+      (finally
         (d/delete-database configuration)))))
 
 (deftest the-exam-query-returns-the-fixtures-true-count

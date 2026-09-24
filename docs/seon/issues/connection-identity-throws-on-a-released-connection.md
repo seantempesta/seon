@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed
 severity: defect
 tags: [issue, db, datahike, custody, errors]
 ---
@@ -40,3 +40,12 @@ result is `seon.sci.eval/record-refusals-once!`. Commit `1b10216c6` converted it
 
 A regression releases a real connection and asserts the declared
 `:seon.db/released-connection` value.
+
+## Resolution (2026-09-24, lane fix-connection-identity)
+
+The producer now tests liveness with `seon.db/connection?`. That predicate reads the
+wrapped atom's `:released` state and does not dereference the connection. Datahike's
+`deref-conn` (`reference-code/datahike/src/datahike/connector.cljc:82-86`, revision
+`620721d67`) is the call that throws. No catch was added. The regression is
+`seon.db-test/connection-identity-answers-a-released-connection-with-its-typed-value`.
+It passes with the fix and errors with the old body (`Connection has been released.`).
