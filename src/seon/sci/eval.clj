@@ -3028,6 +3028,9 @@
         connection (or (:seon.db/connection request)
                        (get-in ctx [::custody :seon.db/connection]))
         profile (render/request-profile request)
+        ;; A refused profile is passed on, never rendered with as a profile.
+        _ (when (:seon.render/refused-member profile)
+            (throw (ex-info (:seon.error/message profile) profile)))
         value (if (and connection
                        (:seon.instrument/check value)
                        ((schema/projection-validator (render/request-projection request)
@@ -3386,7 +3389,15 @@
         (or (::projection-state evaluation-ctx)
             (atom {:seon.schema/projection
                    (evaluation-projection
-                    {:seon.sci.eval/ctx evaluation-ctx})}))]
+                    {:seon.sci.eval/ctx evaluation-ctx})}))
+        ;; The render of this result asks the projection this evaluation
+        ;; holds and the profile derived once here, never a second choice.
+        request (let [request (assoc request :seon.schema/projection
+                                     (:seon.schema/projection @projection-state))
+                      profile (render/request-profile request)]
+                  (cond-> request
+                    (not (:seon.render/refused-member profile))
+                    (assoc :seon.render/profile profile)))]
     (explained-evaluation
      profile-mark
     (schema/call-with-projection-state

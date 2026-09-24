@@ -94,11 +94,11 @@
 (defn request-projection
   "The schema projection one render request asks its selection questions of.
 
-  PRECEDENCE — THE ORDER `seon.db` READS ALREADY USE (law 2.1): the
-  projection CARRIED BY the request's database value first
-  (`seon.db/carried-projection`, `src/seon/db.clj:981`; values carry it at
-  `src/seon/db.clj:141`), then a projection supplied on the request, and only
-  when neither is present the acquired SCI context's projection.
+  PRECEDENCE: a projection supplied on the request first — an evaluation
+  hands the one it evaluated under, so its contract and its rendered
+  declarations come from one value — then the projection CARRIED BY the
+  request's database value (`seon.db/carried-projection`), and only when
+  neither is present the acquired SCI context's projection.
 
   Selection asked the ctx alone until 2026-09-16, which is that precedence
   inverted: the value being rendered was pulled from the database value, and
@@ -107,14 +107,19 @@
   else. It also made \"what would this render as under projection P\"
   unanswerable without mutating shared ctx state. A request with no database,
   no supplied projection and no ctx has nothing declared, and nothing is
-  selected."
+  selected. A database that is a refused read is not an absent one: it
+  throws that error as its `ex-data` rather than rendering against another
+  projection."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.schema/projection]]}
   [request]
-  (or (let [database (:seon.db/db request)]
-        (when (and database (not (or (:seon.db/invalid-read database) (:seon.schema/expected-value database))))
-          (db/carried-projection database)))
-      (:seon.schema/projection request)
-      (some-> (:seon.sci.eval/ctx request) sci.kernel/context-projection)))
+  (let [database (:seon.db/db request)]
+    (cond
+      (:seon.error/at database)
+      (throw (ex-info (:seon.error/message database "The render request's database is a refused read.")
+                      database))
+      :else (or (:seon.schema/projection request)
+                (some-> database db/carried-projection)
+                (some-> (:seon.sci.eval/ctx request) sci.kernel/context-projection)))))
 
 (defn request-profile
   "Return the profile carried by one request, deriving it once when absent."
@@ -125,10 +130,12 @@
       (if-let [projection (or (:seon.schema/projection request)
                               (some-> (:seon.db/db request) db/carried-projection)
                               (schema/handed-projection))]
-        ;; The request's context environment names the cluster: a forked
-        ;; branch carries its parent's cluster rows, so no row can.
+        ;; The caller names the cluster, on the request or through its
+        ;; context's environment: a forked branch carries its parent's
+        ;; cluster rows, so no row can.
         (let [database (:seon.db/db request)
-              cluster-name (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request)))
+              cluster-name (or (:seon.boot/cluster-name request)
+                               (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request))))
               effective (cond
                           (nil? database) nil
                           (nil? cluster-name)

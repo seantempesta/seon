@@ -1028,3 +1028,61 @@
                       [:seon.schema.projection/shape-rows
                        :my.plan.item/item :seon.render/ai]))
            "and the ctx still declares the pair — nothing was mutated")))))
+
+(deftest a-refused-database-read-is-not-an-absent-database
+  ;; THE CLASS: an invalid database read fell through to the request's or
+  ;; context's projection, so a render answered against another program.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           refused (db/q '[:find ?e . :where [?e :seon.render-simplification-test/absent _]]
+                         database)
+           thrown (try (seon.render/request-projection
+                        {:seon.db/db refused
+                         :seon.schema/projection (db/carried-projection database)})
+                       nil
+                       (catch clojure.lang.ExceptionInfo error (ex-data error)))]
+       (is (true? (:seon.db/invalid-read refused)) (pr-str refused))
+       (is (= refused thrown) "the refused read itself is the refusal")
+       (is (identical? (db/carried-projection database)
+                       (seon.render/request-projection {:seon.db/db database})))
+       (is (nil? (seon.render/request-projection {}))
+           "no database, projection or context is nothing declared")))))
+
+(deftest a-supplied-projection-is-the-one-a-render-asks
+  ;; THE CLASS: evaluation used the projection it held while its render chose
+  ;; the database's, so one request answered with two programs. Evaluation
+  ;; now hands its projection, and a supplied projection wins.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           supplied (assoc (db/carried-projection database)
+                           ::supplied true)]
+       (is (identical? supplied
+                       (seon.render/request-projection
+                        {:seon.db/db database :seon.schema/projection supplied})))))))
+
+(deftest an-evaluation-renders-with-the-profile-its-caller-names
+  ;; THE CLASS: a request naming its cluster only on `:seon.boot/cluster-name`
+  ;; got a refused profile, which the result's render then used AS a profile.
+  ;; The caller's name wins; a request naming none is refused, never rendered.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           cluster-name (db/q '[:find ?name . :where [_ :seon.config/cluster ?name]] database)
+           named (seon.render/request-profile
+                  {:seon.db/db database :seon.boot/cluster-name cluster-name})
+           unnamed (seon.render/request-profile {:seon.db/db database})
+           evaluation (eval/evaluate
+                       {:seon.cluster.eval/source "(inc 1)"
+                        :seon.sci.eval/ctx (support/fork-cluster-ctx connection nil)
+                        :seon.db/db database
+                        :seon.boot/cluster-name cluster-name
+                        :seon.sci.admit/caps caps
+                        :seon.sci.eval/time-limit-ms 2000
+                        :seon.config/on-core-error :panic})]
+       (is (string? cluster-name))
+       (is (keyword? (:seon.render.profile/id named)) (pr-str named))
+       (is (= :seon.render/profile (:seon.render/refused-member unnamed)))
+       (is (= :seon.boot/cluster-name (:seon.error/member unnamed)))
+       (is (= "2" (:seon.eval/shown evaluation)) (pr-str evaluation))))))

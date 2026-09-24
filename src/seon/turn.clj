@@ -4682,7 +4682,10 @@
     starting-namespace :seon.ns/name}]
   (let [connection (:seon.db/connection cluster)
         basis (or snapshot (db/db connection))
-        cluster (merge cluster (ai/agent-overlay basis agent-id))
+        overlay (ai/agent-overlay basis agent-id)
+        _ (when (:seon.error/at overlay)
+            (throw (ex-info (:seon.error/message overlay "Agent overlay read refused.") overlay)))
+        cluster (merge cluster overlay)
         ;; ONE DERIVATION PER TURN (2.1). The render profile is the turn's
         ;; presentation policy, not a per-form question, so it is derived
         ;; here — where the evaluation requests are built — and CARRIED on
@@ -4691,7 +4694,11 @@
         ;; 14.7 ms of a 48.8 ms six-form `evaluate-sources` on `default`
         ;; (2026-09-16), one config-effective derivation per form.
         profile (render/request-profile
-                 {:seon.db/db basis :seon.agent/id agent-id})]
+                 {:seon.db/db basis :seon.agent/id agent-id
+                  :seon.boot/cluster-name (:seon.cluster/name cluster)})
+        ;; A refused profile is passed on, never carried as the turn's profile.
+        _ (when (:seon.render/refused-member profile)
+            (throw (ex-info (:seon.error/message profile) profile)))]
     (loop [remaining (seq sources)
            ordinal first-ordinal
            namespace-name starting-namespace
