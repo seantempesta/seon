@@ -3702,29 +3702,3 @@
     (async/close! (:seon.render.web/pages-channel view)))
   nil)
 
-(defn read-advertisement
-  "Read and validate one cluster's advertisement, or nil.
-  Returns the advertisement map only when the file exists, parses,
-  validates against :seon.boot/advertisement, AND its (pid,
-  start-instant) matches a live process — a stale file from a killed
-  instance reads as nil, never as a coordinate. (ProcessHandle/of pid →
-  startInstant comparison; tolerate the platform's millisecond
-  truncation.)"
-  {:malli/schema [:=> [:cat :seon.boot/root :seon.boot/cluster-name]
-                  [:maybe :seon.boot/advertisement]]}
-  [root cluster-name]
-  (try
-    (let [path (:seon.boot/advertisement-file
-                (cluster-paths root cluster-name))
-          advertisement (edn/read-string (slurp path))]
-      (when (and
-             (schema/valid-candidate-value?
-              (schema/declaration-projection (schema.edn/packaged-forms))
-              :seon.boot/advertisement advertisement)
-             (= cluster-name (:seon.boot/cluster-name advertisement))
-             (cluster.process/live?
-              (select-keys advertisement
-                           [:seon.boot/pid :seon.boot/start-instant])))
-        advertisement))
-    (catch Throwable _
-      nil)))
