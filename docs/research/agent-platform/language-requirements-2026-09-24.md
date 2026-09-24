@@ -133,6 +133,30 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 5c.7 | Openers speak as the system, never in the agent's voice | R | open |
 | 5c.8 | No prompt unit reprints a generated selector: 81% of root's 680 KB prompt is one error query printed five times | R | open |
 
+## 7. Where task information lives (owner 2026-09-24: "bringing context closer to normal agents and seon agents is the goal"; "a task or edn file is the backstop")
+
+Principle: **information lives on the most specific code element it is about**, so an agent reading source before editing
+(Claude, Codex, or a Seon agent through `(source f)`, which prints the stored row source) sees it exactly where it acts.
+A task file is only for what has no code home. Samples: `tmp/orchestrator/decoration-samples-2026-09-24.patch` (reverted).
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 7.1 | **Placement order:** function attribute map → namespace attribute map → schema properties → the deftest that proves it → task file (backstop) → database (runtime producers). The first element that fits is the only home | O | proposed |
+| 7.2 | **In code a task is one entry:** `:seon/tasks {:<owning-ns>.task/<name> "intent, one or two sentences"}` in the attribute map of the fn/ns/schema it is about. Nothing else about the task is authored there | O | proposed; SCI admits and keeps the metadata (probe), six namespaces load with it |
+| 7.3 | **Proofs are tests that name the task:** `(deftest ^{:seon/task :seon.x.task/y} …)`. `done-when` is derived (the tests naming the task), never listed on the task | O | proposed |
+| 7.4 | **Identity** is the qualified keyword; unique across code, task files and database (duplicate refuses). Moving a decoration to another element keeps the task | O | proposed |
+| 7.5 | **Subject** is the element carrying the decoration; no subject reference is authored. A task file entry (backstop) names its subjects explicitly by symbol | O | proposed |
+| 7.6 | **Lifecycle:** raised = decoration, no test names it; specified = a test names it and is red on the base; green = its tests pass on the attempt; settled = root accepts AND the fix's diff deletes the decoration in the same merge. Settled tasks leave the code; history keeps them | O | proposed (recommendation) |
+| 7.7 | **What stays out of source:** attempts, decisions, evidence, measurements, long history, discussion — database entities pointing at the task id | O | proposed |
+| 7.8 | **The backstop file** `resources/seon/tasks/<ns>.edn` holds only: tasks for code that does not exist yet (a new namespace), tasks with no single home (cross-cutting), and questions about data. Same keys (`id`, `intent`, optional `must-read`, `needs`, `merge`); proofs still by test symbol | O | proposed |
+| 7.9 | **Runtime tasks** (detectors, errors, users, agents) are database writes through `seon.task/create!`, never file edits | O, A | proposed |
+| 7.10 | **One task table:** the analyzer ingests `:seon/tasks`, `:seon/must-read`, `:seon/see-also` and `^{:seon/task}` into the same task schema the backstop and runtime writers use; code-sourced tasks travel with their code (program partition), runtime tasks are data | O | open: nothing is ingested today |
+| 7.11 | **Short:** intent is at most two sentences; a decoration that needs more is a sign the task wants a backstop entry or a decomposition | O | proposed |
+| 7.12 | **Staleness is derived:** a decoration whose naming tests are green on the base is "fixed but open" (a root task); a decoration with no naming test after N days is listed for triage; a decoration on a deleted element refuses the deletion until moved or settled | O, A | proposed |
+| 7.13 | **Context:** a task's seeds include its decorated element; a function's own open tasks are shown with its source, so any task touching a function surfaces the other open problems on it | O | proposed |
+
+Open for the owner: 7.6 (delete the decoration at settle vs keep it marked), 7.10 (code-sourced tasks as program rows that merge with their code), 7.11 (the length cap).
+
 ## 6. Platform gaps the runs exposed (each is itself a task)
 
 - Two definition authorities: REPL forms are recognized by a hand matcher (`src/seon/sci/reader.cljc:245,323`) that sees only a top-level `clojure.core/defn`, so `(do (defn …))`, `(let [..] (defn …))`, `(def f (fn …))` and defn-expanding macros bypass the entry gate and arming. Owner-directed fix: observe what an evaluation defined (evaluate in a `sci/fork`, diff namespace maps, gate/arm the created Vars from their metadata, adopt or discard the fork); clj-kondo stays the one analyzer for rows and edges. Limit: a call inside the defining form runs before the check.

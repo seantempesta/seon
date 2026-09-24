@@ -61,20 +61,26 @@ A docstring states what is true and why; incident narratives belong in tasks and
 
 **Schema properties:** `:description`, and `:seon/must-read` when a key is unusable without another.
 
-**A task — three keys:**
+**A task lives on the code it is about** (requirements §7): one entry in the element's attribute map,
+and the tests that prove it name it. The task file is the backstop for what has no code home.
 
 ```clojure
-#:seon.task{:id        :seon.error.task/faults-read-is-a-call
-            :intent    "Root's opening prints an 81,805-character error query five times (81% of its prompt).
-                        It should be a short call that returns the same errors."
-            :done-when [seon.error.task-test/opener-is-short
-                        seon.error.task-test/for-agent-matches-the-query]}   ; §3
+(defn prepare-merge!
+  "Test candidate's replacements since its merge base … and answer the proposal accept-merge! takes."
+  {:seon/tasks   {:seon.cluster.source.task/merge-adds-and-retracts
+                  "An addition or deletion refuses, so no new function can ever land; classify and copy
+                   additions and retractions like replacements."}
+   :malli/schema [...]}
+  […] …)
+
+(deftest ^{:seon/task :seon.cluster.source.task/merge-adds-and-retracts} an-added-function-merges
+  (is …))
 ```
 
-Optional only when nothing else can say it: `:seon.task/must-read`, `:seon.task/needs`, `:seon.task/merge`
-(a pure `(fn [{:keys [base source target task]}]) → tx-data` when the default program-row copy is wrong),
-`:seon.task/attempts`, `:seon.task/schedule`. There is no authored scope: what the work touched is the
-diff, and root's decision selects from it.
+Optional, only when nothing else can say it: `:seon/must-read`, `:seon/see-also` (links), and in a backstop
+entry `:seon.task/needs`, `:seon.task/merge` (a qualified symbol naming a pure
+`(fn [{:keys [base source target task]}]) → tx-data`), `:seon.task/attempts`, `:seon.task/schedule`. There is no
+authored scope: what the work touched is the diff, and root's decision selects from it.
 
 **A help topic** — one line, what it builds on, what it teaches:
 
