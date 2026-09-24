@@ -162,6 +162,19 @@ Defects the prototype showed: pprint code-dispatch lays out `(fn [db] …)` one 
 printer must lay out data forms); callers/calls of a missing function are noise (skip); help ties sort by id,
 putting `query` before `task` (needs must express it).
 
+## 4b. Execution model: checkpoints (owner 2026-09-24)
+
+A checkpoint is an immutable pair: a Datahike commit and an SCI context value (persistent namespace maps;
+`sci/fork` 0.006 ms). Levels, keyed by content: base (loaded program, aliases, armed wrappers) → cluster
+(+ its differing rows) → task (+ its tests, vocabulary, evaluated opening). An attempt is a fork of the task
+checkpoint plus a branch of its commit, and never advances; a retry or a proof run is another fork. A
+long-lived agent moves to a new checkpoint at a turn boundary when its cluster's program changes.
+
+Agent atoms, results and quick defs are scratch: private to their fork (probe: another context cannot see
+them; a fork of a context that holds an atom shares that object, so proofs judge the database value, never
+scratch). Scratch never merges and is dropped when an agent moves checkpoints; anything worth keeping goes in
+the database.
+
 ## 5. Derived, never authored
 
 | Derived | From |
