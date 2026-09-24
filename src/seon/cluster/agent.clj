@@ -432,7 +432,9 @@
        [:dd [:code (:seon.turn/id unit)]]]]]))
 
 (defn assigned-to
-  "Agent ids assigned to work in `namespace-name`, sorted; empty when none.
+  "Agent ids assigned to work in `namespace-name`, sorted; empty only when none.
+  An unreadable database refuses with its invalid read, so a failed read can
+  never look unowned and drive a caller to create an owner.
 
   Assignment is not stewardship: any assigned agent evaluates in the
   namespace, and stewardship only decides where that namespace's faults and
@@ -447,8 +449,9 @@
                     [?agent :seon.agent/namespace ?namespace]
                     [?agent :seon.agent/id ?agent-id]]
                   db namespace-name)]
-    (if (or (:seon.db/invalid-read ids) (:seon.schema/expected-value ids))
-      [] (vec (sort ids)))))
+    (when (or (:seon.db/invalid-read ids) (:seon.schema/expected-value ids))
+      (throw (ex-info (:seon.error/message ids) ids)))
+    (vec (sort ids))))
 
 (defn steward-of
   "The agent id stewarding `namespace-name`, or nil.
