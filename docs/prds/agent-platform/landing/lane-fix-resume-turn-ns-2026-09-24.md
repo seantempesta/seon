@@ -1,3 +1,10 @@
+---
+type: landing
+status: landed
+created: 2026-09-24
+tags: [agent-platform, turn, contracts, disposition]
+---
+
 # Lane fix-resume-turn-ns — 2026-09-24
 
 The turn loop evaluates a reply's forms in `seon.turn/evaluate-sources`, and
