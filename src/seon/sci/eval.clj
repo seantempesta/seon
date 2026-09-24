@@ -1532,6 +1532,23 @@
     ::missing-declaration attribute
     :seon.error/expected :seon.sci.eval/present-declaration}))
 
+(defn- missing-contract
+  "The refusal of a function definition that declares no `:malli/schema`.
+
+  Entry defaults to the gate: the definition is refused before evaluation, so
+  it neither enters the context nor replaces an already armed root. No entry
+  dial exists yet; a `:warn` admission needs its owner's ruling first."
+  {:malli/schema [:=> [:cat :qualified-symbol] :seon.sci.eval/declaration-absent-error]}
+  [function-symbol]
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
+   {:seon.error/message
+    (str function-symbol " declares no :malli/schema; add a complete contract to its "
+         "attribute map, e.g. (defn f \"Doc.\" {:malli/schema [:=> [:cat :int] :int]} [x] x).")
+    :seon.error/member :malli/schema
+    :seon.error/offending function-symbol
+    ::missing-declaration :seon.fn/spec
+    :seon.error/expected :malli/schema}))
+
 (defn docstring-parts
   "Split a declared docstring into its summary, body, and final Example section."
   {:malli/schema [:=> [:cat :string] :map]}
@@ -3407,6 +3424,9 @@
             _ (when-let [reader-error (:seon.sci.reader/error event)]
                 (throw (ex-info (:seon.error/message reader-error)
                                 reader-error)))
+            _ (when (and (:seon.fn/sym event) (not (:seon.fn/spec event)))
+                (let [refusal (missing-contract (:seon.fn/sym event))]
+                  (throw (ex-info (:seon.error/message refusal) refusal))))
             form (:seon.sci.reader/form event)
             namespace-unmap? (:seon.sci.reader/ns-unmap? event)
             ;; The install entrance supplies a candidate for a function;

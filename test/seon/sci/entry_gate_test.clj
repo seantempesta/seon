@@ -43,3 +43,23 @@
        (let [refused (:seon.sci.admit/value (evaluate-in ctx "(twice \"a\")"))]
          (is (= :input (:seon.instrument/check refused))
              (pr-str refused)))))))
+
+(deftest a-definition-without-a-contract-is-refused-before-evaluation
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)]
+       (evaluate-in ctx (str "(defn twice \"Double x.\" "
+                             "{:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"))
+       (doseq [source ["(defn bare \"No contract.\" [x] (inc x))"
+                       "(defn twice \"No contract.\" [x] (* 3 x))"]]
+         (let [refusal (:seon.sci.admit/value (evaluate-in ctx source))]
+           (is (= 'seon.sci.eval/evaluate (:seon.error/operation refusal)) source)
+           (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)) source)))
+       (is (= 'absent (:seon.sci.admit/value
+                       (evaluate-in ctx "(if (resolve 'bare) 'present 'absent)")))
+           "the refused definition never entered the context")
+       (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)")))
+           "the refused redefinition left the armed root in place")
+       (is (= :input
+              (:seon.instrument/check
+               (:seon.sci.admit/value (evaluate-in ctx "(twice \"a\")")))))))))

@@ -1481,7 +1481,7 @@
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         definition
         (run-in ctx
-                "(defn spin [] (loop [i 0] (recur (inc i))))"
+                "(defn ^{:malli/schema [:=> [:cat] :int]} spin [] (loop [i 0] (recur (inc i))))"
                 1000)
         evaluation (deadlined-in ctx "(spin)" 300)]
     (is (ok? definition))
@@ -2193,7 +2193,7 @@
                   (run-in
                     ctx
                     (str
-                      "(defn probe-render [unit]"
+                      "(defn ^{:malli/schema [:=> [:cat :map] :string]} probe-render [unit]"
                       " (str \"rendered:\""
                       "      (:seon.render/value unit)))")
                     2000)))
@@ -2201,7 +2201,7 @@
                 (ok?
                   (run-in
                     ctx
-                    (str "(defn probe-render-spin [unit]" " (loop [i 0] (recur (inc i))))")
+                    (str "(defn ^{:malli/schema [:=> [:cat :map] :string]} probe-render-spin [unit]" " (loop [i 0] (recur (inc i))))")
                     2000)))
             _ (kernel/mark-installed! ctx 'user/probe-render)
             _ (kernel/mark-installed! ctx 'user/probe-render-spin)
@@ -2277,10 +2277,10 @@
    (fn [connection]
      (let [database (db/db connection)
            ctx (eval/build-base-ctx (seon.schema/handed-projection))
-           _ (is (ok? (run-in ctx (str "(defn probe-throw [x]"
+           _ (is (ok? (run-in ctx (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} probe-throw [x]"
                                        " (throw (ex-info \"boom\" {:a x})))")
                               2000)))
-           _ (is (ok? (run-in ctx (str "(defn probe-spin [x]"
+           _ (is (ok? (run-in ctx (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} probe-spin [x]"
                                        " (loop [i x] (recur (inc i))))")
                               2000)))
            evaluated-throw (:seon.sci.admit/value
