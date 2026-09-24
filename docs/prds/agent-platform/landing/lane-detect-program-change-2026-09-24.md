@@ -103,7 +103,7 @@ SCI evaluation reads it when it starts and when it ends.
 
 - **2bf66450c** (`sci/eval.clj` +43/−31, `test.clj` +14/−10, tests +41/−7): per-thread expectation stack,
   `since`-arity detection, and an unknown program at end. `member-result` and `bounded-result` take `since`.
-- **Totals over the three commits:** source +101/−101 (`sci/eval`, `cluster`, `test`); schemas +8/−10; tests
+- **Totals over the three commits:** source +174/−157, net +17 (`sci/eval`, `cluster`, `test`); schemas +8/−10; tests
   +203/−150.
 
 ## Root runs (serially, after adopting e81cb51dc, 7f53d0809 and 2bf66450c)
