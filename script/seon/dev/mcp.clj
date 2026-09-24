@@ -508,8 +508,7 @@
    `(do
       ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
        {:seon.dev.mcp/evaluation? true :seon.dev.mcp/read-only? ~read-only?})
-      (let [instances# @@(ns-resolve 'seon.cluster
-                                   (symbol "running-instances"))
+      (let [instances# @@(requiring-resolve 'seon.operator.runtime/running-instances)
           instance# (get instances# ~cluster)
           cluster# (:seon.turn.loop/cluster instance#)]
       (if-not (and instance#
@@ -565,7 +564,7 @@
   through `seon.cluster.registry`; the cluster's own branch never qualifies."
   [cluster action branch]
   (pr-str
-   `(let [instance# (get @@(ns-resolve 'seon.cluster (symbol "running-instances")) ~cluster)
+   `(let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
           handle# (:seon.turn.loop/cluster instance#)
           store# {:seon.store/store (:seon.store/store instance#)}
           connection# (:seon.db/connection handle#)
