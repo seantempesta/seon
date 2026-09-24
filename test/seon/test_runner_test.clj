@@ -11,6 +11,7 @@
             [sci.core :as sci]
             [seon.error :as error]
             [seon.operator.runtime]
+            [seon.program :as program]
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
@@ -326,3 +327,26 @@
   (let [running (set (keys @seon.operator.runtime/running-instances))]
     (is (seq running) "a running cluster is the subject")
     (is (= running (::runner/snapshot-live-clusters (#'runner/ambient-snapshot))))))
+
+(deftest a-metadata-only-change-changes-the-reach-digest
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            test-symbol (symbol (str "reach.probe" (random-uuid)) "check")
+            source "(deftest check (is true))"
+            row (test-support/program-row database [:seon.test/sym test-symbol] source)
+            _ (test-support/transacted!
+               connection [(test-support/namespace-row database (symbol (namespace test-symbol))) row])
+            before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol)
+            changed (program/declaration-row
+                     (db/carried-projection database)
+                     (assoc (dissoc row :seon.program/definition-digest :seon.schema.admission/source)
+                            :seon.test/fixture "a fixture-only change")
+                     :all :agent)]
+        (is (string? before))
+        (is (= source (:seon.test/source changed)))
+        (is (not= (:seon.program/definition-digest row) (:seon.program/definition-digest changed))
+            "the producer's digest sees the metadata")
+        (test-support/transacted! connection [changed])
+        (is (not= before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol))
+            "reuse keyed by reach sees the same change")))))

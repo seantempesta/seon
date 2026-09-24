@@ -691,7 +691,7 @@
 
 (def ^:private reach-attributes
  [:seon.fn/sym :seon.fn/source :seon.fn/spec :seon.fn/calls :seon.fn/references :seon.fn/keywords
-  :seon.test/sym :seon.test/source :seon.test/subject
+  :seon.test/sym :seon.test/source :seon.test/subject :seon.program/definition-digest
   :seon.schema/key :seon.schema/form])
 (defn- reach-keywords [form]
  (into #{} (filter qualified-keyword?) (tree-seq coll? seq form)))
@@ -707,7 +707,9 @@
        form (some-> (:seon.schema/form row) edn/read-string)]
   (cond-> row
    sym (assoc ::reach-symbol sym
-              ::reach-leaf (id/digest 64 [sym (or (:seon.test/source row) (:seon.fn/source row)) (:seon.fn/spec row)])
+              ;; The producer's stored digest (`seon.program/definition-digest`)
+              ;; covers source, spec, effective metadata and resolver context.
+              ::reach-leaf (:seon.program/definition-digest row :seon.error/unknown)
               ::reach-keys (into (set (:seon.fn/keywords row)) (reach-keywords spec)))
    schema-key (assoc ::reach-leaf (id/digest 64 [schema-key (reach-canonical form)])
                      ::reach-keys (reach-keywords form)))))
