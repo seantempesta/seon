@@ -74,7 +74,10 @@
             {:task (:seon.task/id a) :rule :shape :why (me/humanize ex)})
           (for [t derived
                 f (concat
-                   (for [s (:seon.task/subjects t) :when (not (exists? db s))] {:rule :subject-missing :sym s})
+                   (for [s (:seon.task/subjects t)
+                         :when (not (or (exists? db s)
+                                        (and (simple-symbol? s) (some #(= (str s) (namespace %)) (referenced t)))))]
+                     {:rule :subject-missing :sym s})
                    (for [s (:seon/must-read t) :when (not (exists? db s))] {:rule :must-read-missing :sym s})
                    (for [s (::missing t) :when (not (or ((:seon.task/delivers t) s) ((delivered-by-needs t) s)))]
                      {:rule :references-unknown :sym s})
@@ -119,3 +122,39 @@
          {:task (:seon.task/id t) :proof i
           :on-base (cond err :red-error (true? v) :GREEN-ALREADY :else :red)
           :detail (or (some-> err (subs 0 (min 120 (count err)))) (pr-str v))})))
+
+(defn stale-doc-tasks
+  "Detector producer: one task per namespace whose functions changed after their docstrings.
+  Identity is producer + subject, so re-running finds the same tasks instead of duplicating them."
+  [db]
+  (let [rows (d/q '[:find ?s :where [?e :seon.fn/sym ?s] [?e :seon.fn/source _ ?tsrc] [?e :seon.fn/doc _ ?tdoc] [(> ?tsrc ?tdoc)]] db)]
+    (vec (for [[ns-name syms] (group-by #(symbol (namespace %)) (map first rows))]
+           {:seon.task/id (keyword "seon.task.stale-docs" (str ns-name))
+            :seon.task/intent (str (count syms) " function(s) in " ns-name " changed after their docstrings; confirm each still describes the code or rewrite it.")
+            :seon.task/subjects (set syms)
+            :seon.task/done-when [(list 'empty? (list 'seon.task/stale-docs '(seon.db/db) (list 'quote ns-name)))]}))))
+
+(defn attempt
+  "Evaluate one task's proofs on a branch: the ATTEMPT is data, separate from the task."
+  [evaluate branch task]
+  (let [results (vec (for [form (:seon.task/done-when task)
+                           :let [r (evaluate (pr-str form))]]
+                       (cond (:seon.cluster.eval/error r) [:red (:seon.cluster.eval/error r)]
+                             (true? (:seon.sci.admit/value r)) [:green]
+                             :else [:red (pr-str (:seon.sci.admit/value r))])))]
+    {:seon.task.attempt/task (:seon.task/id task)
+     :seon.task.attempt/branch branch
+     :seon.task.attempt/results results
+     :seon.task.attempt/green? (every? #(= :green (first %)) results)}))
+
+(defn states
+  "Derived from tasks + attempts: settled (an attempt with every proof green), ready (specified,
+  every need settled), blocked (a need unsettled), raised."
+  [derived attempts]
+  (let [settled (set (keep #(when (:seon.task.attempt/green? %) (:seon.task.attempt/task %)) attempts))]
+    (into (sorted-map)
+          (for [t derived :let [id (:seon.task/id t)]]
+            [id (cond (settled id) :settled
+                      (= :raised (:seon.task/state t)) :raised
+                      (every? settled (:seon.task/needs t)) :ready
+                      :else :blocked)]))))

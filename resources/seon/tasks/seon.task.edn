@@ -1,0 +1,7 @@
+;; Tasks about the task system itself (seon.task does not exist yet; these tasks create it).
+[{:seon.task/id        :seon.task.task/stale-docs-detector
+  :seon.task/intent    "Documentation must not drift silently: a function whose source changed after its docstring is potentially out of date. Deliver the detector as an ordinary contracted function so the finding is a query any agent can run, and so its empty result is the proof that a namespace's docs were reviewed."
+  :seon.task/subjects  #{seon.task}
+  :seon/must-read      #{seon.db/q seon.db/db}
+  :seon.task/done-when [(set? (seon.task/stale-docs (seon.db/db) 'seon.flow))
+                        (every? qualified-symbol? (seon.task/stale-docs (seon.db/db) 'seon.flow))]}]

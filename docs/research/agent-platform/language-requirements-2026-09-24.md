@@ -31,11 +31,13 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 2.1 | One family: issue, backlog and plan are derived views, never separate stores | O | met |
 | 2.2 | A task points at its subjects by value (symbols, schema keywords, stored-data identities); many tasks per entity; never written onto the entity | O, A | met |
 | 2.3 | The subject is the producer that must change, not where the symptom showed; the symptom is evidence | O | met |
-| 2.4 | Tasks come from many producers: errors, detectors (queries), users and agents (`create!`), other tasks (triage, decomposition), EDN preload incl. recurring and system setup | O | EDN only |
-| 2.5 | Identity: authored tasks by name (a qualified keyword, never confusable with a Var); generated tasks by producer + subject, so re-running a detector finds, not duplicates | O, A | authored only |
-| 2.6 | States are derived, never stored: raised (no requirements), specified, attempted, settled, blocked, obsolete (subject gone), superseded | O, A | raised/specified |
+| 2.4 | Tasks come from many producers: errors, detectors (queries), users and agents (`create!`), other tasks (triage, decomposition), EDN preload incl. recurring and system setup | O | EDN + detector: the stale-doc detector generated 42 tasks from real data (115 drifted functions) |
+| 2.10 | Detector granularity: findings are grouped by the subject's namespace — one focused task per namespace, not one per function (2,395 undocumented + 115 drifted functions would be 2,500 tasks) | R | met |
+| 2.11 | A detector's empty result is the proof: generated tasks' done-when is "the detector returns nothing here", so they all derive a need on the task that delivers the detector — one platform task, then N farmable independent tasks, with no hand-written order | R | met |
+| 2.5 | Identity: authored tasks by name (a qualified keyword, never confusable with a Var); generated tasks by producer + subject, so re-running a detector finds, not duplicates | O, A | met (ids stable across re-runs) |
+| 2.6 | States are derived, never stored: raised (no proofs), ready (specified, every need settled), blocked (a need unsettled), settled (an attempt with every proof green), obsolete (subject gone), superseded | O, A | raised/ready/blocked/settled met |
 | 2.7 | Order: derived — B needs A when B's proofs reference what A delivers; a missing symbol is delivered only by the task whose subjects include its namespace (otherwise every user of a new function claims it); "shares a cause" is distinct from "must precede" | O, A, R | derived order met |
-| 2.8 | Runtime facts (attempts, agents, branches, results) are separate entities pointing at the task, so reconciling EDN never erases what happened | A | not yet |
+| 2.8 | Runtime facts (attempts, agents, branches, results) are separate entities pointing at the task, so reconciling EDN never erases what happened | A | attempts as values met (not stored yet) |
 | 2.9 | Large work is decomposed into small verifiable tasks by a task whose deliverable is tasks | O | not yet |
 
 ## 3. Done is decided by data
@@ -46,7 +48,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 3.2 | A requirement proves a task and does not merge; a guarantee is a `deftest` that merges by deliberate promotion; the test suite must not explode | O | met |
 | 3.3 | A missing symbol is a failing requirement (TDD), allowed only when a requirement references it; a missing SUBJECT namespace is allowed when the task creates it | O, R | symbols met; namespaces open |
 | 3.9 | A proof must be red on the base before work starts (a proof that already holds proves nothing) — checked by evaluating it on a throwaway branch | R | met (caught one task) |
-| 3.10 | A proof must be red for its OWN reason: red only because a needed task is unsettled means blocked; check each task on a branch where its needs are satisfied | R | open |
+| 3.10 | A proof must be red for its OWN reason: red only because a needed task is unsettled means blocked; check each task on a branch where its needs are satisfied | R | met: about-is-a-value on the settled branch is red for "Missing schema declaration :my.note/about-symbol" |
 | 3.4 | Exits can be example tests, properties, bounds, empty detector queries, measurements or root decisions | A | examples only |
 | 3.5 | Deliverables include functions, tests, schema keys and data (findings, child tasks) | A, R | fns + keys |
 | 3.6 | Delivered functions carry a docstring and the declared contract; agents take the shortest path the checks allow, so the checks encode the requirement | R | met in toy |
