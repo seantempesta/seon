@@ -459,6 +459,22 @@
            (get-in retained [:seon.sci.admit/remainder
                              :seon.sci.admit/reason])))))
 
+(deftest over-bound-fault-evidence-keeps-its-cause-chain
+  ;; open-errors-triage-2026-09-24 item 3: an over-bound Throwable's whole
+  ;; evidence was only the remainder marker, so no class, message or frame
+  ;; of any cause survived even in the blob.
+  (let [failure (ex-info "outer" {:rows (vec (range 10000))}
+                         (ex-info "middle" {} (IllegalStateException. "root cause")))
+        prepared (error/prepare
+                  (assoc-in (request (transform-error failure))
+                            [:seon.sci.admit/caps :seon.config.eval.result/max-bytes] 16384))
+        content (#'admit/semantic-value (edn/read-string (:seon.error/data-content prepared)))]
+    (is (= :over-bound (get-in content [:seon.sci.admit/remainder :seon.sci.admit/reason])))
+    (is (= [["clojure.lang.ExceptionInfo" "outer"] ["clojure.lang.ExceptionInfo" "middle"]
+            ["java.lang.IllegalStateException" "root cause"]]
+           (mapv (juxt :seon.error/throwable-class :seon.error/message)
+                 (:seon.error/chain content))))))
+
 (defn ^{:malli/schema [:=> [:cat :int]
                        [:map
                         [:seon.error-test/payload [:vector :string]]
