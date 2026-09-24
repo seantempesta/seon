@@ -3047,3 +3047,18 @@
         (is (= rows (into [] (mapcat #(seon.fn/published-index-rows database [(program/row-identity %)]))
                           rows))
             "a batch reads exactly the rows each identity reads alone")))))
+
+(deftest index-rows-name-a-data-entity-by-its-identity
+  ;; A namespace's steward is an agent (`:seon.program/partition :seon.data`)
+  ;; whose runtime points back to it; inlining it recursed without end.
+  (test-support/with-database
+    (fn [connection]
+      (test-support/seed-cluster! connection "test")
+      (test-support/transacted! connection
+                                ((requiring-resolve 'seon.cluster.agent/creation-tx)
+                                 {:seon.agent/id "steward-cycle"
+                                  :seon.cluster/name "test"
+                                  :seon.ns/name 'my.agents.steward-cycle}))
+      (let [rows (seon.fn/published-index-rows
+                  (db/db connection) [[:seon.ns/name 'my.agents.steward-cycle]])]
+        (is (= [[:seon.agent/id "steward-cycle"]] (map :seon.ns/steward rows)))))))

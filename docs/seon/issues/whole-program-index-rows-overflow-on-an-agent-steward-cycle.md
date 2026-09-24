@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 created: 2026-09-24
 tags: [issue, publication, seon.fn]
@@ -36,3 +36,14 @@ the same test instead ran past its 63 s remainder.
 on a program row. The partition that the entity schemas declare must stop
 program rows from following refs into agent entities. This lane did not choose
 that rule.
+
+## Resolution (lane fix-index-rows-steward-cycle, 2026-09-24)
+
+The partition is declared: the agent entity schema carries
+`:seon.program/partition :seon.data`, and `seon.program/program-attributes`
+derives the program attributes from the projection. `published-index-rows`
+now writes a ref to an entity with no program row identity and no program
+attribute as that entity's declared `:db.unique/identity` pair
+(`[:seon.agent/id "root"]`), and `reached-entities` stops descending at such
+entities. No cycle guard: the partition rules the cycle out. Evidence and
+timings: `docs/prds/agent-platform/landing/lane-fix-index-rows-steward-cycle-2026-09-24.md`.

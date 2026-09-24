@@ -3312,10 +3312,13 @@
 (defn- reached-entities
   "Entities `identities` reach through refs, keyed by identity and `:db/id`, less
   `omitted` attributes. One `pull-many` per ref depth: each armed read costs ~0.1 ms,
-  so one pull per entity made a whole-program read take seconds."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn.file/identities [:set :keyword]]
+  so one pull per entity made a whole-program read take seconds. Past the named
+  rows the walk descends only through entities with a `program` attribute: a data
+  entity such as a steward agent is read for its identity, never followed."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn.file/identities [:set :keyword]
+                       [:set :qualified-keyword]]
                   [:or [:map-of :seon.schema/value [:maybe :map]] :seon.error/value]]}
-  [database identities omitted]
+  [database identities omitted program]
   (letfn [(walk [[found wanted] k entity]
             (let [entity (some-> entity (as-> e (apply dissoc e omitted)))
                   found (cond-> (assoc found k entity) entity (assoc (:db/id entity) entity))]
@@ -3328,7 +3331,8 @@
                                    :else [found (conj wanted id)]))
                            acc (if (map? value) [value] value))
                    acc))
-               [found wanted] (or entity {}))))]
+               [found wanted]
+               (if (or (vector? k) (some program (keys entity))) entity {}))))]
     (loop [pending (vec (distinct identities)) found {}]
       (if (empty? pending)
         found
@@ -3363,7 +3367,12 @@
   ([database identities]
    (published-index-rows database identities #{}))
   ([database identities omitted]
-  (let [entities (reached-entities database identities omitted)
+  ;; The entity schemas' `:seon.program/partition` decides what a row may inline:
+  ;; a ref into a data entity (a steward agent, whose runtime and turns point back)
+  ;; is written as that entity's declared identity.
+  (let [program (program/program-attributes (db/carried-projection database))
+        declared (db/identity-attributes database)
+        entities (reached-entities database identities omitted program)
         entity (fn [identity] (if (:seon.error/at entities) entities (get entities identity)))]
    (letfn [(reference [value]
             (let [pulled (entity (:db/id value))]
@@ -3372,7 +3381,10 @@
                        (contains? pulled :seon.error/layer)
                        (contains? pulled :seon.error/operation))
                 pulled
-                (or (program/row-identity pulled) (row pulled)))))
+                (or (program/row-identity pulled)
+                    (when-not (some program (keys pulled))
+                      (some #(when-some [v (get pulled %)] [% v]) declared))
+                    (row pulled)))))
           (row [entity]
             (if (and (map? entity)
                      (contains? entity :seon.error/at)
