@@ -3020,7 +3020,10 @@
                   "(defn looping [c] (async/go-loop [] (when (async/<! c) (recur))))\n"
                   "(defn channel [] (async/chan 1))\n"
                   "(defn plain [x] (when x (inc x)))\n")
-        rows #(try (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+        ;; The fixture owns its cache: the rows default is the checkout's shared
+        ;; cache, whose (filled) state this test must never depend on.
+        cache (str (io/file root ".clj-kondo" ".cache"))
+        rows #(try (seon.fn/rows {:seon.fn/roots [(.getPath root)] ::analyzer/cache-root cache})
                    (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))
         jar (str/replace (.getPath (io/resource "clojure/core/async.clj")) #"^file:|!/.*$" "")]
     (try
@@ -3033,7 +3036,7 @@
       ;; The fill the command performs, for this fixture's own cache.
       (clj-kondo.core/run! {:lint [jar] :dependencies true :parallel true
                             :config-dir (str (io/file root ".clj-kondo"))
-                            :cache-dir (str (io/file root ".clj-kondo" ".cache"))
+                            :cache-dir cache
                             :config {:output {:canonical-paths true}}})
       (is (= {'sample.env-macro/looping true
               'sample.env-macro/channel false

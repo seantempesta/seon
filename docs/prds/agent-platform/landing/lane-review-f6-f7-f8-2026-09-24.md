@@ -97,6 +97,15 @@ Net +7 lines.
   runs the same fill into the fixture's own cache and asserts looping true, channel and
   plain false. The loaded JVM plays no part: core.async is loaded throughout, yet the
   unanalyzed run refuses.
+- Rerun fix (after root's fill): the regression failed because `seon.fn/rows` defaults
+  its cache to `<checkout>/.clj-kondo/.cache`, not the fixture's. With the shared cache
+  filled, step 1 resolved `go-loop` and returned rows. The empty message was
+  `(str nil)` from a non-refusal. The test now passes a fixture-owned
+  `::analyzer/cache-root`. Live probe of the exact body on adopted `a9449b7c3`: refusal
+  with targets `[<! chan go-loop]` and the full command message (424 ms), fixture fill
+  176 ms, then looping true / channel false / plain false (421 ms); 1,029 ms total.
+  `seon.fn/rows` is dominated by `analysis-projection`/`build-projection` (802 ms of
+  844 ms). That cost was already there and is not from this lane.
 - Also in this commit: `namespace-context-reads-clauses-from-the-publication-analysis`
   now expects the top-level `clojure.data` require and its `data` alias.
 - Net source about +42 lines (fn.clj about +18, analyzer about +24); tests +20.
