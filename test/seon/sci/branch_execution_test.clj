@@ -425,3 +425,34 @@
                             (map :seon.error/message
                                  (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
              (pr-str {:ms (:ms acquired) :interpreted (:interpreted-count view)}))))))))
+
+(deftest ^{:seon.test/long "One complete SCI acquisition of the canonical fixture program interpreting two changed rows and their reverse closures; measured 1,090 ms on default."
+           :seon.test/long-ms 12000}
+  an-interpreted-caller-resolves-its-compiled-namespace-aliases-privates-and-core
+  (support/with-database
+   (fn [connection]
+     (db/call-with-custody {:seon.db/connection connection}
+      (fn []
+       ;; exact! calls effect/request!, an alias my.edit makes with a
+       ;; top-level require outside its ns form; publication-base! calls
+       ;; clojure.core/spit, which SCI's core lacks.
+       (let [changed '[my.edit/exact! seon.cluster/publication-base!]
+             before (db/db connection)
+             ctx (eval/cluster-ctx before connection
+                                   (eval/projection-state before (db/carried-projection before))
+                                   {:seon.sci.eval/loaded-connection connection})
+             _ (support/transacted! connection
+                 (mapv (fn [sym]
+                         [:db/add [:seon.fn/sym sym] :seon.program/definition-digest
+                          (id/digest 64 ["caller-namespace-names" (str sym)])])
+                       changed))
+             acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))]
+         (is (= (zipmap changed (repeat :interpreted))
+                (into {} (keep (fn [{sym :seon.fn/sym state :seon.sci.eval/load-state}]
+                                 (when (some #{sym} changed) [sym state])))
+                      (:seon.sci.eval/load-results (:value acquired))))
+             "each changed row is an SCI definition")
+         (is (= [] (filterv #(re-find #"Unable to resolve|does not name an installed SCI Var" %)
+                            (map :seon.error/message
+                                 (:seon.test/acquisition-refusals (eval/acquired-program ctx)))))
+             (pr-str {:ms (:ms acquired)}))))))))
