@@ -1,6 +1,7 @@
 (ns seon.test.runner
   "Capture test Var results in this JVM and commit them as per-member facts."
   (:require [seon.error.refusal]
+            [clojure.core.cache.wrapped :as cache]
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.set :as set]
@@ -857,12 +858,17 @@
                                 (concat (map #(vector ::reach-symbol %) names)
                                         (map #(vector ::reach-schema %) schema-keys)))
      ::reach-function-count (count names)}))
+(defonce ^:private reach-holders
+  ;; The index follows its branch across contract and schema writes, so it is
+  ;; keyed by the attached connection, not the projection; LRU bounds retention.
+  (cache/lru-cache-factory {} :threshold 16))
 (defn- reach-cache
- "The reach index's holder, retained by the database's carried projection."
+ "The reach index's holder for the database's attached branch connection."
  [database]
- (when-let [projection (db/carried-projection database)]
-  (schema/projection-cache-value projection
-   [::reach-cache (:config database)] #(atom nil))))
+ (let [{:datahike.cache/keys [connection-id generation]} (:cache-context database)]
+  (when connection-id
+   (cache/lookup-or-miss reach-holders [connection-id generation (:config database)]
+                         (fn [_] (atom nil))))))
 (defn- reach-entries
  "Derive selected reach digests, incrementally on the database's carried cache.
  Result-only transactions invalidate nothing. A cache retains only one basis;

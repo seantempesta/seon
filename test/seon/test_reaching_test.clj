@@ -45,33 +45,57 @@
                    :seon.test/changed changed}
                   options)))
 
+(defn- define!
+  "Write synthetic declarations through the production analyzer, refusing at the write."
+  [connection & identity-sources]
+  (support/transacted!
+   connection
+   (mapv (fn [[declaration source]] (support/program-row (db/db connection) declaration source))
+         (partition 2 identity-sources))))
+
+(defn- seed-reach-fixture!
+  "Two functions in `reach.fixture`, each with one test that calls it."
+  [connection]
+  (support/transacted! connection [(support/namespace-row (db/db connection) 'reach.fixture)])
+  (define! connection
+           '[:seon.fn/sym reach.fixture/a] "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] x)"
+           '[:seon.fn/sym reach.fixture/b] "(defn b {:malli/schema [:=> [:cat :int] :int]} [x] x)")
+  (define! connection
+           '[:seon.test/sym reach.fixture/a-test] "(deftest a-test (is (= 'x (a 'x))))"
+           '[:seon.test/sym reach.fixture/b-test] "(deftest b-test (is (= 1 (b 1))))"))
+
+(defn- reach-index
+  "The newest reach index the database's carried cache holds."
+  [connection]
+  (some-> (#'runner/reach-cache (db/db connection)) deref deref))
+
 (deftest reach-digests-follow-only-changed-closures
  (support/with-database
   (fn [connection]
-   (let [a 'reach.fixture/a b 'reach.fixture/b ta 'reach.fixture/a-test tb 'reach.fixture/b-test
-         rows [{:db/id "fn-a" :seon.fn/ns [:seon.ns/name 'seon.test-reaching-test] :seon.schema.admission/source :core :seon.fn/sym a :seon.fn/source "(defn a [x] x)" :seon.fn/spec "[:=> [:cat :seon.test/sym] :seon.test/sym]"}
-               {:db/id "fn-b" :seon.fn/ns [:seon.ns/name 'seon.test-reaching-test] :seon.schema.admission/source :core :seon.fn/sym b :seon.fn/source "(defn b [x] x)" :seon.fn/spec "[:=> [:cat :int] :int]"}
-               {:seon.schema.admission/source :core :seon.test/sym ta :seon.test/source "(deftest a-test (is (= \"x\" (a \"x\"))))" :seon.test/subject "fn-a"}
-               {:seon.schema.admission/source :core :seon.test/sym tb :seon.test/source "(deftest b-test (is (= 1 (b 1))))" :seon.fn/calls [b]}]
-         _ (is (:db-after (db/transact! connection rows)))
+   (seed-reach-fixture! connection)
+   (let [ta 'reach.fixture/a-test tb 'reach.fixture/b-test
          initial (runner/reach-digests (db/db connection) [ta tb])
-         index (fn [] (some-> (#'runner/reach-cache (db/db connection)) deref deref))
-         stats (fn [] (select-keys (index) [:seon.test.runner/reach-updated :seon.test.runner/reach-computed]))
-         derived (:seon.test.runner/reach-derivations (index))]
-    (is (= 2 (count initial)))
+         stats (fn [] (select-keys (reach-index connection)
+                                   [:seon.test.runner/reach-updated :seon.test.runner/reach-computed]))
+         derived (:seon.test.runner/reach-derivations (reach-index connection))]
+    (is (= 2 (count initial)) (pr-str initial))
     (is (= initial (runner/reach-digests (db/db connection) [ta tb])))
-    (is (= derived (:seon.test.runner/reach-derivations (index))))
-    (doseq [tx [[[:db/add [:seon.fn/sym a] :seon.fn/source "(defn a [x] (str x))"]]
-                [[:db/add [:seon.fn/sym a] :seon.fn/spec "[:=> [:cat :seon.test/sym] :string]"]]
-                [[:db/add [:seon.schema/key :seon.test/sym] :seon.schema/form "[:string {:min 2}]"]]]]
+    (is (= derived (:seon.test.runner/reach-derivations (reach-index connection))))
+    ;; Source, contract and schema writes each recompute only the test they reach.
+    (doseq [write! [#(define! % '[:seon.fn/sym reach.fixture/a]
+                              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
+                    #(define! % '[:seon.fn/sym reach.fixture/a]
+                              "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :any]} [x] (identity x))")
+                    #(support/transacted! % [[:db/add [:seon.schema/key :seon.test/sym]
+                                              :seon.schema/form "[:qualified-symbol {:min 2}]"]])]]
      (let [before (runner/reach-digests (db/db connection) [ta tb])]
-      (is (:db-after (db/transact! connection tx)))
+      (write! connection)
       (let [after (runner/reach-digests (db/db connection) [ta tb])]
        (is (not= (get before ta) (get after ta)))
        (is (= (get before tb) (get after tb)))
        (is (= 1 (:seon.test.runner/reach-computed (stats)))))))
     (let [before (runner/reach-digests (db/db connection) [ta tb])]
-     (is (:db-after (db/transact! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])))
+     (support/transacted! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
      (is (= {:seon.test.runner/reach-updated 0 :seon.test.runner/reach-computed 0} (stats))))))))
 
@@ -80,24 +104,22 @@
  ;; share one derivation, a changed value derives again.
  (support/with-database
   (fn [connection]
-   (let [f 'reach.fixture/once ft 'reach.fixture/once-test
-         derivations #(:seon.test.runner/reach-derivations
-                       (some-> (#'runner/reach-cache (db/db connection)) deref deref) 0)]
-    (is (:db-after (db/transact! connection
-                    [{:db/id "fn-once" :seon.fn/ns [:seon.ns/name 'seon.test-reaching-test] :seon.schema.admission/source :core :seon.fn/sym f :seon.fn/source "(defn once [x] x)" :seon.fn/spec "[:=> [:cat :int] :int]"}
-                     {:seon.schema.admission/source :core :seon.test/sym ft :seon.test/source "(deftest once-test (is (= 1 (once 1))))" :seon.fn/calls [f]}])))
-    (let [database (db/db connection)
-          before (derivations)
-          start (java.util.concurrent.CountDownLatch. 1)
-          readers (mapv (fn [_] (future (.await start) (runner/reach-digests database [ft]))) (range 4))
-          _ (.countDown start)
-          results (mapv deref readers)]
-     (is (apply = results))
-     (is (string? (get-in results [0 ft])))
-     (is (= (inc before) (derivations)))
-     (is (:db-after (db/transact! connection [[:db/add [:seon.fn/sym f] :seon.fn/source "(defn once [x] (inc x))"]])))
-     (is (not= (first results) (runner/reach-digests (db/db connection) [ft])))
-     (is (= (+ 2 before) (derivations))))))))
+   (seed-reach-fixture! connection)
+   (let [ta 'reach.fixture/a-test
+         derivations #(:seon.test.runner/reach-derivations (reach-index connection) 0)
+         database (db/db connection)
+         before (derivations)
+         start (java.util.concurrent.CountDownLatch. 1)
+         readers (mapv (fn [_] (future (.await start) (runner/reach-digests database [ta]))) (range 4))
+         _ (.countDown start)
+         results (mapv deref readers)]
+    (is (apply = results))
+    (is (string? (get-in results [0 ta])) (pr-str (first results)))
+    (is (= (inc before) (derivations)))
+    (define! connection '[:seon.fn/sym reach.fixture/a]
+             "(defn a {:malli/schema [:=> [:cat :seon.test/sym] :seon.test/sym]} [x] (identity x))")
+    (is (not= (first results) (runner/reach-digests (db/db connection) [ta])))
+    (is (= (+ 2 before) (derivations)))))))
 
 (deftest reaching-is-the-program-graph-relation
   (support/with-database

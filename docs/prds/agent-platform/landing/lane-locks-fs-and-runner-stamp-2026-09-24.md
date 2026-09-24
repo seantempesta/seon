@@ -18,6 +18,7 @@ Lock audit rows 4 and 5 (`docs/research/agent-platform/lock-audit-2026-09-24.md`
   - `bin/test-check default --test seon.fs.jvm-test/racing-digest-fenced-writes-have-one-winner`
   - `bin/test-check default --test seon.test-reaching-test/concurrent-reach-reads-of-one-value-derive-once`
   - `bin/test-check default --test seon.test-reaching-test/reach-digests-follow-only-changed-closures`
+  - `bin/test-check default --ns seon.test-reaching-test` (after the follow-up commit)
   - `bin/test-check default --ns seon.test.reach-test`
 - **Not adopted.** Hook publication is paused, so default still runs the HEAD Vars.
   Root adopts `src/seon/fs/jvm.clj` and `src/seon/test/runner.clj` at a checkpoint.
@@ -39,6 +40,25 @@ Lock audit rows 4 and 5 (`docs/research/agent-platform/lock-audit-2026-09-24.md`
   `docs/seon/issues/cold-reach-derivation-exceeds-one-second.md` (index not edited).
 - `reach-cache`/`reach-entries` have no Malli contract. The gap already existed and
   I did not widen it.
+
+## Follow-up after root's first run (clean S2a member worlds)
+
+- **Red cause:** both reach fixtures hand-built fn/test rows that had no
+  `:seon.program/definition-digest`. The clean world refuses them; I reproduced the
+  refusal on branch `:locks-fs-and-runner-stamp`. The fixture now seeds
+  `reach.fixture` through `support/namespace-row` and `support/program-row` and writes
+  through `support/transacted!`, so a refusal throws at the write.
+- **Regression I introduced in 4b487b5ac:** keying the holder by the carried
+  projection threw the index away on every contract or schema write, because those
+  writes produce a new projection. A branch probe showed `reach-computed 2` and the
+  derivation count restarting where HEAD recomputes one test. The holder is now
+  `reach-holders`, a `clojure.core.cache.wrapped` LRU (threshold 16), keyed by
+  `[connection-id generation config]` taken from the value's Datahike `:cache-context`.
+- **Branch probe of the edited runner in a scratch namespace:**
+  - Source, contract and schema writes each gave `reach-computed 1`, with derivations
+    1 → 2 → 3 → 4 and b-test unchanged.
+  - Incremental reads took 148–482 ms (the JVM was shared with other root work).
+  - Four concurrent reads of one new value derived once (4 → 5).
 
 ## What changed
 
