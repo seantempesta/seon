@@ -1,0 +1,48 @@
+---
+type: issue
+status: open
+severity: friction
+tags: [issue, test-harness, performance, config]
+---
+
+# Test-world preparation spends seconds in config apply and unmemoized reads
+
+## Problem
+
+A test request's world is a checkpoint branch (`seon.test/clean-request-handle`,
+commit 41f2f0b53). Its first preparation writes boot's cluster facts through
+`seon.cluster/seed-cluster-facts!`. Measured on default (pid 39156,
+2026-09-24), one preparation took 1,700 ms and 1,807 ms. Of that,
+`seon.config/apply-compiled!` took about 780–920 ms, most of it in
+`seon.reconcile/plan`, and four `seon.db/transact!` calls took 1,166 ms.
+The config being applied is the cluster's own effective configuration, onto
+a published commit that holds no config row.
+
+Before 41f2f0b53 (S2a, fe5dcc072) the same writes ran on every request. The
+S2a landing estimated them at "tens of ms"; the measurement is two orders
+larger. The checkpoint now pays them once per content identity. A new base,
+overlay, config or process still pays them again.
+
+Two reads the overlay (`seon.test/program-overlay-tx`) depends on are also
+slow for what they return:
+
+- `seon.program/program-attributes` recomputes from the projection on each
+  call: 50–68 ms warm, never memoized by projection identity.
+- `seon.db/datoms` over the 10,779 `:seon.program/definition-digest` datoms
+  took 28–44 ms. `seon.db/q` over the same range took 0.5 ms, and raw
+  Datahike took 2 ms. The overlay uses `q` for that reason.
+
+## Wanted
+
+- A first preparation under one second. Name which part of
+  `seon.config/apply-compiled!` is proportional to the whole config, and
+  remove it.
+- `seon.program/program-attributes` memoized as a function of its projection.
+- `seon.db/datoms` output checking that does not cost 20× the read.
+
+## Evidence
+
+Profile lines from the preparation probe: `seon.config/apply-compiled!`
+778 ms x1, `seon.reconcile/plan` 622 ms x2, `seon.db/transact!` 1,166 ms x4.
+Overlay probe: `seon.program/program-attributes` 50.9 ms, `seon.db/datoms`
+30.5 ms, `seon.fn/published-index-rows` 52.8 ms for two identities.
