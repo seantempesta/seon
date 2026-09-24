@@ -7,6 +7,7 @@
             [sci.core :as sci]
             [seon.config :as config]
             [seon.cluster.process :as cluster.process]
+            [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
@@ -1461,6 +1462,56 @@
       (:seon.error/at rows) rows
       :else (functions/reconcile-tx world rows (vec (into present changed))))))
 
+;;; A checkpoint is a shared branch named by the content it holds. The
+;;; registry's roster serializes its creation: exactly one `branch!` call is
+;;; `created?`, and only that caller writes it. Completion is a fact, the
+;;; source record written last; nothing else marks readiness.
+(defn- checkpoint-head
+  "The checkpoint branch's head when its source record names `base`, else nil."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.cluster/name :seon.source/commit-id]
+                  [:maybe :seon.source/commit-id]]}
+  [store branch cluster base]
+  (when-let [head (registry/branch-commit-id {:seon.store/store store :seon.store/branch branch})]
+    ;; The raw commit value: deriving its projection costs ~110 ms, the read 9 ms.
+    (when-let [database (source/commit-database store head)]
+      (when (= base (db/q '[:find ?commit . :in $ ?name
+                            :where [?c :seon.cluster/name ?name] [?c :seon.source/commit-id ?commit]]
+                          database cluster))
+        head))))
+
+(defn- prepare-checkpoint!
+  "Write boot's cluster facts, then the overlay with the source record, onto
+  the checkpoint branch this caller created. A refusal retires it and throws."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.cluster/name
+                       :seon.config/effective :seon.db.process/id :seon.source/commit-id
+                       :seon.db/tx-data :seon.db/database-value]
+                  :nil]}
+  [store branch cluster effective process base overlay candidate]
+  (let [connection (store/open-branch! store branch)]
+    (try
+      (db/carry-connection-projection-state!
+       connection (sci.eval/projection-state
+                   (db/db connection)
+                   (schema/projection-from-database (db/db connection) (db/carried-projection candidate))))
+      (db/call-with-custody
+       {:seon.db/connection connection}
+       #(do (@seed-cluster-facts! connection cluster
+                                  {:seon.config/effective effective
+                                   :seon.config/desired-row (assoc effective :seon.config/cluster cluster)
+                                   :seon.config/resolved-attributes (set (keys effective))}
+                                  process)
+            (let [report (db/transact! connection (conj overlay {:seon.cluster/name cluster
+                                                                 :seon.source/commit-id base}))]
+              (when-not (:db-after report)
+                (throw (ex-info "The test world's source record was refused." report))))))
+      (catch Throwable failure
+        (doseq [cleanup! [#(store/release-branch! connection)
+                          #(registry/retire-branch! {:seon.store/store store :seon.store/branch branch})]]
+          (try (cleanup!) (catch Throwable cleanup (.addSuppressed failure cleanup))))
+        (throw failure)))
+    (store/release-branch! connection)
+    nil))
+
 (defn- clean-request-handle
   "Acquire the request's world: the loaded published program, boot's facts and
   the execution's differing program rows.
@@ -1468,48 +1519,55 @@
   The base is the source commit the recording cluster's adoption record names:
   the program this JVM loaded, which admission records as the run's
   `:seon.test.run/loaded-commit-id`. A published commit holds program rows only,
-  so no agent, turn, message or error of the execution is inherited. On it boot's
-  writer puts the cluster's effective config, taken as its complete manifest,
-  and the cluster entity; then one transaction writes the execution value's
-  differing program rows (`program-overlay-tx`) with the fork's source record,
-  so an agent branch tests its candidate program, never its operational data.
-  Members branch from the returned head. A refused write releases the branch
-  and throws."
+  so no agent, turn, message or error of the execution is inherited. The world
+  is a checkpoint branch named by the digest of its inputs (base, cluster,
+  effective config, process and `program-overlay-tx`'s rows), prepared once by
+  the one caller the roster lets create it and read only once its source record
+  exists. A checkpoint another caller is still preparing refuses this request.
+  The request then owns a private branch off the checkpoint's head, which roots
+  that commit for its members; older checkpoints of the cluster are retired
+  once no connection holds them."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
                        :seon.cluster/name :seon.config/effective]
                   :seon.agent/execution-handle]}
   [execution recording cluster effective]
-  (let [base (:seon.source/commit-id
+  (let [store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
+        base (:seon.source/commit-id
               (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
         _ (when-not base
             (throw (ex-info "The cluster records no adopted source commit to branch a test world from."
                             {:seon.error/expected :seon.source/commit-id
                              :seon.error/offending cluster})))
+        candidate (db/db (:seon.db/connection execution))
+        overlay (program-overlay-tx (source/database store base) candidate)
+        _ (when (:seon.error/at overlay)
+            (throw (ex-info "The test world's program overlay could not be read." overlay)))
+        process (cluster.process/id (cluster.process/current-identity))
+        prefix (str "checkpoint-" cluster "-")
+        branch (keyword (str prefix (id/digest 24 [base cluster (sort effective) process overlay])))
+        at {:seon.store/store store :seon.store/branch branch}
+        head (or (checkpoint-head store branch cluster base)
+                 (when (:seon.cluster/created? (registry/branch! (assoc at :seon.cluster.registry/from base)))
+                   (prepare-checkpoint! store branch cluster effective process base overlay candidate)
+                   (checkpoint-head store branch cluster base))
+                 ;; The name includes this process, so an incomplete checkpoint
+                 ;; is one a live caller here is still preparing: push back.
+                 (checkpoint-head store branch cluster base)
+                 (throw (ex-info "Another request is preparing this test world; retry once it completes."
+                                 {:seon.error/expected :seon.test/prepared-checkpoint
+                                  :seon.error/offending branch})))
         handle (@acquire-context! execution nil {:seon.agent/isolate? true
-                                                 :seon.cluster.registry/from base})
-        connection (:seon.db/connection handle)]
-    (try
-      (db/call-with-custody
-       {:seon.db/connection connection}
-       #(do (@seed-cluster-facts! connection cluster
-                                  {:seon.config/effective effective
-                                   :seon.config/desired-row (assoc effective :seon.config/cluster cluster)
-                                   :seon.config/resolved-attributes (set (keys effective))}
-                                  (cluster.process/id (cluster.process/current-identity)))
-            (let [overlay (program-overlay-tx (db/db connection)
-                                              (db/db (:seon.db/connection execution)))
-                  _ (when (:seon.error/at overlay)
-                      (throw (ex-info "The test world's program overlay could not be read." overlay)))
-                  report (db/transact! connection (conj overlay {:seon.cluster/name cluster
-                                                                 :seon.source/commit-id base}))]
-              (when-not (:db-after report)
-                (throw (ex-info "The test world's source record was refused." report))))))
-      (let [database (db/db connection)]
-        (assoc handle :seon.db/db database :seon.source/commit-id (db/commit-id database)))
-      (catch Throwable failure
-        (try (@release-context! handle)
-             (catch Throwable cleanup (.addSuppressed failure cleanup)))
-        (throw failure)))))
+                                                 :seon.cluster.registry/from head})]
+    (doseq [other (registry/roster store)
+            :when (and (not= other branch) (str/starts-with? (name other) prefix))]
+      ;; Datahike refuses a connected branch. A request between reading an old
+      ;; head and branching from it holds that commit by id; retirement only
+      ;; removes the roster name, so the commit stays until collection.
+      (try (registry/retire-branch! {:seon.store/store store :seon.store/branch other})
+           (catch clojure.lang.ExceptionInfo refusal
+             (when-not (= ::registry/cluster-connected (::registry/refused (ex-data refusal)))
+               (throw refusal)))))
+    handle))
 
 (defn- request-refusal
   "Name one refused request member with the value it carried."

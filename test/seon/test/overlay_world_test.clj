@@ -2,10 +2,16 @@
   "A request made on an agent branch runs on the loaded published program plus
   that branch's differing program rows, never on a fork of the branch: the
   branch's operational rows and live default's agents stay out, a retracted
-  declaration is absent and a changed callee runs its candidate definition."
-  (:require [clojure.test :refer [deftest is]]
+  declaration is absent and a changed callee runs its candidate definition.
+  The world is a checkpoint prepared once and read only when complete."
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is]]
+            [seon.cluster.agent :as agent]
+            [seon.cluster.process :as cluster.process]
+            [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.id :as id]
             [seon.program :as program]
             [seon.sci.eval :as sci.eval]
             [seon.test :as sut]
@@ -64,3 +70,66 @@
                               :seon.test/identities #{(symbol (str probe-ns) "overlay-candidate-runs")}})]
          (is (true? (:seon.test/passed? result)) (sut/tally result))
          (is (= 1 (:seon.test/executed-count result)) (sut/tally result)))))))
+
+(def ^:private clean-request-handle #'sut/clean-request-handle)
+(def ^:private checkpoint-head #'sut/checkpoint-head)
+(def ^:private prepare-checkpoint! #'sut/prepare-checkpoint!)
+
+(deftest ^{:seon.test/long "One agent definition and two concurrent checkpoint preparations on a fixture branch. Unmeasured (lane load rule); root replaces this with the measured clock."
+           :seon.test/long-ms 20000}
+  concurrent-first-preparation-yields-one-complete-checkpoint
+  (support/with-database
+   (fn [connection]
+     (let [handle (support/execution-handle connection)
+           cluster (:seon.cluster/name handle)
+           store (:seon.store/store handle)
+           effective (config/effective (db/db connection) cluster)]
+       ;; A unique definition makes this checkpoint's identity new.
+       (admit! handle (str "(defn overlay-probe-" (id/id) " [] 1)"))
+       (let [prepare #(future (try (clean-request-handle handle connection cluster effective)
+                                   (catch clojure.lang.ExceptionInfo refusal refusal)))
+             outcomes (mapv #(support/await-event! % ::prepared) [(prepare) (prepare)])
+             handles (filterv :seon.db/connection outcomes)
+             heads (set (map :seon.source/commit-id handles))
+             checkpoints (filterv #(and (str/starts-with? (name %) (str "checkpoint-" cluster "-"))
+                                        (heads (registry/branch-commit-id {:seon.store/store store
+                                                                           :seon.store/branch %})))
+                                  (registry/roster store))]
+         (try
+           (is (seq handles) (pr-str outcomes))
+           (is (= 1 (count heads)) "every acquirer shares one prepared head")
+           (is (= 1 (count checkpoints)) (pr-str checkpoints))
+           (is (every? #(or (:seon.db/connection %)
+                            (= :seon.test/prepared-checkpoint (:seon.error/expected (ex-data %))))
+                       outcomes)
+               "the other caller reuses the complete checkpoint or is pushed back by name")
+           (finally
+             (run! agent/release-context! handles)
+             (run! #(registry/retire-branch! {:seon.store/store store :seon.store/branch %}) checkpoints))))))))
+
+(deftest a-checkpoint-without-its-source-record-is-never-read
+  (let [member (support/execution-handle nil)
+        store (:seon.store/store member)
+        cluster (:seon.cluster/name member)
+        candidate (db/db (:seon.db/connection member))
+        base (:seon.source/commit-id (db/pull candidate [:seon.source/commit-id] [:seon.cluster/name cluster]))
+        prepare! (fn [overlay]
+                   (let [branch (keyword (str "half-checkpoint-" (id/id)))]
+                     (is (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch branch
+                                                                    :seon.cluster.registry/from base})))
+                     (is (nil? (checkpoint-head store branch cluster base)) "a created, unprepared branch is not ready")
+                     [branch (try (prepare-checkpoint! store branch cluster (config/effective candidate cluster)
+                                                       (cluster.process/id (cluster.process/current-identity))
+                                                       base overlay candidate)
+                                  (catch clojure.lang.ExceptionInfo refusal refusal))]))
+        [refused failure] (prepare! [[:db/add "absent" ::absent-attribute "x"]])
+        [prepared outcome] (prepare! [])]
+    (try
+      (is (instance? clojure.lang.ExceptionInfo failure) "the refused final write throws")
+      (is (not (contains? (registry/roster store) refused)) "a failed preparation retires its branch")
+      (is (nil? (checkpoint-head store refused cluster base)))
+      (is (nil? outcome))
+      (is (= (registry/branch-commit-id {:seon.store/store store :seon.store/branch prepared})
+             (checkpoint-head store prepared cluster base))
+          "the source record, written last, completes it")
+      (finally (registry/retire-branch! {:seon.store/store store :seon.store/branch prepared})))))
