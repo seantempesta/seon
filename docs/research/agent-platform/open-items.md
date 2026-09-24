@@ -8,7 +8,7 @@ updated: 2026-09-24
 
 ## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
-- research-publication-concurrency-astra (read-only): class 4 — three priced options for publication under concurrent lanes.
+- Publication design: three priced options DONE (b8fae5bf8, publication-under-concurrent-lanes-2026-09-24.md), awaiting owner choice: (1) root-only checkpoints, hook lint-only, 0–15 lines, 2–4 h; (2) content-derived reconciliation, 60–100 lines, 12–24 h; (3, recommended) named lane branches → root-accepted merge → fail-closed convergence, the CLAUDE.md/D1 model, 250–450 lines, 40–72 h, with (1) as its interim.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
 - fix-analysis-key-omits-analyzer (cluster.clj, fn.clj): derived analysis rows are keyed without the analyzer program, so a changed indexer leaves unchanged files stale (11 rows on default after 55af9e04b).
 - fix-agent-custody-label (agent.clj): class 2 below.
