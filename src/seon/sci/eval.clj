@@ -360,25 +360,6 @@
 
 (def ^:private absent-intern (Object.))
 
-(defn- intern-values
-  "Dereferenced SCI intern roots keyed by qualified name."
-  [ctx]
-  (let [namespace-state (sci/namespace-state ctx)]
-    (into {}
-          (mapcat
-           (fn [[namespace-name intern-names]]
-             (keep
-              (fn [intern-name]
-                (let [sci-var (get-in namespace-state
-                                      [namespace-name intern-name])]
-                  (when (sci.utils/var? sci-var)
-                    [(symbol (str namespace-name) (str intern-name))
-                     (if (sci.vars/hasRoot sci-var)
-                       @sci-var
-                       absent-intern)])))
-              intern-names))
-           (sci/namespace-interns ctx)))))
-
 (defn- turn-interns
   "Vars and dereferenced roots owned by this SCI fork's generation.
 
@@ -388,25 +369,35 @@
   namespace installation carry no such stamp. This is the definition-event
   provenance for the agent's defs: namespace membership never decides authorship.
 
+  A Var of this generation that did not exist in the acquired program was
+  `assoc-in`ed into its namespace map, so only maps not `identical?` to the
+  acquired program's (`::program-namespaces`, taken under another generation)
+  are walked. Without that reference every namespace is walked.
+
   Values rather than Var identities are retained because redefinition may
   mutate an already generation-owned Var root. Values are not traversed."
   [ctx]
-  (let [namespace-state (sci/namespace-state ctx)
-        values (intern-values ctx)
-        turn-generation (:sci/generation @(:env ctx))]
+  (let [turn-generation (:sci/generation @(:env ctx))
+        program (::program-namespaces @(::kernel/program-snapshot ctx))
+        reference (when (and program
+                             (not= (::generation program) turn-generation))
+                    (::namespaces program))]
     (if-not turn-generation
       {}
       (into {}
-            (keep
-             (fn [[qualified value]]
-               (let [sci-var
-                     (get-in namespace-state
-                             [(symbol (namespace qualified))
-                              (symbol (name qualified))])]
-                 (when (= turn-generation (:sci/generation (meta sci-var)))
-                   [qualified {:seon.sci.eval/var sci-var
-                               :seon.sci.eval/value value}]))))
-            values))))
+            (for [[namespace-name namespace-map] (sci/namespace-state ctx)
+                  :when (not (and reference
+                                  (identical? namespace-map
+                                              (get reference namespace-name))))
+                  [intern-name sci-var] namespace-map
+                  :when (and (symbol? intern-name)
+                             (sci.utils/var? sci-var)
+                             (= turn-generation (:sci/generation (meta sci-var))))]
+              [(symbol (str namespace-name) (str intern-name))
+               {:seon.sci.eval/var sci-var
+                :seon.sci.eval/value (if (sci.vars/hasRoot sci-var)
+                                       @sci-var
+                                       absent-intern)}])))))
 
 (defn- turn-intern-values
   [ctx]
@@ -2457,6 +2448,9 @@
          (swap! (::kernel/program-snapshot ctx)
                 #(-> (dissoc % ::loaded-database)
                      (assoc ::acquisition acquired
+                            ::program-namespaces
+                            {::generation (:sci/generation @(:env ctx))
+                             ::namespaces (sci/namespace-state ctx)}
                             :seon.test/class-loader (clojure.lang.RT/baseLoader))))
          (assoc ctx ::acquisition acquired))))))
 

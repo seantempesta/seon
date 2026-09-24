@@ -1085,7 +1085,9 @@
              (str "(seon.schema/register! :user/once-schema "
                   "(do (def schema-count (inc schema-count)) "
                   "[:int {:min 0}]))"))
-            intern-values (#'eval/intern-values ctx)]
+            intern-values (into {} (map (fn [sym] [sym @(sci/resolve ctx sym)]))
+                                '[user/plain-count user/once-function
+                                  user/schema-count])]
         (is (= 1 (:calls plain)) "the plain call site fires once")
         (is (= 1 (:calls contracted))
             "the live-declaration call site fires once")
