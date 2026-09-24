@@ -3353,9 +3353,10 @@
   has no run to point at, and a lookup ref to a run that does not exist
   would fail the very transaction that records the failure."
   [cluster db declared-schema failure now attribution]
-  (error/commit-tx
+  (error/recording
    db
-   (merge {:seon.error/declared-schema declared-schema
+   (merge {:seon.db/connection (:seon.db/connection cluster)
+           :seon.error/declared-schema declared-schema
            :seon.error/source failure
            :seon.error/id (str (random-uuid))
            :seon.error/at now
@@ -3400,12 +3401,9 @@
           (message/delivery
            db
            (cond-> {:my.message/value asked :seon.agent/id agent-id :seon.turn/id run-id :seon.cluster.eval/ordinal ordinal :seon.config.message/max-chain (:seon.config.message/max-chain cluster)}
-             trigger (assoc :seon.message/trigger trigger))))]
-    {:seon.message/rows
-     (:seon.message/rows delivery)
-     :seon.error/values-tx
-     (into []
-           (mapcat
+             trigger (assoc :seon.message/trigger trigger))))
+        recordings
+        (mapv
             (fn [failure]
               (error-tx cluster db
                         (cond (:seon.message/no-limit failure) :seon.message/no-limit-error
@@ -3413,8 +3411,13 @@
                               (:seon.message/unknown-recipient failure) :seon.message/unknown-recipient-error)
                         failure now
                         {:seon.agent/id agent-id
-                         :seon.turn/id run-id})))
-           (:seon.error/values delivery))}))
+                         :seon.turn/id run-id}))
+           (:seon.error/values delivery))]
+    {:seon.message/rows
+     (:seon.message/rows delivery)
+     ;; a refused recording rides the transaction as before, so it refuses loudly
+     :seon.error/values-tx (into [] (mapcat #(or (:seon.db/tx-data %) %)) recordings)
+     :seon.blob/staged-writes (into [] (mapcat :seon.blob/staged-writes) recordings)}))
 
 (defn- phase
   "Return one phase's value, translating a host failure to flat data.
@@ -3568,7 +3571,8 @@
      :seon.turn.loop/undisposed? undisposed?
      :seon.turn.loop/evaluation evaluation
      :seon.turn.loop/receipt receipt
-     :seon.blob/staged-writes settlement-stages
+     :seon.blob/staged-writes (into (vec settlement-stages)
+                                    (:seon.blob/staged-writes delivery))
      :seon.db/tx-data tx-data}))
 
 (declare settle-batch-refusal!)
@@ -3708,6 +3712,7 @@
                      :seon.eval/shown (pr-str value)
                      :seon.cluster.eval/error (:seon.error/message value)}))]
     {:seon.error/value value
+     :seon.blob/staged-writes (:seon.blob/staged-writes recording)
      :seon.db/tx-data
      (into [] cat
            [;; The run-dependent half is DECIDED AT THE WRITER
@@ -3779,7 +3784,9 @@
                                     :seon.turn/closed-tx "datomic.tx"}))]]
                  (vec (receipt-settle-batch-tx receipts)))
                (:seon.db/tx-data recording))}
-        outcome (db/transact! connection transaction)]
+        outcome (blob/with-publication!
+                 connection (vec (:seon.blob/staged-writes recording))
+                 #(db/transact! connection transaction))]
     (when (or (:seon.db.write.attempt/request-id outcome)
               (:seon.db/invalid-read outcome)
               (:seon.schema/expected-value outcome))
@@ -4129,7 +4136,9 @@
            usage (assoc :seon.ai/usage usage)))
         outcome
         (blob/with-publication!
-         connection (cond-> [] reasoning-stage (conj reasoning-stage))
+         connection (cond-> (into [] (mapcat :seon.blob/staged-writes)
+                                  (distinct (keep identity [failure-recording truncation-recording])))
+                      reasoning-stage (conj reasoning-stage))
          (fn []
            (db/transact! connection
                          (into (conj recording row

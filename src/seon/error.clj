@@ -1465,6 +1465,25 @@
                                       steward-id) recipient reason notification opened)))
           recipients)))))
 
+(defn evidence-stage
+  "One prepared fact with its WHOLE evidence staged when the fact kept less.
+
+  A capped fact's `data-edn` is only a presentation; the complete admitted
+  evidence (`:seon.error/data-content`) is staged here and its digest recorded
+  as `:seon.error/data-blob`, so the cause outlives the cap. The caller
+  publishes the staged write with its commit through `blob/with-publication!`.
+  Without a connection nothing can be published, so nothing is staged; an
+  uncapped fact, or one already carrying a blob, stages nothing."
+  {:malli/schema [:=> [:cat [:or :nil :seon.db/connection] :seon.error/prepared]
+                  [:map [:seon.error/fact :seon.error/fact]
+                   [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
+  [connection {fact :seon.error/fact content :seon.error/data-content}]
+  (if (and connection (:seon.error/capped? fact) (nil? (:seon.error/data-blob fact)))
+    (let [staged (blob/stage! connection content)]
+      {:seon.error/fact (assoc fact :seon.error/data-blob (:seon.blob/digest staged))
+       :seon.blob/staged-writes [staged]})
+    {:seon.error/fact fact :seon.blob/staged-writes []}))
+
 (defn recording
   "Prepared identities, flat value and transaction data for one error.
 
@@ -1508,7 +1527,12 @@
                           (stored-observation (:seon.schema/projection request) source)))
          prepared (prepare request)
          request (assoc request :seon.error/source (:seon.error/source prepared))
-         fact (or (:seon.error/fact request) (:seon.error/fact prepared))
+         connection (:seon.db/connection request)
+         request (dissoc request :seon.db/connection)
+         {fact :seon.error/fact staged :seon.blob/staged-writes}
+         (evidence-stage connection
+                         (assoc prepared :seon.error/fact
+                                (or (:seon.error/fact request) (:seon.error/fact prepared))))
          signature (:seon.error/signature fact)
          agent-id (second (:seon.error/agent fact))
          turn-id (second (:seon.error/run fact))
@@ -1532,11 +1556,13 @@
       :seon.error/ref [:seon.error/signature signature]
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
       :seon.error/value (value fact)
+      :seon.blob/staged-writes staged
       :seon.db/tx-data tx}))))
   ([cluster database declared-schema source at attribution]
    (recording database
               (merge (select-keys cluster [:seon.sci.admit/caps :seon.config.error/recurrence-limit
                                           :seon.config.error/max-evidence-bytes :seon.config.error/escalate-to])
+                     (select-keys cluster [:seon.db/connection])
                      {:seon.error/source source :seon.error/declared-schema declared-schema :seon.error/id (id/id)
                       :seon.error/at at :seon.error/process (:seon.db.process/id cluster)
                       :seon.error/basis-t (db/basis-t database)}

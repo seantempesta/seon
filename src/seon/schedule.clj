@@ -19,6 +19,7 @@
             [clojure.core.async.flow :as flow]
             [clojure.java.io :as io]
             [datahike.api :as d]
+            [seon.blob :as blob]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -599,20 +600,30 @@
                   (error/declared-output-validators
                    projection (:malli/schema (meta #'maintenance/result-entity)) 2)))
         source (when declared-schema result)
+        ;; the capped fact's whole evidence is staged here, outside the
+        ;; transaction function, and published with the settlement below
+        {fact :seon.error/fact staged :seon.blob/staged-writes}
+        (when source
+          (error/evidence-stage
+           connection
+           (error/prepare (assoc (error-request cluster claimed-receipt-id agent-id declared-schema
+                                                source completed-at)
+                                 :seon.schema/projection projection))))
         request
         (cond-> {:seon.maintenance.receipt/id claimed-receipt-id
                  :seon.maintenance.receipt/completed-at completed-at}
           source
           (assoc :seon.maintenance.settlement/arm :error
                  :seon.maintenance.settlement/error-request
-                 (error-request cluster claimed-receipt-id agent-id declared-schema source
-                                completed-at))
+                 (assoc (error-request cluster claimed-receipt-id agent-id declared-schema source
+                                       completed-at)
+                        :seon.error/fact fact))
           (nil? source)
           (assoc :seon.maintenance.settlement/arm :result
                  :seon.maintenance.settlement/result result))]
-    (transact-result!
-     connection
-     [[:db.fn/call #'settle-call request]])))
+    (blob/with-publication!
+     connection (vec staged)
+     #(transact-result! connection [[:db.fn/call #'settle-call request]]))))
 
 (defn- invoke-handler
   "Capture a handler's declared error alternative before recording custody."

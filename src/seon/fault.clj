@@ -65,7 +65,6 @@
           agent-id (:seon.agent/id source-fault)
           run-id (when agent-id (tagged-run db agent-id))
           dropped-count (:seon.flow/dropped-fault-count source-fault)
-          threshold (:seon.config.eval.result/blob-threshold dials)
           request
           (cond-> {:seon.schema/projection (db/carried-projection db)
                    :seon.error/source source-fault
@@ -93,21 +92,11 @@
             run-id (assoc :seon.turn/id run-id)
             agent-id (assoc :seon.agent/id agent-id))
           ;; The fault family's own bound decides how much evidence the
-          ;; durable fact keeps; the blob threshold decides where the
-          ;; complete evidence lives. Two decisions, two declared keys, ONE
-          ;; request — `prepare` and `commit-tx` see the same value.
-          prepared (error/prepare request)
-          staged (when (or (let [size (:seon.error/data-size
-                                       (:seon.error/fact prepared))]
-                             ;; AN UNSERIALIZABLE EVIDENCE MEASURED NOTHING,
-                             ;; so the fact carries no size; the content
-                             ;; comparison below is what decides staging then.
-                             (and (int? size) (> size threshold)))
-                           (not= (:seon.error/data-content prepared)
-                                 (:seon.error/data-edn (:seon.error/fact prepared))))
-                   (blob/stage! connection (:seon.error/data-content prepared)))
-          prepared-fact (cond-> (:seon.error/fact prepared)
-                          staged (assoc :seon.error/data-blob (:seon.blob/digest staged))
+          ;; durable fact keeps; a capped fact's whole evidence is staged by
+          ;; `error/evidence-stage` and published below with its commit.
+          {prepared-fact :seon.error/fact staged :seon.blob/staged-writes}
+          (error/evidence-stage connection (error/prepare request))
+          prepared-fact (cond-> prepared-fact
                           (pos-int? dropped-count)
                           (assoc :seon.error/dropped-fault-count dropped-count
                                  :seon.error/dropped-fault-digest
@@ -138,7 +127,7 @@
                                ;; the target's own custody: a write to another branch is refused otherwise
                                (db/call-with-custody
                                 {:seon.db/connection target}
-                                #(blob/with-publication! target (if staged [staged] [])
+                                #(blob/with-publication! target staged
                                    (fn [] (db/transact! target (:seon.db/tx-data data))))))]
                   [(cond
                      (nil? target)
