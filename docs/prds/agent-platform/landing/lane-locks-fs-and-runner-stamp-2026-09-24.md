@@ -60,6 +60,35 @@ Lock audit rows 4 and 5 (`docs/research/agent-platform/lock-audit-2026-09-24.md`
   - Incremental reads took 148–482 ms (the JVM was shared with other root work).
   - Four concurrent reads of one new value derived once (4 → 5).
 
+## Follow-up 2 (root run of 572af5fb9: 11 pass / 2 error, 120,757 ms)
+
+- **`agent-admitted-tests-reach-their-tested-function`, fixed.** I reproduced the
+  refusal on branch `:locks-fs-and-runner-stamp-2`: the hand-built
+  `{:seon.ns/name my.agents.reach-digest}` row has no `:seon.program/definition-digest`.
+  The fixture now writes it with `support/namespace-row` and writes rows through
+  `transacted!`. The final raw `:db/add :seon.fn/source` also changed: it would have
+  left the stored digest stale, so the fixture now re-analyzes through `program-row`.
+  A branch probe confirmed the reach digest changes: 0c45410a… → a3de6718….
+- **`an-in-process-check-excludes-a-declared-long-test-and-names-it`, not reproduced.**
+  On a branch of default's head, every fixture write succeeds: both `seed-cluster!`
+  calls, both `with-indexed-tests` `seon.fn/rows` writes (the long probe's rows carry
+  digests), and the `changed-request` source row. The offending row exists only in the
+  clean S2a member world. Root needs to supply the exact "Offending row" text that
+  `transacted!` printed.
+- **The 120.8 s is not attributed.** The facts in default hold no per-member elapsed
+  time: `:seon.test.member/*` rows are selection-only, and `:seon.test/elapsed-ms` is
+  not installed. The cold-reach issue does not fit: the reach fixtures read closures of
+  a few functions, not 20 program tests, and `program-row` costs 20–32 ms per
+  declaration (probed).
+  - Unverified suspect: the tests that start nested `seon.test/run` requests
+    (`changed-request`, `run-in-fixture`). One concurrent request profiled at 5,465 ms,
+    with `seon.test/clean-request-handle` at 2,281 ms and
+    `seon.cluster/seed-cluster-facts!` at 1,050 ms.
+  - Root needs to supply the run's per-member tally or elapsed lines.
+- **Transient side effect:** for a moment an edit left unbalanced brackets in the
+  file. The hook recorded an analysis refusal against cluster-default
+  (`seon.fn/assert-clean-analysis!`, signature e4bcf833…). The file lints clean now.
+
 ## What changed
 
 1. `src/seon/fs/jvm.clj` `write` (a6236daa1). `locking write-serialization` moves

@@ -219,7 +219,7 @@
     (fn [connection]
       (support/seed-cluster! connection "default")
       (let [namespace-name 'my.agents.reach-digest
-            _ (support/transacted! connection [{:seon.ns/name namespace-name}])
+            _ (support/transacted! connection [(support/namespace-row (db/db connection) namespace-name)])
             ctx (support/fork-cluster-ctx connection)
             effective (seon.config/effective (db/db connection) "default")
             sources ["(defn largest-customer {:malli/schema [:=> [:cat [:vector {:min 1} [:map [:seon.test/pass-count :seon.test/pass-count]]]] [:map [:seon.test/pass-count :seon.test/pass-count]]]} [rows] (apply max-key :seon.test/pass-count rows))"
@@ -240,7 +240,7 @@
                 row (when (vector? analysis) (second (first analysis)))]
             (is (map? row) (pr-str evaluation))
             (when row
-              (is (:db-after (db/transact! connection [(dissoc row :seon.sci.eval/evaluated?)]))))))
+              (support/transacted! connection [(dissoc row :seon.sci.eval/evaluated?)]))))
         (let [database (db/db connection)
               s 'my.agents.reach-digest/largest-customer-test
               f 'my.agents.reach-digest/largest-customer
@@ -253,9 +253,10 @@
                         '[:seon.test/source :seon.fn/calls
                           {:seon.test/subject [:seon.fn/sym]}]
                         [:seon.test/sym s])))
-          (is (:db-after (db/transact! connection
-                           [[:db/add [:seon.fn/sym f] :seon.fn/source
-                             (str (first sources) "\n")]])))
+          ;; A changed definition is re-analyzed, so its stored digest changes.
+          (support/transacted! connection
+                               [(support/program-row database [:seon.fn/sym f]
+                                                     (str/replace (first sources) "rows)" "(seq rows))"))])
           (is (not= before (sut/reach-digest (db/db connection) s))))))))
 
 (deftest run-carries-the-connections-projection-to-the-test-thread
