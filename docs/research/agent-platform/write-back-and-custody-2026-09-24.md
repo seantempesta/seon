@@ -88,7 +88,7 @@ has no production caller: only `test/seon/cluster/merge_test.clj:42-113` calls i
 6. Creates a fresh intermediate branch `merge-<id>` from H, transacts the delta
    there, and runs the issue's tests plus the tests reaching the delta through
    `seon.cluster/candidate-gate!` (`source.clj:774-782`,
-   `src/seon/cluster/cluster.clj:2669-2718`). It returns a proposal:
+   `src/seon/cluster.clj:2669-2718`). It returns a proposal:
    `{candidate S, test-run id, passed?, expected-basis-t (H), parents #{C}}`.
 
 `accept-merge! [source store proposal]` (`:786-834`) refuses unless all of these hold:
