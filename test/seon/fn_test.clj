@@ -1963,7 +1963,7 @@
         :seon.schema/form ":seon.db/ref"
         :seon.schema.admission/source :agent}]}
      (fn [connection]
-       (let [database (db/carry-derived-projection @connection)
+       (let [database @connection
              projection (db/carried-projection database)
              forms (-> (:seon.schema.projection/forms projection)
                        (update :seon.ns/ns conj

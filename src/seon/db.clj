@@ -33,7 +33,6 @@
             [seon.print :as print]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
-            [seon.schema.edn :as schema.edn]
             [malli.registry :as mr]
             [seon.schema.internal :as internal])
   (:import [datahike.db AsOfDB DB]
@@ -274,28 +273,6 @@
       (cond-> (vary-meta database assoc :seon.sci.eval/projection-state state)
         projection (vary-meta assoc :seon.schema/projection projection)))
     database))
-
-(defn carry-derived-projection
-  "Derive and carry the immutable projection owned by `database` itself.
-
-  Commit database values have no live connection whose projection state they
-  can inherit.  Derive from that exact value's installed program facts once
-  and attach the resulting snapshot, so later reads never depend on a caller's
-  handed projection."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value] :seon.db/database-value]}
-  [database]
-  (if (:seon.schema/projection (meta database))
-    database
-    (let [runtime-projection
-          (schema/build-projection (schema.edn/packaged-forms))
-          database-projection (schema/projection-from-database database)
-          database-delta
-          (schema/projection-delta runtime-projection database-projection)
-          projection
-          (schema/materialize-projection
-           (schema/compose-projection-data runtime-projection database-delta))]
-      (vary-meta database assoc :seon.schema/projection projection))))
 
 (defn- resolve-database-value
   [connection]
