@@ -6,8 +6,9 @@
   process-global — `alter-var-root` on every schema'd var, private included — so a
   test that turned it on and walked away would change how every LATER
   suite behaves, and the gate's result would depend on test order. Every
-  test here restores the entering callable roots in a `finally`, and that discipline is the reason
-  the whole gate is deterministic with this namespace in it.
+  test here runs inside `seon.test-support/preserving-instrumentation-state`,
+  whose `seon.instrument/restore!` returns the entering state even after a
+  throw and never reinstalls a closure over a reloaded definition.
 
   THE FIXTURE IS THE ARCHIVED DEFECT. `seon.db/transact!`
   declared `[:vector :any]` while the run loop's `:open` branch passed
@@ -47,32 +48,16 @@
             [seon.test-support :as test-support])
   (:import [java.nio.file Files LinkOption]))
 
-(def ^:private function-schemas-state
-  ;; Malli exposes collection as a process-global defonce atom but no exact
-  ;; snapshot/restore operation. Tests must restore the entering map itself:
-  ;; re-registering compiled schemas changes their identity and is not exact.
-  (ns-resolve 'malli.core '-function-schemas*))
-
-(defn- preserving-instrumentation-state
+(defn- scoped-instrumentation
+  "Each test runs on its own fixture branch, and `seon.instrument/restore!`
+  (through the canonical scope) returns every root it armed or unarmed;
+  a definition a reload replaced stays the loader's."
   [body]
   (test-support/with-database
    (fn [_connection]
-     (let [instrumented-roots (into {}
-                                    (map (juxt identity deref))
-                                    (instrument/instrumented))
-           function-schemas @@function-schemas-state]
-       (try
-         (body)
-         (finally
-           (try
-             (doseq [candidate (instrument/instrumented)]
-               (alter-var-root candidate mi/-f->original))
-             (finally
-               (reset! @function-schemas-state function-schemas)))
-           (doseq [[instrumented-var root] instrumented-roots]
-             (alter-var-root instrumented-var (constantly root)))))))))
+     (test-support/preserving-instrumentation-state body))))
 
-(use-fixtures :each preserving-instrumentation-state)
+(use-fixtures :each scoped-instrumentation)
 
 (deftest an-invalid-core-error-mode-is-an-evidence-complete-value
   ;; `apply!` IS THE ARM. Boot calls it on a JVM whose contracts are not
