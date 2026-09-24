@@ -20,9 +20,9 @@ a restart loads code from the checkout but schema and test rows install only thr
 1. Publication: OPTION 3 — named lane branches → root-accepted merge → fail-closed convergence (b8fae5bf8); option 1
    (root-only checkpoints, hook paused) is the interim until it lands. Slice plan: lane plan-publication-option3-astra.
 2. Full reanalysis over 10 s (16 s) AUTHORIZED until analysis is made cheap (issue a-full-reanalysis-publication-takes-twenty-five-seconds.md).
-3. SCI evaluation vs adoption: explained in chat; ruling pending.
+3. SCI evaluation vs adoption: owner — locks are a smell, reloads are rare (root checkpoints / accepted merges). Proposed: DETECT, don't prevent — compare the loaded program identity (S3c loaded-commit-id) at evaluation/member start and end; a mismatch reads unknown with a named cause; then delete the program-change lock (da9910fec, S3a). Awaiting owner yes.
 4. Test-declared expected faults: YES to a derived design (no hand list at program.cljc:209) — research lane expected-faults-design.
-5. Inherited agents inside test members: explained in chat; ruling pending.
+5. Inherited agents inside test members: RULED (owner) — they disappear: a member contains only the agents its seeds or body create (harness S2a builds this).
 
 **Harness (all approved):** S12, S0, S1, S3a–S3c landed; next S2/S2a (clean facts/branch) → S2b (seeds; three seed
 forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by namespace groups).
