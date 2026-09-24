@@ -29,6 +29,35 @@
   [identity]
   (str (:seon.boot/pid identity) "-" (inst-ms (:seon.boot/start-instant identity))))
 
+(defn- start-instant-unavailable!
+  "Refuse `pid`'s start instant as unknown: a live pid without its generation
+  is not identity evidence, and unknown must never compare equal to anything."
+  {:malli/schema [:=> [:cat :seon.boot/pid :symbol] :nil]}
+  [pid operation]
+  (let [message (str operation " refused the process start instant of pid " pid
+                     ": expected the process generation timestamp, but ProcessHandle supplied none."
+                     " Fix: run on a platform that exposes ProcessHandle startInstant.")]
+    (throw
+     (ex-info message
+              (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster/process operation
+               {:seon.error/message message
+                :seon.error/member :seon.boot/start-instant
+                :seon.error/expected :process-generation-timestamp
+                :seon.cluster.process/start-instant-unavailable pid
+                :seon.boot/pid pid})))))
+
+(defn- handle-start-instant
+  "The start instant of `handle`; nil only when that process is no longer alive.
+  A live process whose instant the platform withholds refuses as unknown."
+  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?] :symbol]
+                  [:or :nil :seon.boot/start-instant]]}
+  [^java.lang.ProcessHandle handle operation]
+  (let [start (.startInstant (.info handle))]
+    (cond (.isPresent start) (java.util.Date/from (.get start))
+          ;; The process exited between the liveness check and the info read.
+          (not (.isAlive handle)) nil
+          :else (start-instant-unavailable! (.pid handle) operation))))
+
 (defn current-identity
   "This JVM's `(pid, start-instant)` identity.
 
@@ -36,53 +65,30 @@
   without its generation is not safe ownership evidence."
   {:malli/schema [:=> [:cat] :seon.cluster.process/identity]}
   []
-  (let [handle (java.lang.ProcessHandle/current)
-        start (.startInstant (.info handle))]
-    (when-not (.isPresent start)
-      (throw
-       (ex-info
-        "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster/process `current-identity
-         {:seon.error/message
-          "current-identity refused the process start instant: expected the JVM generation timestamp, but ProcessHandle supplied none. Fix: run on a platform that exposes ProcessHandle startInstant."
-          :seon.error/member :seon.boot/start-instant
-          :seon.error/expected :process-generation-timestamp
-          :seon.cluster.process/start-instant-unavailable (.pid handle)
-          :seon.boot/pid (.pid handle)}))))
+  (let [handle (java.lang.ProcessHandle/current)]
     {:seon.boot/pid (.pid handle)
-     :seon.boot/start-instant (java.util.Date/from (.get start))}))
+     :seon.boot/start-instant (or (handle-start-instant handle `current-identity)
+                                  (start-instant-unavailable! (.pid handle) `current-identity))}))
+
+(defn process-start-instant
+  "The OS start instant of `pid`; nil only when no live process has that pid.
+  No platform failure is caught: an unreadable or withheld instant refuses,
+  so an unknown generation never reads as a dead or matching process."
+  {:malli/schema [:=> [:cat :seon.boot/pid] [:or :nil :seon.boot/start-instant]]}
+  [pid]
+  (let [optional (java.lang.ProcessHandle/of (long pid))]
+    (when (and (.isPresent optional) (.isAlive ^java.lang.ProcessHandle (.get optional)))
+      (handle-start-instant (.get optional) `process-start-instant))))
 
 (defn live?
   "True exactly when `identity` names a currently live JVM generation.
 
   A recycled pid whose current start instant differs is dead from the
-  recorded owner's perspective. Platform lookup failures are absence,
-  not exceptions escaping a liveness derivation."
+  recorded owner's perspective. A live pid whose instant the platform
+  withholds refuses through `process-start-instant`: unknown is never dead."
   {:malli/schema [:=> [:cat :seon.cluster.process/identity] :boolean]}
   [{:seon.boot/keys [pid start-instant]}]
-  ;; No parse happens here: an absent process is an empty Optional, never
-  ;; an exception, so there is no declared case to catch and a platform
-  ;; failure propagates whole.
-  (let [optional (java.lang.ProcessHandle/of (long pid))]
-    (boolean
-     (when (.isPresent optional)
-       (let [handle (.get optional)
-             start (.startInstant (.info handle))]
-         (and (.isAlive handle)
-              (.isPresent start)
-              (= (inst-ms start-instant)
-                 (.toEpochMilli ^java.time.Instant (.get start)))))))))
-
-(defn process-start-instant
-  "Return the OS start instant for a live PID."
-  {:malli/schema [:=> [:cat :seon.boot/pid] [:or :nil :seon.boot/start-instant]]}
-  [pid]
-  (try
-    (let [optional (java.lang.ProcessHandle/of (long pid))]
-      (when (and (.isPresent optional) (.isAlive ^java.lang.ProcessHandle (.get optional)))
-        (let [instant (.startInstant (.info (.get optional)))]
-          (when (.isPresent instant) (java.util.Date/from (.get instant))))))
-    (catch Throwable _ nil)))
+  (= (inst-ms start-instant) (some-> (process-start-instant pid) inst-ms)))
 
 (defn process-identity-alive?
   "True when a PID still has the recorded OS start instant."
@@ -93,7 +99,9 @@
        (= start-instant (process-start-instant pid))))
 
 (defn matching-process-handle
-  {:malli/schema [:=> [:cat [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
+  "The live handle whose generation is exactly `record`'s, or nil. The record
+  must carry its start instant: an unknown generation can match no process."
+  {:malli/schema [:=> [:cat :seon.cluster.process/identity] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
   [record]
   (let [optional (java.lang.ProcessHandle/of
                   (long (:seon.boot/pid record)))]
@@ -123,13 +131,14 @@
     value))
 
 (defn- subprocess-identity
-  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]}
+  "`handle`'s identity, or nil when it has already exited."
+  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:or :nil :seon.cluster.process/identity]]}
   [^java.lang.ProcessHandle handle]
-  {:seon.boot/pid (.pid handle)
-   :seon.boot/start-instant (process-start-instant (.pid handle))})
+  (when-let [start (handle-start-instant handle `subprocess-identity)]
+    {:seon.boot/pid (.pid handle) :seon.boot/start-instant start}))
 
 (defn- same-subprocess-handle
-  {:malli/schema [:=> [:cat [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
+  {:malli/schema [:=> [:cat :seon.cluster.process/identity] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
   [{:seon.boot/keys [pid] :as process-identity}]
   (let [candidate (matching-process-handle process-identity)]
     (when (and candidate (= pid (.pid ^java.lang.ProcessHandle candidate)))
@@ -137,12 +146,13 @@
 
 (defn subprocess-tree-identities
   "The `(pid, start-instant)` identities of `root` and its current descendants.
-  An exited root has no descendants: capture while it is alive."
-  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]]]}
+  A member that exited during the walk is absent. An exited root has no
+  descendants: capture while it is alive."
+  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:vector :seon.cluster.process/identity]]}
   [^java.lang.ProcessHandle root]
   (with-open [descendant-stream (.descendants root)]
-    (into [(subprocess-identity root)]
-          (map subprocess-identity)
+    (into (if-let [root-identity (subprocess-identity root)] [root-identity] [])
+          (keep subprocess-identity)
           (iterator-seq (.iterator descendant-stream)))))
 
 (defn terminate-subprocess!
@@ -150,7 +160,7 @@
   wait up to `grace-ms` for all to exit, force survivors, then await actual exit
   within `cleanup-ms`. Every signal first verifies `(pid, start-instant)`.
   Returns true when no captured identity survives."
-  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector [:map [:seon.boot/pid :seon.boot/pid] [:seon.boot/start-instant [:or :nil :seon.boot/start-instant]]]] [:int {:min 0}] [:int {:min 0}]] :boolean]}
+  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector :seon.cluster.process/identity] [:int {:min 0}] [:int {:min 0}]] :boolean]}
   [process-record launch-identities grace-ms cleanup-ms]
   (let [^Process child (:proc process-record)
         identities (vec (distinct (concat launch-identities
@@ -279,23 +289,24 @@
                 :else nil)]
     (if phase
       (let [reaped? (terminate-subprocess! process-record identities
-                                            subprocess-grace-ms subprocess-cleanup-ms)]
+                                            subprocess-grace-ms subprocess-cleanup-ms)
+            ;; A root that exited before its launch capture has no recorded instant.
+            root-start (some #(when (= (.pid child) (:seon.boot/pid %)) (:seon.boot/start-instant %))
+                             identities)]
         (throw
          (ex-info
           "The process and its output must finish within the declared bound."
           (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
-           {:seon.error/message "The process and its output must finish within the declared bound."
-         :seon.error/offending argv
-         :seon.error/member :seon.operator.subprocess/deadline-ms
-         :seon.error/expected deadline-ms
-
-           :seon.operator.subprocess/argv argv
-           :seon.operator.subprocess/deadline-ms deadline-ms
-           :seon.operator.subprocess/phase phase
-           :seon.operator.subprocess/pid (.pid child)
-           :seon.operator.subprocess/start-instant
-           (:seon.boot/start-instant (first identities))
-           :seon.operator.subprocess/reaped? reaped?}))))
+           (cond-> {:seon.error/message "The process and its output must finish within the declared bound."
+                    :seon.error/offending argv
+                    :seon.error/member :seon.operator.subprocess/deadline-ms
+                    :seon.error/expected deadline-ms
+                    :seon.operator.subprocess/argv argv
+                    :seon.operator.subprocess/deadline-ms deadline-ms
+                    :seon.operator.subprocess/phase phase
+                    :seon.operator.subprocess/pid (.pid child)
+                    :seon.operator.subprocess/reaped? reaped?}
+             root-start (assoc :seon.operator.subprocess/start-instant root-start))))))
       {:seon.operator.subprocess/argv argv
        :seon.operator.subprocess/exit (.exitValue child)
        :seon.operator.subprocess/output output

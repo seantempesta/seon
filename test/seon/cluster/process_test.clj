@@ -58,3 +58,30 @@
       (finally
         (.delete marker)
         (Files/deleteIfExists directory)))))
+
+(deftest an-exited-or-unknown-generation-never-matches-a-process
+  (let [record (bp/process ["/bin/sleep" "30"])
+        child ^Process (:proc record)
+        [member :as identities] (process/subprocess-tree-identities (.toHandle child))]
+    (try
+      (testing "a live member carries its generation and matches only it"
+        (is (= 1 (count identities)) (pr-str identities))
+        (is (inst? (:seon.boot/start-instant member)))
+        (is (= (:seon.boot/start-instant member)
+               (process/process-start-instant (:seon.boot/pid member))))
+        (is (some? (process/matching-process-handle member)))
+        (is (nil? (process/matching-process-handle
+                   (update member :seon.boot/start-instant
+                           #(java.util.Date. (- (inst-ms %) 1000)))))))
+      (testing "a record without its generation refuses or misses, never matches"
+        (is (not (process/process-handle?
+                  (try (process/matching-process-handle
+                        (assoc member :seon.boot/start-instant nil))
+                       (catch Exception _ :refused))))))
+      (finally
+        (when (process/process-identity-alive? member) (.destroy child))
+        (.waitFor child)))
+    (testing "an exited process is nothing: no start instant, no identity"
+      (is (nil? (process/process-start-instant (:seon.boot/pid member))))
+      (is (= [] (process/subprocess-tree-identities (.toHandle child))))
+      (is (false? (process/live? member))))))
