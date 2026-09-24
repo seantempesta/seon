@@ -172,8 +172,9 @@
                     :seon.cluster.reply/sources [{:seon.cluster.eval/source source}]}
            fault (try (turn/evaluate-sources request) nil
                       (catch clojure.lang.ExceptionInfo failure (ex-data failure)))]
+       ;; The whole fault can carry the request's world; name it, never print it.
        (is (seq (:seon.turn/generated-read-attributes fault))
-           (pr-str fault))
+           (pr-str (select-keys fault [:seon.error/operation :seon.error/layer :seon.error/message])))
        (is (= source (get-in fault [:seon.error/offending])))
        (is (= #{:seon.turn/id}
               (get-in fault [:seon.error/data :datahike.read/attributes])))
