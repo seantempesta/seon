@@ -65,12 +65,12 @@
                         (contains? recovery :seon.error/operation))
                (throw (ex-info (:seon.error/message recovery) recovery)))
            instance (publish! (merge instance recovery))
+           process (cluster/process-identity (:seon.boot/advertisement instance))
            instance (publish!
                      (assoc instance
                             :seon.boot/config-result
-                            (config/apply-compiled! connection compiled-config)))
-           process (cluster/process-identity (:seon.boot/advertisement instance))
-           _ (cluster/ensure-cluster-entity! connection cluster-name process)
+                            (cluster/seed-cluster-facts!
+                             connection cluster-name compiled-config process)))
            _ (cluster/seed-root-agent! connection cluster-name process)
            boot-dials (config/effective (db/db connection) cluster-name)
            arm-request {:seon.flow/commit-fault!

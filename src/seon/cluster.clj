@@ -3295,6 +3295,21 @@
         :seon.boot/population :seon.cluster/cluster})))
   nil)
 
+(defn seed-cluster-facts!
+  "Write the facts boot seeds for a cluster: its config row, then its entity.
+
+  Boot and a test request's world both use this writer. No agent row is among
+  these facts: boot seeds root separately (`seed-root-agent!`), and a test
+  world holds only the agents its own seeds or body create. Returns the config
+  reconciliation result; a refused write throws."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.cluster/name
+                       :seon.config/compiled :seon.db.process/id]
+                  :seon.reconcile/result]}
+  [connection cluster-name compiled process]
+  (let [result (config/apply-compiled! connection compiled)]
+    (ensure-cluster-entity! connection cluster-name process)
+    result))
+
 (defn ensure-entity-call
   "Create an absent agent inside the transaction; otherwise change nothing."
   {:malli/schema

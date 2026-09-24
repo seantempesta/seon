@@ -6,6 +6,7 @@
             [clojure.string :as str]
             [sci.core :as sci]
             [seon.config :as config]
+            [seon.cluster.process :as cluster.process]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
@@ -1418,6 +1419,51 @@
 (def ^:private release-context!
   (delay (requiring-resolve 'seon.cluster.agent/release-context!)))
 
+(def ^:private seed-cluster-facts!
+  (delay (requiring-resolve 'seon.cluster/seed-cluster-facts!)))
+
+(defn- clean-request-handle
+  "Acquire the request's world: the loaded published program plus boot's facts.
+
+  The base is the source commit the recording cluster's adoption record names:
+  the program this JVM loaded, which admission records as the run's
+  `:seon.test.run/loaded-commit-id`. A published commit holds program rows only,
+  so no agent, turn, message or error of the cluster is inherited. On it boot's
+  writer puts the cluster's effective config, taken as its complete manifest,
+  and the cluster entity, then the fork's source record. Members branch from
+  the returned head. A refused write releases the branch and throws."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.db/connection
+                       :seon.cluster/name :seon.config/effective]
+                  :seon.agent/execution-handle]}
+  [execution recording cluster effective]
+  (let [base (:seon.source/commit-id
+              (db/pull (db/db recording) [:seon.source/commit-id] [:seon.cluster/name cluster]))
+        _ (when-not base
+            (throw (ex-info "The cluster records no adopted source commit to branch a test world from."
+                            {:seon.error/expected :seon.source/commit-id
+                             :seon.error/offending cluster})))
+        handle (@acquire-context! execution nil {:seon.agent/isolate? true
+                                                 :seon.cluster.registry/from base})
+        connection (:seon.db/connection handle)]
+    (try
+      (db/call-with-custody
+       {:seon.db/connection connection}
+       #(do (@seed-cluster-facts! connection cluster
+                                  {:seon.config/effective effective
+                                   :seon.config/desired-row (assoc effective :seon.config/cluster cluster)
+                                   :seon.config/resolved-attributes (set (keys effective))}
+                                  (cluster.process/id (cluster.process/current-identity)))
+            (let [report (db/transact! connection [{:seon.cluster/name cluster
+                                                     :seon.source/commit-id base}])]
+              (when-not (:db-after report)
+                (throw (ex-info "The test world's source record was refused." report))))))
+      (let [database (db/db connection)]
+        (assoc handle :seon.db/db database :seon.source/commit-id (db/commit-id database)))
+      (catch Throwable failure
+        (try (@release-context! handle)
+             (catch Throwable cleanup (.addSuppressed failure cleanup)))
+        (throw failure)))))
+
 (defn- request-refusal
   "Name one refused request member with the value it carried."
   {:malli/schema [:=> [:cat :keyword :string :seon.schema/value] :seon.test/selection-error]}
@@ -1657,7 +1703,10 @@
   the record with `:seon.test/unchanged` and no execution.
 
   Each executed member is an isolated agent for one body: a fresh branch off
-  the captured commit through `seon.cluster.agent/acquire-context!`, the body
+  the request's world through `seon.cluster.agent/acquire-context!`. A cluster's
+  world is its loaded published program plus boot's cluster facts, holding none
+  of its agents, turns, messages or errors; an isolated execution's world is
+  its own captured value (`clean-request-handle`). The body
   under that branch's custody (`seon.sci.eval/run-test`), its result recorded
   on the recording connection, and the branch unlinked by
   `release-context!` after the body's thread exits. The request is bounded by
@@ -1784,10 +1833,17 @@
                                                              [?member :seon.test.member/symbol ?symbol]]
                                                     (:db-after report)
                                                     (:seon.test.run/id batch-provenance)))})))
+                ;; A cluster's request branches from its loaded program with
+                ;; boot's facts, never from its operational data. An isolated
+                ;; attempt may hold candidate program rows that program lacks,
+                ;; so until base plus overlay its request branches from its own
+                ;; value, which a clean request's member already is.
                 request-handle (when (seq ordered)
-                                 (@acquire-context! execution nil
-                                                    {:seon.agent/isolate? true
-                                                     :seon.cluster.registry/from (db/commit-id database)}))
+                                 (if (= :isolated (:seon.agent/mode execution))
+                                   (@acquire-context! execution nil
+                                                      {:seon.agent/isolate? true
+                                                       :seon.cluster.registry/from (db/commit-id database)})
+                                   (clean-request-handle execution recording cluster effective)))
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [settle! (fn [result]
