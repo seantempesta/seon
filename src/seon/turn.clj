@@ -3296,51 +3296,6 @@
 
 (declare turn resume-turn)
 
-(defn- submission-time-limit-evaluation
-  "The evaluation value for a submission the backstop cut.
-
-  Built by `seon.sci.eval/unrun-evaluation`, the ONE constructor of that
-  value, so this arm cannot omit a required key the way a hand-built map did.
-  Its own report used to reach `seon.problems/form-problem` missing four
-  required keys, and the durable evidence of the interruption became a
-  contract violation from the recorder instead of the interruption."
-  {:malli/schema [:=> [:cat :seon.sci.eval/request [:int {:min 0}]]
-                  :seon.sci.eval/evaluation]}
-  [request submission-wait-ms]
-  (let [time-limit-ms (:seon.sci.eval/time-limit-ms request)
-        message (str "Evaluation submission did not settle within "
-                     time-limit-ms "ms.")]
-    (sci.eval/unrun-evaluation
-     {:seon.sci.admit/value
-      {:seon.flow/time-limit :seon.turn.loop/turn
-       :seon.error/at (Date.) :seon.error/layer :seon.turn/evaluation
-       :seon.error/operation 'seon.turn/submission-time-limit-evaluation
-       :seon.error/message message
-       :seon.error/data {:seon.flow/submission-wait-ms submission-wait-ms}}
-      :seon.cluster.eval/ns (:seon.cluster.eval/ns request)
-      :seon.eval/duration-ms (long submission-wait-ms)
-      :seon.cluster.eval/interrupted-at (Date.)})))
-
-(defn- submit-evaluation!!
-  [cluster evaluate submission-id request]
-  (let [submission
-        (seon.flow/submit!!
-         (:seon.flow/work-launcher cluster)
-         {:seon.env/environment (:seon.env/environment cluster)
-          ::seon.flow/submission-id submission-id
-          ::seon.flow/workload :compute
-          ::seon.flow/time-limit-ms
-          (* 2 (:seon.sci.eval/time-limit-ms request))
-          ::seon.flow/work-fn
-          (fn [{::seon.flow/keys [started!]}]
-            (started!)
-            (evaluate request))})]
-    (if (= ::seon.flow/completed (::seon.flow/outcome submission))
-      (::seon.flow/value submission)
-      (submission-time-limit-evaluation
-       request
-       (::seon.flow/submission-wait-ms submission)))))
-
 (defn- error-tx
   "Transaction data recording one failure VALUE as a durable error fact.
   Pure over a database value — `seon.error/commit-tx` does the work and
