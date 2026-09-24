@@ -55,6 +55,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 3.12 | A small standard proof vocabulary lets every task kind state done the same way (children, specified?, settled?, accepted?, reply-to, finding, valid?, detectors) | R | specified as a task |
 | 3.6 | Delivered functions carry a docstring and the declared contract; agents take the shortest path the checks allow, so the checks encode the requirement | R | met in toy |
 | 3.7 | After every turn the task's own requirements run on its branch; red → re-prompt with the refusal as data; budget-bounded; escape hatch to root is itself a task | O, R | proven in toy |
+| 3.13 | A proof is a function of ONE database value `(fn [db] …)`: the deletion run's proofs asked the agent's SCI (`resolve`) and went green while the program row survived; a db-value proof stays red until the data changes, and runs unchanged on base, branch and merge branch | O, R | proposed v0.3 |
 | 3.8 | Requirement test digests are frozen once reviewed; only root revises them, with the reason recorded | O, A | not yet |
 
 ## 3b. The stored model under the authoring surface (Astra synthesis, `task-model-synthesis-2026-09-24.md`)
@@ -106,6 +107,19 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 5b.4 | Dependencies come from CALLS, not quoted names; a proof printing `'x/f` does not depend on x/f's author | A | prototyped |
 | 5b.5 | A namespace a task creates is allowed only through its own explicit definitions in it | A, R | prototyped |
 | 5b.6 | `#:seon.task{…}` literal is the natural file syntax; the task-level must-read key is `:seon.task/must-read` | A, R | prototyped |
+
+## 5c. Merge and rendering (2026-09-24 research: `write-back-and-custody-`, `agent-context-render-pipeline-`)
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 5c.1 | Merge scope is data (definitions/retracts/renames/schemas/output); the merge WORK is a task-named pure fn `(fn [{:keys [base source target task]}]) → tx-data`, default program-row copy; root applies it to an intermediate branch, gates, then transacts the same tx-data; tx-data outside scope refuses | O, A | proposed |
+| 5c.2 | One attempt = one private branch; today agents default to the live cluster branch (`cluster/agent.clj:205`) | O, R | open |
+| 5c.3 | The agent's context is a clojure.main transcript: `ns=> ` + comments/forms, plain printed value, raw `Execution error` text, one trailing `;; result/… · ms` comment, and the context ENDS with `ns=> ` | O, R | open: today ends `turns left: …`, results wrapped in `#:seon.repl{…}` |
+| 5c.4 | One printer with reader conventions (`'x`, `#'v`, `#:ns{}`); nine agent-facing printers today disagree (`(quote x)` leaks) | O, R | open |
+| 5c.5 | Briefs are REPL transcripts built from calls (`(task)`, `(proofs)`, `(source f)`, `(callers 's)`), never a separate grammar | O, R | open |
+| 5c.6 | Help is data: topics with text, example form, needs; order derived by topo sort on needs; one source (today two, contradicting) | O, R | open |
+| 5c.7 | Openers speak as the system, never in the agent's voice | R | open |
+| 5c.8 | No prompt unit reprints a generated selector: 81% of root's 680 KB prompt is one error query printed five times | R | open |
 
 ## 6. Platform gaps the runs exposed (each is itself a task)
 
