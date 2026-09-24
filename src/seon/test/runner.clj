@@ -1616,7 +1616,7 @@
   terminal error naming `failure`, the throwable that ended its request.
 
   An interrupted member is an obligation, never green: it is recorded red with
-  the whole cause chain, so the run's evidence is complete and the member is
+  its cause chain as `seon.render.value/floor` bounds it, so the member is
   selected again. Members already recorded are left as they are."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/completion :seon.error/throwable]
                   [:or :seon.test/results :seon.db/error-result]]}
@@ -1624,13 +1624,8 @@
   (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])
         open (remove :seon.test.member/completed-tx
                      (execution-members (db/db connection) run-id))
-        options (report-options {})
-        cause (str/join "\nCaused by: "
-                        (for [link (take-while some? (iterate ex-cause failure))]
-                          (str (throwable-text options link)
-                               (when-let [data (ex-data link)]
-                                 (str "\n    data " (printable options data))))))
-        message (str "Interrupted: request " run-id " threw before this member finished.\n" cause)]
+        message (str "Interrupted: request " run-id " threw before this member finished.\n"
+                     (value/floor failure))]
     (if (empty? open)
       []
       (commit-results!

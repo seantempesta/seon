@@ -16,6 +16,7 @@
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
+            [seon.render.value :as value]
             [seon.test.runner :as runner])
   (:import [java.util.concurrent FutureTask]))
 
@@ -108,21 +109,6 @@
       (with-bindings {clojure.lang.Compiler/LOADER loader} (work))
       (finally (.setContextClassLoader thread previous))))))
 
-(defn- throwable-text
-  "A throwable's whole cause chain, outermost to root, with each link's class,
-  message and ex-data (`Throwable->map`, `clojure/core_print.clj:473`), and
-  the root cause's first frame."
-  {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
-  [throwable]
-  (let [{links :via trace :trace} (Throwable->map throwable)]
-    (str/join "\n"
-              (concat
-               (for [{link-class :type :keys [message data]} links]
-                 (str link-class
-                      (when message (str ": " message))
-                      (when data (str " " (pr-str data)))))
-               (when-let [frame (first trace)] [(str "at " (pr-str frame))])))))
-
 (def ^:dynamic *member*
   "The execution handle of the member whose host (JVM) test body runs on this
   thread, bound by `seon.test/run` around that body exactly as clojure.test
@@ -203,7 +189,7 @@
                          "; thread " (.threadId thread) ".")
                     false))
           (catch java.util.concurrent.ExecutionException failure
-            (failed (str "Test execution failed:\n" (throwable-text (or (ex-cause failure) failure)))
+            (failed (str "Test execution failed:\n" (value/floor (or (ex-cause failure) failure)))
                     true))))
       (catch Throwable failure
         (when-not @started? (release! false))
@@ -1487,7 +1473,7 @@
                         #(str (when % (str % "\n"))
                               "Member cleanup failed; its branch "
                               (:seon.agent/branch child) " may remain:\n"
-                              (throwable-text failure))))
+                              (value/floor failure))))
             result))
         ;; Owned by this function until `bounded-result` takes it.
         release! (fn [_watched?]

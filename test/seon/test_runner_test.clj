@@ -8,6 +8,9 @@
             [seon.db :as db]
             [seon.cluster.agent :as agent]
             [seon.test-runner-failure-fixture]
+            [sci.core :as sci]
+            [seon.error :as error]
+            [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
 
@@ -295,4 +298,25 @@
         (is (zero? (:seon.test/error-count result)) (pr-str result))
         (is (= [[[0 "[:seon.fn/sym a/b]"]]]
                (mapv :seon.test.failure/contexts (:seon.test.failure/reports result)))))
+      (finally (remove-ns (ns-name (:ns (meta test-var))))))))
+
+(deftest a-huge-execution-failure-becomes-bounded-text
+  ;; A fixture's contract refusal escapes the body, as the 2026-09-23 run's did;
+  ;; its ex-data holds the whole one-megabyte argument. One megabyte, not ten:
+  ;; building a refusal prints its whole offending leaf (`seon.sci.admit/leaf!`),
+  ;; about 0.5 s per megabyte (docs/seon/issues/bounded-admission-prints-a-whole-leaf-before-its-bound.md).
+  (let [huge (apply str (repeat 1000000 "x"))
+        test-var (throwaway-test-var
+                  #(is true)
+                  [(fn [_] (error/problem-sentence [huge] {} nil nil))])]
+    (try
+      (let [result (#'sut/bounded-result test-var 5000 {:seon.sci.eval/ctx (sci/init {})}
+                                         (fn [_] nil))
+            message (:seon.test/failure-message result)]
+        (is (= 1 (:seon.test/error-count result)))
+        (is (str/includes? message "Test execution failed"))
+        (is (str/includes? message "seon.error/problem-sentence refused operation")
+            "the stored text names the refusal")
+        (is (< (count message) 10000)
+            "the whole argument in the refusal's ex-data is not printed"))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
