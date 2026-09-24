@@ -260,7 +260,9 @@
   or is the stdin buffer, when a namespace this analysis defines now lives in
   another file, or when its source sits inside the checkout outside every
   declared source and dependency root and this analysis does not define it. Jar entries are immutable by
-  coordinate. Each stale entry names its checkout source when it has one, so
+  coordinate; kondo names one `<jar>:<entry>` only under canonical paths
+  (clj_kondo/impl/core.clj:289-291), so `seon.fn/dependency-analysis-command`
+  writes them that way — a bare entry name reads as an absent source. Each stale entry names its checkout source when it has one, so
   the caller can rebuild it.
 
   `shared?` is true for the checkout's own cache under `.clj-kondo/`. An
@@ -363,7 +365,8 @@
         result (clj-kondo/run! options)
         {::keys [examined stale]} (check result)]
     (if (empty? stale)
-      (assoc result ::cache {::examined examined ::stale [] ::rebuilt []})
+      (cond-> (assoc result ::cache {::examined examined ::stale [] ::rebuilt []})
+        root (assoc ::cache-root root))
       (let [sources (into [] (comp (keep ::source) (distinct)) stale)]
         (kondo.cache/with-thread-lock
           (kondo.cache/with-cache root 6
@@ -390,7 +393,25 @@
                                    remaining)
                              ::stale remaining
                              ::lint (:lint options)})))
-          (assoc rerun ::cache {::examined examined ::stale stale ::rebuilt sources}))))))
+          (assoc rerun ::cache {::examined examined ::stale stale ::rebuilt sources}
+                 ::cache-root root))))))
+
+(defn- unanalyzed-namespaces
+  "Namespaces a var usage targets of which clj-kondo held no analysis: not
+  defined by this run and absent from its cache and built-in resources, looked
+  up in kondo's own order (clj_kondo/impl/cache.clj:23-31; :clj then :cljc,
+  :185-187). Their vars' facts, `:macro` included, are unknown, never false.
+  A nil root is an analysis run without a cache."
+  {:malli/schema [:=> [:cat [:maybe :string] :map] [:set :symbol]]}
+  [root analysis]
+  (let [defined (into #{} (map :name) (:namespace-definitions analysis))
+        analyzed? (fn [namespace-name]
+                    (some #(or (and root (.isFile (kondo.cache/cache-file root % namespace-name)))
+                               (kondo.cache/built-in-cache-resource % namespace-name))
+                          [:clj :cljc]))]
+    (into (sorted-set)
+          (comp (keep :to) (filter symbol?) (distinct) (remove defined) (remove analyzed?))
+          (:var-usages analysis))))
 
 (defn forget-namespaces!
   "Remove superseded declarations from one explicitly owned resolver cache."
@@ -609,6 +630,7 @@
      [::protocol-impls [:vector :map]]
      [::keywords [:vector :map]]
      [::findings [:vector :map]]
+     [::unanalyzed-namespaces [:set :symbol]]
      [::cache [:map [::examined :int] [::stale [:vector :map]]
                [::rebuilt [:vector :string]]]]]]}
   [{::keys [paths sources cache-root config-root]}]
@@ -706,6 +728,7 @@
           (filter jvm-entry?)
           (sort-by entry-order)
           vec)
+     ::unanalyzed-namespaces (unanalyzed-namespaces (::cache-root result) raw-analysis)
      ;; Which cache entries the analysis found stale and rebuilt: the
      ;; publication's cache-miss count.
      ::cache (::cache result)})))

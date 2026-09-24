@@ -3,6 +3,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [clj-kondo.core]
             [my.program :as my.program]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
@@ -2501,9 +2502,9 @@
           "prefix.clj" "(ns sample.prefix (:require [clojure [edn :as e]]))\n"
           "renamed.clj" "(ns sample.renamed (:require [clojure.test :refer [deftest] :rename {deftest dt}]))\n"})
         context (get contexts 'sample.clauses)]
-    (is (= '#{clojure.edn clojure.set clojure.walk clojure.test} (:requires context))
-        ":as-alias creates no load edge; prefix members and bare libs do; a later require is no clause")
-    (is (= '{e clojure.edn ab a.b} (:aliases context)))
+    (is (= '#{clojure.edn clojure.set clojure.walk clojure.test clojure.data} (:requires context))
+        ":as-alias creates no load edge; prefix members, bare libs and a top-level require do")
+    (is (= '{e clojure.edn ab a.b data clojure.data} (:aliases context)))
     (is (= '{deftest clojure.test/deftest is clojure.test/is} (:refers context)))
     (is (= '{File java.io.File UUID java.util.UUID} (:imports context))
         "a bare dotted import binds its simple class name")
@@ -3012,20 +3013,35 @@
 
 (deftest a-dependency-macro-sci-cannot-expand-is-host-bound
   ;; SCI hands a copied JVM macro its own `&env`; `go` reads it as compiler locals.
+  ;; The macro fact is the dependency's clj-kondo analysis, whatever this JVM has
+  ;; loaded (review F7): unanalyzed, the calls refuse by name.
   (let [root (fixture-root)
         text (str "(ns sample.env-macro (:require [clojure.core.async :as async]))\n"
                   "(defn looping [c] (async/go-loop [] (when (async/<! c) (recur))))\n"
                   "(defn channel [] (async/chan 1))\n"
-                  "(defn plain [x] (when x (inc x)))\n")]
+                  "(defn plain [x] (when x (inc x)))\n")
+        rows #(try (seon.fn/rows {:seon.fn/roots [(.getPath root)]})
+                   (catch clojure.lang.ExceptionInfo refusal (ex-data refusal)))
+        jar (str/replace (.getPath (io/resource "clojure/core/async.clj")) #"^file:|!/.*$" "")]
     (try
       (write-source! root "sample/env_macro.clj" text)
+      (let [refusal (rows)]
+        (is (= '[clojure.core.async/<! clojure.core.async/chan clojure.core.async/go-loop]
+               (:seon.fn/unresolved-targets refusal))
+            (pr-str refusal))
+        (is (str/includes? (str (:seon.error/message refusal)) seon.fn/dependency-analysis-command)))
+      ;; The fill the command performs, for this fixture's own cache.
+      (clj-kondo.core/run! {:lint [jar] :dependencies true :parallel true
+                            :config-dir (str (io/file root ".clj-kondo"))
+                            :cache-dir (str (io/file root ".clj-kondo" ".cache"))
+                            :config {:output {:canonical-paths true}}})
       (is (= {'sample.env-macro/looping true
               'sample.env-macro/channel false
               'sample.env-macro/plain false}
              (into {} (keep (fn [row]
                               (when-let [sym (:seon.fn/sym row)]
                                 [sym (:seon.fn/host-bound? row)])))
-                   (seon.fn/rows {:seon.fn/roots [(.getPath root)]}))))
+                   (rows))))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest canonical-program-has-complete-host-binding-facts

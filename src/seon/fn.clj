@@ -803,16 +803,27 @@
 
 (declare source-span)
 
-(defn- host-macro?
-  "True when `target` names a macro Var this JVM has loaded. clj-kondo marks
-   `:macro` only where it analyzed the definition (its built-in and checkout
-   caches), so a dependency macro such as `clojure.core.async/go-loop` arrives
-   unmarked; the loaded Var is the one SCI would copy and expand."
-  {:malli/schema [:=> [:cat :qualified-symbol] :boolean]}
-  [target]
-  (let [host (some-> (find-ns (symbol (namespace target)))
-                     (ns-resolve (symbol (name target))))]
-    (boolean (and (var? host) (:macro (meta host))))))
+(def dependency-analysis-command
+  "The one-time fill of the checkout's clj-kondo cache from the publication
+  classpath. `--skip-lint` would only copy configs (clj_kondo/core.clj:126-129);
+  canonical paths name each jar entry `<jar>:<entry>` (clj_kondo/impl/core.clj:289-291),
+  which the analyzer's stale check keeps as immutable by coordinate."
+  (str "clj-kondo --lint \"$(clojure -Spath)\" --dependencies --parallel --copy-configs"
+       " --config '{:output {:canonical-paths true}}'"))
+
+(defn- unresolved-macro-refusal
+  "Refuse calls whose target namespace SCI does not interpret and clj-kondo
+  never analyzed: whether each is a macro is unknown, never false."
+  {:malli/schema [:=> [:cat [:set :qualified-symbol]] :nil]}
+  [targets]
+  (when (seq targets)
+    (let [message (str "Cannot classify host binding: clj-kondo holds no analysis of "
+                       (str/join ", " (sort (into #{} (map namespace) targets)))
+                       ". Repopulate the checkout's cache: " dependency-analysis-command)]
+      (throw (ex-info message {:seon.fn/index-refused true
+                               :seon.cluster.source/phase :analysis
+                               :seon.error/message message
+                               ::unresolved-targets (vec (sort targets))})))))
 
 (defn- interpreted-namespaces
   "Namespaces whose macros expand in SCI: SCI's own (`sci.impl.namespaces/namespaces`),
@@ -829,12 +840,21 @@
    Import calls remain host-bound under the program declaration rule. A JVM
    macro from a namespace SCI does not interpret is host-bound: SCI hands it
    SCI's `&env`, which `clojure.core.async/go` reads as compiler locals.
+   Macro status is clj-kondo's `:macro` from the dependency's analysis, never
+   the loaded JVM; a call into a namespace kondo never analyzed refuses by name.
    Kondo supplies resolved class names and declaration ownership in one pass;
    this is membership in SCI's admitted classes and interpreted namespaces, never another resolver."
   {:malli/schema [:=> [:cat :map [:set :qualified-symbol] :seon.schema/projection]
                   [:set :qualified-symbol]]}
   [analysis first-party-functions projection]
-  (let [interpreted (interpreted-namespaces analysis first-party-functions projection)]
+  (let [interpreted (interpreted-namespaces analysis first-party-functions projection)
+        host-call? #(when-let [target (and (some? (::analyzer/arity %)) (usage-symbol %))]
+                      (not (interpreted (symbol (namespace target)))))
+        unanalyzed (::analyzer/unanalyzed-namespaces analysis)]
+    (unresolved-macro-refusal
+     (into #{} (comp (filter host-call?) (map usage-symbol)
+                     (filter #(contains? unanalyzed (symbol (namespace %)))))
+           (::analyzer/var-usages analysis)))
     (-> #{}
         (into
          (comp
@@ -852,9 +872,7 @@
          (::analyzer/var-usages analysis))
         (into
          (comp
-          (filter #(when-let [target (usage-symbol %)]
-                     (and (not (interpreted (symbol (namespace target))))
-                          (host-macro? target))))
+          (filter #(and (host-call? %) (::analyzer/macro %)))
           (keep usage-caller))
          (::analyzer/var-usages analysis)))))
 
