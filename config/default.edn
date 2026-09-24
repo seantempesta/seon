@@ -445,7 +445,9 @@
  ; Authentication is credential-backed by default, so the mutually exclusive
  ; literal no-auth fact is explicitly absent.
  :seon.config.ai/no-auth :seon.config/absent
- :seon.config.ai/no-provider :seon.config/absent
+ ; Owner 2026-09-24: no paid agent calls while agent context is garbage — virtual no-op turns,
+ ; no provider request or tokens. Set back to :seon.config/absent to run a deliberate verification.
+ :seon.config.ai/no-provider true
  :seon.config.ai/retain-reasoning :seon.config/absent
 
  ; Unit: milliseconds. Provenance: DeepSeek V4 Flash calibration report
