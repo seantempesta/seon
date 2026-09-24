@@ -8,7 +8,7 @@ updated: 2026-09-24
 
 ## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
-- sweep-hand-built-ns-rows: scripted conversion of 52 test files to test-support/namespace-row.
+- research-publication-concurrency-astra (read-only): class 4 — three priced options for publication under concurrent lanes.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
 - fix-env-macro-callers (fn.clj): the affected-callers residual — callers expanding &env-reading JVM macros (async/go-loop) classed interpretable.
 - fix-partial-request-profile (sci/eval.clj, render.clj): who carries a render profile without an id; refuse at entry.
@@ -29,8 +29,8 @@ rows refuse only when called (f2bc7088a); interpreted callers get their namespac
 2. **Custody inferred from a label, not the held connection** (agent.clj:205 → 43 "fresh owned branch" refusals; latent
    live-root escape through a shared context-state atom). Fixed b2fcb5225: the writer records the branch the transacting connection holds; an isolated acquisition gets its own context-state (a member's inherited root now refuses loudly instead of borrowing live root). Residue: 17 fixture sites hand-write the label branch (turn suites — after the subsumption review, survivors only); my/agent.clj mode now reads the acquisition's own entry (5a60f51d8). NEW: the MCP entrance acquires branches with a nil agent id, so (my.agent/branch ...) refuses on MCP branches — the entrance should acquire as a named agent. seon.env/supplied-agent-id puts the whole environment in :seon.error/offending (render 2.5 s; class 1). Design question for the owner: should inherited agents run inside a member at all?
 3. **Hand-built rows in fixtures** (ns, fn and test rows missing required digests → most save-gate reds). The rows should
-   come from canonical writers; sweep-hand-built-ns-rows is widened to fn/test rows; the harness's seeds replace the rest.
-4. **Every save runs a heavy save gate on the shared JVM** (65 reaching tests, ~100 s, 274% CPU; refresh-source! 107 s max;
+   come from canonical writers; Namespace rows DONE (4 commits, 53ae022b2: 31 digest reds → 0). Fn/test rows (59 sites, 45 carrying keys the analyzer does not derive) and agent rows without :seon.agent/branch (first failure in 22 tests; agent-tx also makes stewardship) are NOT hand-converted: they are harness S5 material (seeds through canonical writers) — owner rule, do not repair what the harness replaces.
+4. **Every save runs a heavy save gate on the shared JVM** (plus: a lane that commits without publishing blocks every later publication that reloads its file; the hook never retries; one held dependent refuses an unrelated adoption — issue a-db-adoption-refuses-while-another-lane-edits-a-dependent.md) (65 reaching tests, ~100 s, 274% CPU; refresh-source! 107 s max;
    call-with-projection 34,393 calls / 362 s). With reds from class 3 each also prints class 1's giant errors. Cost follows
    the whole reach, not the changed inputs — the projection-passed-explicitly item and the harness's per-member cost target.
 5. **Tests redefine default's Vars** (four replaced roots from web_debug_test). Harness S-slices + redef census.
