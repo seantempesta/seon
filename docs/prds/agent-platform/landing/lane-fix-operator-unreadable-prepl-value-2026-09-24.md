@@ -7,14 +7,20 @@ the JVM keeps printing native values, so refusals keep their proposed transactio
 
 ## Broken / not yet proven
 
-- **RESET NEEDED (or root `(require 'seon.operator :reload)` in default).** `script/seon/operator.clj` has no
-  program rows (`:seon.fn/sym seon.operator/prepl-value!` queries nil) and is loaded from
-  `file:/Users/sean/src/seon/script/seon/operator.clj`; hook publication does not reload it. Default's JVM
-  therefore still holds the old reader, and the new JVM regression `seon.operator-test` is red there
-  (`bin/test-check default --ns seon.operator-test`: 7 fail, value nil because the old reader refuses).
-  It is expected green after default reloads the namespace. Publication gap: script/ namespaces loaded
-  into the JVM are neither rows nor reloaded; recorded here for root.
-- The hook itself runs the operator fresh in babashka, so the fix is live for hook publication now.
+- `seon.adoption-diagnostic-test/operator-reports-the-typed-refusal-over-a-real-prepl` is red at
+  `(< byte-count 1024)`: 2596 bytes. Pre-existing, not this lane: a plain io-prepl's exception `:val`
+  is Throwable->map with its trace (1348 chars, which EDN read identically before), carried whole under
+  `:seon.error/offending :val`; this lane's message change adds about 26 bytes. Test owner decides whether
+  that bound or the retained trace is wrong (not owned here).
+- Publication gap filed: docs/seon/issues/script-namespaces-loaded-by-the-jvm-are-not-published.md.
+  Default was reloaded with `(require 'seon.operator :reload)` (root 56 ms, lane 54 ms), as authorized.
+
+## Follow-up (root report)
+
+- Thrown refusals: the `:exception` branch now takes its message from a Seon error map, else the
+  Throwable->map's `:data :seon.error/message`, else its `:cause` (was always "PREPL evaluation failed.").
+  The test's `(:val (ex-data thrown))` assertion was wrong: evidence lives under `:seon.error/offending`.
+- `bin/test-check default --ns seon.operator-test`: run cf91ab04787c, pass 8 / fail 0, 1160 ms.
 
 ## Evidence
 

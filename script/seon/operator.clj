@@ -186,7 +186,13 @@
                                         (catch Exception cause [nil cause]))]
                  (cond
                    (:exception event)
-                   (fail! (or (and (map? value) (:seon.error/message value)) "PREPL evaluation failed.")
+                   (fail! (or (when (map? value)
+                               ;; A Seon error map, else Throwable->map's ex-data then :cause.
+                               (some #(when (string? %) %)
+                                     [(:seon.error/message value)
+                                      (get-in value [:data :seon.error/message])
+                                      (:cause value)]))
+                             "PREPL evaluation failed.")
                           (cond-> event
                             (nil? cause) (assoc :val value)
                             cause (assoc :seon.operator/reader-error (ex-message cause))))

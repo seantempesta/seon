@@ -33,5 +33,5 @@
         (is (= 'object (:tag object)))
         (is (= "Write refused." (ex-message thrown)))
         (is (nil? (:seon.operator/reader-error (ex-data thrown))))
-        (is (map? (:val (ex-data thrown)))))
+        (is (map? (get-in (ex-data thrown) [:seon.error/offending :val]))))
       (finally (server/stop-server server-name)))))
