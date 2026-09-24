@@ -24,6 +24,17 @@ a restart loads code from the checkout but schema and test rows install only thr
 4. Test-declared expected faults: DESIGNED 59b52dd2e — a fault is expected iff a PASSING assertion's :actual holds its receipt (:seon.fault/recorded, by declared schema; or a passing thrown?'s cause chain); any other fault on the member's branches is a test error. No list, no metadata. 3 slices (runner ~25, member-result ~30, one-line test edit). Blocked on: nested branches acquired from a member handle must record :seon.test.member/branch and copy faults to the member, not cluster-default — launch after harness S2a lands (it reshapes test worlds).
 5. Inherited agents inside test members: RULED (owner) — they disappear: a member contains only the agents its seeds or body create (harness S2a builds this).
 
+**Publication option 3 plan:** D1 revised (ffad218e2; §10 corrected to the detect ruling, b0f5a286d): 19 slices O0–O7,
+each ≤100 lines, depending on harness S2/S3/S4. Running: O0 (delete hook auto-publication). Next: O1a after S2a.
+**Lock audit (9437d0e01):** 38 sites — 17 keep (cross-process file locks, PrintStream/prepl monitors, Thread.interrupt
+holder, Flow CAS, Datahike writer/konserve), 7 replace, program-change lock (detect-program-change), one dead family
+(reserve-cluster!, cluster.clj:818–842). Worst: agent.clj:872 acquire-context! holds the contexts monitor across branch
+creation + SCI acquire + transact! (serializes every turn start); routing monitor held through join-graph! with a hidden
+lock order vs contexts. Running: fs/jvm.clj write lock + runner.clj reach-index stamp. Waiting on files: agent.clj pair
+(after S2a names its files), reserve-cluster! + running-instances/held-flocks/branch-open-monitor (cluster.clj/boot.clj
+held). Findings: two forked prepl writers (cluster.clj:553 vs resources/seon/operator/prepl.clj); maintenance.clj:518
+opens a store outside the refcount (correctness risk); lock-file generator leaves files under tmp/.
+
 **Harness (all approved):** S12, S0, S1, S3a–S3c landed; next S2/S2a (clean facts/branch) → S2b (seeds; three seed
 forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by namespace groups).
 **One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
