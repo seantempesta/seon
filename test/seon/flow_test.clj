@@ -232,8 +232,9 @@
                        unconfigured "process-1"
                        {:listener-key ::probe :exception failure
                         :tx-report {:tx-meta {} :db-after @connection}}))]
-        (doseq [[result text] [[proc-result proc-text] [listener-result listener-text]]]
-          (is (nil? result) "the sink returns as before; the loop continues")
+        (is (true? proc-result) "the proc sink answers the panic so its graph stops")
+        (is (nil? listener-result) "the listener sink returns as before")
+        (doseq [text [proc-text listener-text]]
           (is (< 0 (count text) bound) (str (count text) " stderr chars"))
           (is (str/includes? text "a proc step threw") "the cause is named"))
         (is (identical? big (::big (ex-data failure)))
@@ -423,6 +424,9 @@
   (test-support/with-database
     (fn [connection]
       (let [environment (recording-environment connection)
+            ;; a panic stops the graph after one throw; recording continues
+            _ (test-support/apply-config! connection "seon.flow-test"
+                                          {:seon.config/on-core-error :record})
             in (async/chan work-throws)
             transactions (database-events connection)
             {::sut/keys [graph executor started]}
@@ -460,6 +464,48 @@
                               :seon.await/bound (join-bound 2000)
                               :seon.await/diagnostic {:seon.error/layer :flow
                                                       :seon.error/operation ::throwing-work}})))))))
+
+;;; F4 (review-landings-2026-09-24): a panic stops its graph through Flow,
+;;; so a queued input never runs after it; a recorded fault keeps the graph.
+(defn- panicking-work-step
+  ([] {:ins {::work "Messages; message 1 throws."} :outs {} :workload :io})
+  ([args] (assoc args ::flow/in-ports {::work (::work args)}))
+  ([state _transition] state)
+  ([state _input message]
+   (swap! (::seen state) conj message)
+   (when (= 1 message) (throw (ex-info "panicking work" {::message message})))
+   [state nil]))
+
+(deftest a-panicking-transform-stops-its-graph-and-a-recorded-one-continues
+  (doseq [mode [:panic :record]]
+    (test-support/with-database
+      (fn [connection]
+        (test-support/apply-config! connection "seon.flow-test" {:seon.config/on-core-error mode})
+        (let [in (async/chan 3)
+              seen (atom [])
+              _ (async/onto-chan!! in [0 1 2] false)
+              {::sut/keys [graph executor]}
+              (binding [*err* (java.io.StringWriter.)]
+                (sut/start-graph!
+                 {::sut/graph-definition
+                  {:procs {::panicking-work
+                           {:proc (sut/var-process #'panicking-work-step :io
+                                                   {:seon.env/environment
+                                                    (test-support/environment "seon.flow-test" connection)
+                                                    ::work in ::seen seen})}}
+                   :conns []}}))
+              join! #(sut/join-graph! {::sut/executor executor
+                                       :seon.await/bound (join-bound 2000)
+                                       :seon.await/diagnostic {:seon.error/layer :flow
+                                                               :seon.error/operation ::panicking-work}})]
+          (if (= :panic mode)
+            (do (is (nil? (join!)) "the panicked graph exits without an outside stop")
+                (is (= [0 1] @seen) "the queued input never executes")
+                (is (= 2 (async/poll! in)) "it stays queued"))
+            (do (test-support/await-event! seen ::third-input #(= [0 1 2] %))
+                (is (= [0 1 2] @seen) "a recorded fault keeps the graph running")
+                (flow/stop graph)
+                (is (nil? (join!))))))))))
 
 (deftest background-io-submission-is-nonblocking-bounded-and-joined
   (let [entered (CountDownLatch. 1)

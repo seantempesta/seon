@@ -112,7 +112,14 @@
      [::joins :map]]]}
   [{::keys [graph-definition joins] :as request}]
   (let [executor (graph-executor request)
-        graph (flow/create-flow (assoc graph-definition :io-exec executor))
+        ;; every proc's args name its own graph, so a panicking `var-process`
+        ;; stops it through Flow; delivered before any proc starts
+        graph-ref (async/promise-chan)
+        graph (flow/create-flow
+               (-> graph-definition
+                   (update :procs update-vals #(assoc-in % [:args ::graph-ref] graph-ref))
+                   (assoc :io-exec executor)))
+        _ (async/put! graph-ref graph)
         started (flow/start graph)
         construction {::graph graph
                       ::started started
@@ -197,9 +204,11 @@
   environment names its agent, which attributes the fault to that agent's run.
   A panic (`:panic`, or the fault not stored) is printed on stderr, its causes
   through `seon.render.value/floor` when unstored (bounded text; the whole
-  values stay on the throwables), and the loop continues: a stop transition must still exit so the graph's join
-  completes (`impl.clj:181,317-320`)."
-  {:malli/schema [:=> [:cat ::step-var :map :seon.error/throwable] :nil]}
+  values stay on the throwables), and answers true so the caller stops the
+  graph; the step still returns to Flow, because a stop transition must exit
+  for the graph's join to complete (`impl.clj:181,317-320`). Answers false
+  when the fault was recorded and the graph continues."
+  {:malli/schema [:=> [:cat ::step-var :map :seon.error/throwable] :boolean]}
   [step-var args failure]
   (try
     (fault/fault! (env/of args) failure
@@ -207,6 +216,7 @@
                           :seon.error/operation (symbol step-var)
                           :seon.db.process/id (process/id (process/current-identity))}
                          (select-keys (env/of args) [:seon.agent/id])))
+    false
     (catch Throwable panic
       (let [receipt (:seon.fault/recorded (ex-data panic))]
         (binding [*out* *err*]
@@ -218,8 +228,22 @@
           (when-not (:seon.fault/committed? receipt)
             (println (render.value/floor panic))
             (println (render.value/floor failure)))
-          (flush)))))
-  nil)
+          (flush))
+        true))))
+
+(defn- stop-panicked-graph!
+  "Stop the graph whose proc panicked, from that proc's own thread, never
+  joining it. The proc's own control tap receives Flow's stop first: the
+  loop reads control before any input (`impl.clj:287-295`), so no queued
+  input runs after the panic. `flow/stop` then stops every other proc and
+  closes the graph's channels without awaiting any exit
+  (`impl.clj:174-183`). A graph not started by `start-graph!` names no
+  graph; only its panicked proc stops. The graph reference is the promise
+  channel `start-graph!` fills before any proc starts, polled, never awaited."
+  {:malli/schema [:=> [:cat ::channel [:maybe ::channel]] [:maybe :boolean]]}
+  [control graph-ref]
+  (async/put! control #::flow{:command ::flow/stop :to ::flow/all})
+  (some-> graph-ref async/poll! flow/stop))
 
 (defn var-process
   "Build one Flow proc launcher from a step VAR and a pinned workload.
@@ -258,21 +282,26 @@
        {::step step-var
         ::workload workload})))
    (env/refuse-absent-environment! args ::var-process)
-   (let [launcher
-         (flow/process
-          ;; every arity dispatches through the Var (hot reload); a throwing
-          ;; transition or transform is one fault through `fault!`, and the
-          ;; proc keeps its state
-          (fn
-            ([] (step-var))
-            ([init-args] (step-var init-args))
-            ([state transition]
-             (try (step-var state transition)
-                  (catch Throwable failure (proc-failed! step-var args failure) state)))
-            ([state input message]
-             (try (step-var state input message)
-                  (catch Throwable failure (proc-failed! step-var args failure) [state nil]))))
-          (assoc options :workload workload))]
+   (let [options (assoc options :workload workload)
+         ;; every arity dispatches through the Var (hot reload); a throwing
+         ;; transition or transform is one fault through `fault!`. A recorded
+         ;; fault keeps the proc's state; a panic stops the graph, except
+         ;; while the proc already acknowledges a stop
+         step (fn [control graph-ref]
+                (let [failed! (fn [failure stopping?]
+                                (when (and (proc-failed! step-var args failure) (not stopping?))
+                                  (stop-panicked-graph! control graph-ref)))]
+                  (fn
+                    ([] (step-var))
+                    ([init-args] (step-var (dissoc init-args ::graph-ref)))
+                    ([state transition]
+                     (try (step-var state transition)
+                          (catch Throwable failure
+                            (failed! failure (= ::flow/stop transition)) state)))
+                    ([state input message]
+                     (try (step-var state input message)
+                          (catch Throwable failure (failed! failure false) [state nil]))))))
+         launcher (flow/process (step nil nil) options)]
      (reify
        core.protocols/Datafiable
        (datafy [_]
@@ -283,7 +312,9 @@
          (flow.spi/describe launcher))
        (start [_ start-options]
          (flow.spi/start
-          launcher
+          (flow/process (step (get-in start-options [:ins ::flow/control])
+                              (get-in start-options [:args ::graph-ref]))
+                        options)
           (update start-options :args #(merge args %))))))))
 
 (defn bounded-platform-executor
