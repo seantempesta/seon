@@ -3031,3 +3031,19 @@
         (is (false? (:seon.fn/host-bound?
                      (db/pull database [:seon.fn/host-bound?]
                               [:seon.fn/sym 'seon.id/id]))))))))
+
+(deftest file-rows-read-in-batches-not-per-row
+  ;; Each armed read costs ~0.1 ms of owner overhead, so a pull per row made a
+  ;; whole-program read seconds (lane fix-f4-batched-index-rows).
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            paths ["src/seon/id.clj" "src/seon/program.cljc"]
+            reads (atom [])
+            rows (binding [db/*read-evidence-sink* reads]
+                   (seon.fn/file-rows database paths :seon.fn/file))]
+        (is (< 16 (count rows)) "more rows than the read bound, so per-row reads cannot pass")
+        (is (< (count @reads) 16) "reads are per path and ref depth, not per row")
+        (is (= rows (into [] (mapcat #(seon.fn/published-index-rows database [(program/row-identity %)]))
+                          rows))
+            "a batch reads exactly the rows each identity reads alone")))))

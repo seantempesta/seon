@@ -3309,6 +3309,36 @@
         (when (:seon.db/invalid-read current) current)
         (into (set previous) current)))))
 
+(defn- reached-entities
+  "Entities `identities` reach through refs, keyed by identity and `:db/id`, less
+  `omitted` attributes. One `pull-many` per ref depth: each armed read costs ~0.1 ms,
+  so one pull per entity made a whole-program read take seconds."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn.file/identities [:set :keyword]]
+                  [:or [:map-of :seon.schema/value [:maybe :map]] :seon.error/value]]}
+  [database identities omitted]
+  (letfn [(walk [[found wanted] k entity]
+            (let [entity (some-> entity (as-> e (apply dissoc e omitted)))
+                  found (cond-> (assoc found k entity) entity (assoc (:db/id entity) entity))]
+              (reduce-kv
+               (fn [acc attribute value]
+                 (if (= :db.type/ref (get-in (:schema database) [attribute :db/valueType]))
+                   (reduce (fn [[found wanted :as acc] {id :db/id :as ref}]
+                             (cond (or (contains? found id) (wanted id)) acc
+                                   (< 1 (count ref)) (walk acc id ref)
+                                   :else [found (conj wanted id)]))
+                           acc (if (map? value) [value] value))
+                   acc))
+               [found wanted] (or entity {}))))]
+    (loop [pending (vec (distinct identities)) found {}]
+      (if (empty? pending)
+        found
+        (let [pulled (db/pull-many database '[*] pending)]
+          (if (:seon.error/at pulled)
+            pulled
+            (let [[found wanted] (reduce (fn [acc [k entity]] (walk acc k entity))
+                                         [found #{}] (map vector pending pulled))]
+              (recur (vec (remove #(contains? found %) wanted)) found))))))))
+
 (defn published-index-rows
   "Read compiled rows with portable program refs and complete owned components."
   {:malli/schema
@@ -3333,18 +3363,8 @@
   ([database identities]
    (published-index-rows database identities #{}))
   ([database identities omitted]
-  (let [entity (memoize
-                (fn [identity]
-                  (if (empty? omitted)
-                    (db/pull database '[*] identity)
-                    (let [row (db/pull database [:db/id] identity)]
-                      (if (or (:seon.error/at row) (nil? (:db/id row)))
-                        row
-                        (let [datoms (db/datoms database :eavt (:db/id row))]
-                          (if (:seon.error/at datoms)
-                            datoms
-                            (db/pull database (into [] (comp (map :a) (distinct) (remove omitted)) datoms)
-                                     (:db/id row)))))))))]
+  (let [entities (reached-entities database identities omitted)
+        entity (fn [identity] (if (:seon.error/at entities) entities (get entities identity)))]
    (letfn [(reference [value]
             (let [pulled (entity (:db/id value))]
               (if (and (map? pulled)
@@ -3413,14 +3433,18 @@
   [database paths file-attribute]
   ;; Index seeks, proportional to the named files' declarations: the Datalog
   ;; join on a variable file attribute took 990 ms for one 55-declaration file
-  ;; (these seeks: 15 ms, the same set).
-  (into [] (distinct)
-        (for [path paths
-              file (seek database :avet :seon.fn.file/relative-path path)
-              entity (seek database :avet file-attribute (:e file))
-              attribute program/identity-attributes
-              stored (seek database :eavt (:e entity) attribute)]
-          [attribute (:v stored)])))
+  ;; (these seeks: 15 ms, the same set). One pull-many reads their identities.
+  (let [entities (vec (for [path paths
+                            file (seek database :avet :seon.fn.file/relative-path path)
+                            entity (seek database :avet file-attribute (:e file))]
+                        (:e entity)))
+        pulled (db/pull-many database (filterv #(get (:schema database) %) program/identity-attributes)
+                             entities)]
+    (when (:seon.error/at pulled) (throw (ex-info (:seon.error/message pulled) pulled)))
+    (into [] (distinct)
+          (for [row pulled attribute program/identity-attributes
+                :let [value (get row attribute)] :when (some? value)]
+            [attribute value]))))
 
 (defn file-rows
   "Read declarations or findings through file refs for only the named paths."
