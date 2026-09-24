@@ -163,6 +163,15 @@ explode and the metadata larger than the actual function… tasks and references
 | 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults | lane launched |
 | 8.7 | The per-session `:seon.dev.mcp/new-faults` cursor (`e868e5ec5`) is deleted, replaced by 8.3 | lane launched |
 
+## 10. Contracts and isolation stance (owner 2026-09-24)
+
+| # | Requirement | Status |
+|---|---|---|
+| 10.1 | No `:any`/`:some` ban in function contracts, core or agent: at most one advisory ("deliberate?") silenced by a reason annotation | ruled; lane updating the gate |
+| 10.2 | A stored attribute schema must map to a storable Datahike value type — a storage constraint, stated as such in its refusal | ruled |
+| 10.3 | Root may execute anything outside SCI (JVM mode) against a cluster database; agents work in SCI. True isolation is not a goal | ruled |
+| 10.4 | The goals: full environments cheap to spin up (checkpoint fork + branch), agents collaborating through merge, and agents unable to easily take down the cluster — reviews before merge are the main protection | ruled; drives the checkpoint and merge work |
+
 ## 9. nil means one thing (owner 2026-09-24: "be very clear about what we mean from the start rather than hacking the contracts and having ambiguous nils")
 
 | # | Requirement | Status |
