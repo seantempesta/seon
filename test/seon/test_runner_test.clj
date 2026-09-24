@@ -1,6 +1,7 @@
 (ns seon.test-runner-test
   "Capture and latest-result facts owned by the in-process test runner."
   (:require [clojure.java.io :as io]
+            [datahike.api :as d]
             [dev-cache]
             [seon.dev.dependency-digest :as dependency-digest]
             [clojure.string :as str]
@@ -362,3 +363,25 @@
         (test-support/transacted! connection [changed])
         (is (not= before (get (runner/reach-digests (db/db connection) [test-symbol]) test-symbol))
             "reuse keyed by reach sees the same change")))))
+
+(deftest undigested-declarations-never-share-a-reuse-key
+  ;; Rows admitted before the digest was required: the writer now refuses
+  ;; them, so the pure value is built with Datahike's own `with`.
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            ns-name (symbol (str "reach.undigested" (random-uuid)))
+            rows (mapv #(test-support/program-row database [:seon.test/sym (symbol (str ns-name) %1)] %2)
+                       ["one" "two"] ["(deftest one (is true))" "(deftest two (is false))"])
+            symbols (mapv :seon.test/sym rows)
+            _ (test-support/transacted! connection (into [(test-support/namespace-row database ns-name)] rows))
+            digested (runner/reach-digests (db/db connection) symbols)
+            undigested (:db-after (d/with (db/db connection)
+                                          (for [row rows]
+                                            [:db/retract [:seon.test/sym (:seon.test/sym row)]
+                                             :seon.program/definition-digest (:seon.program/definition-digest row)])))
+            refusal (runner/reach-digests undigested symbols)]
+        (is (every? string? (map digested symbols)) "the digested rows have reuse keys")
+        (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
+        (is (= symbols (:seon.error/offending refusal)) "the refusal names both tests")
+        (is (not-any? #(string? (get refusal %)) symbols) "no reuse key is answered")))))

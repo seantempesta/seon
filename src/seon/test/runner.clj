@@ -827,11 +827,16 @@
         entities (into #{} (keep symbols) names)
         keyword-seeds (reduce into #{} (map #(get-in rows [% ::reach-keys]) entities))
         schema-keys (reach-schema-keys rows schemas keyword-seeds)
+        ;; A name with no program row is host code (`clojure.core/=`); a
+        ;; declared row without its stored digest is unknown evidence.
         node-parts (mapv (fn [name] [name (get-in rows [(get symbols name) ::reach-leaf]
                                                   :seon.error/unknown)]) (sort names))
+        undigested (into [] (comp (filter (fn [[name leaf]] (and (get symbols name) (not (string? leaf)))))
+                                  (map first)) node-parts)
         schema-parts (mapv (fn [key] [key (get-in rows [(get schemas key) ::reach-leaf])])
                            (sort schema-keys))]
-    {::reach-digest (id/digest 64 [test-symbol node-parts schema-parts])
+    {::reach-digest (when (empty? undigested) (id/digest 64 [test-symbol node-parts schema-parts]))
+     ::reach-undigested undigested
      ::reach-refs (when start
                     (into #{} (remove #(= % test-symbol)) names))
      ::reach-dependencies (into entities
@@ -860,13 +865,16 @@
                               previous (reach-refresh database previous test-symbols))
                       missing (remove #(get-in index [::reach-digests % ::reach-refs]) test-symbols)
                       index (reduce (fn [i s] (assoc-in i [::reach-digests s] (reach-entry i s))) index missing)]
-                 (assoc index ::reach-config configuration ::reach-value-identity value-identity ::reach-computed (count missing))))]
+                 (assoc index ::reach-config configuration ::reach-attributes reach-attributes
+                        ::reach-value-identity value-identity ::reach-computed (count missing))))]
   (if holder
    (locking holder
     (let [previous (::reach-index (meta holder))
           revisions (reach-revisions database)
           ;; Equal reach-attribute revisions name the same reach rows at any basis.
+          ;; An index read with other attributes (code before a reload) is not reused.
           usable (and value-identity (= configuration (::reach-config previous))
+                      (= reach-attributes (::reach-attributes previous))
                       (or (< (::reach-basis previous 0) (db/basis-t database))
                           (= value-identity (::reach-value-identity previous))
                           (and revisions (= revisions (::reach-revisions previous)))))
@@ -890,13 +898,31 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.test/sym]]
                   [:or :seon.test/reach-digests :seon.test/unknown-error]]}
   [database test-symbols]
-  (let [entries (reach-entries database test-symbols)]
-    (if (:seon.test/unknown entries)
+  (let [entries (reach-entries database test-symbols)
+        undigested (when-not (:seon.test/unknown entries)
+                     (into (sorted-map) (keep (fn [[s entry]] (when (seq (::reach-undigested entry))
+                                                               [s (::reach-undigested entry)])))
+                           entries))]
+    (cond
+      (:seon.test/unknown entries)
       (assoc (select-keys entries [:seon.error/message :seon.test/unknown])
              :seon.error/at (java.util.Date.)
              :seon.error/layer :seon.test/reach
              :seon.error/operation 'seon.test.runner/reach-digests)
-        (into {} (map (fn [[s entry]] [s (::reach-digest entry)])) entries))))
+      ;; Unknown evidence never keys reuse: equal unknown leaves would match.
+      (seq undigested)
+      {:seon.error/at (java.util.Date.)
+       :seon.error/layer :seon.test/reach
+       :seon.error/operation 'seon.test.runner/reach-digests
+       :seon.error/message (let [declarations (vec (distinct (mapcat val undigested)))]
+                             (str "Reach digest unknown: " (count declarations) " declarations have no stored "
+                                  ":seon.program/definition-digest, first " (pr-str (vec (take 10 declarations)))
+                                  "; reached by " (count undigested) " tests, first "
+                                  (pr-str (vec (take 10 (keys undigested)))) "."))
+       :seon.test/unknown "reach digest"
+       :seon.error/member :seon.program/definition-digest
+       :seon.error/offending (vec (keys undigested))}
+      :else (into {} (map (fn [[s entry]] [s (::reach-digest entry)])) entries))))
 
 (defn reach-memberships
   "The tested closure's function names, including unresolved targets."
