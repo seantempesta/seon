@@ -1936,6 +1936,20 @@
         row))
      result)))
 
+(defn- native-query-result?
+  "True when no find element can carry an encoded value or a decodable map.
+   Pull, aggregate and function-bound elements keep the decoding walk."
+  {:malli/schema [:=> [:cat :map [:vector [:or :nil :keyword [:map [:seon.db/attribute-position :int]] [:vector :keyword]]]] :boolean]}
+  [parsed-query attributes]
+  (let [bound (into #{}
+                    (comp (mapcat :pattern)
+                          (filter #(instance? Variable %))
+                          (map :symbol))
+                    (query-patterns parsed-query))]
+    (and (every? nil? attributes)
+         (every? #(and (instance? Variable %) (bound (:symbol %)))
+                 (parser/find-elements (:qfind parsed-query))))))
+
 (defn- decode-query-result
   [declarations normalized parsed-query result]
   (let [arguments (:args normalized)
@@ -1965,9 +1979,14 @@
 
             :else
             (decode-attribute-maps declarations value)))]
-    (if (and (map? result) (contains? result :ret))
-      (update result :ret decode-result)
-      (decode-result result))))
+    (cond
+      ;; Every find element is a data-pattern variable over no EDN-encoded
+      ;; attribute: each value is a stored datom component the walk would
+      ;; return unchanged, so the result is already native. Walking it cost
+      ;; 5 ms / 21 MB for 19,232 tuples against Datahike's cached 0.002 ms.
+      (native-query-result? parsed-query attributes) result
+      (and (map? result) (contains? result :ret)) (update result :ret decode-result)
+      :else (decode-result result))))
 
 (defn- pull-output-options
   [spec]

@@ -466,6 +466,19 @@
                  (db/pull @connection '[*]
                           [:seon.agent/id "wildcard-agent"])))))))))
 
+(deftest a-query-with-nothing-to-decode-returns-datahikes-value
+  ;; Walking a native result rebuilt every tuple: 5 ms / 21 MB for 19,232
+  ;; cached tuples (2026-09-24). Pattern variables over native attributes
+  ;; return the very value Datahike's query cache holds.
+  (test-support/with-database
+   (fn [connection]
+     (let [database @connection]
+       (doseq [query ['[:find ?entity ?key :where [?entity :seon.schema/key ?key]]
+                      '[:find [?key ...] :where [_ :seon.schema/key ?key]]
+                      '[:find ?entity ?key :where (or [?entity :seon.schema/key ?key])]]]
+         (is (seq (d/q query database)))
+         (is (identical? (d/q query database) (db/q query database)) (pr-str query)))))))
+
 (deftest explicit-and-current-database-forms-are-equivalent
   (test-support/with-database
    (fn [connection]
