@@ -32,10 +32,11 @@
 (def stdout-lock (Object.))
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
 (defonce reload-state (atom {}))
-;; [root cluster] -> the open faults its last discovery observed, and the
-;; latest occurrence instant this MCP session has already reported.
-(defonce observed-faults (atom {}))
-(defonce reported-at (atom {}))
+;; [root cluster branch] -> the basis of the last evaluation's error window there
+;; (branch nil = the shared cluster context). A value, not a queue: absent after a
+;; bridge restart, so the next window starts at 0 and over-shows, never under-shows.
+(defonce window-bases (atom {}))
+(def max-window-errors 20)
 
 (defn- content-text
   {:seon.fn/projection-boundary :none}
@@ -109,8 +110,6 @@
                             {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
                            (~'seon.cluster/mcp-runtime-observation ~cluster))))
                (catch Exception _ nil))]
-         (when observation
-           (swap! observed-faults assoc [root cluster] (:seon.dev.mcp/open-faults observation)))
          {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster
           :seon.dev.mcp/path (str (io/file root "data/clusters" cluster "prepl.edn"))
           :seon.dev.mcp/state (if observation
@@ -622,6 +621,51 @@
                                   :seon.dev.mcp/class (.getName (class throwable))}
                           (ex-data throwable)))))))
 
+(defn- window-form
+  "Read the evaluated branch's errors in (since, its current basis] through `seon.error/occurred-since`."
+  [cluster branch since]
+  (pr-str
+   `(do
+      ((requiring-resolve 'seon.cluster/project-next-prepl-value!) {:seon.dev.mcp/read-only? true})
+      (let [instance# (get @@(requiring-resolve 'seon.operator.runtime/running-instances) ~cluster)
+            connection# (if ~branch
+                          ((requiring-resolve 'seon.cluster.registry/active-branch-connection)
+                           {:seon.store/store (:seon.store/store instance#) :seon.store/branch (keyword ~branch)})
+                          (:seon.db/connection (:seon.turn.loop/cluster instance#)))
+            since# (resolve 'seon.error/occurred-since)]
+        (cond
+          (nil? connection#) {:seon.dev.mcp/window :unknown :seon.error/message "No live connection holds this branch."}
+          (nil? since#) {:seon.dev.mcp/window :unknown :seon.error/message "This JVM's seon.error has no occurred-since (RESET NEEDED)."}
+          :else (let [database# ((requiring-resolve 'seon.db/db) connection#)
+                      errors# (since# database# ~since)]
+                  (if (map? errors#)
+                    {:seon.dev.mcp/window :unknown :seon.error/error errors#}
+                    {:seon.db/basis-t ((requiring-resolve 'seon.db/basis-t) database#)
+                     :seon.dev.mcp/count (count errors#)
+                     :seon.dev.mcp/errors (vec (take ~max-window-errors errors#))})))))))
+
+(defn- branch-errors!
+  "The errors written on the evaluated branch since this bridge's previous
+  evaluation there, or nil when none; advances that branch's window basis.
+  Runs on the evaluation's own session, so it pays no second discovery."
+  [session timeout-ms [_ cluster branch :as key]]
+  (let [since (get @window-bases key 0)
+        value (try (.write ^java.io.Writer (:writer session) (str (window-form cluster branch since) "\n"))
+                   (.flush ^java.io.Writer (:writer session))
+                   (terminal-projection (mapv decoded-projection-event
+                                              (collect-prepl-response! session timeout-ms)))
+                   (catch Throwable throwable
+                     ;; a half-read reply would desynchronize the next evaluation
+                     (close-clj-session! ((juxt :root :cluster :session-id) session))
+                     {:seon.dev.mcp/window :unknown :seon.error/message (ex-message throwable)}))
+        value (or (:seon.dev.mcp/value value) value)]
+    (when-let [basis (:seon.db/basis-t value)]
+      (swap! window-bases assoc key basis))
+    (when (or (:seon.dev.mcp/window value) (pos? (:seon.dev.mcp/count value 0)))
+      (cond-> (assoc value :seon.dev.mcp/branch (or branch :cluster) :seon.dev.mcp/since since)
+        (< max-window-errors (:seon.dev.mcp/count value 0))
+        (assoc :seon.dev.mcp/requery (str "(seon.error/occurred-since database " since ")"))))))
+
 (defn- execute-clj-eval
   [{:keys [code root cluster mode session_id timeout_ms] :as request}]
   (let [root (canonical-root root)
@@ -688,10 +732,14 @@
                           :seon.dev.mcp/namespace (str namespace-symbol)
                           :seon.dev.mcp/session-id session-id
                           :seon.dev.mcp/form code
-                          :seon.dev.mcp/events events}]
-            (if (:exception terminal)
-              (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
-              (mcp-success response))))
+                          :seon.dev.mcp/events events}
+                window (branch-errors! session timeout-ms
+                                       [root cluster (when (= "sci" mode) (:branch request))])]
+            (cond-> (if (:exception terminal)
+                      (mcp-error (assoc response :seon.dev.mcp/failure :evaluation))
+                      (mcp-success response))
+              window (update :content conj {:type "text"
+                                            :text (content-text {:seon.dev.mcp/branch-errors window})}))))
         (catch SocketTimeoutException _
           (close-clj-session! key)
           (mcp-error {:seon.dev.mcp/failure :timeout
@@ -900,21 +948,6 @@
 ;;; JSON-RPC
 ;;; ---------------------------------------------------------------------------
 
-(defn- later? [a b] (or (nil? b) (pos? (compare a b))))
-
-(defn- new-faults!
-  "Open faults whose latest occurrence this session has not reported; advance the cursor."
-  []
-  (let [observed @observed-faults
-        fresh (vec (for [[[_ cluster :as k] faults] observed
-                         :let [seen (get @reported-at k)]
-                         fault faults
-                         :when (later? (:seon.error.occurrence/last-at fault) seen)]
-                     (assoc fault :seon.dev.mcp/cluster cluster)))]
-    (doseq [[k faults] observed, at (map :seon.error.occurrence/last-at faults)]
-      (swap! reported-at update k #(if (later? at %) at %)))
-    fresh))
-
 (defn- send-response
   {:seon.fn/external-sink :ai-visible-text
    :seon.fn/projection-boundary :none}
@@ -954,14 +987,10 @@
       "tools/call"
       (let [{:keys [name arguments]} params]
         (let [result (execute-tool name arguments)
-              error (:error @reload-state)
-              faults (new-faults!)]
+              error (:error @reload-state)]
           (send-result id (cond-> result
                             error (update :content conj
-                                          {:type "text" :text (content-text error)})
-                            (seq faults) (update :content conj
-                                                 {:type "text"
-                                                  :text (content-text {:seon.dev.mcp/new-faults faults})})))
+                                          {:type "text" :text (content-text error)})))
           (when error (swap! reload-state dissoc :error))))
 
       (when id

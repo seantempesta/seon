@@ -1528,6 +1528,53 @@
                       :seon.error/basis-t (db/basis-t database)}
                      attribution))))
 
+(defn occurred-since
+  "The unresolved errors written on `database`'s branch after basis `since`, one
+  entry per signature: the window (since, basis of `database`]. Shown once per
+  window, no seen-flag; a recurrence writes its occurrence again and re-enters.
+  The count sums the touched occurrences' cumulative counts. A branch other than
+  `database`'s own marks a core fault's cluster-branch copy."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/basis-t]
+                  [:or [:vector [:map [:seon.error/signature :seon.error/signature]
+                                 [:seon.error/operation :seon.error/operation]
+                                 [:seon.error.occurrence/message :seon.error.occurrence/message]
+                                 [:seon.error.occurrence/count :seon.error.occurrence/count]
+                                 [:seon.error.occurrence/branch {:optional true} [:set :seon.store/branch]]]]
+                   :seon.db/error-result]]}
+  [database since]
+  (let [rows (db/q '[:find ?signature ?operation ?message ?count ?tx ?occurrence
+                     :in $ ?since
+                     :where [?occurrence :seon.error.occurrence/last-at _ ?tx]
+                            [(> ?tx ?since)]
+                            [?error :seon.error/occurrences ?occurrence]
+                            [?error :seon.error/signature ?signature]
+                            [?error :seon.error/operation ?operation]
+                            [?occurrence :seon.error.occurrence/message ?message]
+                            [?occurrence :seon.error.occurrence/count ?count]
+                            ;; not-join: Datahike's `not` drops ?tx from the predicate
+                            (not-join [?error ?tx]
+                                      [?error :seon.error/resolved-tx ?resolution]
+                                      [(>= ?resolution ?tx)])]
+                   database since)
+        branches (when-not (map? rows)
+                   (db/q '[:find ?occurrence ?branch :in $ [?occurrence ...]
+                           :where [?occurrence :seon.error.occurrence/branch ?branch]]
+                         database (mapv peek rows)))]
+    (cond
+      (map? rows) rows
+      (map? branches) branches
+      :else
+      (let [branch (into {} branches)]
+        (->> (group-by first rows)
+             (sort-by (fn [[_ group]] (- (reduce max (map #(nth % 4) group)))))
+             (mapv (fn [[signature group]]
+                     (let [[_ operation message] (apply max-key #(nth % 4) group)
+                           branches (into #{} (keep (comp branch peek)) group)]
+                       (cond-> {:seon.error/signature signature :seon.error/operation operation
+                                :seon.error.occurrence/message message
+                                :seon.error.occurrence/count (reduce + (map #(nth % 3) group))}
+                         (seq branches) (assoc :seon.error.occurrence/branch branches))))))))))
+
 (defn commit-tx
   "Transaction data for one observation, or its acquisition refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/commit-tx-request]
