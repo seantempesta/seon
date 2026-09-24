@@ -159,7 +159,7 @@
                                       (seon.eval/of-agent (db/db connection) aid))))]
              (println {:seon.test/issue-status :failed :seon.eval/shown shown})
              (is (str/includes? shown (str test-symbol)) shown)
-             (is (str/includes? shown (:seon.test/failure-message red)) shown))
+             (is (str/includes? shown (tests/failure-message red)) shown))
            (is (= 1 (:seon.test/fail-count red)) (pr-str red))
            (is (string? red-run))
            (is (integer? (:seon.test.run/basis-t red)))
@@ -221,7 +221,7 @@
            (plan/run-issue-tests! handle aid)
            (let [expired (evidence test-symbol)]
              (is (pos? (:seon.test/error-count expired)) (pr-str expired))
-             (is (seq (:seon.test/failure-message expired)))
+             (is (seq (tests/failure-message expired)))
              (is (= steady-run (run-id steady-symbol)))
              (is (nil? (resolved))))
            (support/transacted! connection

@@ -838,7 +838,9 @@
                 (str "\n" (:seon.test/sym test-row) ": "
                      (case (:seon.issue.test/state test-row)
                        :verified "passed" :red "failed" :unrun "not run" "not verified")
-                     (when-let [failure (:seon.test/failure-message test-row)]
+                     (when-let [failure (if (seq (:seon.test.failure/reports test-row))
+                                          (seon.test/failure-message test-row)
+                                          (:seon.test/failure-message test-row))]
                        (str "\n" failure)))))))
 
 (defn- status-view
