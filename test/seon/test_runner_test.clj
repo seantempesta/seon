@@ -10,6 +10,7 @@
             [seon.test-runner-failure-fixture]
             [sci.core :as sci]
             [seon.error :as error]
+            [seon.operator.runtime]
             [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as test-support]))
@@ -320,3 +321,8 @@
         (is (< (count message) 10000)
             "the whole argument in the refusal's ex-data is not printed"))
       (finally (remove-ns (ns-name (:ns (meta test-var))))))))
+
+(deftest the-drift-snapshot-names-the-running-clusters
+  (let [running (set (keys @seon.operator.runtime/running-instances))]
+    (is (seq running) "a running cluster is the subject")
+    (is (= running (::runner/snapshot-live-clusters (#'runner/ambient-snapshot))))))

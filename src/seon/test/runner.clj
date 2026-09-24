@@ -624,7 +624,9 @@
                               entries)))
                (m/function-schemas))
          ::snapshot-live-clusters
-         (or (some-> (resolve-loaded 'seon.cluster/running-instances)
+         ;; The owner's Var: `find-var` sees interned Vars only, and
+         ;; `seon.cluster` merely referred this one, so that name read nil.
+         (or (some-> (resolve-loaded 'seon.operator.runtime/running-instances)
                      var-get deref keys set)
              #{})
          ;; A LIVE CLUSTER'S SCHEMA REGISTRY IS NOT A MEMBER HERE.
