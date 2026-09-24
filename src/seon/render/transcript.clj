@@ -16,6 +16,7 @@
             [seon.context :as context]
             [seon.turn :as turn]
             [seon.config :as config]
+            [seon.env :as env]
             [seon.error :as error]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -1461,16 +1462,18 @@
   "The calibration the prompt itself would price these units against.
 
   A model with recorded usage supplies its own ratio through
-  `seon.cluster.prompt/agent-calibration`; an agent with no settled attempt
-  yet uses the measured shipped prior rather than inventing one."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id [:sequential :map]] :seon.ai.tokens/calibration]}
-  [database agent-id rows]
+  `seon.cluster.prompt/agent-calibration` under the cluster the request's
+  context environment names; an agent with no settled attempt yet uses the
+  measured shipped prior rather than inventing one."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.boot/cluster-name]
+                       :seon.agent/id [:sequential :map]] :seon.ai.tokens/calibration]}
+  [database cluster-name agent-id rows]
   (let [model (some :seon.ai/model
                     (reverse (sort-by :seon.ai.attempt/ordinal
                                       (mapcat :seon.turn/attempts rows))))
         fitted (when model
                  ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
-                  database agent-id model))]
+                  database cluster-name agent-id model))]
     (if (or (nil? fitted) (or (:seon.db/invalid-read fitted) (:seon.schema/expected-value fitted) (:seon.config/error-key fitted) (:seon.config/missing-effective fitted) (:seon.cluster.prompt/missing-cluster fitted) (:seon.cluster.prompt/missing-config fitted)))
       tokens/shipped-calibration
       fitted)))
@@ -1588,7 +1591,8 @@
         by-eid (into {} (map (juxt :db/id identity)) (if (vector? rows) rows []))
         projection (when-let [ctx (:seon.sci.eval/ctx request)]
                      ((requiring-resolve 'seon.sci.kernel/context-projection) ctx))
-        calibration (outline-calibration database agent-id (if (vector? rows) rows []))
+        calibration (outline-calibration database (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request))) agent-id
+                                         (if (vector? rows) rows []))
         by-turn (group-by #(get-in (:seon.render/value %)
                                    [:seon.cluster.eval/run :db/id])
                           entries)
@@ -1783,7 +1787,7 @@
         effects (ledger-effects database agent-id rows)
         calibrations (into {} (for [model (distinct (keep #(get-in % [::attempt :seon.ai/model]) rows))]
                                 [model ((requiring-resolve 'seon.cluster.prompt/agent-calibration)
-                                        database agent-id model)]))]
+                                        database (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request))) agent-id model)]))]
     {::evaluations evaluations
      ::rows (mapv #(assoc % ::effects (turn-effects effects %)) rows)
      ::calibrations calibrations}))

@@ -17,6 +17,7 @@
             [seon.config :as config]
             [seon.context :as context]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.print :as print]
             [seon.render :as render]
             [seon.repl :as repl]
@@ -35,45 +36,40 @@
 
 (def ^:private default-depth 2)
 
-(defn- config-cluster-name
-  [database]
-  (db/q '[:find ?cluster-name .
-          :where
-          [_ :seon.config/cluster ?cluster-name]]
-        database))
+(defn- request-cluster-name
+  "The cluster named by the environment the request's context carries, or nil.
+
+  The turn hands its cluster context; that context's environment is the one
+  place the cluster is named, so no database row is asked to guess it."
+  {:malli/schema [:=> [:cat :seon.cluster.prompt/request] [:maybe :seon.boot/cluster-name]]}
+  [request]
+  (:seon.boot/cluster-name (env/of (:seon.sci.eval/ctx request))))
 
 (defn- effective-ai-settings
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.boot/cluster-name] :seon.agent/id]
                   [:or :seon.config/effective :seon.config/error :seon.db/invalid-read-error
                    :seon.schema/validation-refusal
                    :seon.cluster.prompt/missing-cluster-error
                    :seon.cluster.prompt/missing-config-error]]}
-  [database agent-id]
-  (let [cluster-name (config-cluster-name database)]
-    (cond
-      (or (:seon.db/invalid-read cluster-name) (:seon.schema/expected-value cluster-name))
-      cluster-name
-
-      (nil? cluster-name)
-      {:seon.cluster.prompt/missing-cluster agent-id
-       :seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/prompt
-       :seon.error/operation 'seon.cluster.prompt/effective-ai-settings
-       :seon.error/message
-       "The prompt's database has no effective cluster configuration."
-       :seon.error/data {:seon.agent/id agent-id}}
-
-      :else
-      (let [effective (config/effective database cluster-name)]
-        (cond
-          (:seon.config/missing-effective effective)
-          (assoc effective ::missing-config agent-id)
-          (or (:seon.config/error-key effective) (:seon.db/invalid-read effective))
-          effective
-          :else
-          (let [overlay (ai/agent-overlay database agent-id)]
-            (if (or (:seon.db/invalid-read overlay) (:seon.schema/expected-value overlay))
-              overlay
-              (ai/settings effective overlay))))))))
+  [database cluster-name agent-id]
+  (if (nil? cluster-name)
+    {:seon.cluster.prompt/missing-cluster agent-id
+     :seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/prompt
+     :seon.error/operation 'seon.cluster.prompt/effective-ai-settings
+     :seon.error/message
+     "The prompt's caller named no cluster: its context carries no environment cluster name."
+     :seon.error/data {:seon.agent/id agent-id}}
+    (let [effective (config/effective database cluster-name)]
+      (cond
+        (:seon.config/missing-effective effective)
+        (assoc effective ::missing-config agent-id)
+        (or (:seon.config/error-key effective) (:seon.db/invalid-read effective))
+        effective
+        :else
+        (let [overlay (ai/agent-overlay database agent-id)]
+          (if (or (:seon.db/invalid-read overlay) (:seon.schema/expected-value overlay))
+            overlay
+            (ai/settings effective overlay)))))))
 
 (defn- calibration-for
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ai/model
@@ -138,11 +134,15 @@
    (calibration-for database model fallback-calibration agent-id)))
 
 (defn agent-calibration
-  "Fit an agent's recent model attempts, falling back to its config prior."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id :seon.ai/model]
+  "Fit an agent's recent model attempts, falling back to its config prior.
+
+  The caller names the cluster whose configuration supplies that prior; a
+  missing name or configuration is returned as the refusal `prompt` gives."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.boot/cluster-name]
+                       :seon.agent/id :seon.ai/model]
                   [:or :seon.ai.tokens/calibration :seon.error/value]]}
-  [database agent-id model]
-  (let [settings (effective-ai-settings database agent-id)]
+  [database cluster-name agent-id model]
+  (let [settings (effective-ai-settings database cluster-name agent-id)]
     (if (or (:seon.cluster.prompt/missing-cluster settings)
             (:seon.cluster.prompt/missing-config settings)
             (:seon.config/error-key settings) (:seon.db/invalid-read settings)
@@ -431,7 +431,7 @@
   [database request]
   (validate-request! (db/carried-projection database) request)
   (let [agent-id (:seon.agent/id request)
-        settings (effective-ai-settings database agent-id)]
+        settings (effective-ai-settings database (request-cluster-name request) agent-id)]
     (if (or (:seon.cluster.prompt/missing-cluster settings)
             (:seon.cluster.prompt/missing-config settings)
             (:seon.config/error-key settings) (:seon.db/invalid-read settings)
