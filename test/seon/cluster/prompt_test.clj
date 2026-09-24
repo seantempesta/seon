@@ -16,7 +16,8 @@
             [seon.turn :as turn]
 
             [seon.blob :as blob]
-            [seon.test-support :as support])
+            [seon.test-support :as support]
+            [datahike.api :as d])
   (:import [java.util Date]))
 
 (def ^:private caps
@@ -547,3 +548,27 @@
              (let [drifted (prompt/prompt (db/db connection) (request connection ctx))]
                (is (string? (:seon.schema/expected-value drifted)))
                (is (= "walk-run" (:seon.turn/id drifted)))))))))))
+
+
+(deftest an-unread-usage-history-is-not-an-empty-one
+  ;; THE CLASS: a refused usage read answered the budget's prior, the same
+  ;; value as a model with no attempts, so the budget trusted an assumed
+  ;; ratio. A store without the usage attributes makes the read refuse.
+  (support/with-database
+   (fn [connection]
+     (testing "no recorded attempts is nothing: the prior is named"
+       (is (= :seon.ai.tokens/shipped-prior
+              (:seon.ai.tokens/basis
+               (prompt/model-calibration (db/db connection) "no-usage-model")))))
+     (let [configuration {:store {:backend :memory :id (random-uuid)}
+                          :schema-flexibility :write :keep-history? true}]
+       (d/create-database configuration)
+       (let [unread (d/connect configuration)]
+         (try
+           (let [calibration (prompt/model-calibration (d/db unread) "no-usage-model")]
+             (is (true? (:seon.db/invalid-read calibration)) (pr-str calibration))
+             (is (= 'seon.db/q (:seon.error/operation calibration)))
+             (is (not (contains? calibration :seon.ai.tokens/basis))))
+           (finally
+             (d/release unread)
+             (d/delete-database configuration))))))))

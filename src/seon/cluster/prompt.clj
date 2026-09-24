@@ -74,7 +74,7 @@
 (defn- calibration-for
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ai/model
                        :seon.ai.tokens/calibration [:or :nil :seon.agent/id]]
-                  :seon.ai.tokens/calibration]}
+                  [:or :seon.ai.tokens/calibration :seon.db/invalid-read-error]]}
   [database model fallback-calibration agent-id]
   (let [query (cond->
                '{:find [?attempt ?at ?characters ?provider-tokens]
@@ -91,14 +91,17 @@
                                    [?agent :seon.agent/id ?agent-id]]))
         rows (if agent-id (db/q query database model agent-id)
                  (db/q query database model))]
-    (tokens/recent-calibration
-     (keep (fn [[_attempt _at characters provider-tokens]]
-             (when (and (int? provider-tokens) (pos? provider-tokens))
+    ;; An unread usage history is not an empty one: the prior stands in only
+    ;; for a model with no recorded attempts, never for a refused read.
+    (if (:seon.db/invalid-read rows)
+      rows
+      (tokens/recent-calibration
+       (keep (fn [[_attempt _at characters provider-tokens]]
+               (when (and (int? provider-tokens) (pos? provider-tokens))
                  {:seon.ai.tokens/characters characters
                   :seon.ai.usage/prompt-tokens provider-tokens}))
-           (sort-by (juxt second first)
-                    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows)) [] rows)))
-     10 fallback-calibration)))
+             (sort-by (juxt second first) rows))
+       10 fallback-calibration))))
 
 (defn model-calibration
   "Fit this model's characters-per-token ratio to its own recorded usage.
@@ -114,18 +117,19 @@
   The four-argument arity scopes the latest ten billed attempts to the agent.
   The shorter arities retain model-wide inspection for existing callers.
   A model with no recorded usage yet — a fresh cluster's first turns —
-  uses the supplied measured prior without inventing an error band.
+  uses the supplied measured prior without inventing an error band. A
+  usage read that refuses returns its invalid read, never the prior.
   Recorded drift stays queryable: this function IS the query."
   {:malli/schema
    [:function
     [:=> [:cat :seon.db/database-value :seon.ai/model]
-     :seon.ai.tokens/calibration]
+     [:or :seon.ai.tokens/calibration :seon.db/invalid-read-error]]
     [:=> [:cat :seon.db/database-value :seon.ai/model
           :seon.ai.tokens/calibration]
-     :seon.ai.tokens/calibration]
+     [:or :seon.ai.tokens/calibration :seon.db/invalid-read-error]]
     [:=> [:cat :seon.db/database-value :seon.ai/model
           :seon.ai.tokens/calibration :seon.agent/id]
-     :seon.ai.tokens/calibration]]}
+     [:or :seon.ai.tokens/calibration :seon.db/invalid-read-error]]]}
   ([database model]
    (model-calibration database model tokens/shipped-calibration))
   ([database model fallback-calibration]
@@ -431,22 +435,26 @@
   [database request]
   (validate-request! (db/carried-projection database) request)
   (let [agent-id (:seon.agent/id request)
-        settings (effective-ai-settings database (request-cluster-name request) agent-id)]
+        settings (effective-ai-settings database (request-cluster-name request) agent-id)
+        refused (fn [error]
+                  (assoc error :seon.cluster.prompt/error-agent-id agent-id
+                         :seon.cluster.prompt/derivation-observation
+                         {:seon.error.evidence/attribute :seon.error/message
+                          :seon.error.evidence/value (:seon.error/message error)}))]
     (if (or (:seon.cluster.prompt/missing-cluster settings)
             (:seon.cluster.prompt/missing-config settings)
             (:seon.config/error-key settings) (:seon.db/invalid-read settings)
             (:seon.schema/expected-value settings))
-      (assoc settings :seon.cluster.prompt/error-agent-id agent-id
-                       :seon.cluster.prompt/derivation-observation
-                       {:seon.error.evidence/attribute :seon.error/message
-                        :seon.error.evidence/value (:seon.error/message settings)})
-      (acquire-context-report
-       database request
-       (:seon.config.ai/prompt-token-budget settings)
-       (model-calibration
-        database
-        (:seon.config.ai/model settings)
-        (tokens/prior-calibration
-         (:seon.config.ai/chars-per-token-prior settings))
-        agent-id)
-       settings))))
+      (refused settings)
+      (let [calibration (model-calibration
+                         database
+                         (:seon.config.ai/model settings)
+                         (tokens/prior-calibration
+                          (:seon.config.ai/chars-per-token-prior settings))
+                         agent-id)]
+        (if (:seon.db/invalid-read calibration)
+          (refused calibration)
+          (acquire-context-report
+           database request
+           (:seon.config.ai/prompt-token-budget settings)
+           calibration settings))))))
