@@ -993,6 +993,7 @@
                               (handle child (test-support/fork-cluster-ctx child "release-join")
                                       "release-join")
                               :seon.agent/id % :seon.agent/routing routing})]
+        (db/call-with-custody {:seon.db/connection child} (fn []
         (test-support/transacted!
          child (-> (created-agent-tx child "release-join" "stuck")
                    (into (created-agent-tx child "release-join" "idle"))
@@ -1028,7 +1029,7 @@
           (finally
             (.release release-provider 1000)
             (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
-              (agent/release-context! attempt))))))))
+              (agent/release-context! attempt))))))))))
 
 (deftest turn-start-has-the-same-declared-loud-completion-backstop
   (with-connection
