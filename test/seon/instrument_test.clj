@@ -59,6 +59,15 @@
 
 (use-fixtures :each scoped-instrumentation)
 
+(defn- arm-with!
+  "Arm `candidate` as adoption does: compile its wrapper once against
+  `projection`, then install that wrapper."
+  [candidate contract projection caps policy]
+  (#'instrument/arm-var! candidate contract projection
+                         (#'instrument/compiled-wrapper projection (symbol candidate) contract
+                                                        (mi/-f->original @candidate) caps policy)
+                         policy))
+
 (deftest an-invalid-core-error-mode-is-an-evidence-complete-value
   ;; `apply!` IS THE ARM. Boot calls it on a JVM whose contracts are not
   ;; installed yet, and that is the only state in which its own typed refusal
@@ -177,12 +186,12 @@
                         outcome))]
        (try
          (doseq [mode [:panic :record]]
-           (#'instrument/arm-var! candidate contract projection projection caps
-                                 {:seon.config/on-core-error mode
-                                  :seon.config.error/max-evidence-bytes
-                                  (:seon.config.error/max-evidence-bytes
-                                   (test-support/effective-config))
-                                  :seon.flow/commit-fault! recorder})
+           (arm-with! candidate contract projection caps
+                      {:seon.config/on-core-error mode
+                       :seon.config.error/max-evidence-bytes
+                       (:seon.config.error/max-evidence-bytes
+                        (test-support/effective-config))
+                       :seon.flow/commit-fault! recorder})
            (let [before @calls
                  input (if (= :panic mode)
                          (test-support/refusal-data #(candidate 42)) (candidate 42))
@@ -920,6 +929,40 @@
     (try (body namespace-name)
          (finally (remove-ns namespace-name)))))
 
+(deftest one-wrapper-per-adoption-keyed-by-content-never-by-call
+  ;; Two equal-content projection objects arm one wrapper; a call carrying
+  ;; another projection never re-selects or recompiles it; only adopting
+  ;; changed content rearms.
+  (with-disposable-namespace
+   (fn [namespace-name]
+     (let [request-key :seon.instrument-test/content-keyed-request
+           forms (assoc (schema/snapshot) request-key [:map [::value :int]])
+           first-projection (schema/build-projection forms)
+           equal-projection (schema/build-projection forms)
+           changed-projection (schema/build-projection
+                               (assoc forms request-key [:map [::value :string]]))
+           candidate (intern namespace-name 'content-keyed identity)
+           arm! #(instrument/apply! {:seon.config/on-core-error :panic
+                                     :seon.schema/projection %})]
+       (alter-meta! candidate assoc :malli/schema [:=> [:cat request-key] :map])
+       (is (not (identical? first-projection equal-projection)))
+       (arm! first-projection)
+       (let [armed @candidate]
+         (arm! equal-projection)
+         (is (identical? armed @candidate) "equal content keeps the one wrapper")
+         (is (= {::value 1}
+                (schema/call-with-projection
+                 changed-projection
+                 #(candidate (with-meta {::value 1}
+                               {:seon.schema/projection changed-projection}))))
+             "a call's own projection does not re-select the armed contract")
+         (is (thrown? clojure.lang.ExceptionInfo (candidate {::value "one"})))
+         (is (identical? armed @candidate))
+         (arm! changed-projection)
+         (is (not (identical? armed @candidate)) "changed content rearms")
+         (is (= {::value "one"} (candidate {::value "one"})))
+         (is (thrown? clojure.lang.ExceptionInfo (candidate {::value 1}))))))))
+
 (deftest cold-arming-keeps-acquired-predicates-without-an-ambient-binding
   ;; `apply!` arms from the supplied projection's retained contract, so the
   ;; installed wrapper validates with the predicates that projection acquired
@@ -1604,10 +1647,10 @@
         effective (test-support/effective-config)]
     (try
       (alter-meta! candidate assoc :malli/schema contract)
-      (#'instrument/arm-var! candidate contract loaded loaded (config/result-caps effective)
-                             {:seon.config/on-core-error :panic
-                              :seon.config.error/max-evidence-bytes
-                              (:seon.config.error/max-evidence-bytes effective)})
+      (arm-with! candidate contract loaded (config/result-caps effective)
+                 {:seon.config/on-core-error :panic
+                  :seon.config.error/max-evidence-bytes
+                  (:seon.config.error/max-evidence-bytes effective)})
       (is (nil? (find (:seon.schema.projection/forms handed) request-key)))
       (is (= {::value 1} (schema/call-with-projection handed #(candidate {::value 1}))))
       (is (thrown? clojure.lang.ExceptionInfo

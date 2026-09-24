@@ -2,6 +2,7 @@
   "Cause-chain readers preserve producer errors and ordinary exception data.
   Their error-handling contracts use the base; each producer owns its named output."
   (:require [clojure.test :refer [deftest is testing]]
+            [malli.instrument :as mi]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -35,9 +36,13 @@
               buried (fn [data]
                        (RuntimeException. "wrapper" (ex-info "buried" data)))]
           (doseq [entry entries]
-            (#'instrument/arm-var! entry (:malli/schema (meta entry))
-                                   projection projection caps
-                                   {:seon.config/on-core-error :panic}))
+            (let [authored (:malli/schema (meta entry))
+                  policy {:seon.config/on-core-error :panic}]
+              (#'instrument/arm-var! entry authored projection
+                                     (#'instrument/compiled-wrapper
+                                      projection (symbol entry) authored
+                                      (mi/-f->original @entry) caps policy)
+                                     policy)))
           (doseq [entry entries
                   [label data] [[:base base]
                                 [:declared-schema domain]

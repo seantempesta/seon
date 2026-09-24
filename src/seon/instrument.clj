@@ -551,31 +551,6 @@
 
 (def ^:dynamic ^:private *compiling-contract* false)
 
-(defn- request-member
-  {:malli/schema [:=> [:cat :seon.schema/value :qualified-keyword] :seon.schema/value]}
-  [value member]
-  (when (map? value)
-    (try (get value member)
-         (catch ClassCastException _ nil))))
-
-(defn- supplied-projection
-  {:malli/schema [:=> [:cat [:sequential :seon.schema/value]] [:or :nil :seon.schema/projection]]}
-  [arguments]
-  (or (some (fn [argument]
-              (some (fn [candidate]
-                      (when (request-member candidate :seon.schema.projection/registry)
-                        candidate))
-                    [(when (instance? clojure.lang.IMeta argument)
-                       (:seon.schema/projection (meta argument)))
-                     (request-member argument :seon.schema/projection)
-                     (request-member
-                      (request-member argument :seon.env/environment)
-                      :seon.schema/projection)]))
-            arguments)
-      (let [projection ((mi/-f->original schema/handed-projection))]
-        (when (request-member projection :seon.schema.projection/registry)
-          projection))))
-
 (defn- observation-location
   "Ordered schema or value path, preserving arbitrary observed keys."
   {:malli/schema [:=> [:cat :seon.sci.admit/caps [:sequential :seon.schema/value]] :map]}
@@ -779,33 +754,19 @@
             (select-keys (:seon.schema.projection/forms projection)
                          (keys definitions))))))
 
-(defn- validates-loaded-contract?
-  "True when `projection` can validate the loaded function's own contract.
-
-  It must carry the same function contract the Var was armed with (a stored
-  row of a cluster that retains an older program may declare another) and
-  declare every schema key of `definitions`."
-  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value
-                       [:map-of :keyword :seon.schema/value]] :boolean]}
-  [projection function-symbol contract definitions]
-  (let [forms (:seon.schema.projection/forms projection)]
-    (and (= contract (get (:seon.schema.projection/function-contracts projection)
-                          function-symbol contract))
-         (every? #(some? (find forms %)) (keys definitions)))))
-
 (defn- arm-var!
   {:malli/schema
    [:function
-    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable :seon.sci.admit/caps] :seon.instrument/callable]
-    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable :seon.sci.admit/caps [:or :nil :map]] :seon.instrument/callable]
-    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable :seon.sci.admit/caps [:or :nil :map] [:or :nil :seon.program/definition-digest]] :seon.instrument/callable]]}
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable] :seon.instrument/callable]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable [:or :nil :map]] :seon.instrument/callable]
+    [:=> [:cat :seon.instrument/loaded-var :seon.schema/value :seon.schema/projection :seon.instrument/callable [:or :nil :map] [:or :nil :seon.program/definition-digest]] :seon.instrument/callable]]}
   ;; `boot-wrapper` is the wrapper arming compiled once for this Var; the
   ;; installation calls that same object, so a call never compiles.
-  ([candidate authored projection boot-wrapper caps]
-   (arm-var! candidate authored projection boot-wrapper caps nil nil))
-  ([candidate authored projection boot-wrapper caps policy]
-   (arm-var! candidate authored projection boot-wrapper caps policy nil))
-  ([candidate authored projection boot-wrapper caps policy digest]
+  ([candidate authored projection boot-wrapper]
+   (arm-var! candidate authored projection boot-wrapper nil nil))
+  ([candidate authored projection boot-wrapper policy]
+   (arm-var! candidate authored projection boot-wrapper policy nil))
+  ([candidate authored projection boot-wrapper policy digest]
   (alter-var-root
    candidate
    (fn [current]
@@ -823,37 +784,16 @@
                     (profile/cell callable-identity))
              contract (get (:seon.schema.projection/function-contracts projection)
                            function-symbol authored)
-             definitions (contract-definitions projection contract)
-             supplied-wrapper (atom nil)]
+             definitions (contract-definitions projection contract)]
          (profile/with-cell cell
           (with-meta
+           ;; One wrapper per adoption: a call never picks another projection,
+           ;; so it never compiles. Other branches' differing rows interpret
+           ;; in SCI.
            (fn [& arguments]
              (if *compiling-contract*
                (apply original arguments)
-               (profile/timed
-                (let [wrapped
-                      (binding [*compiling-contract* true]
-                        (or (when-let [projection (supplied-projection arguments)]
-                              ;; A supplied projection validates this call only
-                              ;; when it carries the loaded contract and declares
-                              ;; every schema it closes over. A cluster whose
-                              ;; stored program predates the loaded files lacks
-                              ;; them; the files' own declarations then decide.
-                              ;; This installation keeps only its latest
-                              ;; projection's wrapper: the projection never
-                              ;; retains the callable, its policy or its world.
-                              (let [[seen wrapper] @supplied-wrapper]
-                                (if (identical? projection seen)
-                                  wrapper
-                                  (let [wrapper (when (validates-loaded-contract?
-                                                       projection function-symbol
-                                                       contract definitions)
-                                                  (compiled-wrapper projection function-symbol
-                                                                    authored original caps policy))]
-                                    (reset! supplied-wrapper [projection wrapper])
-                                    wrapper))))
-                            boot-wrapper))]
-                  (apply wrapped arguments)))))
+               (profile/timed (apply boot-wrapper arguments))))
            {:malli.instrument/original original
             ::cell cell
             ::policy policy
@@ -898,8 +838,9 @@
   Unrelated contracts are neither inspected nor re-armed.
 
   Host wrappers capture the supplied disposition and recording operation at
-  arm time. Calls validate through their supplied projection or the captured
-  bootstrap declarations. Record-mode acquisition requires a recorder."
+  arm time. Calls validate through the wrapper compiled here, against this
+  adoption's projection; a call's own projection never re-selects it.
+  Record-mode acquisition requires a recorder."
   {:malli/schema
    [:=> [:cat :seon.instrument/request]
     [:or :seon.instrument/applied :seon.instrument/registration-error]]}
@@ -1001,7 +942,7 @@
                                  :seon.error/member function-symbol
                                  :seon.error/throwable built}))
                              (do (when changed (alter-var-root candidate mi/-f->original))
-                                 (arm-var! candidate authored projection built caps policy
+                                 (arm-var! candidate authored projection built policy
                                            (get digests function-symbol))
                                  nil)))))
                       pending)]
@@ -1125,7 +1066,7 @@
                         pending)]
             (arm-var! candidate authored projection wrapper
                       ;; A replaced definition's digest is unknown here.
-                      (:seon.sci.admit/caps policy) policy nil)))))
+                      policy nil)))))
     replaced))
 
 
