@@ -469,3 +469,13 @@
                       acquired (completed! (launch-process! children ["bb" "-e" (pr-str form)]) event-ms)]
                   (is (zero? (:seon.probe/exit acquired)) (:seon.probe/err acquired))
                   (is (= :acquired (:seon.probe/value acquired))))))))))))
+
+(deftest an-uncaught-throwable-without-its-world-is-printed-and-never-stored-elsewhere
+  ;; Before, the sole live instance recorded it: a probe's throwable became the
+  ;; running cluster's core fault. Attribution is only what the throwable carries.
+  (let [printed (java.io.StringWriter.)
+        message (str "uncarried probe " (random-uuid))]
+    (binding [*err* printed]
+      (boot/record-uncaught! "probe-thread" (IllegalStateException. ^String message)))
+    (is (str/includes? (str printed) "SEON CORE FAULT (uncaught, not stored)"))
+    (is (str/includes? (str printed) message) "the throwable is printed whole")))

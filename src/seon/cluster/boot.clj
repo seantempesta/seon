@@ -332,18 +332,16 @@
 (defn record-uncaught!
   "Store one exception no thread caught through the cluster fault recorder.
 
-  The world is the environment the throwable carries; absent that, the sole
-  live instance's (the root agent receives it). With several live instances
-  and no carried world no cluster is chosen: that failure, and a recording
-  the database refuses, panic in both modes on stderr with every cause.
+  The world is the environment the throwable carries, never a guess: without
+  one no cluster is chosen (a probe's throwable is not the sole instance's
+  fault). That failure, and a recording the database refuses, panic in both
+  modes on stderr with every cause.
   `:panic` also prints a stored fault loudly; `:record` stays quiet once
   stored and delivered."
   {:malli/schema [:=> [:cat :string :seon.error/throwable] :nil]}
   [thread-name throwable]
   (let [instances (filterv map? (vals @running-instances))
-        environment (or (carried-environment throwable)
-                        (when (= 1 (count instances))
-                          (env/of (:seon.sci.eval/ctx (first instances)))))]
+        environment (carried-environment throwable)]
     (if-not environment
       (uncaught-emergency! thread-name throwable
                            {:candidates (mapv #(get-in % [:seon.boot/config :seon.boot/cluster-name]) instances)})
