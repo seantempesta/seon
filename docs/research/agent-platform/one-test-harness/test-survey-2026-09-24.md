@@ -122,7 +122,7 @@ member's handle and environment are the world.
 Whole-namespace deletion: `test/fixture_timing_test.clj` (its one test). Its test and the three
 restore-family tests in `test/runner_test.clj` die with their machinery: `with-database`'s second
 branch, `restore-live-cluster-schema!` and `ambient-snapshot` (testing-2026-09-24.md rows 1–2). The three
-restore-family deletions wait for shrink-db row D; the drift and fixture-timing ones can go now. One stale claim found: testing-2026-09-24.md reports
+restore-family deletions wait for shrink-db row D; the drift tests go with the `instrument/state` slice (testing-2026-09-24.md), and the fixture-timing test goes with the `with-database` sweep. One stale claim found: testing-2026-09-24.md reports
 `seon.test.arm` as 254 lines with zero callers, but `src/seon/test/` at this tree holds only
 `accretion.clj`, `cache.clj` and `runner.clj`, so that deletion has already landed.
 
