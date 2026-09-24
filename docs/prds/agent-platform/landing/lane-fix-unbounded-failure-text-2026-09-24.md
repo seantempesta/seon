@@ -2,7 +2,7 @@
 type: landing
 lane: fix-unbounded-failure-text
 created: 2026-09-24
-status: seven commits; slice 2 refuted (no instrument refusal change); default not yet running them
+status: eight commits; revisions slice stopped at a Datahike writer seam; slice 2 refuted (no instrument refusal change); default not yet running them
 ---
 
 # Lane fix-unbounded-failure-text (2026-09-24)
@@ -121,6 +121,37 @@ It needs a declared provenance key, the `seon.test` caller and the runner, about
 Proof root: a fresh `git archive 9b5eefbb7` plus runner.clj and test_runner_test.clj, ready
 in 178.8 s. The parent was HEAD's runner.clj, reloaded into that same JVM with
 `require :reload`, and then mine was reloaded. Both roots were stopped and deleted.
+
+## Third assignment
+
+9. **`bb8adf9ad` runner: `reach-digests` refuses a declaration without a stored digest, by
+   name.** A declared row that has no `:seon.program/definition-digest` used to hash as
+   `:seon.error/unknown`. It now refuses, naming the undigested declarations and the tests
+   that reach them. A name with no program row is host code (`clojure.core/=` and similar)
+   and still hashes as before; a 60-test census on default showed every test reaches such
+   names. The reach index is no longer reused across a change of `reach-attributes`, so an
+   index built before the reload cannot refuse falsely.
+   - Regression `undigested-declarations-never-share-a-reuse-key`: two undigested rows built
+     with Datahike `d/with` get no reuse key. Green on the scratch root (`f16288bd208e`).
+     On the parent it would have answered reuse keys.
+   - Direct probe on mine: the refusal names both tests.
+   - A random sample of 100 real tests on the scratch program answered 100 digests and
+     refused none. That took 7.0 s cold; the pre-existing cost is `seon.id/digest` ×2,723,
+     1.8 s.
+10. **The `program-written-since?` revisions slice is stopped and not committed.** The patch
+    is `tmp/fix-unbounded-revisions-slice.patch`.
+    - Against pure values it is sound and fast: 0.13–0.26 ms / 0.08 MB, where the scan took
+      379–565 ms / 250 MB. Default's scan before the change took 113–118 ms / 258 MB.
+    - In a real request the admission still scanned (691 ms). Datahike's transaction thread
+      bases each write on its own chain value, which carries speculative random-uuid
+      revisions, while the published value carries commit-id revisions. They differed on
+      130 attributes at the same `:max-tx`.
+    - Evidence and the owner seam (the Datahike fork writer) were added to
+      [the issue](../../../seon/issues/the-admission-program-write-check-scans-program-attribute-history.md).
+    - I did not commit the Seon side because it would be dead code until the writer seam
+      exists. That also means the provenance key was not added. Note that the provenance map
+      is declared in `seon.test.run.edn`, not `seon.test.edn`, so whoever lands this needs
+      that file.
 
 ## Evidence (before / after)
 

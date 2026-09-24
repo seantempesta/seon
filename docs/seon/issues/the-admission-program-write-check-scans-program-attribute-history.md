@@ -47,3 +47,29 @@ earlier JVM (`src/seon/cluster/source.clj:826`).
 
 This needs a declared provenance key (`resources/seon/schemas/seon.test.run.edn`), the
 caller in `src/seon/test.clj:1038`, and `src/seon/test/runner.clj`. It is about 20 lines.
+
+## 2026-09-24 finding (lane fix-unbounded-failure-text): the writer's chain never carries committed revisions
+
+I implemented the design above (patch `tmp/fix-unbounded-revisions-slice.patch`) on a
+scratch root built from `f3788c020`. It was not committed. It is correct against pure
+`d/with` values: equal revisions answered `false` in 0.13–0.26 ms / 0.08 MB, where the
+history scan took 379–565 ms / 250 MB. A touched `:seon.fn/doc` answered `true`, which
+agrees with the scan. In a real `seon.test/run`, however, the admission still scanned
+(`program-written-since?` 691 ms). The cause is in Datahike.
+
+- The commit loop publishes `commit-db` with `advance-query-cache-context`, which uses the
+  commit id as the revision (`reference-code/datahike/src/datahike/writer.cljc:246-253`,
+  `query.cljc:2582`).
+- The transaction thread applies the next transaction to its own chain value. That value
+  keeps the speculative context of the previous report, where every touched attribute
+  has a `random-uuid` revision (`db/transaction.cljc:1064-1070`, `db.cljc:448-463`).
+- Probe: one `[:db.fn/call …]` transaction, with no other writes pending. The in-transaction
+  context and `(:db-before report)` agree with each other, and both differ from `@conn`
+  on 130 attribute revisions at the same `:max-tx`. Every attribute written since the
+  writer started therefore compares unequal. The comparison is sound because a mismatch
+  scans, but in production it never matches.
+
+The owner is the Datahike fork writer. After a commit, the chain value that the next
+transaction bases on should adopt the committed context when no later report is pending,
+or the committed revisions should be carried forward onto the chain. Once that seam exists,
+the Seon slice above is about 25 lines.
