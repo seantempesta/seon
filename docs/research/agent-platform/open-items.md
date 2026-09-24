@@ -8,6 +8,8 @@ updated: 2026-09-24
 
 ## Running lanes (ledger: tmp/orchestrator/file-ownership.md)
 
+- Harness first cuts (owner check-in 2026-09-24 "don't we have a large list of work"; root took the recommended option): harness-s12-deletions (13 independent + 54 subsumed turn tests), harness-s0-unknown-results (per-member unknown; green? run-basis-t), harness-s1-attempt-release (attempt owns routing; release awaits graph exit).
+- fix-schema-projection-rules: delete projection-delta; assert-config-display! to admission; :inst false refusal; [:maybe X] one rule.
 - Publication design: three priced options DONE (b8fae5bf8, publication-under-concurrent-lanes-2026-09-24.md), awaiting owner choice: (1) root-only checkpoints, hook lint-only, 0–15 lines, 2–4 h; (2) content-derived reconciliation, 60–100 lines, 12–24 h; (3, recommended) named lane branches → root-accepted merge → fail-closed convergence, the CLAUDE.md/D1 model, 250–450 lines, 40–72 h, with (1) as its interim.
 - Harness design REVISED (c3ceca464), awaiting owner go: ~30 sub-slices, each ≤100 lines; S12 deletions and S0 unknown-result first.
 - Analysis key: fixed c3a225dc7 (:seon.source/analyzer-digest; 11 stale rows converged; unchanged publication 229→249 ms). OVER TEN SECONDS, needs owner authorization: every edit inside the analyzer's reach (338 declarations, 12 namespaces) now costs one full reanalysis, 24.9 s (full-source-refresh! 23.9 s, analyze-rows 13.2 s, with-declarations x866k; issue a-full-reanalysis-publication-takes-twenty-five-seconds.md). The honest fix is making full analysis cheap (clj-kondo is 5.7 s of it), not skipping it.
