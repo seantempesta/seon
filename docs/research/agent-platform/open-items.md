@@ -62,6 +62,16 @@ Rule while fixing: code on the one-happy-path deletion list is deleted or routed
 - Fault delivery: 76e4e0ab6 (a fault with no steward and no attributed agent reaches root with or without an exception class) and addab5ae5 (an oversized fault keeps its cause chain: class, message, first-party frames). :seon.error/chain is blob-only by design. Test-branch faults not copied to cluster: premise wrong — :seon.test.run/branch is the result branch; members' agent-* branches carry no test marker; design (≈15 lines in seon.test member-result: record the member branch, copy? false in fault.clj:144, count its errors as test errors) → S3 lane follow-up. NOTE: 76e4e0ab6 sends MORE faults to root's paid DeepSeek turn once installed — OWNER RULED: record, no LLM wake (dial default off) — lane fault-no-llm-wake, lands before the restart.
 - S1 DONE (aed1b3838 routing owned by the execution handle; d6e93ce72 release marks routing released, joins every graph, closes only after exit, keeps resources on a failed join; 10/0/0, and red without the fix). RESTART NEEDED (boot handle routing; two leaked probe graphs). Verification queue: tmp/orchestrator/verification-queue-2026-09-24.md. Class-1 residue: a failed assertion printing a routing entry OOMed — runner failure-identity/failure-report still pr-str whole expected/actual (runner.clj).
 
+- ROOT LESSON (21:4xZ): with hook publication paused, a restart loads code from the checkout, but schema
+  attributes and test rows install only through publication. S3c's :seon.test.run/loaded-commit-id made EVERY
+  test request refuse ("Bad entity attribute") and new tests read "not eligible". Root publishes at each
+  checkpoint with `bin/seon init --dev default --changed <paths>` (zsh: split the list with `${=paths}`);
+  102 files adopted in 11 s. Start should publish or refuse when the checkout differs from the published
+  program (schema resources especially), rather than run mismatched.
+- Datahike fused-root pin: fork commit fa0cc1a7 (+19/−6, regression datahike.test.fusion-root-pin-test);
+  root runs the fork test, bumps the gitlink, pushes the fork, restarts default. force-branch! was never
+  exposed (it writes fused roots); only commit! was.
+
 ## Integration (root, at the end of the fix round)
 
 1. Default already runs the nuked store from the checkout; after the running lanes land, `bin/seon down && bin/seon start`.
