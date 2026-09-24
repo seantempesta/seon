@@ -5552,6 +5552,12 @@
                                :seon.db.process/id process}
                ;; ONE database value for the derivation
                       next (next-agent-work (db/db connection) request)
+                      ;; A REFUSED DERIVATION IS A CORE FAULT, NOT A SITUATION:
+                      ;; its declared error arm escapes whole to this graph's
+                      ;; fault route instead of reaching `turn` as work.
+                      _ (when (:seon.error/at next)
+                          (throw (ex-info (:seon.error/message next "The next-work read refused.")
+                                          next)))
                       ;; THE BOUND LEARNS ITS SUBJECT HERE, once, from
                       ;; the derivation that decided it. `:open` mints
                       ;; its run inside the turn, so the report supplies
