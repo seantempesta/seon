@@ -5,6 +5,7 @@
   (:require [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.db :as db]
+            [seon.schema :as schema]
             [seon.test-support :as support]))
 
 (defn- queued?
@@ -19,7 +20,10 @@
 
 (deftest a-member-running-across-an-adoption-sees-no-change-and-the-adoption-completes-after-it
   (let [lock (java.util.concurrent.locks.ReentrantReadWriteLock. true)
-        change @#'cluster/call-with-program-change
+        validity (atom nil)
+        commit (random-uuid)
+        change (fn [lock database work]
+                 (@#'cluster/call-with-program-change lock validity database commit work))
         database (db/db (:seon.db/connection (support/execution-handle nil)))
         program (atom :before)
         events (atom [])
@@ -29,7 +33,7 @@
         entered (promise)
         release (promise)
         member (future (cluster/call-excluding-adoption
-                        lock (fn [] (let [seen @program]
+                        lock validity (fn [] (let [seen @program]
                                       (deliver entered true)
                                       @release
                                       (swap! events conj [:member seen @program])
@@ -40,7 +44,7 @@
                                                  adopted)))
         _ (is (queued? lock 1) "the adoption waits for the running member")
         late (future (cluster/call-excluding-adoption
-                      lock (fn [] (swap! events conj [:late @program]) (result "late"))))]
+                      lock validity (fn [] (swap! events conj [:late @program]) (result "late"))))]
     (is (queued? lock 2) "a member starting after the queued adoption waits behind it")
     (is (= :before @program) "nothing was reloaded or armed under the member")
     (deliver release true)
@@ -53,8 +57,49 @@
       (let [own (promise)]
         (is (= "own" (name (:seon.test/sym
                             (deref (future (cluster/call-excluding-adoption
-                                            lock (fn [] (deliver own (change lock database (constantly adopted)))
+                                            lock validity (fn [] (deliver own (change lock database (constantly adopted)))
                                                    (result "own"))))
                                    1000 nil)))))
         (is (= adopted (deref own 0 nil))))
       (is (zero? (.getReadLockCount lock)) "every member released its hold"))))
+
+(deftest an-adoption-failing-after-roots-change-keeps-the-program-unavailable-until-one-records
+  (let [lock (java.util.concurrent.locks.ReentrantReadWriteLock. true)
+        validity (atom nil)
+        database (db/db (:seon.db/connection (support/execution-handle nil)))
+        adopted {:seon.source/reloaded-namespaces [] :seon.source/arming-identities #{}}
+        entries (atom 0)
+        member #(cluster/call-excluding-adoption
+                 lock validity (fn [] (swap! entries inc)
+                                 {:seon.test/sym `member :seon.test/pass-count 1
+                                  :seon.test/fail-count 0 :seon.test/error-count 0}))
+        adopt! (fn [commit work]
+                 (try (@#'cluster/call-with-program-change lock validity database commit work)
+                      (catch clojure.lang.ExceptionInfo failure (ex-message failure))))
+        scratch "seon.cluster.adoption-exclusion-scratch"]
+    (testing "a reload that fails after defining a Var"
+      (let [commit (random-uuid)]
+        (is (= "reload stopped midway"
+               (adopt! commit #(load-string (str "(ns " scratch ") (def loaded :new)"
+                                                 " (throw (ex-info \"reload stopped midway\" {}))")))))
+        (is (= :new @(resolve (symbol scratch "loaded"))) "the root changed before the failure")
+        (is (= commit (:seon.source/commit-id @validity)))
+        (is (= ["reload stopped midway"] (keep :seon.error/message (:seon.error/chain @validity))))))
+    (doseq [[label message] [["arming" "Development JVM instrumentation did not restore contracts."]
+                             ["the record" "The cluster population transaction was refused: basis moved"]]]
+      (testing (str label " refused after the reload")
+        (let [commit (random-uuid)]
+          (is (= message (adopt! commit #(@#'cluster/refused! message {:seon.cluster.source/phase :adoption}))))
+          (is (= commit (:seon.source/commit-id @validity))))))
+    (testing "no member enters the unknown program; it answers the diagnostic"
+      (let [refusal (member)]
+        (is (zero? @entries))
+        (is (= (:seon.source/commit-id @validity) (:seon.source/commit-id refusal)))
+        (is (schema/valid-candidate-value? (db/carried-projection database)
+                                           :seon.test/not-runnable-error refusal))))
+    (testing "a later adoption that records makes execution available again"
+      (is (= adopted (adopt! (random-uuid) (constantly adopted))))
+      (is (nil? @validity))
+      (is (= `member (:seon.test/sym (member))))
+      (is (= 1 @entries)))
+    (remove-ns (symbol scratch))))
