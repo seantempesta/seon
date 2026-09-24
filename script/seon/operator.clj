@@ -130,6 +130,15 @@
                         (identity-of handle)))))
             (iterator-seq (.iterator stream))))))
 
+(defn- read-prepl-val
+  "Read a trusted prepl's printed `:val` with Clojure's reader, never EDN's:
+  `#'v` reads as `(var v)`, `#inst`/`#uuid` stay native, and any other tag
+  (`#object`, `#error`) is a tagged literal. `*read-eval*` stays false."
+  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
+  [text]
+  (binding [*read-eval* false *default-data-reader-fn* tagged-literal]
+    (read-string text)))
+
 (defn prepl-value!
   "Read one form's arbitrary EDN terminal value. The optional total bound limits
   the hook's wait even while output arrives; expiry leaves execution unknown."
@@ -173,7 +182,7 @@
              (if (= :ret (:tag event))
                ;; An unreadable :val keeps its raw text (the event) beside the
                ;; reader's failure; it never replaces the text with the failure.
-               (let [[value cause] (try [(edn/read-string (:val event))]
+               (let [[value cause] (try [(read-prepl-val (:val event))]
                                         (catch Exception cause [nil cause]))]
                  (cond
                    (:exception event)
