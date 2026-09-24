@@ -8,6 +8,7 @@
   `record!` through its `:seon.flow/commit-fault!` callback until its slice."
   (:require [clojure.core.async.flow :as-alias flow.core]
             [seon.blob :as blob]
+            [seon.cluster.branch :as cluster.branch]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]))
@@ -46,7 +47,12 @@
   render proc — attributes to NO run, and that is correct rather than
   missing: it is not a run's fault. The serial-era fallback query is
   gone (F2 §3.3). It goes through
-  `db/transact!`, which never throws. Recurrence is the query-derived count of
+  `db/transact!`, which never throws, once on the branch where the fault
+  happened and, when that is not the cluster branch and this process holds the
+  cluster branch open, once more there naming its origin; `outcome` is the
+  first write that did not commit.
+  So every committer passing the cluster connection still records on the
+  agent's own branch. Recurrence is the query-derived count of
   committed facts; whether a fault is open is `seon.problems/open-faults`."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name :seon.db.process/id
                        :seon.sci.admit/caps :seon.error/recording-observation]
@@ -107,16 +113,49 @@
                                  :seon.error/dropped-fault-digest
                                  (:seon.flow/dropped-fault-digest source-fault)))
           recording (error/recording db (assoc request :seon.error/fact prepared-fact))
-          transaction-data (:seon.db/tx-data recording)
           fact (:seon.error/fact recording)]
       (try
-        (let [result (blob/with-publication!
-                      connection (if staged [staged] [])
-                      #(db/transact! connection transaction-data))]
-          [fact (if (db/database-value? (:db-after result))
-                  :seon.flow/committed
-                  result)
-           (:seon.error.occurrence/ref recording)])
+        ;; ONE WRITER, TWO TARGETS: the branch where the fault happened (its
+        ;; tagged agent's branch, else this connection's) and the cluster
+        ;; branch, whose copy names that origin and so outlives its retirement.
+        (let [here (get-in db [:config :branch])
+              agent-branch (when agent-id
+                             (db/q '[:find ?branch . :in $ ?id
+                                     :where [?agent :seon.agent/id ?id] [?agent :seon.agent/branch ?branch]]
+                                   db agent-id))
+              ;; an unreadable agent branch records here: the fault is not lost
+              origin (if (keyword? agent-branch) agent-branch here)
+              commit-on
+              (fn [branch]
+                (let [target (if (= branch here) connection (db/branch-connection db branch))
+                      data (cond
+                             (and (= branch here) (= branch origin)) recording
+                             target (error/recording
+                                     (db/db target)
+                                     (cond-> (assoc request :seon.error/fact prepared-fact)
+                                       (not= branch origin) (assoc :seon.error.occurrence/branch origin))))
+                      result (when (:seon.db/tx-data data)
+                               ;; the target's own custody: a write to another branch is refused otherwise
+                               (db/call-with-custody
+                                {:seon.db/connection target}
+                                #(blob/with-publication! target (if staged [staged] [])
+                                   (fn [] (db/transact! target (:seon.db/tx-data data))))))]
+                  [(cond
+                     (nil? target)
+                     {:seon.error/at (java.util.Date.) :seon.error/layer :seon.fault/record
+                      :seon.error/operation `record! :seon.store/branch branch
+                      :seon.error/message (str "No open connection to branch " (pr-str branch)
+                                               " in this process, so its record of this fault is not written.")}
+                     (nil? result) data
+                     (db/database-value? (:db-after result)) :seon.flow/committed
+                     :else result)
+                   (:seon.error.occurrence/ref data)]))
+              home (cluster.branch/cluster-branch cluster-name)
+              ;; no copy when this process runs no such cluster (a fixture's name)
+              copy? (and (not= home origin) (or (= home here) (some? (db/branch-connection db home))))
+              [[outcome occurrence] :as outcomes] (mapv commit-on (cond-> [origin] copy? (conj home)))]
+          [fact (or (some #(when (not= :seon.flow/committed %) %) (map first outcomes)) outcome)
+           occurrence])
         (catch Throwable failure
           [fact failure (:seon.error.occurrence/ref recording)])))
     (catch Throwable failure

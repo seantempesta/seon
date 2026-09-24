@@ -6,9 +6,14 @@
             [datahike.writer]
             [datahike.writing]
             [seon.blob :as blob]
+            [seon.cluster.agent :as agent]
+            [seon.cluster.branch :as cluster.branch]
+            [seon.cluster.registry :as registry]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error :as error]
             [seon.fault :as fault]
             [seon.test-support :as test-support])
   (:import (java.util.concurrent CountDownLatch TimeUnit)))
@@ -140,3 +145,53 @@
               connection "the unknown fault write to settle before the branch is released"
               #(> (db/basis-t %) before)))
            (finally (.countDown release))))))))
+
+(deftest a-core-fault-is-recorded-on-its-branch-and-copied-to-the-cluster-branch
+  ;; The fixture branch is the attempt; a sibling `:cluster-<name>` branch of
+  ;; the same store is the cluster, open in this process like a running one's.
+  (let [cluster-name (str "fault-branches-" (random-uuid))
+        home (cluster.branch/cluster-branch cluster-name)
+        branches-seen (fn [connection since]
+                        (mapv :seon.error.occurrence/branch (error/occurred-since (db/db connection) since)))
+        [store cluster origin since]
+        (test-support/with-database
+         (fn [attempt]
+           (let [origin (get-in (db/db attempt) [:config :branch])
+                 store (:seon.store/store (test-support/execution-handle attempt))]
+             (test-support/apply-config! attempt cluster-name {:seon.config/on-core-error :record})
+             (test-support/transacted!
+              attempt (into (test-support/agents-tx @attempt ["root"])
+                            (agent/creation-tx {:seon.agent/id "worker" :seon.ns/name 'my.agents.worker
+                                                :seon.cluster/name cluster-name :seon.agent/branch origin})))
+             (registry/branch! {:seon.store/store store :seon.store/branch home
+                                :seon.cluster.registry/from (db/commit-id (db/db attempt))})
+             (let [cluster (db/carry-connection-projection-state!
+                            (store/open-branch! store home)
+                            (:seon.sci.eval/projection-state (meta attempt)))]
+              (try
+               (let [since (db/basis-t (db/db attempt))
+                     receipt (db/call-with-custody
+                              {:seon.db/connection cluster}
+                              #(fault/fault! (env/environment
+                                              {:seon.boot/cluster-name cluster-name
+                                               :seon.db/connection cluster
+                                               :seon.sci.admit/caps (config/result-caps config/defaults)})
+                                             (nested-failure)
+                                             (assoc context :seon.agent/id "worker")))]
+               (testing "the cluster connection's committer records on the agent's own branch"
+                 (is (true? (:seon.fault/committed? receipt)) (pr-str receipt))
+                 (is (= [#{origin}] (branches-seen attempt since))))
+               (testing "and copies it to the cluster branch naming its origin"
+                 (is (= [#{origin}] (branches-seen cluster since))))
+                 [store cluster origin since])
+               (catch Throwable failure
+                 (store/release-branch! cluster)
+                 (registry/retire-branch! {:seon.store/store store :seon.store/branch home})
+                 (throw failure)))))))]
+    (try
+      (testing "retiring the origin branch keeps the cluster copy"
+        (is (not (contains? (registry/roster store) origin)))
+        (is (= [#{origin}] (branches-seen cluster since))))
+      (finally
+        (store/release-branch! cluster)
+        (registry/retire-branch! {:seon.store/store store :seon.store/branch home})))))

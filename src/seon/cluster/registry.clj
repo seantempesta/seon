@@ -63,6 +63,7 @@
     told `:ok` and the branch was gone (b2-plan §0.3)."
   (:require [clojure.edn :as edn]
             [datahike.api :as d]
+            [seon.cluster.branch :as cluster.branch]
             [seon.db :as db]
             [seon.config :as config]
             [seon.schema :as schema]
@@ -92,13 +93,11 @@
 ;;; Pure derivations
 ;;; ---------------------------------------------------------------------------
 
-(defn cluster-branch
-  "The ONE branch name for a cluster: `:cluster-<name>`.
-  One derivation — no other code builds this keyword, so a cluster's
-  name and its branch can never disagree."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.store/branch]}
-  [cluster-name]
-  (keyword (str "cluster-" cluster-name)))
+(def ^{:arglists '([cluster-name])
+       :doc "RETIRING: callers move to `seon.cluster.branch/cluster-branch` in one
+  scripted sweep (their files are held by other owners); then this name goes."}
+  cluster-branch
+  #'cluster.branch/cluster-branch)
 
 ;;; ---------------------------------------------------------------------------
 ;;; The roster

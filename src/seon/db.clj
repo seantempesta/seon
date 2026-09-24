@@ -13,6 +13,7 @@
             [malli.core :as m]
             [datahike.api :as d]
             [datahike.connector :as connector]
+            [datahike.connections :as connections]
             [datahike.constants :as const]
             [datahike.datom :as datahike.datom]
             [datahike.db :as datahike.db]
@@ -342,6 +343,17 @@
 (defn- connection-id
   [connection]
   (datahike.store/connection-id (:config @connection)))
+
+(defn branch-connection
+  "This process's open connection to `branch` of `database`'s own store, or nil
+  when none is open. Borrowed from Datahike's registry under the same key every
+  connection has (`datahike/store.cljc:44-55`, `connections.cljc:5-9`); the
+  caller never releases it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.store/branch]
+                  [:maybe :seon.db/connection]]}
+  [database branch]
+  (connections/active-connection
+   (datahike.store/connection-id (assoc (dbi/-config database) :branch branch))))
 
 (defn connection-identity
   "Plain-data identity of a Datahike connection, or the typed unknown.
