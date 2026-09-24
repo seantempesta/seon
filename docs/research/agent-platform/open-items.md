@@ -15,8 +15,9 @@ PAUSED; root publishes at checkpoints with `bin/seon init --dev default --change
 a restart loads code from the checkout but schema and test rows install only through publication.
 
 **Adoption unblocked (~23:10Z):** d1ff2e02c (first-party = file under the checkout outside every :local/root; analyzed, kept
-by the stale check) + 366355e2f (fill = `(seon.fn.analyzer/analyze-dependencies!)`, 5.9 s warm). New hang under investigation:
-a nested in-process seon.test/run inside a member never exits (seon.test-reaching-test long-test case).
+by the stale check) + 366355e2f (fill = `(seon.fn.analyzer/analyze-dependencies!)`, 5.9 s warm). Nested-run hang DIAGNOSED by thread dump: not a wait — reach-entries derives every test's
+reach cold on each new branch (572af5fb9 keyed the index by connection); fix: requested symbols only, one content-keyed
+cache shared across branches (lane locks-fs-and-runner-stamp).
 
 **Owner rulings 2026-09-24 (evening):**
 1. Publication: OPTION 3 — named lane branches → root-accepted merge → fail-closed convergence (b8fae5bf8); option 1
