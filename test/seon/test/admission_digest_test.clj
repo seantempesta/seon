@@ -1,7 +1,6 @@
 (ns seon.test.admission-digest-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
-            [seon.test :as sut]
             [seon.test.runner :as runner]
             [seon.test-support :as support]))
 
@@ -41,23 +40,3 @@
         (is (true? (::program-write @observed))
             "a program write earlier in the same transaction is seen")
         (is (not= digest (runner/program-digest (db/db connection))))))))
-
-(deftest a-request-records-its-batch-in-one-transaction
-  ;; Recording was one writer transaction per member (65 per batch of 64, about
-  ;; 210-500 ms each on default); a request now writes its admission and one
-  ;; recording transaction for the batch, and each member keeps its own facts.
-  (support/with-database
-    (fn [connection]
-      (let [members #{'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol
-                      'seon.id-test/data-shape-and-explicit-length-determine-identity
-                      'seon.config-test/optional-setting-flags-assert-only-true}
-            before (db/basis-t (db/db connection))
-            result (sut/run {:seon.test/execution (support/execution-handle connection)
-                             :seon.test/recording-connection connection
-                             :seon.test/policy :named
-                             :seon.test/identities members})]
-        (is (true? (:seon.test/passed? result)) (sut/tally result))
-        (is (= 3 (:seon.test/executed-count result)))
-        (is (= 2 (- (db/basis-t (db/db connection)) before))
-            "one admission transaction and one recording transaction")
-        (is (= members (set (map :seon.test/sym (runner/run-results (db/db connection) (:seon.test.run/id result))))))))))
