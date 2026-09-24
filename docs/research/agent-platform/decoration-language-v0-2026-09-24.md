@@ -67,7 +67,7 @@ A docstring states what is true and why; incident narratives belong in tasks and
 #:seon.task{:id        :seon.error.task/faults-read-is-a-call
             :intent    "Root's opening prints an 81,805-character error query five times (81% of its prompt).
                         It should be a short call that returns the same errors."
-            :done-when ["(deftest opener-is-short …)" "(deftest for-agent-matches-the-query …)"]}   ; §3
+            :done-when [(deftest opener-is-short …) (deftest for-agent-matches-the-query …)]}   ; §3
 ```
 
 Optional only when nothing else can say it: `:seon.task/must-read`, `:seon.task/needs`, `:seon.task/merge`
@@ -85,8 +85,8 @@ diff, and root's decision selects from it.
 
 ## 3. Done when: ordinary deftests through the one test pipeline
 
-`:seon.task/done-when` is a vector of deftests: symbols of existing tests, or deftest source that belongs to
-the task (a proof). Each runs through the existing `seon.test/run` on a throwaway fork of the attempt's
+`:seon.task/done-when` is a vector of deftests: symbols of existing tests, or deftest forms that belong to
+the task (proofs). Each runs through the existing `seon.test/run` on a throwaway fork of the attempt's
 branch — `branch!` → fork the SCI context → inject the connection → run the one body → record → unlink — with
 `is` failures returned as data (expected, actual, message) and re-prompted to the agent. Results key by
 proof-source digest + program digest; they never count as coverage and never merge. A proof becomes a
@@ -94,14 +94,17 @@ permanent guarantee only when root promotes the same text into a namespace defte
 
 ```clojure
 :seon.task/done-when
-["(deftest opener-is-short
+[(deftest opener-is-short
    (is (> 300 (count (pr-str (:seon.repl/form
                                (seon.error/faults-form {:seon.db/db (seon.db/db)
-                                                        :seon.render/value [:seon.agent/id \"root\"]})))))))"
- "(deftest for-agent-matches-the-query
-   (is (= (set (map :seon.error/signature (seon.error/for-agent (seon.db/db) \"root\")))
-          (set (seon.db/q '[:find [?sig ...] …] (seon.db/db) \"root\")))))"]
+                                                        :seon.render/value [:seon.agent/id "root"]})))))))
+ (deftest for-agent-matches-the-query
+   (is (= (set (map :seon.error/signature (seon.error/for-agent (seon.db/db) "root")))
+          (set (seon.db/q '[:find [?sig ...] …] (seon.db/db) "root")))))]
 ```
+
+The file holds forms (read by edamame without evaluation); the writer stores each proof's exact source and
+its digest. A test's name is local to the task (`opener-is-short`), so proofs never collide with program tests.
 
 Measured (`agent-deftest-and-test-forks-2026-09-24.md`): the same deftest source through the existing owners
 on a throwaway fork takes **~130 ms** (branch + fork 48.7, evaluate 33.7, run 37.7, unlink 8.6) and
