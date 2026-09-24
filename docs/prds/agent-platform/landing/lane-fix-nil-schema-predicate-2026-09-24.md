@@ -73,3 +73,38 @@ never requires. So no second resolver was added; the fix narrows the one catch.
 ## Size
 
 src +12 −5, test +48.
+
+**Installed (after root's `start --head` to 3ff123708, which contains 9411e8640):**
+`bin/test-check default --test seon.schema-test/a-predicate-namespace-that-fails-to-load-is-not-an-unresolved-predicate`
+→ run d18688f04c81, executed 1, pass 6, fail 0, 775 ms.
+
+## Follow-up 2 — bootstrap admission falsely refused any entity reaching `:inst`
+
+- **Cause (REPL, live default):** outside an evaluation delta, `schema.edn/admit`
+  with an identity takes `schema/assert-complete-contract!` with no handed
+  projection. Its registry was `(mr/fast-registry compiled-forms)` — declaration
+  FORMS — while every consumer reads an entry as a compiled schema.
+  `assert-entity-partition!` (`(m/properties (mr/schema registry attr))`) then
+  compiled `:inst` against Malli's defaults: `{:type :malli.core/invalid-schema
+  :schema :inst}` → `::schema.edn/unresolved-reference` for
+  `:seon.config/error`. Correcting only that reader exposed the same class in
+  `internal/assert-error-declaration!` (`(mr/schema registry :seon.error/base)`
+  handed a vector to `entity-entries`). So the producer — the registry — is fixed,
+  not its readers: it is now `mr/lazy-registry` compiling each form in scope, as
+  `projection-registry` does (Malli `registry.cljc:81-95` at the pinned gitlink,
+  one cache atom per call).
+- The missing projection is not an ambiguous nil here: outside a delta the
+  caller hands the complete population, and the complete-population gate is the
+  declared bootstrap rule; it now reaches a correct verdict.
+- **Evidence (snapshot, armed):** regression
+  `seon.schema-test/bootstrap-admission-compiles-referenced-attributes-in-its-own-registry`
+  5 pass twice (1598 ms, 944 ms: two full-population admissions); HEAD 1 fail.
+  `admit :seon.config/error` 165–374 ms after vs 695–1416 ms (refusing) before;
+  `admit :seon.error/at` 186–286 ms vs 569–705 ms — the lazy cached registry
+  compiles each reached form once instead of per reference. The regression's
+  ~1 s is those two armed admissions over the ~1.3k-form population (named cost:
+  `seon.schema.edn/admit` → `assert-complete-contract!`).
+  `seon.schema-test`, `contracts-compile-test`, `schema.edn-test`,
+  `schema.admission-gate-test`, `schema.admission-test`: failure sets identical to
+  HEAD (the 25 + 4 + 4 errors are fixture custody outside `seon.test/run`).
+- Size: src +13 −2 (incl. 5 comment lines), test +27.

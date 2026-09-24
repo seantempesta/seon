@@ -1587,10 +1587,18 @@
                  :seon.schema/identity identity
                  :seon.schema/predicate predicate
                  }))))
+        ;; Every consumer reads a registry entry as a compiled schema, as a
+        ;; projection's registry holds them; a registry of FORMS made each
+        ;; read resolve against Malli's defaults and refuse declared keys
+        ;; such as `:inst`. Compile lazily in this registry, as
+        ;; `projection-registry` does.
         registry (or registry
-                     (mr/composite-registry
+                     (mr/lazy-registry
                       (m/default-schemas)
-                      (mr/fast-registry compiled-forms)))
+                      (fn [reference scope]
+                        (when-let [form (get compiled-forms reference)]
+                          ((if (qualified-symbol? reference) m/function-schema m/schema)
+                           form {:registry scope})))))
         compile-options
         (or compile-options
             {:registry registry})

@@ -1861,3 +1861,29 @@
           ;; Undo only what this test loaded, so a rerun loads it again.
           (remove-ns probe)
           (dosync (commute @#'clojure.core/*loaded-libs* disj probe)))))))
+
+(deftest bootstrap-admission-compiles-referenced-attributes-in-its-own-registry
+  ;; CLASS: outside an evaluation delta `schema.edn/admit` with an identity takes
+  ;; the complete-population path (`assert-complete-contract!` with no handed
+  ;; projection). Its registry holds declaration FORMS, and
+  ;; `assert-entity-partition!` read each attribute's form without that
+  ;; registry, so any entity reaching a declared key such as `:inst` refused
+  ;; as an unresolved reference — every hook edit to such a declaration.
+  (let [forms (schema.edn/packaged-forms)
+        admit (fn [population identity]
+                (try (schema.edn/admit {:seon.schema/forms population
+                                        :seon.schema/identity identity
+                                        :seon.schema/admission
+                                        {:seon.schema.admission/source :core}})
+                     (catch clojure.lang.ExceptionInfo e (ex-data e))))]
+    (is (nil? (schema/current-projection)) "the bootstrap path is the one exercised")
+    (is (= :inst (get-in forms [:seon.error/at])) "the entity reaches :inst")
+    (is (vector? (admit forms :seon.config/error))
+        "a packaged entity reaching :inst is admitted")
+    (testing "a reference nothing declares still refuses by name"
+      (let [refused (admit (assoc forms ::bootstrap-referrer [:vector ::never-declared])
+                           ::bootstrap-referrer)]
+        (is (= :seon.schema.edn/unresolved-reference
+               (:seon.schema.edn/error refused)))
+        (is (= ::bootstrap-referrer
+               (:seon.schema.edn/unresolved-reference refused)))))))
