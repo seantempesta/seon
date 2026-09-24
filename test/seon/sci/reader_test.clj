@@ -507,7 +507,7 @@
                   " (defn ^{:malli/schema [:=> [:cat :int] :int]} x [n] n)"))
             declaration (peek read-events)]
         (is (= 'a (:seon.sci.reader/ns declaration)) call)
-        (is (= "a/x" (:seon.fn/sym declaration)) call))))
+        (is (= 'a/x (:seon.fn/sym declaration)) call))))
   (testing "a switch visible only to evaluation removes attribution"
     (doseq [text
             ["(do (in-ns 'a)) (defn x [])"
@@ -537,10 +537,10 @@
   (let [read-events
         (events (slurp (io/file "src/seon/sci/reader.cljc")))
         read-event
-        (first (filter #(= "seon.sci.reader/read" (:seon.fn/sym %))
+        (first (filter #(= 'seon.sci.reader/read (:seon.fn/sym %))
                        read-events))
         read-metadata (meta #'reader/read)]
-    (is (= "seon.sci.reader/read" (:seon.fn/sym read-event)))
+    (is (= 'seon.sci.reader/read (:seon.fn/sym read-event)))
     (is (= [:seon.ns/name 'seon.sci.reader]
            (:seon.fn/ns read-event)))
     (is (= (:seon.sci.reader/source read-event)
@@ -582,7 +582,7 @@
             (first read-events)
             [:seon.ns/name :seon.ns/source :seon.ns/doc
              :seon.ns/requires :seon.ns/aliases :seon.ns/refers])))
-    (is (= {:seon.fn/sym "sample/hidden"
+    (is (= {:seon.fn/sym 'sample/hidden
             :seon.fn/ns [:seon.ns/name 'sample]
             :seon.fn/source
             "(defn- ^{:seon.workload :io} hidden [x] x)"
@@ -599,7 +599,7 @@
            (select-keys
             (nth read-events 2)
             [:seon.schema/key :seon.schema/form :seon.schema/ns])))
-    (is (= {:seon.test/sym "sample/hidden-test"
+    (is (= {:seon.test/sym 'sample/hidden-test
             :seon.test/ns [:seon.ns/name 'sample]
             :seon.test/source "(deftest hidden-test (is true))"}
            (select-keys
@@ -620,7 +620,7 @@
             :seon.config.eval.result/max-source (count source)
             :seon.sci.reader/publics
             {'clojure.set #{'union 'intersection 'difference}}}))]
-    (is (= "exact.bindings/renamed-test"
+    (is (= 'exact.bindings/renamed-test
            (:seon.test/sym (second read-events))))
     (is (= #{{:seon.ns.refer/local 'dt
               :seon.ns.refer/target-ns 'clojure.test
@@ -679,7 +679,7 @@
               ":rename {deftest dt}])\n"
               "(require '[missing.reader.namespace :as-alias ghost])\n"
               "(dt renamed-after-require ::ghost/value)"))]
-    (is (= "user/renamed-after-require"
+    (is (= 'user/renamed-after-require
            (:seon.test/sym (nth read-events 2))))
     (is (= :missing.reader.namespace/value
            (nth (:seon.sci.reader/form (nth read-events 2)) 2))
@@ -707,12 +707,12 @@
               "(deftest real-test)"))]
     (is (= #{'audit.a}
            (into #{} (keep :seon.ns/name) read-events)))
-    (is (= #{"audit.a/real"}
+    (is (= #{'audit.a/real}
            (into #{} (keep :seon.fn/sym) read-events)))
-    (is (= #{"audit.a/real-test"}
+    (is (= #{'audit.a/real-test}
            (into #{} (keep :seon.test/sym) read-events))))
   (let [nested (events "(ns audit.a)\n(do (defn hidden [x] x))")]
-    (is (= [{:seon.fn/sym "audit.a/hidden"
+    (is (= [{:seon.fn/sym 'audit.a/hidden
              :seon.fn/ns [:seon.ns/name 'audit.a]
              :seon.fn/source "(defn hidden [x] x)"
              :seon.fn/arglists "([x])"

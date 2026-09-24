@@ -182,7 +182,8 @@
                                                     :seon.message/inbound-content "Please verify this."
                                                     :seon.config.eval.result/max-string 1000}))
            database (:db-after arrival)
-           message-id (d/q '[:find ?id . :where [?m :seon.message/id ?id]] database)
+           message-id (d/q '[:find ?id . :where [?a :seon.agent/id "outside-recipient"]
+                              [?m :seon.message/to ?a] [?m :seon.message/id ?id]] database)
            opened (d/with database (turn/open-tx {:seon.turn/id "outside-turn"
                                                  :seon.turn/agent [:seon.agent/id "outside-recipient"]
                                                  :seon.turn/opened-tx "datomic.tx"
@@ -215,25 +216,28 @@
        (is (some? (:db-after created)) (pr-str created))
        (is (some? (:db-after opened)) (pr-str opened)))
      (doseq [[ordinal retain?] [[0 false] [1 true]]]
-       (let [changed (db/transact! connection
-                                   [{:seon.config/agent [:seon.agent/id "reasoning-agent"]
-                                     :seon.config.ai/retain-reasoning retain?}])
+       ;; Absence is the off setting: the dial admits only `true`.
+       (let [changed (when retain?
+                       (db/transact! connection
+                                     [{:seon.config/agent [:seon.agent/id "reasoning-agent"]
+                                       :seon.config.ai/retain-reasoning true}]))
              settings (ai/settings (support/effective-config)
                                    (ai/agent-overlay @connection "reasoning-agent"))
              recorded (#'turn/record-attempt!
         {:seon.db/connection connection}
-        {:seon.ai/target {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
-                          :seon.ai/model "deepseek-v4-flash"}
+        {:seon.ai/target (assoc (:seon.ai/primary (ai/targets (schema/handed-projection) (support/effective-config))) :seon.ai/model "deepseek-v4-flash")
          :seon.ai/settings settings
          :seon.turn/id "reasoning-turn" :seon.agent/id "reasoning-agent"
          :seon.ai.attempt/ordinal ordinal
          :seon.ai/reasoning-content "A bounded provider trace."}
         (java.util.Date.))]
-         (is (some? (:db-after changed)) (pr-str changed))
-         (is (= retain? (:seon.config.ai/retain-reasoning settings)))
+         (when retain? (is (some? (:db-after changed)) (pr-str changed)))
+         (is (= retain? (boolean (:seon.config.ai/retain-reasoning settings))))
          (is (nil? recorded) (pr-str recorded))))
      (let [rows (db/q '[:find [(pull ?attempt [*]) ...]
-                        :where [?attempt :seon.ai.attempt/id]] @connection)
+                        :in $ [?id ...]
+                        :where [?attempt :seon.ai.attempt/id ?id]]
+                      @connection (mapv #(#'turn/attempt-id "reasoning-turn" %) [0 1]))
            by-ordinal (into {} (map (juxt :seon.ai.attempt/ordinal identity)) rows)]
        (is (= #{0 1} (set (keys by-ordinal))))
        (is (not-any? #(get (by-ordinal 0) %)
@@ -267,14 +271,14 @@
                     :seon.agent/id "usage-facts"
                     :seon.ai.attempt/ordinal 0
                     :seon.ai/target
-                    {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
-                     :seon.ai/model "deepseek-flash"}
+                    (assoc (:seon.ai/primary (ai/targets (schema/handed-projection) (support/effective-config))) :seon.ai/model "deepseek-flash")
                     :seon.ai/settings (support/effective-config)
                     :seon.ai/usage usage}
                    (java.util.Date.))
            row (db/q '[:find (pull ?a [*]) .
-                        :where [?a :seon.ai.attempt/ordinal 0]]
-                     (db/db connection))]
+                        :in $ ?id
+                        :where [?a :seon.ai.attempt/id ?id]]
+                     (db/db connection) (#'turn/attempt-id "usage-facts-turn" 0))]
        (is (nil? result) (pr-str result))
        (is (= (ai/normalize-usage usage)
               (select-keys row (keys (ai/normalize-usage usage)))))
@@ -306,16 +310,17 @@
                     :seon.agent/id "usage-facts"
                     :seon.ai.attempt/ordinal 0
                     :seon.ai/target
-                    {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
-                     :seon.ai/model "deepseek-flash"}
+                    (assoc (:seon.ai/primary (ai/targets (schema/handed-projection) (support/effective-config))) :seon.ai/model "deepseek-flash")
                     :seon.ai/settings (support/effective-config)
                     :seon.ai/usage usage}
                    (java.util.Date.))
-           row (db/q '[:find (pull ?a [* {:seon.ai.attempt/model [:seon.ai.model/id]}]) .
-                        :where [?a :seon.ai.attempt/ordinal 0]]
-                     (db/db connection))]
+           row (db/q '[:find (pull ?a [*]) .
+                        :in $ ?id
+                        :where [?a :seon.ai.attempt/id ?id]]
+                     (db/db connection) (#'turn/attempt-id "usage-facts-turn" 0))]
        (is (nil? result) (pr-str result))
-       (is (= "deepseek-flash" (get-in row [:seon.ai.attempt/model :seon.ai.model/id])))
+       (is (= "deepseek-flash" (:seon.ai/model row))
+           "the attempt keeps the model identity itself, not a descriptor ref")
        (is (= (get-in row [:seon.ai.attempt/settings :db/id])
               (get-in (db/pull (db/db connection) [:seon.agent/settings]
                                [:seon.agent/id "usage-facts"])
@@ -355,17 +360,17 @@
                        :seon.sci.eval/evaluation evaluation
                        :seon.turn.loop/settlement-evaluation settled})
                result (db/transact! connection (turn/receipt-settle-tx facts))
-               row (db/q '[:find (pull ?e [:seon.eval/shown :seon.eval/renderer
-                                           {:seon.eval/renderer-fn [:db/id :seon.fn/sym]}]) .
-                           :in $ ?ordinal
-                           :where [?e :seon.cluster.eval/ordinal ?ordinal]]
-                         (db/db connection) ordinal)]
+               row (db/pull (db/db connection)
+                            [:seon.eval/shown :seon.eval/renderer
+                             {:seon.eval/renderer-fn [:db/id :seon.fn/sym]}]
+                            [:seon.cluster.eval/id
+                             (turn/receipt-identity "renderer-facts-turn" ordinal)])]
            (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
            (is (:db-after result) (pr-str result))
            (is (= expected (:seon.eval/renderer row)))
            (if expected
              (do
-               (is (= (str expected) (get-in row [:seon.eval/renderer-fn :seon.fn/sym])))
+               (is (= expected (get-in row [:seon.eval/renderer-fn :seon.fn/sym])))
                (is (pos-int? (get-in row [:seon.eval/renderer-fn :db/id]))))
              (is (empty? (select-keys row [:seon.eval/renderer :seon.eval/renderer-fn]))))
            (is (= (:seon.eval/shown evaluation)

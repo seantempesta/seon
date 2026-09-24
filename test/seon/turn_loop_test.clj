@@ -105,8 +105,7 @@
       ((private-loop-fn 'record-attempt!)
        {:seon.db/connection connection}
        {:seon.ai/target
-        {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
-         :seon.ai/model "deepseek-flash"}
+        (assoc (:seon.ai/primary (ai/targets (schema/handed-projection) (test-support/effective-config))) :seon.ai/model "deepseek-flash")
         :seon.ai/settings
         (ai/settings (test-support/effective-config)
                      {:seon.config.ai/model "deepseek-flash"})

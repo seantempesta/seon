@@ -29,6 +29,7 @@
 (defn- request [connection source]
   (let [dials config/defaults]
     {:seon.error/source source
+     :seon.error/declared-schema :seon.error/normalization-error
      :seon.error/id (id/id)
      :seon.error/at (java.util.Date.)
      :seon.error/process "error-result-test"

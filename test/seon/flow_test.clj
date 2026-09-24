@@ -945,6 +945,8 @@
 (deftest turn-evaluation-completion-is-a-flat-diagnostic-value
   (test-support/with-database
     (fn [connection]
+      ;; Effective configuration reads the named cluster's own row.
+      (test-support/seed-cluster! connection "flow-evaluation")
       (let [environment (test-support/environment "flow-evaluation" connection)
             ctx (test-support/fork-cluster-ctx connection "flow-evaluation")]
         (install-test-work-launcher!

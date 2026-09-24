@@ -10,8 +10,11 @@
    (fn [connection]
      (let [database (db/db connection)
            failure (config/effective database "absent-render-config")
+           ;; The caller names the cluster (seon.render/request-profile); its
+           ;; config refusal is the profile member's refusal.
            profile (render/request-profile
-                    {:seon.db/db failure
+                    {:seon.db/db database
+                     :seon.boot/cluster-name "absent-render-config"
                      :seon.schema/projection (db/carried-projection database)})
            request {:seon.db/db database
                     :seon.db/connection connection

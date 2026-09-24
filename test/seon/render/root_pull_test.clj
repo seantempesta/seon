@@ -366,7 +366,7 @@
            call {:seon.render.call/read-evidence (db/read-evidence @captured)
                  :seon.render.call/output acquisition}]
        (is (empty? (#'web/candidate-call-ids
-                    {::root call} fixed))
+                    {::root call} fixed false))
            "an opening as-of database compares through seon.db revisions")))))
 
 (deftest unrelated-entity-change-keeps-root-read-current
@@ -380,7 +380,7 @@
        (support/transacted! connection [{::node-id "outside" ::value "changed"}])
        (let [database @connection
              retained {call-id initial-entry}
-             candidates (#'web/candidate-call-ids retained database)
+             candidates (#'web/candidate-call-ids retained database false)
              pulls (atom 0)
              pull db/pull
              refreshed (with-redefs [db/pull
@@ -400,7 +400,7 @@
               (:datahike.pull/plan (:acquisition refreshed)))
              "W2 hands the retained compiled plan through its replay")
          (is (empty? (#'web/candidate-call-ids
-                      {call-id (:entry refreshed)} database))
+                      {call-id (:entry refreshed)} database false))
              "the consumed revision advances even when the result is equal"))))))
 
 (deftest another-entity-schema-cannot-add-a-reverse-read-to-this-root

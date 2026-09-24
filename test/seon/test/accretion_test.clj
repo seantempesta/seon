@@ -30,9 +30,9 @@
            :seon.test/failure-message "expected: 2\n  actual: 1"})
         report
         (accretion/gate-report
-         {:seon.fn/sym "fixture.feedback/target"
+         {:seon.fn/sym 'fixture.feedback/target
           :seon.test.accretion/results
-          (mapv test-result (map #(str "fixture.feedback/red-" %) (range 5)))
+          (mapv test-result (map #(symbol "fixture.feedback" (str "red-" %)) (range 5)))
           :seon.test.accretion/auto-check
           {:seon.test.accretion/seed 42
            :seon.test.accretion/case-count 25

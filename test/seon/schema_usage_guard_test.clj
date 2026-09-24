@@ -388,11 +388,11 @@
   (with-database
     (fn [connection]
       (let [entity-form
-            [:map {:seon.db/attributes true}
+            [:map {:seon.db/attributes true :seon.program/partition :seon.data}
              [entity-id-key entity-id-key]
              [entity-child-key :int]]
             replacement-form
-            [:map {:seon.db/attributes true}
+            [:map {:seon.db/attributes true :seon.program/partition :seon.data}
              [entity-id-key entity-id-key]
              [entity-child-key [:int {:min 1}]]]
             selected-forms
@@ -427,11 +427,11 @@
   (with-database
     (fn [connection]
       (let [entity-form
-            [:map {:seon.db/attributes true}
+            [:map {:seon.db/attributes true :seon.program/partition :seon.data}
              [entity-id-key entity-id-key]
              [entity-child-key entity-child-key]]
             reduced-entity-form
-            [:map {:seon.db/attributes true}
+            [:map {:seon.db/attributes true :seon.program/partition :seon.data}
              [entity-id-key entity-id-key]]
             selected-forms
             {entity-id-key [:string {:seon.db/identity true}]

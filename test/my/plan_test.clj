@@ -25,10 +25,7 @@
     (fn [connection]
       (support/transacted! connection
                            (into (support/agent-tx @connection "bob")
-                             [{:db/id "plan-ns"
-                               :seon.ns/name 'fixture.plan}
-                              {:seon.agent/id "alice"
-                               :seon.agent/namespace "plan-ns"}]))
+                                 (support/agent-tx @connection "alice" 'fixture.plan)))
       (f connection))))
 
 (defn- add

@@ -979,7 +979,7 @@
                                                    :seon.db/component-schema :seon.agent/error} :seon.db/ref]
                      ::manifest-explanations [:and {:seon.db/component true
                                                     :seon.db/component-schema :seon.instrument.explanations/entity} :seon.db/ref]
-                     ::manifest-root [:map {:seon.db/attributes true}
+                     ::manifest-root [:map {:seon.db/attributes true :seon.program/partition :seon.data}
                                       [::manifest-id ::manifest-id]
                                       [::manifest-location ::manifest-location]
                                       [::manifest-observation {:optional true} ::manifest-observation]
