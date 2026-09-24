@@ -711,3 +711,53 @@
                                   {:root (.getCanonicalPath project-root) :cluster cluster :action "list"}))]
     (is (vector? (:seon.dev.mcp/branches (read-string (:seon.dev.mcp/value data)))) (pr-str data))
     (is (not (contains? data :seon.dev.mcp/events)))))
+
+(deftest a-new-branch-window-opens-at-its-fork-basis
+  ;; Requirement 8.3: a new branch's first evaluation shows none of the errors
+  ;; it inherited; one written on it afterwards shows once, then never again.
+  (let [instances @@(ns-resolve 'seon.cluster (symbol "running-instances"))
+        cluster (first (sort (keys instances)))
+        store (:seon.store/store (get instances cluster))
+        root (.getCanonicalPath project-root)
+        branch (str "lane-mcp-window-" (random-uuid))
+        consume (ns-resolve 'seon.cluster 'consume-mcp-projection!)
+        window (fn [since]
+                 (try (eval (read-string ((bridge-var 'window-form) cluster branch since)))
+                      (finally (consume))))
+        operations #(set (map :seon.error/operation (:seon.dev.mcp/errors %)))
+        execute #((bridge-var 'execute-branch) {:root root :cluster cluster :action % :name branch})]
+    (try
+      (is (not (:isError (execute "create"))))
+      (let [fork (get @@(bridge-var 'window-bases) [root cluster branch])
+            _ (eval (read-string ((bridge-var 'sci-evaluation-form) "1" cluster 'user false branch)))
+            _ (consume)
+            first-window (window fork)
+            connection ((requiring-resolve 'seon.cluster.registry/active-branch-connection)
+                        {:seon.store/store store :seon.store/branch (keyword branch)})]
+        (is (int? fork) "create records the fork basis for the branch's window")
+        (is (pos? (count ((requiring-resolve 'seon.error/occurred-since)
+                          ((requiring-resolve 'seon.db/db) connection) 0)))
+            "the parent's history is inherited, so a window from 0 would list it")
+        (is (= 0 (:seon.dev.mcp/count first-window)) (pr-str first-window))
+        ((requiring-resolve 'seon.db/call-with-custody)
+         {:seon.db/connection connection}
+         #(seon.test-support/transacted!
+           connection
+           ((requiring-resolve 'seon.error/commit-tx)
+            ((requiring-resolve 'seon.db/db) connection)
+            {:seon.schema/projection ((requiring-resolve 'seon.schema/handed-projection))
+             :seon.error/source {:seon.error/at (java.util.Date.) :seon.error/layer ::probe
+                                 :seon.error/operation `probe :seon.error/message "A window probe."}
+             :seon.error/declared-schema :seon.error/normalization-error
+             :seon.error/id (str (random-uuid)) :seon.error/at (java.util.Date.)
+             :seon.error/process "mcp-window-4242-1753650000000"
+             :seon.sci.admit/caps (seon.config/result-caps seon.config/defaults)
+             :seon.config.error/recurrence-limit 100
+             :seon.config.error/max-evidence-bytes 16384})))
+        (let [second-window (window (:seon.db/basis-t first-window))]
+          (is (= #{`probe} (operations second-window)) (pr-str second-window))
+          (is (= 0 (:seon.dev.mcp/count (window (:seon.db/basis-t second-window))))
+              "the next window does not repeat it")))
+      (finally
+        (execute "retire")
+        (is (nil? (get @@(bridge-var 'window-bases) [root cluster branch])))))))

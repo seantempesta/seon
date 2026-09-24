@@ -33,8 +33,9 @@
 (def ^:dynamic *debug* (= "1" (System/getenv "DEBUG")))
 (defonce reload-state (atom {}))
 ;; [root cluster branch] -> the basis of the last evaluation's error window there
-;; (branch nil = the shared cluster context). A value, not a queue: absent after a
-;; bridge restart, so the next window starts at 0 and over-shows, never under-shows.
+;; (branch nil = the shared cluster context, which starts at 0). A lane branch's
+;; entry starts at the fork basis its `branch` create returned; a lane this bridge
+;; did not create (or one from before a bridge restart) reports its start unknown.
 (defonce window-bases (atom {}))
 (def max-window-errors 20)
 
@@ -583,11 +584,14 @@
                             :seon.dev.mcp/branches (vec (sort (call# 'seon.cluster.registry/roster (:seon.store/store store#))))}
         (= own# branch#) (refuse# "The cluster's own branch is shared; name a lane branch." {})
         (= "create" ~action)
-        (let [from# (call# 'seon.db/commit-id @connection#)
+        (let [source# @connection#
+              from# (call# 'seon.db/commit-id source#)
               result# (call# 'seon.cluster.registry/branch!
                              (assoc store# :seon.store/branch branch# :seon.cluster.registry/from from#))]
           (if (:seon.cluster/created? result#)
-            (assoc result# :seon.cluster.registry/from from#)
+            ;; the fork basis: the branch inherits every datom up to it
+            (assoc result# :seon.cluster.registry/from from#
+                   :seon.db/basis-t (call# 'seon.db/basis-t source#))
             (refuse# "The branch already exists; retire it or name another." {})))
         (some (comp :seon.agent/id second) held#)
         (refuse# "Agents hold this branch; disarm them first." {:seon.agent/id (vec (keep (comp :seon.agent/id second) held#))})
@@ -614,14 +618,20 @@
         (if (or (:exception terminal) (not (map? value)) (:seon.error/at value))
           (mcp-error (cond-> (assoc response :seon.dev.mcp/failure :branch)
                        (:exception terminal) (assoc :seon.dev.mcp/events (mapv #(dissoc % :form) events))))
-          (mcp-success response)))
+          (do (case action
+                ;; a new branch's first window opens at its fork basis, not at 0
+                "create" (swap! window-bases assoc [root cluster branch] (:seon.db/basis-t value))
+                "retire" (swap! window-bases dissoc [root cluster branch])
+                nil)
+              (mcp-success response))))
       (catch Throwable throwable
         (mcp-error (merge request {:seon.dev.mcp/failure :branch :seon.dev.mcp/error (ex-message throwable)
                                   :seon.dev.mcp/class (.getName (class throwable))}
                           (ex-data throwable)))))))
 
 (defn- window-form
-  "Read the evaluated branch's errors in (since, its current basis] through `seon.error/occurred-since`."
+  "Read the evaluated branch's errors in (since, its current basis] through
+  `seon.error/occurred-since`; a nil `since` reads only the current basis."
   [cluster branch since]
   (pr-str
    `(do
@@ -636,7 +646,7 @@
           (nil? connection#) {:seon.dev.mcp/window :unknown :seon.error/message "No live connection holds this branch."}
           (nil? since#) {:seon.dev.mcp/window :unknown :seon.error/message "This JVM's seon.error has no occurred-since (RESET NEEDED)."}
           :else (let [database# ((requiring-resolve 'seon.db/db) connection#)
-                      errors# (since# database# ~since)]
+                      errors# (if ~since (since# database# ~since) [])]
                   (if (map? errors#)
                     {:seon.dev.mcp/window :unknown :seon.error/error errors#}
                     {:seon.db/basis-t ((requiring-resolve 'seon.db/basis-t) database#)
@@ -648,7 +658,9 @@
   evaluation there, or nil when none; advances that branch's window basis.
   Runs on the evaluation's own session, so it pays no second discovery."
   [session timeout-ms [_ cluster branch :as key]]
-  (let [since (get @window-bases key 0)
+  ;; a lane branch's window opens at the fork basis its `branch` create
+  ;; recorded; one this bridge did not create has no known start
+  (let [since (get @window-bases key (when-not branch 0))
         value (try (.write ^java.io.Writer (:writer session) (str (window-form cluster branch since) "\n"))
                    (.flush ^java.io.Writer (:writer session))
                    (terminal-projection (mapv decoded-projection-event
@@ -657,7 +669,12 @@
                      ;; a half-read reply would desynchronize the next evaluation
                      (close-clj-session! ((juxt :root :cluster :session-id) session))
                      {:seon.dev.mcp/window :unknown :seon.error/message (ex-message throwable)}))
-        value (or (:seon.dev.mcp/value value) value)]
+        value (or (:seon.dev.mcp/value value) value)
+        value (if (and (nil? since) (:seon.db/basis-t value))
+                (assoc value :seon.dev.mcp/window :unknown
+                       :seon.error/message (str "This bridge recorded no fork basis for the branch; the window opens at "
+                                                (:seon.db/basis-t value) ". Requery (seon.error/occurred-since database <fork basis>)."))
+                value)]
     (when-let [basis (:seon.db/basis-t value)]
       (swap! window-bases assoc key basis))
     (when (or (:seon.dev.mcp/window value) (pos? (:seon.dev.mcp/count value 0)))
