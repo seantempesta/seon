@@ -1501,27 +1501,41 @@
                              commit (when-not (:seon.error/at loaded)
                                       (or (:seon.source/commit-id loaded) (when (= 1 (count boots)) (first boots))))]
                          (or (some-> (when commit (cache/lookup projection-cache [::builder commit])) deref)
-                             (loaded-builder origin loaded instances))))]
-    (cond
+                             (loaded-builder origin loaded instances))))
+        ;; An as-of view keys by its own declaration datoms, never its origin's.
+        ;; An uncommitted origin (the writer's in-transaction value) names them
+        ;; by its revision key and the time point: within one connection an
+        ;; attribute's revision advances with every datom it gains or loses
+        ;; (`datahike.db/advance-cache-context`, db.cljc:423), so the pair fixes
+        ;; the view's declaration datoms without reading them (25 ms per read
+        ;; before, lane-writer-cost-2-2026-09-23.md).
+        view-key (when as-of?
+                   (or (as-of-key source)
+                       (when (:datahike.cache/connection-id (:cache-context (dbi/-origin source)))
+                         (assoc (projection-cache-key (dbi/-origin source))
+                                ::as-of (dbi/-time-point source)))))
+        committed (when-not as-of? (datahike.db/committed-value-identity source))
+        ;; A cell exists only under a key whose value declared its program, and
+        ;; a key names its declaration datoms, so a hit answers before
+        ;; `declares-program?`: on an as-of view that first datom merges the
+        ;; temporal index, 1.6 ms per call (lane-fix-cost-db-2026-09-25).
+        cached (fn [cache-atom k]
+                 (when-let [cell (cache/lookup cache-atom k)]
+                   (cache/hit cache-atom k)
+                   @cell))]
+    (or
+     (when view-key (cached value-projection-cache [@builder view-key]))
+     (when committed (cached projection-cache [::commit (:datahike.value/commit-id committed) @builder]))
+     (cond
       (not (declares-program? source))
       (construction-projection database)
 
-      ;; An as-of view keys by its own declaration datoms, never its origin's.
-      ;; An uncommitted origin (the writer's in-transaction value) names them
-      ;; by its revision key and the time point: within one connection an
-      ;; attribute's revision advances with every datom it gains or loses
-      ;; (`datahike.db/advance-cache-context`, db.cljc:423), so the pair fixes
-      ;; the view's declaration datoms without reading them (25 ms per read
-      ;; before, lane-writer-cost-2-2026-09-23.md).
       as-of?
-      (if-let [view-key (or (as-of-key source)
-                            (when (:datahike.cache/connection-id (:cache-context (dbi/-origin source)))
-                              (assoc (projection-cache-key (dbi/-origin source))
-                                     ::as-of (dbi/-time-point source))))]
+      (if view-key
         (value-projection @builder view-key source)
         (content-projection @builder source))
 
-      (datahike.db/committed-value-identity source)
+      committed
       ;; Store the delay before forcing it: concurrent misses share the winning
       ;; cell even when core.cache's atom retries its insertion. A revision
       ;; miss (a new connection or branch) tries the commit, which names one
@@ -1530,7 +1544,7 @@
       ;; A revision hit also stores its cell under the commit, so a new branch
       ;; at an equal commit hits too; Datahike's query cache keys committed
       ;; values the same way (fork `684d3290`). Both key kinds share the bound.
-      (let [commit-key [::commit (:datahike.value/commit-id (datahike.db/committed-value-identity source)) @builder]
+      (let [commit-key [::commit (:datahike.value/commit-id committed) @builder]
             cell (cache/lookup-or-miss
                   projection-cache (assoc (projection-cache-key source) ::builder @builder)
                   (fn [_] (cache/lookup-or-miss
@@ -1557,7 +1571,7 @@
       ;; A detached value (Datahike gives it no context: an `empty-db` or
       ;; `load-entities` basis) keys by its declaration content alone.
       :else
-      (content-projection @builder source))))
+      (content-projection @builder source)))))
 
 (defn- read-declarations
   "The declaration table for one read, or the flat refusal naming what is missing.

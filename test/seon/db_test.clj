@@ -2448,6 +2448,25 @@
                        ::as-of-staged)
             "a view at the write holds it")))))
 
+;; Class: a memoized projection answers before `declares-program?`. On an
+;; as-of view that check's first `:seon.schema/key` datom merges the temporal
+;; index, 1.6 ms per call, which every rendered node paid (186k calls).
+(deftest a-cached-as-of-projection-answers-without-reading-its-declarations
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           view (db/as-of database (:max-tx database))
+           first-read (db/carried-projection view)
+           elapsed-ms (fn [f] (let [started (System/nanoTime)]
+                                (dotimes [_ 50] (f))
+                                (/ (- (System/nanoTime) started) 1e6)))
+           hits (elapsed-ms #(db/carried-projection view))
+           declaration-reads (elapsed-ms #(first (d/datoms view :avet :seon.schema/key)))]
+       (is (identical? first-read (db/carried-projection view)))
+       (is (< hits (/ declaration-reads 4))
+           (str "50 cached reads took " hits " ms; 50 first declaration datoms took "
+                declaration-reads " ms"))))))
+
 (deftest equal-revisions-prove-a-read-current-without-scanning-history
   (test-support/with-database
    (fn [connection]
