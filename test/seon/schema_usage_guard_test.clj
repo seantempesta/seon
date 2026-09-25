@@ -6,6 +6,7 @@
             [datahike.db.interface :as dbi]
             [seon.turn :as turn]
             [seon.env :as env]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support]))
@@ -17,6 +18,7 @@
 (def ^:private entity-key :seon.schema-usage-guardb/entity)
 (def ^:private entity-id-key :seon.schema-usage-guardb/entity-id)
 (def ^:private entity-child-key :seon.schema-usage-guardb/entity-child)
+(def ^:private holder-key :seon.schema-usage-guard/holder)
 
 (def ^:private forms
   {base-key [:int {:seon.db/index true}]
@@ -77,10 +79,20 @@
   (schema/build-projection (merge (schema/snapshot) probe-forms)))
 
 (defn- schema-row
-  [schema-key definition]
-  {:seon.schema/key schema-key
-   :seon.schema/form (pr-str definition)
-   :seon.schema.admission/source :core})
+  "One canonical schema declaration row, as the agent's declaration path
+  derives it against the fixture's current projection."
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword :any] :seon.program/declaration-row]}
+  [connection schema-key definition]
+  (program/declaration-row (schema/projection-from-database @connection)
+                           {:seon.schema/key schema-key :seon.schema/form (pr-str definition)}
+                           :all :core))
+
+(defn- held
+  "One data entity carrying `attribute`. The writer refuses a root entity with
+  no identity attribute, so the fixture's data hangs off one holder identity."
+  {:malli/schema [:=> [:cat :qualified-keyword :any] :map]}
+  [attribute value]
+  {holder-key "holder" attribute value})
 
 (defn- advance-fixture-projection!
   "Advance the fixture's projection state to the database it just wrote.
@@ -110,9 +122,11 @@
   references. A fixture that wrote the rows and left the projection behind
   made every later `row-tx` here fail `:malli.core/invalid-schema` on
   `:seon.schema-usage-guardb/entity-id` — the suite's own declaration
-  referring to a key its writer's projection did not carry."
+  referring to a key its writer's projection did not carry. The holder
+  identity every suite datum hangs off (`held`) is installed with them."
   [connection selected-forms]
-  (let [projection
+  (let [selected-forms (assoc selected-forms holder-key [:string {:seon.db/identity true}])
+        projection
         (reduce-kv
          (fn [current schema-key definition]
            (schema/projection-with-schema
@@ -245,12 +259,12 @@
       (with-database
         (fn [connection]
           (install-forms! connection forms)
-          (test-support/transacted! connection [{used-key 7}])
+          (test-support/transacted! connection [(held used-key 7)])
           (let [result
                 (transact-result
                  connection
                  (row-tx
-                  (schema-row base-key
+                  (schema-row connection base-key
                               [:string {:seon.db/index true}])))]
             (is (nil? (:error result)) (pr-str (:error result)))
             (is (= (pr-str [:string {:seon.db/index true}])
@@ -265,7 +279,7 @@
                              :where [_ ?attribute ?value]]
                            @connection used-key))
                 "and the old-type data behind it is dropped")
-            (test-support/transacted! connection [{used-key "seven"}])
+            (test-support/transacted! connection [(held used-key "seven")])
             (is (= "seven"
                    (db/q '[:find ?value .
                           :in $ ?attribute
@@ -277,11 +291,11 @@
   (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (test-support/transacted! connection [{base-key 7}])
+      (test-support/transacted! connection [(held base-key 7)])
       (let [result
             (transact-result
              connection
-             (row-tx (schema-row base-key (get forms base-key))))]
+             (row-tx (schema-row connection base-key (get forms base-key))))]
         (is (nil? (:error result)))
         (is (= (pr-str (get forms base-key))
                (:seon.schema/form
@@ -299,9 +313,9 @@
       (install-forms! connection {base-key (get forms base-key)})
       (test-support/transacted!
                    connection
-                   [(schema-row unrelated-key [:string {:seon.db/index true}])])
+                   [(schema-row connection unrelated-key [:string {:seon.db/index true}])])
       (is (not (contains? (:schema @connection) unrelated-key)))
-      (test-support/transacted! connection [{base-key 7}])
+      (test-support/transacted! connection [(held base-key 7)])
       (let [entity (db/q '[:find ?entity .
                           :in $ ?attribute
                           :where [?entity ?attribute _]]
@@ -311,10 +325,10 @@
               (transact-result
                connection
                (row-tx
-                (schema-row base-key
+                (schema-row connection base-key
                             [:int {:min 1 :seon.db/index true}])))]
           (is (nil? (:error result)))
-          (test-support/transacted! connection [{base-key 8}])
+          (test-support/transacted! connection [(held base-key 8)])
           (is (= 8
                  (db/q '[:find ?value .
                         :in $ ?attribute
@@ -345,7 +359,7 @@
         (test-support/transacted! connection (into [(test-support/namespace-row @connection namespace-name)]
                                                    cat
                                                    [(test-support/agent-tx @connection agent-id namespace-name)]))
-        (test-support/transacted! connection [{base-key 7}])
+        (test-support/transacted! connection [(held base-key 7)])
         (test-support/transacted!
                      connection
                      (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/opened-tx "datomic.tx"}))
@@ -354,7 +368,7 @@
                      (transact-result
                       connection
                       (row-tx request
-                              (schema-row base-key [:string {:seon.db/index true}]))))))
+                              (schema-row connection base-key [:string {:seon.db/index true}]))))))
           (is (= (pr-str [:string {:seon.db/index true}])
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]
@@ -365,13 +379,13 @@
                           @connection base-key))))
         (testing "a form another writer changed since the run opened refuses"
           (test-support/transacted! connection
-                                    [(schema-row unrelated-key
+                                    [(schema-row connection unrelated-key
                                                  [:string {:seon.db/index true}])])
           (let [refusal
                 (transact-result
                  connection
                  (row-tx request
-                         (schema-row unrelated-key
+                         (schema-row connection unrelated-key
                                      [:boolean {:seon.db/index true}])))]
             (is (= :seon.turn/program-row-changed-after-open
                    (get-in refusal [:error :seon.turn/rule])))
@@ -401,12 +415,12 @@
         (install-forms! connection selected-forms)
         (test-support/transacted!
                      connection
-                     [(schema-row unrelated-key [:string {:seon.db/index true}])])
-        (test-support/transacted! connection [{entity-child-key 7}])
+                     [(schema-row connection unrelated-key [:string {:seon.db/index true}])])
+        (test-support/transacted! connection [{entity-id-key "child" entity-child-key 7}])
         (let [result
               (transact-result
                connection
-               (row-tx (schema-row entity-key replacement-form)))]
+               (row-tx (schema-row connection entity-key replacement-form)))]
           (is (nil? (:error result)) (pr-str (:error result)))
           (is (= (pr-str replacement-form)
                  (:seon.schema/form
@@ -447,7 +461,7 @@
               (transact-result
                connection
                (row-tx
-                (schema-row entity-key reduced-entity-form))))))
+                (schema-row connection entity-key reduced-entity-form))))))
         (is (= #{[entity-key entity-id-key]}
                (into #{}
                      (filter (fn [[source _]] (= entity-key source)))
@@ -500,7 +514,7 @@
   (with-database
     (fn [connection]
       (install-forms! connection {base-key (get forms base-key)})
-      (test-support/transacted! connection [{base-key 7}])
+      (test-support/transacted! connection [(held base-key 7)])
       (let [data-t (:max-tx @connection)
             entity
             (db/q '[:find ?entity .
@@ -546,7 +560,7 @@
             definition
             [:int {:seon.db/index true :seon.db/no-history? true}]]
         (install-forms! connection {schema-key definition})
-        (test-support/transacted! connection [{schema-key 7}])
+        (test-support/transacted! connection [(held schema-key 7)])
         (let [data-t (:max-tx @connection)
               entity
               (db/q '[:find ?entity .
