@@ -118,7 +118,7 @@
               :selection
               [:map
                [:seon.render.selection/stages
-                [:vector {:min 5 :max 5} :seon.render/selection-stage]]
+                [:vector {:min 2 :max 2} :seon.render/selection-stage]]
                [:seon.render.selection/selected
                 [:or :qualified-symbol :seon.render/rendered
                  :seon.render/ambiguous-error :seon.render/request-error :seon.config/error]]],
