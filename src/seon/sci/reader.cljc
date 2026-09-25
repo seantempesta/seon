@@ -158,10 +158,7 @@
            referred-names)
      :requires
      (cond-> #{}
-       (nil? (:as-alias options)) (conj target))
-     ::refer-all-targets
-     (cond-> #{}
-       (= :all refer-kind) (conj target))}))
+       (nil? (:as-alias options)) (conj target))}))
 
 (defn- libspec-pair
   [prefix [kind value]]
@@ -201,7 +198,6 @@
           alias-rows (into #{} (mapcat :aliases) bindings)
           refer-rows (into #{} (mapcat :refers) bindings)
           required-targets (into #{} (mapcat :requires) bindings)
-          refer-all-targets (into #{} (mapcat ::refer-all-targets) bindings)
           aliases (into {}
                         (map (juxt :seon.ns.alias/local
                                    :seon.ns.alias/target-ns))
@@ -219,8 +215,7 @@
         :seon.ns/name namespace-name
         :seon.ns/requires required-targets
         :seon.ns/aliases alias-rows
-        :seon.ns/refers refer-rows
-        ::refer-all-targets refer-all-targets}
+        :seon.ns/refers refer-rows}
         doc (assoc :seon.ns/doc doc)))))
 
 (defn- quoted-symbol
@@ -326,51 +321,6 @@
       (or (get refers operation)
           (symbol "clojure.core" (name operation))))))
 
-(defn- declaration-occurrence
-  "The declaration family and independently placeable identity of `form`.
-
-  An occurrence remains present when namespace attribution is unavailable.
-  Build indexing can therefore refuse an unplaceable declaration instead of
-  mistaking the absence of its durable row for the absence of a declaration."
-  [form namespace-name context]
-  (when (seq? form)
-    (let [operation (resolved-operation (first form) context)
-          declared-name (second form)]
-      (cond
-        (contains? #{'clojure.core/defn 'clojure.core/defn-} operation)
-        (let [identity (when (symbol? declared-name)
-                         (qualified-symbol namespace-name declared-name))]
-          (cond-> {::declaration-family :seon.fn/sym}
-            identity (assoc ::declaration-identity (str identity))
-            (nil? identity)
-            (assoc ::declaration-refusal
-                   (if (symbol? declared-name)
-                     ::namespace-unproven
-                     ::malformed-declaration))))
-
-        (= 'clojure.test/deftest operation)
-        (let [identity (when (symbol? declared-name)
-                         (qualified-symbol namespace-name declared-name))]
-          (cond-> {::declaration-family :seon.test/sym}
-            identity (assoc ::declaration-identity (str identity))
-            (nil? identity)
-            (assoc ::declaration-refusal
-                   (if (symbol? declared-name)
-                     ::namespace-unproven
-                     ::malformed-declaration))))
-
-        (= 'seon.schema/register! operation)
-        (let [identity (when (and (= 3 (count form))
-                                  (qualified-keyword? declared-name))
-                         declared-name)]
-          (cond-> {::declaration-family :seon.schema/key}
-            identity (assoc ::declaration-identity identity)
-            (nil? identity)
-            (assoc ::declaration-refusal ::malformed-declaration)))
-
-        :else
-        nil))))
-
 (defn- schema-declaration
   [form context]
   (when (and (seq? form)
@@ -412,41 +362,17 @@
      (select-keys
       (namespace-info form context)
       [:seon.ns/name :seon.ns/doc :seon.ns/requires
-       :seon.ns/aliases :seon.ns/refers ::refer-all-targets])
+       :seon.ns/aliases :seon.ns/refers])
      :seon.ns/source source)
-    (merge
-     (declaration-occurrence form namespace-name context)
-     (or
-      (when-let [function (function-declaration form namespace-name context)]
-        (assoc function :seon.fn/source source))
-      (when-let [test (test-declaration form namespace-name context)]
-        (assoc test :seon.test/source source))
-      (when-let [declaration (schema-declaration form context)]
-        (assoc declaration :seon.schema/ns [:seon.ns/name namespace-name]))
-      (schema-unregister form context)
-      (namespace-unmap form context)))))
-
-(defn- nested-executable-declarations
-  "Declaration facts nested directly under an executable top-level `do`.
-
-  The publication contract is one top-level form to at most one row, so these
-  are refused loudly rather than silently omitted. Quote, function bodies, and
-  other inert data are not traversed."
-  [form namespace-name context]
-  (when (and (seq? form) (= 'do (first form)))
-    (into []
-          (mapcat
-           (fn [child]
-             (if (and (seq? child) (= 'do (first child)))
-               (nested-executable-declarations child namespace-name context)
-               (when-let [facts
-                          (declaration-facts child namespace-name context
-                                             (pr-str child))]
-                 [(dissoc facts
-                          ::declaration-family
-                          ::declaration-identity
-                          ::declaration-refusal)]))))
-          (rest form))))
+    (or
+     (when-let [function (function-declaration form namespace-name context)]
+       (assoc function :seon.fn/source source))
+     (when-let [test (test-declaration form namespace-name context)]
+       (assoc test :seon.test/source source))
+     (when-let [declaration (schema-declaration form context)]
+       (assoc declaration :seon.schema/ns [:seon.ns/name namespace-name]))
+     (schema-unregister form context)
+     (namespace-unmap form context))))
 
 (defn- namespace-changing-mention?
   "True when executing this top-level form can change the reading namespace."
@@ -635,14 +561,7 @@
                   form
                   (when (::attribution? state) (::ns state))
                   (select-keys state [::ns ::aliases ::refers ::publics])
-                  source)
-                 (when-let [nested
-                            (seq
-                             (nested-executable-declarations
-                              form
-                              (when (::attribution? state) (::ns state))
-                              (select-keys state [::ns ::aliases ::refers])))]
-                   {::nested-declarations nested}))
+                  source))
                 event
                 (cond-> event
                   (and (map? form)
@@ -822,7 +741,9 @@
       (::ns state) (assoc ::ns (::ns state)))))
 
 (defn- recovering-events
-  "Recover at proven top-level anchors, retaining one unreadable span."
+  "Resynchronize after an unreadable span at a heuristic column-zero anchor
+  (not a proof of top-level structure), retaining the span as one error event.
+  Emitted spans are ordered and recovery strictly advances."
   [text reading-context failure]
   (loop [offset 0
          state reading-context

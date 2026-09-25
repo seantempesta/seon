@@ -759,12 +759,5 @@
     (is (= #{'audit.a/real}
            (into #{} (keep :seon.fn/sym) read-events)))
     (is (= #{'audit.a/real-test}
-           (into #{} (keep :seon.test/sym) read-events))))
-  (let [nested (events "(ns audit.a)\n(do (defn hidden [x] x))")]
-    (is (= [{:seon.fn/sym 'audit.a/hidden
-             :seon.fn/ns [:seon.ns/name 'audit.a]
-             :seon.fn/source "(defn hidden [x] x)"
-             :seon.fn/arglists "([x])"
-             :seon.fn/private? false}]
-           (:seon.sci.reader/nested-declarations (second nested))))))
+           (into #{} (keep :seon.test/sym) read-events)))))
 
