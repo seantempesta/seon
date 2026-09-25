@@ -196,11 +196,35 @@
         ((shell-private 'task-result)
          task
          {:seon.config.eval/time-limit-ms 20}
-         ::stdout-capture)]
+         ::stdout-capture
+         (+ (System/nanoTime) 20000000))]
     (is (number? (:seon.await/elapsed-ms result)))
     (is (= ::stdout-capture
            (:seon.await/requested-member result)))
     (is (= true (deref interrupted 1000 ::not-interrupted)))))
+
+(deftest every-capture-outcome-is-read-and-none-is-lost
+  (let [task (shell-private 'virtual-task)
+        finish (fn [reaped? & bodies]
+                 (try ((shell-private 'finish-evidence) nil
+                       (mapv vector [:seon.shell.jvm/stdout :seon.shell.jvm/stderr :seon.shell.jvm/stdin]
+                             (map #(task "seon-shell-test-" %) bodies))
+                       {:seon.config.eval/time-limit-ms 50} reaped?)
+                      (catch Throwable thrown thrown)))
+        never #(deref (promise))
+        pipe #(throw (java.io.IOException. "Broken pipe"))]
+    (testing "a failing reader throws with a later timeout suppressed, not skipped"
+      (let [thrown (finish false #(throw (ex-info "stdout failed" {})) never (constantly nil))]
+        (is (= "stdout failed" (ex-message thrown)))
+        (is (= [:seon.config.eval/time-limit-ms]
+               (map (comp :seon.await/config-attribute ex-data) (.getSuppressed ^Throwable thrown))))))
+    (testing "two timeouts at one deadline: the first carries the later one"
+      (let [timeout (finish false never never (constantly nil))]
+        (is (= :seon.shell.jvm/stderr (-> timeout :seon.error/data first :seon.await/requested-member)))))
+    (testing "only a closed stdin pipe after reaping is an expected end of input"
+      (is (instance? java.io.IOException (finish false (constantly nil) (constantly nil) pipe)))
+      (is (= "blob failed" (ex-message (finish true (constantly nil) (constantly nil)
+                                               #(throw (ex-info "blob failed" {})))))))))
 
 (deftest ^{:seon.test/long "Publish the canonical program into a physical store before observing shell output or process teardown."
            :seon.test/long-ms 600000

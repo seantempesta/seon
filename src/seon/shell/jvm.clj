@@ -102,16 +102,17 @@
      :seon.shell.jvm/result result}))
 
 (defn- task-result
-  {:malli/schema [:=> [:cat :map :map :qualified-keyword]
+  {:malli/schema [:=> [:cat :map :map :qualified-keyword :int]
                   [:or :nil :seon.blob/staged-write :seon.await/timeout-error]]}
   [{thread :seon.shell.jvm/thread result :seon.shell.jvm/result}
-   effective member]
+   effective member deadline-nanos]
   (let [terminal
         (await/await!
          {:seon.await/bound
           {:seon.await/config-attribute :seon.config.eval/time-limit-ms
            :seon.await/config-value
-           (:seon.config.eval/time-limit-ms effective)}
+           (:seon.config.eval/time-limit-ms effective)
+           :seon.await/deadline-nanos deadline-nanos}
           :seon.await/diagnostic
           {:seon.error/layer :shell
            :seon.error/operation ::capture-completion
@@ -321,21 +322,38 @@
         (string? decoded) (assoc :my.shell.output/preview decoded)))))
 
 (defn- finish-evidence
-  {:malli/schema [:=> [:cat :seon.db/connection :map :map :map]
+  "Every capture task's outcome, each read against one evaluation deadline so
+  none is left unread: the first failure thrown with every later one
+  suppressed, else the first timeout carrying the later ones, else the
+  evidence. After reaping, a closed stdin pipe (the JDK's two messages, no
+  subclass) is the expected end of input; no other failure is."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector :map] :map :boolean]
                   [:or [:map [:my.shell/stdout :my.shell.output/value]
                              [:my.shell/stderr :my.shell.output/value]
                              [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]
                    :seon.await/timeout-error]]}
-  [connection stdout-task stderr-task effective]
-  (let [stdout (task-result stdout-task effective ::stdout)]
-    (if (:seon.await/elapsed-ms stdout)
-      stdout
-      (let [stderr (task-result stderr-task effective ::stderr)]
-        (if (:seon.await/elapsed-ms stderr)
-          stderr
-          {:my.shell/stdout (output-descriptor connection stdout effective)
-           :my.shell/stderr (output-descriptor connection stderr effective)
-           :seon.blob/staged-writes [stdout stderr]})))))
+  [connection tasks effective reaped?]
+  (let [deadline (+ (System/nanoTime) (* 1000000 (long (:seon.config.eval/time-limit-ms effective))))
+        [stdout stderr :as outcomes]
+        (mapv (fn [[member task]]
+                (try (task-result task effective member deadline)
+                     (catch java.io.IOException pipe
+                       (if (and reaped? (= ::stdin member) (#{"Broken pipe" "Stream closed"} (ex-message pipe)))
+                         nil pipe))
+                     (catch Throwable failure failure)))
+              tasks)
+        [primary & later] (filter #(instance? Throwable %) outcomes)
+        [timeout & timeouts] (filter :seon.await/elapsed-ms outcomes)]
+    (when primary
+      (doseq [failure (concat later (map #(ex-info (:seon.error/message %) %) (remove nil? (cons timeout timeouts))))]
+        (.addSuppressed ^Throwable primary failure))
+      (throw primary))
+    (cond
+      (and timeout timeouts) (assoc timeout :seon.error/data (vec timeouts))
+      timeout timeout
+      :else {:my.shell/stdout (output-descriptor connection stdout effective)
+             :my.shell/stderr (output-descriptor connection stderr effective)
+             :seon.blob/staged-writes [stdout stderr]})))
 
 (defn- execute
   [projection request effective cwd]
@@ -350,13 +368,11 @@
         ^Process child (:proc process-record)
         captured (volatile! [])
         grace-ms (:seon.config.shell/termination-grace-ms effective)
-        stdout-task
-        (capture-task connection "seon-shell-stdout-" (:out process-record))
-        stderr-task
-        (capture-task connection "seon-shell-stderr-" (:err process-record))
-        input-task
-        (stdin-task connection (:in process-record) (:my.shell/stdin request)
-                    (:seon.config.shell/stdin-max-bytes effective))]
+        tasks
+        [[::stdout (capture-task connection "seon-shell-stdout-" (:out process-record))]
+         [::stderr (capture-task connection "seon-shell-stderr-" (:err process-record))]
+         [::stdin (stdin-task connection (:in process-record) (:my.shell/stdin request)
+                              (:seon.config.shell/stdin-max-bytes effective))]]]
     (try
       (let [disposition (await-exit child
                                     (:seon.config.shell/time-limit-ms
@@ -367,31 +383,18 @@
         (if-let [unfinished (reap! process-record @captured grace-ms
                                    {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)})]
           unfinished
-          (if (= :exited disposition)
-            (let [evidence (finish-evidence connection stdout-task stderr-task
-                                            effective)
-                  input (task-result input-task effective ::stdin)]
-              (cond
-                (:seon.await/elapsed-ms evidence) evidence
-                (:seon.await/elapsed-ms input) input
-                :else
-                (merge {:my.shell/argv argv
-                        :my.shell/cwd (:my.shell/cwd request)
-                        :my.shell/exit (.exitValue child)}
-                       evidence)))
-            ;; The tree is reaped, so the `:interrupted` disposition — what
-            ;; stamps `:seon.effect/interrupted-at` on the receipt — is true:
-            ;; the process and the receipt terminate together or not at all.
-              (let [evidence (finish-evidence connection stdout-task stderr-task
-                                              effective)
-                    input
-                    (try
-                      (task-result input-task effective ::stdin)
-                      (catch Throwable _ nil))]
-                (cond
-                  (:seon.await/elapsed-ms evidence) evidence
-                  (:seon.await/elapsed-ms input) input
-                  :else
+          (let [evidence (finish-evidence connection tasks effective (not= :exited disposition))]
+            (cond
+              (:seon.await/elapsed-ms evidence) evidence
+              (= :exited disposition)
+              (merge {:my.shell/argv argv
+                      :my.shell/cwd (:my.shell/cwd request)
+                      :my.shell/exit (.exitValue child)}
+                     evidence)
+              ;; The tree is reaped, so the `:interrupted` disposition — what
+              ;; stamps `:seon.effect/interrupted-at` on the receipt — is true:
+              ;; the process and the receipt terminate together or not at all.
+              :else
                   (assoc
                    (seon.error.refusal/diagnostic (java.util.Date.) :my.shell/execution 'seon.shell.jvm/execute
                     {:seon.error/message (if (= :evaluation-limit disposition)
@@ -404,11 +407,14 @@
           :seon.error/member :my.shell/argv
           :seon.error/expected "process exit before its deadline"
           :seon.error/data (merge {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)} evidence)})
-                   :seon.effect/disposition :interrupted))))))
+                   :seon.effect/disposition :interrupted)))))
       (catch InterruptedException interrupted
-        (when-let [unfinished (reap! process-record @captured grace-ms
-                                     {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)})]
-          (.addSuppressed interrupted (ex-info (:seon.error/message unfinished) unfinished)))
+        ;; A reaped tree's tasks end at their pipes' close: read each, keeping any failure.
+        (let [late (or (reap! process-record @captured grace-ms
+                              {:my.shell/argv argv :my.shell/cwd (:my.shell/cwd request)})
+                       (try (finish-evidence connection tasks effective true) (catch Throwable late late)))]
+          (cond (instance? Throwable late) (.addSuppressed interrupted late)
+                (:seon.await/elapsed-ms late) (.addSuppressed interrupted (ex-info (:seon.error/message late) late))))
         (.interrupt (Thread/currentThread))
         (throw interrupted)))))
 
