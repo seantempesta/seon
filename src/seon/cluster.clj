@@ -626,6 +626,23 @@
                       [?file :seon.fn.file/relative-path ?path]]
              database '[clojure.core/defn clojure.core/defn-])))
 
+(def ^:private observation-top
+  "How many open faults the MCP observation carries whole; the rest are counted."
+  10)
+
+(defn- bounded-summary
+  "`value` with each string over 300 characters cut to 300 and each collection
+  dropped, both named with their size under `:seon.dev.mcp/omitted`. The whole
+  value stays with its producer; the observation crosses a prepl to MCP."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [value]
+  (reduce-kv (fn [summary k v]
+               (cond (coll? v) (-> summary (dissoc k) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
+                     (and (string? v) (< 300 (count v)))
+                     (-> summary (assoc k (subs v 0 300)) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
+                     :else summary))
+             value value))
+
 (defn mcp-runtime-observation
   "Derive health and Flow observations for one root-discovered cluster."
   {:malli/schema [:=> [:cat :seon.boot/cluster-name] :map]}
@@ -652,13 +669,20 @@
         ;; the full chain is the occurrence's evidence blob in the database.
         open-faults
         (when (and connection ready (not unavailable))
-          (mapv (fn [{fact :seon.error/fact :as entry}]
-                  (merge (select-keys entry [:seon.error/signature :seon.error/operation
+          (problems/open-faults (db/db connection)
+                                (vec (:seon.problems/error-signatures problems))))
+        ;; The newest few, message-bounded; the chain stays in the database.
+        shown-faults
+        (->> open-faults
+             (sort-by #(get-in % [:seon.error/fact :seon.error.occurrence/last-at]) #(compare %2 %1))
+             (take observation-top)
+             (mapv (fn [{fact :seon.error/fact :as entry}]
+                     (-> (select-keys entry [:seon.error/signature :seon.error/operation
                                              :seon.problems/occurrences])
-                         (select-keys fact [:seon.error.occurrence/last-at :seon.error/message
-                                            :seon.error/exception-class :seon.error/frame])))
-                (problems/open-faults (db/db connection)
-                                      (vec (:seon.problems/error-signatures problems)))))
+                         (merge (select-keys fact [:seon.error.occurrence/last-at :seon.error/message
+                                                   :seon.error/exception-class]))
+                         bounded-summary
+                         (merge (select-keys fact [:seon.error/frame]))))))
         readiness-face
         (when ready
           (dissoc ready :seon.problems/problems))
@@ -687,10 +711,11 @@
                 projection-state
                 #(oversight/flow-status (db/db connection) instance))
                :unknown)}
-      unloaded (assoc :seon.dev.mcp/program-unavailable unloaded)
-      (seq open-faults) (assoc :seon.dev.mcp/open-faults open-faults)
+      unloaded (assoc :seon.dev.mcp/program-unavailable (bounded-summary unloaded))
+      (seq open-faults) (assoc :seon.dev.mcp/open-faults shown-faults
+                               :seon.dev.mcp/open-fault-count (count open-faults))
       problem-counts (assoc :seon.dev.mcp/problem-counts problem-counts)
-      unavailable (assoc :seon.dev.mcp/problems-unavailable unavailable)
+      unavailable (assoc :seon.dev.mcp/problems-unavailable (bounded-summary unavailable))
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
 
 ;;; ---------------------------------------------------------------------------
