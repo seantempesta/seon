@@ -78,3 +78,43 @@
 	url = https://github.com/seantempesta/superv.async.git
 	branch = main
 	ignore = dirty
+[submodule "reference-code/clerk"]
+	path = reference-code/clerk
+	url = https://github.com/nextjournal/clerk.git
+	shallow = true
+[submodule "reference-code/portal"]
+	path = reference-code/portal
+	url = https://github.com/djblue/portal.git
+	shallow = true
+[submodule "reference-code/reveal"]
+	path = reference-code/reveal
+	url = https://github.com/vlaaad/reveal.git
+	shallow = true
+[submodule "reference-code/morse"]
+	path = reference-code/morse
+	url = https://github.com/nubank/morse.git
+	shallow = true
+[submodule "reference-code/orchard"]
+	path = reference-code/orchard
+	url = https://github.com/clojure-emacs/orchard.git
+	shallow = true
+[submodule "reference-code/nrepl"]
+	path = reference-code/nrepl
+	url = https://github.com/nrepl/nrepl.git
+	shallow = true
+[submodule "reference-code/fipp"]
+	path = reference-code/fipp
+	url = https://github.com/brandonbloom/fipp.git
+	shallow = true
+[submodule "reference-code/puget"]
+	path = reference-code/puget
+	url = https://github.com/greglook/puget.git
+	shallow = true
+[submodule "reference-code/clay"]
+	path = reference-code/clay
+	url = https://github.com/scicloj/clay.git
+	shallow = true
+[submodule "reference-code/kindly"]
+	path = reference-code/kindly
+	url = https://github.com/scicloj/kindly.git
+	shallow = true
