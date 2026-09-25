@@ -28,6 +28,6 @@
                             :error [:string {:min 1}],
                             :hash [:string {:min 1}],
                             :id
-                            [:string {:min 1, :seon.db/identity true}],
+                            [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.context.contribution/contribution}],
                             :position [:int {:min 0}],
                             :tokens [:int {:min 0}]}

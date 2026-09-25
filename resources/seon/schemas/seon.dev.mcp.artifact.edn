@@ -1,5 +1,5 @@
 #:seon.dev.mcp.artifact
-{:id [:and {:seon.db/identity true} :seon.blob/digest]
+{:id [:and {:seon.db/identity true :seon.program/row-schema :seon.dev.mcp.artifact/entity} :seon.blob/digest]
  :digest [:and {:seon.db/no-history? true} :seon.blob/digest]
  :entity
  [:map {:seon.db/attributes true :seon.program/partition :seon.data}

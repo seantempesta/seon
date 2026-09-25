@@ -1,5 +1,5 @@
 #:seon.schedule.fire{:id
-                     [:string {:min 1, :seon.db/identity true}],
+                     [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.schedule.fire/fire}],
                      :task [:and #:seon.db{:index true} :seon.db/ref],
                      :nominal-at
                      [:and #:seon.db{:index true} :inst],

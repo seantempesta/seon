@@ -1,5 +1,5 @@
 #:seon.maintenance.request{:id
-                           [:string {:min 1, :seon.db/identity true}],
+                           [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.maintenance.request/entity}],
                            :task
                            [:and #:seon.db{:index true} :seon.db/ref],
                            :fire

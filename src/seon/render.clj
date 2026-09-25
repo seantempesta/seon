@@ -350,6 +350,41 @@
   [entity]
   (render.value/transacted entity))
 
+(defn- entity-owners
+  "Each identity attribute's declared `:seon.program/row-schema`, and each
+  such row schema's owned keys (its entries plus `:db/id`), once per projection."
+  {:malli/schema [:=> [:cat :seon.schema/projection]
+                  [:map [::identity-rows [:map-of :qualified-keyword :qualified-keyword]]
+                   [::owned-keys [:map-of :qualified-keyword [:set :keyword]]]]]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::entity-owners
+   (fn []
+     (let [registry (:seon.schema.projection/registry projection)
+           rows (into {} (keep (fn [attribute]
+                                 (when-let [row (some-> (mr/schema registry attribute)
+                                                        m/properties :seon.program/row-schema)]
+                                   [attribute row])))
+                      (keys (:seon.schema.projection/forms projection)))]
+       {::identity-rows rows
+        ::owned-keys (into {} (keep (fn [row]
+                                      (when-let [definition (mr/schema registry row)]
+                                        [row (into #{:db/id} (map first)
+                                                   (internal/entity-entries definition))])))
+                           (set (vals rows)))}))))
+
+(defn- entity-owner
+  "The one row schema owning map `value`: every identity attribute present
+  names it and every present key is its entry or `:db/id`; else nil."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:maybe :qualified-keyword]]}
+  [projection value]
+  (let [{rows ::identity-rows owned ::owned-keys} (entity-owners projection)
+        named (into #{} (keep rows) (keys value))
+        row (first named)]
+    (when (and (= 1 (count named))
+               (every? (get owned row #{}) (keys value)))
+      row)))
+
 (defn- schema-producers
   [projection request value output]
   (schema/call-with-projection

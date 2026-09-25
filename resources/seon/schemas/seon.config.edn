@@ -17,7 +17,7 @@
                 :seon.config/manifest]
                [:seon.boot/cluster-name
                 :seon.boot/cluster-name]],
-              :cluster [:string {:min 1, :seon.db/identity true}],
+              :cluster [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.config/entity}],
               :missing-effective :seon.boot/cluster-name
               :missing-effective-error :seon.config/error
               :compile-request

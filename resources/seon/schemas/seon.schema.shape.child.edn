@@ -1,4 +1,4 @@
-#:seon.schema.shape.child{:id [:string {:seon.db/identity true}],
+#:seon.schema.shape.child{:id [:string {:seon.db/identity true :seon.program/row-schema :seon.schema.shape.child/row}],
                           :order :int,
                           :schema :seon.db/ref,
                           :value-edn :string,

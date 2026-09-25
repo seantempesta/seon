@@ -1,5 +1,5 @@
 #:seon.error.occurrence
-{:id [:string {:min 12 :max 12 :seon.db/identity true}]
+{:id [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.error.occurrence/occurrence}]
  :count [:int {:min 1 :seon.db/no-history? true}]
  :first-at :inst
  :last-at [:and {:seon.db/no-history? true} :inst]
@@ -11,7 +11,7 @@
  :message :string
  ; the branch where the error happened; a core fault's cluster-branch copy names its origin
  :branch :seon.store/branch
- :blob-digest [:and {:seon.db/identity true} :seon.blob/digest]
+ :blob-digest [:and {:seon.db/identity true :seon.program/row-schema :seon.error.occurrence/blob} :seon.blob/digest]
  :blob [:map {:seon.db/attributes true :seon.program/partition :seon.data}
         [:seon.error.occurrence/blob-digest :seon.error.occurrence/blob-digest]
         [:seon.error/data-blob :seon.error/data-blob]]

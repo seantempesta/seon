@@ -165,7 +165,7 @@
             :opened-tx [:and {:seon.wake/context-inert true} :seon.db/ref],
             :transition [:and {:seon.wake/context-inert true} :keyword],
             :reply-blob [:and {:seon.wake/context-inert true} :seon.blob/digest],
-            :id [:string {:min 1, :seon.db/identity true :seon.wake/context-inert true}],
+            :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.turn/turn :seon.wake/context-inert true}],
             :refused-error
             [:and
              {:seon.db/attributes true,

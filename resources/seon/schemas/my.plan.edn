@@ -1,4 +1,4 @@
-#:my.plan{:agent [:and {:seon.db/identity true
+#:my.plan{:agent [:and {:seon.db/identity true :seon.program/row-schema :my.plan/entity
                        :description "The agent owning this addressable plan component."} :seon.db/ref]
           :completion [:map [:db/txInstant :inst]]
           :objective :string

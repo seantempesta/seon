@@ -1,7 +1,7 @@
 #:my.plan.item{:id
                [:string
                 {:min 1,
-                 :seon.db/identity true,
+                 :seon.db/identity true :seon.program/row-schema :my.plan.item/item,
                  :description
                  "The stable lookup identity of one authored plan step."}],
                :title

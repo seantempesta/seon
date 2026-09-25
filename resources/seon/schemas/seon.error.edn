@@ -101,7 +101,7 @@
               [:seon.agent/id {:optional true} :seon.agent/id]
               [:seon.config.error/max-evidence-bytes
                :seon.config.error/max-evidence-bytes]],
-             :id [:string {:min 1, :seon.db/identity true}],
+             :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.error/error}],
              :message [:string {:min 1}],
              :refusal-shape :qualified-keyword,
              :proc :keyword,
@@ -270,7 +270,7 @@
              :notification-limit [:int {:min 1}],
              :notification [:enum :final],
              :dropped-fault-count [:int {:min 1}],
-             :signature [:string {:min 64 :max 64 :seon.db/identity true}],
+             :signature [:string {:min 64 :max 64 :seon.db/identity true :seon.program/row-schema :seon.error/error}],
              :frame [:tuple :symbol :symbol :string :int],
              :frames [:vector {:min 1 :description "A throwable's own first-party (seon.*/my.*) complete stack frames, outermost first."} :seon.error/frame],
              :link

@@ -18,7 +18,7 @@
                       :description
                       "The agent's own comment, stored verbatim. The REPL prompt precedes the comment and source as one agent input; the response follows both." :seon.wake/context-inert true}],
                     :interrupted-at [:and {:seon.wake/context-inert true} :inst],
-                    :id [:string {:min 1, :seon.db/identity true :seon.wake/context-inert true}],
+                    :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.cluster.eval/receipt :seon.wake/context-inert true}],
                     :ns [:and {:seon.wake/context-inert true} :seon.db/ref],
                     :run [:and {:seon.wake/context-inert true} :seon.db/ref],
                     :output

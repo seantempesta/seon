@@ -90,10 +90,11 @@
  :seon.program/row-schema
  [:qualified-keyword
   {:description
-   "Declared on a program identity attribute: the entity schema whose map
-    declares that family's row. Its declared attributes ARE the attributes the
-    static indexer owns, so declaring one there is sufficient — there is no
-    second list to extend (seon.program/shapes derives from this link)."}]
+   "Declared on every identity attribute: the entity schema whose map
+    declares that identity's row, which renders a map whose keys it owns.
+    With :seon.program/source-attribute it names a program family, whose
+    declared attributes ARE the attributes the static indexer owns — there is
+    no second list to extend (seon.program/shapes derives from this link)."}]
  :seon.program/written-by
  [:qualified-symbol
   {:description

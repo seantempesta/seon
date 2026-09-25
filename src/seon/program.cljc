@@ -14,6 +14,15 @@
             ;; below already sit inside a `#?(:clj …)` branch.
             #?(:clj [seon.schema.edn :as schema.edn])))
 
+(defn- source-family?
+  "Does this identity attribute's property map declare a source declaration
+   family? Every identity attribute names its owning row schema; only a program
+   family also names the attribute holding its source."
+  {:malli/schema [:=> [:cat [:maybe :map]] :boolean]}
+  [properties]
+  (boolean (and (:seon.program/row-schema properties)
+                (:seon.program/source-attribute properties))))
+
 (def identity-attributes
   "Source declaration identities, derived from their authored row-schema links.
    Program components and other analysis rows are selected by program-attributes."
@@ -21,7 +30,7 @@
         (keep (fn [[attribute definition]]
                 (when (and (vector? definition)
                            (map? (second definition))
-                           (:seon.program/row-schema (second definition)))
+                           (source-family? (second definition)))
                   attribute)))
         #?(:clj (schema.edn/packaged-forms)
            :cljs (schema/registered-schemas))))
@@ -258,8 +267,8 @@
   (into {}
         (map (fn [identity-attribute]
                [identity-attribute (derived-shape projection identity-attribute)]))
-        (filter #(some-> (mr/schema (:seon.schema.projection/registry projection) %)
-                         m/properties :seon.program/row-schema)
+        (filter #(source-family? (some-> (mr/schema (:seon.schema.projection/registry projection) %)
+                                         m/properties))
                 (keys (:seon.schema.projection/forms projection)))))
 
 #?(:clj (defonce ^:private !authored-shapes (atom nil)))
@@ -440,8 +449,7 @@
               (and digested? (not recomputed?)) :seon.program/compared-families
               (and recomputed? (not digested?)) :seon.program/recomputed-families
               :else :seon.program/unclassified-families)))
-        families (filter #(some-> (mr/schema registry %)
-                                  m/properties :seon.program/row-schema)
+        families (filter #(source-family? (some-> (mr/schema registry %) m/properties))
                          (keys (:seon.schema.projection/forms projection)))]
     (reduce (fn [result attribute]
               (update result (classify attribute) conj attribute))

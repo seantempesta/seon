@@ -11,7 +11,7 @@
                   :seon.cluster.eval/ordinal]
                  [:seon.cluster.eval/source :seon.cluster.eval/source]
                  [:seon.cluster.eval/error :seon.cluster.eval/error]],
-                :id [:string {:min 1, :seon.db/identity true}],
+                :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.cluster.eval/receipt}],
                 :form-problem
                 [:map
                  [:seon.problems/id :seon.problems/id]

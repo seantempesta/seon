@@ -1,4 +1,4 @@
-#:seon.schema.shape.entry{:id [:string {:seon.db/identity true}],
+#:seon.schema.shape.entry{:id [:string {:seon.db/identity true :seon.program/row-schema :seon.schema.shape.entry/row}],
                           :order :int,
                           :optional? :boolean,
                           :schema :seon.db/ref,

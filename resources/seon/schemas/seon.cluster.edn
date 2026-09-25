@@ -10,7 +10,7 @@
                :config :seon.db/ref,
                :created? :boolean,
                :instructions [:set :seon.db/ref],
-               :name [:string {:min 1, :seon.db/identity true}],
+               :name [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.cluster/cluster}],
                :toolkit [:set :seon.db/ref],
                :toolkit-namespaces [:vector :seon.ns/name]
  ; Additive error declaration manifest, 2026-09-18.

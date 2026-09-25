@@ -19,7 +19,7 @@
  ;; Three facts make a value suppliable. Adding a third supplied default is
  ;; adding one row plus one ordinary contracted function — never editing a
  ;; dispatch map, a case expression, or a naming convention.
- :key [:qualified-keyword {:seon.db/identity true}],
+ :key [:qualified-keyword {:seon.db/identity true :seon.program/row-schema :seon.call-preparation/row}],
 
  ;; Ref to the registered `:seon.schema/key` row whose `:seon.schema/shape`
  ;; names the supplied value contract. Only that authored schema name matches;

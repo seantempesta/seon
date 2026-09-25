@@ -1,5 +1,5 @@
 {:seon.issue.citation/id
- [:string {:min 1 :seon.db/identity true
+ [:string {:min 1 :seon.db/identity true :seon.program/row-schema :seon.issue.citation/citation
            :description "seon.id/id of [issue-id path row end-row]: one issue's citation of one file at one span. Stable, so re-indexing the same note reuses the entity."}]
  :seon.issue.citation/file
  [:and {:description "The cited seon.fn.file entity, resolved from the note's repository-relative path."} :seon.db/ref]

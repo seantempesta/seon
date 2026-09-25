@@ -44,7 +44,7 @@
                  :seon.message/inbound-content]
                 [:seon.config.eval.result/max-string
                  :seon.config.eval.result/max-string]],
-               :id [:string {:min 1, :seon.db/identity true}],
+               :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.message/message}],
                :inbox-unit
                [:sequential
                 {:description

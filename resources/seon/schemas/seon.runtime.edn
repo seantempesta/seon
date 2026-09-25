@@ -1,4 +1,4 @@
-#:seon.runtime{:agent [:and {:seon.db/identity true
+#:seon.runtime{:agent [:and {:seon.db/identity true :seon.program/row-schema :seon.runtime/entity
                             :description "The agent owning this runtime component."} :seon.db/ref]
                :turns [:set {:seon.db/component true :seon.db/component-schema :seon.turn/turn
                              :seon.render/ai seon.render.transcript/render-history-ai

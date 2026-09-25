@@ -1,4 +1,4 @@
-#:seon.schedule{:id [:string {:min 1, :seon.db/identity true}],
+#:seon.schedule{:id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.schedule/schedule}],
                 :expression [:string {:min 1}],
                 :zone-id [:string {:min 1}],
                 :schedule

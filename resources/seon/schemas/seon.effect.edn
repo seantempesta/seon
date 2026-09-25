@@ -64,7 +64,7 @@
                [:map
                 [:seon.effect/time-limit-attribute
                  :seon.effect/time-limit-attribute]]],
-              :id [:string {:min 1, :seon.db/identity true}],
+              :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.effect/receipt}],
               :time-limit-attribute :qualified-keyword,
               :unavailable-handler-symbol :qualified-symbol,
               :request-too-large-error

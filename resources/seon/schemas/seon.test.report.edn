@@ -1,5 +1,5 @@
 {:seon.test.report/id
- [:string {:min 1 :seon.db/identity true
+ [:string {:min 1 :seon.db/identity true :seon.program/row-schema :seon.test.report/report
            :description "Identity of immutable failing report content, derived from test symbol and report signature."}]
  :seon.test.report/symbol
  [:qualified-symbol {:description "Test name observed for this report, retained after program deletion."}]

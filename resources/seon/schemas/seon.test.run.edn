@@ -1,6 +1,6 @@
 #:seon.test.run{:at :inst,
                 :git-sha [:re "^[0-9a-f]{40}$"],
-                :id [:string {:min 1, :seon.db/identity true}],
+                :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.test.run/run}],
                 :program-digest [:and {:seon.db/identity false} :seon.source/digest],
                 :basis-t :seon.db/basis-t,
                 :published-base-digest [:and {:seon.db/identity false :description "Digest of the published base resolved before overlay admission. This identifies the base, not the overlaid program."} :seon.source/digest],

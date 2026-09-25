@@ -2,7 +2,7 @@
                   :finish-reason [:and {:seon.wake/context-inert true} :seon.ai/finish-reason],
                   :reasoning-size [:int {:min 1 :seon.wake/context-inert true}],
                   :delay-ms [:int {:min 0 :seon.wake/context-inert true}],
-                  :id [:string {:min 1, :seon.db/identity true :seon.wake/context-inert true}],
+                  :id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.ai/attempt :seon.wake/context-inert true}],
                   :ordinal [:int {:min 0 :seon.wake/context-inert true}],
                   :reasoning-blob [:and {:seon.wake/context-inert true} :seon.blob/digest],
                   :at [:and {:description "The provider attempt's observed time, which predates its recording transaction. Keep this external-event instant; it is not the recording transaction's time." :seon.wake/context-inert true} :inst],

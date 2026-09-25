@@ -1,4 +1,4 @@
-#:my.note{:id [:string {:min 1, :seon.db/identity true}],
+#:my.note{:id [:string {:min 1, :seon.db/identity true :seon.program/row-schema :my.note/note}],
           :agent [:and {:seon.render/ai seon.note/render-notes-ai
                         :seon.render/html seon.note/render-notes-html
                         :seon.render/form seon.note/render-notes-form}

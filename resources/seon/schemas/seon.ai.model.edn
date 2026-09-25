@@ -1,9 +1,9 @@
 {:seon.ai.model/id
- [:and {:seon.db/identity true} :seon.config.ai/model]
+ [:and {:seon.db/identity true :seon.program/row-schema :seon.ai.model/entity} :seon.config.ai/model]
 
  :seon.ai.model/provider :seon.db/ref
  :seon.ai.model/provider-id
- [:string {:min 1 :seon.db/identity true}]
+ [:string {:min 1 :seon.db/identity true :seon.program/row-schema :seon.ai.model/provider-entity}]
  :seon.ai.model/openai-chat-completions [:= true]
  :seon.ai.model/output-token-wire-key [:string {:min 1}]
 
@@ -24,7 +24,7 @@
 
  :seon.ai.model/deepseek-off-peak-windows [:set :seon.db/ref]
  :seon.ai.model/deepseek-window-id
- [:string {:min 1 :seon.db/identity true}]
+ [:string {:min 1 :seon.db/identity true :seon.program/row-schema :seon.ai.model/deepseek-window-entity}]
  :seon.ai.model/deepseek-utc-start [:string {:min 1}]
  :seon.ai.model/deepseek-utc-end [:string {:min 1}]
  :seon.ai.model/deepseek-regular-price-factor [:double {:min 0.0}]

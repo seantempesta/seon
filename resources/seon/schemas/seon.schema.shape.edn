@@ -1,5 +1,5 @@
 #:seon.schema.shape{:fingerprint
-                    [:and {:seon.db/identity true} :seon.source/digest],
+                    [:and {:seon.db/identity true :seon.program/row-schema :seon.schema.shape/row} :seon.source/digest],
                     :normalization-revision :string,
                     :required-map-entries [:vector [:tuple :qualified-keyword :seon.schema/value]],
                     :supplied-map-entries [:vector [:tuple :qualified-keyword :qualified-keyword :seon.source/digest]],

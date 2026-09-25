@@ -1,5 +1,5 @@
 #:seon.test.failure
-{:id [:string {:min 12 :max 12 :seon.db/identity true}]
+{:id [:string {:min 12 :max 12 :seon.db/identity true :seon.program/row-schema :seon.test.failure/failure}]
  :test :seon.db/ref
  :type [:enum {:description "The reporter's two failing assertion outcomes."} :fail :error]
  :ordinal [:int {:min 0}]

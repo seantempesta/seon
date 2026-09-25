@@ -1,5 +1,5 @@
 #:seon.maintenance.receipt{:id
-                           [:string {:min 1, :seon.db/identity true}],
+                           [:string {:min 1, :seon.db/identity true :seon.program/row-schema :seon.maintenance.receipt/receipt}],
                            :fire
                            [:and #:seon.db{:index true} :seon.db/ref],
                            :task
