@@ -218,7 +218,9 @@
          :else (qualify value)))
      form)))
 
-(defn- namespace-row [contexts context entry]
+(declare task-links)
+
+(defn- namespace-row [projection auto-resolved contexts context entry]
   (let [namespace-name (::analyzer/name entry)
         {:keys [aliases refers imports requires]} context
         row (cond-> {:seon.ns/name namespace-name
@@ -245,7 +247,8 @@
       (assoc :seon.ns/imports
              (into #{} (map (fn [[local target]]
                               {:seon.ns.import/local local
-                               :seon.ns.import/target-class target})) imports)))]
+                               :seon.ns.import/target-class target})) imports)))
+        row (merge row (task-links projection context namespace-name (::analyzer/meta entry) auto-resolved entry))]
     (assoc row :seon.program/definition-digest
            (program/definition-digest row))))
 
@@ -593,6 +596,41 @@
     (second value)
     value))
 
+(defn task-refused!
+  "Refuse one task annotation or task file entry by the rule it broke (spec 7.2-7.5, 1.5)."
+  {:malli/schema [:=> [:cat :seon.task/refused :seon.task/holder :seon.schema/value] :nil]}
+  [rule holder offending]
+  (let [message (str holder " is refused: " (name rule) " " (pr-str offending))]
+    (throw (ex-info message {:seon.task/refused rule :seon.task/holder holder :seon.error/offending offending
+                             :seon.fn/index-refused true :seon.error/message message}))))
+
+(defn- task-links
+  "One holder's authored edges: `:seon/tasks` ids as keyword values; `:seon/must-read`
+  and `:seon/see-also` quoted qualified symbols resolved through the namespace's aliases.
+  A `::` id (clj-kondo's auto-resolved keyword entry inside the form) refuses."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :symbol [:maybe :map] [:sequential :map] :map] :map]}
+  [projection context holder metadata auto-resolved entry]
+  (let [[_ tasks :as authored] (find metadata :seon/tasks)
+        at (juxt ::analyzer/row ::analyzer/col)
+        link (fn [k] (when-let [[_ targets] (find metadata k)]
+                       (not-empty (into (sorted-set)
+                                        (map #(or (and (seq? %) (qualified-symbol? (capability-symbol %))
+                                                       (seed-symbol context (capability-symbol %)))
+                                                  (task-refused! :unquoted-link holder {k %})))
+                                        (if (coll? targets) targets [targets])))))]
+    (when (and authored (schema/explain-candidate-value projection :seon.task/tasks tasks))
+      (task-refused! :not-a-set-of-ids holder {:seon/tasks tasks}))
+    (when-let [id (some #(let [id (keyword (str (::analyzer/ns %)) (::analyzer/name %))]
+                           (and (= (::analyzer/filename %) (::analyzer/filename entry)) (contains? tasks id)
+                                (<= 0 (min (compare (at %) (at entry)) (compare [(::analyzer/end-row entry) (::analyzer/end-col entry)] (at %))))
+                                id))
+                        auto-resolved)]
+      (task-refused! :auto-resolved-id holder {:seon/tasks id}))
+    (cond-> {}
+      authored (assoc :seon.task/tasks tasks)
+      (link :seon/must-read) (assoc :seon.fn/must-read (link :seon/must-read))
+      (link :seon/see-also) (assoc :seon.fn/see-also (link :seon/see-also)))))
+
 (defn- declared-function-targets
   "Literal targets of explicitly declared invocation attributes."
   [attributes values first-party-functions]
@@ -643,7 +681,7 @@
 
 (defn- var-row
   [projection contexts namespace-contexts
-   {:keys [calls-by-caller references used-keywords writes call-arities]} entry]
+   {:keys [calls-by-caller references used-keywords writes call-arities auto-resolved]} entry]
   (let [namespace-name (::analyzer/ns entry)
         qualified (symbol (str namespace-name) (str (::analyzer/name entry)))
         metadata (::analyzer/meta entry)
@@ -666,6 +704,8 @@
         {:seon.fn/capability-rule :invalid-handler-symbol
          :seon.fn/sym qualified
          :seon.effect/capability capability :seon.fn/index-refused true})))
+    (when (and (::analyzer/test entry) (contains? (get used-keywords qualified) :seon/tasks))
+      (task-refused! :metadata-after-test-name qualified (get used-keywords qualified)))
     (let [row
           (cond
             (::analyzer/test entry)
@@ -780,7 +820,8 @@
         (update :seon.fn/calls (fnil conj #{}) capability))
 
             :else nil)]
-      (when row
+      (when-let [row (some-> row (merge (task-links projection (get namespace-contexts namespace-name)
+                                                     qualified metadata auto-resolved entry)))]
         (assoc row :seon.program/definition-digest
                (program/definition-digest
                 row
@@ -1386,7 +1427,9 @@
                :references references
                :used-keywords used-keywords
                :writes (writes-by-writer analysis)
-               :call-arities (call-arities-by-caller analysis calls-by-caller)}
+               :call-arities (call-arities-by-caller analysis calls-by-caller)
+               :auto-resolved (filterv #(and (::analyzer/auto-resolved %) (not (::analyzer/from-var %)))
+                                       (::analyzer/keywords analysis))}
         namespace-contexts
         (into {}
               (map (fn [entry]
@@ -1398,7 +1441,7 @@
      (fn [rows entry]
        (if-let [row (if (::analyzer/ns entry)
                       (var-row projection contexts namespace-contexts edges entry)
-                      (cond-> (namespace-row contexts
+                      (cond-> (namespace-row projection (:auto-resolved edges) contexts
                                               (get namespace-contexts (::analyzer/name entry))
                                               entry)
                         (seq (get unresolved-by-file (::analyzer/filename entry)))
@@ -1803,7 +1846,8 @@
   "Tests gating one function identity. Unknown identities match only an
   explicitly pending subject; unresolved file references select that file's
   tests. Use gate-sets when one operation asks about several identities."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+  {:seon/tasks #{:seon.fn.task/tests-reaching-saturates}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
   (let [result (gate-sets database [function-symbol])]
@@ -1812,7 +1856,8 @@
 
 (defn tests-reaching
   "Compatibility spelling for the shared gate-set derivation."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
+  {:seon/tasks #{:seon.fn.task/tests-reaching-saturates}
+   :malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database function-symbol]
   (gate-set database function-symbol))
