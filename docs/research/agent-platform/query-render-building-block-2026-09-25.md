@@ -1,396 +1,565 @@
 ---
 type: design
-status: "Opus first pass (lane research-query-render-history-opus); awaiting Astra review (AGENTS.md step 4)"
+status: "Opus revision 2 after Astra review ae7cfa793 (implement after fixes); all seven P1s and the ledger P1/P2s integrated in place; awaiting Astra re-review"
 created: 2026-09-25
 scope: Git archaeology of every query + render generation, and the one building block that replaces them
-source-pin: 48ceb9cad (every src range below is valid at this commit; walk, data, web, transcript, bootstrap, prompt, context, cluster and mcp.clj are byte-identical to 3785970b9)
+source-pin: 48ceb9cad (src ranges valid there; render.clj, render/walk.clj, render/data.clj and db.clj byte-identical at 19e9fe5f4)
+aligned-with: language-requirements-2026-09-24.md (19e9fe5f4) §§1.9, 1.13, 11, 12; function-face-and-canonical-authoring-2026-09-25.md (52e252f74) §1; one-render-path-design-2026-09-25.md §3; floor-shell-order-review-2026-09-25.md
 ---
 
 # Query + render: one building block
 
-Seon already has every part: a declared read as data (`:seon.db/read-request`, executed by `seon.db/replay-read`), a
-four-stage per-face selection (`seon.render/selection`), guarded invocation with supplied defaults
-(`invoke-selected` → `sci.kernel/invoke` → `call-preparation/hook`), a retained render call (`render-call`), and
-one floor (`render.value/prepare`). What is missing is **one entrance that accepts a value *or* a declared read,
-and returns the rendered units of it**. Every consumer today writes its own "query, then loop, then render" around
-`render-call`, or skips `render-call` entirely.
+Today four owners each do one part. The database owner executes reads (`seon.db/q`, `pull`, `pull-many`,
+`index-page`). The walk acquires an entity's concerns (`walk.clj:69-708`). `render-call` selects and retains one
+face (`render.clj:1496-1678`). The floor prepares values (`render.value/prepare`). Around them, each consumer
+writes its own "acquire, loop, render" (§4).
 
-The principal Clojure approach: add a second **source** to the existing call request (`:seon.render/query`, a
-`:seon.db/read-request` value) and lift the walk's per-member render loop into the one public entrance
-`seon.render/units`. No new registry, cache, selector, printer, navigator or storage.
+The principal Clojure approach is to join those owners in place, behind one public entrance, `seon.render/units`:
+
+- acquire a declared source **once**, with its read evidence;
+- render the reached units under **one request budget**, with the existing per-face selection and call-preparation
+  defaults;
+- return units whose continuations name their source.
+
+Domain acquisition stays with its owners: walk, `seon.eval/of-agent`, bootstrap membership and the transcript's
+domain analysis. Ordinary REPL settlement stays the REPL's. No new registry, cache, result store, selector, printer,
+acquisition DSL or second read interpreter is added.
 
 ## 0. Broken things first
 
-1. **The installed JVM does not run HEAD's selection.** Read-only probe on default (PID 35446, started
-   `2026-09-25T14:24:44Z`, health `faulted`, 21 open faults, open fault "JVM RESTART NEEDED: loaded dependencies
-   changed"): `@#'seon.render/selection-stage-order` answered **`[:declared :floor]`**. HEAD says
+1. **The installed JVM did not run HEAD's selection.** On 2026-09-25 I ran a read-only probe on default (PID 35446,
+   started `2026-09-25T14:24:44Z`, health `faulted`, open fault "JVM RESTART NEEDED: loaded dependencies changed").
+   `@#'seon.render/selection-stage-order` answered **`[:declared :floor]`**. HEAD has
    `[:explicit-value :namespace :declared :floor]` (`render.clj:532-533`). The owner-ruled precedence
-   (634d8aaa2, aa91ecb34) and the database-as-declared-input change (b195ae037) are committed but not
-   installed. **RESTART NEEDED (root).** No claim below about selection behaviour is installed evidence.
-2. **This is the seventh generation.** The same four-level selection was written on 2026-01-23 (`seon.ns.view`),
-   2026-02-19 (`find-renderer`), 2026-05/06 (`resolve-render` in the pod), 2026-08-17 (`context-pipeline-ideal`)
-   and 2026-09-24/25 (`selection`). "Context is a render of a database query" was written 2026-02-19
-   (`seon.graph.context/build`), 2026-06-24 (`context-render.md`), 2026-07-28 (`render(its namespace, distance
-   N)`), 2026-08-14 (`one-renderer-prd`), 2026-08-29 (`context-as-queries-handoff`), 2026-09-04
-   (`agent-centric-design`) and 2026-09-23 (`context-as-query-and-render`). Each was replaced wholesale by a
-   tree cut, never converged in place. §1 lists them.
-3. **Declared-concern producers still do their own graph work in the AI face.** The steward faults concern is
-   the live example: `faults-form` (`error.clj:1943-1966`) builds a read form, `render-faults-ai` (`:1968-1979`)
-   prints it as source, and `render-faults-html` (`:1981-2004`) runs a *different* acquisition (`for-agent`,
-   `:1925-1941`, pulling with `observation-selector` built from the whole projection, `:1643-1672`). The
-   2026-09-24 capture found this read reprinted five times, 549 KB, **81% of a 680,643-character prompt**
-   ([agent-context-render-pipeline](agent-context-render-pipeline-2026-09-24.md) §0.1). The one-REPL design
-   already rules "no graph work in an AI renderer" ([one-repl-language](one-repl-language-2026-09-25.md) §5).
-4. **The agent-facing walk is a second entrance with ambient custody.** `seon.render/walk`
-   (`render.clj:1876-1976`, 101 lines) reads custody from the dynamic Var `*walk-context*`
-   (`:1812`, bound by `call-with-walk-context` `:1814-1823` from `turn.clj:4715`), then `pr-str`s the units.
-   AGENTS.md "Pass the world explicitly" forbids this.
-5. **A banned placeholder survives in the one traversal.** `neighborhood` still paints
-   `"renderer unavailable"` / `"Renderer unavailable."` on failure (`walk.clj:792-798`). Existing issue:
-   `docs/seon/issues/namespace-page-repeats-renderer-unavailable.md`.
-6. **The declared-read executor is private.** `seon.db/replay-read` (`db.clj:962`) is total over `:q`, `:pull`,
-   `:pull-many` and `:index-page`, returns typed refusals, and records read evidence. Its only caller is
-   read-currency replay (`db.clj:1166`). Every render-side query is hand-written instead: 36 `db/q`/`db/pull`
-   sites in `render/transcript.clj`, 19 in `bootstrap.clj`, 18 in `error.clj`, 15 in `render/web.clj`, 15 in
-   `my/program.clj`, 11 in `problems.clj` (`grep -cE '\((db|d)/(q|pull|pull-many|datoms|entity)[ )]'` at the
-   pin).
+   (634d8aaa2, aa91ecb34) and the database-as-declared-input change (b195ae037) were committed but not installed.
+   **RESTART NEEDED (root)**, then verification of the loaded order and defaults. The reviewer did not re-observe
+   this; it is the author's evidence. No stage behaviour below is installed evidence.
+2. **Query + render has been rebuilt about ten times** (§1). The lesson is narrower than "each generation was
+   destroyed". Several generations were cut with a whole tree: the archive 6c1079c8d, the split f25e34594 and the
+   quarry deletion 099cdfa99. Others converged in place: the blocks' "funeral" 7ba92be65 and the walk's evolution
+   since 1a499558a. The surviving block and walk code show that **the explicit source and the recursion context can
+   be kept through caller conversions**. This design makes that retention a proved property of each slice.
+3. **Declared-concern producers do their own graph work in the AI face.** The steward faults concern is the example:
+   - `faults-form` (`error.clj:1943-1966`) builds a read form, and `render-faults-ai` (`:1968-1979`) prints it as
+     source;
+   - `render-faults-html` (`:1981-2004`) runs a different acquisition, `for-agent` (`:1925-1941`), with
+     `observation-selector` (`:1643-1672`).
+   The 2026-09-24 capture found this read reprinted five times: 549 KB, 81% of a 680,643-character prompt
+   ([agent-context-render-pipeline](agent-context-render-pipeline-2026-09-24.md) §0.1). "No graph work in an AI
+   renderer" is already ruled ([one-repl-language](one-repl-language-2026-09-25.md) §5).
+4. **The agent-facing walk is a second entrance with ambient custody.** `seon.render/walk` (`render.clj:1876-1976`)
+   reads custody from the dynamic Var `*walk-context*` (`:1812`). That Var is bound by `call-with-walk-context`
+   (`:1814-1823`), called from `turn.clj:4715`. The walk then `pr-str`s its units. AGENTS.md "Pass the world
+   explicitly" forbids this.
+5. **A banned placeholder is painted only when a failure has no owner.** `neighborhood` calls `renderer-failure`
+   only when it found an owning namespace (`walk.clj:777-781`). Otherwise it paints "renderer unavailable"
+   (`:792-798`). Existing issue: `docs/seon/issues/namespace-page-repeats-renderer-unavailable.md`.
+6. **There is no public declared-read entrance, and the private executor captures no evidence.**
+   - `seon.db/replay-read` (`db.clj:962-1026`) dispatches over `:q`, `:pull`, `:pull-many` and `:index-page` through
+     `d/q-with-evidence`, `pull-plan-with-evidence` and `d/index-page`. It **discards their dependency evidence**:
+     it never calls `append-query-evidence!` or `append-pull-evidence!`, and its only caller is read-currency
+     comparison (`:1166`).
+   - The public owners do the capture and checks: `q` (`:2365`, evidence at `:2416`), `pull` (`:2588`, pull-call
+     evidence at `:2568-2576`), `pull-many` (`:2636`) and `index-page` (`:2818`).
+   - Render-side queries are hand-written instead: 36 `db/q`/`db/pull` sites in `render/transcript.clj`, 19 in
+     `bootstrap.clj`, 18 in `error.clj`, 15 each in `render/web.clj` and `my/program.clj`, and 11 in `problems.clj`.
+7. **Nested values do not get the full ladder.** `project-node*` chooses only explicit or declared producers
+   (`render.clj:1226-1229`), with no namespace stage. Requirement 11.1 records "nested open". `namespace-stage` fits
+   `[argument]` before call preparation supplies defaults (`:617-637`). A renderer whose second positional input is a
+   database is therefore rejected before its default exists.
 
 ## Evidence and limits
 
-Read end to end: `AGENTS.md`, the lane preamble `tmp/orchestrator/fix-lane-preamble-2026-09-24.md`,
-[duplicate-paths audit](duplicate-paths-audit-2026-09-25.md) §§1-3, 7, 10-11,
-[one-render-path design](one-render-path-design-2026-09-25.md) §§1-6,
-[floor-shell-order review](floor-shell-order-review-2026-09-25.md) (P1-1 to P1-7), the render-dispatch landing
-(`docs/prds/agent-platform/landing/lane-render-dispatch-opus-2026-09-24.md`, twelfth follow-up) and
-[one-repl-language](one-repl-language-2026-09-25.md) §§2.4, 4.0, 5-6. The earlier archaeology
-`docs/prds/context-generation/research/render-archaeology-2026-08-14.md` was read. It is reused, not redone:
-this document adds the *query* half and the later generations.
+**Read end to end:**
 
-Archaeology method (14,652 commits, `git rev-list --all --count`):
-`git log --all --diff-filter=D --name-only` filtered for render/context/query/walk/block/page/prompt/view;
-`git log --all -i -E --grep` over render/query/context-block/walk/neighbourhood (589 matches); `git log -S`
-for `find-renderer`, `renderer-resolution`; and every PRD/research path ever committed under `docs/` whose
-name matches those words (≈230 files). Sizes are `git show <deleting-commit>^:<path> | wc -l`. Current
-definition sizes use one awk pass over `git show HEAD:<file>`: first line of a top-level `(def…` to its last
-non-comment, non-blank line before the next top-level form. That matches the audit's counting rule (§2) for these files.
+- `AGENTS.md` and the lane preamble;
+- [duplicate-paths audit](duplicate-paths-audit-2026-09-25.md) §§1-3, 7, 10-11;
+- [one-render-path](one-render-path-design-2026-09-25.md) §§1-6 and the
+  [floor-shell-order review](floor-shell-order-review-2026-09-25.md);
+- the render-dispatch landing, twelfth follow-up;
+- [one-repl-language](one-repl-language-2026-09-25.md) §§2.4, 4.0, 5-6;
+- the [language requirements](language-requirements-2026-09-24.md) (19e9fe5f4);
+- the [function face](function-face-and-canonical-authoring-2026-09-25.md) (52e252f74) §1;
+- the [review of this design](query-render-building-block-review-2026-09-25.md) (ae7cfa793).
 
-Live probe (JVM mode, explicit root/cluster, `read_only`, one finite form; the first attempt was my malformed
-pull arguments, which include the database; replay supplies it):
+**Reused, not redone:** `docs/prds/context-generation/research/render-archaeology-2026-08-14.md`.
 
-```clojure
-(let [database @(seon.cluster.boot/connection "default")
-      counted (#'seon.db/replay-read database {:seon.db/read-operation :q
-                :seon.db/query-request {:query '[:find (count ?e) . :where [?e :seon.agent/id]]
-                                        :args [:seon.db/database]}})
-      pulled (#'seon.db/replay-read database {:seon.db/read-operation :pull
-               :seon.db/pull-arguments [[:seon.agent/id :seon.agent/namespace] [:seon.agent/id "root"]]})
-      rows (seon.db/q '[:find [?k ...] :where [?r :seon.call-preparation/key ?k]] database)] …)
-```
+**Archaeology method** (14,652 commits):
 
-Result: count `1` in **0.127 ms**; pull `#:seon.agent{:id "root", :namespace #:db{:id 42404}}` in **0.110 ms**;
-supplied keys `[:my.program/context :seon.agent/id :seon.db/connection :seon.db/db]`; stage order
-`[:declared :floor]`; prepl 3 ms. The pull shows a **bare `{:db/id …}` ref leaf**. The 2026-08-17 rule
-"every ref leaf carries its identity attribute" is not satisfied by a plain selector; a declared query must
-ask identities itself.
+- deleted-file history filtered for render, context, query, walk, block, page, prompt and view;
+- commit-message search (589 matches);
+- `git log -S` for `find-renderer` and `renderer-resolution`;
+- every `docs/` PRD or research path with those words.
 
-No code, test, `bin/seon` or JVM start was run. Memory, allocation and end-to-end render timings are
-**unmeasured**. Every "+N" below is an estimate, not a diff.
+Sizes come from `git show <deleting-commit>^:<path> | wc -l`. A definition's size runs from its top-level `(def…` to
+its last non-comment, non-blank line (the audit's §2 rule).
+
+**Live probe** (JVM mode, explicit root and cluster, read-only, one finite form):
+
+- `(#'seon.db/replay-read database {:seon.db/read-operation :q …})` returned `1` in 0.127 ms.
+- A pull request answered `#:seon.agent{:id "root", :namespace #:db{:id 42404}}` in 0.110 ms. The ref leaf is bare
+  unless the selector asks for identities.
+- The supplied-default rows are `[:my.program/context :seon.agent/id :seon.db/connection :seon.db/db]`.
+- The stage order was `[:declared :floor]`.
+
+Those timings price two tiny reads. They do **not** price a page, a query tree or an artifact parse.
+
+No code, test, `bin/seon` or JVM start was run. Memory, allocation and end-to-end timings are unmeasured. Every
+"+N" is an estimate.
 
 ## 1. Archaeology: every generation of query + render
 
-| Gen | Commit range | Files (lines at deletion or now) | Entry function | What it got right | Why replaced | Survives today |
-|---|---|---|---|---|---|---|
-| **G0 namespace UI** | e041ef5c6 (2026-01-23) → 6c1079c8d (2026-07-13, "archive paused JVM application", −54,229) | `seon.ns.view` 552, `seon.ui.viewer` 269, `seon.render` (clj) 789, `render/default_page` 246, `render/code` 347, `render/example` 163 (deleted 5e8e40c06) | `seon.ns.view/render-value` `{::value ::format}`, multimethod on `[format view-type]` | Faces per format (`:ai :html :human :raw`); **value metadata overrides, Malli schema property is the default, inference last**. Map-in/map-out. | JVM application paused for the CLJS pod | No code. The four-level idea returns in G6. |
-| **G0b spec-driven discovery** | 6e013a325 (2026-02-19) → same archive | `render.clj` `find-renderer` (+56), `graph/scanner` | `find-renderer [conn data format]` | **Contract-fitting renderer discovery** from `:seon.fn/render-input-keys` (level 2 of today) | Ranked by specificity, then recency, then name: a silent tie-break, where today refuses ambiguity | `namespace-stage` (`render.clj:617-645`) restores the idea without the ranking |
-| **G0c context builder** | 37bc72b00 / 0a0bd0a06 (2026-02-19) → 6c1079c8d | `graph/context` 392, `graph/query` 491, `repl/context` 121 | `seon.graph.context/build {::db-name ::seed ::depth}` | **Context = seed → recursive pull over refs → topological order → text.** The first "context is a query" | Datalevin era; whole tree archived | Walk acquisition (`walk.clj:252-573`) is the descendant |
-| **G0d renderer resolution PRDs** | 552db0ffc (2026-02-22), c5bc21291 (2026-02-26) | `docs/prds/archive/refinement/render-pipeline.md`, `renderer-resolution.md` | (design) | **"Agents never wire data sources; they declare what they need via input spec; the system injects it"** — today's supplied defaults | `*ctx*`/`*conn*` dynamic Vars; page-renderer heuristic | `call-preparation/hook` (`call_preparation.clj:1497`) is the same idea done by schema name |
-| **G1 pod render + context blocks** | 5a9255de8 (2026-05-19) → f25e34594 (tree split 2026-07-27) → 099cdfa99 (quarry deleted 2026-08-05) | `render.cljs→cljc` 1,132, `agent/ctx.cljc` 1,959, `agent/ctx/transcript.cljc` 1,612, `agent/ctx/namespaces.cljc` 1,292, `render/value.cljc` 1,927 (quarry pin 9e44815f5) | `seon.render/render [view ctx node]` with `resolve-render` (`render.cljc:1058`); `seon.agent.ctx/rendered-context-from-entity` | **One resolution ladder** (slot string/hiccup → symbol → schema default → generic); **one recursion handle** `:seon.render/render`; **one envelope unwrap**; `missing-render` names the missing symbol; record → panic → face; per-block token estimate reused for whole-prompt accounting | Pod deleted; stored block rows and profiles; strict dial defaulted off; seven value dials | Selection's four stages; failure faces in `renderer-failure` (`render.clj:1770`). The recursion handle and envelope unwrap did not survive |
-| **G1b "context is a render of the database"** | 68bc63dfc (2026-06-24), 6c93677b1 (2026-06-25), e5305b5a9 (2026-05-26) | `docs/prds/archive/agent-fsm/archive/context-render.md`, `single-render-path-design-2026-06-25.md`, `ctx-render-strategies-prd.md` | `seon.ctx/render-context [{:seon.db/db :seon.agent/id}] → twin` | **"Three render systems must collapse into one, not add a third."** `:seon.render/ai [:or :string :symbol]` value slot (today's level 1). Handle = the entity's own id; derived, never stored; one producer returns the AI+HTML twin; byte identity between prompt and inspector | Pod era; sections still hand-ordered by `:seon.ctx/priority` | Level 1 (`explicit-value-stage`, `render.clj:581-590`) |
-| **G2 JVM host** | cd239b795 (2026-07-20) → 8dc8623ad (2026-07-26, "Delete the 5,715-line old guarded door") | `host/context.clj` 2,184; `render/value.cljc` (JVM) 281 (→0413f07e7); `src-old/seon/render/surface.cljc` 87, `view_unit.cljc` 49, `web/feed.clj` 170 | `seon.execution.runtime/render-prompt!`, `render-agent-view!` (design `render-context-single-owner-cut-2026-07-16.md`) | **One held `:seon.db/db` carried through every nested selected function** (consistent basis) | UDS execution child deleted | The held-basis rule survives as b195ae037's environment scoping (`render.clj:1082-1091`) |
-| **G3 fresh tree: blocks** | 6dcda1ab9, d240656f2, f2a6ec0f2 (2026-07-27) → 4a65f9c7a (2026-08-03) | `render/block.clj` 347 → **96 now**; `render/root.clj` 217 (deleted); `render/data.clj` 221 → 235; `render/agent.clj` 179 → **24 now**; `seon.context` 340 → 416 | `block` derivation; `/data` drill | **The block is the morph target** (`surface-id`, `block.clj:61-96`); the `/data` cursor is a window with a cursor, not an elision | Stored/hand-listed blocks; "the funeral" 7ba92be65 folded them into the neighbourhood | `block/surface-id`, `data/at`, `data/parse-cursor` |
-| **G4 the neighbourhood walk** | 1a499558a (2026-07-28, "an agent's context is render(its namespace, distance N)") → now | `render/walk.clj` 461 → **974**; `schema/walk.edn` | `walk/neighborhood request → units`; `walk/history`; agent-facing `seon.render/walk` | **Flat units, each a `render-call`**; distance is an argument, spent per hop; total (failure is a value) | Measured 23 s (6f309c6d3); universal render-walk outage (965bce048); `render.lint` 529 lines added 746a87d51, deleted 9440698f3 (2026-09-22) | **Live**: `neighborhood` `walk.clj:710-807`, `history` `:926-974`; callers `web.clj:470`, `bootstrap.clj:362`, `turn.clj`, `render.clj:1939` |
-| **G5 context-generation PRDs** | 2026-08-13 → 2026-09-09 | `docs/prds/context-generation/plan/`: `one-renderer-prd-2026-08-14.md` 393 (deleted 93187e7cb), `context-pipeline-ideal-2026-08-17.md` 113, `render-data-plan-2026-08-28.md` 138, `context-as-queries-handoff-2026-08-29.md` 265, `agent-centric-design-2026-09-04.md` 651 | (design) | **Mechanical acquisition**: own / incoming / outgoing, and **one render target per attribute group** (all messages-to-me are one unit). Four face levels with ties loud. **Form honesty**: every context entry is a call the agent could make, whose print equals the AI bytes. One drill contract for both seams. "Context for the AI and the human is one render of one pull" | Never implemented as one function. Code grew by concern: `declared-acquisition` (`walk.clj:657-692`), d6d399561 "declared concerns", source-returning renderers | `:seon.render/units` property (3 schemas: agent, cluster.status, issue); **26 source files** return `:seon.render/source` read forms |
-| **G6 agent platform** | d0b0c7a62 (2026-09-23) → now | `context-as-query-and-render-2026-09-23.md` 419, `agent-context-render-pipeline-2026-09-24.md` 330, `one-render-path-design-2026-09-25.md` 693, `floor-shell-order-review-2026-09-25.md` 231, `one-repl-language-2026-09-25.md` 703 | `seon.render/selection`, `render-call`, `render.value/prepare` | Per-face first match (owner 2026-09-25); **database as a declared input supplied by call preparation** (b195ae037); shell-order floor with one budget; **one retrieval entrance keyed by held source** (Astra P1-2) | — | This document's base |
+Each row is one of three kinds: an **executable entry** (the function consumers called), a **composition helper**
+(used inside an entry of the same generation), or a **proposal** (a design, never installed as an entrance).
 
-**Count.** Eleven distinct entrances that took data from the database and rendered it for a face: `ns.view/render-value`,
-`find-renderer`, `graph.context/build`, `repl.context/for-*`, pod `render/render` + `agent.ctx` assembly,
-`ctx/render-context`, `execution.runtime/render-prompt!` / `render-agent-view!`, fresh-tree blocks,
-`walk/neighborhood` + `history`, the agent-facing `seon.render/walk`, and `render-call` itself. The owner's
-"about ten times" is accurate.
+| Gen | Kind | Commit range | Files (lines) | Entry | Right idea | How it ended | Survives |
+|---|---|---|---|---|---|---|---|
+| **G0 namespace UI** | executable | e041ef5c6 (2026-01-23) → 6c1079c8d (2026-07-13, tree archive, −54,229) | `seon.ns.view` 552, `seon.ui.viewer` 269, `render/default_page` 246, `render/code` 347, `render/example` 163 | `ns.view/render-value`, a multimethod on `[format view-type]` (`e041ef5c6:src/seon/ns/view.clj:82-119`) | Three levels: value metadata `:seon/view` → Malli schema property → default; faces per format | Archived with the JVM application | No code. The value-override idea lives in level 1 today |
+| **G0b** | composition helper (selector) | 6e013a325 (2026-02-19) → archive | `render.clj` +56 | `find-renderer [conn data format]` | Find a renderer from its declared input keys | Ranked by key specificity, then recency, then name. That is neither full contract validation nor viewer-namespace selection | The idea recurs in `namespace-stage` (`render.clj:617-645`), without the ranking |
+| **G0c** | executable | 37bc72b00 (2026-02-19) → archive | `graph/context` 392, `graph/query` 491, `repl/context` 121 | `graph.context/build` over conn, seed, depth (`:302-327`) | **Context = seed → recursive pull → topological order → per-entity text** | Archived | Walk acquisition descends from it |
+| **G0d** | proposal | 552db0ffc, c5bc21291 (2026-02) | `refinement/render-pipeline.md`, `renderer-resolution.md` | — | "Agents declare what they need by input spec; the system injects it" | Relied on `*ctx*`/`*conn*` dynamic Vars | Requirement 1.13; `call-preparation/hook` |
+| **G1 pod** | executable | 5a9255de8 (2026-05-19) → f25e34594 (split) → 099cdfa99 (quarry deleted) | quarry `9e44815f5`: `render.cljc` 1,132, `agent/ctx.cljc` 1,959, `ctx/transcript.cljc` 1,612 | `render [view ctx node]` + `resolve-render` (`render.cljc:1058-1132`) | Value slot (string/hiccup terminal) → symbol → schema default → generic. **One unwrap** (`:312-325`). **Recursion handle** `:seon.render/render` (`:1107-1108`). Record, then panic, then face | Whole pod deleted. It had no viewer-namespace stage, and `missing-render` (`:1047-1056`) returns nil for HTML | Level 1 and the per-face idea. The recursion handle is restored here as a declared composition (§3d) |
+| **G1b** | proposal | 68bc63dfc, 6c93677b1 (2026-06-24/25) | `context-render.md`, `single-render-path-design` | `seon.ctx/render-context` (never landed as specified) | "Three render systems must collapse into one, not add a third"; derived, never stored; byte identity between prompt and inspector | Superseded by the JVM host | The acceptance test of this design |
+| **G2 JVM host** | executable | cd239b795 → 8dc8623ad (2026-07-20/26) | `host/context.clj` 2,184, JVM `render/value.cljc` 281 | `execution.runtime/render-prompt!`, `render-agent-view!` | **One held database value through every nested selected function** | Execution child deleted | b195ae037's environment scoping (`render.clj:1082-1091`) |
+| **G3 fresh blocks** | executable | 6dcda1ab9, f2a6ec0f2 (2026-07-27) → converged | `block.clj` 347 → 96, `render/root.clj` 217 (deleted 4a65f9c7a), `data.clj` 235, `render/agent.clj` 179 → 24 | block derivation; `/data` drill | **The block is the morph target**; an explicit held database; a cursor window | **Converged in place**: 7ba92be65 moved two prompt blocks into run rendering | `surface-id` (`block.clj:61-96`), `data/at`, `parse-cursor` |
+| **G4 walk** | executable | 1a499558a (2026-07-28) → now | `walk.clj` 461 → 974 | first nested node/neighbour shapes calling `render/render` (`1a499558a:walk.clj:328-410`); now flat `render-call` units | Bounded hops, nodes and per-path cycles; a held database; totality | Evolved in place. The 23 s measurement (6f309c6d3) and the outage (965bce048) were fixed, not replaced | **Live**: `neighborhood` `walk.clj:710-807`, `history` `:926-974` |
+| **G5** | proposals | 2026-08-13 → 2026-09-09 | `one-renderer-prd` 393, `context-pipeline-ideal` 113, `render-data-plan` 138, `context-as-queries-handoff` 265, `agent-centric-design` 651 | — | **Mechanical acquisition, one render target per attribute group**; face levels with loud ties; **form honesty**: an entry is a call the agent could make, and its print equals the AI bytes | Code grew concern by concern instead: `declared-acquisition`, and 26 source files returning `:seon.render/source` read forms | The `:seon.render/units` property (three schemas) |
+| **G6** | executable + proposals | d0b0c7a62 (2026-09-23) → now | `render.clj` `selection`/`render-call`, `render.value/prepare`; the G6 designs | `render-call` | Per-face first match (owner); database as a declared input (b195ae037); one budget; one retrieval entrance per held source (floor review P1-2) | — | Base of this design |
 
-**The pattern of loss.** Each generation was replaced by a *tree* cut (archive 07-13, split 07-27, quarry deletion 08-05),
-not by converging callers onto the previous owner. What was lost every time was the same three things: the
-**recursion handle** (a renderer handing a sub-value back to the same dispatch), the **declared query as data**
-(G0c's seed + pull, G5's attribute-group target), and **one entrance** (G1b's "not a third"). The
-replacements kept rediscovering selection, which is the easy part.
+**Counting.** Eight executable entries (G0, G0c, G1, G2, G3, G4, G6, plus the agent-facing `seon.render/walk`), one
+selector helper (G0b) and three proposal families. The owner's "about ten times" holds. They are not ten identical
+four-stage functions: the viewer-namespace stage exists only since 2026-09-24.
 
 ## 2. Best ideas taken, by name
 
-| Idea | Source generation | Where it lands in the block |
+| Idea | Source | Where it lands |
 |---|---|---|
-| value key → viewer's contract-fitting fn → schema pair → floor, ties loud | G0 `ns.view`, G0b `find-renderer`, G1 `resolve-render`, G5 ideal, G6 ruling | Unchanged `seon.render/selection` (`render.clj:671-692`) |
-| inputs declared by contract, supplied by the system, caller wins | G0d renderer-resolution | Unchanged `call-preparation/hook`; b195ae037 already scopes the held database |
-| context = seed + declared pull, rendered | G0c `graph.context/build`, G4 walk, G5 one-renderer | Source = `:seon.render/query` (`:seon.db/read-request`) |
-| one render target per attribute group | G5 `context-pipeline-ideal` | A declared concern's query is one unit, never one unit per row |
-| every ref leaf carries identity | G5 2026-08-17 probe | A declared query asks identities; the probe above shows why |
-| form honesty: the context entry is the call | G5 one-renderer §1.3; one-REPL §5 | The AI form of a query unit is derived from its read-request |
-| one recursion handle, one envelope unwrap | G1 quarry `render.cljc:290-325,1088` | A renderer returns a smaller value or a `{:seon.render/query …}` child; the entrance renders it. No second path down |
-| named missing/failed renderer, never a placeholder | G1 `missing-render` | `units` returns the existing `renderer-failure` face; deletes `walk.clj:792-798` |
-| the block is the morph target | G3 `block.clj` | Unit identity `:seon.render.call/id` → `surface-id` |
-| one held database value through nested renderers | G2 single-owner cut | b195ae037 (installed at HEAD, not in the JVM) |
-| retained reuse by read evidence, not by commit id | G4 `render-call` | Unchanged; a query's reads land in the same `:seon.render.call/captured-reads` |
-| one retrieval entrance by held source + path + offset | G6 Astra P1-2; G3 `/data` cursor | Same entrance with `:seon.render.data/cursor` |
+| Value override → viewer's contract-fitting function → schema pair → floor; ties loud | Owner ruling 2026-09-25 (req 11.1); value override from G0/G1; contract-fit discovery from G0b, without ranking | `seon.render/selection`, extended to nested values (§3c) |
+| Inputs declared by contract and supplied by schema name; caller wins | G0d; req 1.13 | `call-preparation/hook`; the held database scoped by b195ae037 |
+| Context = seed + declared acquisition, rendered | G0c, G4 | Walk stays the entity acquisition owner. `units` renders its composition (§3a) |
+| One render target per attribute group | G5 ideal | A concern is one unit, never one unit per row (§3b) |
+| Ids plus the call that expands them, never the expansion by default | Req 1.9; function face §1.2 | Child declared queries render as **handles** by default (§3d) |
+| Form honesty | G5 one-renderer; one-REPL §5 | A query descriptor derives its form **without executing**. The REPL executes it once (§3b) |
+| Recursion handle, one unwrap | G1 quarry | A declared render composition, under the same budget and producer chain (§3d) |
+| The block as morph target, with an occurrence address | G3 | Occurrence id = parent occurrence + path (§3a) |
+| One held database through nested renderers | G2 | b195ae037 (not installed; §0.1) |
+| Retained reuse by read evidence | G4 `render-call` | Extended to source descriptor, acquisition evidence and child membership (§3a) |
+| One retrieval entrance by held source | G6 floor review P1-2 | Source references resolved inside `units` (§3e) |
 
-Correctly left dead (from render-archaeology §"Correctly deleted", confirmed): stored block rows and profiles,
-per-block token caps, seven value dials, `render-strict?` defaulting off, specificity/recency ranking.
+Correctly left dead: stored block rows and profiles, per-block token caps, the seven value dials, a strict dial
+defaulting off, specificity/recency ranking, and a callable renderer registry.
 
 ## 3. The building block
 
-### 3a. Data shape: source → unit → render
+### 3a. Data shape: source → units → rendered units
 
-**Source.** Exactly one of:
+**Sources.** Exactly one source key must be present. Presence is decided by `find`, so a supplied `nil` value is a
+real value (AGENTS "Preserve native values").
 
-- `:seon.render/value` — any value (unchanged);
-- `:seon.render/query` — a `:seon.db/read-request` (`seon.db.edn:94-104`: `:q` with `:seon.db/query-request`,
-  `:pull`/`:pull-many` with `:seon.db/pull-arguments`, `:index-page`), with two placeholders in its arguments.
-  `:seon.db/database` is already substituted by `replay-read` (`db.clj:980-982`, probed above). `:seon.render/subject`
-  (new) is substituted by the entrance with the parent unit's lookup.
-
-Search result: no `:seon.render/query` exists in the registry (`git grep` over `resources/` at the pin).
-One new member on `:seon.render/call-request`, plus one attribute-schema property of the same name for
-declared concerns. No new entity kind.
-
-**Unit.** The existing call request (`:seon.render/call-request`), which is already the unit:
-face `:seon.render/output`, source, identity `:seon.render.call/id`, path `:seon.render.walk/path`,
-`:seon.render/distance`, and explicit custody (`:seon.db/db`, `:seon.sci.eval/ctx`, `:seon.agent/id` as the
-viewer, caps, time limit, `:seon.config/on-core-error`, floor profile, retained/captured calls). The
-*argument* a renderer receives stays `render-argument`'s unit (`render.clj:196-233`), which since b195ae037 omits
-the database. A renderer that declares `:seon.db/db` is supplied the request's database by call preparation.
-
-**Render.** The existing `render-call` (`render.clj:1496-1678`) decides one unit. A query source resolves first:
-`(db/replay-read db (substitute query subject))` inside the call's captured-read scope. The read result *is*
-the value; a typed read refusal is also a value, and renders through the error pair. Then comes the unchanged
-selection, invocation and output check.
-
-**Output.** A vector of the existing walk units (`:seon.render.walk/units`): each carries `:seon.render.call/id`,
-`:seon.render.walk/path`, `:seon.render/output` (the rendered face), and optionally `:seon.error/value`. A
-query unit also carries `:seon.render/query`, so the AI context can print the call that produced it.
-
-### 3b. One entry function
-
-```clojure
-(seon.render/units request) ;=> [:seon.render.walk/unit …] | :seon.render/request-error
-
-;; request = :seon.render/call-request, accreted:
-{:seon.render/output   :seon.render/ai            ; or :seon.render/html
- :seon.render/query    {:seon.db/read-operation :q
-                        :seon.db/query-request {:query '[:find [(pull ?e [:seon.cluster.eval/id …]) ...]
-                                                         :in $ ?agent :where …]
-                                                :args [:seon.db/database :seon.render/subject]}}
- ;; or :seon.render/value v
- :seon.render.call/id  [:seon.render/ai [:seon.agent/id "root"] :history]
- :seon.render/distance 0                          ; 0 = this unit only
- :seon.db/db db :seon.sci.eval/ctx ctx :seon.agent/id "root" …}
-```
-
-Contracted with a complete named schema over the existing members. Cost is the source's read (bounded by
-its own query-work bounds), plus one selection, plus one invocation per unit, plus the floor under B per unit.
-There is no whole-program work. A unit whose call id, producer and read evidence are current is reused
-(`render-call`'s existing path).
-
-`units` **is** the per-member loop now inside `neighborhood` (`walk.clj:751-807`), lifted out and given the two
-sources. `neighborhood` keeps only what is genuinely its own, **the default declared query of an entity**:
-installed-schema acquisition, declared concerns, components and distance (`walk.clj:69-708`). `render-call`
-stays public for one-unit callers during conversion. Its callers then either call `units` with distance 0
-or remain as `units`' internal step.
-
-### 3c. Selection and contract defaults compose; nothing new
-
-- **Per face, first match wins** (owner 2026-09-25): (1) the value's own `:seon.render/ai`/`:seon.render/html`:
-  a symbol, an inline function or data (`explicit-value-stage`, `inline-rendered` `render.clj:581-604`);
-  (2) a contract-fitting function in the **viewing** agent's namespace (`namespace-stage` `:617-645`, viewer =
-  request `:seon.render/namespace`, else `:seon.agent/id`'s namespace); (3) the schema's declared pair
-  (`declared-stage`); (4) the floor. For a query unit, "the value" is the read result. So a query's result can
-  carry its own face key, a viewer can override how its `[:vector error]` looks, and otherwise each element's
-  schema pair applies inside the floor.
-- **Inputs by contract.** `invoke-selected` (`render.clj:1069-1115`) invokes through `sci.kernel/invoke`, whose
-  named-Var path calls `call-preparation/hook` (`kernel.clj` invoke; `call_preparation.clj:1497-1556`). Declared
-  but omitted inputs are supplied by schema name from the four rows probed above; the held database comes via
-  `env/scope {:seon.db/db …}` (b195ae037). Caller arguments win. Map inputs use `supplied-map-entries`;
-  positional inputs use the plan's arity placement.
-- **Known gaps, owned elsewhere (not re-solved here):** inline closures are never prepared
-  (`call_preparation.clj:1535`; the landing prices options at about 120 lines or about 30 lines plus
-  analysis). The namespace stage's one-argument fit never selects a positional renderer declaring a second
-  database input (landing, twelfth follow-up). The block inherits both limits. An inline function receives
-  only its value (design §1).
-
-### 3d. Nested components and declared queries render in their own blocks
-
-AGENTS.md: "scalars in its block, components/declared queries in theirs". Two producers of child units:
-
-1. **Schema-declared.** An entity schema's `:seon.render/units` names its concern attributes (existing,
-   `seon.agent.edn:38`, `seon.issue.edn:46`, `seon.cluster.status.edn:7`). A concern attribute's schema may
-   declare `:seon.render/query`, a read-request template over `:seon.render/subject`. `units` emits one child
-   unit per concern: source = that query, path `[attr]`, id `[face parent-lookup attr]`. Owned components are
-   child units whose source is the component value, as `declared-acquisition` does today (`walk.clj:657-692`).
-   Distance decrements per hop (`walk.clj` docstring rule). One unit per attribute group (G5), never per row.
-2. **Renderer-returned.** A renderer may return a smaller value containing a `{:seon.render/query …}` map. That
-   is the recursion handle (G1) as data. The floor does not execute it inline. It emits a reference node at
-   that path, naming the child's call id (a cut-shaped node, charged like one, so B stays single). `units`
-   appends the child unit after the parent. Within a unit, nested values that are not queries stay in the
-   same floor under the same B (one-render-path §2/§3b: no fresh B, no redispatch of the same producer).
-
-A child whose read refuses or whose renderer fails yields its own unit carrying `:seon.error/value` and the
-`renderer-failure` face (`render.clj:1770-1806`). Siblings render. The "renderer unavailable" strings go.
-Under `:panic` the failure is also recorded and thrown at the entrance, per AGENTS.md "Panic visibly"
-(existing `renderer-failure` tx-data path, `walk.clj:777-781`).
-
-### 3e. Cuts and continuations
-
-The floor is one-render-path §3 as revised by the floor-shell-order review: classification before any
-touch; one character budget spent in shell order; one tail cut per collection carrying `:seon.render.data/path`,
-`/next-offset`, `/total` or `/total-unknown`; fipp for the AI text; Hiccup from the same tree. The block adds
-exactly one thing, which Astra's P1-2 asks for: **the continuation names the unit's source**, so MCP and the
-browser use one entrance:
-
-```clojure
-(seon.render/units {:seon.render/value v :seon.blob/digest d            ; stored artifact
-                    :seon.render.data/cursor {:seon.render.data/path p :seon.render.data/offset n} …})
-(seon.render/units {:seon.render/query q :seon.db/db (as-of basis) …    ; query at its basis
-                    :seon.render.data/cursor {…}})
-```
-
-- A **value** cut's requery is its digest plus path and offset (`get_value`, `/data?value=`). A live unsaved
-  value has no expander and says so (design §3f).
-- A **query** cut's requery is the read-request plus basis `t` plus path and offset. It is valid forever,
-  because the query is data and `as-of` answers history. It is labelled current or as-of; this is Datahike's
-  time seam, not a stamp.
-- An **entity** cut is the entity's default declared query, i.e. `neighborhood`'s acquisition, labelled current.
-
-`mcp-get-value` (`cluster.clj:555-610`) and `data-response` (`web.clj:3516-3627`) both become a cursor
-request to `units`. Their windows and second navigator are already in audit R1/R3 and are not recounted.
-Navigation stays in `render.data/at` (`data.clj:46-89`), which preserves missing-versus-nil (audit §1.3).
-
-### 3f. Every consumer, one call each
-
-| Consumer | Today | With the block |
+| Source key | Meaning | Custody it requires |
 |---|---|---|
-| MCP eval result | `mcp-project` admits, artifacts, prepares, reconstructs (`cluster.clj:388-494`); bridge re-enriches (`mcp.clj:371-441`) | `units {:value result :distance 0}` → AI text + cut coordinates (R3/R6 retirements, audit) |
-| `get_value`, `/data` | two acquisitions and windows | `units` with cursor (§3e) |
-| Namespace/agent page | `page-result` → `neighborhood` → `surface-html` (`web.clj:435-572`) | `units {:query (entity default) :distance d :output html}` → `surface-html` per unit (morph per unit) |
-| Agent opening | `bootstrap/direct-candidates` + `listing-candidates` call `render-call` per member (`bootstrap.clj:303-365`) | `units {:output ai}`; each query unit's derived read form becomes the opening's `:seon.repl/form`, evaluated through the ordinary REPL settlement (form honesty; the evaluation, not the renderer, records) |
-| Prompt history | `walk/history` hand-queries `eval/of-agent`, loops `render-call` (`walk.clj:926-974`); `derive-context!` caches it (`web.clj:2537-2610`) | `units {:query evaluations-of-agent}`; each evaluation unit renders its **saved shown bytes** via the evaluation pair; `prompt/select` keeps whole units (§5 of design) |
-| Agent-facing `(seon.render/walk)` | ambient `*walk-context*`, `pr-str` of units (`render.clj:1812-1976`) | a `my.*` call with explicit custody delegating to `units` |
-| Transcript session/outline/ledger | 36 hand queries in `transcript.clj` | per-view declared queries (turns of agent, attempts of turn) → `units`; layout and domain analysis stay (audit §3.3) |
-| Status / runtime observation | `mcp-runtime-observation` 83, `bounded-face`/`bounded-summary`, operator summaries (audit R4) | `units {:value observation}` with one declared renderer; terminal and MCP take its text |
-| Test reports | stored rendered strings (`runner/failure-report`) | `units {:value native-report}` after native evidence (audit R10, §1.5) |
-| Error faces | `error/prepare-result` renders twice (audit C8) | `units {:value error}`; the faults concern becomes a declared query (§4 Q3) |
-| `my.program` reports | hand queries → report map → floor | unchanged queries (they are the agent's verbs); the report renders via `units {:value report}` |
+| `:seon.render/value` | Any value, including nil and false | none for the floor-only path. Schema/namespace stages need a projection and SCI context when present |
+| `:seon.render/query` | A `:seon.db/read-request` (`seon.db.edn:94-104`) as data. Executed only by `seon.db/read` (§3f) | `:seon.db/db` |
+| `:seon.render.walk/units` | An **already-acquired, ordered composition** of unit requests from a domain owner: walk entity acquisition, `walk/history` over `of-agent`, bootstrap members | whatever the members name |
+| `:seon.render/source-ref` | A retained reference for a continuation: a live result handle, an admitted artifact digest, or a query tied to its branch lineage (§3e) | the reference's own custody |
 
-## 4. Duplicates mapped to the block, measured
+A request with none or with more than one source is refused. The refusal is the declared
+`:seon.render/request-error` naming the member, the expected "exactly one source" and the keys present. The request
+schema is a Malli `:multi` in `seon.render.edn`. It dispatches on a registered named function
+`seon.render/source-kind`, which returns the present source key or `::none`/`::both`. There are no branches for
+`::none` and `::both`, so Malli's explainer reports the refusal
+(`reference-code/malli/src/malli/core.cljc:2637,2653`). There is no anonymous predicate and no second registry.
+**Value-only requests** keep database and SCI context optional, which serves boot diagnostics, status and fault
+cases (req 12.1). Database-backed branches require `:seon.db/db`. The existing `:seon.render/call-request`
+(`seon.render.edn:21-35`) currently requires value, database and context; it becomes the value branch's specialisation.
 
-**Not recounted.** Audit §11 groups R1 (1,099), R2 (140), R3 (65), R4 (88), R5 (20), R6 (50), R8 (21), R9 (15), R10 (50),
-C3 (329) and C8 (33) are rendering or defaults work that the block *consumes*. Their credit stays with their
-audit groups and owning designs. The groups below are **not in the audit ledger**. Each range belongs to one
-group only. Sizes are at the pin; "credit" counts old definition lines that the named replacement removes.
+**Unit identity.** The **occurrence** id is the parent occurrence plus the structural path. It is the morph address
+(`block/surface-id`) and the retention key. Source contents are **not** part of the id. They join the
+**cache-validity evidence** (§3f), so two occurrences of one source keep separate DOM addresses and share valid
+acquisition evidence. Anonymous values and scalars get occurrences without an invented entity lookup. The current
+neighbourhood loop computes a call id and drops it from the returned unit (`walk.clj:765-802`); `units` returns it.
 
-| Group | Pinned ranges (lines) | Replacement | Credit | Add (est.) | Status |
+**Result.** `[:seon.render/rendered-unit …]`, a named open-map schema over existing members:
+
+- **required:** `:seon.render.call/id` (occurrence), `:seon.render.walk/path`, `:seon.render/output` (the requested
+  face's bytes, or the derived form for `:seon.render/form`);
+- **optional:** `:seon.render.walk/lookup` when the occurrence is an entity; `:seon.render/source` (the source
+  descriptor: value provenance, query or reference); `:seon.render.value/tree` (the selected structure with its cut
+  nodes, from `prepare`); `:seon.error/value`; `:seon.db/tx-data` (failure-message data for the calling boundary to
+  commit, §3g).
+
+The tree is what lets AI and HTML share structural decisions and lets both adapters continue one cut (req 11.3). A
+per-face declared renderer remains a legitimate per-face choice. Result values stay values until the edge
+(req 12.1). An error unit carries the error value itself, never a summary of it (req 12.2).
+
+### 3b. Cardinality and the two lifecycles
+
+**One source, one root unit.** A scalar `:q`, a relation, a `pull-many` vector and a concern's vector of faults are
+each **one value**, rendered as one unit. Collection shape never splits a result into units.
+
+Child units exist only at **declared boundaries**:
+
+- an entity schema's `:seon.render/units` concerns and owned components, as walk acquisition assembles them today;
+- a declared render composition (§3d);
+- a domain owner's ordered composition, passed as the `:seon.render.walk/units` source.
+
+Prompt history is therefore a composition of evaluation unit requests. `walk/history`'s acquisition half keeps
+three things of `of-agent`'s semantics (`eval.clj:9-63`): absent agent is distinct from empty history, the order is
+by turn transaction, turn id and ordinal, and each evaluation's `:t` is attached. It also keeps its own rules:
+active-reply-turn exclusion, generated evaluations, and per-evaluation subject and basis (`walk.clj:926-974`). None
+of this is re-spelled as query literals.
+
+**Render lifecycle.** A value, composition or reference goes to `units`, which returns faces. A query source is
+executed by `units` only when a **face** of its result is requested. Examples are a page concern and a function face's
+row pull (function face §1.1).
+
+**Evaluation lifecycle** (the opening and any agent-visible read):
+
+1. The descriptor becomes a form, **without executing**: `units` with face `:seon.render/form` returns the form
+   derived from the read request (`seon.db/read-form`, printed by `repl/source-text`).
+2. The ordinary REPL reads, evaluates, records and binds `result/e…`. That is the read's **single** execution.
+3. The actual result goes back through `units` as a `:seon.render/value` source. The descriptor rides along as its
+   `:seon.render/source` provenance.
+
+Rendering never pre-executes an opening read and never records an evaluation. Bootstrap's `:seon.render/form`
+consumers keep receiving forms (§5 S2).
+
+**Saved history bypasses the floor.** A unit whose face is saved shown text (`:seon.render.history/bytes`) is
+returned as is. It is not charged to B and is never re-clipped. `prompt/select` admits it whole (design §5).
+Expanding a historical unit later is a new, bounded request.
+
+### 3c. Selection and defaults: the same owners, completed
+
+- **The order is unchanged.** Per face, first match wins (req 11.1; `render.clj:532-533`): (1) the value's own
+  `:seon.render/ai`/`:seon.render/html` key, which may be a symbol, an inline function or data; (2) a
+  contract-fitting function in the **viewing** agent's namespace; (3) the schema's declared pair; (4) the floor.
+- **Nested values get the same ladder.** A reached nested value is selected by the same `selection` call, with the
+  producers already rendering it excluded (the existing `:seon.render/rendering` chain). This closes "nested open"
+  (req 11.1) and is the same cut as audit **R2**, which retires `project-node*`'s own two-stage chooser
+  (`render.clj:1226-1229`). The line credit stays with R2.
+- **Candidate fit uses the preparation plan, not the bare argument.** `namespace-stage` (`:617-637`) must fit a
+  candidate against the argument **as call preparation would complete it**. It reads the callee's retained plan:
+  supplied map entries and positional placements by schema name (req 1.13; audit C3's retained-contract planning).
+  Fitting never executes a supplier or a renderer, and caller arguments win. Until C3 lands, a renderer that
+  declares a positional database input is not a namespace-stage candidate. That limitation is stated, not hidden.
+- **Inline functions.** A value key holding a function value is **invoked**, never displayed as an object:
+  `sci.kernel/invoke` with `:seon.sci.eval/function` (6d25d9483), through the same arm, admission and failure path.
+  A schema-less inline function receives only its value. A contracted inline function receives defaults only after
+  call preparation's closure gap is fixed (`call_preparation.clj:1535-1542`; function face §5). Until then it also
+  receives only its value, and the unit records that no defaults were supplied.
+- **Output handling admits exactly one more declared shape.** `raw-output` (`render.clj:1316-1376`) accepts final
+  text, Hiccup or form today. It gains one alternative: a declared `:seon.render/composition` (§3d). Any other
+  returned data goes to the floor under the current allocation, as design §2 rules. An inspected map that merely
+  contains `:seon.render/query` is **data**; it never becomes a database operation.
+
+### 3d. Children, handles and the one budget
+
+**One budget per request.** `units` opens **one** floor allocation from the request's profile. It is the character
+budget B of one-render-path §3b: converted once, with the legend reserved once. Every rendered unit and descendant
+of that request spends from its remaining allowance: visible content, handles, references, diagnostics, layout and
+legend. No child starts a fresh profile, so a parent with k query children spends at most B, not (k+1)B (req 11.4).
+The allocation is threaded as an explicit argument through the unit loop. There is no dynamic Var and no atom beside
+a connection.
+
+**Children render as handles by default** (req 1.9; function face §1.2). A declared child query's unit shows its id
+and the call that expands it, for example `;;   callers 15   (my.program/callers {…})`. The count appears only when
+the declaration names a count read, and that read is charged as query work. The child's result is executed and
+rendered inline only when all three conditions hold:
+
+1. its declaration marks it for expansion;
+2. the request's distance still has a hop for it;
+3. the remaining allowance admits at least its handle.
+
+A handle that cannot be paid closes the parent's child list with one cut. The cut names the count of remaining
+children and their ids as a continuation, like any other collection cut. Only **reached and admitted** children
+execute. Nothing is queried eagerly before selection.
+
+**A declared render composition is the recursion handle, as data.** A renderer may return a `:seon.render/composition`:
+a named schema carrying `:seon.render/value` (the smaller value to render) and optionally declared children as
+`:seon.render/query` descriptors or values. `units` renders the composition's value through the same selection. Its
+children become child units under the same allocation and the same producer-exclusion chain. This is the only place
+a renderer's output can introduce a query. Option C of §7 is therefore limited to explicitly declared
+compositions.
+
+**Work bounds and termination are separate from B.**
+
+- Child execution per request is capped by the existing `:seon.config.eval.result/max-nodes` cap (as `neighborhood`
+  uses it today, `walk.clj:733-734`). Distance decrements per hop.
+- A child whose source descriptor equals an ancestor's is refused by name as a cycle. The rendering chain carries
+  source descriptors as well as producers.
+- Every read keeps its own `:max-work`, `:max-results` and `:max-result-weight` bounds and its deadline. Exhaustion
+  yields a named refusal or continuation, never a silent stop.
+
+### 3e. Continuations: one entrance, resolved from a held source
+
+Every cut's coordinates name the unit's **source reference**, the selected producer and its program evidence, plus a
+typed path and absolute offset into the **represented** value. That is the value the floor actually held, which may
+be a renderer's smaller value. It is not the raw query result. `get_value` and `/data` only decode coordinates and
+encode the common result. Source resolution, navigation and preparation all happen inside `units` (floor review
+P1-2).
+
+| Source reference | Valid while | Resolution |
+|---|---|---|
+| live result `result/e…` | the SCI context retains it (`:seon.sci.eval/result-objects`, `sci/eval.clj:620`; `repl/live-response` `repl.clj:465-480`) | the live object, reselected |
+| admitted artifact digest | the blob is retained (existing MCP artifacts only; **no new historical blob writes**) | `read-artifact`, reselected |
+| query + branch + basis | the branch is retained and its history reaches the basis. `as-of` answers only over the retained origin database (`reference-code/datahike/src/datahike/api/impl.cljc:153-183`), and GC follows reachable roots (`gc.cljc:22-80`) | `seon.db/read` on the branch's database `as-of` the basis |
+
+A transformed output is continued only if the recorded producer, program identity and projection evidence equal the
+current ones. Otherwise the result is typed. One new error schema, `:seon.render/continuation-error` over
+`:seon.error/base`, carries `:seon.render.continuation/reason` from
+`[:enum :stale :gone :unavailable :malformed]`, naming the member and the offending coordinate. Saved historical
+shown text is never reconstructed by current renderers. "Not retained" is an honest terminal answer, never a
+reason to re-evaluate.
+
+**Navigation prerequisites (floor review, carried, not re-solved):**
+
+- `render.data/at` keeps missing versus nil, but its raw `contains?`/`get`/`nth` (`data.clj:54-68`) must give way to
+  typed structural steps (map-entry key and value roles, held-order set ordinals);
+- `parse-cursor` (`:27-44`) must refuse malformed coordinates instead of rooting them;
+- offsets are absolute and strictly progressing; empty and beyond-end are distinct results; current and historical
+  labels are stated.
+
+A browser-supplied query continuation is a **checked reference** to a query the server held: branch, basis and
+descriptor digest. It is never executable source supplied by the client.
+
+### 3f. The entry function, its reads and its reuse
+
+```clojure
+(seon.render/units request) ;=> [:seon.render/rendered-unit …] | :seon.render/request-error
+;; request: one source (§3a); :seon.render/output :seon.render/ai | :seon.render/html | :seon.render/form;
+;; :seon.render.call/id (parent occurrence, optional at the root); :seon.render/distance (default 0);
+;; explicit custody: :seon.db/db, :seon.sci.eval/ctx, :seon.agent/id (viewer), caps, time limit,
+;; :seon.config/on-core-error, :seon.render/profile (one B), retained/captured calls;
+;; optional :seon.eval/shown-subjects, the known set K the function face needs (function face §1.3), passed as
+;; an explicit input into the unit argument of renderers that declare it.
+```
+
+**The declared-read executor lives in `seon.db`.** `seon.db/read [database read-request]` is public and new. It
+dispatches `:q` → `q`, `:pull` → `pull`, `:pull-many` → `pull-many` and `:index-page` → `index-page`, with explicit
+database arguments. The public owners' validation, decoding, refusals and evidence capture therefore apply unchanged.
+Nothing is copied into render. The `:seon.db/database` placeholder keeps its current meaning. A malformed request is
+refused by `read-request`'s own schema at that boundary.
+
+`replay-read` becomes a thin delegate to `read`. Currency comparison stays capture-neutral by calling it with no
+evidence sink bound (`append-read-evidence!` is a no-op without a sink, `db.clj:495`). Its legacy mistyped-evidence
+check on `:q` stays (`:984-986`).
+
+**Subject substitution, exactly.** A declared concern's query names the parent as `:seon.render/subject`, only in:
+
+- the `:args` vector of `:q`, at positions bound by `:in`;
+- the eid position (second element) of `:pull`/`:pull-many` `:seon.db/pull-arguments`.
+
+The substituted value is the parent's **lookup** (`[attr value]`). A query that needs a scalar binds it with `:in`
+and destructures in the query. Q3 changes `agent-faults-query`'s `?id` input into a lookup binding `?agent`, so the
+lookup is not flattened by a heuristic. `:index-page` options take no substitution. A missing parent subject is
+refused by name.
+
+The function face's example writes `:seon.db/pull-arguments` as a map; the existing schema is a vector
+`[selector eid]`. The face's owner adopts the vector.
+
+**Reuse.** `render-call`'s retention entry is extended, not duplicated. It now also holds the **resolved source
+descriptor**, the source's **acquisition read evidence** and, for compositions, the **membership evidence** of the
+owner's read. That last item lets an appended history row invalidate the composition, not only its children. The
+query read happens **before** the reuse check, inside the same capture. Today `render-call` creates its sink after
+selection (`render.clj:1511-1538` versus `:1586`); moving it before is a control-flow change priced in S2.
+
+A unit is reused only when all of these agree: source descriptor, program and selection inputs (existing
+`call-cache-evidence`), and read evidence. Required witnesses:
+
+- an empty query is invalidated by an insertion;
+- a relevant update or retraction invalidates;
+- an unrelated write reuses;
+- a changed template at the same occurrence cannot reuse;
+- nil and false results stay values.
+
+**Cost.** Cost is the source's read work (bounded by its own query bounds), plus per reached unit one selection
+(candidate fitting is proportional to the viewer namespace's public functions and to declared alternatives), plus
+one invocation, plus floor work O(V log V) over admitted nodes plus opened-collection ordering (one-render-path §3b
+and floor review P1-6). Cache hits cost evidence comparison only. These are call counts, not constant bounds.
+Parent-versus-change latency, memory, reached units and reads, and hit/miss counts are measured per slice.
+
+### 3g. Failure
+
+- A declared read refusal is a **value**. It renders through the error pair (req 12.2).
+- A renderer that **returned** an error value is distinct from one that **did not return** (`invocation-unknown`,
+  `render.clj:1117-1133`).
+- A failing unit gets its diagnostic face. With an owner, that is `renderer-failure`'s two faces plus message
+  tx-data (`render.clj:1770-1806`). Without an owner, the same diagnostic data applies: producer, path, reason and
+  requery. The "renderer unavailable" strings go.
+- `units` is **pure**. It returns failures as units carrying `:seon.error/value` and `:seon.db/tx-data`, and commits
+  nothing. The calling execution boundary commits and delivers: the web render proc already commits page tx-data
+  (`web.clj:571-572`), and the turn opening and MCP settlement use their existing fault owners.
+- Under `:panic`, that boundary stores the fault, then throws and stops its graph (AGENTS "Panic visibly"). Siblings
+  keep rendering only under `:record`.
+
+### 3h. Every consumer delegates the same responsibility
+
+"One call" means one **presentation** boundary. It does not mean that domain acquisition, settlement or layout
+disappear.
+
+| Consumer | What stays in its owner | The call |
+|---|---|---|
+| MCP evaluation result | ordinary evaluation and settlement; its separate evaluator is one-REPL work | `units {:value result}` (value-only path works without SCI context); returns faces plus tree and cuts. R3/R6 retire the reconstruction |
+| `get_value`, `/data` | coordinate decoding, envelope encoding | `units {:source-ref … :cursor …}` (§3e) |
+| Namespace/agent page | walk acquisition, fleet oversight, `surface-html`, SSE packaging | `units {:seon.render.walk/units (walk acquisition) :output html}` |
+| Agent opening | bootstrap membership, ordering, demonstrations, origin metadata; REPL settlement | `units {:output form}` for each descriptor, then the REPL executes once, then `units {:value actual-result}` |
+| Prompt history | `of-agent` semantics, active-turn exclusion, per-evaluation identity and basis, `prompt/select` whole-unit admission | `units {:seon.render.walk/units (history composition)}`; saved bytes bypass B |
+| Function face | the row, its pair `seon.render.ns/function-ai`/`-html` (function face §1.1) | `units {:query (pull of the row) …}`; callers, tests and tasks as child **handles** |
+| Agent-facing walk | a thin `my.*` custody adapter; its branch filter selects **unit paths**, not a path inside one value | `units` with explicit custody |
+| Transcript session/outline/ledger | evaluated-sources, comments, branch errors, messages, effects, ordering, calibration, contributed-byte accounting | final presentation only |
+| Status/runtime observation | the observation's acquisition, including no-database boot and fault cases | `units {:value observation}` with no SCI context required |
+| Test reports | native expected/actual evidence (test owner; audit R10 and its schema cost) | `units {:value report}` |
+| Errors and the faults concern | error identity and occurrences; the requested observation data (the selector choice is a semantic decision, kept) | one acquired result feeds both faces |
+| `my.program` reports | its read/write verbs | `units {:value report}`; presentation never reruns a verb |
+
+## 4. Duplicates mapped to the block, one ledger
+
+**Booked elsewhere, not recounted.** Audit §11 groups R1, R2, R3, R4, R5, R6, R8, R9, R10, C3 and C8 own their
+retirements. **Audit C7** books `replay-read`'s 65 lines as a deletion. This design keeps the dispatch as `read` and
+turns `replay-read` into a delegate, so it books those 65 lines **here, as Q0**. C7 must drop `replay-read` from its
+139 lines (74 remain) and reprice its currency work. This design's net must not be added to the audit's 2,287.
+
+Credit counts whole old definitions removed or rewritten in place (old size minus new size shown as the add).
+Moved lines, such as the neighbourhood loop `walk.clj:751-807` moving into `units`, earn no credit and cost no
+addition. Fragments of mixed functions earn nothing. Each range appears once.
+
+| Group | Pinned ranges | Replacement | Old | Source add (est.) | Status |
 |---|---|---|---:|---:|---|
-| **Q1 history as a hand query + loop** | `walk.clj:926-974` `history` 49 | a declared read-request (evaluations of an agent, excluding its own run as now) + `units` | 49 | 12 | direct |
-| **Q2 agent-facing walk with ambient custody** | `render.clj:1876-1976` `walk` 101; `:1814-1823` `call-with-walk-context` 10; `:1825-1839` `walk-error` 15; `:1841-1846` `ambient-database-value` 6; `:1848-1862` `repl-state` 15; `:1864-1874` `selected-walk-units` 11; `:1812` `*walk-context*` 1 | a `my.*` entry with explicit custody → `units` (branch filter becomes a path cursor) | 159 | 20 | direct; converts `turn.clj:4715` and two tests |
-| **Q3 faults concern: query + two faces by hand** | `error.clj:1897-1902` `faults-input` 6; `:1943-1966` `faults-form` 24; `:1968-1979` `render-faults-ai` 12; `:1981-2004` `render-faults-html` 24 | one `:seon.render/query` on the concern attribute (the existing `agent-faults-query` datalog, with an identity-bearing selector, not `observation-selector`) | 66 | 10 | direct; `for-agent` (17), `agent-faults-query` (20) and `observation-selector` (30) stay for agents and other callers |
-| **Q4 duplicate per-member render loop** | `bootstrap.clj:303-344` `direct-candidates` 42; `:346-365` `listing-candidates` 20 | `units` + filter on the returned units | 62 | 15 | conditional: opening-subject membership and demonstrations must be preserved by a behaviour map |
-| **Q5 second retention layer over history** | `web.clj:2537-2610` `derive-context!` 74 | `render-call` retention on the history unit's id and read evidence | 74 | 5 | conditional: its context-action (`change-context` `:2504-2535`) is kept; prove the cache hit on an unrelated write |
-| **Q6 transcript acquisition** (audit §3.3 inventory, unbooked there) | `transcript.clj:404-432` `history` 29; `:668-737` `candidate-history` 70; `:739-753` `projection` 15; `:945-995` `agent-history-under` 51; `:998-1011` `agent-history` 14; `:1856-1880` `acquire-ledger-data` 25 | declared queries → `units` | 204 | 40 | conditional on the behaviour → surviving-function map the audit requires first |
-| **Q7 entity observation page** | `data.clj:195-235` `entity-observation` 41; `:135-151` outgoing 17; `:153-193` incoming 41; `:110-133` helpers 22 | an `:index-page` read-request (replay-read supports it, `db.clj:1010-1013`) | 0 | — | candidate only: its snapshot-bound continuation refusal is a distinct guarantee until probed |
+| **Q0** executor | `db.clj:962-1026` `replay-read` 65 | `seon.db/read` dispatch over the public owners (~18) + `replay-read` delegate keeping its legacy check (~12) | 65 | 30 | direct once the evidence witnesses pass |
+| **Q1** history | `walk.clj:926-974` `history` 49 | rewritten in place as the acquisition half returning a composition (of-agent kept) | 49 | 30 | conditional: history bytes, exclusion and membership invalidation |
+| **Q2** ambient walk | `render.clj:1876-1976` `walk` 101; `:1814-1823` 10; `:1825-1839` 15; `:1841-1846` 6; `:1848-1862` 15; `:1864-1874` 11; `:1812` 1 | `my.*` adapter with explicit custody → `units` | 159 | 20 | conditional: branch filter mapped to unit paths; `turn.clj:4715` and two tests converted |
+| **Q3** faults | `error.clj:1897-1902` 6; `:1943-1966` 24; `:1968-1979` 12; `:1981-2004` 24 | a `:seon.render/query` on the concern (lookup-bound `agent-faults-query` pulling with `observation-selector`, kept) | 66 | 0 (declaration, below) | conditional: empty/non-empty, one execution, both faces, observation data preserved |
+| **Q4** opening loop | `bootstrap.clj:303-344` 42; `:346-365` 20 | form derivation through `units`; membership, teaching and key chaining kept in bootstrap | 62 | 15 | conditional: behaviour map |
+| **Q5** outer history retention | `web.clj:2537-2610` `derive-context!` 74 | extended `render-call` retention with membership evidence; `change-context` (`:2504-2535`) kept | 74 | 15 | conditional: append invalidates; unrelated write reuses; segments and ledger data preserved |
+| **Q6** transcript acquisition adapters | `transcript.clj:404-432` 29; `:668-737` 70; `:739-753` 15; `:945-995` 51; `:998-1011` 14; `:1856-1880` 25 | only the adapters made redundant; in-flight sources, comments, grouping, effects and calibration go to named surviving owners | 204 | 40 | conditional: audit §3.3's behaviour → surviving-function map first |
+| **Q7** entity observation | `data.clj:110-235` | none: snapshot, eid and direction validation, attribute offsets and identity completeness are query-work policy | 0 | — | kept |
 
-| Scope | Credit | Add (est.) | Net |
-|---|---:|---:|---:|
-| Direct (Q1-Q3) | 274 | 42 | −232 |
-| Conditional (Q4-Q6) | 340 | 60 | −280 |
-| **Block core** (not a group): query source in `render-call` +12, subject placeholder +3, publish `replay-read` +1, `units` entrance moved from `neighborhood` (net +10 for the second source and contract), read-form derivation +10, schema members +8 | — | 44 | +44 |
-| **All, if conditions hold** | 614 | 146 | **−468** |
+| Core (no group) | Source add (est.) |
+|---|---:|
+| `units` entrance: source dispatch, shared allocation threading, handles, cycle guard (the loop itself moves) | 45 |
+| retention extension (source descriptor, acquisition and membership evidence, capture before reuse) | 20 |
+| `seon.db/read-form` form derivation | 10 |
+| source-reference resolution for continuations (replaces adapter-side acquisition; windows stay in R1/R3) | 30 |
+| `raw-output` composition alternative | 8 |
+| namespace-stage fit through the retained plan (after C3) | 15 |
+| ownerless diagnostic face (replaces the placeholder branch; no credit, mixed function) | 3 |
 
-Mixed functions keep zero credit, as in the audit: `neighborhood` (98, its loop moves rather than disappears),
-`page-result` (138), `render-call` (183), `acquire-context-report` (54), `history-contributions` (30), the
-26 source-returning renderers (their read forms become derivable, but each keeps its face), and `my.program`'s
-query verbs.
+| Ledger | Old | Source add | Declarations | Net source + declarations |
+|---|---:|---:|---:|---:|
+| Q0 | 65 | 30 | 0 | −35 |
+| Q1-Q6 (all conditional) | 614 | 120 | 10 (Q3 query) | −484 |
+| Core | 0 | 131 | 28 (request `:multi` 12, rendered-unit 8, continuation error 8) | +159 |
+| **All, if every condition holds** | **679** | **281** | **38** | **−360** |
 
-## 5. Adoption order: each cut pays for itself
+Tests are priced separately: one class regression per slice plus the §8 witnesses, about +200 lines (estimate).
+Caller edits inside the converted consumers are included in their group's add. They are estimates, not ceilings.
+Every slice still stops before 100 added lines (§5).
 
-Every slice keeps HEAD loadable, lands its caller conversions, and carries one class regression. Root runs
-the tests (lane rule). Precondition **A0**: root restarts default, so that HEAD's four-stage selection and
-b195ae037 are installed (probe §0.1). Otherwise no slice can be proven.
+**What the additions buy.** The core's +159 is not new machinery beside the old. It is:
 
-| Slice | Change | + / − (est.) | Justified by | Proof root runs |
+- the only public source dispatch (removing Q0's private duplicate);
+- the only continuation resolver (letting R1/R3 delete their windows and reconstruction without a replacement
+  acquisition in two adapters);
+- the ladder completion that lets R2 delete `project-node*`'s chooser.
+
+Without the core, R2 and R3 cannot book their 205 lines, and Q1-Q6 have nowhere to delegate.
+
+## 5. Adoption order: one active loop at every commit
+
+Each slice keeps HEAD loadable and converts all affected callers in the same activation. Every temporary name
+delegates to the one implementation and names its retirement. Root runs the tests.
+
+| Slice | Change | Source + / − (est.) | Pays with | Proof root runs |
 |---|---|---|---|---|
-| **A1** | `:seon.render/query` source in `render-call`; `:seon.render/subject` placeholder; publish `seon.db/replay-read` (name for review); convert `walk/history` to a declared read + `render-call` per row | +28 / −49 | Q1 | history bytes for root identical before/after; history's read evidence reused after an unrelated write |
-| **A2** | lift the per-member loop into `seon.render/units`; `neighborhood` returns acquisition units only and `page-result` calls `units`; replace `walk.clj:792-798` placeholders with `renderer-failure` faces | +25 / −12 (placeholder branch and loop wrapper) | prerequisite of A3/A4; closes the existing issue | page units equal (ids, paths, bytes) on default; a failing renderer names producer and path |
-| **A3** | faults concern as a declared query; AI unit shows the derived form + rendered result, HTML the same result | +10 / −66 | Q3; the 81% prompt defect | opening for an agent with faults: one read, one result; with none: an empty unit, no source reprint |
-| **A4** | agent-facing walk → `my.*` entry with explicit custody → `units`; delete `*walk-context*` | +20 / −159 | Q2 | `(my.….walk {:depth 2})` equals the old text for root; `turn.clj:4715` binding gone |
-| **A5** | cursor continuation through `units` (value digest / query + basis / entity); `get_value` and `/data` call it | budget in audit R1/R3 | Astra P1-2 | same fragment for MCP and browser for one cut |
-| **A6** | opening subjects through `units` | +15 / −62 | Q4 | opening entries equal as a set; demonstrations kept |
-| **A7** | fold `derive-context!` into `render-call` retention | +5 / −74 | Q5 | cache hit after an unrelated write; miss after an evaluation append |
-| **A8** | transcript views over declared queries | +40 / −204 | Q6 | the audit's behaviour map, then byte equality of session/outline/ledger |
+| **S0** contracts | Root restarts default and verifies the loaded order and supplied defaults (§0.1). Declare the source `:multi`, `:seon.render/rendered-unit`, `:seon.render/composition` and `:seon.render/continuation-error`; no behaviour change. Carry forward the floor review's blockers as prerequisites. | 0 / 0 (+28 declarations) | enabling | the schemas compile against the packaged projection; no behaviour change |
+| **S1** executor | `seon.db/read` over the public owners; `replay-read` delegates. C7 drops `replay-read`. | +30 / −65 | Q0 | §8 witness 1 |
+| **S2** lift | `units` holds the one render loop. `neighborhood` becomes a **thin delegate** returning `units` over its own acquisition, with output unchanged, so `page-result`, `listing-candidates` (`:form` outputs) and the agent-facing walk keep working. Retention extension. Ownerless diagnostic face. | +68 / 0 | enabling; closes the placeholder issue | page units equal (ids, paths, bytes); an ownerless failure names producer and path; §8 witness 2 for value and query sources |
+| **S3** budget + continuation | One allocation per request, handles, cycle and work bounds, compositions in `raw-output`; source-reference resolution; `get_value` and `/data` both call it. Lands **with** floor R1 slice (i) and R3, which book the windows and reconstruction. | +38 / 0 here | R1, R3 | §8 witnesses 4 and 5 |
+| **S4** faults | The Q3 declaration end to end. | 0 / −66 (+10 declarations) | Q3 | one execution; captured empty/non-empty reads; both faces; nested bounded; a cut continues |
+| **S5** opening, history, walk | Opening without pre-execution, with `seon.db/read-form` (Q4); history as a composition (Q1); the `my.*` walk adapter, then delete `*walk-context*` (Q2). Retire `neighborhood`'s delegate name once its three callers call `units`. | +75 / −270 | Q1, Q2, Q4 | an opening read settles exactly once; history bytes exact; the walk equals the old unit set |
+| **S6** ladder | Namespace-stage fit through the retained plan (after C3); nested values through `selection` (with R2). | +15 / 0 here | R2, C3 | §8 witness 3 |
+| **S7** domain views | `derive-context!` fold (Q5) after membership proof; transcript adapters (Q6) after the behaviour map. | +55 / −278 | Q5, Q6 | append invalidates, unrelated write reuses; session/outline/ledger bytes and accounting equal |
 
-A1-A4 are each under 100 added lines, and each is net negative on its own except A2, which is the enabling
-move (+13 net) and pays in A3 and A4.
+The slices add 30 + 68 + 38 + 75 + 15 + 55 = **281** source lines and delete 65 + 66 + 270 + 278 = **679**.
+That is the §4 ledger exactly: S2 carries the core's `units`, retention and diagnostic lines (45 + 20 + 3); S3 its
+source-reference and composition lines (30 + 8); S5 `read-form` (10); S6 the plan fit (15). No slice exceeds 100
+added lines. If S3's share of R1's classification and coordinate work grows, it splits along R1's (i)/(ii)/(iii)
+commits.
 
-## 6. What must NOT merge
+## 6. What stays distinct
 
-These are distinct guarantees, not duplicates (audit §7, plus this dig):
+- Database read execution and capture **versus** since-diff comparison and changed-read refresh. They share the
+  dispatch, not the purpose.
+- Query-work bounds and deadlines **versus** the one presentation allowance.
+- Entity and concern acquisition policy (walk), history semantics (`of-agent`) and bootstrap membership **versus**
+  selection and face encoding.
+- Occurrence identity **versus** cache-validity inputs **versus** historical basis.
+- Ordinary REPL evaluation and settlement **versus** rendering its actual result.
+- Exact saved shown text and whole-unit prompt admission **versus** rendering a new live value.
+- Live object custody, retained artifact bytes and database history, which have different lifetimes.
+- Diagnostic face construction **versus** durable core-fault recording, delivery and panic.
+- Native test evidence, effect receipts and domain analysis **versus** how they are displayed.
+- Source-code formatting, HTTP/SSE/MCP envelopes and DOM targeting **versus** value interpretation.
+- Agent verbs (`seon.error/for-agent`, `my.program` queries) **versus** declared concern reads. They may share
+  Datalog; a verb stays a function the agent calls.
+- `render.data/entity-observation`'s paged observation **versus** a single `:index-page` read.
 
-- **Whole-unit prompt admission** (`prompt/select` `prompt.clj:301-333`, `retained-count`) versus the floor's B.
-  Admission selects saved units; it never fits their text.
-- **Saved shown bytes** versus re-rendering. History units render the exact saved text; a new viewer's current
-  view is labelled current (one-REPL §2.4).
-- **Evaluating opening forms** versus rendering a query. The renderer derives the form. The REPL evaluates,
-  records and binds the result (`result/e…`). The block never records evaluations.
-- **Read-currency replay** versus declared-query execution. They share `replay-read` as an executor, not a
-  purpose. Since-diffs and changed-read refresh stay in `seon.db` and the turn.
-- **Walk acquisition policy** (installed refs, declared concerns, ownership, distance) is the *producer* of an
-  entity's default query, not part of selection.
-- **Query-work bounds** (pull width, `max-work`, `max-results`, deadlines) versus presentation B.
-- **Source-code formatting** (`repl/source-text`, syntax tokens) versus value rendering.
-- **Transport:** SSE packaging and deltas (`web.clj:1851-1925`), `surface-id` addressing, MCP/JSON envelopes.
-- **Durable records:** evaluation facts, effect receipts, test assertion evidence, exact prompt capture
-  (`context/capture-tx`), error identity/occurrences, live result objects (audit §7).
-- **Agent verbs** (`seon.error/for-agent`, `my.program` queries). A declared query may call the same datalog,
-  but a verb is a function the agent calls and stays one.
+## 7. Where a concern's query is declared: resolved hybrid
 
-## 7. Open question for review (priced)
+The first pass offered three options. The review agrees with A and bounds B and C. The hybrid:
 
-Where a declared concern's query lives. This decides how Q3/Q6 are written; the rest is unaffected.
+- **A (default): a `:seon.render/query` property on the concern attribute's schema**, holding a read-request
+  template. It is read through the existing projection's Malli properties and invalidated by its declaration inputs.
+  Use it for simple declarative reads, such as faults and the function face's callers, tests and tasks. It costs
+  about 3 declaration lines per concern.
+- **B: an existing domain function** where acquisition already carries ordering, projection, validation or
+  composition semantics (`of-agent`, the walk, ledger assembly). Its output is plain data or a unit composition
+  handed to `units`. Such functions are never translated into a general read program.
+- **C: renderer-produced children**, only through a declared `:seon.render/composition`, under the same budget and
+  provenance rules. Children are never triggered by an inspected map's shape.
 
-| Option | Guarantee | Cost | Sacrifice |
-|---|---|---|---|
-| **A. `:seon.render/query` property on the concern attribute's schema (recommended)** | The query is data beside its schema: queryable, printable as the call, and no function is needed per concern | about +3 per concern; one property read in `declared-acquisition` | Templates are limited to read-request plus two placeholders; computed queries need B |
-| B. A contracted query function named by the property, returning a read-request | Arbitrary computation, still data at the boundary | +1 function per concern; call preparation supplies its inputs | One more indirection per concern; tempts graph work back into code |
-| C. No declaration: the renderer returns `{:seon.render/query …}` at render time (§3d.2 only) | Zero schema change | nothing new | The query exists only after a render; no index of what each concern reads |
+No universal refusal of identity-less pulled maps: owned components and partial observations legitimately lack
+identities. Only a continuation that promises an entity identity must prove one. The probe's bare
+`{:db/id 42404}` leaf means a declared query that feeds entity continuations must ask for identities.
 
-## 8. Unresolved risks
+## 8. Required proof (acceptance witnesses)
+
+These witnesses run through the installed test process when implementation is authorized. The floor review's
+hostile-value, deep-serialization, safe-navigation and emitted-byte requirements remain prerequisites. They are not
+duplicated here.
+
+1. Every read operation records the right evidence. Empty → inserted, changed or retracted, unrelated-write reuse,
+   malformed request and query-bound refusal have distinct outcomes.
+2. Literal nil and false, scalar `:q`, relation `:q`, `pull-many`, one faults concern and ordered saved history
+   have declared, stable unit boundaries. An opening read executes and settles exactly once.
+3. Root and nested values obey the same per-face order. Supplied map and positional defaults use the held database,
+   caller arguments win, and returned data cannot restart a producer or the budget.
+4. Many query children stay within one B. Cycles and work exhaustion name a continuation or refusal. Two occurrences
+   keep separate addresses without duplicating valid acquisition.
+5. MCP and the browser retrieve the same selected fragment from live, query and artifact sources. The cases include
+   transformed-output paths, wrong branch or basis, an absent live object, a missing artifact, a malformed cursor,
+   nil versus missing, empty and beyond-end, and strict absolute-offset progress.
+6. History shown bytes stay exact. Generated forms, demonstrations, selected run semantics, errors, effects and
+   ledger accounting survive their conversions. Record and panic keep their different execution behaviour.
+
+Performance per slice: source acquisition, selection and invocation, cache hit and miss, and both emissions. Report
+parent-versus-change latency and memory, reached units and reads, and retention hits. AGENTS.md's >20% or 50 ms
+rule blocks a commit.
+
+## 9. Unresolved risks and out-of-scope findings
+
+This lane writes one file, so these are recorded here.
 
 - **Installed behaviour is unproven** (§0.1). Every stage claim is a HEAD-source claim.
-- **Performance is unmeasured.** A query unit adds one `replay-read` (0.11-0.13 ms for the two probed reads,
-  finite), but real concern queries, the per-unit floor and `units` over a page are not timed. A1 must time
-  parent versus change on the page and the prompt (AGENTS.md: >20% or 50 ms blocks).
-- **The subject placeholder** substitutes only in `:args` and pull arguments. A query that needs the subject
-  inside `:find`/`pull` patterns must use `:in` binding. Declared templates that cannot must use option B.
-- **The identity of a renderer-returned child** (§3d.2) derives from parent id + path. Two children at one path
-  in one value are impossible by construction, but a renderer returning different queries across renders
-  changes the child's id silently. The query value itself should join the id; this is priced at 0 and needs
-  review.
-- **Closure inputs and positional fit** gaps (§3c) are inherited, not solved.
-
-## 9. Out-of-scope findings
-
-This lane may write one file, so no issue files were created. The durable record is this document:
-
-1. The installed default runs a two-stage selection while HEAD has four (§0.1). Root: restart and verify.
-2. `*walk-context*` ambient custody (`render.clj:1812`), in scope of A4.
-3. "renderer unavailable" placeholders at `walk.clj:792-798`. Existing issue:
-   `docs/seon/issues/namespace-page-repeats-renderer-unavailable.md` (A2 closes it).
-4. The steward-faults read dominates prompts (81%). Recorded in
-   `docs/research/agent-platform/agent-context-render-pipeline-2026-09-24.md` §0.1 (A3 closes it).
-5. `replay-read` pulls return bare `{:db/id}` ref leaves unless the selector asks identities (probe). Declared
-   queries must ask them; a check in `units` could refuse an identity-less ref leaf by name. Unpriced.
+- **Performance is unmeasured**, beyond two tiny reads.
+- **Inherited gaps:** closure defaults (`call_preparation.clj:1535-1542`) and plan-based fit before C3 (§3c).
+- **The one-render-path design §1** still says to remove the explicit and namespace stages right after restating the
+  four-level ruling. That is a stale instruction in that design's owning revision (review P2). The latest owner
+  order governs.
+- **The function face writes `:seon.db/pull-arguments` as a map** (function face §1.1); the schema is a vector. This
+  is for its owner to correct.
+- **Skill citations have drifted.** The datahike skill cites stale `q`/`pull`/read-evidence lines; the current
+  definitions are `db.clj:2365`, `:2588` and `:895`. This is a skill defect for its owner; this lane edits no skill.
+- **Existing issues:** `docs/seon/issues/namespace-page-repeats-renderer-unavailable.md` (S2 closes it); the faults
+  prompt share in `agent-context-render-pipeline-2026-09-24.md` §0.1 (S4 closes it); ambient `*walk-context*`
+  (S5 removes it).
