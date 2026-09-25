@@ -8,6 +8,13 @@ updated: 2026-09-24
 
 ## Now (rewritten 2026-09-24 ~22:10Z; ledger: tmp/orchestrator/file-ownership.md)
 
+**RESUME (2026-09-25 ~02:30Z).** Tests 2,154; 365 failed + 18 unknown (current, after a full rerun). Running, code only:
+fixture-agent-rows (73), fix-sci-zero-arg-and-names (23), fix-src-singles-db-schema, update-retired-test-shapes (52),
+fix-mcp-value-window-budget. When they land: checkpoint `bin/seon init --dev default` (never restart without one first), run
+each landing's commands serially (tmp/orchestrator/verification-queue-2026-09-24.md), rerun the 16 non-routing unknowns,
+report the count. Then: harness S2b-b/c and S4, S5 scripted migration (~120), one-happy-path wave 3 in parallel (src 84,806
+lines, +647 net since f2bc7088a). Ledger: tmp/orchestrator/file-ownership.md.
+
 **Standing rules (owner 2026-09-24).** No paid agent calls: config/default.edn ships `:seon.config.ai/no-provider true`
 and `:seon.config.error/escalate-to` absent (boot re-applies that file). Root reads errors via MCP first, logs second.
 LOAD RULE: lanes write and commit code; root runs every test request and adoption serially. Hook publication is
