@@ -790,7 +790,12 @@
   ([database identity source overrides]
    (let [projection (db/carried-projection database)
          [attribute declaration-symbol] identity
-         ns-row (namespace-row database (symbol (namespace declaration-symbol)))
+         namespace-name (symbol (namespace declaration-symbol))
+         ;; The writer digests with the namespace row the transaction leaves
+         ;; stored: the stored row when the namespace exists, else the one the
+         ;; fixture writes beside it.
+         ns-row (or (db/pull database '[*] [:seon.ns/name namespace-name])
+                    (namespace-row database namespace-name))
          rows (seon.fn/source-rows
                database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
