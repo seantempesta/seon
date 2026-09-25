@@ -44,8 +44,8 @@ as a value, with a default. No new loop, recorder, printer or store is added.
 `mcp-effective` and the ThreadLocal marks, `src/seon/cluster.clj:244-534`), the JVM error summary
 (`exception-summary` family, `:334-367`), the dead `mcp-io-prepl` (`:535-553`), the bridge's two evaluation forms,
 its error window and window bases, its re-decoding of shown text and its status printer
-(`script/seon/dev/mcp.clj:37-38`, `:280-303`, `:347-431`, `:511-563`; `cluster.clj:633-658`): about 590 source lines
-against about 310 added over P1-P5, and about 134 more with retrieval (P7, Q3 (c) as ruled). Until P7 and P6 land the milestone is a partial
+(`script/seon/dev/mcp.clj:37-38`, `:280-303`, `:347-431`, `:511-563`; `cluster.clj:633-658`, already retired by 79d052d15): about 565 source lines
+against about 295 added over P1-P5, and about 134 more with retrieval (P7, Q3 (c) as ruled). Until P7 and P6 land the milestone is a partial
 migration (§2.9).
 
 ## 0. Broken things first
@@ -500,9 +500,9 @@ including every caller of `project-next-prepl-value!` (`mcp.clj:108`, `:354`, `:
 | `nil-deref?`, `first-seon-frame`, `exception-summary` (R6) | `cluster.clj:334-367` | 34 | P4 | `kernel/failure-value` and error storage |
 | `mcp-projection-error`, `mcp-project`, `mcp-valf`, `mcp-io-prepl` | `cluster.clj:368-553` | 187 | P4 | the one print; the host prepl's bounded `valf` |
 | projection lookup | `prepl.clj:26-27` | 2 | P4 | — |
-| `bounded-face`, `bounded-summary` | `cluster.clj:633-658` | 26 | P5 | ordinary render selection |
+| `bounded-face`, `bounded-summary` | `cluster.clj:633-658` | (26, already retired by 79d052d15, not booked here) | — | the observation's declared AI face |
 | the bridge's `refuse#` maps | `mcp.clj:442-482` | ≈ 8 | P5 | registry-declared errors |
-| **Total, P1-P5** | | **≈ 593** | | |
+| **Total, P1-P5** | | **≈ 567** | | |
 | `get_value`'s old-artifact adapter: `hex-digit?`, `digest!`, `path!`, `execute-get-value`; `mcp-get-value`; `mcp-effective` | `mcp.clj:728-782`; `cluster.clj:555-611`, `:309-333` | ≈ 134 (137 less the mark call P4 removes) | P7 | the one continuation entrance |
 | `record-evaluated-tx`, `record-evaluated-call` and helpers | `turn.clj:1454-1585` | ≈ 130 | root's call | `virtual-turn!` in fixtures |
 | R10, C1 (conditional) | runner, test, eval | 137 | P6 | §2.7 |
@@ -921,7 +921,7 @@ renders whole (5.8).
 | **P3** | MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −130 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54) | −65 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
 | **P3m** | the fault observation, exactly lost-error design §M (folded here as its "pipeline that owns MCP reply assembly"): the cluster value captured before settlement, saved shown text, the `fault-window` component, the committed-cursor and last-form rules, lineage unknowns, `occurred-since` in place, one budget, outcome and `isError` | the settlement writer, `seon.cluster.eval` schema (+1 attribute and component, +1 error schema, counted once across both plans), `src/seon/error.clj`, `render/transcript.clj`, `mcp.clj` | +45 | −100 (window 55, transcript ≈ 45) | −55 | lost-error §M's class regression rows, including a fault resolved inside the window, a later recurrence leaving earlier saved text unchanged, and a failed settlement not advancing the lower bound |
 | **P4** | MCP JVM mode is root's run with the JVM stage; `mode "host"` with a bounded `valf`; the MCP projection, error summary, marks and dead prepl deleted; `get_value` reduced to the labelled old-artifact adapter (its mark call removed) | new `src/seon/repl/jvm.clj`, `src/seon/turn.clj` (refresh exclusion), `src/seon/cluster.clj`, `mcp.clj`, `resources/seon/operator/prepl.clj`, `script/seon/operator.clj`, the eval schema, `test/seon/cluster/mcp_test.clj`, `test/seon/mcp_test.clj`, `test/seon/render/web_context_test.clj` | +80 | −278 (R6 34, projection/valf/io-prepl 187, marks 31, JVM form 24, lookups 2) | −198 | M1's JVM proofs; `bin/seon status`, `start` and `config apply` read their replies; a large host value is bounded in `mode "host"` |
-| **P5** | `runtime_status` renders its observation through selection; `branch` refusals are registry-declared errors | `src/seon/cluster.clj`, `src/seon/cluster/registry.clj`, `mcp.clj` | +25 | −34 | −9 | status and branch answers unchanged in content, rendered by their declared renderers |
+| **P5** | `branch` refusals are registry-declared errors (the status half landed in 79d052d15: the observation is whole and declares its AI face) | `src/seon/cluster/registry.clj`, its schema, `mcp.clj` | +10 | −8 | +2 | branch answers unchanged in content, refusals validate against their declared schemas and render by them |
 | **P7** | retrieval through the one continuation entrance (Q3 (c), owner's choice): `get_value` validates wire input and calls the render owner's `units` with the evaluation's source reference; a result with no retained backing answers the typed unavailable cut; the old-artifact adapter deleted | `mcp.clj`, `src/seon/cluster.clj` | +20 | −134 | −114 | a live SCI result expands beyond the budget; a JVM result answers unavailable; nothing replays |
 | **S5** | write-back of one file (§3.3) | `src/seon/cluster/source.clj` | +75 | 0 | +75 | the M1 write-back proofs |
 | **P6** | tests enter the composition: `capture-evaluate`, recording through `evaluation-facts` and the recording writer, native report printed once, candidate gate as one request | `src/seon/test.clj`, `src/seon/test/runner.clj`, `src/seon/sci/eval.clj`, the test schema | +90 | −137 (R10 50, C1 87, conditional) | −47 | a member leaves one evaluation on the retaining branch, read once; failure keeps native operands; the candidate gate records a whole run |
@@ -943,9 +943,9 @@ entrance itself is the render plan's unpriced cut.
 
 | Option | Slices | Guarantee | Added / deleted / net | Sacrifice |
 |---|---|---|---|---|
-| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 + P5 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +310 / −593 / **−283** | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
-| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +385 / −593 / **−208** | as A; tests outside the composition until P6 |
-| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +495 / −864 / **−369** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −282) |
+| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 + P5 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +295 / −567 / **−272** | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
+| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +370 / −567 / **−197** | as A; tests outside the composition until P6 |
+| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +480 / −838 / **−358** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −271) |
 
 B is recommended as the first dogfood milestone: it lands the owner's MCP law and the dogfood path without waiting
 for the continuation entrance, and it is labelled partial until P7 and P6 land. All three wait on the refresh cut and,
