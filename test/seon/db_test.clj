@@ -2035,12 +2035,11 @@
    (fn [connection]
      (let [database @connection
            decoded? (atom false)
-           refusal (@#'db/read-declarations {:not :a-database} 'seon.db/pull)
-           data (:seon.error/data refusal)]
+           refusal (@#'db/read-declarations {:not :a-database} 'seon.db/pull)]
        (is (= 'seon.db/pull (:seon.db.read/unreadable-declarations refusal)))
-       (is (= :seon.db/installed-schema
-              (:seon.error/member data)))
-       (is (= 'seon.db/pull (:seon.error/operation data)))
+       (is (= :seon.db/installed-schema (:seon.error/member refusal)))
+       (is (= 'seon.db/pull (:seon.error/operation refusal))
+           "the refusal names its operation (an absent one threw an NPE in `diagnostic`)")
        (let [observed (@#'db/with-declarations
                        {:not :a-database} 'seon.db/pull
                        (fn [_] (reset! decoded? true) ::decoded))]

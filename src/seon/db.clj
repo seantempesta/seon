@@ -1587,9 +1587,8 @@
         :seon.db.read/unreadable-declarations operation
         :seon.db/invalid-read true
         :seon.error/layer :database-read
+        :seon.error/operation operation
         :seon.error/member ::installed-schema
-        :seon.error/expected :seon.db/database-value
-        :seon.error/offending database
         :seon.error/data {:seon.db/db database}}))))
 
 (def ^:private relation-only-declarations
