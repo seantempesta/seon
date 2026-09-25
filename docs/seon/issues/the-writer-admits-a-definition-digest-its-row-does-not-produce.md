@@ -65,3 +65,15 @@ one (`:seon.error/unknown` when there is none), and `:seon.error/data :seon.db/e
 - **Regression:** `seon.db-test/a-program-row-keeps-only-the-definition-digest-it-produces`.
 - **Pending:** root's runs, and the tests that write stale digests. Both are listed in
   `docs/prds/agent-platform/landing/lane-fix-writer-digest-2026-09-25.md`.
+
+## Round 2 (2026-09-25, 58d953b7e 3c300e5d5 9bd944d45 40dae3514)
+
+Four defects of 79b6d9abd, one commit each:
+
+- **P1, 58d953b7e.** A result write onto a test declaration was refused. The check now runs only on attributes the
+  family owns (`seon.program/shapes-in`), over `canonical-row`.
+- **P4, 3c300e5d5.** A store without program schema crashed on `:seon.fn/sym`. Only installed families are checked.
+- **P3, 9bd944d45.** Indexed seed vectors were read back as sets. The declared collection is kept.
+- **P2, 40dae3514.** `seon.db/definition-digest-of` is the one owner. The producer patches for `seon.fn/source-rows`
+  and `sci.eval` `definition-rows` are in the landing and not applied, because fn.clj is held. Until they land,
+  SCI-settled definitions are still refused, and the issue stays open.
