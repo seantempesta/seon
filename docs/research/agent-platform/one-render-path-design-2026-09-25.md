@@ -1,6 +1,6 @@
 ---
 type: design
-status: "revised after Opus review 8a9e946d7; awaiting owner go"
+status: "owner go 2026-09-24 (all slices); implementation in progress"
 created: 2026-09-25
 scope: One schema dispatch and one shape-aware, budget-owning floor printer
 ---
@@ -217,7 +217,7 @@ and regenerates opening under “Derive wakes and completion”; it is a distinc
 
 ## 6. Ordered implementation slices and proof
 
-Independent review `8a9e946d7` is complete and root accepts all findings; **implementation still awaits owner go**. Owners below are responsibilities, not file assignments; root checks the ledger. Every slice is ≤100 added physical
+Independent review `8a9e946d7` is complete and root accepts all findings; **owner go given 2026-09-24 for all slices**. Owners below are responsibilities, not file assignments; root checks the ledger. Every slice is ≤100 added physical
 lines including declarations/contracts/regressions. Preparatory accretion leaves current dispatch active; the switch
 is atomic with every named caller conversion. If that cut exceeds 100 additions, return a smaller reviewed cut before
 writing, not a partial switch. Shared `value.clj` slices run sequentially; there is no 89-renderer API migration.

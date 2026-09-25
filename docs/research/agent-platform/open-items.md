@@ -15,11 +15,12 @@ default converged: seon.call-preparation-test 127/0 (was 80/21/13), supplier coh
 shapes whose own schema row is correct (finding them needs a hand list of shape-pointing attributes — not done).
 Hub schema edit re-derives ~1,500 rows in 3 s, 2.4 s in seon.test.accretion/generatable? (unassigned).
 
-**OWNER RULING 2026-09-25: no budgets anywhere; ONE render path** — a value is rendered by its schema's declared render
-function (responsible: renders less), else by the floor printer (the only clipper; clips intelligently with its own fixed
-rules). Clipping audit c6e75e57c: 21 sites (9 DELETE, 6 CONVERT; a budget still lives inside the floor: print/fit's
-token-budget loop). Design lane design-one-render-path-astra writing one-render-path-design-2026-09-25.md (dispatch,
-render-fn contract, floor rules, data vs text, deletions, prompt-token-budget question, slices); conversion waits for it.
+**OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
+(responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
+(snippets of every branch of deep large values); nothing else clips. Clipping audit c6e75e57c (21 sites). Design
+one-render-path-design-2026-09-25.md revised after Opus review 8a9e946d7 (67645d512); OWNER GO 2026-09-24 for all 11
+slices (~725 net lines deleted). Running: render-dispatch-opus (slices 0a, 0b, 1) and render-floor-opus (slices 2, 3);
+slices 4–11 follow in order, file-disjoint ones in parallel.
 
 **RESUME (2026-09-25 ~02:30Z).** Tests 2,154; 365 failed + 18 unknown (current, after a full rerun). Running, code only:
 fixture-agent-rows (73), fix-sci-zero-arg-and-names (23), fix-src-singles-db-schema, update-retired-test-shapes (52),
