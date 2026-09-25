@@ -100,6 +100,24 @@ for the owner and `#{}` for an absent root. Fixed in a646e65a9 (test only, +32/â
 The fifth red, `source-harvest-keeps-refusal-render-contracts-coherent`, exceeded its 5 s bound
 (11.3 s). That is a timing bound, not a fixture shape, and is not in this lane.
 
+### Second round (root run on 6ab6f5fb)
+
+- **accretion-test, 4 errors: retired assumption.** Once the symbols were fixed, the writer refused
+  the hand-built fixture rows because they lacked `:seon.program/definition-digest`, and `:seon.fn/fn`
+  also requires `:seon.program/analyzed-source-digest`. In 64be831ab the fixtures build their functions
+  and tests through the production analyzer, `test-support/program-fn-row` / `program-row`, after the
+  namespace row is stored.
+- **REPL, via `d/with` on default:** for every fixture, the private `seon.db/write-digest-error` returns
+  nil and every row validates against `:seon.fn/fn` / `:seon.test/test`. `gate-set` of
+  `fixture.gate/target` gives the three fixture tests plus this test's own row, whose source quotes the
+  fixture symbols, so the assertions now filter to the fixture namespace.
+- **effect-test, 2 fail and 1 error: pre-existing.**
+  - The three reds are `an-oversized-request-is-refused-and-never-dispatched`, the message without the dial
+    name; `detached-work-is-bounded-by-its-own-limit-config-then-the-form`, 7.2 s over a 5 s bound; and
+    `seon.flow/submit!` refusing a nil work launcher (effect.clj:865).
+  - The same three were red in root's run at 19:38Z (verify-1955.out.d/005.txt), before dea61e080
+    (19:45Z). None of them touches `capabilities`. I have not fixed them.
+
 ## Root runs (serially, quiet window, after adopting the three commits)
 
 ```
