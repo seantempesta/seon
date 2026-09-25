@@ -869,6 +869,9 @@
       (spit source
             (str "(ns " probe-namespace ")\n"
                  "(def value absent.namespace/value)\n"))
+      ;; A previous failed load left the lib registered by its `ns` form; the
+      ;; cause must surface on every attempt, not only the first in a JVM.
+      (try (host-namespace! probe-namespace) (catch clojure.lang.ExceptionInfo _ nil))
       (let [failure (try
                       (host-namespace! probe-namespace)
                       nil
@@ -877,7 +880,8 @@
             diagnostic-data (:seon.error/data data)
             evidence diagnostic-data
             location (:seon.sci.eval/cause-location evidence)
-            cause-message (:seon.error/source diagnostic-data)]
+            cause-message (get-in data [:seon.sci.eval/acquisition-observation
+                                        :seon.error.evidence/value])]
         (is (schema/valid-candidate-value? (schema/handed-projection)
                                           :seon.sci.eval/row-acquisition-error data))
         (is (= probe-namespace (:seon.sci.eval/row-member data)))

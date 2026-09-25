@@ -1865,7 +1865,12 @@
   (or (find-ns namespace-name)
       (when (classpath-locatable? namespace-name)
         (try
-          (require namespace-name)
+          ;; `:reload` because the namespace is absent: its `ns` form registers
+          ;; the lib in `*loaded-libs*` even when the rest of the file then
+          ;; fails, and `remove-ns` never clears it, so a plain `require` of a
+          ;; namespace that once failed or was removed loads nothing and the
+          ;; real cause is lost. Nothing loaded exists here to be replaced.
+          (require namespace-name :reload)
           (catch Throwable failure
             (let [causes (take-while some? (iterate ex-cause failure))
                   underlying (last causes)
