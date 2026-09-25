@@ -32,6 +32,10 @@ overlay candidate attributes belong in its world. Census c (fe2f67953): 127 red 
 fix-config-boot, fix-test-shapes, fix-agent-test-redefs running. Kondo dependency cache refilled (434 files, 0 errors,
 4.5 s). UGLY: MCP eval echoes every clj-kondo stderr line (~230 "already linted" events) unbounded — events bypass the
 one render path; route events through the floor.
+**Var-redefinition class (measured 2026-09-25):** 323 `with-redefs`/`alter-var-root` sites in 94 test files — a CLAUDE.md
+law violation that leaks across members when a test never exits (StackOverflow x11 came from one). agent_test's
+evaluator redef removed (2519a9ae0); its ai/complete, prompt, async/close!, next-agent-work, turn, next-entry redefs and
+alter-var-root #'seon.turn/step remain. Owner: harness S5 sweep + S9 loopback/function provider (injection seams).
 
 **OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
 (responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
