@@ -584,8 +584,13 @@
                    (catch clojure.lang.ExceptionInfo failure (refuse! :unreadable-file text {:seon.error/throwable failure})))
         _ (when-not (task-path? path) (refuse! :misplaced-file path {}))
         _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse! :not-one-vector forms {}))
-        entries (mapv #(if (map? %) (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) %) %) (first forms))]
-    (when-let [explanation (m/explain (mr/schema (:seon.schema.projection/registry projection) :seon.task/file) entries)]
+        ;; Only an empty set at an optional set member is absence (#{} clears);
+        ;; every other member, empty or not, meets the closed entry schema.
+        registry (:seon.schema.projection/registry projection)
+        absent-when-empty (into #{} (keep (fn [[k props s]] (when (and (:optional props) (= :set (m/type (m/deref-all s)))) k)))
+                                (m/children (m/deref (mr/schema registry :seon.task/entry))))
+        entries (mapv #(if (map? %) (into {} (remove (fn [[k v]] (and (absent-when-empty k) (= #{} v)))) %) %) (first forms))]
+    (when-let [explanation (m/explain (mr/schema registry :seon.task/file) entries)]
       (refuse! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
     (mapv (fn [{:seon.task/keys [id name kind] :as entry}]
             (let [handle (task-handle ns name kind)]

@@ -1,7 +1,8 @@
 (ns seon.issue.task-ingestion-test
   "Task ingestion (spec 7.9-7.16): handle-valued edges, task EDN by handle with a
   revision basis, lookups both ways, and the publication seam's dangling refusal."
-  (:require [clojure.java.io :as io]
+  (:require [clojure.edn :as edn]
+            [clojure.java.io :as io]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.cluster.source]
@@ -108,6 +109,12 @@
                             :handle-mismatch "[#:seon.task{:id \"000000000000\" :name \"x\" :kind :function :intent \"i\"}]"
                             :duplicate-id "[#:seon.task{:name \"x\" :kind :function :intent \"i\"} #:seon.task{:name \"x\" :kind :function :intent \"j\"}]"}]
          (is (= rule (refusal #(ingest! connection text))) text))
+       (testing "only #{} at an optional set member is absence; other empty values meet the closed entry"
+         (doseq [members [":unknown []" ":must-read []" ":evidence {}" ":id []" ":id \"\""]]
+           (let [text (str "[#:seon.task{:name \"x\" :kind :function :intent \"i\" " members "}]")
+                 refused (ingest! connection text)]
+             (is (= :invalid-entry (:seon.task/refused refused)) members)
+             (is (= (edn/read-string text) (:seon.error/offending refused)) "the diagnostic keeps the authored entry"))))
        (is (= :unreadable-file (refusal #(ingest! connection "#=(+ 1 2)"))))
        (is (= :not-one-vector (refusal #(ingest! connection "{}"))))
        (is (= :misplaced-file (refusal #(issue/index-tasks! {:seon.db/connection connection :seon.task/files {"tmp/tq.a.edn" "[]"}}))))
