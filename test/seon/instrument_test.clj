@@ -416,7 +416,7 @@
                                          {:seon.config/on-core-error :record})
            database (db/db connection)
            projection (schema/projection-from-database database)
-           state (sci.eval/projection-state database projection)
+           state (sci.eval/projection-state database projection "sci-fork-recorder")
            caps (config/result-caps (config/effective database "sci-fork-recorder"))
            recorded (atom [])
            recorder (fn [value]

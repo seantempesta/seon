@@ -377,7 +377,8 @@
    options
    (fn [connection]
      (db/carry-connection-projection-state!
-      connection (sci.eval/projection-state @connection fixture-projection))
+      connection (sci.eval/projection-state @connection fixture-projection
+                                            (:seon.cluster/name (test-support/execution-handle connection))))
      (schema/call-with-projection
       fixture-projection
       (fn []

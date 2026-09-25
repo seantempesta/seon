@@ -961,7 +961,8 @@
                        (if (= (db/commit-id database) (db/commit-id @connection))
                          (db/carried-projection database)
                          (schema/projection-from-database
-                          @connection (db/carried-projection database))))))
+                          @connection (db/carried-projection database)))
+                       (:seon.cluster/name handle))))
                  _ (when (and create? agent-id)
                      (let [result (db/call-with-custody {}
                                     #(db/transact! connection
@@ -976,7 +977,7 @@
                           (sci.eval/fork-cluster-ctx
                            source-ctx selected connection
                            (sci.eval/projection-state selected
-                            (db/carried-projection selected))
+                            (db/carried-projection selected) (:seon.cluster/name handle))
                            {:seon.env/environment (or (env/of handle) (env/of source-ctx))}))
                  ;; A row the program cannot install is recorded by the
                  ;; acquisition (an agent's row as its mistake, a core row as a

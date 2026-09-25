@@ -170,17 +170,42 @@
 
 (schema.edn/load! {})
 
+(declare carried-cluster-name)
+
 (defn projection-state
-  "Create a cluster context's immutable environment replacement reference."
+  "Create `cluster-name`'s context environment replacement reference; the
+  caller names the cluster whose world `db` is. Without a name, the cluster is
+  the one that world itself names (`carried-cluster-name`), never an invented one."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.schema/projection]
-    :seon.sci.eval/projection-state]}
-  [db projection]
-  (env/environment-state
-   (env/refuse-incomplete-environment!
-    (env/environment {:seon.boot/cluster-name "current-src"
-                      :seon.db/basis-t (db/basis-t db)
-                      :seon.schema/projection projection}))))
+   [:function
+    [:=> [:cat :seon.db/database-value :seon.schema/projection] :seon.sci.eval/projection-state]
+    [:=> [:cat :seon.db/database-value :seon.schema/projection :seon.boot/cluster-name]
+     :seon.sci.eval/projection-state]]}
+  ([db projection] (projection-state db projection (carried-cluster-name nil db)))
+  ([db projection cluster-name]
+   (env/environment-state
+    (env/refuse-incomplete-environment!
+     (env/environment {:seon.boot/cluster-name cluster-name
+                       :seon.db/basis-t (db/basis-t db)
+                       :seon.schema/projection projection})))))
+
+(defn- carried-cluster-name
+  "The cluster the caller's world names: the environment its connection or
+  database value carries, else the database's one cluster row, else, for the
+  published source branch (which holds no cluster), that branch's own name.
+  Anything else refuses by name; no cluster is invented."
+  {:malli/schema [:=> [:cat [:maybe :seon.db/connection] :seon.db/database-value] :seon.boot/cluster-name]}
+  [connection db]
+  (or (some-> (or (some-> connection meta ::projection-state) (::projection-state (meta db)))
+              deref :seon.boot/cluster-name)
+      (let [names (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] db)]
+        (cond
+          (= 1 (count names)) (first names)
+          (and (empty? names) (= :current-src (get-in db [:config :branch]))) (name :current-src)
+          :else
+          (throw (ex-info "A cluster context needs its caller's cluster name: this world carries no environment and names no single cluster."
+                          {:seon.error/expected :seon.boot/cluster-name
+                           :seon.error/offending (vec (sort names))}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The base context
@@ -2938,7 +2963,7 @@
                   (select-keys arm-request
                                [:seon.flow/commit-fault! ::loaded-database ::loaded-connection]))
          projection-state (or supplied-projection-state
-                              (projection-state db projection))
+                              (projection-state db projection (carried-cluster-name connection db)))
          ctx (call-preparation/install
               (env/carry-state
                (assoc ctx :seon.schema/projection projection)
@@ -2971,11 +2996,12 @@
            [:seon.env/environment {:optional true} :seon.env/environment]
            [:seon.sci.eval/loaded-connection {:optional true} :seon.db/connection]]]
      :seon.sci.eval/ctx]]}
-  ;; The fork keeps the base context's cluster; `projection-state` alone names
-  ;; "current-src", whose config row a fixture branch does not hold.
+  ;; The fork keeps the base context's cluster, else the one its world names.
   ([base-ctx db connection]
    (fork-cluster-ctx base-ctx db connection
-                     (projection-state db (schema/projection-from-database db))
+                     (projection-state db (schema/projection-from-database db)
+                                       (or (:seon.boot/cluster-name (env/of base-ctx))
+                                           (carried-cluster-name connection db)))
                      (if-let [environment (env/of base-ctx)]
                        {:seon.env/environment environment}
                        {})))

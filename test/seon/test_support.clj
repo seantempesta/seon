@@ -640,7 +640,8 @@
     (try
       (d/transact connection attributes)
       (db/carry-connection-projection-state!
-       connection (sci.eval/projection-state @connection (db/carried-projection source)))
+       connection (sci.eval/projection-state @connection (db/carried-projection source)
+                                             (:seon.cluster/name handle)))
       (run-database-body connection extra-schema body)
       (finally
         (d/release connection)

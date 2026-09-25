@@ -1652,16 +1652,17 @@
             :seon.error/offending (value/bounded-text (:seon.error/offending refusal) 400)}))
 
 (defn- open-world!
-  "Open `branch` with the schema projection its value derives, from `candidate`'s."
-  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value]
+  "Open `branch`, `cluster`'s test world, with the schema projection its value derives, from `candidate`'s."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value :seon.cluster/name]
                   :seon.db/connection]}
-  [store branch candidate]
+  [store branch candidate cluster]
   (let [connection (store/open-branch! store branch)]
     (try
       (db/carry-connection-projection-state!
        connection (sci.eval/projection-state
                    (db/db connection)
-                   (schema/projection-from-database (db/db connection) (db/carried-projection candidate))))
+                   (schema/projection-from-database (db/db connection) (db/carried-projection candidate))
+                   cluster))
       connection
       (catch Throwable failure
         (try (store/release-branch! connection) (catch Throwable cleanup (.addSuppressed failure cleanup)))
@@ -1675,7 +1676,7 @@
                        :seon.db/database-value]
                   :nil]}
   [store branch cluster effective process base candidate]
-  (let [connection (open-world! store branch candidate)]
+  (let [connection (open-world! store branch candidate cluster)]
     (try
       (db/call-with-custody
        {:seon.db/connection connection}
@@ -1752,7 +1753,7 @@
                      (try (cleanup!) (catch Throwable cleanup (.addSuppressed failure cleanup))))
                    failure)
         retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch request-branch})
-        connection (try (open-world! store request-branch candidate)
+        connection (try (open-world! store request-branch candidate cluster)
                         (catch Throwable failure (throw (release! failure [retire!]))))
         report (when (seq overlay)
                  (try (db/call-with-custody {:seon.db/connection connection}

@@ -1828,9 +1828,10 @@
        {:seon.source/branch source/current-branch})))
 
 (defn source-base!
-  "Acquire the immutable published program value shared by new cluster forks."
+  "Acquire the immutable published program value shared by new cluster forks,
+  its environment named for `cluster-name`, the cluster about to fork it."
   {:malli/schema
-   [:=> [:cat :seon.store/store]
+   [:=> [:cat :seon.store/store :seon.boot/cluster-name]
     [:map
      [:seon.source/commit-id :seon.source/commit-id]
      [:seon.source/digest :seon.source/digest]
@@ -1839,13 +1840,14 @@
      [:seon.db/db :seon.db/database-value]
      [:seon.schema/projection :seon.schema/projection]
      [:seon.sci.eval/ctx :seon.sci.eval/ctx]]]}
-  [store]
+  [store cluster-name]
   (let [{commit-id :seon.source/commit-id} (current-source! store)
         connection (store/open-branch! store source/current-branch)]
     (try
       (let [database (db/db connection)
             projection (schema/projection-from-database database)
-            projection-state (sci.eval/projection-state database projection)
+            ;; The cluster whose fork this base becomes names its environment.
+            projection-state (sci.eval/projection-state database projection cluster-name)
             [source-digest base-ctx]
             (schema/call-with-projection-state
              projection-state

@@ -195,7 +195,7 @@
                          [:config :store :id])
         cluster-branch (registry/cluster-branch cluster-name)
         existing-cluster? (contains? (registry/roster store) cluster-branch)
-        source-base (when-not existing-cluster? (cluster/source-base! store))
+        source-base (when-not existing-cluster? (cluster/source-base! store cluster-name))
         start-permit (gc-guard/try-reachability-permit! store-id :roster)
         _ (when (:seon.error/retryable? start-permit)
             (throw
@@ -234,7 +234,7 @@
         (or (:seon.schema/projection source-base)
             (schema/projection-from-database initial-database))
         initial-projection-state
-        (sci.eval/projection-state initial-database initial-projection)
+        (sci.eval/projection-state initial-database initial-projection cluster-name)
         _ (schema/call-with-projection-state
            initial-projection-state
            #(do
@@ -247,7 +247,7 @@
         (if (= (db/basis-t initial-database) (db/basis-t database))
           initial-projection
           (schema/projection-from-database database))
-        projection-state (sci.eval/projection-state database projection)
+        projection-state (sci.eval/projection-state database projection cluster-name)
         _ (store/release-branch! provisional-connection)
         connection
         (schema/call-with-projection-state
@@ -640,7 +640,7 @@
           (let [dir (str (io/file root "data/store"))
                 held (cluster/acquire-root-store! dir)]
             (try
-              (let [base (cluster/source-base! held)
+              (let [base (cluster/source-base! held name)
                     branch (registry/cluster-branch name)
                     _ (when (and (contains? (registry/roster held) branch)
                                  (not (:seon.operator/force? request)))
