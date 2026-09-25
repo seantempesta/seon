@@ -46,6 +46,7 @@
             [seon.schema.internal :as internal]
             [malli.core :as m]
             [seon.sci.admit :as admit]
+            [seon.schema.datahike :as schema.datahike]
             [seon.sci.kernel :as sci.kernel]))
 
 ;;; ---------------------------------------------------------------------------
@@ -972,3 +973,173 @@
             (remove #(= (:db/id selected)
                         (get-in % [:seon.cluster.eval/run :db/id])) evaluations)
             evaluations)))))
+
+;;; ---------------------------------------------------------------------------
+;;; The linked graph: levels of set-at-a-time joins, definitions first
+;;; ---------------------------------------------------------------------------
+
+(def ^:private interim-value-edges
+  "Value-stored references `[holder identity definition?]`; each row is RETIRED
+  when the references-as-refs lane stores its relation as a ref. A definition
+  row places its target before its holder."
+  [[:seon.fn/calls :seon.fn/sym true] [:seon.fn/must-read :seon.fn/sym true]
+   [:seon.fn/see-also :seon.fn/sym false] [:seon.test/subject :seon.fn/sym true]
+   [:seon.task/must-read :seon.fn/sym true] [:seon.task/tasks :seon.task/id false]
+   [:seon.fn.arity/input-refs :seon.schema/key true] [:seon.fn.arity/output-refs :seon.schema/key true]
+   [:seon.schema/references :seon.schema/key true]])
+
+(defn- graph-structure
+  "Ref, value, identity and component attributes, their owning schemas, and
+  the owning schemas declaring an AI pair; derived once per projection."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.render.walk/structure]}
+  [projection]
+  (schema/projection-cache-value
+   projection ::graph-structure
+   (fn []
+     (let [declared (schema.datahike/malli->datahike-schema-in projection (schema.datahike/database-attributes-in projection))
+           properties #(some-> (mr/schema (:seon.schema.projection/registry projection) %)
+                               (as-> s (or (internal/entity-properties s) (m/properties s))))
+           owners (fn [pick owner] (into {} (comp (filter pick) (map :db/ident) (map (juxt identity owner))) declared))
+           identities (owners :db/unique #(:seon.program/row-schema (properties %) %))
+           components (owners :db/isComponent #(:seon.db/component-schema (properties %) %))]
+       {::ref-attributes (into [] (comp (filter (comp #{:db.type/ref} :db/valueType)) (map :db/ident)) declared)
+        ::value-attributes (mapv (comp vec butlast) interim-value-edges)
+        ::identity-owners identities ::component-owners components
+        ::rendered-schemas (into #{} (filter #(qualified-symbol? (:seon.render/ai (properties %))))
+                                 (concat (vals identities) (vals components)))}))))
+
+(defn- joined
+  "The `[source attribute target]` edges each family joins from the whole
+  frontier, reverse attributes spelled `:ns/_name`; else the first refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure [:sequential :int] [:vector :keyword]]
+                  [:or :seon.render.walk/edges :seon.db/invalid-read-error]]}
+  [db bounds structure frontier families]
+  (reduce
+   (fn [edges family]
+     (let [refs (::ref-attributes structure) values (::value-attributes structure)
+           [clauses bind attributes reverse?]
+           (case family
+             :forward ['[[?e ?a ?t]] '[?a ...] refs false]
+             :reverse ['[[?t ?a ?e]] '[?a ...] refs true]
+             :value-forward ['[[?e ?a ?v] [?t ?i ?v]] '[[?a ?i] ...] values false]
+             :value-reverse ['[[?e ?i ?v] [?t ?a ?v]] '[[?a ?i] ...] values true]
+             :identity ['[[?e ?a ?t]] '[?a ...] (vec (keys (::identity-owners structure))) false])
+           found (db/q (assoc bounds :query (-> '[:find ?e ?a ?t :in $ [?e ...]] (conj bind :where) (into clauses))
+                              :args [db (vec frontier) attributes]))]
+       (if (:seon.db/invalid-read found)
+         (reduced found)
+         (into edges (map (fn [[e a t]] [e (cond-> a reverse? reverse-attribute) t])) (sort found)))))
+   [] families))
+
+(defn- owning-schemas
+  "Each edge target's owning schema: its identity's row schema, else the
+  component schema of the attribute reaching it; else the refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure [:sequential [:tuple :int [:maybe :qualified-keyword] :int]]]
+                  [:or :seon.render.walk/owning-schemas :seon.db/invalid-read-error]]}
+  [db bounds structure edges]
+  (let [found (joined db bounds structure (distinct (map peek edges)) [:identity])]
+    (if (:seon.db/invalid-read found)
+      found
+      (merge (into {} (keep (fn [[_ a t]] (some->> (get (::component-owners structure) a) (vector t)))) edges)
+             (into {} (map (fn [[t a _]] [t (get (::identity-owners structure) a)])) found)))))
+
+(defn- level-step
+  "One level's edges and owning schemas; an owned child without a pair (an
+  arity) is joined through within its owner's level. Else the refusal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.render.walk/structure [:sequential :int]]
+                  [:or :seon.render.walk/level-result :seon.db/invalid-read-error]]}
+  [db bounds structure frontier]
+  (let [refused #(when (:seon.db/invalid-read %) %)
+        found (joined db bounds structure frontier [:forward :reverse :value-forward :value-reverse])
+        schemas (or (refused found) (owning-schemas db bounds structure found))
+        owner (if (refused schemas) {}
+                  (into {} (keep (fn [[e a t]] (when (and ((::component-owners structure) a)
+                                                          (not ((::rendered-schemas structure) (schemas t))))
+                                                 [t e])))
+                        found))
+        inner (if (seq owner) (joined db bounds structure (vec (keys owner)) [:forward :value-forward]) [])
+        inner-schemas (if (or (refused inner) (empty? inner)) inner (owning-schemas db bounds structure inner))]
+    (or (some refused [found schemas inner inner-schemas])
+        {::edges (into (filterv #(not (owner (peek %))) found) (map (fn [[e a t]] [(owner e) a t])) inner)
+         ::owning-schemas (merge schemas (not-empty inner-schemas))})))
+
+(defn- definitions-first
+  "Postorder over definition edges: each node after the definitions it names,
+  siblings by `chronology`. An edge onto the current path is a back-reference,
+  so a cycle renders once."
+  {:malli/schema [:=> [:cat [:sequential :int] [:map-of :int [:set :int]] [:map-of :int [:vector :int]]]
+                  [:tuple :seon.render.walk/graph-order :seon.render.walk/back-references]]}
+  [ids depends chronology]
+  (letfn [(visit [[done order backs] path node]
+            (if (done node)
+              [done order backs]
+              (let [path (conj path node)
+                    [done order backs] (reduce #(if (path %2) (update %1 2 conj [node %2]) (visit %1 path %2))
+                                               [(conj done node) order backs] (sort-by chronology (depends node)))]
+                [done (conj order node) backs])))]
+    (vec (rest (reduce #(visit %1 #{} %2) [#{} [] []] (sort-by chronology ids))))))
+
+(defn- finished-graph
+  "The walked graph with pulled node values, definitions-first order (turns by
+  `:seon.turn/opened-tx`, then entity id) and back-references."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.render.walk/graph] :seon.render.walk/graph]}
+  [db {nodes ::nodes edges ::edges :as graph}]
+  (let [ids (vec (keys nodes))
+        values (zipmap ids (db/pull-many db '[*] ids))
+        definition? (into #{} (keep (fn [[a _ d]] (when d a))) interim-value-edges)
+        depends (reduce (fn [m [e a t]]
+                          (cond (= e t) m
+                                (definition? a) (update m e (fnil conj #{}) t)
+                                (definition? (keyword (namespace a) (subs (name a) 1))) (update m t (fnil conj #{}) e)
+                                :else m))
+                        {} edges)
+        [order backs] (definitions-first ids depends (into {} (map #(vector % [(:db/id (get-in values [% :seon.turn/opened-tx]) %) %])) ids))]
+    (assoc graph ::nodes (into {} (map (fn [[e node]] [e (assoc node :seon.render/value (values e))])) nodes)
+           ::graph-order order ::back-references backs ::skipped (update-vals (::skipped graph) count))))
+
+(defn graph
+  "The linked graph from `lookup`, `:seon.render/distance` levels deep (default 3).
+
+  Its refs and interim value edges are followed forward and reverse.
+
+  A target is a node when its owning schema declares an AI pair; the others are
+  counted by schema under `::skipped`. Each level's joins bind the whole
+  frontier through `seon.db/q` under the caps' query-work bounds. A refusal,
+  `max-nodes`, or `max-collection` per source and attribute records a cut."
+  {:malli/schema [:=> [:cat :seon.render.walk/graph-request]
+                  [:or :seon.render.walk/graph :seon.render.walk/no-such-entity-error]]}
+  [{db :seon.db/db lookup :seon.render.walk/lookup caps :seon.sci.admit/caps :as request}]
+  (let [structure (graph-structure (db/carried-projection db))
+        rendered (::rendered-schemas structure)
+        max-nodes (admit/required-cap caps :seon.config.eval.result/max-nodes)
+        per-attribute (admit/required-cap caps :seon.config.eval.result/max-collection)
+        bounds {:max-work max-nodes :max-results max-nodes :max-result-weight max-nodes}
+        root (:db/id (db/pull db [:db/id] lookup))]
+    (if-not root
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/render 'seon.render.walk/graph
+       {:seon.error/message "The requested lookup has no entity in this database."
+        :seon.render.walk/missing-lookup lookup :seon.error/member :seon.render.walk/lookup})
+      (loop [level 0 frontier [root] edges [] skipped {} cuts []
+             nodes {root {::node-level 0 ::node-schema (get (owning-schemas db bounds structure [[root nil root]]) root)}}]
+        (let [step (when (and (< level (get request :seon.render/distance 3)) (seq frontier))
+                     (level-step db bounds structure frontier))
+              cut (fn [bound level n & more] (apply assoc {::cut-bound bound ::node-level level ::cut-count n} more))]
+          (if (or (nil? step) (:seon.db/invalid-read step))
+            (finished-graph db (cond-> {::graph-root root ::nodes nodes ::edges edges ::skipped skipped}
+                                 step (assoc ::cuts (conj cuts (cut :seon.db/invalid-read level (count frontier) :seon.error/value step)))
+                                 (and (nil? step) (seq cuts)) (assoc ::cuts cuts)))
+            (let [groups (group-by (juxt first second) (::edges step))
+                  kept (into [] (mapcat #(take-last per-attribute (sort-by peek %))) (vals groups))
+                  schemas (::owning-schemas step)
+                  targets (remove nodes (distinct (map peek kept)))
+                  fresh (vec (sort (filter (comp rendered schemas) targets)))
+                  admitted (vec (take (max 0 (- max-nodes (count nodes))) fresh))
+                  nodes (into nodes (map (fn [e] [e {::node-level (inc level) ::node-schema (schemas e)}])) admitted)]
+              (recur (inc level) admitted (into edges (filter (comp nodes peek)) kept)
+                     (reduce #(update %1 (get schemas %2 ::unowned) (fnil conj #{}) %2) skipped (remove (comp rendered schemas) targets))
+                     (cond-> (into cuts (keep (fn [[[e a] group]] (when (> (count group) per-attribute)
+                                                                  (cut :seon.config.eval.result/max-collection level (count group) ::cut-source e ::attribute a))))
+                                   groups)
+                       (< (count admitted) (count fresh))
+                       (conj (cut :seon.config.eval.result/max-nodes (inc level) (- (count fresh) (count admitted)))))
+                     nodes))))))))

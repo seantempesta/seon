@@ -3283,6 +3283,37 @@
                                   (:seon.sci.admit/caps service)
                                   (dissoc service :seon.turn/id)))))}))
 
+(defn- graph-debug-html
+  "The agent's linked graph at N (0-3) for the owner: each node's AI and HTML
+  faces side by side in graph order, then the skipped targets and any cut."
+  {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :string] :seon.render/hiccup]}
+  [service agent-id n-text]
+  (let [n (-> (or (parse-long n-text) 3) (max 0) (min 3))
+        request {:seon.db/db (db/db (:seon.store/connection-object service)) :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
+                 :seon.sci.admit/caps (:seon.sci.admit/caps service) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
+                 :seon.config/on-core-error (:seon.config/on-core-error service) :seon.agent/id agent-id}
+        graph (render.walk/graph (assoc request :seon.render.walk/lookup [:seon.agent/id agent-id] :seon.render/distance n))
+        face (fn [id value distance output]
+               (let [call #(render/render-call (assoc request :seon.render/value %1 :seon.render/output %2 :seon.render/distance distance
+                                                      :seon.render.call/id [::graph %3 %2 id distance]))
+                     shown (call value output :value)
+                     shown (if (or (string? shown) (vector? shown)) shown (call shown :seon.render/html :failure))]
+                 (cond (string? shown) [:pre shown] (vector? shown) shown :else [:pre "Renderer unavailable."])))]
+    [:section {:class "seon-debug seon-graph"}
+     (into [:nav {:class "seon-agent-routes"}]
+           (comp (map #(vector :a {:href (route/path ::route/agent-debug {:id agent-id} {:n (str %)})} (str "N=" %))) (interpose " ")) (range 4))
+     (if-not (::render.walk/nodes graph)
+       (face :graph graph 0 :seon.render/html)
+       (into [:table {:class "seon-graph-nodes"} [:tr [:th "node"] [:th "AI face"] [:th "HTML face"]]]
+             (for [id (::render.walk/graph-order graph)
+                   :let [{level ::render.walk/node-level schema-key ::render.walk/node-schema value :seon.render/value}
+                         (get-in graph [::render.walk/nodes id])
+                         distance (max 0 (- n level))]]
+               [:tr [:td [:code (str schema-key)] (str " " id " · level " level)]
+                [:td (face id value distance :seon.render/ai)] [:td (face id value distance :seon.render/html)]])))
+     [:h3 "Skipped targets (their owning schema declares no render pair)"] (face :skipped (::render.walk/skipped graph {}) 1 :seon.render/html)
+     (when-let [cuts (::render.walk/cuts graph)] [:div [:h3 "Cut"] (face :cuts cuts 1 :seon.render/html)])]))
+
 (defn- debug-response
   [{connection :seon.store/connection-object
     :as service}
@@ -3312,6 +3343,10 @@
                            (get (query-params request) "context") :context
                            (get (query-params request) "ledger") :ledger
                            :else :full))
+
+    (and agent-id (get (query-params request) "n"))
+    {:status 200 :headers {"content-type" "text/html; charset=utf-8"} :body (shell {:seon.agent/id agent-id ::session? true
+     :seon.render/page [(graph-debug-html service agent-id (get (query-params request) "n"))]})}
 
     (and agent-id (not (get (query-params request) "subject")))
     {:status 200

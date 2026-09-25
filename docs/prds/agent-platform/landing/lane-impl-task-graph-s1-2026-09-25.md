@@ -1,85 +1,110 @@
 ---
 type: landing
 lane: impl-task-graph-s1-opus
-status: "IN PROGRESS: paused for the default store nuke (root, 2026-09-25 22:05Z). No source edited yet; the REPL-proven graph walk is held in the lane's scratch file and lands in walk.clj after the fresh default is up."
+status: "S1 landed: seon.render.walk/graph, its schemas, the /agent/{id}/debug?n=0..3 page, two tests (root runs them). Over the line budget: 206 source lines added against 100."
 design: docs/research/agent-platform/task-context-install-design-2026-09-25.md revision 4 (7bdf4fc0c) §S1
 ---
 
 # Task-context S1: the graph walk and the agent debug page
 
+Open **http://localhost:7994/agent/root/debug?n=3** (or `n=0`, `1`, `2`). The page lists each node in graph order,
+with its AI face beside its HTML face, then the skipped targets and any cut.
+
 ## Broken things first
 
-- Nothing is installed yet. `src/seon/render/walk.clj`, `seon.render.walk.edn` and `web.clj` are unchanged.
-  The walk below runs only as a scratch namespace (`scratch.task-graph-final`, loaded into default pid 79957
-  from an ignored `tmp/` file). It is not committed, contracted or armed.
-- The level step uses Datalog through `seon.db/q`, not index seeks. The research's 20–40× faster seeks need a
-  batch `seon.db` entrance, and `db.clj` is outside this grant. The measured cost is below.
-- A task root at N=3 reaches 1,593–2,177 nodes. Through `render-call`, at the research's ~5 ms per node and face,
-  such a debug page would take 15–20 s. The agent debug page walks only from the agent. Root's agent has no task
-  link, so its N=3 graph is 134 nodes.
+1. **Over budget.** The change adds 206 source lines against the 100-line limit: `walk.clj` +171 and `web.clj` +35
+   (the 35-line page cap was met). Declarations add +27 lines and tests +121. Nothing is deleted, because S1 as
+   designed only adds. The walk is 7 contracted functions plus the interim table. The smaller alternative is to
+   drop the component join-through (about 20 lines) and the per-attribute cap (about 8 lines). Without the
+   join-through, functions lose their contract-schema edges. Without the cap, 42 turns flow uncapped.
+2. **The max-nodes node cut is effectively unreachable.** Query work is bounded by the same cap, as the `ns.clj:40-50`
+   precedent maps it (`:max-work`, `:max-results` and `:max-result-weight` = `max-nodes`). Level queries always
+   touch more datoms than they admit nodes, so the query refusal fires first. That refusal is reported as a cut named
+   `:seon.db/invalid-read`, carrying the refusal whole. Measured on task 300aca at N=3: `max-nodes` 10 refuses at
+   level 0, and `max-nodes` 30–400 refuses at level 1. There is no separate query-work cap in the caps. Adding one is
+   a config decision for the owner.
+3. **The agent HTML face fails on a pulled agent value.** It returns "The selected renderer did not return an
+   observation" after 417 ms. The page shows that failure through the error's own HTML face. This is an existing
+   renderer defect (design §0.3; the S3 work), not something this slice changed.
+4. **The page is slow on large graphs.** Root's page takes 0.49–0.70 s on the fresh store (12–15 nodes, 2 faces
+   each). A task-rooted walk at N=3 reaches 435–2,182 nodes, which through `render-call` would take many seconds.
+   The page walks from the agent only, and root has no task link yet.
+5. **Reloads removed wrappers.** I ran `require :reload` on `seon.render.walk` and `seon.render.web` in default
+   (pid 39484) to prove the page. The reload removed their instrumentation wrappers, so **root must re-arm or adopt**
+   these namespaces. HTTP serves the new page, because the handler dispatches through Vars.
+6. **Index seeks are not used.** The level step is Datalog through `seon.db/q`. The research's seek path needs a
+   batch entrance in `seon.db`, which is outside this grant.
+7. **Plans.** `datahike.query/explain` reports `SCAN eavt` with `?e`/`?a` bound, and the old-format heuristic
+   estimate. Measured per-level times of 1–16 ms show bound lookups. The index choice for the reverse family is
+   unverified.
 
-## REPL evidence (default pid 79957, max-tx 536886778, JVM mode, read-only, one sample each)
+## What landed
 
-**The presence reconciliation (§2.4 against the research §1b).** Every identity attribute that has an entity row
-declares `:seon.program/row-schema`, including `:seon.turn/id` → `:seon.turn/turn` and `:seon.message/id` →
-`:seon.message/message`. Presence through the identity's row schema therefore finds turns and messages: 42 turns and
-17 messages are nodes at N=1. Revision 4's "0 rendered holders" did not reproduce. Identity-less owned children take
-the reaching attribute's `:seon.db/component-schema`. Of 55 identity attributes, 9 lack a row schema, and none of
-those 9 are entity identities with a pair. The structure found 260 ref attributes, 137 components, and 23 owning
-schemas with an AI pair.
+- **`seon.render.walk/graph`** takes `{:seon.db/db :seon.render.walk/lookup :seon.sci.admit/caps
+  :seon.render/distance}` and returns `:seon.render.walk/graph`: nodes with level, owning schema and pulled value;
+  every edge between nodes; the definitions-first order; back-references; skipped counts by owning schema; and cuts.
+  A missing lookup returns `:seon.render.walk/no-such-entity-error`.
+  - **Edges:** every ref attribute is followed forward and reverse (reverse spelled `:ns/_attr`). The interim
+    value table (`interim-value-edges`, rows retired by the refs lane) is followed both ways. That table adds
+    `:seon.test/subject` to the design's list.
+  - **Presence:** a target is a node when its owning schema declares `:seon.render/ai`. The owning schema is the
+    identity attribute's `:seon.program/row-schema`, else the reaching attribute's `:seon.db/component-schema`. A
+    pair-less owned child (an arity) is joined through inside its owner's level.
+  - **Order:** a DFS postorder over definition edges only. Siblings sort by `:seon.turn/opened-tx`, then entity id.
+    Self-calls are ignored. An edge onto the current path is recorded as a back-reference, so a cycle renders once.
+  - **Cost:** the structure is derived once per projection through `schema/projection-cache-value`.
+- **Web.** `/agent/{id}/debug?n=` renders `graph-debug-html`. Every node face goes through `render/render-call`, the
+  one render path, with the floor as the only clipper. A failed render shows through its own HTML face.
+- **Schemas.** 23 declarations in `seon.render.walk.edn`: structure, edge(s), level result, node(s), order,
+  back-references, skipped, cut(s), graph and graph request. All 7 function contracts compile against the live
+  projection, and every measured graph validates against `:seon.render.walk/graph`.
 
-**Structure memo:** 152 ms on first derivation (it runs `schema.datahike/malli->datahike-schema-in` over every
-attribute), then 0.07 ms per hit via `schema/projection-cache-value`.
+## Evidence on the fresh store (pid 39484, max-tx 536870961, one sample each)
 
-**`graph` from `[:seon.agent/id "root"]`:**
-
-| N | nodes | levels (nodes per level) | edges | ms | MB |
+| root | N | nodes (per level) | edges | ms | MB |
 |---|---:|---|---:|---:|---:|
-| 0 | 1 | 1 | 0 | 5–54 | 4–105 |
-| 1 | 65 | 1 · 64 | 84 | 17–28 | 26–48 |
-| 2 | 134 | 1 · 64 · 69 | 468 | 43–70 | 103–106 |
-| 3 | 134 | 1 · 64 · 69 (level 3 adds no node with a pair) | 537 | 79–139 | 225–227 |
+| agent root | 0 | 1 | 0 | 4 | 2 |
+| agent root | 1 | 7 (1 · 6) | 10 | 16 | 27 |
+| agent root | 2 | 12 (1 · 6 · 5) | 40 | 13 | 31 |
+| agent root | 3 | 12 | 45 | 8–15 | 32–39 |
+| task 132fee0467c8 | 2 / 3 | 174 / 2,182 | 191 / 4,543 | 28 / 151 | 61 / 392 |
+| task 300aca1ad57c | 2 / 3 | 40 / 435 | 60 / 648 | 26 / 65 | 44 / 133 |
+| task cea47b015b23 | 2 / 3 | 323 / 1,593 | 335 / 3,763 | 39 / 127 | 87 / 354 |
 
-- Node kinds at N=2: 42 turns, 33 context captures, 30 attempts, 17 messages, 5 refer bindings, 2 notes, and one each
-  of agent, runtime, plan, namespace and function.
-- Skipped at N=3: 108 `:seon.cluster.eval/receipt`, 78 unowned (transaction entities), 4 error occurrences, 3
-  schedule tasks, 2 schedule fires, 2 maintenance requests, 2 shape rows, 1 argument row, 1 config agent.
+- **Order check.** For root, 132fee and cea47 at N=3, no definition edge points forward except recorded
+  back-references (0 violations). Turns fall in `opened-tx` order: 2 turns on root.
+- **Page.** `debug-response` at n=0/1/2/3 answers 200 in 491 / 555 / 608 / 637 ms, with 1 / 10 / 15 / 15 node rows
+  (the store grew between runs). Over HTTP, `?n=3` takes 703 ms, and the browser paints both columns and the N
+  selector.
+- **Pre-nuke store (1.0 M datoms).** Root at N=3 reached 134 nodes in 79–139 ms (225 MB); the per-level queries
+  took about 67 ms and `pull-many` 31 ms.
+- **Presence reconciliation.** Revision 4 §2.4 reported 0 rendered holders through the row-schema lookup; that is
+  stale. `:seon.turn/id` and `:seon.message/id` declare row schemas, so turns and messages are present.
 
-**Task roots:**
+## Root runs (lanes run no tests)
 
-| task | N=2 nodes / edges / ms / MB | N=3 nodes / edges / ms / MB | back-references at N=3 |
-|---|---|---|---:|
-| 132fee0467c8 | 171 / 188 / 52 / 88 | 2,177 / 4,536 / 158 / 416 | 0 |
-| 300aca1ad57c | 40 / 60 / 50 / 71 | 435 / 648 / 74 / 150 | 0 |
-| cea47b015b23 | 322 / 334 / 58 / 114 | 1,593 / 3,760 / 148 / 384 | 4 (call cycles) |
+```
+bin/test-check default --ns seon.render.walk-graph-test
+bin/test-check default --test seon.render.web-debug-test/the-graph-debug-page-shows-both-faces-in-graph-order-at-every-n
+bin/test-check default --ns seon.render.web-debug-test
+```
 
-**Cost split, root at N=3:**
+These need the reloaded namespaces adopted and armed first (item 5). The web case renders four pages, about 0.5 s
+each, against the five-second bound. If it runs over, the cost is `render-call` per face, not the walk.
 
-- per-level queries: forward refs 1.3 / 11.8 / 15.8 ms, reverse refs 1.2 / 11.7 / 10.9 ms, value edges 0.7–3.0 ms
-  each, for levels 0 / 1 / 2;
-- `pull-many '[*]` of the 134 nodes: 31.5 ms, 57 MB.
+## Changed paths and lines
 
-**Plans** (`datahike.query/explain`, level-1 frontier). Every family reports `SCAN eavt` with the pattern's
-`?e`/`?a` bound. The row estimate is the old-format heuristic (1,002,676), and the log confirms
-`estimate-heuristic-fallback`. Measured times of 1–16 ms per level show bound lookups, not store scans. The
-reverse family reports `SCAN eavt [?t ?a ?e]`, so its index choice is unverified.
+- `src/seon/render/walk.clj`: +171.
+- `src/seon/render/web.clj`: +35.
+- `resources/seon/schemas/seon.render.walk.edn`: +27.
+- `test/seon/render/walk_graph_test.clj`: +98 (new).
+- `test/seon/render/web_debug_test.clj`: +23.
 
-**Queries per level:**
+Net source is +206 with no deletions.
 
-- four families (forward refs, reverse refs, value forward, value reverse), plus one identity query for presence;
-- plus two families and one identity query when the level has pair-less owned children (arities), which are joined
-  through inside their owner's level;
-- one `pull-many` at the end.
+**Out of scope, for root to file:**
 
-## Remaining (resume after the fresh default)
+- the agent HTML face failure (item 3);
+- the query-work cap tied to `max-nodes` (item 2).
 
-1. Paste the scratch walk into `walk.clj`, and add the structure, edges, step, graph, graph-request and cut schemas
-   to `seon.render.walk.edn`.
-2. Build the `?n=0..3` agent debug page with both faces per node in graph order, plus the skipped and cut panels.
-3. Add the tests.
-4. Re-measure on the fresh store.
-
-The owner's correction (root, 22:03Z): renderers MAY read the stable database value they are handed. The walk still
-supplies each node's pulled value and the order.
-
-RESET NEEDED: no.
+RESET NEEDED: no. **Re-arm needed** for `seon.render.walk` and `seon.render.web`.

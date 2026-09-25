@@ -1088,3 +1088,26 @@
             (is (str/includes? (element-text opening) ":seon.issue/id"))
             (is (= issue-id (:seon.eval/origin (db/pull @connection [:seon.eval/origin] [:seon.cluster.eval/id "outline-e0"]))))))
         (is (nil? (db/pull @connection [:seon.issue/id] [:seon.issue/id issue-id])))))))
+
+(deftest the-graph-debug-page-shows-both-faces-in-graph-order-at-every-n
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "graph-debug")
+     (support/transacted! connection (agent/creation-tx {:seon.agent/id "root" :seon.cluster/name "graph-debug"
+                                                         :seon.ns/name 'my.agents.root}))
+     (let [service (#'web-test/service-request connection {})]
+       (doseq [n (range 4)]
+         (let [graph (walk/graph {:seon.db/db @connection :seon.render.walk/lookup [:seon.agent/id "root"]
+                                  :seon.render/distance n :seon.sci.admit/caps (:seon.sci.admit/caps service)})
+               page (#'web/graph-debug-html service "root" (str n))
+               rows (rest (filter #(and (vector? %) (= :tr (first %))) (tree-seq coll? seq page)))
+               response (#'web/debug-response service 'my.agents.root "root" {:query-string (str "n=" n) :headers {}})]
+           (is (seq (:seon.render.walk/graph-order graph)) (pr-str graph))
+           (is (= (count (:seon.render.walk/graph-order graph)) (count rows)) "one row per node")
+           (is (= (:seon.render.walk/graph-order graph)
+                  (mapv #(parse-long (second (re-find #" (\d+) · level" (element-text (second %))))) rows))
+               "rows follow the graph order")
+           (is (every? #(= 3 (count (filter (fn [cell] (and (vector? cell) (= :td (first cell)))) %))) rows)
+               "each node shows its AI face beside its HTML face")
+           (is (= 200 (:status response)))
+           (is (str/includes? (:body response) "seon-graph-nodes"))))))))
