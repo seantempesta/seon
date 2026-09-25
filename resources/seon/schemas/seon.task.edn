@@ -1,0 +1,22 @@
+#:seon.task
+{:id [:qualified-keyword {:seon.db/identity true :seon.program/row-schema :seon.task/task
+                          :description "The task's identifying aspect written literally: its component (`<owning-ns>.task`) plus its name. The same token appears in task EDN, :seon/tasks metadata and rendered context (spec 1.9, 3b.6)."}]
+ :intent [:string {:min 1}]
+ :must-read [:set {:description "Functions a task's worker reads first; bare qualified symbols in task EDN."} :seon.program/edge-symbol]
+ :evidence [:set {:description "Repository paths of evidence documents; linked, never parsed."} [:string {:min 1}]]
+ :tasks [:set {:min 1 :seon.db/index true :description "Task ids a definition's :seon/tasks names, as keyword values (never refs). On a deftest they are the tasks it proves; anywhere else the tasks it is subject to."} :qualified-keyword]
+ :entry [:map {:closed true :description "One authored entry of resources/seon/tasks/<owning-ns>.edn."}
+         [:seon.task/id :seon.task/id] [:seon.task/intent :seon.task/intent]
+         [:seon.task/must-read {:optional true} :seon.task/must-read]
+         [:seon.task/evidence {:optional true} :seon.task/evidence]]
+ :file [:vector :seon.task/entry]
+ :task [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+        [:seon.task/id :seon.task/id] [:seon.task/intent :seon.task/intent]
+        [:seon.task/must-read {:optional true} :seon.task/must-read]
+        [:seon.task/evidence {:optional true} :seon.task/evidence]]
+ :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
+           :not-a-set-of-ids :auto-resolved-id :unquoted-link :metadata-after-test-name
+           :invalid-entry :misplaced-id :duplicate-id :dangling-id]
+ :holder [:symbol {:description "The definition, namespace or task file stem whose annotation or entry was refused."}]
+ :refused-error [:map {:error/message "must name the rule broken, its holder and the offending value"}
+                 [:seon.task/refused :seon.task/refused] [:seon.task/holder :seon.task/holder] [:seon.error/offending :seon.schema/value]]}
