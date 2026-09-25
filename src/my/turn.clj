@@ -26,9 +26,16 @@
   [request]
   (run/wait (:my.turn/note request)))
 
+(defn render-namespace-ai
+  "Render the lifecycle namespace request."
+  {:seon.fn/internal? true
+   :malli/schema [:=> [:cat :my.turn/namespace-unit] :seon.render/ai]}
+  [request]
+  (run/render-namespace-ai request))
+
 (defn usage-form
   "Render the lifecycle usage request."
   {:seon.fn/internal? true
-   :malli/schema [:=> [:cat :my.turn/usage-unit] :seon.render/form]}
+   :malli/schema [:=> [:cat [:or :my.turn/namespace-unit :my.turn/usage-unit]] :seon.render/form]}
   [request]
   (run/usage-form request))

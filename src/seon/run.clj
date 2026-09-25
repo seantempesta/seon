@@ -11,6 +11,30 @@
 
 (schema.edn/load! {})
 
+(defn render-namespace-ai
+  "Present my.turn as the lifecycle protocol, in use order."
+  {:malli/schema [:=> [:cat :my.turn/namespace-unit] :seon.render/ai]}
+  [unit]
+  (let [database (:seon.db/db unit)
+        docs
+        (when database
+          (into
+           {}
+           (db/q '[:find ?sym ?doc
+                   :in $ [?sym ...]
+                   :where
+                   [?function :seon.fn/sym ?sym]
+                   [?function :seon.fn/doc ?doc]]
+                 database
+                 '[my.turn/complete my.turn/wait])))]
+    (str (:seon.ns/doc unit)
+         "\n\n1. complete — "
+         (or (get docs 'my.turn/complete)
+             "Finish completed work with a reply for its requester.")
+         "\n\n2. wait — "
+         (or (get docs 'my.turn/wait)
+             "Finish paused work with the condition needed to continue."))))
+
 (defn walkthrough
   "The executable lifecycle walkthrough used by the opening episode."
   {:malli/schema [:=> [:cat] :seon.repl/entries]}
@@ -59,11 +83,12 @@
   "Render my.turn's listing followed by its canonical usage walkthrough.
 
   The usage declaration is the executable teaching source. Rendering the
-  usage test refuses loudly when the indexed usage test is absent, so the
+  namespace refuses loudly when the indexed usage test is absent, so the
   generated opening cannot silently retain a hand-copied demonstration after
   its recurring anti-rot gate disappears."
   {:malli/schema
-   [:=> [:cat :my.turn/usage-unit] :seon.render/form]}
+   [:=> [:cat [:or :my.turn/namespace-unit :my.turn/usage-unit]]
+    :seon.render/form]}
   [unit]
   (let [database (:seon.db/db unit)
         usage-test
