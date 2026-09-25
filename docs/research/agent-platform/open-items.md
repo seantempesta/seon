@@ -1,193 +1,139 @@
 ---
 type: living-list
 status: current
-updated: 2026-09-25
+updated: 2026-09-26
 ---
 
 # Open items (living list — root rewrites it in place; ledger of file owners: tmp/orchestrator/file-ownership.md)
 
-## Now (rewritten in place 2026-09-25 ~17:40Z; ledger: tmp/orchestrator/file-ownership.md)
+## Now (current state — rewritten in place 2026-09-26 ~02:00Z; never append; ledger: tmp/orchestrator/file-ownership.md)
 
-### Resume here — read, don't assume
-1. Read `AGENTS.md` end to end: today's laws are "The one REPL path", the per-face render order, "an error is an ordinary
-   value", "Bound a code change by what it lets us cut" (design docs may grow when revised in place), and "Opus writes
-   first-pass designs and implements; Astra reviews every design and diff and audits".
-2. Read the living spec `docs/research/agent-platform/language-requirements-2026-09-24.md` end to end.
-3. Read this section, the ACTIVE rows of the ledger, and the landing note of every running lane before touching its files.
-4. **Before designing or assigning anything, find the existing owner** (owner: "The agent didn't know there was already a
-   parser so they wrote another one"). `rg` the concept; check `reference-code/` (the clj-kondo fork is the ONE parser;
-   malli, clerk, fipp, puget, orchard, nrepl are vendored); read `duplicate-paths-audit-2026-09-25.md` §11 (the only
-   deletion-credit ledger) and `query-render-building-block-2026-09-25.md` (11 prior query+render generations). Never
-   write a second parser, renderer, registry, runner or retry.
-5. Verify at the REPL (MCP `runtime_status`, `eval_clj` jvm with `(seon.cluster.boot/connection "default")`) before
-   trusting any doc claim; probes finite, never on new code in default (PROBE SAFETY in the lane preamble).
+### Resume here — read everything, don't tail
+1. Read `AGENTS.md` end to end. Laws added 2026-09-25 that shape everything below: the one REPL path is a composition of
+   stages (read → evaluate → record → print; other readers/evaluators plug in as values, never a parallel pipeline); the Seon
+   agent is the perspective (MCP, tests, web are views into its world); core is composable (shared db values, a shared SCI
+   base each agent forks into its private universe, one Flow graph per agent); errors are ordinary values; render selection
+   order (value key → viewing agent's ns fn → schema pair → floor) with contract-declared inputs supplied as defaults;
+   bound code by what it deletes; REPL-first on real data; Opus designs and implements, Astra reviews and audits.
+2. Read this whole section, the ACTIVE ledger rows, and the landing note of every lane before touching its files.
+3. Find the existing owner before designing: `rg` the concept, `reference-code/` (clj-kondo fork = the ONE analyzer;
+   edamame = SCI's reader; malli, fipp, datahike, core.async, sci vendored), the duplicate-paths audit §11, the
+   library-replacement audit, the lost-errors audit. Never write a second parser, renderer, registry, runner, walker or cache.
+4. Verify at the REPL before trusting a doc (MCP `runtime_status`; `eval_clj` jvm with `(seon.cluster.boot/connection "default")`).
 
-### The goal (big picture)
-Seon agents — ours included — code through ONE REPL path (read → eval → record → print; MCP and the test harness are
-entrants, printing only at the edge; everything before it is a Malli-typed value, fact or blob). The language (code
-metadata + task EDN + schemas) co-locates every fact where grep finds it and indexes it once for REPL agents; every id is a
-handle followable by grep and by one REPL call. Docs, plans and issues move into the codebase as tasks. Six ingredients,
-made capable and reused everywhere: value+schema, fact store, function, evaluation, render, flow.
+### Standing rulings (owner, 2026-09-25 — folded here, not a log)
+- **Pillars, not parallel solutions:** every slice rgs for duplicates and deletes them in the same slice, listing deleted
+  paths with line counts and net lines; ≥2 deletion/migration lanes run at all times; lean on libraries for the tricky
+  parts — our code is the data transformation between their seams; hunt whole functions a library call replaces.
+- **Context = a composed graph render of the agent entity.** The agent names its task by a task handle
+  (`:seon.agent/task`); anything attached by reference renders. One walker (set-at-a-time index joins per level, bounded by
+  N, default 3, caller-overridable) → each node through its own schema render pair (presence of a pair decides inclusion; no
+  mode keywords) → one composer (topological: definitions before uses; turns by tx; each node once, later refs back-point;
+  renders cached by content digest + face). Renderers MAY read the stable db value they are handed. Root gets a standing
+  root task. `:seon.render/units` is to be deleted (the walk replaces it). The debug page shows it: `/agent/{id}/debug?n=0..3`.
+- **Store references, never copies:** errors/facts carry a db value as commit id/basis, an SCI ctx as agent/branch identity,
+  a request as its evaluation/turn ref, a large value as one blob digest. Opaque world objects are typed identities at the
+  admission edge, never walked.
+- **References are decided at the one producer** (`var-row` and siblings from clj-kondo analysis). Program references become
+  validated refs with named schema keys where the design proves it (`references-as-refs-design`); `:seon.db/reference-to`
+  names targets; docstring links come from a markdown library's parse tree (no regex); error members stay symbol values;
+  `:seon.render/face` is a declared fact. Every top-level def is a declaration (P2-A).
+- **Faults:** core faults deliver to root by default AND surface as errors in the cluster's MCP replies.
+- **Tests:** slow = poorly designed. A test member's world is a branch of a prepared commit (ms), never a file store, full
+  canonical population, whole-program rebuild or nested full run. One way to write a test for us and for agents (deftest via
+  the REPL path or a file, run by the one `seon.test/run`), one setup/fixture system callable from SCI and files alike — no
+  duplicate harness. Runs report new/fixed/still-red from stored evidence and run only against committed program states.
+- **Paid calls:** default stays no-provider; a stray cheap call is not an emergency (fix silent fallbacks as correctness).
+- **Process owner:** a timeout freezes the descendant tree (SIGSTOP walk to a fixpoint) then kills it; survivors named by (pid, start-instant).
+- Standing: no PRs; push personal forks (sci, clj-kondo, datahike); root parks dirty lane edits itself; nuke/reset freely (db data is disposable).
 
-### The organizing principle (owner 2026-09-25): one happy path is the unified environment and harness
-"It should be our unified env / harness whatever not just a single slice. Keep pushing on making this one happy path the
-main view for everything in the system." Every entrant runs through read → eval → record → print on its branch, and every
-workstream is judged by whether it moves an entrant onto that path or deletes a parallel one. Entrants and their state:
+### Definition of done
+A component is DONE only when REPL-proven on real data, green on published default, Astra diff-reviewed, measured, and its
+duplicates deleted. Unverified commits are debt. Two lessons from 2026-09-25: a scratch-namespace REPL copy runs UNARMED (validate
+real values against the declared contract before committing); a new attribute must install before its first write on an
+EXISTING store (prove adoption on a branch of the live store, never only on a fresh one).
 
-| Entrant | Today | Converges by |
-|---|---|---|
-| Agent turns (turn drive) | on `seon.sci.eval/evaluate`, records via turn settlement | M1 S1 (one definition authority) |
-| MCP SCI mode | evaluates but records nothing (no program or evaluation rows) | M1 S2: submit as an owned agent |
-| MCP JVM mode | separate read/eval, unrecorded | S2 multi-form reader; recorded as root's (ruled 8.6) |
-| Test harness | own runner/recording; bodies partly outside the recorder | tests record through `turn/evaluation-facts` (design §2) |
-| Operator prepl (`bin/seon`) | separate request path | entrant on the same path (unassigned) |
-| Web runtime-eval | invalidation channel, not an evaluator (audit §1.7) | render consumer only |
-| Rendering (MCP + browser) | many printers and windows | one pipeline: selection → floor → two faces |
-| Program change | files edited by shell; publication batched | REPL `defn`/`ns-unmap!` on a branch → merge → write-back |
-| Tasks, errors, config | partly Markdown/EDN, several writers | data on the path: one writer each, reverse lookups |
+### Platform state (2026-09-26 ~02:00Z)
+- Default: pid 39484, fresh store since the 22:05Z nuke (old store 124 GB, ≥8.76 GB of world copies), ready 33 s from zero,
+  no-provider true, adopted at 6ab70139 (+ later commits pending adoption). Store 3.5 GB — watch it.
+- Boot from zero works again after two fixes (dependency cache refilled from the shell; call reach on a store without
+  functions 58e341cf3); the in-boot refill is in flight (fix-boot-dependency-analysis).
+- Adoption blockers met today, each fixed: `[:= {}]` read as properties (db51da2e7); reload refuses a retargeted alias (root
+  ns-unaliased; issue filed); deleted paths in `--changed` (pass existing paths only); schema retirement against old row
+  schemas (A/B two-step); attribute written before its schema (config re-land installs first).
+- Hook publication loads edited files into default mid-edit; runs overlapping it produce false reds — the harness design removes this.
 
-### Owner authorizations for this push (2026-09-25, owner away)
-- Root approves slices over the line bound itself; when possible, schedule identification of obsolete code/docs to delete.
-- Task migration: slice 2 (3 records), then batches of hand-checked tasks, each Astra-reviewed.
-- Floor printer: Opus revises the design per Astra `6e9deea71`, Astra re-reviews, Opus implements if it passes.
-- Derived contracts: S0 (shape codec on `[:map :k]`), S2 (arm from projection contracts), F1 (clj-kondo fork exports
-  per-arity return tags; push to seantempesta/clj-kondo). S3+ waits for the sweep's measured deletions.
-- Standing: no paid agent calls (default runs no-provider via `config/development.edn`); root parks dirty lane edits as
-  patches itself for publishes and restarts (never waits); no PRs; push personal forks.
-
-### Definition of done (owner 2026-09-25: "one step at a time… refined components we can keep building with")
-- **Root rulings 01:45Z (owner delegated "do everything you think you should"):** process race = freeze (SIGSTOP walk to fixpoint) then kill; references-as-refs Q1 `:seon.db/reference-to`, Q2 docstring links via a markdown library parse tree (no regex), Q3 error members stay symbol values, Q4 `:seon.render/face` declared fact; one-pipeline Q3 = (c).
-- **Owner 01:10Z: "slow means poorly designed since we know we can spin up envs and execute them faster."** Test cost is a design defect: a member's world must be a branch of a prepared commit (ms), never a file store, full canonical population, whole-program rebuild or nested full run. Harness redesign launched (design-fast-harness-opus → Astra).
-- **Store nuked 22:05Z (owner):** old store 124 GB, ≥8.76 GB world copies (projection 6.44 GB, printed SCI ctx 2.32 GB). Boot from zero was broken twice: nuke deleted the kondo dependency cache with no in-boot refill (issue filed; root refilled from the shell, 41 s) and call reach read `:seon.fn/sym` on a store without it (fixed 58e341cf3). Fresh default pid 39484, ready 33 s, no-provider true, store 3.5 GB. Shape mirror → Malli re-landed as A e7b9e8791 + B e6066f091 (no migration on the fresh store).
-- **Owner rulings 23:00Z:** (1) renderers MAY read the database — they are handed a stable db value (contract-declared input, supplied as a default); root's "renderers make no database reads" was wrong and is withdrawn. (2) Errors and facts REFERENCE the world, never copy it: db value → commit id/basis, SCI ctx → agent/branch identity, request → evaluation/turn ref, stored values → blob digest. (3) Default went down twice today on unadoptable commits (schema retirement 0bd3a38b4; config attribute written before its schema 54c550e4c) — both reverted (e00a3ccda, 81f9b1b3e) and re-landing with adoption proven on a branch of the live store first.
-- **Owner direction 21:25Z — context is a composed graph render:** the agent's context is the rendering of the agent entity; anything attached by reference appears. One walker (declared query, bounded) → per-node pure render pairs → one composer; reference-following rules (:content/:address/:skip) declared on attribute schemas; topological order (definitions before uses; turns by tx); each node rendered once (later refs = addresses); node renders cached by content digest + face. This is the query+render building block; task-context design round 3 revises to it.
-- **Owner rulings 20:50Z:** core faults deliver to root by default AND surface as errors on the cluster's MCP interactions, so agents see them; C4 shape mirror replaced by Malli (option B); R7 = fix the one reader's errors first, then delete the bridge reader; task context = simplest: the agent names its task, and the agent's context is a render function over agent → task → N hops.
-- **Owner law 20:10Z (AGENTS.md ba41af0c0):** the Seon agent is the perspective; MCP, tests and web are views into its world (no second model/evaluator/printer/store). Plus: find whole functions a library call replaces (Astra library-replacement audit running); keep ≥2 deletion/migration lanes running (bridge R7/R3/R6, closure walkers, C4 shape mirror).
-- **Verified on default 6ab6cd5e (20:05Z):** entry-gate 66/0, restoration 18/0, reader 292/0, reply 124/0, agent-custody 9/0, merge 16/0, source 23/0, one-request 12/0. New reds routed: registry 12 errors (custody lane), render.ns 52 fails + subprocess 4 (deletion lane), read-evidence 4 (db cost lane). Pre-existing: db-test ~30, effect 2–3. Start 50.9 s / adoption 32 s (boot lane).
-- **Owner rulings 19:45Z:** audit fixes = design per owner seam → Astra review → file-disjoint implementation lanes that delete their class's per-site copies; boot to ≤10 s now (profiling lane); db witness change accepted AND read-evidence refresh must draw from the task-focused context view (spec §5a), not the namespace — install task-focused context as THE generator first (design → review); test worlds inject values (dependency analysis into analyze-forms; the runner's recording writer) instead of redefinitions.
-- **Every slice collapses duplicates (owner 2026-09-25, "focus on the pillars… not writing parallel solutions").** Before designing, rg for every other place computing the same thing and check the duplicate-paths audit §11; route callers through the one owner and delete the copies in the same slice; the landing names each deleted path with line counts and net lines. Today's slices all grew net (S1 +257/−106, hold +72/−31, custody +32/−14, tff +89/−65) — that stops. Each lane launch carries this rule; every Astra review checks it.
-A component is DONE only when it is REPL-proven on real data, green on published default, Astra diff-reviewed and
-measured. No new implementation starts on top of anything that is not done; in-flight work narrows to what completes the
-current component. Unverified commits are debt, not progress.
-
-### Critical path, in order
-1. **DONE 18:05Z:** the task-gate block is fixed (`f06358c74`..`153c9b584`): publication reconciles every task file, and
-   adoption carries tasks into clusters as data. Default runs `6ab6ae2a`; `seon.issue.task-ingestion-test` 7/0.
-2. **Verify:** read `tmp/orchestrator/verify-6ab6a945-results.txt` (50 focused commands, run b7sqnn06h); then run the
-   queued lists in `tmp/orchestrator/verification-queue-2026-09-24.md` newest sections (render hand-off, turn, test rows,
-   digest). **`seon.cluster.turn-test` first after publishing:** every turn opened `:error` before any model call until
-   `3d0e68452` restored the database in the render argument (unpublished when written).
-3. **Tasks:** run ingestion's tests (`seon.issue.task-ingestion-test`, `seon.fn-test`, `seon.issue-test`,
-   `seon.cluster.source-test`) → slice 2 per `language-requirements-review-2026-09-25.md` "The first three slices" →
-   slice 3 (`(task h)` and a function's open tasks) → batches from `tmp/task-inventory/draft-tasks.edn` (first batch of
-   10 in `task-migration-inventory-2026-09-25.md`). Unwired: dangling check on program MERGE (`accept-merge!`).
-4. **Floor:** re-review `98c563b34` says implement after fixes, naming the first sub-slice; start it after the current run is green.
-4b. **Docs become queryable data** (owner 2026-09-25: "getting all the documentation integrated with the code and parsing it
-   and having it all be queryable will make it more useful"), after task slices 2–3 are done: docstrings parsed by the one
-   Markdown owner, their `[[wikilinks]]`/symbols/keywords as typed edges (one-REPL design C4); help derived from tool
-   namespace docstrings (C3); long docs indexed by heading and links so a definition shows the design sections that govern
-   it, and a doc citing a gone definition surfaces as stale (obsolete-doc identification rides here).
-5. **Derived contracts:** S0 landed (`eb7e64ffa`); S2 and F1 wait for green. S2 needs a rule for the 43 metadata-only armed
-   Vars, which item 5b resolves by making `script/` program.
-5b. **Index `script/` as program, after cleanup** (owner: "you can index more directories … consider refactoring, merging";
-   audit `script-dev-roots-audit-2026-09-25.md` `6fc7cde58`): (i) delete the changed-test/cache-helper family (663) and
-   `schema_split.clj` (141); (ii) move `dev-cache`, `seon.operator.runtime`, `seon.operator.prepl` and harness-costs into
-   `src/`; (iii) add `script/` as a program root (bb-loadable code stays bb-loadable); the MCP reader and render cuts (145)
-   ride with S2. This unblocks the MCP task migration and arming the 43 Vars.
-6. **The system REPL is the main input (owner 2026-09-25): keep improving it.** One-REPL milestone M0 → M1 (option B) → D1 per `one-repl-language-2026-09-25.md` (`42308d868`); write-back is
-   constrained by 7.17 (one-file-one-owner; honest guarantee).
-7. **Then** the function face (`52e252f74`; Astra `49b1122d4` implement after fixes) and the query+render block
-   (`2ae3e003c`; Astra `ae7cfa793` implement after fixes), both on the floor's one pipeline.
-
-### Running lanes (18:55Z) — read each landing note before touching its files
-fix-turn-hang-opus round 4 (batched-turn hang: settle! parked on the writer while a hot `declared-sources` neighborhood render
-runs; local-provider turn 6.05 s > 5 s; dumps `tmp/turn-hang-1243/`). Idle, results routed: impl-repl-m1-opus (S1 done
-pending eval-test triage), fix-ingestion-p1s-opus (custody class `c1e40b7e8`), fix-test-failure-facts-opus (`72578e81a`).
-Root run `tmp/orchestrator/verify-1852.out` (merge, source, test-failure-facts, eval, evaluate-sources) on 6ab6c29c.
-REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate, store, pull back — before implementing.
-
-### Component status (definition of done: REPL-proven, green on default, Astra-reviewed, measured)
+### Component status
 | Component | State |
 |---|---|
-| Task ingestion + gate + adoption | ingestion-test green 67/0 on 6ab6bf57; merge gate custody class fixed `c1e40b7e8` (prepare, gate test run, acquisition refusals under the acquired branch's custody); green on 6ab6c29c: merge-test 16/0 (35 s, long tier), source-test 21/0 (3 platform-only members await root's platform tier); Astra review running (review-custody-ingestion) |
-| Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
-| Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
-| REPL S1 (definition authority) | P0-A..D + P1-A..C landed (`bbbdbd5bd` `51dda24e9` `a9c74ad46` `6dfe778e4`); green on default: entry-gate 66/0, restoration 16/0, reader 292/0, reply 124/0; armed cost P1-D: contracted defn 16.3 ms (parent 22.4), `(+ 1 2)` 1.5 ms; eval-test 4 reds new vs pre-S1 (1 was root's helper, fixed `8e731ac68`) — none S1-caused (red at 08:34, before S1); Astra re-review REVISE `e19adf392` (3 P0 + 3 P1: provenance on root writes, unbound-Var restoration, restoration captured before mutation, restoration error delivered, metadata CoW vs newer Var, nested reader positions) — lane revising |
-| Test harness hold | overdue member's late exit records the exit only (`1197a35ac`); regressions green 12/0 + 3/0 |
-| Turns | local-provider turn settles (5/0) but 6.05 s > 5 s bound; batched turn hangs (lane round 4) |
+| REPL S1 (one definition authority) | green: entry-gate 77/0, restoration 24/0, reader 331/0, reply 124/0; Astra revision accepted after S1 revise-2 |
+| Custody class + merge gate | green: merge 16/0, source 23/0, agent-custody 15/0, one-request 89/0; Astra ACCEPT-AFTER-FIXES folded |
+| World-reference admission (22.8 GB → 2.36 ms/1.09 MB) | green: sci.admit 80/0, error-result long 11/0; error-test's 4 reds pre-existing |
+| Shape mirror → Malli (−784 src, −611 test) | call-preparation 130/0; fn/program/schema/instrument reds classified pre-existing or environmental |
+| Candidate/parent isolation | proven: two forks of one base keep their own roots (8/0), parent untouched (6/0); fork 4–8 ms |
+| Graph walk + debug page (S1, T0 −650) | walk-graph 17/0, debug-page test 24/0; page readable (screenshots tmp/impl-debug-page-ui/) |
+| Status one face (R4 −88) / turn result fact (R5) | boot status 5/0, drive 11/0; mcp-test/turn-test/program-test reds with the deletion lane |
+| Read-sink / read evidence | read-evidence 47/0, form-scoped sink green; `(inc 1)` records 0 reads |
+| Config sparse apply (installs attribute first) | re-landed 278b22317; config 219/2 (2 pre-existing), no-provider 21/1 (turn-owner red) |
+| Seams S-scripts / S-process | shell.jvm 18/0, subprocess 16/0, dependency-cache 10/0 (after reloading the digest ns) |
+| Turns | local-provider turn 5/0 in bound; batched turn 3 fails (deletion lane); episode-limit loud fault green |
+| Concurrency | long suites not yet run; concurrency-test "Agent creation refused" unassigned |
 
-### Queued slices (root-ruled, waiting on a held file)
-- R5 grader half: settlement writes optional `:seon.turn/result` beside the disposition; `drive/read-result` (13) goes — needs turn.clj after fix-turn-hang round 6.
-- R4 status: one render pair for the runtime observation; `bin/seon status` and MCP print through it; −88/+40 — needs script/seon/operator.clj, after delete-mcp-bridge R7.
-- fn/reaches? → `db/call-reach` (−16) and runner.clj:839-849 closure → `db/call-reach` — fn.clj after impl-shape-mirror-malli; runner.clj free.
-- Library audit D6 (instrument.clj), D7 fn half — after impl-shape-mirror-malli.
-- Agent HTML face refuses "did not return an observation" after 417 ms on the fresh store (task-graph S1 landing item 11); renderer owner.
-- Graph walk: the node-count cut never fires because query work is capped by the same `max-nodes` (S1 landing item 10) — separate query-work cap is a config decision (owner).
-- Task-graph S1 4f18ab5db over budget (+206/0): accepted on condition that T0 (retire neighborhood + declared-sources walks onto `graph`) lands next.
-- registry-test runs out of time (62.6 s for 11 members; two stay pending): each member builds a file store and writes every canonical attribute (~2 s). Shrink assignment: one populated store per namespace, members branch from it (custody lane, 87cd929d7 landing).
-- `seon.test/resolve-test` (test.clj:1462) uses plain `requiring-resolve`, so a test namespace registered as loaded but absent from the JVM cannot run ("no executable test Var"); route through `seon.sci.eval/host-namespace!` (eval.clj:1925), which already reloads (UI lane).
-- web-debug-test foreign reds (UI landing): `repl/render-ai` returns the raw evaluation map (render dispatch; d315faa6f had fixed it); fault card renders nil kicker/message (error pair); fixture writes refused (`unowned-entity`; issue "only the creator may remove tests"); `turn-details` 34 s + ledger bytes mismatch + `error/recording` missing declared-schema.
-- accretion `source-harvest-keeps-refusal-render-contracts-coherent` 10.7–17.5 s vs 5 s: rebuilds the whole program's rows per run (cost owner).
-- Process owner race (S-process landing): a descendant forked during termination escapes and the refusal reads `reaped? true` — OWNER DECISION: kill -STOP freeze / process groups / declared outside the guarantee.
-- Publication gap: `script/` namespaces loaded by path (`dev_cache.clj:220-221` loads `script/seon/dev/dependency_digest.clj` only when absent) are never reloaded by adoption, so committed script changes never reach the running JVM (S-scripts landing). Fold into the `script/` indexing/move-into-src plan.
-- accretion `a-gate-test-runs-with-its-authors-cluster-custody` 6.3 s vs 5 s (newly measurable; candidate evaluation + gate test, unprofiled).
-- seon.test-test reds (UI landing fc410f18f): `admission-refuses-stale-program…` fixture writes a bare doc onto a stored row (use `support/revision`); `recording-distinguishes-run-replay…` `with-redefs` on `db/pull` (banned; inject the refused read as a value); `recording-preserves-admission-and-refuses-a-deleted-definition`: `runner/record-tx` inside `:db.fn/call` throws and `db/transact!` rethrows as outcome-unknown where the test expects a returned refusal — runner/db contract question.
-- Datahike parity baseline (`test/seon/schema/datahike_parity.edn`) is weeks stale (516 forms differ, ~53 extra / 32 missing attributes): regenerate inside a test world with a per-attribute explanation, as its own assignment — never as a side effect of another lane.
-- `seon.ai/complete` ignores `:seon.ai/no-provider` (issue provider-completion-ignores-the-no-provider-request-attribute.md; ai.clj owner).
-- Concurrency: long-tier suites (independence 137 s pool, streams, publication-concurrency) run with --include-long at a quiet window; concurrency-test "Agent creation refused" error unassigned.
+### Running lanes (read their landing notes)
+| Lane | Doing | Files |
+|---|---|---|
+| design-fast-harness-opus | harness redesign (prepared worlds, one fixture system for us and agents, baseline diff, clean runs) | design doc only |
+| design-one-reader-opus | implementing one-reader option A S1–S3 (Astra accepted after fixes) | reader.cljc, eval.clj one-event |
+| design-one-pipeline-opus | implementing P5 (branch refusals) + S5 (one-file write-back: agent defn → merge → write-back → reindex) | registry, source, mcp.clj, tests |
+| design-lost-error-seams-opus | implementing P0 then ordered cuts (Astra accepted after fixes) | instrument, sci/kernel, fault, ai, background |
+| design-references-as-refs-opus | folding rulings Q1–Q4, then Astra re-review, then implement | design doc |
+| impl-render-pairs-opus | graph-node pairs: task, schema, function, ns, agent, runtime, turn | pair files named in its landing |
+| impl-index-point-free-defs-opus | P2-A: every top-level def a declaration (uses kondo's defined-by) | fn.clj classification |
+| fix-boot-dependency-analysis-opus | boot fills a missing dependency analysis | operator nuke/start, analyzer, boot |
+| impl-seams-s-process-opus | process race: freeze then kill | process.clj |
+| delete-duplicates-opus | classifying R4/R5 reds (mcp-test 9f, turn-test 21f, program-test 10f, batched turn 3f) | its R4/R5 files |
 
 ### Designs (authorities; each revised in place)
-| Design | Latest | Review verdict |
-|---|---|---|
-| Living spec | `language-requirements-2026-09-24.md` (task ids = `seon.id/id` over ordered `[ns name kind]`; one `:seon/tasks` key; 1.15 staged schemas) | reviewed `4aedb01b2`, shaken `6cfb6a789`, integrated |
-| One REPL path | `one-repl-language-2026-09-25.md` `42308d868` | proceed after fixes (re-review) |
-| Render selection §1–§2 | `one-render-path-design-2026-09-25.md` (value key → viewing agent's ns fn → schema pair → floor; contract inputs are defaults, caller wins) | installed; nested ladder open |
-| Floor §3 | same file, shell order `0b83d61a5` | redesign before implementation `6e9deea71` — revising |
-| Query+render block | `query-render-building-block-2026-09-25.md` `2ae3e003c` | implement after fixes |
-| Function face | `function-face-and-canonical-authoring-2026-09-25.md` `52e252f74` | implement after fixes |
-| Derived contracts | `derived-contracts-2026-09-25.md` `d88ce949f` (call-graph return inference) | implement after fixes `511b948c6` |
-| Parser proof | `parser-proves-the-spec-2026-09-25.md` `76d5f06b3` | links exist in kondo analysis; producers dropped them |
-| Duplicate paths | `duplicate-paths-audit-2026-09-25.md` `7c577876d` | 3,062 measured retirement candidates |
+| Design | Verdict |
+|---|---|
+| `task-context-install-design-2026-09-25.md` (graph render; slices S1 done, T0 done, B/C next) | Astra ACCEPT-AFTER-FIXES; B (neighborhood onto `graph`) needs review before it changes live openings |
+| `render-graph-research-2026-09-25.md` | measured: 0.8 ms seek walk, 97% cache hits, one SCI fork safe for parallel render (4.7×) |
+| `references-as-refs-design-2026-09-25.md` | REVISE → round 2 folded; re-review next |
+| `one-repl-language-2026-09-25.md` rev 5 (one composable pipeline) | ACCEPT-AFTER-FIXES; implementing |
+| `one-reader-collapse-2026-09-25.md` | ACCEPT-AFTER-FIXES; implementing option A |
+| `lost-error-seams-design-2026-09-25.md` (audit: 106 instances, 7 classes) | ACCEPT-AFTER-FIXES; implementing |
+| `fast-harness-design-2026-09-25.md` | in design |
+| `library-replacement-audit-2026-09-25.md` | 12 candidates, 2 landed (−20); rest MED/HIGH or held files |
+| `language-requirements-2026-09-24.md` (living spec, 125 rows: 31 met, 20 proposed, 15 open) | the parser already sees every link (parser-proves-the-spec); producers must emit them |
+| floor §3, function face, query+render block, derived contracts | older; floor/face/block now converge on the graph render — re-read before starting |
 
-### Open defects, not yet assigned (assign when files free)
-- `:my.edit/error` and `my.fs` error schemas require attributes their handlers never produce (make them the handler's union).
-- ~50 `ai/complete` redefs in `test/seon/cluster/turn_test.clj` → the injected local provider seam (`146b8a5fb` pattern).
-- `seon.fn/analyzed-form` merges digested attributes after the digest; `var-row` is a second digest producer.
-- Call preparation cannot see optional inputs inside `:seon.render/unit` (patch in `lane-fix-render-handoff` landing).
-- `:int`→`:string` schema change throws ClassCastException in `seon.db/transact-call`; `seon.effect/request!` writes the
-  wrong branch inside a nested test run; SCI undeclared-attribute write returns no read error (`lane-fix-test-rows-e`).
-- QUESTION (data integrity): upserting a re-analyzed function row onto a stored declaration keeps the OLD `:seon.fn/doc`, `:seon.fn/calls`, `:seon.fn/arities`, `:seon.fn/form-span`, `:seon.fn/file` the new definition lacks (REPL 18:55Z on seon.id/valid?); the writer digests that merged value. Verify every production redefinition path retracts absent owned attributes; a stale call edge or doc is a false fact.
-- SLOW START: `bin/seon start` ready in 11.1 s at 18:50Z (pid 23282) against the ten-second start law; 4.8 s at 18:43Z — find what grew (dependency-classes cache miss both times).
-- SCI FORK: sci.core-test has 4 failures at e663d9e2 AND 409888f6 (pre-existing): `(meta (fn []))` returns `:sci.impl/root-data` (function-results-dont-have-metadata, core_test.cljc:1335-1336) and two error-location message mismatches (:559, :567). Likely from fcbd8862 (fact-safe root installation) — our fork leaks internal metadata onto fns. Evidence tmp/sci-core-409888f6.txt, tmp/sci-core-e663d9e2.txt.
-- PRODUCER (likely root of read-evidence cost): the read sink bound at `turn.clj:4753` wraps the whole install, so the platform's own reads count as a form's dependencies — `(quote 1)` carries 7,286 reads (fix-cost-db landing). Bound the sink to the form's evaluation only; the digest/scan fixes (901bcaa5b, d46bbae77) then shrink further.
-- COST: `schema.clj:853` `canonical-value-string` recurses through its armed wrapper (539,778 calls for one digest, ~120 ms/form).
-- DUPLICATE: the forward call-closure walk exists four times — `effect/capabilities` (now a pull-many walk, 1b9aafa96), `render.clj:783-803` render-program-evidence, `db.clj:1413-1427` builder-digest, `fn.clj:2288-2302` reaches? — collapse to one walker at its owner (fix-cost-capabilities landing).
-- UGLY: `(seon.fn.analyzer/analyze-dependencies!)` prints ~230 "already linted, skipping" stderr lines per call; report a count.
-- SLOW START again: 18.6 s ready at 19:17Z (pid 32831), after a dependency-analysis refresh; start law is 10 s.
-- PROBE SAFETY: default Vars are direct-linked (probe stack shows invokeStatic), so republishing a Var does NOT stop a running probe loop; an unbounded probe (capabilities over every function) grew default to 11.8 GB and needed a restart (19:17Z).
-- UGLY/UNBOUNDED: `bin/seon status` printed 1.1 MB after a restart, one full error map per never-started test in `:seon.problems/failed-tests-unknown` (18:43Z); problems must render through the one render path with counts, not raw maps.
-- PRE-S1 RED: evaluate-sources-test `ordered-evaluation-retains-one-explicit-basis-without-publication` :204 expects `:seon.turn/recorded-content-conflict` (red since 09-24, rerun-results-2026-09-25.txt:49); owner = turn settlement, unassigned.
-- HANG SOURCE: `seon.error/prepare-result` renders a contract error's offending value as full HTML with no bound (stuck deep in `seon.render.hiccup/hiccup?` on a huge value) — violates the one render path; it must go through the floor (lane-fix-turn-hang landing).
-- SECURITY-SHAPED: `shown-result` reads a key from the raw result before the floor classifies it (`sci/eval.clj:3274`), so a hostile `java.util.Map` runs its own code first (`RT.java:788`); the floor design moves the read after classification.
-- `render_coverage_test.clj:49`: forms threaded into `comp` make assertions vacuous (`0f5f849bd` class).
-- Census e BOUND/HANG/LOOP/BUDGET classes (`red-baseline-census-2026-09-25e.md` §3).
-- 2,768 of 4,867 loaded function rows carry no contract; three producers of `:seon.fn/spec`.
-- Operational: the clj-kondo dependency cache empties across restarts (refill `(seon.fn.analyzer/analyze-dependencies!)`);
-  MCP eval echoes every stderr line; adding reference-code submodules forces "JVM RESTART NEEDED"; `init --changed` runs a
-  full refresh; publication takes 25–47 s; the testing skill wrongly says `seon.test/run` does not arm contracts.
+### Queued (root-ruled; waiting on a held file or on the harness)
+- Render-dispatch reds in web-debug-test (`repl/render-ai` returns the raw evaluation map), fault card nil kicker/message,
+  fixture writes refused (`unowned-entity`, "only the creator may remove tests"), `turn-details` 34 s.
+- seon.test-test: two stale fixtures (bare doc upsert; `with-redefs` on `db/pull`) and the runner/db question: should
+  `transact!` return or throw a completion refusal raised inside `:db.fn/call`.
+- A terminal provider refusal closes two turns instead of one (turn settlement); evaluate-sources :204 recorded-content-conflict (turn settlement).
+- `fn/reaches?` and `runner.clj:839-849` onto `db/call-reach`; library audit D6/D7; the ~40 request-copying error producers (one scripted sweep).
+- registry-test per-member store (harness); accretion source-harvest 16 s and gate-test 6.3 s (harness/cost); datahike parity
+  baseline weeks stale (own assignment); `seon.ai/complete` ignores no-provider; script namespaces loaded by path never reload.
+- Costs still open: publication of one file runs `full-source-refresh!` (2.4–14 s; adoption 12–30 s); a trivial SCI eval
+  allocated ~0.5 GB (not reproduced on the fresh JVM: 2.3 MB); turn renderer 13 queries/turn; render-call recomputes reach per node;
+  `canonical-value-string` armed recursion; `analyze-dependencies!` prints ~230 stderr lines.
+- SCI fork: 4 pre-existing sci.core-test failures (root-data metadata leaks onto fns).
+- Correctness questions: upserting a re-analyzed row onto a stored one keeps stale owned attributes unless the replacement path
+  (`reconcile-tx`/`exact-replacement-tx`) is used — verify every production redefinition path.
 
-### Operating checklist (learned 2026-09-25)
-- Publication reads the working tree: park dirty lane files first (`tmp/orchestrator/parked/<name>-<file>.patch`, one per
-  file), publish, then tell each owner to `git apply` its own patch.
-- A dependency or fork bump (SCI, clj-kondo, datahike gitlinks) needs `(seon.fn.analyzer/analyze-dependencies!)` BEFORE
-  `bin/seon down && bin/seon start`, or startup refuses "clj-kondo holds no analysis of …".
-- An overdue test member blocks every later body until a JVM replacement: avoid running known-hanging tests (turn tests)
-  until their fix lands; restart with `down`/`start` (never reset) to clear it.
+### Operating checklist
+- Publish/adopt: `bin/seon init --dev default --changed <existing paths only>`; park dirty lane files first; after a fork or
+  dependency bump run `(seon.fn.analyzer/analyze-dependencies!)` (or the shell form) before restart.
+- Tests: root runs serially with `tmp/orchestrator/run-verify2.sh LIST OUT`; never in a publication window; `--include-long`
+  for long members (skipped long members show `passed? false`).
+- Probes: bounded loops only (default Vars are direct-linked; republishing never stops a running loop); scratch copies are unarmed.
 
 ### Where evidence lives
-Ledger `tmp/orchestrator/file-ownership.md` · run queue `tmp/orchestrator/verification-queue-2026-09-24.md` · runner
-`tmp/orchestrator/run-verify2.sh LIST OUT` (full outputs in `OUT.d/`) · landing notes `docs/prds/agent-platform/landing/` ·
-censuses `red-baseline-census-2026-09-25c/d/e.md` · lane preamble `tmp/orchestrator/fix-lane-preamble-2026-09-24.md`.
+Ledger `tmp/orchestrator/file-ownership.md` · verify outputs `tmp/orchestrator/verify-*.out(.d)` · red routing
+`tmp/orchestrator/red-routing-2330.md` · landing notes `docs/prds/agent-platform/landing/` · issues `docs/seon/issues/` ·
+lane preamble `tmp/orchestrator/fix-lane-preamble-2026-09-24.md` · parked patches `tmp/orchestrator/parked/`.
 
 ## New platform findings (2026-09-25)
 - Small publication 14.6 s: 9.4 s was relinting all 179 callers of zero-argument functions whose arity rows never compared
