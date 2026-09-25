@@ -8,6 +8,12 @@ updated: 2026-09-24
 
 ## Now (rewritten 2026-09-24 ~22:10Z; ledger: tmp/orchestrator/file-ownership.md)
 
+**OWNER RULING 2026-09-25: no budgets anywhere** — render functions render less data; the floor value printer
+(seon.render.value/floor) is the only clipper (AGENTS.md a6b8baaff; memory feedback_no_budgets_only_floor_printer_clips).
+Root added several clipping sites on 09-24/25 (status top-5/300-char, MCP top-10/300-char/bounded-face, problems prose via
+budget, test-world 400-char summaries, runner report-value text); audit-clipping-sites lists every site → CONVERT/DELETE
+lanes follow. MCP value-window lane redirected: no budget dial.
+
 **RESUME (2026-09-25 ~02:30Z).** Tests 2,154; 365 failed + 18 unknown (current, after a full rerun). Running, code only:
 fixture-agent-rows (73), fix-sci-zero-arg-and-names (23), fix-src-singles-db-schema, update-retired-test-shapes (52),
 fix-mcp-value-window-budget. When they land: checkpoint `bin/seon init --dev default` (never restart without one first), run
