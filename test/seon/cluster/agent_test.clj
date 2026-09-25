@@ -849,7 +849,7 @@
           (not [?run :seon.turn/closed-tx])]
         @connection agent-id))
 
-(deftest ^{:seon.test/long "Measured 7,431-8,373 ms on a HEAD snapshot (2026-09-22): arming 1,495 ms, the turn's prelude before prompt acquisition 5,400 ms (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md), the interrupted disarm itself 1,405 ms; the disarm now runs inside one nested fixture branch, whose acquisition is not yet measured here."
+(deftest ^{:seon.test/long "Measured 7,431-8,373 ms on a HEAD snapshot (2026-09-22): arming 1,495 ms, the turn's prelude before prompt acquisition 5,400 ms (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md), the interrupted disarm itself 1,405 ms; the disarm now runs inside one nested fixture branch: isolated acquisition 51-59 ms plus release 8-9 ms (three warm runs on default, 2026-09-25)."
            :seon.test/long-ms 12000}
   disarm-interrupts-an-in-flight-turn-and-records-it-interrupted
   ;; Interrupted execution never resumes: an orderly stop while the turn is

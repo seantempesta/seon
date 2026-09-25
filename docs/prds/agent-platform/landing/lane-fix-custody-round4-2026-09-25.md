@@ -1,7 +1,7 @@
 ---
 type: landing
 lane: fix-custody-round4-opus
-status: committed-unrun
+status: committed-unrun; C regression written, awaiting eval.clj
 date: 2026-09-25
 authority: docs/research/agent-platform/custody-and-ingestion-p1-review-2026-09-25.md (Astra de1075aa3) findings 1-3; takes over lane-fix-ingestion-p1s-2026-09-25.md round 4
 ---
@@ -27,11 +27,23 @@ the binding in `record-acquisition-refusals!`. Under the LOAD RULE no test reque
 - **Line budget.** Source adds are 87 raw, but only 59 ignoring whitespace; most of the
   difference is re-indenting the wrapped bodies. C still needs its regression, about 35 test
   lines. I stopped here, as the assignment's ~60-line rule asks.
-- **Finding 3 has no internal-defect regression.** The caller-mistake half is asserted: a
-  foreign recording connection returns the refusal and does not panic. The core-fault half has
-  no committed test. It needs a real refused completion write that the caller did not cause,
-  and I found no way to produce one without `with-redefs`. The candidate is a recording
-  schema that predates the admission attributes. Root's ruling is needed.
+- **Finding 3's core-fault half has no regression, and none exists without a test-only seam.**
+  Root ruled out Var redefinition. I probed for a real internal refusal the runner reaches
+  without the caller making a mistake:
+  - *Unlinking the recording branch mid-run.* Datahike refuses to delete a branch with an
+    open connection: `:branch-has-active-connection`, `datahike/versioning.cljc:311`,
+    datahike `4157916b`. Observed on default in a disposable isolated branch, which I then
+    released and retired; the roster is clean.
+  - *A completion value the writer refuses.* `commit-results!` writes through `record-tx`
+    (runner.clj:1586). Members are keyed by symbol, not by a ref to the test row, and
+    result strings are unbounded (`seon.test.edn:43`). So a concurrent change to the program
+    cannot make the completion refuse.
+  - *A released recording connection.* The writer refuses it as "not live" (db.clj:4814).
+    But the caller owns that connection, so releasing it is the caller's mistake. `fault!`
+    also cannot store into it, which makes it a panic in both modes, not a durable occurrence.
+
+  The caller-mistake half is asserted (source_test: a foreign recording connection returns
+  the refusal and does not panic). The core-fault route stays source-reviewed only.
 - **`record-interrupted!` in `run-batch`'s catch is unchanged.** Its refusal is still only
   suppressed onto the rethrown primary throwable. That throwable already reaches the caller
   loudly. Routing it through `fault!` under `:panic` would replace the primary failure.
@@ -39,10 +51,9 @@ the binding in `record-acquisition-refusals!`. Under the LOAD RULE no test reque
   virtual thread, after the branch release, having already been stored and delivered.
   Nothing joins that thread. The fault record is the visible evidence, and the cleanup
   failure is still recorded in a `finally`.
-- **Unmeasured bound.** `disarm-interrupts-an-in-flight-turn-and-records-it-interrupted` now
-  disarms inside one nested `with-database`, so its 12,000 ms bound (measured 7.4–8.4 s)
-  also covers one fixture-branch acquisition. The reason string says this. Root's run gives
-  the number.
+- **Bound measured.** The disarm test now disarms inside one nested `with-database`. That
+  isolated acquisition costs 51–59 ms plus 8–9 ms to release (three warm runs on default,
+  pid 32831). The number is next to the 12,000 ms bound.
 
 ## A. Finding 2 (commit 3c4952503)
 
@@ -145,19 +156,32 @@ No new union, no retry.
 3. **Environment.** `env/environment` over `{cluster-name, connection, caps}` gives
    `environment? true`. 3 ms.
 
-## C plan: waits for root's go
+## C, finding 1 agent half: regression written, uncommitted until eval.clj lands
 
-1. Delete the `acquired (db/call-with-custody {:seon.db/connection connection} …)` wrapper, so
-   the call is `(sci.eval/acquire! …)` directly.
-2. Add one regression in `test/seon/cluster/agent_custody_test.clj`:
-   - write an un-installable host-bound override (`seon.env/->Environment`, as in
-     `branch_execution_test.clj:126`) on an isolated child branch;
-   - acquire that branch through `agent/acquire-context!` under the parent member's custody;
-   - separately, invoke a lazily installed function under the parent's custody
-     (kernel.clj:606 path);
-   - for each path, read the refusal occurrence back from the child branch with
-     `:seon.error/id` = `acquisition-refusal-id`, and assert that no
-     `::acquisition-recording-error` was raised and the parent is unchanged.
+`test/seon/cluster/agent_custody_test.clj`,
+`an-acquisition-records-its-refusal-on-the-acquired-branch-under-another-custody` (+66 lines).
+
+**Setup.** Two isolated children of the member's handle. Each gets the real poison row from
+`eval_test`, `bad`, which calls `missing-dependency`, plus one good row.
+
+**Two paths, each under the parent's custody:**
+- **Agent entrance.** `acquire-context!` of the child's agent. It throws if it cannot record.
+- **Lazy invocation.** A fresh `cluster-ctx` on the second child, then `kernel/invoke` of
+  `good`, which returns 42. Acquisition runs at the first named call (kernel.clj:606).
+
+**Assertions.** Each refusal is read back from its own child through
+`:seon.error/occurrences` / `:seon.sci.eval/row-member`. The parent's basis is unchanged, and
+no refusal was recorded on the parent.
+
+**Why two branches.** `record-refusals-once!` records once per program identity and recording
+target. A second path on the same branch would therefore record nothing new.
+
+**Expected on the current tree.** The entrance half is green, protected by agent.clj's
+wrapper. The lazy half is red until eval.clj binds custody at `record-acquisition-refusals!`.
+
+**On root's signal:** delete agent.clj's acquisition wrapper (−2 lines), then commit it with
+this test. **Unmeasured:** two fresh acquisitions. One complete acquisition was measured at
+1,090 ms (branch_execution_test); the test runs under the default 5 s bound.
 
 ## Commits
 
@@ -177,6 +201,7 @@ bin/test-check default --test seon.cluster.agent-test/concurrent-arm-and-release
 bin/test-check default --test seon.cluster.agent-test/disarm-interrupts-an-in-flight-turn-and-records-it-interrupted --include-long
 bin/test-check default --ns seon.test.one-request-test
 bin/test-check default --ns seon.cluster.acquisition-test --include-long
+bin/test-check default --ns seon.cluster.agent-custody-test   # after C lands
 ```
 
 A boot under an outer custody has no committed regression. The ordinary external boot has no
