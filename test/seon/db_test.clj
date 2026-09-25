@@ -1997,6 +1997,26 @@
                           (db/pull (db/db connection) [:seon.program/definition-digest]
                                    [:seon.fn/sym function])))))))))
 
+(deftest evidence-on-a-declaration-is-not-its-definition
+  ;; CLASS: the digest check read attributes the digest does not own. A result
+  ;; count written onto a test declaration was refused, so no test evidence
+  ;; could be recorded. Only an attribute the family owns is checked.
+  (test-support/with-database
+   (fn [connection]
+     (let [test-symbol 'sample.evidence/smoke]
+       (test-support/transacted!
+        connection [(test-support/namespace-row (db/db connection) 'sample.evidence)
+                    (test-support/program-row (db/db connection) [:seon.test/sym test-symbol]
+                                              "(clojure.test/deftest smoke (clojure.test/is true))")])
+       (test-support/transacted!
+        connection [[:db/add [:seon.test/sym test-symbol] :seon.test/pass-count 7]])
+       (is (= 7 (:seon.test/pass-count (db/pull (db/db connection) [:seon.test/pass-count]
+                                                [:seon.test/sym test-symbol]))))
+       (is (= :seon.program/definition-digest
+              (:seon.error/member
+               (db/transact! connection [[:db/add [:seon.test/sym test-symbol] :seon.test/long "An owned attribute."]])))
+           "an owned attribute is still checked")))))
+
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
    (fn [connection]

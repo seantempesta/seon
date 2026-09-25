@@ -4167,6 +4167,9 @@
 ;; The one owner of a namespace row's resolver context (`seon.fn` digests with it).
 (defonce ^:private stored-namespace-context
   (delay (requiring-resolve 'seon.fn/stored-namespace-context)))
+;; The one answer to which attributes a declaration row owns: the digest's input.
+(defonce ^:private program-shapes-in (delay (requiring-resolve 'seon.program/shapes-in)))
+(defonce ^:private program-canonical-row (delay (requiring-resolve 'seon.program/canonical-row)))
 
 (defn- declaration-value
   "`entity-id` in `database` as the row that wrote it: a component as its nested
@@ -4191,22 +4194,37 @@
   "The first function or test row this report changed whose stored definition
   digest is not the one its final value produces with its namespace's resolver
   context, as `seon.fn` produces it. Every digest comparison (acquisition,
-  install, test reach) trusts the stored digest, so the writer decides it."
-  {:malli/schema [:=> [:cat :seon.db/transaction-report [:vector :qualified-keyword]]
+  install, test reach) trusts the stored digest, so the writer decides it.
+  Only a change to an attribute the row's family owns (`seon.program/shapes-in`,
+  the attributes `canonical-row` hands the digest) is checked: evidence written
+  onto a declaration entity (results, reach) is not its definition."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
+                       [:vector :qualified-keyword]]
                   [:or :nil :seon.error/base]]}
-  [report identity-attrs]
+  [projection report identity-attrs]
   (let [database (:db-after report)
+        shapes (schema/projection-cache-value projection ::program-shapes
+                                              #(@program-shapes-in projection))
+        families (into {} (map (fn [family]
+                                 [family (set (:seon.program/owned-attributes (get shapes family)))]))
+                       [:seon.fn/sym :seon.test/sym])
+        touched (reduce (fn [result {:keys [e a]}] (update result e (fnil conj #{}) a))
+                        (sorted-map) (:tx-data report))
         ;; One resolver context per namespace in the report, not per row.
         context-of (memoize #(@stored-namespace-context (declaration-value database identity-attrs %)))]
-    (some (fn [entity-id]
-            (when-let [identity-attribute (some #(when (first (d/datoms database :eavt entity-id %)) %)
-                                                [:seon.fn/sym :seon.test/sym])]
+    (some (fn [[entity-id attributes]]
+            (when-let [identity-attribute
+                       (some (fn [[family owned]]
+                               (when (and (some owned attributes)
+                                          (first (d/datoms database :eavt entity-id family)))
+                                 family))
+                             families)]
               (let [row (declaration-value database identity-attrs entity-id)
                     namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))
                     namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
                     context (some-> namespace-entity context-of)
                     stored (:seon.program/definition-digest row)
-                    produced (@program-definition-digest row context)]
+                    produced (@program-definition-digest (@program-canonical-row shapes row) context)]
                 (when (not= stored produced)
                   (diagnostic
                    {::transaction-refused true
@@ -4219,7 +4237,7 @@
                     :seon.error/expected produced
                     :seon.error/offending (or stored :seon.error/unknown)
                     :seon.error/data {::entity {identity-attribute (get row identity-attribute)}}})))))
-          (into (sorted-set) (map :e) (:tx-data report)))))
+          touched)))
 
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
@@ -4255,7 +4273,7 @@
      (write-deletion-error before database affected identity-attrs)
      (write-owned-values-error projection report attribute-plans identity-attrs
                                changed-identity-attributes)
-     (write-digest-error report (identity-attributes database))
+     (write-digest-error projection report (identity-attributes database))
      ;; A render target breaks only by a declaration this report wrote or a
      ;; function it removed. Written rows are read alone; a removed function
      ;; can be named by any row, so that report reads them all.
