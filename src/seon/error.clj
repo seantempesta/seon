@@ -240,13 +240,16 @@
   handful of bytes and always admits, so the durable fact says why instead of
   the committer dying — and it rides beside the admission as `::marker`, so a
   caller can report the absence rather than merely showing its substitute."
-  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps]
+  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps [:maybe :seon.schema/projection]]
                   :seon.sci.admit/admitted]}
-  [value caps]
-  (let [request {:seon.sci.admit/value value
-                 :seon.sci.admit/interrupt-fn (constantly nil)
-                 :seon.sci.admit/caps caps
-                 :seon.config/on-core-error :record}
+  [value caps projection]
+  ;; The projection is what lets admission REFERENCE the world (a database,
+  ;; connection, SCI ctx, environment or projection) instead of copying it.
+  (let [request (cond-> {:seon.sci.admit/value value
+                         :seon.sci.admit/interrupt-fn (constantly nil)
+                         :seon.sci.admit/caps caps
+                         :seon.config/on-core-error :record}
+                  projection (assoc :seon.schema/projection projection))
         admitted (admit/admit request)]
     (if-some [marker (admit/missing-marker admitted)]
       (assoc (admit/admit (assoc request
@@ -300,17 +303,18 @@
 
 (defn- bounded-error-admission
   "Admit complete evidence, retaining classifying observations on overflow."
-  {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable] :seon.sci.admit/caps]
+  {:malli/schema [:=> [:cat :seon.error/source [:or :nil :seon.error/throwable] :seon.sci.admit/caps [:maybe :seon.schema/projection]]
                   :seon.sci.admit/admitted]}
-  [source failure caps]
-  (let [request {:seon.sci.admit/value source
-                 :seon.sci.admit/interrupt-fn (constantly nil)
-                 :seon.sci.admit/caps caps
-                 :seon.config/on-core-error :record}
+  [source failure caps projection]
+  (let [request (cond-> {:seon.sci.admit/value source
+                         :seon.sci.admit/interrupt-fn (constantly nil)
+                         :seon.sci.admit/caps caps
+                         :seon.config/on-core-error :record}
+                  projection (assoc :seon.schema/projection projection))
         admitted (admit/admit-partitioned
                   request (classifying-error-data source failure))]
     (if (admit/missing-marker admitted)
-      (bounded-admission source caps)
+      (bounded-admission source caps projection)
       admitted)))
 
 (defn- bounded-text
@@ -321,10 +325,10 @@
   This is storage, not presentation. Over the bound the field IS the missing marker —
   the same data every other surface reports an absent value with — and the
   whole value stays reachable in the fault's evidence content."
-  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps]
+  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps [:maybe :seon.schema/projection]]
                   :string]}
-  [value caps]
-  (let [admitted (bounded-admission value caps)]
+  [value caps projection]
+  (let [admitted (bounded-admission value caps projection)]
     (if-some [marker (::marker admitted)]
       (admit/canonical-edn marker)
       (let [projected (:seon.sci.admit/value admitted)]
@@ -394,13 +398,15 @@
 
 (defn project-observation
   "Project one observed value under the supplied admission caps."
-  {:malli/schema [:=> [:cat :seon.sci.admit/caps :seon.schema/value] :map]}
-  [caps value]
-  (let [admitted (bounded-admission value caps)]
+  {:malli/schema [:function [:=> [:cat :seon.sci.admit/caps :seon.schema/value] :map]
+                  [:=> [:cat :seon.sci.admit/caps :seon.schema/value [:maybe :seon.schema/projection]] :map]]}
+  ([caps value] (project-observation caps value nil))
+  ([caps value projection]
+  (let [admitted (bounded-admission value caps projection)]
     {:seon.error/capped? (boolean (or (::marker admitted)
                                     (:seon.sci.admit/capped? admitted)))
      :seon.error.projection/bound-bytes (:seon.config.eval.result/max-bytes caps)
-     :seon.instrument/actual (:seon.sci.admit/edn admitted)}))
+     :seon.instrument/actual (:seon.sci.admit/edn admitted)})))
 
 (defn- admitted-size
   "One value's own size, measured by the same admission that stores it.
@@ -408,10 +414,10 @@
   Over the bound the marker reports the bytes it refused, so the number is
   the value's and never the substitute's — the same rule `prepare` applies to
   `:seon.error/data-size`."
-  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps]
+  {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps [:maybe :seon.schema/projection]]
                   [:or :nil [:int {:min 0}]]]}
-  [value caps]
-  (let [admitted (bounded-admission value caps)]
+  [value caps projection]
+  (let [admitted (bounded-admission value caps projection)]
     (if-some [marker (::marker admitted)]
       (:seon.sci.admit/bytes marker)
       (utf8-size (:seon.sci.admit/edn admitted)))))
@@ -424,9 +430,9 @@
   a field's bytes are measured on the admitted value while the fact stores it
   as an escaped string; it terminates at one byte, where every field is the
   marker."
-  {:malli/schema [:=> [:cat :map :seon.error/source :string [:or :nil :map] [:or :nil [:tuple :qualified-keyword :seon.error/source]] :seon.sci.admit/caps [:int {:min 1}]]
+  {:malli/schema [:=> [:cat :map :seon.error/source :string [:or :nil :map] [:or :nil [:tuple :qualified-keyword :seon.error/source]] :seon.sci.admit/caps [:int {:min 1}] [:maybe :seon.schema/projection]]
                   [:or :seon.error/fact :seon.error/base]]}
-  [base-fact source message-value instrument-data actual caps inline-limit]
+  [base-fact source message-value instrument-data actual caps inline-limit projection]
   (let [expected (or (:seon.instrument/schema instrument-data)
                      (:seon.error/expected instrument-data))
         arguments (or (:seon.instrument/args instrument-data)
@@ -436,22 +442,22 @@
     (loop [field-limit (max 1 (quot available payload-count))]
       (let [field-caps (evidence-caps caps field-limit)
             evidence (bounded-error-admission source (throwable source)
-                                              field-caps)
+                                              field-caps projection)
             fact
             (cond-> (assoc base-fact
                            :seon.error/message
-                           (bounded-text message-value field-caps)
+                           (bounded-text message-value field-caps projection)
                            :seon.error/data-edn
                            (:seon.sci.admit/edn evidence))
               expected
               (assoc :seon.instrument/expected
-                     (bounded-text expected field-caps))
+                     (bounded-text expected field-caps projection))
               arguments
               (assoc :seon.instrument/args
-                     (bounded-text arguments field-caps))
+                     (bounded-text arguments field-caps projection))
               actual
               (assoc :seon.instrument/actual
-                     (bounded-text (val actual) field-caps)))]
+                     (bounded-text (val actual) field-caps projection)))]
         (if (or (<= (utf8-size (pr-str fact)) inline-limit)
                 (= 1 field-limit))
           fact
@@ -524,7 +530,7 @@
   (let [failure (throwable source)
         class-name (when failure (.getName (class failure)))
         source (meaningful-source source)
-        admitted (bounded-error-admission source failure caps)
+        admitted (bounded-error-admission source failure caps projection)
         full-edn (:seon.sci.admit/edn admitted)
         ;; ONE KEY, AND IT IS SUPPLIED. The fault family's own declared bound
         ;; decides how much evidence the FACT keeps; the blob threshold
@@ -562,7 +568,7 @@
                      {:seon.db.write.attempt/request-id (:seon.db.write.attempt/request-id observation)
                       :seon.db.write.attempt/observed-at (:seon.error/at observation)
                       :seon.db.write.attempt/operations
-                      (project-observation caps (get-in observation [:seon.error/data :seon.db.write.attempt/transaction]))})
+                      (project-observation caps (get-in observation [:seon.error/data :seon.db.write.attempt/transaction]) projection)})
               (dissoc :seon.db.write.attempt/request-id)
               (update :seon.error/data dissoc :seon.db.write.attempt/transaction))
           observation)
@@ -570,9 +576,9 @@
         (if (= declared-schema :seon.schema/validation-refusal)
           (-> observation
               (assoc :seon.schema/error-declaration
-                     (project-observation caps (:seon.schema/refused-value observation))
+                     (project-observation caps (:seon.schema/refused-value observation) projection)
                      :seon.schema/declaration-expectation
-                     (project-observation caps (:seon.schema/expected-value observation)))
+                     (project-observation caps (:seon.schema/expected-value observation) projection))
               (dissoc :seon.schema/refused-value :seon.schema/expected-value))
           observation)
         declared-schema (case declared-schema
@@ -595,7 +601,7 @@
         ;; the leaf sits four levels down and a depth cap would drop exactly
         ;; the evidence being recorded.
         actual (offending-entry error-value)
-        actual-size (when actual (admitted-size (val actual) caps))
+        actual-size (when actual (admitted-size (val actual) caps projection))
         marker (or (::marker admitted)
                    (:seon.sci.admit/remainder admitted))
         data-size (if marker
@@ -644,7 +650,7 @@
                           [:seon.agent/id agent-id]))
         fact (fit-fact-payload
               base-fact source
-              (message source failure) instrument-data actual caps inline-limit)
+              (message source failure) instrument-data actual caps inline-limit projection)
         fact (assoc fact :seon.error/capped?
                     ;; HONEST WHEN EVERYTHING WAS DROPPED. Comparing the two
                     ;; EDN strings alone reported "nothing omitted" for the

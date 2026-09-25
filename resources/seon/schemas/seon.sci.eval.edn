@@ -174,6 +174,13 @@
                  {:error/message "must be an SCI evaluation context",
                   :gen/gen seon.sci.eval/ctx-generator}
                  seon.sci.eval/ctx?],
+                :ctx-reference
+                [:fn
+                 {:error/message "must be SCI's own context record",
+                  :gen/gen seon.sci.eval/ctx-generator
+                  :seon.schema/identity-only true
+                  :seon.schema/identity-projection seon.sci.admit/sci-context-identity}
+                 seon.sci.admit/sci-context?],
                 :ending-ns :symbol,
                 :request
                 [:map

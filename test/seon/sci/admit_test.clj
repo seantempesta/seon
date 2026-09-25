@@ -33,6 +33,7 @@
             [malli.core :as m]
             [sci.core :as sci]
             [seon.config :as config]
+            [seon.env]
             [seon.print :as print]
             [seon.sci.admit :as admit]
             [seon.schema :as schema]
@@ -537,3 +538,44 @@
        (is (str/includes? (pr-str refusal)
                           ":seon.config.eval.result/max-bytes"))
        (is (not (str/includes? (pr-str refusal) "RT.longCast")))))))
+
+(defn- allocated-bytes
+  []
+  (.getThreadAllocatedBytes
+   ^com.sun.management.ThreadMXBean (java.lang.management.ManagementFactory/getThreadMXBean)
+   (.getId (Thread/currentThread))))
+
+(deftest a-value-carrying-its-world-admits-references-not-copies
+  ;; docs/seon/issues/a-refusal-that-carries-its-request-costs-gigabytes-to-admit.md:
+  ;; a refusal holding its request (SCI ctx, environment, projection,
+  ;; database) walked all of it, 350 B allocated per emitted byte, 22.8 GB
+  ;; unbounded. The owner's rule: reference the world, never copy it.
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           projection @packaged-projection
+           world {:seon.error/message "refused"
+                  :seon.error/offending {:db @connection :conn connection :ctx ctx
+                                         :env (seon.env/of ctx) :projection projection}}
+           admit! #(admit/admit (request world))
+           _ (admit!)
+           runs (vec (repeatedly 3 (fn [] (let [a0 (allocated-bytes) n0 (System/nanoTime)
+                                               admitted (admit!)]
+                                           {:ms (/ (- (System/nanoTime) n0) 1e6)
+                                            :bytes (- (allocated-bytes) a0)
+                                            :admitted admitted}))))
+           offending (get-in (:admitted (peek runs)) [:seon.sci.admit/value :seon.error/offending])]
+       ;; the owner's bound: 5 ms and 5 MB (measured 2.4 ms / 1.1 MB unarmed on default)
+       (is (< (apply min (map :ms runs)) 5.0) (pr-str (map :ms runs)))
+       (is (< (apply min (map :bytes runs)) 5000000) (pr-str (map :bytes runs)))
+       (is (< (count (:seon.sci.admit/edn (:admitted (peek runs)))) 20000))
+       (testing "each world object is its typed identity"
+         (is (uuid? (get-in offending [:db :datahike/commit-id])))
+         (is (vector? (get-in offending [:conn :datahike/connection-id])))
+         (is (vector? (get-in offending [:ctx :seon.db/connection :datahike/connection-id])))
+         (is (string? (get-in offending [:env :seon.boot/cluster-name])))
+         (is (= #{:seon.schema.projection/fingerprint :seon.schema.projection/fingerprint-version}
+                (set (keys (:projection offending)))))
+         (is (= "sci.impl.opts.Ctx"
+                (->> (tree-seq coll? seq (:seon.sci.admit/print-node (:admitted (peek runs))))
+                     (keep :seon.print/class) (some #{"sci.impl.opts.Ctx"})))))))))

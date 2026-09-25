@@ -3937,19 +3937,48 @@
           descriptors))
     (identity-only-descriptors-in projection)))
 
+(defn identity-only-projector
+  "One function of a value to its registered identity data, or nil.
+
+  Derive it once per walk: value admission asks at every node, and asking
+  through the armed `identity-only-projection-in` Var cost ~2.9 KB per node."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :seon.instrument/callable]}
+  [projection]
+  (let [descriptors (identity-only-descriptors projection)]
+    (fn [value]
+      (some
+       (fn [{:seon.schema/keys [key identity-projection]
+             validator :seon.schema.identity-only/validator}]
+         (when (validator value)
+           {:seon.schema/key key
+            :seon.schema/identity-value (identity-projection value)}))
+       descriptors))))
+
 (defn identity-only-projection-in
   "Project a registered reference value to its declared identity data."
   {:seon.fn/invokes #{:seon.schema/identity-projection}
    :malli/schema
    [:=> [:catn [:seon.schema/projection :seon.schema/projection] [:seon.schema/value [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "Schema discovery and explanation inspect arbitrary candidate values, including scalars, nil and host objects; the supplied validators decide whether they match.", :gen/elements [nil false 0 "" :k [] {}]}]]] [:maybe :map]]}
   [projection value]
-  (some
-   (fn [{:seon.schema/keys [key identity-projection]
-         validator :seon.schema.identity-only/validator}]
-     (when (validator value)
-       {:seon.schema/key key
-        :seon.schema/identity-value (identity-projection value)}))
-   (identity-only-descriptors projection)))
+  ((identity-only-projector projection) value))
+
+(defn projection-value?
+  "True for a built schema projection: a map holding its registry and fingerprint."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (and (map? value)
+       (contains? value :seon.schema.projection/registry)
+       (contains? value :seon.schema.projection/fingerprint)))
+
+(register-core-predicate! 'seon.schema/projection-value? projection-value?)
+
+(defn projection-identity
+  "A projection is referenced by its content fingerprint, never copied: its
+  registry, forms and indexes are megabytes derived from the database."
+  {:malli/schema [:=> [:cat :seon.schema/projection-reference] :map]}
+  [projection]
+  (select-keys projection [:seon.schema.projection/fingerprint
+                           :seon.schema.projection/fingerprint-version]))
 
 (defn identity-only-projection
   "Project a registered reference value using the active schema registry."

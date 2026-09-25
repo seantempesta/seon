@@ -9,6 +9,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.config :as config]
+            [seon.blob :as blob]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
             [seon.instrument :as instrument]
@@ -1490,3 +1491,25 @@
               (signature :seon.turn/error observation)))
     (is (= (signature :seon.agent/error observation)
            (signature :seon.agent/error (assoc observation :seon.turn/error-turn-id "incidental"))))))
+
+(deftest a-fifty-thousand-entry-offending-value-stores-bounded-text-and-a-digest
+  ;; The value must outlive its subject, so it is stored ONCE by content
+  ;; digest; the fact itself keeps text bounded by the fault family's bound.
+  (test-support/with-database
+   (fn [connection]
+     (let [offending (into {} (map (fn [i] [(keyword "entry" (str "k" i)) i])) (range 50000))
+           prepared (error/prepare
+                     (request {:seon.error/message "wide"
+                               :seon.error/offending offending}))
+           {fact :seon.error/fact staged :seon.blob/staged-writes}
+           (error/evidence-stage connection prepared)
+           digest (:seon.error/data-blob fact)]
+       (is (true? (:seon.error/capped? fact)))
+       (is (<= (count (.getBytes ^String (:seon.error/data-edn fact) "UTF-8")) evidence-bytes))
+       (is (string? digest) "the complete evidence is referenced by its digest")
+       (is (= [digest] (mapv :seon.blob/digest staged)))
+       (blob/with-publication! connection staged (constantly nil))
+       (is (= 50000
+              (count (:seon.error/offending
+                      (#'admit/semantic-value (edn/read-string (blob/get connection digest))))))
+           "the digest retrieves the whole value")))))

@@ -43,6 +43,7 @@
             [sci.impl.namespaces :as sci.namespaces]
             [sci.impl.types :as sci.types]
             [sci.lang]
+            [sci.impl.opts]
             [seon.env :as env]
             [seon.error.refusal :as error]
             [seon.id :as id]
@@ -189,10 +190,63 @@
     (instance? sci.lang.Namespace value)
     (assoc ::print/rep (pr-str (str (sci.types/getName value))))))
 
+;;; WORLD REFERENCES (owner 2026-09-25: reference the world, never copy it).
+;;; The evaluation's SCI ctx, its environment and its schema projection are
+;;; declared identity-only beside their owners' schemas, exactly as a database
+;;; value and a connection are: the walk admits the identity below and never
+;;; enters the object. Each identity is made of further references.
+
+(defn sci-context?
+  "True for SCI's own context record, never for a map that merely has `:env`."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? sci.impl.opts.Ctx value))
+
+(schema/register-core-predicate! 'seon.sci.admit/sci-context? sci-context?)
+
+(defn sci-context-identity
+  "An SCI context's references: its environment, projection and custody connection."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx-reference] :map]}
+  [ctx]
+  (let [connection (get-in ctx [:seon.sci.eval/custody :seon.db/connection])]
+    (cond-> (select-keys ctx [:seon.env/environment :seon.schema/projection])
+      connection (assoc :seon.db/connection connection))))
+
+(defn environment-identity
+  "An environment's references: its cluster, basis, connection and projection."
+  {:malli/schema [:=> [:cat :seon.env/environment-reference] :map]}
+  [environment]
+  (select-keys environment [:seon.boot/cluster-name :seon.db/basis-t
+                            :seon.db/connection :seon.schema/projection]))
+
+(def ^:private scalar-leaf-prefix
+  "The fixed text before a scalar node's value: `#:seon.print{:face F, :value `."
+  (into {} (map (fn [face] [face (str "#:seon.print{:face " face ", :value ")]))
+        [::print/nil ::print/boolean ::print/number ::print/keyword ::print/symbol
+         ::print/char ::print/uuid ::print/inst ::print/string]))
+
+(defn- leaf-edn
+  "One leaf's canonical EDN. A scalar node is its fixed prefix plus the
+  scalar's own `print-method` text, byte-identical to `canonical-edn` of the
+  node (probed on every scalar face, 2026-09-25) at 458 B allocated instead of
+  7 KB: `canonical-edn` pushes six thread bindings and prints a namespaced map
+  for every leaf, which made admission allocate ~350 B per emitted byte. The
+  fast path needs only the ambient defaults scalars print under."
+  ^String [node]
+  (if-some [prefix (and (== 2 (count node))
+                        *print-readably* (not *print-meta*) (not *print-dup*)
+                        (scalar-leaf-prefix (::print/face node)))]
+    (let [writer (java.io.StringWriter.)]
+      (.write writer ^String prefix)
+      (print-method (::print/value node) writer)
+      (.write writer "}")
+      (str writer))
+    (canonical-edn node)))
+
 (defn- leaf!
   "Emit one node that has no child node: its own canonical EDN, exactly."
   [state node]
-  (write! state (canonical-edn node))
+  (write! state (leaf-edn node))
   node)
 
 (def ^:private empty-string-leaf-bytes
@@ -250,9 +304,9 @@
   carries what remains and how to close it."
   [value state]
   (let [identity-projection
-        (delay (some-> (or (:seon.schema/projection (meta value))
-                            (:projection state))
-                       (schema/identity-only-projection-in value)))]
+        (delay (if-some [own (:seon.schema/projection (meta value))]
+                 (schema/identity-only-projection-in own value)
+                 (when-let [projector (:identity-projector state)] (projector value))))]
     (cond
       (nil? value) {::node (leaf! state (value-node ::print/nil nil))}
       (boolean? value) {::node (leaf! state (value-node ::print/boolean value))}
@@ -728,6 +782,8 @@
                ;; Identity projection is handed by the operation boundary.
                ;; Ordinary scalar/collection admissions never require it.
                :projection projection
+               ;; derived ONCE per walk, then asked at every node
+               :identity-projector (some-> projection schema/identity-only-projector)
                :builder builder
                :bytes (volatile! 0)
                ;; THE ONE BOUND. `unbounded?` is the caller that is not
