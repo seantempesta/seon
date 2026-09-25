@@ -74,7 +74,7 @@
               :projection-reference
               [:fn
                {:error/message "must be a built schema projection"
-                :gen/schema [:map [:seon.schema.projection/registry [:= {}]]
+                :gen/schema [:map [:seon.schema.projection/registry [:= {} {}]]
                              [:seon.schema.projection/fingerprint [:= "0"]]]
                 :seon.schema/identity-only true
                 :seon.schema/identity-projection seon.schema/projection-identity}
