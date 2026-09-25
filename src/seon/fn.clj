@@ -996,10 +996,14 @@
     (let [message (str "Cannot classify host binding: clj-kondo holds no analysis of "
                        (str/join ", " (sort (into #{} (map namespace) targets)))
                        ". Fill the checkout's cache from this JVM's classpath at its REPL: " dependency-analysis-command)]
-      (throw (ex-info message {:seon.fn/index-refused true
-                               :seon.cluster.source/phase :analysis
-                               :seon.error/message message
-                               ::unresolved-targets (vec (sort targets))})))))
+      ;; A platform fault, not the author's mistake: its own declared schema
+      ;; (`seon.turn` stores and delivers it rather than returning it).
+      (throw (ex-info message (with-meta {:seon.fn/index-refused true
+                                          ::dependency-analysis-missing true
+                                          :seon.cluster.source/phase :analysis
+                                          :seon.error/message message
+                                          ::unresolved-targets (vec (sort targets))}
+                                {:seon.error/declared-schema ::dependency-analysis-missing-error}))))))
 
 (defn- interpreted-namespaces
   "Namespaces whose macros expand in SCI: SCI's own (`sci.impl.namespaces/namespaces`),
