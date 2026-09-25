@@ -1,26 +1,14 @@
 (ns seon.render.ns-test
-  (:require [clojure.edn :as edn]
-            [clojure.string :as str]
+  (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [clojure.test.check :as tc]
-            [clojure.test.check.generators :as gen]
-            [clojure.test.check.properties :as prop]
             [seon.db :as db]
             [seon.cluster.agent :as agent]
-            [malli.registry :as mr]
-            [seon.ai.tokens :as tokens]
             [seon.config :as config]
-            [seon.print :as print]
-            [seon.render :as render]
-            [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
             [seon.issue :as issue]
-            [seon.program :as program]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
-
-(def ^:private property-seed 2026073102)
 
 (deftest identity-reads-stewardship-without-an-agent-cluster-attribute
   (support/with-database
@@ -68,58 +56,6 @@
          :seon.render/profile
          {:seon.render.profile/token-budget token-budget}))
 
-(defn- reader-valid?
-  ([text]
-   (reader-valid? *ns* text))
-  ([reader-ns text]
-   (try
-     (binding [*ns* reader-ns]
-       (with-open [reader (PushbackReader. (StringReader. text))]
-         (loop []
-           (let [form (read {:eof ::eof
-                             :read-cond :allow
-                             :features #{:clj}}
-                            reader)]
-             (when-not (= ::eof form)
-               (recur))))))
-     true
-     (catch Throwable _
-       false))))
-
-(defn- comment-framed?
-  [value]
-  (boolean
-   (some #(and (string? %) (str/starts-with? (str/triml %) ";"))
-         (tree-seq coll? seq value))))
-
-(defn- install-namespace!
-  "Write one fixture namespace through the canonical writers: its declaration
-  row, its schema rows, then its functions analyzed from their source."
-  [connection namespace-name source schema-rows functions]
-  (support/transacted!
-   connection
-   [(program/declaration-row (db/carried-projection @connection)
-                             {:seon.ns/name namespace-name :seon.ns/source source}
-                             :all :agent)])
-  (when (seq schema-rows)
-    (support/transacted!
-     connection
-     (mapv #(support/revised-row @connection
-                                 (assoc % :seon.schema.admission/source :core) {} nil)
-           schema-rows)))
-  (when (seq functions)
-    (support/transacted!
-     connection
-     (mapv (fn [{::keys [sym source overrides]}]
-             (support/program-row @connection [:seon.fn/sym sym] source overrides))
-           functions))))
-
-(defn- function-row
-  [namespace-name function-name source overrides]
-  {::sym (symbol (str namespace-name) (str function-name))
-   ::source source
-   ::overrides overrides})
-
 (deftest bounded-read-refusals-remain-flat-errors
   (support/with-database
     (fn [connection]
@@ -141,135 +77,33 @@
         (is (= 'seon.db/q (:seon.db/refused-read-operation ai)))
         (is (string? (:seon.error/message ai)))))))
 
-(deftest populated-namespace-renders-the-inverse-distance-gradient
+(deftest a-namespace-renders-as-one-graph-node
+  ;; Class regression (the namespace page dump): the node is its declaration,
+  ;; doc and public functions by name; never member sources or schemas.
   (support/with-database
     (fn [connection]
+      (support/transacted! connection (support/agent-tx @connection "fresh" 'my.agents.fresh))
       (let [db @connection
-            d0 (namespace-unit db 'seon.flow 0 100000)
-            d1 (namespace-unit db 'seon.flow 1 100000)
-            d2 (namespace-unit db 'seon.flow 2 100000)
-            source (:seon.ns/source d1)
-            ai0 (sut/render-ai d0)
-            ai1 (sut/render-ai d1)
-            ai2 (sut/render-ai d2)
-            html1-text (hiccup/->string (sut/render-html d1))
-            html2-text (hiccup/->string (sut/render-html d2))]
-        (testing "distance zero is only the namespace name"
-          (is (= "seon.flow" ai0)))
-        (testing "distance one composes every authoritative source row"
-          (is (str/starts-with? ai1 source))
-          (is (= 1 (count (re-seq (re-pattern (java.util.regex.Pattern/quote source))
-                                  ai1))))
-          (is (str/includes? ai1 "(defn start-work-launcher!"))
-          (is (str/includes? ai1 "(defn- work-launcher-step")
-              "the full d1 tier includes private member source too")
-          (is (reader-valid? (the-ns 'seon.flow) ai1)))
-        (testing "distance two is an ordinary public API value"
-          (let [rendered (edn/read-string ai2)]
-            (is (some #(= 'seon.flow/start-work-launcher!
-                          (:seon.fn/sym %))
-                      rendered))
-            (is (some :seon.schema/key rendered))
-            (is (not (comment-framed? rendered))))
-          (is (str/includes? ai2 "[clojure.core.async :as async]"))
-          (is (not (str/includes? ai2 "#:db"))
-              "required namespace refs render their nested names")
-          (is (str/includes? ai2 "seon.flow/->CountedDroppingBuffer"))
-          (is (not (str/includes? ai2 "fault-graph-definition")))
-          (is (not (str/includes? ai2 "work-launcher-step")))
-          (is (reader-valid? ai2)))
-        (testing "the HTML projection has the same tier membership"
-          (is (str/includes? html1-text "seon-namespace-source"))
-          (is (str/includes?
-               html1-text
-               "Production-shaped core.async.flow launchers"))
-          (is (str/includes? html1-text "seon-namespace-definitions"))
-          (is (str/includes? html1-text "seon.flow/start-work-launcher!"))
-          (is (str/includes? html2-text "seon-namespace-own-schemas"))
-          (is (str/includes? html2-text "seon.flow/start-work-launcher!"))
-          (is (str/includes?
-               html2-text
-               (str "id=\""
-                    (block/surface-id :seon.flow/start-work-launcher!)
-                    "\"")))
-          (is (not (str/includes? html2-text "fault-graph-definition")))
-          (is (not (str/includes? html2-text "work-launcher-step"))))))))
+            flow (sut/render-ai (namespace-unit db 'seon.flow 1 100000))
+            html (hiccup/->string (sut/render-html (namespace-unit db 'seon.flow 1 100000)))
+            fresh (sut/render-ai (namespace-unit db 'my.agents.fresh 1 256))]
+        (testing "distance zero is its one header line"
+          (is (str/starts-with? (sut/render-ai (namespace-unit db 'seon.flow 0 100000)) ";; Namespace seon.flow — "))
+          (is (= 1 (count (str/split-lines (sut/render-ai (namespace-unit db 'seon.flow 0 100000)))))))
+        (testing "distance one is the stored ns form, public functions by name, then dir"
+          (is (str/includes? flow (:seon.ns/source (namespace-unit db 'seon.flow 1 100000))))
+          (is (re-find #"\n;; public functions: .*start-work-launcher!" flow))
+          (is (not (str/includes? flow "work-launcher-step")) "private functions are not named")
+          (is (not (str/includes? flow "(defn ")) "no member source")
+          (is (str/ends-with? flow "(dir seon.flow)")))
+        (testing "HTML is the same node: a namespace link, requires and function names"
+          (is (str/includes? html "href=\"/ns/seon.flow\""))
+          (is (str/includes? html "<code>start-work-launcher!</code>"))
+          (is (not (str/includes? html "seon-namespace-source"))))
+        (testing "an empty agent namespace names no functions and is no error"
+          (is (str/includes? fresh ";; public functions: none"))
+          (is (str/ends-with? fresh "(dir my.agents.fresh)")))))))
 
-(deftest fitted-full-html-leads-with-description-and-function-summaries
-  (support/with-database
-    (fn [connection]
-      (let [namespace-name 'fixture.presentation
-            required-names
-            (mapv #(symbol (str "fixture.required." %)) (range 16))
-            source (str "(ns fixture.presentation)\n"
-                        (apply str (repeat 4000 "source-body "))
-                        "source-tail-marker")]
-        (install-namespace!
-         connection namespace-name source []
-         [(function-row
-           namespace-name 'alpha "(defn alpha [value] value)"
-           {:seon.fn/spec "[:=> [:cat :string] :string]"
-            :seon.fn/doc "Return the first useful value."})
-          (function-row
-           namespace-name 'useful "(defn useful [value] value)"
-           {:seon.fn/spec "[:=> [:cat :string] :string]"
-            :seon.fn/doc "Return the useful value."})])
-        (support/transacted!
-         connection
-         [(support/revision @connection [:seon.ns/name namespace-name]
-                            {:seon.ns/doc
-                             "Useful namespace summary.\n\nLonger stewardship text."
-                             :seon.ns/requires (set required-names)})])
-        (let [raw (sut/render-html
-                   (namespace-unit @connection namespace-name 1 100000))
-              raw-html (hiccup/->string raw)
-              profile (assoc (render/agent-render-profile
-                              (support/effective-config))
-                             :seon.render.profile/token-budget 1024
-                             :seon.render.profile/max-depth 8
-                             :seon.render.profile/max-children 32
-                             :seon.render.profile/composition :multiline
-                             :seon.print/requery-id
-                             [:seon.ns/name namespace-name])
-              fitted-html
-              (hiccup/->string (sut/render-html
-                               (assoc (namespace-unit @connection namespace-name 1 100000)
-                                      :seon.render/profile profile)))]
-          (is (< (.indexOf raw-html "Useful namespace summary.")
-                 (.indexOf raw-html "fixture.presentation/useful")
-                 (.indexOf raw-html "Requires")
-                 (.indexOf raw-html "namespace source"))
-              "callable summaries precede requires and source")
-          (is (and (str/includes? fitted-html "Useful namespace summary.")
-                   (str/includes? fitted-html "fixture.presentation/alpha")
-                   (str/includes? fitted-html "fixture.presentation/useful")
-                   (str/includes? fitted-html "Return the useful value."))
-              "the final fitted HTML retains the summary and callable API")
-          (is (and (str/includes? raw-html "namespace source")
-                   (str/includes? raw-html "member definition sources")
-                   (str/includes? raw-html "(defn useful [value] value)")
-                   (not (str/includes? raw-html "<details open")))
-              "exact namespace and member source remain in disclosures")
-          (is (and (not (str/includes? fitted-html "seon-print-html-elision"))
-                   (str/includes? fitted-html "source-tail-marker"))
-              "HTML preserves every source byte regardless of the AI profile"))))))
-
-(deftest source-less-agent-namespace-emits-a-dir-read
-  ;; An empty namespace still teaches the same executable inspection form.
-  (support/with-database
-    (fn [connection]
-      (support/transacted! connection
-                           (support/agent-tx @connection "fresh" 'my.agents.fresh))
-      (let [db @connection
-            unit (namespace-unit db 'my.agents.fresh 1 256)
-            ai (sut/render-ai unit)
-            html-text (hiccup/->string (sut/render-html unit))]
-        (is (= '(dir my.agents.fresh) (edn/read-string ai)))
-        (is (not (str/includes? ai ":seon.error/message"))
-            "the empty state is never an error value in the agent's context")
-        (is (str/includes? html-text
-                           "No definitions are indexed in this namespace yet"))
-        (is (str/includes? html-text "it belongs to agent fresh"))))))
 
 (deftest namespace-bindings-render-in-clojures-own-words
   (testing "an alias names its target namespace, a refer names its Var"
@@ -307,164 +141,6 @@
            (sut/render-refer-ai {:seon.ns.refer/local 'q
                                  :seon.ns.refer/target-ns 'seon.db
                                  :seon.ns.refer/target-name 'q})))))
-
-(deftest schema-closure-is-database-derived-and-budgeted
-  (support/with-database
-    (fn [connection]
-      (let [closure-ns 'fixture.closure
-            closure-source "(ns fixture.closure)\n\n(def source-marker :only)"
-            closure-spec
-            (pr-str
-             [:=>
-              [:catn [:fixture.labels/input :fixture.closure/own]]
-              [:enum :fixture.enum/not-a-schema :ok]])
-            ;; A named error needs a non-base domain member; canonical
-            ;; registrations are acyclic (`seon.schema/assert-acyclic-references!`).
-            subject-row {:seon.schema/key :fixture.closure/subject
-                         :seon.schema/form ":string"}
-            own-row {:seon.schema/key :fixture.closure/own
-                     :seon.schema/form
-                     (pr-str [:map [:value :fixture.external/a]])}
-            error-row
-            {:seon.schema/key :fixture.closure/not-found-error
-             :seon.schema/form
-             (pr-str
-              [:and :seon.error/base
-               [:map {:seon.render/ai 'seon.error/render-ai
-                      :seon.render/html 'seon.error/render-html
-                      :error/message "must identify the absent fixture"}
-                :fixture.closure/subject]])}
-            closure-schema-rows
-            [subject-row own-row error-row
-             {:seon.schema/key :fixture.external/a
-              :seon.schema/form (pr-str [:or :string :fixture.external/b])}
-             {:seon.schema/key :fixture.external/b
-              :seon.schema/form (pr-str [:maybe :string])}]
-            closure-function-rows
-            [(function-row
-              closure-ns 'uses-own
-              "(defn uses-own [value] value)"
-              {:seon.fn/spec closure-spec
-               :seon.fn/doc "Uses an own schema whose closure crosses namespaces."})]
-            _ (install-namespace! connection closure-ns closure-source
-                                  closure-schema-rows closure-function-rows)
-            db @connection
-            d1 (namespace-unit db closure-ns 1 100000)
-            d2 (namespace-unit db closure-ns 2 100000)
-            ai1 (sut/render-ai d1)
-            ai2 (sut/render-ai d2)
-            html2 (sut/render-html d2)
-            isolated-ai2
-            (binding [mr/*registry* {:fixture.external/a :boolean
-                                     :fixture.external/b :int}]
-              (sut/render-ai d2))]
-        (testing "d1 composes namespace, member, and schema source"
-          (is (str/starts-with? ai1 closure-source))
-          (is (str/includes? ai1 "(defn uses-own"))
-          (is (str/includes? ai1
-                             "#:seon.schema{:key :fixture.external/a}"))
-          (is (str/includes? ai1
-                             "#:seon.schema{:key :fixture.external/b}"))
-          (is (str/includes? ai1
-                             "(register! :fixture.closure/own")))
-        (testing "d2 renders own records, one closure, and raw contracts"
-          (let [rendered (edn/read-string ai2)]
-            (is (some #(= :fixture.closure/own (:seon.schema/key %))
-                      rendered))
-            (is (some #(= {:seon.schema/key
-                           :fixture.closure/not-found-error
-                           :seon.error/message
-                           "must identify the absent fixture"}
-                          %)
-                      rendered))
-            (is (not (str/includes? ai2 "seon.error/render-ai")))
-            (is (some #(= 'fixture.closure/uses-own (:seon.fn/sym %))
-                      rendered))
-            (is (not (comment-framed? rendered))))
-          (is (not (str/includes? ai2
-                                  "(register! :fixture.closure/own")))
-          (is (not (str/includes? ai2
-                                  "(register! :fixture.labels/input"))
-              "a qualified catn label is not a schema ref")
-          (is (not (str/includes? ai2
-                                  "(register! :fixture.enum/not-a-schema"))
-              "a qualified enum value is not a schema ref")
-          (is (not (str/includes? (pr-str html2) "(register!"))
-              "HTML names referenced schemas without repeating their source")
-          (is (str/includes? (pr-str html2) ":fixture.external/a"))
-          (is (str/includes? (pr-str html2) ":fixture.external/b"))
-          (is (reader-valid? ai2)))
-        (testing "the isolated placeholder registry ignores live registry state"
-          (is (= ai2 isolated-ai2))))
-
-      (let [cap-ns 'fixture.cap
-            cap-keys (mapv #(keyword "fixture.external" (str "k" %))
-                           (range 41))
-            cap-schemas
-            (mapv (fn [schema-key]
-                    {:seon.schema/key schema-key
-                     :seon.schema/form ":string"})
-                  cap-keys)
-            long-doc (str (apply str (repeat 100 "x")) "…")
-            cap-functions
-            [(function-row
-              cap-ns 'uncontracted
-              "(defn uncontracted [] :ok)"
-              {:seon.fn/doc long-doc})
-             (function-row
-              cap-ns 'with-many
-              "(defn with-many [& values] values)"
-              {:seon.fn/spec (pr-str [:=> (into [:cat] cap-keys) :any])})]
-            _ (install-namespace! connection cap-ns
-                                  "(ns fixture.cap)\n\n(def cap-source :only)"
-                                  cap-schemas cap-functions)
-            db @connection
-            ai (sut/render-ai (namespace-unit db cap-ns 2 100000))]
-        (testing "the closure emits forty references and one honest cap line"
-          (is (= 40
-                 (count
-                  (filter #(= "fixture.external" (namespace %))
-                          (keep :seon.schema/key (edn/read-string ai))))))
-          (is (not (str/includes? ai "(register! :fixture.external/")))
-          (is (= 1 (count (re-seq #"40\+ referenced schemas are reachable" ai)))))
-        (testing "uncontracted public functions and their docs remain whole"
-          (is (str/includes? ai "fixture.cap/uncontracted"))
-          (is (str/includes? ai long-doc))
-          (is (not (str/includes? ai " [clipped]")))))
-      (let [budget-ns 'fixture.budget
-            large-form
-            (pr-str
-             (into [:map]
-                   (map (fn [index]
-                          [(keyword (str "field-" index)) :string]))
-                   (range 180)))
-            budget-schemas
-            [{:seon.schema/key :fixture.budget/own
-              :seon.schema/form large-form}
-             {:seon.schema/key :budget.external/a
-              :seon.schema/form ":string"}
-             {:seon.schema/key :budget.external/b
-              :seon.schema/form large-form}]
-            budget-functions
-            [(function-row
-              budget-ns 'a "(defn a [value] value)"
-              {:seon.fn/spec (pr-str [:=> [:cat :budget.external/a] :any])})
-             (function-row
-              budget-ns 'b "(defn b [value] value)"
-              {:seon.fn/spec (pr-str [:=> [:cat :budget.external/b] :any])})]
-            _ (install-namespace! connection budget-ns "(ns fixture.budget)"
-                                  budget-schemas budget-functions)
-            db @connection
-            budgets [64 96 128 192 256 384 512 768 1024 1536 2048
-                     3072 4096 6144 8192]
-            rendered (mapv #(sut/render-ai
-                              (namespace-unit db budget-ns 2 %)) budgets)]
-        (testing "the namespace renderer preserves declared data for the value projection"
-          (is (apply = rendered))
-          (let [rows (edn/read-string (first rendered))]
-            (is (= #{'fixture.budget/a 'fixture.budget/b}
-                   (into #{} (keep :seon.fn/sym) rows)))
-            (is (some :seon.schema/key rows))))))))
 
 ;; DELETED 2026-08-29 (owner gate ruling): compact registered-map
 ;; rendering is the filed issue
