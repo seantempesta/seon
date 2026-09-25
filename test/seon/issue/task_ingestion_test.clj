@@ -13,6 +13,10 @@
 
 (def ^:private handle "043df611d179")
 
+(def ^:private digest
+  "A source digest the publication seam's contract admits."
+  (apply str (repeat 64 "d")))
+
 (def ^:private subject-source
   (str "(ns tq.a {:seon/tasks #{\"043df611d179\"} :seon/must-read ['tq.a/f]}\n"
        "  (:require [clojure.test :refer [deftest is]] [clojure.string :as s]))\n"
@@ -67,7 +71,7 @@
        (is (:seon.task/changed? (ingest! connection text)))
        (is (= #:seon.task{:subjects '#{tq.a tq.a/f tq.a/g} :proofs '#{tq.a/proves} :referrers #{'tq.a 'tq.a/f handle}}
               (issue/task-edges @connection handle)))
-       (is (= '#{clojure.string/join} (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f]))))
+       (is (= '#{clojure.string/join} (set (:seon.fn/see-also (db/pull @connection [:seon.fn/see-also] '[:seon.fn/sym tq.a/f])))))
        (is (= #{handle} (issue/open-tasks @connection '[:seon.fn/sym tq.a/g])))
        (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection))))
        (testing "unchanged input, with an empty optional set, writes nothing"
@@ -126,14 +130,14 @@
     (test-support/with-database
      (fn [connection]
        (admit! connection (rows-of subject-source))
-       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection "d" (.getPath root))))))
+       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection digest (.getPath root))))))
            "an annotation whose task is absent at the destination refuses with its holders")
        (with-root (assoc checkout task-path (task-text "Prove ingestion." ""))
          (fn [root]
-           (is (:seon.task/changed? (publish-tasks! connection "d" (.getPath root))) "coherent task and annotation admission")
-           (is (= {:seon.task/changed? false} (publish-tasks! connection "d" (.getPath root))) "repeat is a no-op")
+           (is (:seon.task/changed? (publish-tasks! connection digest (.getPath root))) "coherent task and annotation admission")
+           (is (= {:seon.task/changed? false} (publish-tasks! connection digest (.getPath root))) "repeat is a no-op")
            (io/delete-file (io/file root task-path))
-           (is (= [handle] (dangling #(publish-tasks! connection "d" (.getPath root))))
+           (is (= [handle] (dangling #(publish-tasks! connection digest (.getPath root))))
                "a removed task file retracts its task, leaving its annotations dangling")))))))
 
 (deftest a-source-only-publication-admits-the-unchanged-task-file-its-annotations-name
@@ -146,7 +150,7 @@
      (admit! connection (rows-of subject-source))
      (with-root (assoc (issue/task-files "." nil) task-path (task-text "Prove ingestion." ""))
        (fn [root]
-         (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection "d" (.getPath root))))
+         (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection digest (.getPath root))))
          (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection)))))))))
 
 (deftest adoption-carries-published-tasks-as-data
