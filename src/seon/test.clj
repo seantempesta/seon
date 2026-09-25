@@ -1758,9 +1758,7 @@
                  (throw (ex-info "Another request is preparing this test world; retry once it completes."
                                  {:seon.error/expected :seon.test/prepared-checkpoint
                                   :seon.error/offending branch})))
-        ;; The request branch holds the overlay and roots its commit for the
-        ;; members, which fork the execution's context and acquire their own
-        ;; program: acquiring one here too measured ~0.5 s of nothing.
+        ;; The request branch holds the overlay and roots its commit for the members.
         request-branch (keyword (str "agent-" (id/id)))
         _ (when-not (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch request-branch
                                                               :seon.cluster.registry/from head}))
@@ -1790,14 +1788,28 @@
              (when-not (= ::registry/cluster-connected (::registry/refused (ex-data refusal)))
                (throw refusal)))))
     (let [database (db/db connection)
-          ctx (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution)
-                  (:seon.sci.eval/ctx execution))]
+          source (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution)
+                     (:seon.sci.eval/ctx execution))
+          environment (or (env/of execution) (env/of source))
+          ;; Acquired once on a fork (389 ms), never on the execution's own context:
+          ;; each member forks this and finds its program by commit (29 ms), where
+          ;; re-acquiring per member measured 325-581 ms (2026-09-25).
+          ctx (try (let [ctx (sci.eval/fork-cluster-ctx source database connection
+                                                        (:seon.sci.eval/projection-state (meta connection))
+                                                        {:seon.env/environment environment})
+                         acquired (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})]
+                     (when-let [failure (:seon.sci.eval/acquisition-recording-error acquired)]
+                       (throw (ex-info "The request's program acquisition could not record its refusals."
+                                       {:seon.sci.eval/acquisition-recording-error failure})))
+                     ctx)
+                   (catch Throwable failure
+                     (throw (release! failure [#(store/release-branch! connection) retire!]))))]
       ;; The execution's value with this request's own world: fresh context
       ;; state and routing, so member entries and graphs stay the request's.
       (assoc execution
              :seon.agent/context-state (atom {}) :seon.agent/routing (@routing)
              :seon.sci.eval/base-ctx ctx :seon.sci.eval/ctx ctx
-             :seon.env/environment (or (env/of execution) (env/of ctx))
+             :seon.env/environment environment
              :seon.db/connection connection :seon.db/db database
              :seon.source/commit-id (db/commit-id database)
              :seon.schema/projection (db/carried-projection database)
