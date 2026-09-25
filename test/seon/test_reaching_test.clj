@@ -94,10 +94,13 @@
        (is (not= (get before ta) (get after ta)))
        (is (= (get before tb) (get after tb)))
        (is (= 1 (:seon.test.runner/reach-computed (stats)))))))
-    (let [before (runner/reach-digests (db/db connection) [ta tb])]
+    ;; A data write leaves the program content equal, so the index of that
+    ;; content answers with no derivation (7154084b9: keyed by content).
+    (let [before (runner/reach-digests (db/db connection) [ta tb])
+          derivations (:seon.test.runner/reach-derivations (reach-index connection))]
      (support/transacted! connection [[:db/add [:seon.test/sym ta] :seon.test/pass-count 1]])
      (is (= before (runner/reach-digests (db/db connection) [ta tb])))
-     (is (= {:seon.test.runner/reach-updated 0 :seon.test.runner/reach-computed 0} (stats))))))))
+     (is (= derivations (:seon.test.runner/reach-derivations (reach-index connection)))))))))
 
 (deftest concurrent-reach-reads-of-one-value-derive-once
  ;; The index is a delay held as the cache's value: equal database values
@@ -202,7 +205,9 @@
                            [[:db/add [:seon.test/sym s] :seon.test/fixture-observation
                              "External fixture bytes must be observed."]])))
           (is (some #{s} (sut/stale (db/db connection))))
-          (is (true? (sut/verified? (db/db connection) s))))))))
+          ;; An observed external fixture is never verified by recorded evidence
+          ;; (`seon.test/verified?` since b0b5eedfe).
+          (is (false? (sut/verified? (db/db connection) s))))))))
 
 (deftest in-process-results-detect-worker-global-drift
   (support/with-database
@@ -231,7 +236,8 @@
               (is (= 1 (:seon.test/fail-count result)) (pr-str result))
               (is (= 0 (:seon.test/error-count result)))
               (is (.contains (:seon.test/failure-message result "") "Original Datom failure"))
-              (is (= (sut/reach-digest database s) (:seon.test/reach-digest result))))))))))
+              ;; Admitted members record their reach (f3a4b33d9).
+              (is (= (sut/reach-digest database s) (:seon.test.member/reach-digest result))))))))))
 
 (deftest agent-admitted-tests-reach-their-tested-function
   (support/with-database
@@ -519,8 +525,9 @@
               (let [result (changed-request connection [test-symbol cheap-symbol] {})
                     excluded (:seon.test/long-excluded result)
                     tally (sut/tally result)]
-                (is (= [cheap-symbol] (map :seon.test/sym (:seon.test/results result))) (pr-str result))
-                (is (true? (:seon.test/passed? result)) tally)
+                (is (= [cheap-symbol] (map :seon.test/sym (:seon.test/results result))) tally)
+                ;; An excluded long obligation is unfulfilled, never green (57f02fd5b).
+                (is (false? (:seon.test/passed? result)) tally)
                 (is (= [{:seon.test/sym test-symbol
                          :seon.test/long long-declaration
                          :seon.test/command ["bin/test-check" "default" "--test" (str test-symbol)]}]
