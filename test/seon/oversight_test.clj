@@ -8,7 +8,6 @@
             [datahike.api :as d]
             [seon.db :as db]
             [seon.bootstrap :as bootstrap]
-            [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.cluster.agent :as agent]
             [seon.flow :as seon.flow]
@@ -333,8 +332,6 @@
     (fn [connection]
       (support/seed-cluster! connection "named-a" {:seon.config.render.agent/max-children 3})
       (support/seed-cluster! connection "named-b" {:seon.config.render.agent/max-children 5})
-      (is (not (:seon.error/at (cluster/ensure-cluster-entity!
-                                 connection "unconfigured" cluster/boot-process-identity))))
       (let [db @connection
             names (db/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] db)
             ctx-of #(support/fork-cluster-ctx connection %)
@@ -354,6 +351,9 @@
             (is (= 3 (:seon.render.profile/max-children (profile "named-a"))))
             (is (= 5 (:seon.render.profile/max-children (profile "named-b"))))
             (is (= [] (:seon.render.transcript/runs (history "named-b")))))
+          ;; A cluster row requires its config (`:seon.cluster/config`), so the
+          ;; unconfigured name is one this world holds no rows for.
+          (is (not-any? #{"unconfigured"} names))
           (testing "a named cluster without configuration refuses by that name"
             (doseq [refusal [(fleet "unconfigured") (profile "unconfigured")
                              (history "unconfigured")]]

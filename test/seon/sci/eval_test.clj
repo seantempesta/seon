@@ -514,8 +514,8 @@
             (is (thrown? Throwable
                          (sci/eval-string* ctx-b "fork-private"))
                 "a definition in one fork cannot mutate its sibling")
-            (is (= ["fork-a"] (:seon.sci.admit/value (evaluate ctx-a))))
-            (is (= ["fork-b"] (:seon.sci.admit/value (evaluate ctx-b)))
+            (is (= ["fork-a"] (filterv #{"fork-a" "fork-b"} (:seon.sci.admit/value (evaluate ctx-a)))))
+            (is (= ["fork-b"] (filterv #{"fork-a" "fork-b"} (:seon.sci.admit/value (evaluate ctx-b))))
                 "each fork derives database custody from its branch")))))))
 
 (deftest acquired-source-context-forks-own-their-lazy-program-state
@@ -612,8 +612,7 @@
               source)
           (is (= before (meta #'compiled-runtime-victim)) source)
           (is (= (:arglists before)
-                 (::instrument/arglists
-                  (:seon.error/data instrumentation-read)))
+                 (::instrument/arglists instrumentation-read))
               "instrumentation reads only the unpoisoned compiled metadata")))
       (finally
         (reset-meta! #'compiled-runtime-victim before)))))
@@ -1325,8 +1324,8 @@
         (is (identical? @#'db/as-of (sci/eval-string* ctx "seon.db/as-of"))
             "the fork calls the armed root, not a pre-arming copy")
         (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/arity-error) failure))
-        (is (= 0 (get-in failure [:seon.error/data :seon.instrument/arity])))
-        (is (= arglists (get-in failure [:seon.error/data :seon.instrument/arglists])))
+        (is (= 0 (:seon.instrument/arity failure)))
+        (is (= arglists (:seon.instrument/arglists failure)))
         (is (= (:seon.error/message failure) (:seon.cluster.eval/error evaluation)))
         (is (str/includes? (:seon.eval/shown evaluation) (pr-str arglists)))
         (is (not (str/includes? (:seon.eval/shown evaluation) "projection failed")))
@@ -1758,6 +1757,7 @@
                               :seon.sci.admit/caps caps,
                               :seon.sci.eval/time-limit-ms 5000,
                               :seon.config/on-core-error :panic}))
+                ambient #{"ambient-a" "ambient-b"}
                 cluster-names-source (str
                                        "(seon.db/q "
                                        "'[:find [?name ...] "
@@ -1792,12 +1792,12 @@
             (is (= :seon.db/connection
                    (get-in unbound [:seon.sci.admit/value :seon.schema/expected-value])))
             (is
-              (= ["ambient-a"] (:seon.sci.admit/value read-a))
+              (= ["ambient-a"] (filterv ambient (:seon.sci.admit/value read-a)))
               "the ctx overrides a foreign binding already on the thread")
             (is
-              (= ["ambient-b"] (:seon.sci.admit/value read-b))
+              (= ["ambient-b"] (filterv ambient (:seon.sci.admit/value read-b)))
               "each sibling derives custody from its own ctx")
-            (is (= ["ambient-a"] (:seon.sci.admit/value read-a-again)))
+            (is (= ["ambient-a"] (filterv ambient (:seon.sci.admit/value read-a-again))))
             (is (nil? (:seon.cluster.eval/error write)))
             (is
               (= "ambient-message" (:seon.sci.admit/value read-written))

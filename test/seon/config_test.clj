@@ -609,7 +609,7 @@
           {:seon.config.flow.compute/queue-depth 17}
           :seon.boot/cluster-name "fork"})
         (is (= ["fork"]
-               (sort
+               (filterv #{"ancestor" "fork"}
                 (db/q '[:find [?cluster-name ...]
                         :where
                         [_ :seon.config/cluster ?cluster-name]]

@@ -20,14 +20,14 @@
                                       (fn [_] nil)))
               (finally (remove-ns (ns-name owned)))))))))
 
-;; An installed string attribute of no identity: a seed entity needs no entity schema.
-(defn- reasons [database] (set (db/q '[:find [?r ...] :where [_ :seon.test/fixture-observation ?r]] database)))
+;; A seed entity is a complete data entity: `:seon.maintenance.result/entity` is its string identity alone.
+(defn- reasons [database] (set (db/q '[:find [?r ...] :where [_ :seon.maintenance.result/id ?r]] database)))
 
 (deftest seeds-prepare-the-member-world-in-order-before-the-body
   (let [seen (atom nil)
-        result (run-seeded [{:seon.test/fixture-observation "seed-0"}
+        result (run-seeded [{:seon.maintenance.result/id "seed-0"}
                             (fn [{database :seon.db/db}]
-                              {:seon.test.seed/tx-data [{:seon.test/fixture-observation (str "saw " (count (filter #{"seed-0"} (reasons database))))}]})]
+                              {:seon.test.seed/tx-data [{:seon.maintenance.result/id (str "saw " (count (filter #{"seed-0"} (reasons database))))}]})]
                            #(let [{database :seon.db/db commit :seon.source/commit-id} sut/*member*]
                               (reset! seen [(reasons database) (= commit (db/commit-id database))])))]
     (is (zero? (:seon.test/error-count result)) (:seon.test/failure-message result))
@@ -36,7 +36,7 @@
 
 (deftest a-host-body-and-its-held-handle-read-the-prepared-member
   (let [seen (atom nil)
-        result (run-seeded [{:seon.test/fixture-observation "custody"}]
+        result (run-seeded [{:seon.maintenance.result/id "custody"}]
                            #(let [head (db/db)]
                               (reset! seen [(reasons head) (db/commit-id head)
                                             (:seon.source/commit-id (support/execution-handle db/*conn*))])))
@@ -46,8 +46,8 @@
     (is (= head held) "the handle held for that connection is the prepared one, so fixtures branch with the seeds")))
 
 (deftest a-refused-seed-prevents-body-entry
-  (doseq [[seeds rule] [[[{:seon.test/fixture-observation 42}] "Seed entry 0"]
-                        [[{:seon.test/fixture-observation "ok"} (fn [_] {:seon.test.seed/tx-data "nope"})] "Seed entry 1"]]
+  (doseq [[seeds rule] [[[{:seon.maintenance.result/id 42}] "Seed entry 0"]
+                        [[{:seon.maintenance.result/id "ok"} (fn [_] {:seon.test.seed/tx-data "nope"})] "Seed entry 1"]]
           :let [entered (atom false) result (run-seeded seeds #(reset! entered true))]]
     (is (false? @entered) rule)
     (is (str/includes? (str (:seon.test/failure-message result)) rule))))
@@ -71,7 +71,7 @@
                                          (assoc row :seon.program/definition-digest (program/definition-digest row)))
                          rows (seon.fn/source-rows database (program/shapes-in (schema/projection-from-database database))
                                                    namespace-row "(deftest redefined-by-its-own-seed (is false))" #{})]
-                     {:seon.test.seed/tx-data (seon.fn/reconcile-tx database rows [])}))
+                     {:seon.test.seed/tx-data (seon.fn/reconcile-tx database (mapv #(support/revised-row database % {}) rows) [])}))
         entered (atom false)
         result (run-seeded test-symbol [redefine] #(reset! entered true))]
     (is (false? @entered) "the pre-seed Var never runs")
