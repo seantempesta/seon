@@ -237,7 +237,6 @@
                entries)
             "cluster and agent assertions deduplicate and sort by model id")
         (is (str/includes? (problems/ai-prose value) "a-agent-model"))
-        (is (str/includes? (problems/log-report value) "z-cluster-model"))
         (is (str/includes?
              (hiccup/->string (problems/html-report value))
              "no registry row"))
@@ -290,7 +289,6 @@
                 (is (= [{:seon.fn/sym qualified-name}] stale-vars))
                 (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
                 (is (str/includes? (problems/ai-prose value) qualified-text))
-                (is (str/includes? (problems/log-report value) qualified-text))
                 (is (str/includes?
                      (hiccup/->string (problems/html-report value))
                      qualified-text)))
@@ -376,7 +374,6 @@
         (is (= 4 (count facts)))
         (is (every? #((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/fact) %) facts))
         (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
-        (is (= 4 (count (str/split-lines (problems/log-report value)))))
         (is (hiccup/hiccup? (problems/html-report value)))))))
 
 (deftest incomplete-error-entities-are-refused
@@ -426,7 +423,6 @@
         acquisitions (atom 0)
         render-calls (atom {})
         acquire with-db
-        log-report problems/log-report
         html-report problems/html-report
         verify-value
         (fn [connection present occurrences]
@@ -435,7 +431,6 @@
                            (present :seon.problems/failed-runs)
                            (conj :seon.problems/error-signatures))
                 _ (reset! render-calls {})
-                log (problems/log-report value)
                 html (problems/html-report value)
                 rows (filter
                       (fn [node]
@@ -444,14 +439,13 @@
                       (tree-seq sequential? seq html))
                 row-count (+ (count present)
                              (if (present :seon.problems/failed-runs) 1 0))]
-            (is (= {:log 1 :html 1} @render-calls)
+            (is (= {:html 1} @render-calls)
                 "Each derived value reaches each renderer exactly once.")
             (is (every? #(seq (get value %)) present))
             (is (= expected (set (keys value))))
             (is (= (empty? present) (= {} value)))
             (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
             (is (= present (set/intersection present (set (keys value)))))
-            (is (= row-count (count (remove str/blank? (str/split-lines log)))))
             (is (= row-count (count rows)))
             (is (hiccup/hiccup? html))
             (when (present :seon.problems/error-signatures)
@@ -462,9 +456,6 @@
                 (is (= (if (present :seon.problems/failed-runs) 2 1)
                        (count signatures)))))))]
     (with-redefs [with-db (fn [body] (swap! acquisitions inc) (acquire body))
-                  problems/log-report
-                  (fn [value] (swap! render-calls update :log (fnil inc 0))
-                    (log-report value))
                   problems/html-report
                   (fn [value] (swap! render-calls update :html (fnil inc 0))
                     (html-report value))]

@@ -144,15 +144,13 @@
                               [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
                                 [:seon.agent/id "owner"]]])
       (let [value (found connection)
-            log-line (problems/log-report value)]
+            html (pr-str (problems/html-report value))]
         (is (= [{:seon.ns/name 'example.assigned}
                 {:seon.ns/name 'example.unowned}]
                (:seon.problems/unowned-namespaces value))
             "an assigned namespace nobody stewards is still unstewarded")
         (is (= "owner" (agent/steward-of @connection 'example.owned)))
         (is (nil? (agent/steward-of @connection 'example.assigned)))
-        (is (str/includes? log-line
-                           "unstewarded-namespace namespace=example.unowned"))
-        (is (str/includes? log-line
-                           "unstewarded-namespace namespace=example.assigned"))
-        (is (not (str/includes? log-line "example.owned")))))))
+        (is (str/includes? html "example.unowned"))
+        (is (str/includes? html "example.assigned"))
+        (is (not (str/includes? html "example.owned")))))))

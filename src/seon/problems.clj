@@ -29,8 +29,7 @@
     signature. Grouping is the point: a hundred errors of one signature
     is ONE problem that recurred a hundred times, and listing it a
     hundred times would bury the other three. The latest occurrence
-    rides along in full, so the log projection composes the ordinary
-    per-fact line and a digger needs no second lookup.
+    rides along in full, so a digger needs no second lookup.
   - WEDGED RUNS — a run held by a process that is not in the live set.
     No clock: liveness is observable, and a deadline standing in for it
     is the tuned constant the standing ruling bans.
@@ -62,8 +61,7 @@
 
   Crash walk: reads only. A kill loses a value nobody had
   committed; the next caller re-derives it from the same facts."
-  (:require [clojure.string :as str]
-            [seon.db :as db]
+  (:require [seon.db :as db]
             [seon.turn :as turn]
             [seon.error :as error]
             [seon.config :as config]
@@ -507,10 +505,9 @@
 (defn html-report
   "`:seon.render/html` — everything wrong now, as a surface.
 
-  THE THIRD PROJECTION OF ONE VALUE, and deliberately not a third
-  derivation: `problems` already answered what is wrong, `log-report`
-  says it in lines and `ai-prose` says it as steering; this says it in
-  hiccup. Adding it was one key on the value and one function, with no
+  THE SECOND PROJECTION OF ONE VALUE, and deliberately not a second
+  derivation: `problems` already answered what is wrong and `ai-prose`
+  says it as steering; this says it in hiccup. Adding it was one key on the value and one function, with no
   router change and no registration — which is the whole claim the open
   kind set makes, tested here on the first consumer outside the error
   family.
@@ -631,58 +628,3 @@
      {:seon.render/value (into {} (keep (fn [[family rows]] (when (seq rows) [family (vec rows)]))) lines)
       :seon.render.value/root `ai-prose
       :seon.render/profile (assoc profile :seon.print/requery-id '(seon.problems/problems (seon.db/db) {}))})))
-
-(defn log-report
-  "The whole value as log lines, newest concern first.
-  COMPOSES rather than reformats: an error signature's line is
-  the latest fact's ordinary `seon.error/log-line`, so the line a
-  digger sees in `problems` is byte-identical to the one the fault path
-  emitted. The other three families have no per-fact owner, so their
-  lines are built here, in the same `key=value` grammar.
-
-  Returns \"\" for a healthy cluster — nothing wrong is nothing to say,
-  and a cheerful \"no problems\" line is noise in a log that only exists
-  to be grepped."
-  {:malli/schema [:=> [:cat :seon.problems/problems] :string]}
-  [found]
-  (->> (concat
-        (for [entry (:seon.problems/failed-tests found)]
-          (str "Test " (:seon.test/sym entry) "\n" (test/failure-message entry)))
-        (for [entry (:seon.problems/failed-tests-unknown found)]
-          (str "Test evidence unknown: " (:seon.error/message entry)
-               " Offending: " (pr-str (:seon.error/offending entry))))
-        (for [entry (:seon.problems/error-signatures found)]
-          (error/log-line
-           (error/notice {:seon.error/fact (:seon.error/fact entry)
-                          :seon.error/occurrence-count
-                          (:seon.problems/occurrences entry)})))
-
-        (for [entry (:seon.problems/failed-runs found)]
-          (str "seon.problems failed-run run=" (:seon.turn/id entry)
-               " agent=" (:seon.agent/id entry)
-               " error=" (pr-str (:seon.error/message entry))))
-        (for [entry (:seon.problems/errored-receipts found)]
-          (str "seon.problems errored-receipt receipt="
-               (:seon.cluster.eval/id entry)
-               " run=" (:seon.turn/id entry)
-               " ordinal=" (:seon.cluster.eval/ordinal entry)
-               " source=" (pr-str (:seon.cluster.eval/source entry))
-               (when-let [message (:seon.cluster.eval/error entry)]
-                 (str " error=" (pr-str message)))))
-        (for [entry (:seon.problems/deferred-agents found)]
-          (str "seon.problems deferred-agent agent="
-               (:seon.agent/id entry)
-               " episode-runs=" (:seon.turn.work/episode-runs entry)
-               " deferred=" (:seon.problems/deferred-count entry)
-               " (agent-sent triggers wait for an outside trigger)"))
-        (for [entry (:seon.problems/unowned-namespaces found)]
-          (str "seon.problems unstewarded-namespace namespace="
-               (:seon.ns/name entry)))
-        (for [entry (:seon.problems/stale-vars found)]
-          (str "seon.problems stale-var var=" (:seon.fn/sym entry)
-               " (absent from the published program graph; restart the JVM)"))
-        (for [entry (:seon.problems/missing-models found)]
-          (str "seon.problems missing-model model="
-               (pr-str (:seon.config.ai/model entry))
-               " (no :seon.ai.model/id registry row; calls continue unchanged)")))
-       (str/join "\n")))

@@ -226,7 +226,6 @@
                 found {:seon.problems/failed-tests [entry]}]
             (is (= (:seon.test/failures result) (:seon.test/failures entry)))
             (is (str/includes? (problems/ai-prose found) "first claim"))
-            (is (str/includes? (problems/log-report found) "expected:"))
             (is (str/includes? (sut/failure-message (dissoc result :seon.test/failure-message)) "second claim"))
             (is (str/includes? (pr-str (problems/html-report found)) "data-file"))))))))
 
