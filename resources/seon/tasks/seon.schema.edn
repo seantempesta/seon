@@ -1,0 +1,8 @@
+[#:seon.task{:id "cea47b015b23"
+             :name "agents-can-validate"
+             :kind :namespace
+             :intent "An agent can validate a value against a registered schema key from its SCI context in one ordinary call. Historical: passed on branch exp-validate-2 from the brief alone, never delivered; that branch is not retained."
+             :must-read #{seon.schema/valid-candidate-value? seon.schema/explain-candidate-value seon.schema/projection-from-database}
+             :evidence #{"docs/research/agent-platform/experiments/tasks-v02/seon.schema.edn"
+                         "docs/research/agent-platform/language-requirements-2026-09-24.md"
+                         "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}]

@@ -166,3 +166,23 @@
        (is (= [] (issue/adopt-tasks-call absent @connection)))
        (adopt! published)
        (is (= "Prove ingestion." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))))))
+
+(deftest the-checkouts-migrated-records-ingest-by-aspect-and-repeat-as-a-no-op
+  ;; Slice 2 (spec 7.12, 7.15): the checkout's own task files are the migrated
+  ;; records. Each handle is its aspect's; an entry moved to another namespace's
+  ;; file names a different aspect, so its written handle refuses there.
+  (test-support/with-database
+   (fn [connection]
+     (let [files (issue/task-files "." nil)
+           basis (issue/task-basis @connection files)]
+       (issue/index-tasks! {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
+       (doseq [[id aspect] {"132fee0467c8" '[seon.sci.eval "definitions-bypass-entry-gate" :function]
+                                "cea47b015b23" '[seon.schema "agents-can-validate" :namespace]}]
+         (is (= aspect ((juxt :seon.task/ns :seon.task/name :seon.task/kind)
+                        (db/pull @connection [:seon.task/ns :seon.task/name :seon.task/kind] [:seon.task/id id]))))
+         (is (= id (apply issue/task-handle aspect))))
+       (is (= {:seon.task/changed? false} (issue/index-tasks! {:seon.db/connection connection :seon.task/files files})))
+       (is (= :handle-mismatch
+              (refusal #(issue/index-tasks! {:seon.db/connection connection
+                                             :seon.task/files {"resources/seon/tasks/seon.sci.eval.edn"
+                                                               (get files "resources/seon/tasks/seon.schema.edn")}}))))))))
