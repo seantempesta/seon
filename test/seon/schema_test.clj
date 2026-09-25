@@ -1494,8 +1494,10 @@
                           (ex-data failure)))]
        (is (not= ::no-refusal outcome)
            "a poisoned database value may not answer as a projection")
-       (is (= :seon.schema/database-value (:seon.error/member outcome)))
-       (is (= poisoned (:seon.schema/refused-value outcome)))
+       ;; The armed contract refuses the argument before the body reads it.
+       (is (= 'seon.schema/projection-from-database (:seon.error/operation outcome)))
+       (is (= :seon.fn.arity/input (:seon.error/member outcome)))
+       (is (= [poisoned] (:seon.error/offending outcome)))
        (is (seq (:seon.schema.projection/forms
                  (schema/projection-from-database @connection)))
            "a real database still derives a populated projection")))))

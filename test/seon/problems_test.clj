@@ -220,7 +220,8 @@
   (let [properties
         (-> (schema.edn/packaged-forms)
             (get :seon.problems/stale-var)
-            (comp seon.schema.internal/entity-properties seon.schema/structural-schema))]
+            seon.schema/structural-schema
+            seon.schema.internal/entity-properties)]
     (is (nil? (:seon.render/ai properties)))
     (is (nil? (:seon.render/html properties)))
     (is (= [:seon.fn/sym]
@@ -231,7 +232,8 @@
   (let [properties
         (-> (schema.edn/packaged-forms)
             (get :seon.problems/missing-model)
-            (comp seon.schema.internal/entity-properties seon.schema/structural-schema))]
+            seon.schema/structural-schema
+            seon.schema.internal/entity-properties)]
     (is (= `problems/missing-model-ai (:seon.render/ai properties)))
     (is (= `problems/missing-model-html (:seon.render/html properties)))))
 
@@ -567,10 +569,11 @@
            result (binding [*err* warnings]
                     (seon.schema/call-with-projection-state
                      (atom {}) #(problems/problems raw {})))]
-       (is (= 'seon.problems/problems (:seon.error/operation result)))
-       (is (= :seon.db/projection (:seon.error/layer result)))
-       (is (= 'seon.problems/problems
-              (get-in result [:seon.error/data :seon.db/operation])))
+       ;; `seon.db/projection-fallback` owns the flat refusal and names the caller.
+       (is (= 'seon.db/projection-fallback (:seon.error/operation result)))
+       (is (= :seon.schema/projection (:seon.error/layer result)))
+       (is (= 'seon.problems/problems (:seon.db/refused-read-operation result)))
+       (is (= {:seon.db/operation 'seon.problems/problems} (:seon.schema/refused-value result)))
        (is (= 1 (count (str/split-lines (str warnings)))))))))
 
 (deftest six-hundred-failed-tests-render-within-the-profile-bound
