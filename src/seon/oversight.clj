@@ -208,8 +208,8 @@
            :seon.render/value (fleet-value (:seon.db/db source)
                                            (context-cluster-name (:seon.sci.eval/ctx source))
                                            routing)
-           :seon.render/ai `ai-story
-           :seon.render/html `html-table)))
+           ;; The producer's declared return names the pair (:seon.oversight/fleet).
+           :seon.render.call/function `fleet-value)))
 
 (defn- ordinal
   "An English ordinal for a positive run count."
@@ -248,7 +248,7 @@
 
 (defn ai-story
   "Tell the fleet's current story in one concise line."
-  {:malli/schema [:=> [:cat :seon.oversight/unit] :string]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
   (let [value (:seon.render/value unit)
         agents (:seon.oversight/agents value)]
@@ -291,7 +291,7 @@
 
 (defn html-table
   "Render the fleet story as the root page's live table."
-  {:malli/schema [:=> [:cat :seon.oversight/unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [value (:seon.render/value unit)
         agents (:seon.oversight/agents value)

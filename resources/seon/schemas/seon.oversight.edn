@@ -6,7 +6,8 @@
                  :missing [:vector {:min 1 :description "The live-state members the handed request did not hold: routing entry members, or :seon.boot/cluster-name when no context environment names the cluster."} :qualified-keyword],
                  :unavailable
                  [:map
-                  {:description "Live fleet state was requested with a routing entry that cannot answer it. Rendered visibly; never an empty fleet."}
+                  {:description "Live fleet state was requested with a routing entry that cannot answer it. Rendered visibly; never an empty fleet."
+                   :seon.render/ai seon.oversight/ai-story :seon.render/html seon.oversight/html-table}
                   [:seon.oversight/missing :seon.oversight/missing]],
                  :request
                  [:map
@@ -75,6 +76,7 @@
                  :agents [:vector :seon.oversight/agent],
                  :fleet
                  [:map
+                  {:seon.render/ai seon.oversight/ai-story :seon.render/html seon.oversight/html-table}
                   [:seon.oversight/agents :seon.oversight/agents]
                   [:seon.oversight/plumbing :seon.oversight/plumbing]],
                  :unit

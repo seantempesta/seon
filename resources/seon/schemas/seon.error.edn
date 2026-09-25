@@ -238,9 +238,9 @@
              :occurrence [:int {:min 1}],
              :notice
              [:map
+              {:seon.render/ai seon.error/notice-prose}
               [:seon.error/fact :seon.error/fact]
               [:seon.error/evidence :seon.error/evidence]
-              [:seon.render/ai :qualified-symbol]
               [:seon.error/reason {:optional true} :seon.error/reason]
               [:seon.error/occurrence
                {:optional true}

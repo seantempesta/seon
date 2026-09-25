@@ -701,7 +701,7 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn notice
-  "The agent-facing unit for one fact and its explicit AI producer.
+  "The agent-facing unit for one fact; :seon.error/notice declares its AI renderer.
 
   `:seon.error/reason` is the per-RECIPIENT why-clause and is optional
   because a log has no recipient: one fact is `:your-run` to the
@@ -712,20 +712,14 @@
   [{:seon.error/keys [fact reason occurrence occurrence-count notification-limit
                       notification]
     agent-id :seon.agent/id}]
-  (let [presentation (if (and (qualified-symbol? (:seon.instrument/fn fact))
-                                    (#{:input :output :guard} (:seon.instrument/arm fact)))
-                       `instrumentation-prose
-                       `ai-prose)]
-    (cond-> {:seon.error/fact fact
-             :seon.error/evidence [:seon.error/id (:seon.error/id fact)]
-             ;; The typed selector invokes this explicit producer through SCI.
-             :seon.render/ai presentation}
-      reason (assoc :seon.error/reason reason)
-      occurrence (assoc :seon.error/occurrence occurrence)
-      occurrence-count (assoc :seon.error/occurrence-count occurrence-count)
-      notification-limit (assoc :seon.error/notification-limit notification-limit)
-      notification (assoc :seon.error/notification notification)
-      agent-id (assoc :seon.agent/id agent-id))))
+  (cond-> {:seon.error/fact fact
+           :seon.error/evidence [:seon.error/id (:seon.error/id fact)]}
+    reason (assoc :seon.error/reason reason)
+    occurrence (assoc :seon.error/occurrence occurrence)
+    occurrence-count (assoc :seon.error/occurrence-count occurrence-count)
+    notification-limit (assoc :seon.error/notification-limit notification-limit)
+    notification (assoc :seon.error/notification notification)
+    agent-id (assoc :seon.agent/id agent-id)))
 
 (defn- fact-source
   {:malli/schema [:=> [:cat :map]
@@ -1158,6 +1152,18 @@
                            nil)
                          (str "Inspect error " id ". Signature: " signature ".")
                          "Further occurrences share this record and send no notification until it is resolved."])))))
+
+(declare ai-prose)
+
+(defn notice-prose
+  "`:seon.render/ai` for one notice: steering for a contract arm's fact, else its evidence."
+  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
+  [notice]
+  (let [fact (:seon.error/fact notice)]
+    (if (and (qualified-symbol? (:seon.instrument/fn fact))
+             (#{:input :output :guard} (:seon.instrument/arm fact)))
+      (instrumentation-prose notice)
+      (ai-prose notice))))
 
 (defn ai-prose
   "`:seon.render/ai` — AI-attempt evidence or a legacy error notice.
