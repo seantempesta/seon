@@ -23,6 +23,17 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**INCIDENT 2026-09-25 03:09Z: default OOM-killed** by render-floor-opus's scratch probe (an infinite `(range)` map key hashed
+by its new identity-first ordering; 17.8 GB dump data/heap/java_pid67823.hprof — owner to delete). Recovery: floor slice
+parked at tmp/render-floor-opus/slice2b-worktree.patch, dispatch 1c parked at tmp/render-dispatch-opus/inflight.patch;
+restart refused twice. (1) PUBLICATION ORDER: incremental publication wrote schema rows before program rows, refusing a
+schema naming a renderer defined in the same publication (seon.error/notice-prose) — fixed 5c80755da. The refusal's
+printed chain dropped the missing names (keep-the-whole-cause defect in boot's response/refused!). Root's revert
+6f0a37843 of 5a07f31e3 (my.turn page deletion) was based on a WRONG guess; re-land after adoption is proven. (2)
+ADOPTION: development-namespaces fed a refusal map's entries back as namespace names ([:seon.db/invalid-read true]) —
+lane fix-adoption-dependents-opus. Default is UP (03:27Z) running HEAD code over OLD rows (6ab5d3a3, 18 stale Vars)
+until adoption lands; lanes paused from REPL probes except the adoption lane. init took 39.5 s (over 10 s: issue owed).
+
 **RULINGS 2026-09-25 (owner):** floor slice 2 lands as ONE slice with the 100-line bound waived (conditions: §3
 fixes folded in, ≤+20% time, compact elisions, Astra diff review). Harness S4c: attempt agent/turn only for members
 whose reach includes effect/request*; a reach miss refuses loudly. **(root):** namespace-specific pages deleted (one
