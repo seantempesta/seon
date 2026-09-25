@@ -781,24 +781,13 @@
                evidence)))
 
 (defn- render-program-evidence
-  "Follow recorded call edges once; retained calls carry these program rows."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :map] :seon.fn/sym] [:or :nil :map]]}
+  "The program rows a retained call reaches over recorded call edges."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:or :nil :map] :seon.fn/sym] :map]}
   [database snapshot selected]
-  (loop [pending #{selected} visited #{}]
-    (if (empty? pending)
-      (let [symbols (map symbol visited)
-            namespaces (set (map #(symbol (namespace %)) symbols))]
-        {:functions (into {} (map #(vector % (get (:functions snapshot) %))) symbols)
-         :namespaces (into {} (map #(vector % (get (:namespaces snapshot) %))) namespaces)})
-      (let [rows (db/pull-many database
-                              '[:seon.fn/sym (limit :seon.fn/calls nil)]
-                              (mapv #(vector :seon.fn/sym %) pending))
-            visited (into visited pending)]
-        (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
-          nil
-          (recur (into #{} (comp (mapcat :seon.fn/calls)
-                                (remove visited)) rows)
-                 visited))))))
+  (let [symbols (db/stored-call-reach database selected)
+        namespaces (set (map #(symbol (namespace %)) symbols))]
+    {:functions (into {} (map #(vector % (get (:functions snapshot) %))) symbols)
+     :namespaces (into {} (map #(vector % (get (:namespaces snapshot) %))) namespaces)}))
 
 (defn call-cache-evidence
   "Describe a retained call's code, projection, and supplied input."
