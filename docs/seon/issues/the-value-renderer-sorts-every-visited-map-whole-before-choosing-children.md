@@ -45,3 +45,15 @@ profile's bound (children shown), not the map's size: e.g. select the first
 `max-children` members in order with a bounded selection instead of a full
 sort, or keep sorted/array-map order as given. Regression: a 1,000,000-entry
 map renders under the default profile in well under 100 ms.
+
+## Progress (2026-09-25, lane perf-renderer-map-sort)
+
+`value-node*` now selects the first `max-children`+1 members with a bounded
+heap (`seon.render.value/ordered-head`) instead of sorting the whole map or
+set; output is identical at or under the bound. Measured 1,000,000 entries:
+8,472 ms / 26.9 GB before, 403 ms / 1.6 GB after
+(`docs/prds/agent-platform/landing/lane-perf-renderer-map-sort-2026-09-25.md`).
+Still open: the 100 ms target. The rest is one armed `seon.print/compare-values`
+call per member; a cheaper comparator belongs to `seon.print`. Also open, same
+class: `seon.render.value/window` (`stable-entries`) sorts a whole map or set
+by `pr-str` before paging.

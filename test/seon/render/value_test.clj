@@ -537,6 +537,31 @@
     (is (str/includes? html ">99<")
         "the last item of the whole value reaches the page")))
 
+(deftest a-map-beyond-the-child-bound-costs-the-bound-not-its-size
+  ;; The AI render keeps `max-children` members in whole-map order and names
+  ;; the rest; it selects them without sorting the whole map, so a million
+  ;; entries cost one pass. At or under the bound the order is the full sort.
+  (let [profile (render/agent-render-profile (support/effective-config))
+        kept (:seon.render.profile/max-children profile)
+        shown (fn [raw] (->> (value/prepare (assoc (unit raw) :seon.render/profile profile))
+                             :seon.render.value/tree :seon.print/entries
+                             (keep (fn [entry] (when (vector? entry)
+                                                 (:seon.print/value (first entry)))))))
+        whole (fn [raw] (map key (sort-by key print/compare-values raw)))
+        mixed (merge (zipmap (range 20) (range)) (zipmap (map (comp keyword str) (range 20)) (range)))
+        large (zipmap (range 1000000) (range))
+        started (System/nanoTime)
+        projection (value/prepare (assoc (unit large) :seon.render/profile profile))
+        elapsed-ms (/ (- (System/nanoTime) started) 1e6)
+        cut (last (:seon.print/entries (:seon.render.value/tree projection)))]
+    (is (= (whole (into {} (take kept mixed))) (shown (into {} (take kept mixed))))
+        "at the bound every member shows in whole order")
+    (is (= (take kept (whole mixed)) (shown mixed))
+        "beyond the bound the kept members are the whole order's first")
+    (is (= (- (count large) kept) (:seon.print/omitted cut)) (pr-str cut))
+    (is (= :seon.render.profile/max-children (:seon.print/bound-by cut)))
+    (is (< elapsed-ms 1000) (str "a million-entry map rendered in " elapsed-ms " ms"))))
+
 (deftest references-stay-opaque
   ;; A reference is never entered: it contributes its class and nothing
   ;; else, so no private state leaks through a render. A value that is

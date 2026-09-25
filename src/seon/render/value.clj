@@ -422,6 +422,25 @@
 
       :else value)))
 
+(defn- ordered-head
+  "The first `n` of `members` as `(sort order members)` orders them, ties kept
+  in iteration order, found in one pass through an `n`-member heap."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] [:int {:min 1}] [:fn clojure.core/seqable?]]
+                  [:fn clojure.core/sequential?]]}
+  [order n members]
+  (let [before (fn [[i a] [j b]]
+                 (let [c (order a b)] (if (zero? c) (compare i j) c)))
+        ;; A max-heap: its head is the last member kept so far.
+        heap (java.util.PriorityQueue. (int n) (fn [x y] (before y x)))]
+    (reduce (fn [i member]
+              (cond (< (.size heap) n) (.add heap [i member])
+                    ;; A later member displaces the head only when strictly before it.
+                    (neg? (order member (second (.peek heap))))
+                    (do (.poll heap) (.add heap [i member])))
+              (inc i))
+            0 members)
+    (mapv second (sort before (vec heap)))))
+
 (declare value-node)
 
 (defn- value-node*
@@ -479,13 +498,18 @@
                        (vector? value) :seon.print/vector :else :seon.print/list)
             child-key (if map-value? :seon.print/entries :seon.print/items)
             limit (if ai? (:seon.render.profile/max-children profile) Long/MAX_VALUE)
-            ;; Order whole members before choosing which children to retain.
+            ;; The AI profile shows `limit` children and one elision, so it
+            ;; selects `limit`+1 ordered members; HTML orders the whole value.
+            ordered (fn [order members]
+                      (if (and ai? total (> total (inc limit)))
+                        (ordered-head order (inc limit) members)
+                        (sort order members)))
             entries (cond
                       map-value? (map (fn [[k v]] [nil k v])
-                                      (sort-by key print/compare-values value))
-                      set-value? (let [members (map (fn [v] [nil v v]) value)]
-                                     (if (sorted? value) members
-                                       (sort-by second print/compare-values members)))
+                                      (ordered #(print/compare-values (key %1) (key %2)) value))
+                      set-value? (map (fn [v] [nil v v])
+                                      (if (sorted? value) value
+                                        (ordered print/compare-values value)))
                       :else (map-indexed (fn [i v] [nil i v]) value))
             children
             (loop [entries (seq entries) result []]
