@@ -2053,6 +2053,25 @@
                (db/pull (db/db connection) [:seon.program/definition-digest]
                         [:seon.test/sym 'sample.seedorder/seeded]))))))))
 
+(deftest one-owner-digests-a-definition-with-its-stored-namespace
+  ;; CLASS: producers digested with resolver contexts other than the stored
+  ;; namespace (an SCI context, a widened analysis `ns` form), so settled REPL
+  ;; definitions were refused. `db/definition-digest-of` is the one owner.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           namespace-row (test-support/namespace-row database 'sample.context)
+           widened (assoc namespace-row :seon.ns/refers
+                          #{{:seon.ns.refer/local 'is :seon.ns.refer/target-ns 'clojure.test
+                             :seon.ns.refer/target-name 'is}})
+           row (test-support/program-fn-row database 'sample.context/f "(defn f [x] x)")
+           digested #(assoc row :seon.program/definition-digest (db/definition-digest-of projection row %))]
+       (is (= (:seon.program/definition-digest row) (:seon.program/definition-digest (digested namespace-row))))
+       (is (= :seon.program/definition-digest
+              (:seon.error/member (db/transact! connection [namespace-row (digested widened)]))))
+       (test-support/transacted! connection [namespace-row (digested namespace-row)])))))
+
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
    (fn [connection]

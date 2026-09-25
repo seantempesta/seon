@@ -4201,6 +4201,22 @@
                      {} (d/datoms database :eavt entity-id))]
      (reduce (fn [row a] (update row a (or (::normalize-many (get plans a)) set))) row @many))))
 
+(defn definition-digest-of
+  "The definition digest the writer admits for function or test `row`:
+  `seon.program/definition-digest` of the attributes its family owns
+  (`seon.program/canonical-row`) with the resolver context
+  (`seon.fn/stored-namespace-context`) of `namespace-row`, the namespace row
+  the same transaction leaves stored. The one digest owner: the writer checks
+  every changed row against it, and every producer digests through it."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map [:maybe :map]]
+                  :seon.program/definition-digest]}
+  [projection row namespace-row]
+  (@program-definition-digest
+   (@program-canonical-row
+    (schema/projection-cache-value projection ::program-shapes #(@program-shapes-in projection))
+    row)
+   (some-> namespace-row (@stored-namespace-context))))
+
 (defn- write-digest-error
   "The first function or test row this report changed whose stored definition
   digest is not the one its final value produces with its namespace's resolver
@@ -4224,8 +4240,8 @@
                        [:seon.fn/sym :seon.test/sym])
         touched (reduce (fn [result {:keys [e a]}] (update result e (fnil conj #{}) a))
                         (sorted-map) (:tx-data report))
-        ;; One resolver context per namespace in the report, not per row.
-        context-of (memoize #(@stored-namespace-context (declaration-value projection database identity-attrs %)))]
+        ;; One namespace row per namespace in the report, not per row.
+        namespace-of (memoize #(declaration-value projection database identity-attrs %))]
     (some (fn [[entity-id attributes]]
             (when-let [identity-attribute
                        (some (fn [[family owned]]
@@ -4236,9 +4252,8 @@
               (let [row (declaration-value projection database identity-attrs entity-id)
                     namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))
                     namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
-                    context (some-> namespace-entity context-of)
                     stored (:seon.program/definition-digest row)
-                    produced (@program-definition-digest (@program-canonical-row shapes row) context)]
+                    produced (definition-digest-of projection row (some-> namespace-entity namespace-of))]
                 (when (not= stored produced)
                   (diagnostic
                    {::transaction-refused true
