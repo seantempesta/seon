@@ -351,6 +351,51 @@
         (is (:seon.error/at (problems/resolve! connection (apply str (repeat 64 "0"))))
             "resolving an unrecorded signature is refused, not a silent no-op")))))
 
+(deftest a-fault-resolves-when-its-function-changes-and-reopens-on-recurrence
+  (with-db
+    (fn [connection]
+      (let [function (symbol "my.resolution.fixture" "target")
+            define! (fn [source]
+                      (test-support/transacted!
+                       connection [(test-support/namespace-row @connection 'my.resolution.fixture)
+                                   (test-support/program-fn-row @connection function source)]))
+            fault! (fn []
+                     (test-support/transacted!
+                      connection
+                      (error/commit-tx
+                       @connection
+                       {:seon.schema/projection (seon.schema/handed-projection)
+                        :seon.error/source {:clojure.core.async.flow/ex
+                                            (ex-info "boom" {:seon.instrument/fn function :seon.instrument/arm :input})}
+                        :seon.error/declared-schema :seon.flow/exception-error
+                        :seon.error/id (str (random-uuid)) :seon.error/at (java.util.Date.) :seon.error/process live
+                        :seon.sci.admit/caps caps :seon.config.error/escalate-to "agent-a"
+                        :seon.config.error/recurrence-limit 100 :seon.config.error/max-evidence-bytes 16384})))
+            signature #(db/q '[:find ?s . :in $ ?f :where [?e :seon.error/signature ?s] [?e :seon.instrument/fn ?f]]
+                             @connection function)
+            open? #(= [(signature)] (mapv :seon.error/signature
+                                          (problems/open-faults @connection (vec (:seon.problems/error-signatures (found connection))))))
+            messages #(db/q '[:find (count ?m) . :in $ ?s :where [?m :seon.message/about ?s]] @connection (signature))]
+        (define! "(defn target [] 1)")
+        (fault!)
+        (is (string? (signature)) "the recorded fault names its failing function")
+        (is (open?) "a fault whose function is unchanged is open")
+        (is (= 1 (messages)))
+        (fault!)
+        (is (open?) "a repeat under the same code keeps it open")
+        (is (= 1 (messages)) "and is not delivered again")
+        (define! "(defn target [] 2)")
+        (let [resolved (error/resolution @connection (signature))]
+          (is (= :seon.program/definition-digest (:seon.error/resolved-by resolved)) (pr-str resolved))
+          (is (= function (:seon.instrument/fn resolved)))
+          (is (not= (:seon.error/digest-then resolved) (:seon.error/digest-now resolved))))
+        (is (not (open?)) "a changed definition resolves it without resolve!")
+        (fault!)
+        (is (open?) "a recurrence under the changed code reopens it")
+        (is (= 2 (messages)) "the reopening is delivered once")
+        (fault!)
+        (is (= 2 (messages)) "a repeat under the changed code is not delivered again")))))
+
 (deftest every-committed-error-fact-shape-is-projectable
   (with-db
     (fn [connection]

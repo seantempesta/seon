@@ -1315,41 +1315,80 @@
                    [?agent :seon.agent/id ?id]]
           database function)))
 
-(defn resolved?
-  "Whether a resolution follows the latest occurrence: the transaction instant of
-  `:seon.error/resolved-tx` is at or after `latest-at` (`seon.problems/open-faults`)."
-  {:malli/schema [:=> [:cat [:or :nil :inst] [:or :nil :inst]] :boolean]}
-  [resolution-at latest-at]
-  (boolean (and resolution-at (or (nil? latest-at) (not (pos? (compare latest-at resolution-at)))))))
+(defn resolution
+  "Why the fault `signature` names is resolved, or nil while it is open.
+  Resolved by program change when its `:seon.instrument/fn` row's definition
+  digest now differs from the digest current at its latest occurrence's
+  transaction, so a recurrence under the changed code reopens it; otherwise by
+  a `:seon.error/resolved-tx` (`seon.problems/resolve!`) at or after that
+  transaction. No function row or digest leaves the rule unknown: open. The
+  digest then is read from one `history` view, because each `as-of` view
+  derives its own projection (~100 ms per signature on default, 2026-09-24)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature]
+                  [:or :nil :seon.error/resolution :seon.db/error-result]]}
+  [database signature]
+  (let [latest (db/q '[:find (max ?tx) . :in $ ?signature
+                       :where [?error :seon.error/signature ?signature]
+                              [?error :seon.error/occurrences ?occurrence]
+                              [?occurrence :seon.error.occurrence/last-at _ ?tx]]
+                     database signature)
+        current (db/q '[:find [?function ?now ?changed] :in $ ?signature
+                        :where [?error :seon.error/signature ?signature]
+                               [?error :seon.instrument/fn ?function]
+                               [?row :seon.fn/sym ?function]
+                               [?row :seon.program/definition-digest ?now ?changed]]
+                      database signature)
+        [function now changed] (when (vector? current) current)
+        ;; the latest digest datom at or before `latest`; an assertion wins its tx
+        then (when (and (int? latest) changed (> changed latest))
+               (let [datoms (db/q '[:find ?tx ?digest ?added :in $ ?function ?latest
+                                    :where [?row :seon.fn/sym ?function]
+                                           [?row :seon.program/definition-digest ?digest ?tx ?added]
+                                           [(<= ?tx ?latest)]]
+                                  (db/history database) function latest)]
+                 (if (map? datoms) datoms
+                     (let [[_ digest added] (last (sort-by (juxt first #(if (peek %) 1 0)) datoms))]
+                       (when added digest)))))
+        resolved (when (int? latest)
+                   (db/q '[:find (max ?resolution) . :in $ ?signature
+                           :where [?error :seon.error/signature ?signature]
+                                  [?error :seon.error/resolved-tx ?resolution]]
+                         database signature))]
+    (cond
+      (some map? [latest current then resolved]) (some #(when (map? %) %) [latest current then resolved])
+      (and (string? then) (not= then now))
+      {:seon.error/resolved-by :seon.program/definition-digest :seon.instrument/fn function
+       :seon.error/digest-then then :seon.error/digest-now now}
+      (and resolved (>= resolved latest))
+      {:seon.error/resolved-by :seon.error/resolved-tx :seon.error/resolved-tx resolved})))
 
 (defn- opening
   "The opening this occurrence starts, or nil while its signature stays open:
-  0 for the first occurrence, the resolution's transaction id for a recurrence
-  after it. Delivery is once per opening; a refusal is preserved."
+  0 for the first occurrence; for a recurrence after its `resolution`, the
+  digest current at the recurrence or the resolution's transaction id.
+  Delivery is once per opening; a refusal is preserved."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.error/signature]
-                  [:or :nil [:int {:min 0}] :seon.db/error-result]]}
+                  [:or :nil [:int {:min 0}] :seon.program/definition-digest :seon.db/error-result]]}
   [database signature]
-  (let [row (db/pull database
-                     '[{:seon.error/resolved-tx [:db/id :db/txInstant]}
-                       {(:seon.error/occurrences :limit nil) [:seon.error.occurrence/last-at]}]
-                     [:seon.error/signature signature])
-        resolution (:seon.error/resolved-tx row)]
+  (let [resolved (resolution database signature)
+        recorded (when-not resolved
+                   (db/q '[:find ?occurrence . :in $ ?signature
+                           :where [?error :seon.error/signature ?signature]
+                                  [?error :seon.error/occurrences ?occurrence]]
+                         database signature))]
     (cond
-      (and (inst? (:seon.error/at row))
-           (qualified-keyword? (:seon.error/layer row))
-           (qualified-symbol? (:seon.error/operation row))) row
-      (empty? (:seon.error/occurrences row)) 0
-      (resolved? (:db/txInstant resolution)
-                 (last (sort (keep :seon.error.occurrence/last-at (:seon.error/occurrences row)))))
-      (:db/id resolution))))
+      (:seon.error/at resolved) resolved
+      resolved (or (:seon.error/digest-now resolved) (:seon.error/resolved-tx resolved))
+      (map? recorded) recorded
+      (nil? recorded) 0)))
 
 (defn- message-tx
   {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id :seon.error/reason :map
-                       [:int {:min 0}]]
+                       [:or [:int {:min 0}] :seon.program/definition-digest]]
                   :map]}
   [fact sender recipient reason notification opening]
   ;; one message per opening: a re-opened signature is a new message, so it wakes again
-  {:seon.message/id (id/id (cond-> [(:seon.error/signature fact) recipient] (pos? opening) (conj opening)))
+  {:seon.message/id (id/id (cond-> [(:seon.error/signature fact) recipient] (not= 0 opening) (conj opening)))
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
    :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
@@ -1460,7 +1499,7 @@
                                           :seon.error/exception-class])
                          :seon.error/occurrences #{occurrence})
         notification {:seon.error/notification-id signature}
-        recipients (when (int? opened)
+        recipients (when (some? opened)
                      (cond
                        steward-present {steward-id :recurring}
                        (and interrupted? agent-id) {agent-id :your-run}
@@ -1839,14 +1878,14 @@
         [[:p {:class "seon-error-occurrences"} (str "Occurrences: " n)]])
       (when (:seon.error/signature value)
         [[:p {:class "seon-error-resolution"}
-          (let [resolution (:seon.error/resolved-tx value)
-                tx (if (map? resolution) (:db/id resolution) resolution)
-                at (when (and tx (:seon.db/db unit))
-                     (:db/txInstant (db/pull (:seon.db/db unit) [:db/txInstant] tx)))]
-            (cond (nil? resolution) "Open"
-                  (nil? at) "Resolution time unknown"
-                  (resolved? at (:seon.error/at value)) "Resolved"
-                  :else "Open: recurred after its resolution"))]])
+          (let [database (:seon.db/db unit)
+                resolved (when database (resolution database (:seon.error/signature value)))]
+            (cond (nil? database) "Resolution unknown"
+                  (:seon.error/at resolved) "Resolution unknown"
+                  (:seon.error/digest-now resolved) (str "Resolved by change to " (:seon.instrument/fn resolved))
+                  resolved "Resolved"
+                  (:seon.error/resolved-tx value) "Open: recurred after its resolution"
+                  :else "Open"))]])
       (when turn-ref
         [[:p {:class "seon-error-run"}
           [:a {:href (render.route/path :seon.render.route/data {}

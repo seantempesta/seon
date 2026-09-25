@@ -147,7 +147,9 @@
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
           (is (str/includes? (error/log-line (error/notice {:seon.error/fact (:seon.error/fact summary) :seon.error/occurrence-count 6})) "occurrences=6"))
           (is (str/includes? (error/render-ai row) "Occurrences: 6"))
-          (is (str/includes? (pr-str (error/render-html row)) "Open"))
+          (is (str/includes? (pr-str (error/render-html row)) "Resolution unknown")
+              "without a database the resolution cannot be derived")
+          (is (str/includes? (pr-str (error/render-html {:seon.db/db database :seon.render/value row})) "Open"))
           (is (= '(seon.error/for-agent (seon.db/db) "error-graph-steward") read-form))
           (let [observed (error/for-agent database "error-graph-steward")]
             (is (= 1 (count observed)) (pr-str observed)))

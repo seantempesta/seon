@@ -8,8 +8,9 @@
   store, no acknowledgement flag, no `seen-at`. A problem stops being a
   problem when the facts stop saying so, which is the only definition
   that cannot go stale. The one fact written when a fault is fixed is
-  its `:seon.error/resolved-tx` (`resolve!`); `open-faults` derives the
-  still-open signatures from it and the latest occurrence.
+  its `:seon.error/resolved-tx` (`resolve!`), kept for fixes away from the
+  failing function; `open-faults` derives the still-open signatures from
+  `seon.error/resolution`, which also reads a changed definition digest.
 
   DERIVED from one immutable database value, one live-process set, and
   one snapshot of the loaded JVM namespaces. Database families are
@@ -131,25 +132,18 @@
        vec))
 
 (defn open-faults
-  "Keep the signatures of `entries` with no resolution after their latest occurrence.
-  `entries` are this database's error-signature entries; a resolution is
-  the `:seon.error/resolved-tx` transaction `resolve!` writes, and a later
-  occurrence re-opens its signature."
+  "Keep the signatures of `entries` that `seon.error/resolution` leaves open at `database`.
+  A fault resolves when its function's definition digest changed after its
+  latest occurrence, or by `resolve!`; a later occurrence re-opens it, and an
+  unreadable resolution keeps it open."
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.problems/error-signature]]
                   [:vector :seon.problems/error-signature]]}
   [database entries]
-  (let [resolved (into {} (db/q '[:find ?signature ?at
-                                  :where [?error :seon.error/resolved-tx ?tx]
-                                         [?error :seon.error/signature ?signature]
-                                         [?tx :db/txInstant ?at]]
-                                database))]
-    (filterv (fn [{signature :seon.error/signature fact :seon.error/fact}]
-               (let [at (get resolved signature)]
-                 (or (nil? at) (pos? (compare (:seon.error.occurrence/last-at fact) at)))))
-             entries)))
+  (filterv #(not (:seon.error/resolved-by (error/resolution database (:seon.error/signature %)))) entries))
 
 (defn resolve!
-  "Record that the fault `signature` names is fixed.
+  "Record that the fault `signature` names is fixed away from its failing function.
+  A fix at that function resolves it without this (`seon.error/resolution`).
   Its signature is open again only when a later occurrence is recorded.
   Called by whoever fixed it, never inferred from a turn. Returns the writer's report or its refusal."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.error/signature]

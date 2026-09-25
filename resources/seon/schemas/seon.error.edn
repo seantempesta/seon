@@ -285,6 +285,16 @@
              :regressions [:set :seon.db/ref],
              :issue :seon.db/ref,
              :resolved-tx :seon.db/ref,
+             :resolved-by [:enum {:description "The fact that resolves a fault: its function's changed definition digest, or the resolve! transaction."} :seon.program/definition-digest :seon.error/resolved-tx],
+             :digest-then :seon.program/definition-digest,
+             :digest-now :seon.program/definition-digest,
+             :resolution
+             [:map {:description "Why a fault is resolved (seon.error/resolution): derived, never stored."}
+              [:seon.error/resolved-by :seon.error/resolved-by]
+              [:seon.instrument/fn {:optional true} :seon.instrument/fn]
+              [:seon.error/digest-then {:optional true} :seon.error/digest-then]
+              [:seon.error/digest-now {:optional true} :seon.error/digest-now]
+              [:seon.error/resolved-tx {:optional true} [:int {:min 0}]]],
              :process [:string {:min 1}]
  ; Additive error declaration manifest, 2026-09-18.
 
