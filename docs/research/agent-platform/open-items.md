@@ -89,20 +89,22 @@ current component. Unverified commits are debt, not progress.
 7. **Then** the function face (`52e252f74`; Astra `49b1122d4` implement after fixes) and the query+render block
    (`2ae3e003c`; Astra `ae7cfa793` implement after fixes), both on the floor's one pipeline.
 
-### Running lanes (18:20Z) — read each landing note before touching its files
-impl-repl-m1-opus (S1 one definition authority + qualified defn; then S2) · impl-task-slice2-opus (3 records) ·
-impl-derived-prereqs-opus (S0 ONLY; S2 and F1 wait for green) · design-floor-revise-opus (then Astra re-review, then implement) ·
-root verification run bhklahejy (`tmp/orchestrator/verify-6ab6ae2a.txt`, 65 commands, cluster.turn-test first).
+### Running lanes (18:55Z) — read each landing note before touching its files
+fix-turn-hang-opus round 4 (batched-turn hang: settle! parked on the writer while a hot `declared-sources` neighborhood render
+runs; local-provider turn 6.05 s > 5 s; dumps `tmp/turn-hang-1243/`). Idle, results routed: impl-repl-m1-opus (S1 done
+pending eval-test triage), fix-ingestion-p1s-opus (custody class `c1e40b7e8`), fix-test-failure-facts-opus (`72578e81a`).
+Root run `tmp/orchestrator/verify-1852.out` (merge, source, test-failure-facts, eval, evaluate-sources) on 6ab6c29c.
 REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate, store, pull back — before implementing.
 
 ### Component status (definition of done: REPL-proven, green on default, Astra-reviewed, measured)
 | Component | State |
 |---|---|
-| Task ingestion + gate + adoption | green (46 assertions); Astra `5fb38b91f`: ingestion accept after fixes, publication/adoption revise (3 P1s) — lane fix-ingestion-p1s-opus |
+| Task ingestion + gate + adoption | ingestion-test green 67/0 on 6ab6bf57; merge gate custody class fixed `c1e40b7e8` (prepare, gate test run, acquisition refusals under the acquired branch's custody); merge/source runs pending; Astra diff review of P1 fixes pending |
 | Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
 | Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
-| REPL S1 (definition authority) | Astra REVISE `ef099dccf`: P0-A/C `bbbdbd5bd`, P0-B `51dda24e9` (SCI fork e663d9e2 pushed) landed; entry-gate on 6ab6bdc1: 2 fail + 1 error back with the lane; P0-D next |
-| Turns | nested as-of view re-keyed the projection per read (36 s prompts) — fixed `68eb9d310`, but the regression still hangs on default after restart; TOP HARNESS DEFECT: an overdue member blocks every later body until JVM replacement (issue an-exited-overdue-test-member-still-holds-its-test) — lane fix-turn-hang-opus round 2 |
+| REPL S1 (definition authority) | P0-A..D + P1-A..C landed (`bbbdbd5bd` `51dda24e9` `a9c74ad46` `6dfe778e4`); green on default: entry-gate 66/0, restoration 16/0, reader 292/0, reply 124/0; armed cost P1-D: contracted defn 16.3 ms (parent 22.4), `(+ 1 2)` 1.5 ms; eval-test 4 reds new vs pre-S1 (1 was root's helper, fixed `8e731ac68`) — re-running; Astra re-review of the revision NEXT |
+| Test harness hold | overdue member's late exit records the exit only (`1197a35ac`); regressions green 12/0 + 3/0 |
+| Turns | local-provider turn settles (5/0) but 6.05 s > 5 s bound; batched turn hangs (lane round 4) |
 
 ### Designs (authorities; each revised in place)
 | Design | Latest | Review verdict |
