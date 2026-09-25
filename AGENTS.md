@@ -53,8 +53,10 @@ running system: a specification or source citation is not evidence of installati
    or two lines naming what exists, its data flow and the principal Clojure approach.
    State what disappears, each operation's cost and target complexity, concerns separated,
    and the simplest alternative: dependency seam, existing function or deletion.
-   More than about 100 added lines is presumed wrong: stop before writing and report the
-   smaller alternative. Net deletion does not excuse new machinery. Research existing
+   Bound a change by what it lets us cut: its added lines are justified by the duplicate
+   paths it deletes in the same cut, and the design names those deletions with line counts.
+   More than about 100 added lines without matching deletions is presumed wrong: stop before
+   writing and report the smaller alternative. Net deletion does not excuse new machinery. Research existing
    libraries on the web before writing replacements in a shrinking assignment.
    If a fix, cleanup, conversion or replacement grows code, justify to the owner before
    integration what it adds, why nothing smaller works, and what it lets go later.
