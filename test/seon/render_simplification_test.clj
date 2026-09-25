@@ -58,21 +58,22 @@
     (assoc :seon.render.call/function (symbol (str owning-namespace) "subject"))))
 
 (defn declare-subject!
-  "Declare NAMESPACE-NAME's fixture subject through the canonical writers: a
-  schema whose AI/HTML pair names that namespace's renderers and a contracted
-  producer returning it. A request naming that producer selects the pair."
+  "Declare a fixture subject through the canonical writers: a schema named
+  like PRODUCER (default `<namespace>/subject`) whose AI/HTML pair names the
+  given renderers, and the contracted PRODUCER returning it. A request naming
+  that producer (:seon.render.call/function) selects the pair."
   {:malli/schema [:=> [:cat :seon.db/connection :symbol [:map-of :qualified-keyword :qualified-symbol]]
                   :qualified-symbol]}
-  [connection namespace-name pair]
-  (let [subject (keyword (str namespace-name) "subject")
-        producer (symbol (str namespace-name) "subject")]
+  [connection named pair]
+  (let [producer (if (qualified-symbol? named) named (symbol (str named) "subject"))
+        subject (keyword (namespace producer) (name producer))]
     (support/transacted! connection
                          [{:seon.schema/key subject :seon.schema.admission/source :core
-                           :seon.schema/form (pr-str [:map pair [:seon.ns/name :seon.ns/name]])}])
+                           :seon.schema/form (pr-str [:map pair [:seon.ns/name {:optional true} :seon.ns/name]])}])
     (support/transacted! connection
                          [(support/program-fn-row
                            (db/db connection) producer
-                           (str "(defn subject {:malli/schema [:=> [:cat] " subject "]} [] {})"))])
+                           (str "(defn " (name producer) " {:malli/schema [:=> [:cat] " subject "]} [] {})"))])
     producer))
 
 (defn- declare-fixture-subjects!
@@ -259,26 +260,6 @@
       (is (= [:int] (schema/function-matching-outputs-in
                      projection cross-arity [{:seon.render/value 7}]))))))
 
-(deftest explicit-value-selection-records-a-value-without-calling-it-a-producer
-  (support/with-database
-   (fn [connection]
-     (let [ctx (support/fork-cluster-ctx connection)
-           decision
-           (selection
-            (assoc (render-request (db/db connection) ctx nil
-                                   {:seon.render/ai "already rendered"})
-                   :seon.render/output :seon.render/ai))
-           explicit-stage
-           (first (:seon.render.selection/stages decision))]
-       (is (= "already rendered"
-              (:seon.render.selection/selected decision)))
-       (is (= "already rendered"
-              (:seon.render.selection.stage/value explicit-stage)))
-       (is (nil? (:seon.render.selection.stage/candidates explicit-stage)))
-       (is (= [:selected :not-consulted :not-consulted
-               :not-consulted :not-consulted]
-              (stage-statuses decision)))))))
-
 (deftest missing-render-profile-remains-a-flat-error
   (support/with-database
    (fn [connection]
@@ -317,7 +298,7 @@
                       :seon.render/selection])]
          (is (= 'seon.render.value/render-ai
                 (:seon.render.selection/selected decision)))
-         (is (= [:no-match :no-match :no-match :no-match :selected]
+         (is (= [:no-match :selected]
                 (stage-statuses decision))))))))
 
 (deftest
@@ -469,6 +450,12 @@
   nested-values-render-their-declared-faces
   (support/with-database
     (fn [connection]
+      ;; An identity-less value nested under a registered attribute gets that
+      ;; attribute's named schema (design §1): the report renders its pair.
+      (support/transacted! connection
+                           [{:seon.schema/key :seon.render-simplification-test/report
+                             :seon.schema.admission/source :core
+                             :seon.schema/form (pr-str :seon.db/transaction-report)}])
       (let [database (db/db connection)
             ctx (support/fork-cluster-ctx connection)
             report (db/transact! connection [])
@@ -476,15 +463,10 @@
                       database
                       ctx
                       nil
-                      {:probe/database database, :probe/report report})
+                      {:probe/database database,
+                       :seon.render-simplification-test/report report})
             ai (render-ai request)
             html (hiccup/->string (render-html request))]
-        ;; A declared pair shapes a nested value in BOTH projections:
-        ;; `cecfaf428` removed the `(not ai?)` guard `563034709` had added
-        ;; to `seon.render.value/value-node*`, because that guard left
-        ;; settlement with no selected renderer. Structural printing is the
-        ;; explicit `:seon.render.value/structural?` option, not the AI
-        ;; default.
         (is (str/includes? ai "database"))
         (is (str/includes? ai "basis transaction"))
         (is (not (str/includes? ai "#datahike.db.DB")))
@@ -493,38 +475,7 @@
             (str/includes?
               rendered
               (if (= rendered ai) "Wrote 0 facts on 0 entities." "Committed transaction")))
-          (is (not (str/includes? rendered "datahike.db.TxReport"))))
-        (let [first-producer 'seon.render-simplification.fixture-ambiguous/first-ai
-              second-producer 'seon.render-simplification.fixture-ambiguous/second-ai
-              matches [{:seon.schema/key :fixture.render/second,
-                        :seon.render/ai second-producer,
-                        :seon.render/html second-producer}
-                       {:seon.schema/key :fixture.render/first,
-                        :seon.render/ai first-producer,
-                        :seon.render/html first-producer}]
-              matching-shapes-in schema/matching-shapes-in
-              render-with-ambiguity (fn [render]
-                                      (with-redefs
-                                        [schema/matching-shapes-in
-                                         (fn [projection value]
-                                           (if (:fixture.render/ambiguous value)
-                                             matches
-                                             (matching-shapes-in projection value)))]
-                                        (render
-                                          (render-request
-                                            database
-                                            ctx
-                                            nil
-                                            {:probe/nested
-                                             {:fixture.render/ambiguous true}}))))
-              ambiguous-ai (render-with-ambiguity render-ai)
-              ambiguous-html (hiccup/->string (render-with-ambiguity render-html))]
-          (doseq [rendered [ambiguous-ai ambiguous-html]]
-            (is (str/includes? rendered "seon.render/ambiguous"))
-            (is
-              (<
-                (str/index-of rendered (str first-producer))
-                (str/index-of rendered (str second-producer))))))))))
+          (is (not (str/includes? rendered "datahike.db.TxReport"))))))))
 
 (deftest overlapping-declared-returns-refuse-loudly-and-deterministically
   (support/with-database
@@ -765,6 +716,8 @@
           {:seon.agent/id "source-cache-agent",
            :seon.ns/name fixture-a,
            :seon.cluster/name "source-cache"}))
+      (declare-subject! connection fixture-a
+                        {:seon.render/ai 'seon.render-simplification-test/authored-source})
       (let [database (db/db connection)
             ctx (support/fork-cluster-ctx connection)
             handle (support/cluster-handle
@@ -780,8 +733,6 @@
                         (render-request database ctx fixture-a {:seon.ns/name fixture-a})
                         :seon.render/output
                         :seon.render/ai
-                        :seon.render/ai
-                        'seon.render-simplification-test/authored-source
                         :seon.render.call/id
                         id
                         :seon.render/retained-calls
@@ -889,17 +840,14 @@
          (is (boolean
               (some #(str/includes? % "renderer") messages))))))))
 
-(defn- without-declared-ai-pairs
-  "The same projection with every AI pair this value's shapes declare removed.
-
-  Derived from the projection's own matching shapes, never a hand-written
-  roster: whatever declares an AI pair for this value is what is removed."
-  [projection value]
-  (reduce (fn [acc shape-key]
-            (update-in acc [:seon.schema.projection/shape-rows shape-key]
-                       dissoc :seon.render/ai))
-          projection
-          (map :seon.schema/key (schema/matching-shapes-in projection value))))
+(defn- without-declared-pair
+  "The same projection with `schema-key` redeclared without its AI/HTML pair."
+  [projection schema-key]
+  (schema/projection-with-schema
+   projection schema-key
+   (update (get (:seon.schema.projection/forms projection) schema-key) 1
+           dissoc :seon.render/ai :seon.render/html)
+   {:seon.schema.admission/source :agent}))
 
 (deftest selection-asks-the-handed-database-value-s-projection
   ;; §2.1: a database value carries the projection its rows were read under
@@ -915,7 +863,7 @@
            value {:my.plan.item/id "selection-projection"
                   :my.plan.item/title "Probe"}
            declared (db/carried-projection database)
-           undeclared (without-declared-ai-pairs declared value)
+           undeclared (without-declared-pair declared :my.plan.item/item)
            other-database (vary-meta database assoc
                                      :seon.schema/projection undeclared)
            request (assoc (render-request database ctx nil value)

@@ -8,6 +8,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.render-simplification-test :as simplification]
             [seon.render.data :as data]
             [seon.render.transcript :as transcript]
             [seon.render.web :as web]
@@ -27,6 +28,15 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [_unit]
   "(seon.db/pull [:my.plan.item/title] [:my.plan.item/id \"preview-item\"])")
+
+(defn- subject-of
+  "The declared subject producer whose pair names a source fixture renderer."
+  [renderer]
+  (symbol "seon.render-source-test" (str (name renderer) "-subject")))
+
+(defn- declare-source-subject!
+  [connection renderer]
+  (simplification/declare-subject! connection (subject-of renderer) {:seon.render/ai renderer}))
 
 (defn- cluster-handle
   "This suite's cluster identity, through the ONE canonical handle fixture.
@@ -64,6 +74,7 @@
      (support/transacted! connection
                           (turn/open-tx
                            {:seon.turn/id "agent-is-busy" :seon.turn/agent [:seon.agent/id "memory-preview-agent"] :seon.turn/opened-tx "datomic.tx"}))
+     (declare-source-subject! connection 'seon.render-source-test/database-source)
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            channel (async/chan 1)
@@ -76,7 +87,7 @@
            request {:seon.db/db database :seon.sci.eval/ctx ctx
                     :seon.render/value {}
                     :seon.render/namespace 'my.agents.memory-preview
-                    :seon.render/ai 'seon.render-source-test/database-source
+                    :seon.render.call/function (subject-of 'seon.render-source-test/database-source)
                     :seon.render/output :seon.render/ai
                     :seon.render/profile (render/agent-render-profile config/defaults)
                     :seon.render.call/id [:memory-preview]
@@ -240,6 +251,7 @@
                  :seon.cluster.eval/source source
                  :seon.cluster.eval/ns [:seon.ns/name 'my.agents.source-contract]
                  :seon.eval/shown result}]))
+     (declare-source-subject! connection 'seon.render-source-test/authored-source)
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            source-call (ns-resolve 'seon.render.web 'render-source-call)
@@ -251,8 +263,9 @@
            original-evaluate eval/evaluate
            request
            (fn [id producer value]
+             (cond->
              {:seon.db/db database :seon.sci.eval/ctx ctx
-              :seon.render/value value :seon.render/ai producer
+              :seon.render/value value
               :seon.render/output :seon.render/ai
               :seon.render/profile
               {:seon.render.profile/id :test/source-contract
@@ -268,7 +281,11 @@
               :seon.config/on-core-error :panic
               :seon.agent/id "source-contract-agent"
               :seon.turn.loop/cluster cluster
-              :seon.agent/routing (atom {})})
+              :seon.agent/routing (atom {})}
+              ;; A fixture renderer is named by its declared subject; the
+              ;; stored run selects its own row schema's pair.
+              (= "seon.render-source-test" (namespace producer))
+              (assoc :seon.render.call/function (subject-of producer))))
            stored-run (db/pull database '[*] [:seon.turn/id "stored-transcript"])
            output-refs
            (fn [function-symbol]

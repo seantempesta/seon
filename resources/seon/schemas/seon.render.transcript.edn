@@ -1,4 +1,10 @@
-#:seon.render.transcript{:history-request
+#:seon.render.transcript{:prefix-subject
+                         [:map
+                          {:description "One turn's captured history prefix, as a debug finding compares it."
+                           :seon.render/ai seon.render.transcript/render-captured-prefix}
+                          [:seon.turn/id :seon.turn/id]
+                          [:seon.agent/id :seon.agent/id]]
+                         :history-request
                          [:map
                           {:description
                            "The named request for one agent's own evaluation history. Call preparation supplies the database and agent id; the caller names the cluster whose configuration bounds the runs, because a forked branch carries its parent's cluster rows too."}

@@ -1,10 +1,10 @@
 (ns seon.render
   "The one typed projection selector and guarded SCI invocation boundary.
 
-  AI and HTML each follow the same ordered chain: an explicit producer on the
-  value or request, the value's declared identity (its error operation's
-  returns, the root call's contracted returns, its owning row schema), a
-  matching schema's declared property, then the prepared value floor. Zero matches is ordinary. Multiple matches are one deterministic flat
+  AI and HTML each follow one chain: the value's declared identity (its
+  error operation's returns composed with the error base pair, the root
+  call's contracted returns, its owning row schema, or its attribute's named
+  schema), then the prepared value floor. Zero matches is ordinary. Multiple matches are one deterministic flat
   error. Selected failures do not fall through to another producer.
 
   Every selected qualified symbol resolves to the live SCI Var in the cluster
@@ -26,7 +26,6 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
-            [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]
@@ -231,23 +230,6 @@
     ;; with unqualified keys unconstructable at the one total floor.
     (assoc context :seon.render/value value)))
 
-(defn- transaction-shape
-  "The transaction shape of a pulled entity, with database custody when the
-  request carries it.
-
-  `seon.render.value/transacted` declares two arities for exactly this: with a
-  database value the installed value type and cardinality are the authority,
-  and WITHOUT one the shape-only behaviour is the declared answer. Reading
-  `:seon.db/db` and handing the absence to the two-argument arity asked a
-  contract that requires a database value to accept that there was none, so
-  every render whose request carries no database died at the one boundary
-  §2.4 requires a value from — a `/data` page answered 500 with the violation
-  as its body."
-  [value request]
-  (if-let [database (:seon.db/db request)]
-    (render.value/transacted value database)
-    (render.value/transacted value)))
-
 (defn- producer-argument
   [request]
   ;; Existing declared producers accept the qualified attributes of the value
@@ -444,63 +426,6 @@
                    (get (:seon.schema.projection/function-contracts projection) function-symbol))
           function-symbol)))))
 
-(defn- schema-producers
-  [projection request value output]
-  (schema/call-with-projection
-   projection
-   (fn []
-     (when (map? value)
-       (let [transacted-matches
-             (schema/matching-shapes-in
-              projection (transaction-shape value request))
-             ;; A pull has two honest shapes. Refs and cardinality-many values
-             ;; validate in transaction form, while tuple/vector value attributes
-             ;; validate exactly as pulled. A pulled entity admits only shapes
-             ;; whose required attributes are database-storable; open request
-             ;; envelopes must not acquire a one-key value renderer.
-             pulled-matches (schema/matching-shapes-in projection value)
-             matches
-             (->> (concat transacted-matches pulled-matches)
-                  (filter
-                   #(or (not (:db/id value))
-                        (every?
-                         (partial schema.datahike/storable-attribute-in?
-                                  projection)
-                         (:seon.schema/required-attrs %))))
-                  (reduce (fn [by-key row]
-                            (assoc by-key (:seon.schema/key row) row))
-                          (sorted-map))
-                  vals)
-             matches
-             (filter #(get % output) matches)
-             matches
-             (let [specificity (fn [row]
-                                 (max (count (:seon.schema/required-attrs row))
-                                      (count (filter #(some? (get value %))
-                                                     (map first
-                                                          (internal/entity-entries
-                                                           (mr/schema (:seon.schema.projection/registry projection)
-                                                                      (:seon.schema/key row))))))))
-                   most-specific (apply max 0 (map specificity matches))]
-               (filter #(= most-specific (specificity %))
-                       matches))
-             producers
-             (->> matches
-                  (map #(get % output))
-                  distinct
-                  (sort-by str)
-                  vec)]
-         producers)))))
-
-(defn- schema-producer
-
-  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.render/output] [:or :nil :qualified-symbol :seon.render/ambiguous-error]]}
-  [projection request value output]
-  (let [producers (schema-producers projection request value output)]
-    (cond
-      (= 1 (count producers)) (first producers)
-      (> (count producers) 1) (ambiguity nil output producers))))
-
 (defn- attribute-producer
   [projection request output]
   (when-let [attribute (:seon.render.walk/attribute request)]
@@ -572,7 +497,9 @@
     (cond
       (or (nil? projection) (not (map? value)) (attribute-scoped? request)) []
       (and (:seon.error/at value) (qualified-symbol? (:seon.error/operation value)))
-      (pairs (error-alternatives projection value))
+      ;; Compose the satisfied alternative's pair, else the error base pair.
+      (let [found (pairs (error-alternatives projection value))]
+        (if (seq found) found (pairs [:seon.error/base])))
       (and function (identical? value (render-value request)))
       (pairs (satisfied-alternatives projection function value))
       :else (pairs (or (some-> (entity-owner projection value) vector)
@@ -588,11 +515,10 @@
     (cond
       (attribute-scoped? request) (attribute-producer projection request output)
       (= 1 (count declared)) (first declared)
-      (seq declared) (ambiguity nil output declared)
-      :else (schema-producer projection request value output))))
+      (seq declared) (ambiguity nil output declared))))
 
 (def ^:private selection-stage-order
-  [:explicit-value :explicit-request :declared :schema :floor])
+  [:declared :floor])
 
 (defn- selection-candidate
   [producer]
@@ -632,53 +558,6 @@
       'seon.render/render-default-ai-source
       'seon.render.value/render-ai)))
 
-(defn- explicit-value-stage
-  [request output]
-  (let [value (render-value request)
-        explicit (when (map? value) (find value output))]
-    (if explicit
-      (selected-stage
-       (if (qualified-symbol? (val explicit))
-         (selection-stage :explicit-value :selected
-                          [(selection-candidate (val explicit))])
-         (assoc (selection-stage :explicit-value :selected)
-                :seon.render.selection.stage/value (val explicit)))
-       (val explicit))
-      {:seon.render.selection/stage
-       (selection-stage :explicit-value :no-match)})))
-
-(defn- explicit-request-stage
-  [request output]
-  (if-let [explicit (get request output)]
-    (selected-stage
-     (selection-stage :explicit-request :selected
-                      [(selection-candidate explicit)])
-     explicit)
-    {:seon.render.selection/stage
-     (selection-stage :explicit-request :no-match)}))
-
-(defn- schema-stage
-  [request projection value output]
-  (let [producers
-        (or (if (attribute-scoped? request)
-              (when-let [declared (attribute-producer projection request output)]
-                [declared])
-              (schema-producers projection request value output))
-            [])
-        selection-error (when (> (count producers) 1)
-                          (ambiguity nil output producers))
-        status (cond selection-error :ambiguous
-                     (seq producers) :selected
-                     :else :no-match)
-        evidence (mapv selection-candidate producers)
-        stage (if selection-error
-                (selection-stage :schema status evidence selection-error)
-                (selection-stage :schema status evidence))]
-    (cond
-      selection-error (selected-stage stage selection-error)
-      (= 1 (count producers)) (selected-stage stage (first producers))
-      :else {:seon.render.selection/stage stage})))
-
 (defn- declared-stage
   [request projection value output]
   (let [producers (declared-producers projection request value output)
@@ -694,9 +573,6 @@
   [stage-name request projection value output]
   (case stage-name
     :declared (declared-stage request projection value output)
-    :explicit-value (explicit-value-stage request output)
-    :explicit-request (explicit-request-stage request output)
-    :schema (schema-stage request projection value output)
     :floor (let [selected (floor-producer request output)]
              (selected-stage
               (selection-stage :floor :selected
@@ -966,27 +842,16 @@
                  (:seon.render.call/read-evidence previous))))))
 
 (defn- cost-shape-key
-  [projection request selected output]
-  (let [value (render-value request)
-        matches (concat
-                 (schema/matching-shapes-in
-                  projection
-                  (transaction-shape value request))
-                 (schema/matching-shapes-in projection value))]
-    (or (->> matches
-             (filter #(= selected (get % output)))
-             (sort-by (juxt (comp - count :seon.schema/required-attrs)
-                            (comp str :seon.schema/key)))
-             first
-             :seon.schema/key)
+  "The row schema owning the rendered value, else the generic value schema."
+  [projection request]
+  (let [value (render-value request)]
+    (or (when (and projection (map? value)) (entity-owner projection value))
         :seon.schema/value)))
 
 (defn- render-cost-fact
-  [request selected output rendered]
+  [request rendered]
   {:seon.render.cost/shape-key
-   (cost-shape-key
-    (request-projection request)
-    request selected output)
+   (cost-shape-key (request-projection request) request)
    :seon.render.cost/profile
    (get-in request [:seon.render/profile :seon.render.profile/id])
    :seon.render.cost/estimated-tokens
@@ -1263,8 +1128,7 @@
         ;; explicitly is a `:seon.render/call-request`, which declares its
         ;; ctx.
         selected (when (and projection (map? value))
-                   (or (get value output)
-                       (declared-producer projection request value output)))
+                   (declared-producer projection request value output))
         selected (when-not (or (contains? rendering selected)
                                (and (= output :seon.render/ai)
                                     selected
@@ -1698,7 +1562,7 @@
                        (:seon.turn/id request)
                        (:seon.db/connection request))
               (swap! captured-calls assoc-in [call-id :seon.db/tx-data]
-                     [(render-cost-fact request selected output rendered)]))
+                     [(render-cost-fact request rendered)]))
                 rendered))))))))
 
 (def ^:private branch-scope-keys

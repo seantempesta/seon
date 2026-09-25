@@ -2089,6 +2089,12 @@
          (finding :fault-turns "Turns opened by faults"
                   (map #(hash-map ::turn % ::detail "The trigger message references a core fault.") triggered))]))))
 
+(defn prefix-subject
+  "One turn's captured-prefix subject; its declared pair is render-captured-prefix."
+  {:malli/schema [:=> [:cat :seon.turn/id :seon.agent/id] :seon.render.transcript/prefix-subject]}
+  [turn-id agent-id]
+  {:seon.turn/id turn-id :seon.agent/id agent-id})
+
 (defn render-captured-prefix
   "The captured history bytes, excluding the turn owner's changing frame."
   {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :string :seon.db/error-result]]}
@@ -2123,7 +2129,7 @@
             (throw (ex-info (:seon.error/message profile) profile)))
         request (assoc request :seon.render/profile profile
                                :seon.render/output :seon.render/ai
-                               :seon.render/ai 'seon.render.transcript/render-captured-prefix
+                               :seon.render.call/function 'seon.render.transcript/prefix-subject
                                :seon.render/retained-calls retained
                                :seon.render/captured-calls captured)
         prefixes (mapv (fn [row]
@@ -2133,8 +2139,8 @@
                                        :seon.render.call/id
                                        [[:seon.ai.attempt/id (:seon.ai.attempt/id
                                                               (last (sort-by :seon.ai.attempt/ordinal (:seon.turn/attempts row))))]]
-                                       :seon.render/value {:seon.turn/id (:seon.turn/id row)
-                                                           :seon.agent/id (:seon.agent/id request)}))}) rows)
+                                       :seon.render/value (prefix-subject (:seon.turn/id row)
+                                                                          (:seon.agent/id request))))}) rows)
         pairs (partition 2 1 prefixes)
         measured (filter #(every? (comp string? ::prefix) %) pairs)
         changed (for [[previous current] measured
