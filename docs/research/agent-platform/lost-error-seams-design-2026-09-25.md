@@ -1,461 +1,705 @@
 ---
 type: design
-status: "first pass (Opus); awaiting Astra review and root rulings on §9"
+status: "round 2 (Opus) after Astra REVISE 668d8aa79 and owner ruling 20:50Z on delivery; awaiting Astra re-review and root rulings on §9"
 created: 2026-09-25
-scope: One owner change per lost-error class A–G from the 2026-09-25 audit
+scope: One owner change per lost-error class A–G from the 2026-09-25 audit, plus fault delivery through the agent's path
 ---
-# Lost-error seams: one owner change per class — 2026-09-25
+# Lost-error seams: one owner change per class
 
-What exists: Astra's [lost-errors audit](lost-errors-audit-2026-09-25.md) (`64ae7aca5`, pinned `93711ba43`), which
-lists 106 path instances in seven classes, each with an owner seam. The data flow this design fixes is
-*failure → owner boundary → durable fact + delivered wake → policy*, plus *task → exit → consumed terminal* and
-*value → one floor bound → two faces*. The principal Clojure approach is to make each owner's contract total, so
-the class cannot happen. Every per-site copy then becomes dead code, and each lane deletes it in the same cut.
-Nothing here is a new registry, supervisor, retry or second printer.
+**What exists.** Astra's [lost-errors audit](lost-errors-audit-2026-09-25.md) (`64ae7aca5`, pinned `93711ba43`) found
+106 path instances in seven classes. The [review](lost-error-seams-design-review-2026-09-25.md) (`668d8aa79`) asked
+for nine corrections to this design. All nine are integrated below, in the sections that own them.
 
-Status: first-pass design (Opus). It needs Astra's review, then root's ruling on the open questions in section 9,
-before any implementation lane starts. Only this file is authored here, with no source edits. Line numbers are
-**HEAD `2d23029cb`** unless marked *pinned*.
+**Data flow.** This design fixes three flows:
 
-## 0. Two findings that reshape the audit's seams
+- *failure → owning boundary → durable fact + delivered message → policy at the execution owner*;
+- *task → real exit → exactly one terminal disposition*;
+- *value → one floor bound → two faces*.
 
-**0.1 The fault channel is a second, lossy fault route, and it should be deleted, not repaired.** `var-process`
-already records every proc step's throw on the proc's own thread through `fault!`, and stops the graph on panic
-(`flow.clj:198-232`, `:290-303`). Its docstring gives the reason: Flow's error channel is a sliding buffer
-(`reference-code/core.async/.../flow/impl.clj:102`). In parallel, a second route still exists:
+**Approach.** Make each owner's contract total using the dependency seams that already exist: Flow's `ProcLauncher`
+SPI and the `::flow/error` out port; Malli's throwing `:report` in `-instrument`; `Thread.join`/executor termination
+and `ProcessHandle.onExit`; the render owner's safe selection. The per-site copies are then deleted in the same cut.
+There is no new registry, supervisor, retry, task framework or second printer.
 
-- the error fan-out: `start-error-fanout!` / `join-error-fanout!` (`flow.clj:982-1081`);
-- the fault-committer graph with its own policy copy, `fault-committer-step` (`flow.clj:839-889`), which is B01's
-  swallowing catch;
-- `CountedDroppingBuffer` and its overflow summary (`flow.clj:742-835`), which is C03's evidence loss;
-- `report-committer-loss!` (`:937-959`);
-- four injected callbacks, `:seon.flow/commit-fault!`, `commit-drop!`, `panic!` and `read-core-error-mode`
-  (`cluster.clj:3549-3571`, `boot.clj:83-94`), plus `emit-core-fault!` (`cluster.clj:3341-3364`);
-- six producers that `offer!` a fault and fall back to stderr: `turn.clj:5484`, `:5507`; `web.clj:2336`, `:2936`,
-  `:3546`; and the agent fan-out join `agent.clj:1153-1160`.
+**Pin.** Lines are at HEAD **`14ccb65f0`**. These files were unchanged between `2d23029cb` and `14ccb65f0` and keep
+their round-1 lines: `flow.clj`, `fault.clj`, `instrument.clj`, `cluster/boot.clj`, `cluster/agent.clj`,
+`cluster.clj`, `sci/kernel.clj`, `sci/eval.clj`, `await.clj`, `render/value.clj`, `render/web.clj`, `shell/jvm.clj`,
+`script/seon/operator.clj`. Every other cited file was re-grepped at `14ccb65f0`.
 
-No production graph uses a connection xform: `rg ':xform' src` finds nothing. After `var-process`, Flow's error
-channel therefore receives only Flow-internal failures (`impl.clj:312-316` send-outputs and the outer loop). The
-owner change for B, C and E is **one route**: every producer calls `fault!` on its own thread. `record!` becomes
-private, so no caller can record a fault without the policy. A single per-graph reader drains Flow's own error
-channel on that graph's own executor, so the graph's join also joins that reader.
+**Status.** Design only. No source was edited and no test was run.
 
-**0.2 Every task-owning site hand-rolls the same FutureTask pattern: bounded get, cancel, forget.** The sites are
-`flow.clj:465`, `effect.clj:481`, `test.clj:238-311`, `shell/jvm.clj:90-124`, `cluster/process.clj:266`, and five
-in `operator.clj`/`dependency_digest.clj`. `FutureTask.cancel(true)` makes `.get` return at once, so it proves
-nothing about exit. A and G therefore share one owner: a task whose own `finally` is the exit event and the
-exactly-once consumer. This design places that owner in `seon.await`, next to the bound, and keeps `io-terminal!`
-as the io work's consumer inside it. Measured cost is a promise delivered in `finally`: **+44 ns per task**
-(28 → 72 ns, 100,000 warm iterations, JVM mode on PID 37460).
+## 0. Findings that reshape the audit's seams
+
+**0.1 The fault channel is a second, lossy fault route.** Delete it, together with the upstream route it drains.
+
+`var-process` already records every step throw on the proc's own thread (`flow.clj:198-232`, `:290-303`). Beside it
+runs a second route: the error fan-out (`:982-1081`); the committer graph with its own policy copy (`:839-889`),
+which is where B01 comes from; `CountedDroppingBuffer` (`:742-835`), where C03 comes from; four injected callbacks
+(`cluster.clj:3549-3571`, `boot.clj:83-94`); and six `offer!`-with-stderr producers (`turn.clj:5484`, `:5507`;
+`web.clj:2336`, `:2936`, `:3546`; `agent.clj:1153-1160`).
+
+Deleting the second route does not make Flow's own error channel lossless. The review (finding 1) is right on
+that point, and the seam is:
+
+- Flow's proc loop reports every loop-level failure with `(async/>!! (outs ::flow/error) …)` (`impl.clj:313`, `:318`).
+- `outs` is the map the **`ProcLauncher` SPI** receives in `start` (`impl.clj:153-164`).
+- `var-process` already reifies that SPI and forwards `start-options` to the inner launcher (`flow.clj:310-318`).
+
+So `var-process` replaces `::flow/error` in the `:outs` it forwards with a per-proc **fault port**. The port is a
+channel whose `UnblockingBuffer` `add!*` disposes the report synchronously on the reporting thread, through
+`proc-failed!` and then `stop-panicked-graph!`. `RefusingBuffer` (`flow.clj:354-380`) already does side-effecting
+admission in `add!*` the same way.
+
+This closes both holes the review names:
+
+- **Capacity.** `>!!` onto an unblocking buffer never drops.
+- **Shutdown.** Flow's `stop` closes only the graph's `:error` chan (`impl.clj:179`). The per-proc port is never
+  closed, so a proc still unwinding after stop reports into a live disposer.
+
+This uses no fork, no `:xform` assumption and no reader thread, and the graph's error chan stays empty. The flow
+docstring reserves `::flow/error` against *init-state* out-ports (`flow.clj:220-223`), which this does not use. What
+this does use is the SPI's own freedom to choose the channels it hands to the process it launches.
+
+If recording itself fails, `proc-failed!` already treats that as a panic and stops the graph. **Probe first:** assert
+at the REPL that a report from `send-outputs` and one racing `flow/stop` both reach the port.
+
+**0.2 Task ownership stays with each existing owner.** There is no new `await/task`. The review (finding 2) showed
+that a `finally`-delivered promise proves only that the body reached that point, and that cancellation can prevent
+the body from ever running. Exit proof is therefore the real `Thread.join`, executor termination (`join-graph!`,
+`flow.clj:134-160`) or `ProcessHandle.onExit` (`process.clj:158-200`). Disposition stays with the existing
+submission CAS (`io-terminal!`, `flow.clj:398-424`) or the caller's own join-then-consume.
+
+Two callers do repeat one shape: *run on a virtual thread, bounded join, a watcher joins then consumes*. They are
+`test.clj:272-311` (about 25 lines) and `effect.clj:472-502` (about 25 lines). A shared helper is justified only
+after both conversions show that shape is identical, so it is recorded as a follow-up rather than a first step
+(§9.5). The lifecycle every owner must dispose is data (A.2).
+
+**0.3 Delivery goes through the agent's path (owner ruling 20:50Z).** Core faults go to root by default, and each MCP
+interaction carries the faults that are new since that agent's previous interaction, as data rendered by the one
+path. This is section M.
 
 ## A. Asynchronous results not consumed on every exit (13)
 
-**1. Seam and missing contract.** `seon.flow/io-terminal!` (`flow.clj:398-424`) settles once per submission by
-CAS, but it has two gaps.
-(a) `complete!` runs inside `try/finally` with no catch. A throwing callback removes the submission (`:414-415`),
-still offers a success terminal to the launcher (`:416-424`), and leaves the exception in a `FutureTask` nobody
-`.get`s (`:444-465`). This is A01, confirmed at HEAD.
-(b) The stopping thread may settle *running* work before exit (`:628-644`). The task's later `io-terminal!` then
-loses its CAS, and its real result or exception disappears. This is A-class loss created by the G02 path.
+**1. Seam and missing contract.** `seon.flow/io-terminal!` (`flow.clj:398-424`) settles each submission exactly once
+by CAS on `::status`. It has three gaps:
 
-**2. Smallest owner change.** Add `seon.await/task` (about +25 lines in `await.clj`). It takes a callable and an
-`on-exit` function of `{::value v}` or `{::throwable t}`, and returns `{:seon.await/future f :seon.await/exit p}`.
-The task body is `(try (deliver-terminal (body)) (catch Throwable t (deliver-terminal t)) (finally (deliver p)))`.
-`on-exit` runs exactly once, on the task's own thread, after the body. If `on-exit` itself throws, that throwable
-goes to `fault/fault-detached!` (section B.2), never into the future.
-`io-terminal!` becomes the `on-exit` of io work. Its `complete!` throw is caught and faulted, and the completion
-offered to the launcher then carries `::throwable`, so the launcher reports a failure, not a success
-(`:518-519` already handles `::throwable`). `stop-work-launcher!` only interrupts running work. Queued work still
-settles by CAS (`:633`), because queued work never started.
+- (a) A throwing `complete!` still gets a success terminal offered in `finally` (`:413-424`), and its exception is
+  kept only in an unread `FutureTask` (`:444-465`). This is A01, still present at HEAD.
+- (b) `stop-work-launcher!` cancels futures (`:628-630`) and settles running work from the stopping thread
+  (`:633-644`). A later terminal from the task then loses the CAS, and the task's real outcome is dropped.
+- (c) A `.cancel` before the runnable starts leaves ::running work that never reaches `io-terminal!`.
 
-**3. Migration** (sites at HEAD; each loses its hand-rolled FutureTask, watcher or unread future):
+**2. Owner change: the lifecycle table.** `io-terminal!` stays the one disposer. Every outcome has exactly one owner:
 
-| ID | Site | Conversion | − / + |
+| Outcome | Where it is observed | Disposition (once, by the `::status` CAS) |
+|---|---|---|
+| body returned (a value or a declared refusal) | the task thread, `execute-io-work!` | `io-terminal!` with `::value` |
+| body threw | the task thread's body catch (`:460-462`) | `io-terminal!` with `::throwable` → launcher `proc-failed!` (`:518-519`) |
+| `complete!` threw | `io-terminal!`'s own catch around `complete!` (new, separate from the body catch) | the completion offered carries `::callback-throwable`; the launcher disposes it with `proc-failed!`, which delivers the fault and stops the graph on panic. No success report |
+| executor rejected | `:469-473` (existing) | `io-terminal!` with `::throwable` |
+| stopped before entry | the runnable's first form reads `::active?`, which stop clears (`:632`) | `io-terminal!` with the existing launcher-stopped value, and no body |
+| stopped while running | stop **interrupts** the entered thread; it never settles running work | the task thread's own terminal, after exit |
+| queued, never executed | stop's CAS `::queued → ::completed` (`:404`) | stop settles with launcher-stopped |
+
+This removes the FutureTask. `execute-io-work!` calls `(.execute executor ^Runnable runnable)`, so there is no
+future left unread. Anything escaping the runnable's two catches reaches the thread's uncaught handler, which is E06,
+and that handler then reports an owner defect. `::task` and `.cancel` are deleted. Exit is proved by the launcher's
+executor terminating (G02).
+
+**3. Migration.** `−` and `+` are physical source lines, estimated. Each range has one owning cut in §8.
+
+| ID | Site at HEAD | Conversion | − / + |
 |---|---|---|---|
-| A01 | `flow.clj:444-473` | the runnable becomes `await/task` with `on-exit` = `io-terminal!` | −14 / +4 |
-| A02 | `test.clj:272-311` | the body becomes `await/task`; `on-exit` interprets the result and calls `release!`; delete `watch-exit!` (`:282-284`) and the release-before-`.get` ordering (`:290-291`) | −18 / +6 |
-| A03 | `effect.clj:481-512` | `await/task`; a late handler failure reaches `on-exit` → `fault-detached!` and marks handler exit on the effect row | −8 / +6 |
-| A04 | `flow.clj:1055-1081`, `agent.clj:1153-1160` | deleted with the fan-out (section C); the per-graph error reader runs on the source graph's executor | −35 / 0 |
-| A05, A06 | `operator.clj:553-580` | the accept and read tasks become `await/task`; the losing task is consumed by `on-exit` after the socket closes | −6 / +6 |
-| A07 | `process.clj:266-274` | the output reader becomes `await/task`; `run-process!` awaits its exit before returning or throwing | −4 / +4 |
-| A08 | `shell/jvm.clj:87-124`, `:330-408` | the capture threads become `await/task`; delete the promise-per-stream plumbing | −20 / +8 |
-| A09 | `web.clj:2889-2945` | the feed writer's catch calls `fault-detached!` unless the failure is the declared client close (`painting` false *and* an `IOException` from the SSE write) | −10 / +5 |
-| A10 | `turn.clj:5545-5561` | the backstop runnable becomes `await/task`; the fault goes through `fault-detached!` (section C) | −6 / +3 |
-| A11 | `operator.clj:757-759` | the census becomes `await/task`, consumed in `finally` | −2 / +3 |
-| A12 | `dependency_digest.clj:69-83` | use `process/run-process!` (the existing owner) | −14 / +4 |
-| A13 | `operator_move_test.clj:23-26` | use `process/run-process!` | −4 / +2 |
+| A01 | `flow.clj:404-424`, `:444-473`, `:513-524` | the table above; the launcher reads `::callback-throwable` | −10 / +8 |
+| A02 | `test.clj:282-311` | keep the thread join as the exit proof. The watcher does `.join`, then `.get`s the task and disposes a late throw through the runner's existing `core-fault!` (`test.clj:2192`), then `release!`. The timely path `.get`s before `release!` (`:290-291` reordered) | −2 / +6 |
+| A03 | `effect.clj:472-502` | see G01; one cut | in G01 |
+| A04 | `flow.clj:1055-1081`, `agent.clj:1153-1160` | deleted in cut R1 (section C) | counted in C |
+| A05, A06 | `operator.clj:553-580` | JDK only, on the operator's own classpath (review finding 7). The losing `CompletableFuture` is consumed with `.handle` into the same terminal map, and joined after the socket closes | −0 / +8 |
+| A07 | `process.clj:266-274` | the streamed-output future is joined before `run-process!` returns or throws, including on timeout, after `terminate-subprocess!` | −2 / +5 |
+| A08 | `shell/jvm.clj:87-124`, `:330-408` | every capture thread's promise is consumed on every exit; a stdout timeout still reads stderr's terminal. JDK threads are kept | −4 / +8 |
+| A09 | `web.clj:2925-2945` | see C.3 (web producers) | in C |
+| A10 | `turn.clj:5545-5561` | see C.3 (backstop) | in C |
+| A11 | `operator.clj:757-759` | `@census` in `finally`, with the extraction failure as primary and the census failure suppressed | −1 / +3 |
+| A12 | `script/seon/dev/dependency_digest.clj:69-83` | stays on JDK primitives (tool classpath, `dev_cache.clj:208-221`); join the output future after the child's exit; an output timeout throws instead of returning `::unavailable` | −3 / +5 |
+| A13 | `script/seon/operator_move_test.clj:23-26` | `.waitFor` before `.exitValue`; join the output future with a bound | −1 / +3 |
 
-**4. Class regression** (`test/seon/await_task_test.clj`). One table over the real `submit!`/`io-terminal!` and one
-`await/task`. Each row is a finite task that crosses its deadline, then throws a nested `ex-info`, plus a
-`complete!` that throws. Assert exactly one stored, delivered fault per failure, and no `::work-complete` success
-report. Assert the submission is retained until the task's `finally` has run, and that the normal, interrupted
-and timeout rows share the same terminal assertions. No Var redefinition.
+**4. Class regression.** Rows are added to the existing launcher suite in `test/seon/flow_test.clj`, using the real
+`start-work-launcher!`/`submit!`/`stop-work-launcher!`: body value, body throw, `complete!` throw, rejection,
+stopped before entry, stopped while running (the host body ignores its first interrupt and waits on an injected
+latch), and queued-never-run. Each row asserts one disposition, no success report for a failure, and no release
+before the executor terminates. The A02 rows go in `test/seon/test_test.clj` through a real `seon.test/run`: a late
+throw after the bound is stored once, and custody is released only after the join. There is no Var redefinition.
 
-**5. Cost.** +44 ns per task, plus one closure. The launcher step itself is unchanged.
+**5. Cost.** Deleting the FutureTask removes one allocation per submission. The new `complete!` catch costs nothing
+on success. This is not measured yet; the implementing cut times `submit!` → terminal on parent and change (the
+round-1 44 ns promise figure measured something else and is withdrawn).
 
-**6. Order.** After E0, so that `fault-detached!` exists and delivers. G0 (`await/task`) is this class's first
-slice.
+**6. Order.** A01 goes into cut L (the launcher cut) together with G02, after R1 has removed the fan-out from
+`flow.clj`. A02 waits for the `test.clj` holder. A05–A08 and A11–A13 are independent of the other classes.
 
-**7. Files.** `await.clj`, `flow.clj` (launcher half), `test.clj`, `effect.clj`, `process.clj`, `shell/jvm.clj`,
-`operator.clj`, `dependency_digest.clj`, `web.clj` (A09 only), `turn.clj` (A10 only).
+**7. Files.** `flow.clj` (launcher half), `test.clj`, `process.clj`, `shell/jvm.clj`, `operator.clj`,
+`dependency_digest.clj`, `operator_move_test.clj`, `test/seon/flow_test.clj`, `test/seon/test_test.clj`.
 
 ## B. Catch converts failure to absence, fallback or incomplete evidence (35)
 
-**1. Seam and missing contract.** `seon.fault/fault!` (`fault.clj:179-234`) itself never swallows. A recording that
-does not commit becomes a panic with the outcome suppressed (`:224-234`). Its gap is structural: `record!`
-(`:33-160`) is public and *total*, so any caller can record and ignore the tuple. Callers do exactly that, at the
-committer (`flow.clj:883`), `boot.clj:84`, `boot.clj:362`, instrumentation (`instrument.clj:721`) and
-`sci/eval.clj:2488`. Beyond that, nothing distinguishes a catch that handles a declared rejection from one that
-disguises a machinery fault. Also, `record!`'s last resort prints `(str fault)` (`:159`, F08).
+**1. Seam, and what an owner cannot do.** `seon.fault/fault!` (`fault.clj:179-234`) never swallows its own failure:
+if the recording does not commit, it panics with the outcome suppressed (`:224-234`). Its gaps are that `record!`
+(`:33-160`) is public and total, that its last resort prints `(str fault)` (`:159`, F08), and that its recipient is
+not evidence.
 
-**2. Smallest owner change.**
-(a) Make `record!` private (`defn-`). Every recording then passes the policy.
-(b) Move `proc-failed!`'s body (`flow.clj:212-232`) into `seon.fault/fault-detached!`. This is "fault! on a thread
-nobody awaits": record, deliver, and on panic print the receipt and return true, so the caller can stop its graph.
-`proc-failed!` calls it (−20 lines in `flow.clj`), and so do the A/C detached producers.
-(c) Replace `(str fault)` with a fixed message; the fault itself stays in the tuple as a value.
-(d) A lint row in the existing clj-kondo config forbids direct `fault/record!`. No new tool is needed; the
-`defn-` alone is enough.
+The review (finding 8) is right that **no owner change can make an arbitrary catch-and-default impossible**. B is
+closed three ways: by deleting each listed catch, by making `record!` private in the E-activation cut (so no caller
+can record a fault without applying the policy), and by the class regression below. B's guarantee is therefore per
+producer and proved producer by producer; it is not a single owner guarantee.
 
-The per-site rule has exactly three forms:
-- **Core operation:** delete the catch. The throw reaches its owning boundary (`var-process`, the evaluation
-  boundary, `fault!` at the request writer).
-- **Declared rejection:** the `try` wraps only the parse call and matches its declared rejection. For edamame that
-  is `ExceptionInfo` with `:type :edamame/error`, probed at HEAD. `clojure.edn` throws a bare `RuntimeException`,
-  probed at HEAD, so its try must cover the read call alone.
-- **Typed unknown:** keep the unknown and add `:seon.error/throwable failure`. `seon.error.refusal/diagnostic`
-  (`error/refusal.clj:91`) already keeps class, message, `ex-data`, chain and Seon frames.
+**2. Per-site rule, with the rejection shapes probed at HEAD.**
 
-In script processes with no connection (`mcp.clj`, `operator.clj`, `docstring.clj`), the same `diagnostic` travels
-to the operator's boundary unchanged. Cleanup failures become `.addSuppressed` on the primary failure.
+- **Core operation.** Delete the catch. The throw reaches its owning boundary: `var-process`, the evaluation
+  boundary, or the writer's `fault!`.
+- **Declared rejection.** The `try` wraps only the rejecting call and matches that call's actual rejection:
+  - edamame: `ExceptionInfo` with `:type :edamame/error` (probed);
+  - `clojure.edn`: a bare `RuntimeException` (probed), so the `try` covers `edn/read-string` alone;
+  - Malli generators: `:type :malli.generator/no-generator` (`malli/generator.cljc:475-482`, `:501`).
+- **Typed unknown.** Keep the unknown and add `:seon.error/throwable failure`; `refusal/diagnostic`
+  (`error/refusal.clj:91`) keeps class, message, `ex-data`, chain and Seon frames.
+- **Scripts with no connection.** Carry the same `diagnostic` to the operator boundary; cleanup failures become
+  `.addSuppressed` on the primary failure.
 
-**3. Migration.** B01 is deleted with the committer (section C). The rest:
+**3. Migration.** B01 is deleted in R1. Rows marked *probe* are PLAUSIBLE: before editing, the lane shows their
+declared rejection case at the REPL, or refutes the finding with evidence.
 
-| Rule | IDs (HEAD file) | Per site |
+| Rule | ID and site at HEAD | Transformed producer: typed rejection vs machinery failure |
 |---|---|---|
-| delete catch | B02 `schema.clj:247`, B03 `schema.clj:1122-1131`, B06 `call_preparation.clj:486`, B07 `ai.clj:868`, B08 `test/accretion.clj:185` (keep only Malli's declared `::m/no-generator`), B11 `schema/admission.clj:366`, `:493`, B14 `shell/jvm.clj:388` (keep the declared broken-pipe `IOException`) | −3 to −6 each, about −35 total |
-| add throwable | B04 `turn.clj:3406-3416`, B05 `sci/kernel.clj:548`, B09 `test/runner.clj:954`, B10 `test.clj:105`, `:1471`, B13 `render/value.clj:309`, `:341` (under the render slice), B15 `web/jvm.clj:349`, B16 `cluster/status.clj:44`, `:92`, `:162` | +1 each, about +12 |
-| narrow to declared parse | B11 `admission.clj:100`, B12 `render/ns.clj:134-151`, B24 `dev/docstring.clj:303` (a parse failure becomes a finding, never `clean? true`), B26/B27 `fn/analyzer.clj:807`, `:852`, B28 `print.cljc:108`, `:1081` (render slice), B29 `repl.clj:89`, `:124`, `:166`, `:463`, B30 `render/transcript.clj:1201`, B31 `sci/eval.clj:1199`, B32 `eval/drive.clj:125`, B33 `web/jvm.clj:427`, B35 `bootstrap.clj:94` | ±0 to −2 each |
-| script boundary keeps the chain | B17–B23 `script/seon/dev/mcp.clj` (seven boundaries in one bridge loop), B25, B34 `operator.clj:295`, `:466` | −25 / +12 |
+| delete | B02 `schema.clj:247` | a reload failure propagates; no stale predicate is reused |
+| delete | B03 `schema.clj:1122-1131` | a basis or canonicalization failure propagates out of the delay |
+| delete | B06 `call_preparation.clj:489` | a validator compilation failure keeps its cause as `:seon.error/throwable` in the incoherent-row refusal |
+| delete | B07 `ai.clj:868` | a sink failure fails the attempt |
+| narrow | B08 `test/accretion.clj:185-192` | only `:type :malli.generator/no-generator` becomes `:skipped-non-generatable`; everything else propagates |
+| split | B11 `schema/admission.clj:100` (read: narrow to edamame), `:366` and `:493` (engine: delete) | a lint finding only for declared schema shapes |
+| split | B12 `render/ns.clj:134-141` (`read-edn`: narrow to `RuntimeException` around `edn/read-string`), `:142-155` (`schema-form-refs`: **delete** the Malli-walk catch; a failed walk propagates rather than leaving a partial set) | the review's finding 8 split |
+| narrow | B14 `shell/jvm.clj:388` | only the broken-pipe `IOException` after reaping |
+| throwable | B04 `turn.clj:3406-3416`, B05 `sci/kernel.clj:543-553` (existing-refusal branch), B09 `test/runner.clj:949-954`, B10 `test.clj:105-106` and `:1469`, B13 `render/value.clj:309` and `:341`, B15 `web/jvm.clj:349`, B16 `cluster/status.clj:44`, `:92`, `:162` | a typed unknown with the full cause |
+| delete | B24 `script/seon/dev/docstring.clj:303-307` | a parse failure is a finding, never `clean? true` |
+| probe | B26, B27 `fn/analyzer.clj:807`, `:852`; B28 `print.cljc:108`, `:1081`; B29 `repl.clj:89`, `:124`, `:166`, `:463`; B30 `render/transcript.clj:1201`; B31 `sci/eval.clj:1199`; B32 `eval/drive.clj:125`; B33 `web/jvm.clj:427`; B34 `operator.clj:466`; B35 `bootstrap.clj:94` | narrow to the declared reader rejection if one exists; otherwise delete |
+| script | B17–B23 `script/seon/dev/mcp.clj` (HEAD: `:113`, `:201`, `:221-222`, `:327`, `:363`, `:405`, `:555`, `:566`, `:607`, `:645`, `:707`, `:754`, `:807`, `:951`, `:982`, `:1012`, `:1018`), B25 `operator.clj:295` | whole cause to the bridge's or operator's boundary. **`mcp.clj` is held by delete-mcp-bridge-opus**, whose rewrite deletes or moves most of these catches; its lane converts the survivors |
 
-Estimated total: B about **−140 / +60**.
+Estimate: about −75 / +45, excluding the render-slice rows (B13, B28, B29), which are counted in that slice.
 
-**4. Class regression** (`test/seon/fault_route_test.clj`, shared with E). A real core operation throws an
-exception with a nested cause, namespaced `ex-data` and a Seon frame, once normally and once during recording.
-Assert that the full chain reaches the stored fact, or that an explicit storage-failed panic occurs. Assert that
-no nil, default, clean or skip value appears. Assert that edamame input which is not EDN remains a declared
-rejection.
+**4. Class regression.** Parameter rows in `test/seon/cluster/fault_storage_test.clj`. A real core operation throws a
+nested cause with namespaced `ex-data` and a Seon frame. Assert that the full chain is stored, or that an explicit
+storage-failed panic occurs. The other rows are: a declared edamame rejection stays a rejection; a Malli
+`no-generator` stays a skip while a generator machinery throw stays red; a typed unknown carries the chain; and a
+cleanup failure is suppressed on the primary. Every changed producer adds one row there or to its own existing suite.
 
-**5. Cost.** Deleting catches costs nothing. `refusal/diagnostic` runs only on the failure path.
+**5. Cost.** Only failure paths change.
 
-**6. Order.** After E0 (the private `record!` and `fault-detached!`). The B rows in `turn.clj`, `sci/eval.clj` and
-`test.clj` wait for those files' holders.
+**6. Order.** After cut P2, which makes the receipt carry delivery. The rows in held files (`turn.clj`,
+`sci/eval.clj`, `test.clj`, `runner.clj`, `mcp.clj`, `call_preparation.clj`) wait for their holders.
 
-**7. Files.** The files named in the table, split into two lanes: platform (`schema`, `call_preparation`, `ai`,
-`accretion`, `runner`, `admission`, `status`, `analyzer`, `transcript`, `drive`, `web/jvm`, `bootstrap`) and
-script (`mcp.clj`, `operator.clj`, `docstring.clj`). The rows in `render/value.clj`, `print.cljc` and `repl.clj`
-belong to the render slice (section F).
+**7. Files.** Those named in the table.
 
 ## C. Exhaustion becomes no work, or its terminal fault is not durable (6)
 
-**1. Seam and missing contract.** `fault!` is the owner again, but these producers bypass it. Exhaustion is
-decided by a scheduler that returns nil (`turn.clj:2739`, `(nil? limit) true`, C01, confirmed at HEAD). Terminal
-faults are offered to a buffer that reports success while keeping only a digest (`turn.clj:5466-5512`, C03,
-confirmed at HEAD).
+**1. Seam and missing contract.** The owner is `fault!` again; these producers bypass it.
 
-**2. Smallest owner change.** Delete the fault channel (section 0.1). `offer-write-refusal-fault!` and
-`offer-turn-backstop-fault!` call `fault-detached!` with `(env/of cluster)`, and their stderr fallbacks go.
-`opening-deferred?` answers the *typed* missing-dial error instead of `true` when the limit is absent. The
-scheduler's first deferral then commits that error once, through `fault!`, deduplicated by the writer's existing
-signature/`opening` (`error.clj:1363`, `:1443`). The same happens for a pre-exhausted agent at arm (C02). No retry
-and no new identity are added.
+- **C01, C02.** `opening-deferred?` answers `true` when the dial is absent (`turn.clj:2739`), and both of its
+  consumers treat that as ordinary deferral. `:2793` branches on any truthy answer, while `:2913` propagates an error
+  only if one is returned.
+- **C03.** Exhaustion and backstop faults are offered to the dropping channel (`turn.clj:5466-5512`).
+- **C04.** A request deadline before an unadmitted batch leaves only pending members (`test.clj:2308`), and
+  `plan.clj:716-725` drops the incomplete result.
+- **C05, C06.** Process refusals become nil (`dependency_digest.clj:78-82`, `issue.clj:77-88`).
 
-**3. Migration.**
+**2. Owner change.** The typed error is one value at its producer, and every consumer handles it:
+
+- `opening-deferred?` answers the declared missing-dial error. `:2793` and `:2913` both branch on it.
+- **The first deferral records the fault once.** The writer's `opening` stops a second *message* per signature, but
+  every call still increments the occurrence count (`error.clj:1392`). The evidence that prevents re-disposition is
+  therefore a fact the scheduler already holds, the newest unanswered wake. The scheduler faults only when no
+  occurrence of this agent's `:seon.turn.loop/episode-limit-missing-error` has `:seon.error.occurrence/last-at` at or
+  after that wake's transaction instant. That is one indexed query over the agent's occurrences. The same rule
+  covers a pre-exhausted agent at arm (C02), keyed on the exhaustion error.
+- C03 exhaustion runs inside the turn step on the proc thread, so it calls `fault!` directly. A panic throws into
+  `var-process`, whose `proc-failed!` stops the graph.
+
+**3. Migration.** Cut R1 retires the fault channel, which gives every producer its own execution owner:
+
+| Producer at HEAD | Its execution owner and panic action |
+|---|---|
+| `turn.clj:5466-5489` write-refusal exhaustion | the turn proc: `fault!` throws → `var-process` stops the agent graph |
+| `turn.clj:5491-5561` backstop (A10) | the agent graph. `var-process` adds `::stop!` (its `stop-panicked-graph!` closure over control and graph-ref) to init args; the step hands it to `arm-turn-completion-backstop!`; the backstop runnable calls `fault!`, and on panic calls `::stop!` and puts the failure on `failure-channel` |
+| `web.clj:2322-2345` page derivation | the render proc: `fault!`; a panic stops the render graph, per the law |
+| `web.clj:2925-2945` feed writer (A09) | the SSE feed: `fault!` unless the failure is the declared client close (`painting` false *and* an `IOException` on write); on panic `close-sse!` (the existing `finally`) and a failed feed status |
+| `web.clj:3540-3556` data read | the HTTP request: `fault!`; a panic becomes the declared error response |
+| `agent.clj:1153-1160`, `boot.clj:28-47` launcher join | deleted: per-proc fault ports need no join |
+| `cluster.clj:3341-3364`, `:3542-3600`, `:3620-3630`, `:3711-3712` wiring and fan-out stop | deleted; the report mult and monitor taps survive as `start-report-fanout!` |
+
+Deleted from `flow.clj`: `:742-900` (dropped-fault family, buffer, committer, 159 lines), `:933-980` (loss reporter,
+committer error join and graph definition, 48), and the error halves of `:982-1108` (about 55 of 127). Retained:
+`monitor-graph` (`:902-931`, 30 lines, report view only) and the report fan-out (about 40). **Gross −262 in
+`flow.clj`**, plus about +18 for the fault port in `var-process` (0.1). Net about −244. That replaces round 1's
+"−370", which the review showed was not what the named interval can yield.
+
+Schemas deleted: `seon.flow.edn:28-116` (fan-out and committer members) and `:190-196`; the `dropped-fault` members
+in `seon.error.edn:108`, `:144-149` and `:272`, and in `seon.error.occurrence.edn:40-41`; plus `seon.boot.edn:75-77`,
+`seon.cluster.wake.edn:25`, and `seon.render.web.edn:21`, `:117`. That is about −70 lines.
+
+Tests converted or deleted in the same cut: the committer and overflow rows in `test/seon/flow_test.clj` (the
+`:698`, `:793` and `:1136` `record!` callers), `test/seon/cluster_test.clj:121`, and
+`test/seon/cluster/fault_message_test.clj:23`.
 
 | ID | Conversion | − / + |
 |---|---|---|
-| C01, C02 | `turn.clj:2739`, `:2913`: nil limit → the typed error; faulted once at the first deferral | −2 / +10 |
-| C03 | `turn.clj:5466-5512` → `fault-detached!`; delete `flow.clj:742-1108` except `monitor-graph` and a 15-line per-graph error reader; delete the `cluster.clj:3341-3364` and `:3542-3600` wiring, `boot.clj:41-47` and `:83-94`, `agent.clj:1153-1160`, `web.clj:2322-2345`, `:2934-2944` and `:3546-3556` (→ `fault-detached!`); in schemas delete `seon.flow.edn:28-116` fan-out/committer members and the `:seon.flow/dropped-fault-*` family (`seon.flow.edn:190-196`, `seon.error.edn:108`, `:144-149`, `:272`, `seon.error.occurrence.edn:40-41`), plus `boot.edn:75-77`, `wake.edn:25` and `render.web.edn:21`, `:117` | about −480 / +30 |
-| C04 | `test.clj:2308`: a deadline before an unadmitted batch stores the typed await timeout on the run row; `plan.clj:716-725` propagates an incomplete result | −3 / +8 |
-| C05 | `dependency_digest.clj:78-82` → `run-process!` (with A12) | counted in A12 |
-| C06 | `issue.clj:77-88`: a nonzero exit returns the process refusal instead of nil | −1 / +3 |
+| C01, C02 | `turn.clj:2739`, `:2793`, `:2913`: typed error; faulted once per unanswered wake | −2 / +14 |
+| C03 | R1 as above; `turn.clj` offers → `fault!` | −24 / +10 |
+| C04 | `test.clj:2308`: the typed await timeout goes on the run row; `plan.clj:716-725` propagates an incomplete result | −3 / +8 |
+| C05 | with A12 | counted there |
+| C06 | `issue.clj:77-88`: a nonzero exit returns the process refusal | −1 / +3 |
 
-**4. Class regression** (`test/seon/exhaustion_fault_test.clj`). Start from a branch holding an unanswered wake and
-a missing episode dial, and another holding an exhausted allowance. Assert one stored, delivered fault naming the
-missing dial or `seon.run/complete`, no duplicate on re-derivation, and no paid call (no-provider). A completed
-episode produces no fault.
+**4. Class regression.** Parameter rows in `test/seon/cluster/turn_test.clj`, run on canonical branch worlds with
+no-provider:
 
-**5. Cost.** Hot paths get cheaper. Every agent graph loses one blocked virtual thread (the fan-out), and every
-fault skips a channel hop. `fault!` already runs on the proc's thread for step throws.
+- a missing dial with an unanswered wake;
+- a pre-exhausted agent re-armed;
+- repeated derivation over the same wake, asserting occurrence count 1 and one message;
+- a stalled owner: the recipient's graph is paused, and the fault is still durable with its message committed;
+- a completed episode, which produces no fault.
 
-**6. Order.** After E0. C03 must land before A09 and A10 (they call `fault-detached!` instead of `offer!`).
+In `test/seon/flow_test.clj`: more than 100 finite reports from one proc, a `send-outputs` failure, a report racing
+`flow/stop`, and a stalled or failing recorder. Each must either be stored or leave a panicked, stopped graph with
+emergency evidence.
 
-**7. Files.** `flow.clj` (fault half), `cluster.clj`, `boot.clj` (wiring only), `agent.clj` (join only), `turn.clj`
-(offers and the dial), `web.clj` (three offers), the schema files, `test.clj`/`plan.clj` (C04) and `issue.clj`.
+C04 and C06 rows go in `test/seon/test_test.clj` and `test/seon/issue_test.clj`.
+
+**5. Cost.** Each agent graph loses its blocked fan-out thread, and each fault skips a channel hop. The deferral
+query runs once per deferral, not per pass.
+
+**6. Order.** P1 (the fault port) and P2 (delivery) come before R1. C01 and C02 wait for the `turn.clj` holders.
+
+**7. Files.** `flow.clj` (fault half), `cluster.clj`, `boot.clj` (the join and the arm-request callback), `agent.clj`
+(the join), `web.clj` (three producers), `turn.clj`, `test.clj`, `plan.clj`, `issue.clj`, the schema files above,
+and the named tests.
 
 ## D. Returned value escapes the declared error alternatives (4)
 
-**1. Seam and missing contract.** `seon.instrument/compiled-wrapper` (`instrument.clj:624-726`). Under `:record`,
-its outer catch returns the boundary refusal *as the function's value* after recording it (`:715-726`). That value
-is outside Malli's output check (`malli/core.cljc:2202`, `:2227`) and outside the arity's declared output. D01 is
-confirmed at HEAD. The same branch sends *invalid caller input* through `commit-fault!` as a core fault (E05).
+**1. Seam and missing contract.** `seon.instrument/compiled-wrapper` (`instrument.clj:624-726`). Under `:record`, its
+outer catch returns the boundary refusal as the function's value (`:715-726`), outside Malli's output check. D01 is
+still present at HEAD. Malli already enforces refusal: `-instrument-f` checks input before entry and output after
+the body (`malli/core.cljc:2202-2231`, `befcd302a`), and the wrapper's throwing `:report` (`:705-714`) makes a
+violation throw. Nothing else is needed for enforcement.
 
-**2. Smallest owner change.** Delete the catch: the wrapper is `wrapped` (Malli's `-instrument`), which always
-throws the marked `ex-info`. Classification then belongs where the throw is caught, as the law requires:
-- The **evaluation boundary** (`sci/kernel.clj:653-681`) already turns the throw into the evaluation's returned
-  value. An `:input` refusal, and an `:output` refusal of an agent-authored function, are the agent's mistakes and
-  return to it.
-- An `:output` or `:guard` refusal of a host (default program) function is a core fault. That boundary calls
-  `fault!` on it, and rethrows any throwable that carries a `:seon.fault/recorded` receipt (E07).
-- A host caller outside SCI gets the throw at its own `var-process` or request boundary, which already calls
-  `fault!`.
+**2. Owner change.** Delete the outer catch (`:715-726`) and keep the throwing report. The wrapper's `policy` then
+needs only `:seon.config.error/max-evidence-bytes`. Deciding **who is responsible** for a refusal is a separate,
+harder problem. The review (finding 5) is right that "input means agent" is wrong, and at the REPL I refuted the
+provenance source I would have reached for first. On a scratch `sci.core/init` context, `sci.core/stacktrace` lists
+only interpreted frames: a direct `(h/f 1)` and a nested `(h/g)` → `h/f` both end at the interpreted caller (probe
+in §10). So D is split:
 
-The wrapper's `policy` then carries only `:seon.config.error/max-evidence-bytes`. That deletes the commit-fault!
-requirement and its validation.
+- **D-delete** (cut P0). Delete the catch; D02–D04; and the evaluation boundary rethrows a throwable carrying a
+  receipt anywhere in its cause chain, using `fault/carried-receipt` (`fault.clj:171-177`, made public), at the one
+  normalizer `kernel/failure-value` (`kernel.clj:526`), which `kernel/invoke` (`:658`) and `sci/eval.clj:4122`,
+  `:4442` all use. Until D-classify lands, a host output violation under `:record` is **returned** to the agent
+  rather than stored, which is a named, temporary gap. Under the default `:panic` the wrapper already threw, so
+  nothing changes there.
+- **D-classify** (cut R3, after §9.6 is ruled). The responsibility table, applied once in `failure-value`, which
+  every view reaches (MCP, tests and web enter through `sci/eval`):
+
+| Malli report (`:seon.instrument/check`, `:seon.error/member`) | Evidence | Responsible → disposition |
+|---|---|---|
+| `:input`/`:arity` on V | V is called by the agent's own code (§9.6: V ∈ `:seon.fn/calls` of the evaluated form's analysis or of branch-authored rows) | the agent → returned value |
+| `:input`/`:arity` on V | otherwise (a host caller supplied bad arguments) | core fault of the caller → `fault!` |
+| `:output`/`:guard` on V | V's row differs on the agent's branch (authored there) | the agent → returned |
+| `:output`/`:guard` on V | V's row is the default program row | core fault → `fault!` |
+| `::m/invalid-schema-at-call` (validator threw) | the contract's schema row is branch-authored | the agent → returned |
+| `::m/invalid-schema-at-call` | otherwise | core fault |
+| any throwable carrying `:seon.fault/recorded` | already disposed | rethrow, never recount |
+| an interrupt or bound firing | the evaluation's own bound | the declared timeout |
+
+The provenance is Seon's existing program data (row identity per branch, and stored `:seon.fn/calls`). It is read
+only on the failure path, and no call site is marked. This is the same boundary for every view; there is no
+transport-specific classifier.
 
 **3. Migration.**
 
 | ID | Conversion | − / + |
 |---|---|---|
-| D01, E05 | delete `instrument.clj:715-726`, the commit-fault! checks `:470`, `:491-499`, `:860-871`, `:901-902` and `seon.instrument.edn:42-44` | −42 / +2 |
-| E07 | `kernel.clj:653`: rethrow a receipt-bearing throwable; call `fault!` for a host function's `:output`/`:guard` refusal | +8 |
-| D02, D03 | `ai.clj:114`, `:120`: declare the callee's `:seon.render.value/missing-root-identity-error` alternative. §1 of the render path allows any spec'd output. Once render slice 2(i) removes the missing-root arm from `render-ai`, delete it again | +2 |
+| D01 | delete `instrument.clj:715-726` and the commit-fault! checks at `:470`, `:491-499`, `:860-871`, `:901-902`; `seon.instrument.edn:42-44` | −40 / +1 |
+| D02, D03 | `ai.clj:114`, `:120`: declare the callee's `:seon.render.value/missing-root-identity-error` alternative; delete it again when render slice 2(i) removes that arm | +2 |
 | D04 | `background.clj:59-72`: return the `db/pull` error before success projection | +2 |
+| E05, E07 | receipt rethrow (P0) and the table (R3) in `kernel.clj:526-572` | +4 / +14 |
+| test | `test/seon/instrument_test.clj:195`, `:344`, `:422`, `:1308` stop calling `record!` and assert the throw | ±0 |
 
-**4. Class regression** (`test/seon/instrument_alternatives_test.clj`). One real armed composition: a `:string`
-function whose callee takes a failing branch, run under both `:panic` and `:record`. Assert that no non-string
-value escapes, that an input refusal returns to the agent with no fault occurrence, and that a host output
-refusal is stored and delivered. Parameter rows cover the rootless attempt unit and the background read error.
+**4. Class regression.** In `test/seon/instrument_test.clj`, one real armed composition under both policies: an
+authored direct bad call, a nested host bad call, authored bad output, host bad output, a validator that throws, and
+a receipt-carrying panic. Parameter rows cover the rootless attempt unit and the background read error. The same
+case runs through the MCP SCI entrance and `seon.test/run` as thin adapter checks, asserting an identical
+disposition (review finding 5 and its view proof).
 
-**5. Cost.** Negative: one `try` frame per armed call is removed. The evaluation boundary adds one `ex-data` check
-on the failure path only.
+**5. Cost.** The `try` frame goes from every armed call. Classification runs only on refusals: one set lookup and
+one row-identity comparison.
 
-**6. Order.** Independent of every other class, so it can land first. E07 is in `kernel.clj`, which no running row
-holds.
+**6. Order.** P0 is independent. `instrument.clj` is held by impl-shape-mirror-malli-opus (shape callers only), so
+the whole file is granted after that lane releases it. R3 comes after §9.6 and after E-activation's writer.
 
-**7. Files.** `instrument.clj`, `seon.instrument.edn`, `sci/kernel.clj`, `ai.clj` (with the B07 row, the same
-lane), `background.clj`.
+**7. Files.** `instrument.clj`, `seon.instrument.edn`, `sci/kernel.clj`, `fault.clj` (`carried-receipt` public: one
+token), `ai.clj`, `background.clj`, `test/seon/instrument_test.clj`.
 
 ## E. Fault classification, custody or delivery is wrong (9)
 
-**1. Seam and missing contract.** `seon.error/commit-call` (`error.clj:1342-1466`). It infers responsibility from
-`interrupted? (some? :seon.error/exception-class)` (`:1406`), routing a core throwable to the *executing* agent as
-`:your-run` (`:1446`). With `escalate-to` absent, the shipped default (`:1449-1454`), unattributed faults wake
-nobody, and `fault!`'s receipt checks storage only (`fault.clj:212`). `fault!`'s docstring claims "root by
-default" (`:188`), which is false.
+**1. Seam and missing contract.** `seon.error/commit-call` (`error.clj:1329-1453`). It infers responsibility from
+`interrupted? (some? :seon.error/exception-class)` (`:1393`) and routes a core throwable to the executing agent as
+`:your-run` (`:1433`). With `escalate-to` absent (`:1436-1442`), unattributed faults are delivered to nobody. The
+receipt checks storage only (`fault.clj:212`), and the docstring claim "root by default" (`:188`) is false.
 
-Live evidence at HEAD (JVM mode, PID 37460, read-only): the effective `:seon.config.error/escalate-to` is absent,
-and there are **32 error signatures but 9 notification ids**. So 23 recorded faults were delivered to no agent.
+Live evidence (round 1, PID 37460): `escalate-to` is absent, and there are 32 signatures but 9 notification ids.
+The review notes that this count is not a per-fault delivery proof. Cut P2's regression gives that proof per fault.
 
-**2. Smallest owner change (E0).**
-(a) `commit-call` routes only core faults, because `fault!` is the only route into it (after B.2 and C). Its
-recipients are the steward, otherwise `escalate-to`. Delete the `:your-run` arm and the `interrupted?` inference.
-(b) `record!` returns the recipient that the transaction opened, or the recipient already open for that signature.
-`fault!`'s receipt gains `:seon.fault/delivered-to`.
-(c) `policy` takes `committed? ∧ delivered?`. An undeliverable fault panics under both modes, like an unstored one.
-(d) The shipped `escalate-to` becomes `"root"` (option 1 in section 9), and `fault!`'s docstring becomes true.
+**2. Owner change, as preparation then activation** (review finding 4). Every cut loads without a later cut's repair.
+
+- **P2, compatible.**
+  - `commit-call` also returns the recipient it messaged, or the recipient already open for that signature.
+  - `record!`'s tuple accretes that recipient, and `fault!`'s receipt accretes `:seon.fault/delivered-to` (an
+    optional member in `seon.fault.edn:1-34`).
+  - Ship `:seon.config.error/escalate-to "root"` (owner ruling) and make `fault!`'s docstring true.
+  - `seon.fault/fault-detached!` is **not** added. Every detached producer has a named execution owner (C.3).
+  - The policy is unchanged.
+- **E-activate (cut R4), atomic, with whole-file grants for `fault.clj`, `error.clj`, `instrument.clj` and the tests
+  below.**
+  - `record!` becomes `defn-`.
+  - `commit-call` becomes core-only: the `:your-run` arm and the `interrupted?` inference are deleted (`:1393`,
+    `:1433`).
+  - `policy` requires `committed? ∧ delivered-to`; an undeliverable fault panics under both modes.
+  - The remaining `record!` callers are converted in this cut: `test/seon/turn_test.clj:251`, and whatever
+    `instrument_test.clj` rows are left.
+  - Precondition: R1 (cluster and boot callers), R2 (`sci/eval` acquisition) and R3 have landed. `rg
+    "fault/record!" src script test` must return only `fault.clj`.
 
 **3. Migration.**
 
-| ID | State at HEAD | Conversion |
+| ID | State at `14ccb65f0` | Conversion |
 |---|---|---|
-| E01 | confirmed (`error.clj:1406`, `:1443-1455`) | (a)–(d): about −6 / +14 in `error.clj` and `fault.clj`, +1 in `seon.config.error.edn` |
-| E02 | **superseded**: the watcher now calls `fault!` through `core-fault!` (`test.clj:2192-2203`, `2253`) | none; A02 still holds |
-| E03 | **superseded** by `4c8e3588e` (`test.clj:2186-2203`) | none |
-| E04 | **superseded**: the recording binds its own custody (`sci/eval.clj:2481-2482`, `e8cada147`) | none |
-| E05 | confirmed | lands with D01 |
-| E06 | confirmed (`boot.clj:342-380`) | `record-uncaught!` calls `fault-detached!`; with an environment that names an agent, a panic stops that agent's graph through routing; without an environment, emergency stderr stays (the storage-fails-panics law): −20 / +6 |
-| E07 | plausible → resolved in D | lands with D |
-| E08 | confirmed (`turn.clj:3406-3443`, `call_preparation.clj:1269-1303`, `test.clj:1471`) | the per-site classifier `analyze-submitted` (`turn.clj:3434-3442`) is the pattern to delete. The phase boundary calls `fault!` for any failure whose declared schema is not in the phase's declared agent-mistake alternatives, and those are already enumerated in its arity (`:3427-3428`): −9 / +6 |
-| E09 | confirmed: second disposition via `commit-fault!` (`sci/eval.clj:2487-2495`), `config/defaults` fallback (`:2448-2450`), and a third writer calling `commit-tx` directly (`:2456-2482`) | see question 9.2. Either way the `config/defaults` fallback is deleted (it violates "`seon.config/defaults` is a compiled constant"), and the `commit-fault!` branch is deleted with the callback key (31 references in `sci/eval.clj`, `seon.sci.eval.edn:244-246`): about −45 / +8 |
+| E01 | confirmed (`error.clj:1393`, `:1430-1442`) | P2 + R4: about −6 / +16 in `error.clj`/`fault.clj`, +1 in `seon.config.error.edn`, +2 in `seon.fault.edn` |
+| E02, E03 | superseded: `test.clj:2192-2203`, `:2253` use `fault!` (`4c8e3588e`) | none (A02 remains) |
+| E04 | superseded: `sci/eval.clj:2481-2482` binds its own custody (`e8cada147`) | none |
+| E05, E07 | confirmed / resolved in D | P0 / R3 |
+| E06 | confirmed (`boot.clj:342-381`) | `record-uncaught!` calls `fault!` with the carried environment. A panic **cannot** stop a graph here: the failing thread belongs to no graph, and it is already dead. After A/G, a Seon task reaching this handler is itself an owner defect, so the stored fault names the thread and the missing owner. Without an environment, stderr emergency evidence stays, per the storage-fails-panics law. About −14 / +6 |
+| E08 | confirmed (`turn.clj:3406-3443`; `call_preparation.clj:1272`, `:1291`; `test.clj:1469`) | the per-site classifier `analyze-submitted` (`turn.clj:3434-3442`) is deleted. The phase boundary returns only declared agent-mistake alternatives and hands every other failure to `fault!`. The `call_preparation.clj` default-supplier failure and the `test.clj` LinkageError follow the same rule at their producers. About −9 / +8, across three files |
+| E09 | confirmed (`sci/eval.clj:2437-2496`) | cut R2, §9.2 option 1 (the review's opinion, adopted). `::agent-mistakes` return in the acquiring agent's opening. `::acquisition-refusals` are classified at their producer: an authored row that fails to acquire is the agent's, while an installed-program, compiler or configuration failure goes to `fault!`. Deleted: the direct `commit-tx` writer (`:2443-2486`), the `commit-fault!` branch (`:2487-2495`), the `config/defaults` fallback (`:2448-2450`), and the callback key. The count unit is lines matching the literal `:seon.flow/commit-fault!`: **19 in `sci/eval.clj`**, plus `seon.sci.eval.edn:244-246`. About −70 / +15 |
 
-**4. Class regression** (the E half of `fault_route_test.clj`). One nested platform failure, sent as a Throwable
-and as a flat core error, each with and without executing-agent attribution, on a disposable branch that has a
-root agent. Assert identical routing to the steward or root, the full cause, and the occurrence and message
-committed in one transaction. Under `:panic`, assert the failing graph stops. On a branch with no root agent,
-assert an undeliverable-fault panic. An invalid authored call returns to its agent and creates no occurrence.
+**4. Class regression.** Rows in `test/seon/cluster/fault_message_test.clj`, on a disposable branch with a root agent:
 
-**5. Cost.** On the fault path only, one set lookup of the recipient in the transaction data already built.
+- one nested platform failure as a Throwable and as a flat core error, each with and without executing-agent
+  attribution; assert the steward or root recipient in the receipt, the occurrence and message in one transaction,
+  and the full cause;
+- a notification already open for the signature, which gives the same recipient and no second message;
+- a removed steward, which falls back to root; a missing root, which panics as undeliverable;
+- storage refused, which panics;
+- a receipt-carrying throwable, which is not recounted;
+- under `:panic`, the failing proc's graph is stopped (via `var-process`);
+- **no paid turn**, with the effective root provider read on the target branch (review opinion on 9.1);
+- an invalid authored call returns with no occurrence.
 
-**6. Order.** E0 is first among B, C and E, because B and C route through `fault!`/`fault-detached!` and their
-regressions assert delivery. D can run in parallel.
+**5. Cost.** On the fault path only, one lookup of the recipient in transaction data already built.
 
-**7. Files.** `fault.clj`, `error.clj` (`commit-call` only), `seon.config.error.edn`, `flow.clj`
-(`proc-failed!` → `fault-detached!`, 20 lines), `boot.clj` (`record-uncaught!` and the arm request), `sci/eval.clj`
-(the `commit-fault!` retirement, E09), `turn.clj` (E08).
+**6. Order.** P2, then R1 ∥ R2 ∥ R3, then R4. `sci/eval.clj` is held by fix-read-sink-opus and
+fix-one-reader-errors-opus.
+
+**7. Files.** `fault.clj`, `seon.fault.edn`, `error.clj` (`commit-call` only), `seon.config.error.edn`, `boot.clj`
+(`record-uncaught!` and the arm-request callback, in R1), `sci/eval.clj` and `seon.sci.eval.edn` (R2), `turn.clj`,
+`call_preparation.clj`, `test.clj` (E08), and the tests named above.
+
+## M. Delivery through the agent's path: faults in MCP replies (owner ruling 20:50Z)
+
+**What exists.** Core faults are durable occurrences with a message to their recipient (E). The MCP `runtime_status`
+shows open faults through `mcp-runtime-observation` (`cluster.clj:659-740`). It clips with `take observation-top`
+and `bounded-summary` (`:629-647`, `:691`, `:719`), a presentation cut that render slice 6 already deletes. MCP
+evaluation replies carry no faults.
+
+**Design.** An MCP reply is a view of the calling Seon agent's evaluation (AGENTS.md: the Seon agent is the
+perspective). The faults it shows are therefore *the core faults committed since this agent's previous recorded
+evaluation*, derived from facts. Nothing is held per session:
+
+1. **Data function** `seon.problems/faults-since` (+about 20 lines, `seon.problems.edn` +8). Input: the database and
+   a basis-t. Output: `{:seon.problems/basis-t t, :seon.problems/new-fault-count n,
+   :seon.problems/undelivered-count u, :seon.problems/new-faults [<error notice units>]}`.
+   - It reads occurrences committed after `t` through `seon.db`'s since view (`d/since`, which `db.clj:134` already
+     serves), so its cost follows new occurrences.
+   - Each fault is the existing `seon.error/notice` unit (`error.clj`, declared AI renderer), carrying its signature,
+     operation, message, last-at and `delivered-to`.
+   - `undelivered-count` counts new occurrences with no message. After R4 it is always 0, because such a fault
+     panics, so a non-zero value shows faults recorded before R4.
+2. **Basis.** The agent's previous recorded evaluation's `basis-t`. The one REPL path records every evaluation
+   (AGENTS "the one REPL path"). If there is none, the basis is the agent's branch creation. A lost or first basis
+   shows faults again, which is safe.
+3. **Rendering.** The reply renders the evaluation unit and the faults unit together through the one `units`
+   entrance of the [render path](one-render-path-design-2026-09-25.md), sharing its one budget B:
+   - the counts are exact integers;
+   - the vector is cut by the floor, with its elision naming the bound, the count and the requery
+     `(seon.problems/faults-since db t)`;
+   - an empty result renders as absence, with no key.
+   `runtime_status` renders the same unit over all open faults, which replaces `observation-top`/`bounded-summary`
+   (render slice 6 row 9).
+4. **Placement.** The reply assembly's owner is being moved: `mcp-project`/`mcp-valf` (`cluster.clj:388-535`) is
+   rewritten by render slice 2(i), and design-one-pipeline-opus (S2) routes MCP SCI and JVM evaluations through the
+   agent pipeline. M therefore lands as **one line in that pipeline's reply unit list**, plus the data function.
+   It adds no bridge code: `script/seon/dev/mcp.clj` renders what it receives.
+
+**Class regression.** Rows in `test/seon/problems_test.clj`:
+
+- two evaluations by one agent with a fault committed between them; the second reply's unit names it and the first's
+  does not;
+- more faults than B holds, which gives exact counts, a cut, and a requery that returns the remainder;
+- an agent with no prior evaluation.
+
+One MCP adapter check asserts that the reply contains the same unit text.
+
+**Cost.** One since-read per reply, proportional to occurrences committed since the basis (usually zero). Render cost
+stays under B.
+
+**Order.** P2 (so `delivered-to` exists), then the data function; the reply line waits for the MCP reply owner (render
+slice 2(i) and one-pipeline S2).
 
 ## F. Arbitrary value expands before the single presentation bound (23)
 
-**1. Seam and missing contract.** `seon.render.value/prepare` (`value.clj:621-668`) bounds only the AI face
-(`:512`, `:643-644`). HTML visits the whole value (`:447`, `:512`), the key rendering uses HTML (`:537-541`, F03),
-and window ordering prints every key (`:300-301`, `:413`, F04). All three are confirmed at HEAD.
+**1. Seam and missing contract.** `seon.render.value/prepare` (`value.clj:621-668`) bounds only the AI face. HTML
+visits the whole value (`:446-576`), map keys are rendered with the HTML face (`:537-541`, F03), and window ordering
+prints every key (`:297-304`, `:413`, F04). **Today's AI face is not wholly safe either:** composite keys and full
+printed ordering both run before the budget. So no producer row closes F before render slice 2(i). The review is
+right here (finding 6).
 
-F01 is measured at HEAD (JVM mode, read-only). A 50,000-entry vector of small maps prepares its AI face in
-**3.4 ms, 1,391 chars**. The HTML face that `prepare-result` stores as the "complete" blob (`error.clj:498`) takes
-**2,113 ms and 1,939,885 chars**, with 2.4 M `hiccup?` calls. Recording the error that explains a large value
-costs more than the failure itself.
+F01 at HEAD (`error.clj:460-492`): `prepare-result` renders the HTML face into text as `complete` (`:485`) and
+stores it as `:seon.error/data-blob`. Round 1 measured that face at 2,113 ms and 1.94 M characters for a 50,000-entry
+vector, against 3.4 ms and 1,391 characters for AI. That measures the *old* detour, not any replacement.
 
-**2. Smallest owner change.** None is new here. The owner change is render slice 2(i) of the
-[one render path](one-render-path-design-2026-09-25.md) (§3, §6 row 2): one held source, safe structural
-selection under one budget B, one tree and two faces. It deletes `value-node*`, `window`, `stable-entries` and the
-`pr-str` tie-break (§6 row 2 (i)). This class adds only the producer rule that makes the floor the *only*
-expansion: **a diagnostic carries its offending value as a value (`:seon.error/offending` or its declared member)
-and fixed prose, never `pr-str` inside a message.** The floor then bounds the value whenever anything prints it.
-Durable exact evidence stays what it is: blob artifacts of the value, via `artifact`/`artifact-edn`
-(`value.clj:683-716`), never a rendered face.
+**2. Owner change.** Render slice 2(i) is the owner: one held source, safe structural selection under one B, one tree
+and two faces (render design §3, §6 row 2). This class adds two things.
+
+- **Producer rule.** A diagnostic carries its offending value as a value (`:seon.error/offending` or its declared
+  member) plus fixed prose, never `pr-str` inside a message. The floor bounds the value whenever anything prints it.
+- **F01, settled by evidence ownership rather than a new artifact path** (finding 6).
+  - `:seon.error/data-blob` has **two producers with different content**: `prepare-result`'s complete-HTML text
+    (`:485-487`) and `evidence-stage`'s whole admitted evidence (`:1455-1473`, staged when the fact is capped). Its
+    readers are `error.clj:659-660` (reuse), `:681` (`value`), `:1403-1447` (the occurrence link) and
+    `cluster/status.clj:141` (size accounting). None reads the HTML text as HTML.
+  - So `prepare-result` stops producing `data-blob`: its `complete` line and `blob/put!` are deleted, and its
+    contract output drops the member. `evidence-stage` becomes the one producer of `data-blob`, under its existing
+    contract. `:seon.error/shown` stays the floor's AI text (exact saved bytes). `:seon.error/result-id` still binds
+    the live subject through `bind-result!`, so exploration of a live subject goes through the render path's
+    continuation, and a gone subject answers `:gone` (render design §3g).
+  - No raw admission is added. `evidence-stage`'s own `full-edn` admission (`:640-664`) is O(N) storage work under
+    `max-evidence-bytes`. It is measured separately (time and allocation) and is not called presentation.
 
 **3. Migration.**
 
-| IDs (HEAD) | Conversion | − / + |
+| IDs at HEAD | Conversion | − / + |
 |---|---|---|
-| F02, F03, F04, F13 (`repl.clj:491`), F12 (`web.clj:795-798`), F18 (`problems.clj:587-633`) | render slice 2(i) and slice 4, counted there | 0 here |
-| F01 `error.clj:498-500` | store the offending value's artifact (`admit` → `artifact-edn` → `blob/put!`) instead of the HTML face's text; `shown` stays the AI face | −3 / +3 |
-| F07 `error.clj:1122-1130`, `:2026`, `:2069`; F22 `:905` | fixed prose plus the value in data; the elision HTML goes through the floor | −10 / +4 |
-| F08 `fault.clj:159` | lands with B.2(c) | −1 / +1 |
-| F05 `render/hiccup.clj:280` | an invalid tag's error carries the head as its offending value; serialization of already prepared trees is unchanged | −2 / +1 |
-| F06 `db.clj` (9 sites), F09 `sci/eval.clj:3589`, `:3637`, `:3793`, F10 `turn.clj:3704`, `:3753` (`:2200` is exact source bytes, not presentation; keep), F11 `render.clj:1925`, `:1968`, F14 `accretion.clj:136-138`, `:370-375`, F15 `test.clj:1944`, `runner.clj:398`, F16 `fn.clj:58-59`, F17 `schema/internal.cljc:469-523`, `admission.clj:409-410`, F19 `cluster.clj:3470`, `status.clj:177`, F21 `background.clj:55`, `my/program.clj:265`, `plan.clj:1367`, F23 `render/ns.clj:233-511` | the same rule, scripted once across the list (`pr-str` inside `str` inside an error constructor → value member), then linted and loaded, with the residue fixed by hand | about −60 / +30 |
-| F20 `script/seon/dev/mcp.clj:440` | delete the `*print-length*`/`*print-level*` nil binding; non-string content goes through the JVM floor (`value/floor`) before the bridge | −3 / +1 |
+| F02, F03, F04, F12 (`web.clj:795-798`), F13 (`repl.clj:491`), F18 (`problems.clj:587-633`) | render slices 2(i) and 4, counted there | 0 here |
+| F01 `error.clj:460-492`, `:657-660` | as above | −6 / +1 |
+| F07 `error.clj:1110`, `:2013`, `:2056`; F22 `:892` | fixed prose, value in data; the elision HTML goes through the floor | −10 / +4 |
+| F08 `fault.clj:159` | a fixed message; the fault stays in the tuple | −1 / +1 |
+| F05 `render/hiccup.clj:280` | the invalid tag's head becomes the offending value | −2 / +1 |
+| F06 `db.clj` (9 sites), F09 `sci/eval.clj:3589`, `:3637`, `:3793`, F10 `turn.clj:3704`, `:3753` (keep `:2200`: exact source bytes), F11 `render.clj`, F14 `accretion.clj:136-138`, `:370-375`, F15 `test.clj:1944`, `runner.clj:398`, `:986-988`, F16 `fn.clj:58-59`, F17 `schema/internal.cljc:469-523`, `admission.clj:409-410`, F19 `cluster.clj:3470`, `status.clj:177`, F21 `background.clj:55`, `my/program.clj:265`, `plan.clj:1367`, F23 `render/ns.clj` (re-grep: that file changed in `a2ee4f38f`) | the producer rule, scripted once across the list (`pr-str` inside `str` inside an error constructor → a value member), then linted and loaded, with the residue fixed by hand | about −60 / +30 |
+| F20 | **retired**. After `1ae366d7f`, `mcp.clj` passes strings through and JSON-encodes other content; the round-1 row cited a different function | 0 |
 
-**4. Class regression.** This is the render path's §3h row 8 ("one tree across faces"), extended with one error-path
-row. The same nested failure value (a large string, a composite map key, and a finite lazy tail that throws if
-realized past the permitted prefix) goes through `fault!`, the AI face and the HTML face. Assert that both
-terminate within the same fixed profile, that the tail is not forced, that one cut/requery identity is shared, and
-that the stored artifact reads back as the value.
+**4. Class regression.** The render path's §3h rows, plus these rows in `test/seon/render/value_test.clj`, in one
+suite:
 
-**5. Cost.** Error recording drops from O(value) to O(B) (2,113 ms → about 3 ms on the probe). Error construction
-stops printing, which is negative cost.
+- no unsafe realization across the error, AI and HTML views of one nested failure value (a large string, a composite
+  key, and a finite lazy tail that throws past its prefix);
+- an exact round trip for a supported, retained, finite evidence blob;
+- explicit unavailable evidence beyond `max-evidence-bytes`;
+- exact saved shown bytes.
 
-**6. Order.** F02–F04 wait for render slice 2(i). The producer rows can land before it: carrying a value is correct
-under today's floor too, since the AI face is already bounded. F01, F07 and F22 in `error.clj` wait for E0.
+These go through the agent's read → eval → record → print path, with one MCP adapter check. Selection and storage
+are timed separately, with allocation.
 
-**7. Files.** `error.clj` (after E0), `db.clj`, `render/hiccup.clj`, `render.clj`, `accretion.clj`, `fn.clj`,
-`schema/internal.cljc`, `admission.clj`, `problems.clj` (slice 4), `status.clj`, `background.clj`, `my/program.clj`,
-`plan.clj`, `render/ns.clj`, `mcp.clj`, `cluster.clj` (after C), `sci/eval.clj`, `turn.clj`, `test.clj` and
-`runner.clj` (after their holders).
+**5. Cost.** F01 removes one HTML-face render per recorded error (the probe figure is an upper bound on what is
+removed). The storage cost stays O(N), is bounded by `max-evidence-bytes`, and is measured.
+
+**6. Order.** F02–F04 go in render slice 2(i). The producer rows land with or after it, and are not claimed as
+closing F earlier. F01, F07 and F22 in `error.clj` follow P2 in the same file-owner sequence.
+
+**7. Files.** `error.clj`, `db.clj`, `render/hiccup.clj`, `render.clj`, `accretion.clj`, `fn.clj`,
+`schema/internal.cljc`, `admission.clj`, `status.clj`, `background.clj`, `my/program.clj`, `plan.clj`, `render/ns.clj`,
+`cluster.clj`, `sci/eval.clj`, `turn.clj`, `test.clj`, `runner.clj`. Many of these are held (§8).
 
 ## G. Unbounded wait, or cancellation mistaken for exit (16)
 
-**1. Seam and missing contract.** `seon.await/await!` (`await.clj:106-153`) bounds the *observation*. Its docstring
-leaves cleanup to the caller (`:122-123`). For a Java future, the timed `.get` (`:144-147`) followed by the
-caller's `.cancel` proves nothing about exit. There is also no way to ask for "the exit event".
+**1. Seam and missing contract.** `seon.await/await!` (`await.clj:106-153`) bounds an *observation*, and its
+docstring leaves cleanup to the caller (`:122-123`). It stays an observation operation (review finding 2).
+Cancellation and exit belong to the execution owner.
 
-**2. Smallest owner change (G0).** `await!` accepts the `seon.await/task` value from section A.2:
-- **Completion** returns the value, or rethrows the throwable, which is consumed once.
-- **Expiry** interrupts the task and returns the typed timeout, whose diagnostic names `::task-exit` as the
-  missing event. The caller keeps custody until `:seon.await/exit` is delivered. That is a second bounded await
-  that *reports* a missed exit and never releases.
+The review found two gaps in round 1 (finding 3):
 
-Exit proof for Flow work reuses the existing seam, executor termination (`join-graph!`, `flow.clj:134-160`). The
-work launcher's io tasks move from the shared root `:io` executor (`flow.clj:608`) onto the launcher graph's own
-executor, so `join-graph!` proves every handler has exited (G02). `start-graph!` accepts a supplied `::executor`
-(+3 lines). Subprocess exit reuses `process/run-process!` and `terminate-subprocess!`, which already await
-`onExit` and return survivors (`process.clj:175-189`).
+- **The real stop caller discards the launcher's result.** `boot/stop!` calls `(some-> … flow/stop-work-launcher!)`
+  at `boot.clj:499`, ignores the returned timeout, then releases the branch and store (`:500-502`).
+- **A `Delay` has no timed deref.** Delays are `IDeref`/`IPending` only (`clojure/lang/Delay.java:18`), so
+  `agent.clj:1313-1320` cannot be bounded through `await!`.
+
+**2. Owner changes.**
+
+- **G02 (cut L).** Launcher tasks run on the launcher graph's own thread-per-task executor, which `start-graph!` is
+  given as `::executor` (+3 lines; today they use the root `:io` executor, `flow.clj:608`). `join-graph!`'s
+  `awaitTermination` (`:151-159`) then proves every handler thread has returned. Stop only interrupts (A.2).
+  **`boot/stop!` checks the launcher's result before any release.** On a typed timeout it throws a refusal carrying
+  the timeout, which the existing catch (`boot.clj:512-514`) turns into instance retention. The branch and store are
+  not released, and a restart refuses. A late handler therefore never uses a released connection.
+- **G03.** The arm and stop owners publish completion as a `promise`, delivered in the owning operation's `finally`
+  by the thread that runs it, instead of a `delay` that any dereferencer may end up running. Waiters `await!` that
+  promise under `:seon.config.agent/turn-completion-backstop-ms`. On timeout they throw with the release mark
+  retained, as `agent.clj:785-791` already promises.
+- **G01 / A03 (`effect.clj:472-502`).** The handler runs on a virtual thread (the `test.clj` shape). The
+  bounded join returns the typed timeout, and the effect row keeps its claim. A watcher joins the thread, then
+  consumes the outcome: a late throw goes to `fault!`, a late value to `settle-value!`'s interrupted-late branch.
+  Only then is the claim released, and a re-request on the same effect id refuses while it is held.
+- **Subprocesses** use `process/terminate-subprocess!` and `onExit` (`process.clj:158-200`) where that owner is on
+  the classpath. Survivors keep their resources, and the caller fails naming them. The tool-classpath and operator
+  scripts stay on JDK `Process.waitFor`/`onExit` (finding 7). A07/G05 must land before any caller migrates onto
+  `run-process!`.
 
 **3. Migration.**
 
 | ID | Conversion | − / + |
 |---|---|---|
-| G01 | `effect.clj:505-512`: with A03 the handler is an `await/task`; on timeout the effect row stays claimed until `exit` fires, and a new effect on that id refuses | −4 / +6 |
-| G02 | `flow.clj:608`, `:628-646`: launcher tasks run on the graph's executor; stop interrupts, and `drained` fires from the tasks' own `io-terminal!` | −8 / +5 |
-| G03 | `agent.clj:796`, `:1318-1320`: deref the arming/stopping delay through `await!` with the turn-completion backstop bound; a timeout keeps the release mark | −2 / +8 |
-| G04 | `shell/jvm.clj` (with A08): capture threads become tasks, and the process result waits for their exits | counted in A08 |
-| G05 | `process.clj:289-303` (with A07) | counted in A07 |
-| G06–G10 | `operator.clj:553-580`, `:616-624`, `:901-902`, `:1513-1514`: the timed races use `await/task` for the socket tasks; the direct `destroyForcibly` sites call `process/terminate-subprocess!` and fail on survivors | −20 / +8 |
-| G11 | `dependency_digest.clj` (with A12) | counted in A12 |
-| G12 | `issue.clj:79`, `test/cache.clj:47`, `:196` → `run-process!` | −10 / +6 |
-| G13 | `operator_move_test.clj:24-26`, `:111-112` (with A13); cleanup deletes only after a proved exit | −3 / +2 |
-| G14, G15 | `sci/eval.clj:3106`, `:3217`; `call_preparation.clj:614-617`; `db.clj:3772` | **refute or measure first**: these are shared `delay`s of finite derivations. A delay forced by a second thread blocks on the owner's monitor, and that is not a new unbounded wait unless the derivation blocks. The lane measures one contended acquisition on the admitted entry path and converts only if it can hang |
-| G16 | `flow.clj:278`: no production proc declares `:compute` (`rg` at HEAD), so `var-process` refuses `:compute` and the dependency's timed-get gap becomes unreachable | −1 / +1 |
+| G01, A03 | as above | −12 / +16 |
+| G02 | `flow.clj:575-675` + `boot.clj:499` in cut L | −8 / +10 |
+| G03 | `agent.clj:796`, `:1085`, `:1308-1320` delay → promise; the waiters `await!` it | −3 / +10 |
+| G04 | with A08 | counted there |
+| G05 | with A07 | counted there |
+| G06–G10 | `operator.clj:553-580`, `:616-624`, `:901-902`, `:1513-1514`: `.destroyForcibly` then `(.waitFor child bound unit)`; fail naming the survivor; delete the output file only after proved exit. JDK only | −0 / +12 |
+| G11 | with A12 (JDK) | counted there |
+| G12 | `issue.clj:79`, `test/cache.clj:41`, `:190` → `run-process!` (these run in the main JVM) | −8 / +6 |
+| G13 | `operator_move_test.clj:24-26`, `:111-112` | −1 / +3 |
+| G14, G15 | `sci/eval.clj:3106`, `:3217`; `call_preparation.clj:614-617`; `db.clj:3772` | **measure first**, as the review asked: contended acquisition's excess over the declared evaluation deadline, not only a hang. Convert only if it exceeds the deadline |
+| G16 | `flow.clj:278`: no production proc declares `:compute` (`rg` at HEAD), so `var-process` accepts only `:io`, making Flow's timed-get compute path (`impl.clj:258-260`) unreachable | −1 / +1 |
 
-**4. Class regression** (the G half of `await_task_test.clj`). A finite host task ignores its first interrupt and
-waits on an injected latch. The caller crosses its timeout. Assert that a conflicting operation (a re-submit on the
-same effect id, a test body on the same member) refuses while resources are still owned. Release the latch.
-Assert that the exit is observed, that a late failure is consumed and faulted once, and that only then do release
-and re-entry proceed. One row runs a subprocess survivor through `run-process!`. No infinite task.
+**4. Class regression.**
 
-**5. Cost.** +44 ns per task (measured). `awaitTermination` is already paid at graph stop.
+- `test/seon/cluster/boot_test.clj` exercises the real stop caller: a launcher handler ignores its first interrupt
+  and waits on an injected latch; `boot/stop!` refuses and the instance, branch and store are retained; the latch is
+  released; the late failure is stored once; a second stop then releases.
+- `test/seon/effect_test.clj` rows: a re-request refused while held; a late throw consumed once; no double settlement
+  by the waiter and the watcher.
+- `test/seon/cluster/agent_test.clj` rows: a blocked arm under stop, which gives a bounded refusal with the mark
+  retained.
+- `test/seon/cluster/subprocess_test.clj` rows: a survivor keeps its ownership.
+- The script entrances are proved on their own classpaths: `bin/seon` operator paths, and `dev_cache` loading
+  `dependency_digest`.
 
-**6. Order.** G0 before A (A.2 uses it). G02 shares `flow.clj` with C and A, so it goes in one `flow.clj` lane
-after C.
+**5. Cost.** Stop pays one extra `awaitTermination`, bounded by the existing backstop. Arming delivers one promise.
 
-**7. Files.** `await.clj`, `flow.clj`, `effect.clj`, `agent.clj`, `shell/jvm.clj`, `process.clj`, `operator.clj`,
-`issue.clj`, `test/cache.clj`, `dependency_digest.clj`, `operator_move_test.clj`.
+**6. Order.** Cut L (G02 + A01) comes after R1 in `flow.clj`, and waits on the `boot.clj` holders (fix-boot-cost-opus,
+fix-custody-round4-opus). G03 waits for `agent.clj` (fix-custody-round4-opus). G12 waits for `process.clj`
+(delete-duplicates round 3).
 
-## 8. Order, lanes cut by file, and conflicts
+**7. Files.** `flow.clj`, `boot.clj`, `agent.clj`, `effect.clj`, `shell/jvm.clj`, `process.clj`, `operator.clj`,
+`issue.clj`, `test/cache.clj`, `dependency_digest.clj`, `operator_move_test.clj`, and the test files named above.
 
-The classes overlap heavily by file, so the implementation lanes below are cut **by file ownership**, each landing
-its classes' rows for those files.
+## 8. Cuts, order and file ownership (rebased on `14ccb65f0`)
 
-| # | Lane | Owns | Classes | Waits for |
+Each cut owns whole files for its duration (there is no hunk sharing), loads on its own, and needs no later cut's
+repair. Root grants files from the current ledger just before each launch. "Holder" lists the rows that held a file
+at `14ccb65f0` according to `tmp/orchestrator/file-ownership.md`.
+
+| Cut | Owns (whole files) | Lands | After | Holder at writing |
 |---|---|---|---|---|
-| 1 | D | `instrument.clj`, `seon.instrument.edn`, `sci/kernel.clj`, `ai.clj`, `background.clj` | D, E05, E07, B07, F21 (background) | nothing |
-| 2 | E0 | `fault.clj`, `error.clj`, `seon.config.error.edn`, `flow.clj` (`proc-failed!` only) | E01, B.2, F08 | nothing; D in parallel |
-| 3 | G0 | `await.clj` | G.2 / A.2 | nothing |
-| 4 | fault channel | `flow.clj` (fault half), `cluster.clj`, `boot.clj`, `agent.clj`, `web.clj`, seven schema files | C03, A04, A09, E06, G03, F19 (cluster) | E0; `boot.clj` held by fix-boot-cost (readiness) |
-| 5 | flow tasks | `flow.clj` (launcher half), `effect.clj` | A01, A03, G01, G02, G16 | 3, 4; `effect.clj` held by fix-cost-capabilities |
-| 6 | turn | `turn.clj` | C01–C03, A10, B04, E08, F10 | E0, 3, 4; `turn.clj` held by fix-read-sink and fix-turn-hang r5 |
-| 7 | eval | `sci/eval.clj`, `seon.sci.eval.edn` | E09, B31, F09, G14 | E0; held by fix-read-sink |
-| 8 | test | `test.clj`, `test/runner.clj`, `plan.clj` | A02, C04, B09, B10, F15 | 3; `test.clj` held by impl-world-injection |
-| 9 | subprocess | `process.clj`, `shell/jvm.clj`, `issue.clj`, `test/cache.clj`, `dependency_digest.clj`, `operator.clj`, `operator_move_test.clj` | A05–A08, A11–A13, B14, B25, B34, C05, C06, G04–G13 | 3 |
-| 10 | platform catches | `schema.clj`, `call_preparation.clj`, `accretion.clj`, `admission.clj`, `status.clj`, `analyzer.clj`, `transcript.clj`, `drive.clj`, `web/jvm.clj`, `bootstrap.clj`, `db.clj`, `render.clj`, `render/hiccup.clj`, `render/ns.clj`, `fn.clj`, `schema/internal.cljc`, `my/program.clj` | B (rest), F (producer rows) | E0; `bootstrap.clj` and `render/ns.clj` must be checked against the render lanes |
-| 11 | bridge | `script/seon/dev/mcp.clj`, `script/seon/dev/docstring.clj` | B17–B24, F20 | nothing |
-| 12 | render floor | render slice 2(i) and slice 4 files | F02–F04, F12, F13, F18, B13, B28, B29 | its own owner go |
+| P0 D-delete | `instrument.clj`, `seon.instrument.edn`, `sci/kernel.clj`, `fault.clj` (one token), `ai.clj`, `background.clj`, `instrument_test.clj` | D01, D02–D04, E05, the E07 rethrow, B05, B07, F21 (background) | — | `instrument.clj`: impl-shape-mirror-malli-opus |
+| P1 fault port | `flow.clj` | 0.1 (the fault port in `var-process`), G16 | — | free |
+| P2 delivery prep | `fault.clj`, `error.clj`, `seon.fault.edn`, `seon.config.error.edn`, `fault_message_test.clj` | E01 prep, F08, and F01/F07/F22 in a second commit | — | free |
+| M1 | `problems.clj`, `seon.problems.edn`, `problems_test.clj` | `faults-since` | P2 | `problems.clj`: fix-boot-cost-opus |
+| R1 channel retirement | `flow.clj`, `cluster.clj`, `boot.clj`, `agent.clj`, `web.clj`, the seven schema files in C.3, `flow_test.clj`, `cluster_test.clj` | C03, A04, A09, A10 (needs `turn.clj`: split R1t), E06, the `cluster.clj` F19 row | P1, P2 | `boot.clj`, `agent.clj`: fix-custody-round4, fix-boot-cost |
+| R1t | `turn.clj`, `turn_test.clj` (cluster) | C01–C03, A10, B04, E08 (turn), F10 | P1, P2 (R1 and R1t land together or R1t first: the offers call `fault!` directly) | fix-read-sink, fix-turn-hang r5 |
+| R2 acquisition | `sci/eval.clj`, `seon.sci.eval.edn` | E09, B31, F09 | P2 | fix-read-sink, fix-one-reader-errors |
+| R3 D-classify | `sci/kernel.clj`, `instrument_test.clj` | the D table | P0, §9.6 ruling | — |
+| R4 E-activate | `fault.clj`, `error.clj`, `turn_test.clj` (root test dir) | E01 activation | R1, R1t, R2, R3 | — |
+| L launcher | `flow.clj`, `boot.clj`, `boot_test.clj`, `flow_test.clj` | A01, G02 | R1 | as R1 |
+| G-agent | `agent.clj`, `agent_test.clj` | G03 | R1 | fix-custody-round4 |
+| G-effect | `effect.clj`, `effect_test.clj` | G01, A03 | P2 | fix-cost-capabilities, delete-closure-walks |
+| T test | `test.clj`, `test/runner.clj`, `plan.clj`, `test_test.clj`, `test_runner_test.clj` | A02, C04, B09, B10, E08 (test), F15 | P2 | impl-world-injection, fix-test-failure-facts, fix-boot-cost (runner) |
+| S process | `process.clj`, `issue.clj`, `test/cache.clj`, `subprocess_test.clj` | A07, G05, C06, G12 | — | `process.clj`: delete-duplicates r3 |
+| S scripts | `shell/jvm.clj`, `operator.clj`, `dependency_digest.clj`, `operator_move_test.clj` | A05, A06, A08, A11–A13, B14, B25, B34, C05, G04, G06–G11, G13 | — | free |
+| B platform | `schema.clj`, `call_preparation.clj`, `accretion.clj`, `admission.clj`, `status.clj`, `analyzer.clj`, `transcript.clj`, `drive.clj`, `web/jvm.clj`, `bootstrap.clj`, `docstring.clj` | B rows, E08 (call_preparation), F producer rows in these files | P2 | `call_preparation.clj`: impl-shape-mirror-malli; `bootstrap.clj`, `render/ns.clj`: check render lanes |
+| F producers | `db.clj`, `render.clj`, `render/hiccup.clj`, `render/ns.clj`, `fn.clj`, `schema/internal.cljc`, `my/program.clj` | F producer rows | render slice 2(i) | `db.clj`, `render.clj`: delete-closure-walks, fix-cost-db; `fn.clj`: several |
+| bridge | `script/seon/dev/mcp.clj` | B17–B23 survivors | delete-mcp-bridge-opus lands | delete-mcp-bridge-opus |
+| M2 | the MCP reply owner at that time | the reply unit line | M1, render slice 2(i), one-pipeline S2 | render and one-pipeline lanes |
 
-**Same-file conflicts that force a sequence:** `flow.clj` (2 → 4 → 5), `error.clj` (2, then F01/F07/F22 in lane 2's
-second cut), `boot.clj` (4 after fix-boot-cost), `ai.clj` (1 only), and `turn.clj`, `sci/eval.clj`, `test.clj`
-(one lane each, after their current holders). Lanes 1, 2, 3, 9 and 11 can start together.
+**Startable now, if root grants them:** P1, P2, S scripts. P0 starts when `instrument.clj` frees, S process when
+`process.clj` frees. Everything else is ordered as above. The files shared by several cuts are sequenced, never
+shared: `flow.clj` (P1 → R1 → L), `fault.clj` (P0 token → P2 → R4), `error.clj` (P2 → R4), `boot.clj` and
+`agent.clj` (R1 → L / G-agent), `sci/kernel.clj` (P0 → R3), and `instrument_test.clj` (P0 → R3).
 
-**Net source-line estimates** (planning, not measured; tests excluded; regressions add about +40 each, six files):
-A about −130 / +50, B −140 / +60, C −485 / +50, D −42 / +14, E −80 / +34, F −80 / +40 (excluding render slice 2),
-G −48 / +36 (A/G shared rows counted once). Total about **−1,000 / +285, net ≈ −715**. The largest cut is C: the
-fault channel and committer family, about −370 in `flow.clj` alone. Every lane stays under 100 added lines, except
-C's lane 4, which is +30 added against −480.
+**Estimates.** These are unique physical source lines per cut, planning values that are not measured. Every range is
+counted once, in its owning cut; schemas and test conversions are listed separately.
 
-## 9. Open questions (priced; recommendation marked)
+| Cut | src − / + | schema − / + | tests |
+|---|---|---|---|
+| P0 | −40 / +9 | −3 / 0 | convert 4 `record!` rows; add about +40 |
+| P1 | 0 / +18 | 0 | about +35 (flow_test) |
+| P2 | −3 / +12 | 0 / +3 | about +40 |
+| M1 | 0 / +20 | 0 / +8 | about +30 |
+| R1 + R1t | −300 / +40 | −70 / 0 | delete committer/overflow tests (about −150), convert 3 callers, add about +40 |
+| R2 | −70 / +15 | −3 / 0 | about +25 |
+| R3 | 0 / +14 | 0 | about +30 (rows) |
+| R4 | −6 / +4 | 0 | convert 1 caller |
+| L | −18 / +18 | 0 | about +35 |
+| G-agent, G-effect | −15 / +26 | 0 | about +45 |
+| T | −5 / +20 | 0 | about +30 |
+| S process, S scripts | −30 / +60 | 0 | about +30 |
+| B platform, bridge | −75 / +45 | 0 | about +40 |
+| F producers (excluding render slices) | −79 / +37 | 0 | about +20 |
+| **Total** | **about −640 / +340, net ≈ −300** | **−76 / +11** | about −150 / +520 |
 
-**9.1 What "delivered" means for a core fault (E01). This conflicts with the 2026-09-24 ruling "no paid root
-turns".**
-1. **Recommended.** Ship `escalate-to "root"`. Delivery is the ordinary message fact. Whether it starts a paid turn
-   is decided by root's provider configuration: `:no-provider`, the default-cluster policy. Guarantee: every fault
-   has a durable addressee. Cost: +1 edn line, and fixtures need a root agent (`seed-root-agent!` exists).
-   Sacrifice: root's inbox holds one message per signature.
-2. Keep the absent default. Define delivery as open on the problems surface, and amend AGENTS.md "Recording
-   without delivery is a defect". Cost: docs only. Sacrifice: nobody is woken; MCP polling is the reader.
-3. Require `escalate-to` at config apply and refuse boot without it. Loud. Cost: a config refusal. Sacrifice:
-   every cluster must name one.
+This is smaller than round 1's claimed −715 because the double counts (A04/C03, B01/C03, E09) are removed, the
+`flow.clj` interval is honest (−262 gross, not −370), and the retained per-graph machinery (report fan-out, fault
+port) is priced. Several cuts exceed 100 added lines only in tests. R1 is the one large deletion, at −370 source and
+schema lines against +40.
 
-**9.2 Acquisition refusals of authored rows (E09): returned mistakes, or recorded history?**
-1. **Recommended.** Return them in the acquiring agent's opening as declared values, and delete the third writer
-   (`sci/eval.clj:2437-2496`, about −55). Sacrifice: no durable history of refused acquisitions beyond the turn.
-2. Keep the durable record, add a declared recipient member on the commit request for authored mistakes, and route
-   through `commit-call`. Cost: +1 key, +15 lines.
-3. Treat them as core faults through `fault!`. Cost: smallest diff. Sacrifice: wrong responsibility; the agent's
-   own mistake wakes root.
+## 9. Questions and rulings
 
-**9.3 Flow's own error channel still slides (`impl.clj:102`, buffer 100) for Flow-internal failures.**
-1. **Recommended.** Accept a documented residual: a per-graph reader calls `fault-detached!` on the graph's
-   executor. After `var-process`, only Flow-internal failures arrive there, so more than 100 of them queued behind
-   one fault write is not a realistic load. Cost: 0.
-2. A fork patch letting `create-flow` take the error buffer, used with a blocking buffer. Cost: about 5 fork lines
-   and a gitlink bump. Sacrifice: fork drift.
-3. An upstream PR. Cost: time; ruled out by the no-PR standing rule.
-
-**9.4 `stop-work-launcher!` returning a timeout with retained submissions (G02).** Its callers
-(`cluster.clj` stop) must then keep the connection. The lane verifies that `cluster.clj:3711` already refuses
-through `refuse!` on a timeout, and does not release, before relying on it.
+- **9.1 Delivery.** RULED (owner 20:50Z). The default is root, and faults are surfaced in MCP replies (section M).
+  Proof of no paid turn is in E.4.
+- **9.2 Authored acquisition refusals.** Astra's opinion is adopted (option 1, with classification at the producer).
+  This is in E.3, E09.
+- **9.3 Flow's error channel.** Astra rejected accepting the residual. The fix is §0.1: a per-proc fault port through
+  Flow's own `ProcLauncher` SPI. It uses no fork, so there is no dependency pin or publication change. **Probe
+  first:** show a `send-outputs` report and a report racing `flow/stop` reaching the port on a scratch graph.
+- **9.4 Timeout at stop.** Astra's opinion is adopted. The real caller is `boot/stop!` at `:499`, and it is fixed in
+  cut L (G.2).
+- **9.5 A shared bounded-thread helper** for `test.clj` and `effect.clj` (0.2). This is a follow-up: after G-effect
+  and T land, compare the two watcher shapes line by line. If they are identical, extract one function in the owner
+  of both, which would be `seon.await` if it stays an observation plus join. Otherwise leave them.
+- **9.6 Call provenance for D-classify** (new; refutation evidence in §10):
+  1. **Recommended: program data.** The caller is "the agent" when the refusing Var is in the stored
+     `:seon.fn/calls` of the evaluated form's analysis or of a row authored on the agent's branch. Guarantee: data
+     only, read on the failure path, with no hot-path cost. Cost: about +14 lines in `failure-value`. Sacrifice: when
+     both authored code and a host function call V, a host bad call is attributed to the agent; it is still returned
+     visibly, but not stored as a core fault.
+  2. **A marker at the SCI binding boundary.** The per-Var SCI binding catches its own Var's input refusal and marks
+     it direct. Guarantee: exact for direct calls. Cost: a `try` frame per SCI→host call (to be measured) and a
+     change to how host Vars are copied into SCI, which bends the SCI-binding owner. Sacrifice: recursion
+     self-attribution.
+  3. **Structural JVM frame check.** Test whether the `StackTraceElement` below V's wrapper belongs to an `sci.impl`
+     class. Cost: about 8 lines, no hot path. Sacrifice: class-name prefix matching, which needs the owner's
+     permission as production pattern matching and breaks if SCI renames its internals.
 
 ## 10. Evidence and limits
 
-Probes (JVM mode, `default`, PID 37460, read-only, no scratch namespace):
-- the effective config (`escalate-to` absent, `:on-core-error :panic`) and the 32 signatures vs 9 notifications;
-- the task-ownership overhead (+44 ns);
-- the F01 face costs (3.4 ms vs 2,113 ms);
-- reader rejection shapes (`clojure.edn` → bare `RuntimeException`; edamame → `ExceptionInfo :type :edamame/error`).
+Round-2 probes, all JVM mode on `default` (PID 37460), read-only and disposable:
 
-Runtime health was `faulted`, with 21 open faults that belong to other lanes (listed by `runtime_status`), and
-nothing was changed.
+- A scratch `sci.core/init` context, with no Seon context touched. `sci.core/stacktrace` returned only interpreted
+  frames: `[{:name a …} {:name a …} {:ns user}]` for a direct `(h/f 1)`, and the same shape (`:name b`) for a nested
+  `(h/g)` → `h/f`. This refutes stacktrace-based provenance (§9.6).
+- Clojure's `edn/read-string` throws a bare `RuntimeException`; edamame throws `ExceptionInfo` with
+  `{:type :edamame/error :row :col}`.
 
-The HEAD re-verification cited above covers A01–A04, A07, A09, A10, B01, B04, C01, C03, D01–D04, E01, E04, E06,
-E08, E09, F01–F04, F13, G01–G03 and G16. E02, E03 and E04 are superseded at HEAD. G14 and G15 remain unproven
-triggers and are scoped to measure first. No tests were run, there was no source delta, and line estimates are
-planning values.
+Read at HEAD: the Flow source seams (`impl.clj:29-36`, `:94-102`, `:150-165`, `:174-183`, `:258-265`, `:312-318`),
+the public docstrings (`flow.clj:116-120`, `:215-229`), Malli's no-generator data (`generator.cljc:475-482`,
+`:501`), and `boot.clj:485-515`.
+
+Round-1 evidence still stands: 32 signatures vs 9 notification ids, and the F01 face timings. The 44 ns promise
+figure is withdrawn as irrelevant to the revised lifecycle.
+
+Not run: tests, fault-port shutdown probes, the §9.6 option-1 lookup, the G14/G15 contention measurements and the
+F storage timings. These are obligations of the implementing cuts. Unavailable evidence is not a pass.
+
+Source delta is **0**; only this file changed.
