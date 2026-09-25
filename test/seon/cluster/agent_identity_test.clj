@@ -44,6 +44,20 @@
                            "Cluster   renamed-cluster")
             "the result follows the supplied database, not a captured identity")))))
 
+(deftest the-root-agent-renders-as-one-node-without-the-fleet
+  ;; Class regression: the agent pair renders its own node (identity, tasks,
+  ;; status); the fleet table belonged to the fleet page and needed a connection.
+  (test-support/with-database
+    (fn [connection]
+      (test-support/seed-cluster! connection cluster-name)
+      (test-support/transacted! connection
+                                (vec (agent/creation-tx {:seon.agent/id "root" :seon.ns/name 'my.agents.root
+                                                         :seon.cluster/name cluster-name})))
+      (let [html (pr-str (agent/render-identity-html {:seon.db/db @connection :seon.agent/id "root"}))]
+        (is (str/includes? html "\"Tasks\"] [:dd \"None\"]"))
+        (is (re-find #"\"Status\"\] \[:dd \"(Idle|Turn open) · \d+ turns?\"" html) html)
+        (is (not (str/includes? html "seon-root-agents")) "no fleet table")))))
+
 (deftest identity-rendering-keeps-partial-data-and-read-errors-visible
   (testing "an id remains visible while optional connections are absent"
     (let [unit {:seon.agent/id agent-id

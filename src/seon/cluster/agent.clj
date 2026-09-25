@@ -74,7 +74,8 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.blob :as blob]
-            [seon.cluster.status :as cluster.status]
+            ;; loaded for agents: the root opening names (seon.cluster.status/agents {})
+            [seon.cluster.status]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [seon.id :as id]
@@ -310,64 +311,42 @@
   (render-identity-ai {:seon.agent/id agent-id}))
 
 (defn render-identity-html
-  "Render an agent's id, namespace, and steward as an identity card."
+  "Render an agent node: id, namespace, steward, the tasks naming its namespace
+  as subject, and its status. The fleet belongs to the fleet page."
   {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or [:maybe :seon.render/hiccup] :seon.error/value]]}
   [unit]
   (let [agent-data (if-let [database (:seon.db/db unit)]
                      (when-let [agent-id (:seon.agent/id unit)]
-                       (db/pull database identity-selector
+                       (db/pull database
+                                '[:seon.agent/id :seon.agent/archived-tx
+                                  {:seon.agent/namespace [:seon.ns/name :seon.task/tasks {:seon.ns/steward [:seon.agent/id]}]}
+                                  {:seon.agent/runtime [{:seon.runtime/turns [:seon.turn/closed-tx]}]}]
                                 [:seon.agent/id agent-id]))
                      (or (:seon.render/value unit) unit))]
     (if (or (:seon.db/invalid-read agent-data) (:seon.schema/expected-value agent-data))
       agent-data
-      (let [agent-id (:seon.agent/id agent-data)
-            namespace-name
-            (get-in agent-data
-                    [:seon.agent/namespace :seon.ns/name])
-            steward
-            (get-in agent-data
-                    [:seon.agent/namespace :seon.ns/steward :seon.agent/id])]
+      (let [{agent-id :seon.agent/id {namespace-name :seon.ns/name tasks :seon.task/tasks
+                                      {steward :seon.agent/id} :seon.ns/steward} :seon.agent/namespace} agent-data
+            turns (get-in agent-data [:seon.agent/runtime :seon.runtime/turns])
+            agent-link #(vector :a {:href (route/path :seon.render.route/agent {:id %})} %)
+            entry (fn [label value] [:div [:dt label] [:dd value]])]
         (when agent-id
           [:article {:class "seon-family-entry seon-agent-identity-entry"}
-           [:header
-            [:h3 "Identity"]]
+           [:header [:h3 "Identity"]]
            (into [:dl]
-                 (cond-> [[:div [:dt "Agent"]
-                           [:dd [:a {:href (route/path :seon.render.route/agent {:id agent-id})}
-                                 agent-id]]]]
+                 (cond-> [(entry "Agent" (agent-link agent-id))]
                    namespace-name
-                   (conj [:div [:dt "Namespace"]
-                          [:dd [:a {:href (route/path :seon.render.route/namespace
-                                                     {:namespace (str namespace-name)})}
-                                [:code (str namespace-name)]]]])
-                   steward
-                   (conj [:div [:dt "Steward"]
-                          [:dd [:a {:href (route/path :seon.render.route/agent {:id steward})}
-                                steward]]])))
-           (when (and (= "root" agent-id) (:seon.db/db unit))
-             (let [agents (cluster.status/agents unit)]
-               (if (:seon.cluster.status/unavailable-observation agents)
-                 [:p (:seon.error/message agents)]
-                 [:section {:class "seon-root-agents"}
-                  [:h3 "Agents"]
-                  [:table
-                   [:thead [:tr [:th "Agent"] [:th "Current step"]
-                            [:th "Last turn ms"] [:th "Evaluations / ms"]
-                            [:th "Tokens / USD"] [:th "Storage bytes"]]]
-                   (into [:tbody]
-                         (map (fn [row]
-                                [:tr
-                                 [:td [:a {:href (route/path :seon.render.route/agent
-                                                            {:id (:seon.agent/id row)})}
-                                       (:seon.agent/id row)]]
-                                 [:td (get-in row [:seon.agent/plan :my.plan/current-step
-                                                  :my.plan.item/title] "None selected")]
-                                 [:td (str (get row :seon.cluster.status/last-turn-ms "—"))]
-                                 [:td (str (:seon.cluster.status/evaluations row) " / " (:seon.cluster.status/evaluation-ms row))]
-                                 [:td (str (:seon.cluster.status/provider-tokens row) " / " (:seon.cluster.status/provider-cost-usd row))]
-                                 [:td (str (:seon.cluster.status/storage-bytes row))]]))
-                         (sort-by :seon.agent/id agents))]])))])))))
+                   (conj (entry "Namespace" [:a {:href (route/path :seon.render.route/namespace {:namespace (str namespace-name)})}
+                                             [:code (str namespace-name)]]))
+                   steward (conj (entry "Steward" (agent-link steward)))
+                   namespace-name
+                   (conj (entry "Tasks" (if (seq tasks) (into [:span] (interpose " " (map #(vector :code %) (sort tasks)))) "None")))
+                   (:seon.db/db unit)
+                   (conj (entry "Status" (str (cond (:seon.agent/archived-tx agent-data) "Archived"
+                                                    (some (complement :seon.turn/closed-tx) turns) "Turn open"
+                                                    :else "Idle")
+                                              " · " (count turns) (if (= 1 (count turns)) " turn" " turns"))))))])))))
 
 (defn render-id-html
   "Render the identity unit as a compact labeled card.
