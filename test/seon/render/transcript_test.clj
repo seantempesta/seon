@@ -423,12 +423,10 @@
           ;; degradation step, whose driver had no caller and is deleted:
           ;; presentation elides once, at the AI boundary.
           (is (= (repeat 8 :full) (mapv :detail html-rows))))
-        (testing "HTML is the same structure with stable entry ids"
-          (is (= (block/surface-id :transcript) (get-in html-value [1 :id])))
-          (doseq [{:keys [id kind dom-id]} html-rows]
-            (is (= (block/surface-id
-                    (keyword (str "seon.transcript." (name kind)) id))
-                   dom-id)))
+        (testing "HTML is the same structure; a turn node carries no page element ids"
+          (is (nil? (get-in html-value [1 :id])))
+          (is (every? (comp nil? :dom-id) html-rows))
+          (is (every? :id html-rows) "entries keep their data-transcript-id")
           (is (str/includes? html "waiting for the peer review")))))))
 
 (deftest error-receipt-without-triage-has-an-execution-error-face

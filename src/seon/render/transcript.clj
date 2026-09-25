@@ -541,10 +541,6 @@
   [_unit entry _detail]
   (or (turn/render-ai (::entity entry)) ""))
 
-(defn- entry-name
-  [entry]
-  (keyword (str "seon.transcript." (name (::kind entry))) (::id entry)))
-
 (defn- projected-entry
   [unit entry detail]
   ;; Every value this entry renders through the floor is rooted at the entry's
@@ -638,8 +634,7 @@
    [:ol {:class "seon-transcript-list"}]
    (map (fn [entry]
           [:li (cond->
-                 {:id (block/surface-id (entry-name entry))
-                  :class (str "seon-transcript-entry"
+                 {:class (str "seon-transcript-entry"
                               (when (= :attempt (::kind entry))
                                 " seon-transcript-attempt"))
                   :data-transcript-id (::id entry)
@@ -654,11 +649,11 @@
 
 (defn- html-output
   ;; HTML is not bounded at all (owner ruling, 2026-09-07): the page serves
-  ;; the entries the transcript holds.
+  ;; the entries the transcript holds. A turn renders as a node of a page, so
+  ;; it carries no page element ids: two turns on one page never collide.
   [pinned entries]
   (into
-   [:section {:id (block/surface-id :transcript)
-              :class "seon-transcript"}]
+   [:section {:class "seon-transcript"}]
    (cond-> []
      (seq pinned)
      (conj (html-entries pinned))
@@ -2473,9 +2468,9 @@
                                             ")/60000));return m>=1440?Math.floor(m/1440)+' d '+Math.floor(m%1440/60)+' h':m>=60?Math.floor(m/60)+' h '+m%60+' min':m+' min'})()")}
                      (runtime-duration since (java.util.Date.))] ")"))]
            (when trigger
+             ;; the trigger message is its own graph node; the runtime links it
              [:div {:class "seon-runtime-trigger"}
-              [:p "Woke on " (or (runtime-message-link trigger) "a recorded fact")]
-              (message/render-html (assoc trigger :seon.db/db database))])
+              [:p "Woke on " (or (runtime-message-link trigger) "a recorded fact")]])
            [:div {:class "seon-runtime-listens" :style {:display "flex" :gap "0.5rem" :flex-wrap "wrap"}}
             [:span "Listening:"]
             (if (seq (:seon.runtime/listens runtime))
