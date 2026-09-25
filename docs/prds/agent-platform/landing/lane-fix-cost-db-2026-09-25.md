@@ -235,6 +235,45 @@ Repeat these probes after adoption:
   foreign-connection reads would also need to be refused, or recorded with their own connection's
   currency. No db.clj edit was made: the witness is correct for the evidence it is handed.
 
+## Round 4: the capture side (commits 8a9085969 and 4086391a0)
+
+- **Probe.** I ran a JVM REPL probe on the disposable branch `fix-cost-db-probe2`, through the
+  agent acquisition entrance, with the same source as the test's inbox query:
+  - With the sink passed as request data (`:seon.db/read-evidence-sink`), the evidence holds one
+    read, the form's `q`.
+  - With the sink bound ambient around `evaluate`, as read-evidence-test binds it, the evidence
+    holds six reads: four `:all` identity reads, the `[:seon.config/cluster "default"]` pull and
+    the form's `q`.
+  - So everything other than the `q` is captured outside the form's scope.
+- **Fix 1 (`src/seon/sci/eval.clj`).** `evaluate` takes the form's sink once, unbinds the ambient
+  sink for all of its work, and binds the form's sink only around `eval-form` and the shown result.
+  An ambient sink now behaves exactly like a request sink.
+  - Regression: read-evidence-test asserts that every evidence entry names the form's own
+    connection.
+- **Question 3, settled: nothing commits during the test.** The test branch's `:all` reads carry
+  the revision `6ab6e659-e59c…`, and **both** tests carry the same one, although they run on
+  different branches (`:agent-349a…`, `:agent-8455…`).
+  - That revision is the shared fork commit, the value from before the test's opening-message
+    write, which the forked context held at acquisition.
+  - The probe shows no commit during `evaluate`: the branch head is equal before and after.
+  - The `:cluster-default` reads are the host program snapshot, from `function-digests` and
+    `overridden-row?` in sci/eval.clj.
+  - All of them were acquisition reads that the ambient sink captured.
+- **Fix 2 (`src/seon/db.clj`).** Opening an as-of, history or since view no longer records `:all`
+  on the argument, because building a view reads no datom. Each read on the view records its own
+  evidence, and the as-of revision is keyed by its fixed point. A refused view still records `:all`.
+- **Left unchanged: the `:all` reads from `database-identity`** (`commit-id`, `basis-t` and
+  `committed-value-identity`). They are exact: that value changes with every commit, and a
+  revision (commit) comparison proves it current. Failed reads also keep a conservative `:all`.
+- **Lines.** sci/eval.clj +8/−4. db.clj +4/−4. read_evidence_test +6.
+- **Root runs:**
+  - `bin/test-check default --ns seon.read-evidence-test`
+  - `bin/test-check default --ns seon.directory-test`
+  - `bin/test-check default --ns seon.sci.eval-test`
+  - `bin/test-check default --ns seon.cluster.evaluate-sources-test`
+  - `bin/test-check default --test seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts`
+  - `bin/test-check default --ns seon.db-test`
+
 ## Verification limits
 
 - The lane ran no tests, per the load rule.
