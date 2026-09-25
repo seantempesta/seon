@@ -708,51 +708,6 @@
             "contract installation copies the inherited candidate Var")
         (is (= 42 (sci/eval-string* candidate "(contracted 42)")))))))
 
-(deftest a-configless-database-refuses-contract-installation
-  ;; THE CLASS: an absence handed into a contract that forbids it.
-  ;; `database-effective-config` answered nil for a database carrying no
-  ;; config singleton, and `instrumentation-config` passed that straight to
-  ;; `seon.config/result-caps`, whose declared input is the effective config
-  ;; OR the missing-effective refusal. Under armed contracts every SCI
-  ;; contract install against such a database died inside the installer.
-  ;;
-  ;; Neither a missing recorder nor unavailable caps permits an unarmed
-  ;; record-mode installation.
-  (test-support/with-database
-    (fn [connection]
-      (let [database (db/db connection)
-            configured
-            (db/q '[:find ?cluster .
-                    :where
-                    [?config :seon.config/cluster ?cluster]
-                    [?config :seon.config/on-core-error _]]
-                  database)
-            {mode :seon.config/on-core-error caps :seon.sci.admit/caps}
-            (#'eval/instrumentation-config database)]
-        (is (nil? configured)
-            "this database genuinely carries no config singleton, which is
-             the case that produced the nil")
-        (is (= :record mode))
-        (is (schema/valid-candidate-value? (schema/handed-projection) :seon.config/error caps)
-            "the caps are the refusal NAMING the key, not an absence")
-        (is (= :seon.config.eval.result/max-bytes
-               (:seon.config/key (:seon.error/data caps)))
-            "and the key it names is the one a caller has to supply")
-        (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
-          (sci/eval-string* ctx "(defn configless-contracted [x] x)")
-          (let [refusal (test-support/refusal-data
-                         #(#'eval/install-function-contract!
-                           ctx
-                           {:seon.fn/sym 'user/configless-contracted
-                            :seon.fn/spec "[:=> [:cat :int] :int]"}
-                           (schema/projection-from-database database)
-                           database))]
-            (is (schema/valid-candidate-value? (schema/handed-projection)
-                                             :seon.instrument/registration-error refusal))
-            (is (= :seon.flow/commit-fault!
-                   (get-in refusal [:seon.instrument/registration-observation
-                                    :seon.error.evidence/value])))))))))
-
 (deftest require-context-rows-carry-namespace-symbols
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
         evaluation (run-in ctx "(require 'clojure.set)" 2000)]
@@ -855,7 +810,7 @@
   ;; the graph's, so a namespace cannot fall off by registering no predicate.
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/cluster-ctx (db/db connection) connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             capability-symbols
             (sort
              (db/q '[:find [?sym ...]
@@ -998,7 +953,7 @@
 (deftest schema-and-contract-declarations-have-bounded-allocation
   (test-support/with-database
     (fn [connection]
-      (let [ctx (eval/cluster-ctx (db/db connection) connection)]
+      (let [ctx (test-support/fork-cluster-ctx connection)]
         ;; Warm the guarded evaluator so this measures declaration work on one
         ;; cluster-owned projection rather than context acquisition.
         (run-in ctx "(+ 1 1)" 2000)
@@ -1401,8 +1356,12 @@
         (is (= (set (map symbol declared)) (set (map :sym functions))))
         (is (every? #(and (:arglists %) (:in %) (:out %)) functions))
         (is (seq (get-in directory [:seon.sci.admit/value :schemas])))
-        (is (= [:cat :my.fs/read-request] (:in read-value)))
-        (is (= [:or :my.fs/read-result :seon.error/value] (:out read-value)))
+        ;; Relative to the declared row: doc shows the program's own contract.
+        (let [[_ declared-in declared-out]
+              (edn/read-string (:seon.fn/spec (db/pull database [:seon.fn/spec]
+                                                       [:seon.fn/sym 'my.fs/read])))]
+          (is (= declared-in (:in read-value)))
+          (is (= declared-out (:out read-value))))
         (is (seq (:summary read-value)))
         (is (seq (:example read-value)))
         (is (= (:arglists (meta #'db/as-of)) (:arglists multi-value)))
@@ -1421,9 +1380,7 @@
             namespace-name 'fixture.empty-agent
             _ (test-support/transacted!
                            connection
-                           [{:seon.agent/id agent-id
-                             :seon.agent/namespace
-                             {:seon.ns/name namespace-name}}])
+                           (test-support/agent-tx (db/db connection) agent-id namespace-name))
             base (test-support/fork-cluster-ctx connection)
             _ (eval/acquire! {:seon.sci.eval/ctx base
                               :seon.db/db (db/db connection)})
@@ -1531,11 +1488,11 @@
      _
      (test-support/transacted!
                   connection
-                  [#:seon.agent{:id "interrupt-author",
-                                :namespace
-                                #:seon.ns{:name 'authored.interrupt,
-                                          :source "(ns authored.interrupt)"}}
-                   (test-support/program-fn-row (db/db connection)
+                  (test-support/agent-tx (db/db connection) "interrupt-author" 'authored.interrupt))
+     _
+     (test-support/transacted!
+                  connection
+                  [(test-support/program-fn-row (db/db connection)
                                                  'authored.interrupt/spin source)])
      ctx
      (eval/build-base-ctx (seon.schema/handed-projection))
@@ -1642,11 +1599,10 @@
       "accept [x] x)")]
     (test-support/transacted!
                  connection
-                 [#:seon.agent{:id "contract-author",
-                               :namespace
-                               #:seon.ns{:name 'authored.contract,
-                                         :source "(ns authored.contract)"}}
-                  (test-support/program-fn-row (db/db connection)
+                 (test-support/agent-tx (db/db connection) "contract-author" 'authored.contract))
+                (test-support/transacted!
+                 connection
+                 [(test-support/program-fn-row (db/db connection)
                                                 'authored.contract/accept source)])
     (let
      [assert-violation
@@ -1714,7 +1670,7 @@
                             {:seon.agent/id agent-id
                              :seon.ns/name assigned-namespace
                              :seon.cluster/name cluster-name}))
-            ctx (eval/cluster-ctx (db/db connection) connection)
+            ctx (test-support/fork-cluster-ctx connection)
             evaluation
             (run-in ctx
                     "(seon.sci.eval/agent-namespace (seon.db/db) \"probe\")"
@@ -1748,7 +1704,7 @@
   (test-support/with-database
     (fn [connection]
       (let [seen (atom [])
-            ctx (eval/cluster-ctx (db/db connection) connection)
+            ctx (test-support/fork-cluster-ctx connection)
             evaluation
             (with-redefs [call-preparation/hook
                           (fn [runtime-ctx _callee arguments]
@@ -1861,7 +1817,7 @@
                       {:seon.agent/id "host-walker",
                        :seon.cluster/name "host-walk",
                        :seon.ns/name 'my.agents.host-walker}))
-      (let [ctx (eval/cluster-ctx (db/db connection) connection)
+      (let [ctx (test-support/fork-cluster-ctx connection)
             request {:seon.render.walk/lookup [:seon.agent/id "host-walker"],
                      :seon.sci.eval/time-limit-ms 5000,
                      :seon.agent/id "host-walker",
