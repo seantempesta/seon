@@ -107,6 +107,23 @@
                   {:optional true}
                   :seon.db/connection]],
                 ,
+                :shown-request
+                [:map {:description "The world one final value is printed in: the form's database and connection, its agent and cluster (from which the render profile derives, unless carried), its admission caps, its source and, optionally, its SCI context."}
+                 [:seon.db/db {:optional true} :seon.db/database-value]
+                 [:seon.db/connection {:optional true} :seon.db/connection]
+                 [:seon.agent/id {:optional true} :seon.agent/id]
+                 [:seon.boot/cluster-name {:optional true} :seon.boot/cluster-name]
+                 [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
+                 [:seon.cluster.eval/source {:optional true} :seon.cluster.eval/source]],
+                :shown
+                [:map
+                 [:seon.sci.admit/value
+                  [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                         :seon.schema.admission/reason "The printed value is any evaluated or replacing value."
+                         :gen/elements [nil false 0 "" :k [] {}]}]]
+                 [:seon.eval/shown :seon.eval/shown]
+                 [:seon.eval/renderer {:optional true} :seon.eval/renderer]
+                 [:seon.sci.admit/record {:optional true} :seon.sci.admit/record]],
                 :unrun-request
                 [:map
                  [:seon.sci.admit/value :seon.error/value]

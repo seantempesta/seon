@@ -2255,3 +2255,54 @@
                  (assoc handle :seon.config.agent/write-refusal-bound 3)
                  "dial-reader"))
            "a carried dial is read without asking the config")))))
+
+(deftest a-replaced-result-is-shown-by-the-one-print-owner
+  ;; A value that replaces a printed result (a disposition refusal inside the
+  ;; loop, a refusal at the terminal writer) is rendered by
+  ;; `seon.sci.eval/shown-result`, never by `pr-str`, and the saved text is
+  ;; that rendering of the value that settles.
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "one-print"})
+     (support/seed-cluster! connection "one-print")
+     (checked-transact! connection (agent/creation-tx {:seon.agent/id "printer" :seon.ns/name 'my.agents.printer
+                                                       :seon.cluster/name "one-print"}))
+     (let [ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.env/environment (support/environment "one-print" connection)
+                    :seon.db/connection connection :seon.cluster/name "one-print"
+                    :seon.db.process/id cluster/boot-process-identity :seon.sci.eval/ctx ctx})
+           database (db/db connection)
+           owner #(:seon.eval/shown (#'turn/final-shown handle %1 "printer" %2))]
+       (testing "a disposition that is not the last form is refused, and the refusal is the owner's text"
+         (let [preview (turn/preview-sources {:seon.turn.loop/cluster handle :seon.db/db database
+                                              :seon.sci.eval/ctx ctx :seon.agent/id "printer"
+                                              :seon.ns/name 'my.agents.printer
+                                              :seon.cluster.reply/text "(my.agent/done)\n(+ 1 1)"
+                                              :seon.sci.admit/caps (:seon.sci.admit/caps handle)})
+               refused (get-in preview [:seon.turn.loop/evaluated-sources 0 :seon.sci.eval/evaluation])
+               value (:seon.sci.admit/value refused)]
+           (is (:seon.turn/invalid-disposition-source value) (pr-str (keys refused)))
+           (is (= (owner database value) (:seon.eval/shown refused)))
+           (is (not= (pr-str value) (:seon.eval/shown refused)) "the retired raw printer's text is gone")))
+       (testing "a terminal refusal saves the owner's rendering of the recorded error"
+         (let [run-id "one-print-run"
+               evaluation-id (id/evaluation run-id 0)
+               _ (checked-transact!
+                  connection
+                  [{:seon.turn/id run-id :seon.turn/agent [:seon.agent/id "printer"]
+                    :seon.turn/starting-ns [:seon.ns/name 'my.agents.printer] :seon.turn/opened-tx "datomic.tx"}
+                   {:seon.cluster.eval/id evaluation-id :seon.cluster.eval/at (java.util.Date.)
+                    :seon.cluster.eval/run [:seon.turn/id run-id] :seon.cluster.eval/ordinal 0
+                    :seon.cluster.eval/author :system :seon.cluster.eval/ns [:seon.ns/name 'my.agents.printer]
+                    :seon.cluster.eval/source "(+ 1 1)"}])
+               refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run {:seon.turn/id run-id})
+                            (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+               settlement (#'turn/settle! {:seon.turn.loop/cluster handle :seon.turn.loop/now (java.util.Date.)
+                                           :seon.agent/id "printer" :seon.turn/id run-id
+                                           :seon.cluster.eval/ordinal 0 :seon.error/value refusal})
+               after (db/db connection)
+               shown (:seon.eval/shown (db/pull after [:seon.eval/shown] [:seon.cluster.eval/id evaluation-id]))]
+           (is (some? (:db-after (:seon.turn.loop/outcome settlement))) (pr-str (keys settlement)))
+           (is (string? shown))
+           (is (= (owner after (:seon.error/value settlement)) shown))))))))

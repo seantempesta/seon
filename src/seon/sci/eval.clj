@@ -3660,7 +3660,18 @@
       ;; printing `nil` as though it were the failure.
       :else "The evaluation failed and named no failure.")))
 
-(defn- shown-result
+(defn shown-result
+  "The one print of a final value: its admitted value and exact shown text.
+
+  Every evaluation's shown text comes from here, and so does the text of a
+  value that replaces a result after it was printed (a disposition refusal, a
+  completed disposition's delivery, a settlement refusal): the earlier bytes
+  are discarded, never stored, and the final value is rendered by this owner."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                                  :seon.schema.admission/reason "Any evaluated or replacing value is printed here."
+                                  :gen/elements [nil false 0 "" :k [] {}]}]
+                       :seon.sci.eval/shown-request [:maybe :seon.sci.admit/record]]
+                  :seon.sci.eval/shown]}
   [value request record]
   (let [ctx (:seon.sci.eval/ctx request)
         connection (or (:seon.db/connection request)
@@ -3846,7 +3857,8 @@
 
   An arm that does not name the value's keys cannot omit them. The namespace
   is the form's own `:seon.cluster.eval/ns` reference, so nothing here has
-  to guess where the form was going to run."
+  to guess where the form was going to run. It prints nothing: its caller
+  renders the final value through `shown-result`."
   {:malli/schema [:=> [:cat :seon.sci.eval/unrun-request]
                   :seon.sci.eval/evaluation]}
   [{value :seon.sci.admit/value
@@ -3860,7 +3872,6 @@
                  (assoc :seon.eval/duration-ms duration-ms)
                  interrupted? (assoc :seon.eval/outcome :time))]
     (cond-> {:seon.sci.admit/value value
-             :seon.eval/shown (pr-str value)
              :seon.cluster.eval/error (failure-text value)
              :seon.cluster.eval/ns namespace-ref
              :seon.sci.eval/ending-ns (second namespace-ref)

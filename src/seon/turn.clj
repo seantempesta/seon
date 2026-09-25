@@ -3452,6 +3452,20 @@
   (boolean (or undisposed?
                (contains? #{:completed :wait} (:my.turn/disposition settled)))))
 
+(defn- final-shown
+  "The one print owner's rendering of `value`, a value that replaced a printed
+  result at settlement, in `cluster`'s world for `agent-id`."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.db/database-value :seon.agent/id
+                       [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+                              :seon.schema.admission/reason "Settlement prints any replacing value: a completed disposition or a refusal."
+                              :gen/elements [nil false 0 "" :k [] {}]}]]
+                  :seon.sci.eval/shown]}
+  [cluster database agent-id value]
+  (sci.eval/shown-result value {:seon.db/db database :seon.db/connection (:seon.db/connection cluster)
+                                :seon.agent/id agent-id :seon.boot/cluster-name (:seon.cluster/name cluster)
+                                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+                         nil))
+
 (defn- evaluation-terminal-data
   [{cluster :seon.turn.loop/cluster
     now :seon.turn.loop/now
@@ -3474,15 +3488,19 @@
                      :outside)))
         evaluation
         (if (and settled (not= settled raw-settled))
-          (merge evaluation
-                 (admit/admit
-                  {:seon.sci.admit/value settled
-                   :seon.sci.admit/interrupt-fn (constantly nil)
-                   :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                   :seon.config/on-core-error
-                   (:seon.config/on-core-error cluster)
-                   :seon.schema/projection
-                   (db/carried-projection database)}))
+          ;; The completed disposition replaces the printed value: its text is
+          ;; rendered again, by the one owner, for the value that settles.
+          (let [admitted (admit/admit
+                          {:seon.sci.admit/value settled
+                           :seon.sci.admit/interrupt-fn (constantly nil)
+                           :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                           :seon.config/on-core-error
+                           (:seon.config/on-core-error cluster)
+                           :seon.schema/projection
+                           (db/carried-projection database)})]
+            (merge (dissoc evaluation :seon.eval/renderer) admitted
+                   (select-keys (final-shown cluster database agent-id (:seon.sci.admit/value admitted))
+                                [:seon.eval/shown :seon.eval/renderer])))
           evaluation)
         last-ordinal
         (db/q '[:find (max ?ordinal) .
@@ -3706,7 +3724,7 @@
            database
             {:seon.turn/id run-id
                      :seon.cluster.eval/ordinal ordinal
-                     :seon.eval/shown (pr-str value)
+                     :seon.eval/shown (:seon.eval/shown (final-shown cluster database agent-id value))
                      :seon.cluster.eval/error (:seon.error/message value)}))]
     {:seon.error/value value
      :seon.blob/staged-writes (:seon.blob/staged-writes recording)
@@ -3755,7 +3773,7 @@
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
         value (:seon.error/value recording)
-        serialized (pr-str value)
+        serialized (:seon.eval/shown (final-shown cluster (db/db connection) agent-id value))
         receipts
         (mapv
          (fn [entry]
@@ -4788,9 +4806,14 @@
               ;; the agent that earned it.
               evaluation
               (if (:seon.turn/invalid-disposition-source evaluation)
-                (sci.eval/unrun-evaluation
-                 {:seon.sci.admit/value evaluation
-                  :seon.cluster.eval/ns (:seon.cluster.eval/ns form)})
+                (let [unrun (sci.eval/unrun-evaluation
+                             {:seon.sci.admit/value evaluation
+                              :seon.cluster.eval/ns (:seon.cluster.eval/ns form)})]
+                  ;; The refusal replaces a printed result: the one print
+                  ;; owner renders it, and its render reads stay the form's.
+                  (merge unrun (binding [db/*read-evidence-sink* captured]
+                                 (sci.eval/shown-result (:seon.sci.admit/value unrun) request
+                                                        (:seon.sci.admit/record unrun)))))
                 evaluation)
               evaluation
               (merge (select-keys source [:seon.eval/origin])
