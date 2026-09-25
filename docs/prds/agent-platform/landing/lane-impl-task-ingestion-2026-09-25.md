@@ -31,6 +31,21 @@ created: 2026-09-25
   arm, but `src/seon/test.clj:2060` calls `instrument/apply!`. The owner of `.agents/skills/clojure-testing` should
   fix it.
 
+## Publication refusal after cdc4567e6, fixed
+
+`bin/seon init --dev default` refused with "A stored error member must have a storable registered attribute."
+- The cause was my required `[:seon.error/offending :seon.schema/value]` in `:seon.task/refused-error`, which
+  `:seon.task/conflict-error` inherits. `:seon.error/offending` is not a registered attribute, and
+  `seon.schema.internal/assert-error-declaration!` (`internal.cljc:274-281`) requires every required member to be
+  storable.
+- It is now optional, the way every other refusal carries it. The rest are unchanged: the required members are
+  `:seon.task/refused` (enum) and `:seon.task/holder` (symbol), both storable, and base, current and proposed stay
+  optional.
+- Probe, read-only and pure: `seon.schema/build-projection` over default's forms plus `seon.task.edn` and the two
+  `seon.fn` link attributes. The old form reproduced the refusal (identity `:seon.task/conflict-error`, member
+  `:seon.error/offending`); the fix builds 3,434 forms in 138 ms. `storable-attribute-in?` is true for
+  `:seon.task/id`, `/tasks`, `/refused`, `/holder` and `:seon.fn/must-read`.
+
 ## The review's findings, each fixed at its owner
 
 1. **Identity (owner clarification 2026-09-25).** The handle is `seon.issue/task-handle`, which is `seon.id/id` over

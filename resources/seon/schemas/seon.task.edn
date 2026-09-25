@@ -45,7 +45,7 @@
  :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
  :explanation :seon.schema/value
  :refused-error [:and :seon.error/base
-                 [:map [:seon.task/refused :seon.task/refused] [:seon.task/holder :seon.task/holder] [:seon.error/offending :seon.schema/value]
+                 [:map [:seon.task/refused :seon.task/refused] [:seon.task/holder :seon.task/holder] [:seon.error/offending {:optional true} :seon.schema/value]
                   [:seon.task/explanation {:optional true} :seon.task/explanation]]]
  :base :seon.task/declaration :current :seon.task/declaration :proposed :seon.task/declaration
  :conflict-error [:and :seon.task/refused-error
