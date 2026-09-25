@@ -4688,6 +4688,9 @@
         (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
               database (or snapshot (db/db connection))
+              settled (into {} (keep #(let [row (get-in % [:seon.sci.eval/evaluation :seon.program/row])]
+                                         (when (:seon.ns/name row) [(:seon.ns/name row) row])))
+                            results)
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
                                   (:seon.config.eval/time-limit-ms cluster))
@@ -4709,7 +4712,10 @@
                              :seon.db/db database
                              :seon.db/connection connection
                              :seon.render/profile profile)
-                handle (assoc :seon.repl/handle handle))
+                handle (assoc :seon.repl/handle handle)
+                ;; The namespace rows earlier forms will settle: a definition
+                ;; digests with the row its transaction leaves stored.
+                (seq settled) (assoc :seon.sci.eval/settled-namespaces settled))
               evaluation
               (binding [db/*read-evidence-sink* captured]
                 (render/call-with-walk-context

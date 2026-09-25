@@ -489,11 +489,14 @@
 (defn- definition-rows
   "Analyze the accepted source once; SCI contributes only runtime contract facts.
   Each FINAL row (after spec, workload, test markers and contract facts) takes
-  its digest from `seon.db/definition-digest-of` with the namespace row the
-  database stores, else SCI's for a namespace not yet stored: the digest the
-  writer recomputes."
-  [ctx database projection before source namespace-row]
-  (let [digest-namespace (or (db/pull database '[*] [:seon.ns/name (:seon.ns/name namespace-row)])
+  its digest from `seon.db/definition-digest-of` with the namespace row its
+  transaction leaves stored: an earlier form's row in this settlement, else the
+  database's, else SCI's for a namespace not yet stored. That is the digest
+  the writer recomputes."
+  [ctx database projection before source namespace-row settled-namespaces]
+  (let [namespace-name (:seon.ns/name namespace-row)
+        digest-namespace (or (get settled-namespaces namespace-name)
+                             (db/pull database '[*] [:seon.ns/name namespace-name])
                              namespace-row)
         digested #(assoc % :seon.program/definition-digest
                          (db/definition-digest-of projection % digest-namespace))
@@ -3877,7 +3880,8 @@
               (vec (definition-rows execution-ctx database projection
                                     before-intern-values source
                                     (assoc (binding-rows before-reader-context)
-                                           :seon.ns/name namespace-name))))
+                                           :seon.ns/name namespace-name)
+                                    (:seon.sci.eval/settled-namespaces request))))
             var-row (first var-rows)
             _ (refuse-uncontracted-definitions!
                execution-ctx before-namespaces before-owned

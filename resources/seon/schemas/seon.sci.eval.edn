@@ -202,7 +202,14 @@
                   :seon.boot/cluster-name]
                  [:seon.sci.eval/loaded-identity
                   {:optional true}
-                  :seon.sci.eval/loaded-identity]],
+                  :seon.sci.eval/loaded-identity]
+                 [:seon.sci.eval/settled-namespaces
+                  {:optional true}
+                  :seon.sci.eval/settled-namespaces]],
+                :settled-namespaces
+                [:map-of
+                 {:description "The namespace rows earlier forms of this settlement will store, by name: a definition digests with the row its transaction leaves stored."}
+                 :seon.ns/name :seon.ns/ns],
                 :schema-refused :seon.schema/key,
                 :reader-event-count-error
                 [:and {:seon.db/attributes true
