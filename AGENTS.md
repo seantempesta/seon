@@ -127,6 +127,9 @@ at start vs end) and pushes back, never a lock. A **reload** uses
 program; selected development clusters adopt explicitly. Every program function is
 callable: prompt visibility grants no execution permission; consumer domains stay downstream.
 
+**Core is composable.** One shared database (stable values, one writer, cheap branches), one shared SCI runtime
+(a base context each agent forks into its private universe), and the web and MCP faces are all functions over data; each
+agent is its own Flow graph running concurrently. Core parts compose as functions and stage values, never as parallel systems.
 **The Seon agent is the perspective.** Everything is modeled from a Seon agent's side: its task, its context, its REPL, its
 branch. The MCP server, the test harness and the web interface are views into that world, not owners of their own: they
 enter through the agent's path and render its values, and hold no second model, evaluator, printer or store.
