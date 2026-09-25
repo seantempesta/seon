@@ -13,6 +13,16 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Fifth follow-up: contract finding and remaining fallout
+
+- `e7c4deb4c` (ruling: follow the design): an error whose contracted operation's declared alternatives it satisfies
+  none of selects `seon.error/render-undeclared-ai`/`-html` — the base renderer's content plus a contract finding naming
+  the operation. Uncontracted operations compose the base pair; satisfied alternatives render their pair. Regression in
+  `entity_pairs_test` (`declared-identity-and-producer-lookups-name-their-owners`).
+- `17a075c84`: selection-stage enum is `[:enum :declared :floor]`; `:seon.render.selection.stage/value` and web.clj's
+  read of it deleted; `eval_test` armed-render regression uses declared subjects over two contracted renderer rows;
+  `page_settings_test` adds `:seon.render.walk/attribute :seon.agent/settings`; `web_test` stage data renamed.
+
 ## Fourth follow-up: carriage and 1c landed
 
 - `4bb8f07df` `render/value.clj:470` hands `project-node` `(assoc unit :seon.render.data/path path)` (+3/−1). Selection
@@ -269,6 +279,8 @@ explicit-request, namespace (per ruling) and schema stages, specificity ranking,
   audit site 2/13, owned by render-floor-opus.
 
 ## Root runs (serially, after adopting the commits)
+
+0. Also: `bin/test-check default --ns seon.sci.eval-test`, `--ns seon.render.page-settings-test`, `--ns seon.render.web-test`, `--ns seon.render-source-test`, `--ns seon.render.retained-test`; the pair census script above.
 
 1. `bin/test-check default --ns seon.render.entity-pairs-test`
 2. `bin/test-check default --ns seon.program-test`
