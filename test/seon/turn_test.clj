@@ -196,6 +196,44 @@
                         [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence]))
            "a virtual reply is authored input, not generated context")))))
 
+(deftest a-forms-read-evidence-is-only-what-the-form-read
+  ;; The sink covered install, identity checks and profile derivation, so
+  ;; `(quote 1)` carried 7,286 reads (evaluation 73041 on default).
+  (support/with-database
+   (fn [connection]
+     (config/apply! {:seon.db/connection connection
+                    :seon.boot/cluster-name "form-read-proof"})
+     (support/seed-cluster! connection "form-read-proof")
+     (checked-transact! connection
+                        (agent/creation-tx {:seon.agent/id "reader"
+                                            :seon.ns/name 'my.agents.reader
+                                            :seon.cluster/name "form-read-proof"}))
+     (let [query '[:find ?name . :where [_ :seon.agent/id ?name]]
+           ctx (support/fork-cluster-ctx connection)
+           handle (support/cluster-handle
+                   {:seon.env/environment (support/environment "form-read-proof" connection)
+                    :seon.db/connection connection
+                    :seon.cluster/name "form-read-proof"
+                    :seon.db.process/id cluster/boot-process-identity
+                    :seon.sci.eval/ctx ctx})
+           [pure reading]
+           (turn/evaluate-sources
+            {:seon.turn.loop/cluster handle
+             :seon.sci.eval/ctx ctx
+             :seon.agent/id "reader"
+             :seon.cluster.eval/ordinal 0
+             :seon.ns/name 'my.agents.reader
+             :seon.cluster.reply/sources
+             [{:seon.cluster.eval/source "(inc 1)"}
+              {:seon.cluster.eval/source (str "(seon.db/q '" (pr-str query) ")")}]})
+           evidence #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence])]
+       (is (= "2" (get-in pure [:seon.sci.eval/evaluation :seon.eval/shown])))
+       (is (empty? (evidence pure)) "a form that reads nothing records no read")
+       (is (= ['{:find [?name .] :where [[_ :seon.agent/id ?name]]}]
+              (mapv #(get-in % [:seon.db/read-request :seon.db/query-request :query])
+                    (evidence reading)))
+           "a form's one query is its one read")))))
+
 (deftest a-refused-generated-form-records-its-refusal
   (testing "an appended form whose evaluation is refused never stays bare"
    (support/with-database

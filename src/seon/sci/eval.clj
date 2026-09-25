@@ -3860,6 +3860,12 @@
       (throw (ex-info (:seon.error/message answer) answer))
       answer)))
 
+(defn- form-read-sink
+  "The sink collecting one form's own reads: the request's, else the ambient one."
+  {:malli/schema [:=> [:cat :map] [:maybe :seon.db/read-evidence-sink]]}
+  [request]
+  (or (:seon.db/read-evidence-sink request) db/*read-evidence-sink*))
+
 (defn evaluate
   "Evaluate one form source and return what may leave the boundary.
   Runs synchronously on the caller's `:compute` workload task — this
@@ -4221,7 +4227,11 @@
                             sci/print-namespace-maps true
                             sci/print-readably true]
                 (try
-                  (let [value (sci/eval-form execution-ctx form)]
+                  ;; Read evidence is what the form read: the request's sink
+                  ;; is bound here and around its shown result, never around
+                  ;; acquisition, identity checks or install.
+                  (let [value (binding [db/*read-evidence-sink* (form-read-sink request)]
+                                (sci/eval-form execution-ctx form))]
                     (vreset! ending-namespace (sci/ns-name @sci/ns))
                     value)
                   (finally
@@ -4353,9 +4363,10 @@
               ;; declared returns; any other form supplies no producer.
               head (some-> (render/request-projection request)
                            (render/head-function execution-ctx namespace-name form))
-              admitted (shown-result value (cond-> request
-                                             head (assoc :seon.render.call/function head))
-                                     evaluation-record)]
+              admitted (binding [db/*read-evidence-sink* (form-read-sink request)]
+                         (shown-result value (cond-> request
+                                               head (assoc :seon.render.call/function head))
+                                       evaluation-record))]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps

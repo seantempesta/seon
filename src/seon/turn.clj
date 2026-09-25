@@ -4745,27 +4745,30 @@
                         :seon.turn/id run-id})
                              :seon.db/db database
                              :seon.db/connection connection
-                             :seon.render/profile profile)
+                             :seon.render/profile profile
+                             ;; The form's own reads: `evaluate` binds this
+                             ;; around the form and its shown result only, so
+                             ;; install, identity, profile and gate reads stay out.
+                             :seon.db/read-evidence-sink captured)
                 handle (assoc :seon.repl/handle handle)
                 ;; The namespace rows earlier forms will settle: a definition
                 ;; digests with the row its transaction leaves stored.
                 (seq settled) (assoc :seon.sci.eval/settled-namespaces settled))
               evaluation
-              (binding [db/*read-evidence-sink* captured]
-                (render/call-with-walk-context
-                 {:seon.db/db database
-                  :seon.db/connection connection
-                  :seon.agent/id agent-id
-                  :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
-                  :seon.sci.eval/ctx ctx
-                  :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
-                  :seon.config/on-core-error (:seon.config/on-core-error cluster)}
-                 #(gate-function-install
-                   cluster ctx agent-id
-                   (if run-id (receipt-identity run-id ordinal)
-                       (id/id [agent-id form]))
-                   request
-                   (sci.eval/evaluate-for-install request))))
+              (render/call-with-walk-context
+               {:seon.db/db database
+                :seon.db/connection connection
+                :seon.agent/id agent-id
+                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                :seon.sci.eval/ctx ctx
+                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
+                :seon.config/on-core-error (:seon.config/on-core-error cluster)}
+               #(gate-function-install
+                 cluster ctx agent-id
+                 (if run-id (receipt-identity run-id ordinal)
+                     (id/id [agent-id form]))
+                 request
+                 (sci.eval/evaluate-for-install request)))
               evaluation (or (disposition-rule-error
                                (db/carried-projection database)
                                (:seon.cluster.eval/source form) namespace-name

@@ -190,6 +190,9 @@
                   {:optional true}
                   :seon.sci.eval/ctx]
                  [:seon.db/db {:optional true} :seon.db/database-value]
+                 [:seon.db/read-evidence-sink
+                  {:optional true}
+                  :seon.db/read-evidence-sink]
                  [:seon.agent/id {:optional true} :seon.agent/id]
                  [:seon.turn/id {:optional true} :seon.turn/id]
                  [:seon.cluster.eval/ordinal
