@@ -521,6 +521,18 @@
     (or (str/starts-with? line "```")
         (str/starts-with? line "~~~"))))
 
+(defn- advance-to!
+  "Advance `source-reader` over `text` to character offset `end`; its cursor
+  owns line and column, so coordinates stay those of `text`. Answers `end`."
+  [source-reader text starts end]
+  (loop []
+    (when (< (cursor-offset starts (count text)
+                           (sci/get-line-number source-reader)
+                           (sci/get-column-number source-reader)) end)
+      (when (rt/read-char source-reader)
+        (recur))))
+  end)
+
 (defn- skip-fences!
   "Skip delimiter lines only between top-level forms, never inside a literal.
   SCI owns form boundaries; its source reader owns cursor advancement."
@@ -541,20 +553,18 @@
                    (fence-line? (subs text offset line-end)))
               (recur line-end line-end)
               :else fence-end)))]
-    (loop []
-      (when (< (cursor-offset starts (count text)
-                             (sci/get-line-number source-reader)
-                             (sci/get-column-number source-reader)) end)
-        (when (rt/read-char source-reader)
-          (recur))))
-    end))
+    (advance-to! source-reader text starts end)))
 
 (defn- read-events
-  [text reading-context]
+  "Read `text`'s forms from character offset `from` into events. Recovery
+  resumes the same text at a later offset, so every event, form and nested
+  form carries the coordinates of `text` itself."
+  [text reading-context from]
   (let [ctx (sci/init {})
         source-reader (sci/source-reader text)
         starts (line-starts text)
         text-length (count text)
+        _ (advance-to! source-reader text starts from)
         initial-context
         (let [context (select-keys reading-context
                                    [::ns ::aliases ::refers ::publics])]
@@ -676,28 +686,6 @@
      (if refused?
        {::refused-token (::tag data)}
        {::unreadable-member ::form})))))
-
-(defn- shift-event
-  [event offset line-offset column-offset]
-  (let [shift-position (fn [position]
-                         (when (integer? position) (+ offset position)))
-        form (::form event)
-        form-meta (meta form)
-        first-line? (= 1 (::line event))]
-    (cond-> (-> event
-                (update ::start shift-position)
-                (update ::end shift-position)
-                (update ::source-start shift-position)
-                (update ::source-end shift-position)
-                (update ::line #(+ line-offset %)))
-      first-line? (update ::column #(+ column-offset %))
-      form-meta
-      (assoc ::form
-             (with-meta form
-               (cond-> form-meta
-                 (:line form-meta) (update :line #(+ line-offset %))
-                 (and (= 1 (:line form-meta)) (:column form-meta))
-                 (update :column #(+ column-offset %))))))))
 
 (defn- cause-data
   "The Edamame fact map beneath SCI's parse wrapper, when one exists."
@@ -831,53 +819,38 @@
 (defn- recovering-events
   "Recover at proven top-level anchors, retaining one unreadable span."
   [text reading-context failure]
-  (let [starts (line-starts text)]
-    (loop [offset 0
-           state reading-context
-           pending failure
-           recovered []]
-      (let [data (ex-data pending)
-            [base-line base-column] (offset-cursor starts offset)
-            line-offset (dec base-line)
-            column-offset (dec base-column)
-            partial (mapv #(shift-event % offset line-offset column-offset)
-                          (::partial-events data))
-            local-start (long (or (::failure-start data) 0))
-            absolute-start (+ offset local-start)
-            local-text (subs text offset)
-            classification (parse-classification local-text local-start pending)
-            local-end (recovery-point local-text local-start classification)
-            absolute-end (+ offset local-end)
-            classification (update classification ::failure-offset + offset)
-            state-after (or (::reading-state data) state)
-            source (subs text absolute-start absolute-end)
-            recovered (into recovered partial)
-            ;; An unmatched closer is a reader error, as in Clojure
-            ;; (LispReader's UnmatchedDelimiterReader): kept in order after
-            ;; the forms before it, never silently repaired away. Only a
-            ;; whitespace-only recovery span holds nothing to report.
-            recovered (if (str/blank? source)
-                        recovered
-                        (conj recovered
-                              (error-event text absolute-start absolute-end
-                                           state-after pending classification)))]
-        (if (= absolute-end (count text))
-          recovered
-          (let [suffix (subs text absolute-end)
-                [next-line _] (offset-cursor starts absolute-end)
-                attempt
-                (try
-                  {::events (read-events suffix state-after)}
-                  (catch #?(:clj Throwable :cljs :default) next-failure
-                    {::failure next-failure}))]
-            (if-let [events (::events attempt)]
-              (into recovered
-                    (map #(shift-event % absolute-end (dec next-line)
-                                       (dec (second (offset-cursor starts
-                                                                  absolute-end)))))
-                    events)
-              (recur absolute-end state-after (::failure attempt)
-                     recovered))))))))
+  (loop [offset 0
+         state reading-context
+         pending failure
+         recovered []]
+    (let [data (ex-data pending)
+          partial (::partial-events data)
+          absolute-start (long (or (::failure-start data) offset))
+          classification (parse-classification text absolute-start pending)
+          absolute-end (recovery-point text absolute-start classification)
+          state-after (or (::reading-state data) state)
+          source (subs text absolute-start absolute-end)
+          recovered (into recovered partial)
+          ;; An unmatched closer is a reader error, as in Clojure
+          ;; (LispReader's UnmatchedDelimiterReader): kept in order after
+          ;; the forms before it, never silently repaired away. Only a
+          ;; whitespace-only recovery span holds nothing to report.
+          recovered (if (str/blank? source)
+                      recovered
+                      (conj recovered
+                            (error-event text absolute-start absolute-end
+                                         state-after pending classification)))]
+      (if (= absolute-end (count text))
+        recovered
+        (let [attempt
+              (try
+                {::events (read-events text state-after absolute-end)}
+                (catch #?(:clj Throwable :cljs :default) next-failure
+                  {::failure next-failure}))]
+          (if-let [events (::events attempt)]
+            (into recovered events)
+            (recur absolute-end state-after (::failure attempt)
+                   recovered)))))))
 
 (defn read
   "Read accepted Clojure source into ordered read events or a flat error."
@@ -932,7 +905,7 @@
 
       :else
       (try
-        (read-events text reading-context)
+        (read-events text reading-context 0)
         (catch #?(:clj Throwable :cljs :default) failure
           (let [failure-data (ex-data failure)
                 refused? (::refusal failure-data)]

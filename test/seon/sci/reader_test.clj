@@ -393,6 +393,26 @@
            ["(let [x 1]\n(f x)\n}" [:error :form :error]]]]
     (is (= expected (read-kinds (events source))) (pr-str source))))
 
+(deftest recovered-forms-carry-the-coordinates-of-the-whole-source
+  ;; Recovery resumes the same text, so a nested declaration after an error
+  ;; carries its own line and column there, as SCI then defines it; error
+  ;; facts name the whole source's line too.
+  (doseq [[source nested error-line]
+          [[")\n(do\n  (defn recovered \"D.\" {:malli/schema [:=> [:cat :int] :int]} [x] x))"
+            [[2 1] [3 3]] 1]
+           ["(defn f [)\n(defn g [] (h 1))\n)" [[2 1] [2 12]] 3]
+           ["(1 2\n;; c\n(3 (4))" [[3 1] [3 4]] 3]]]
+    (let [result (events source)
+          form (some #(when-not (:seon.sci.reader/error %) %) result)]
+      (is (= nested (mapv (comp (juxt :line :column) meta)
+                          (filter seq? (tree-seq seq? seq (:seon.sci.reader/form form)))))
+          (pr-str source))
+      (is (= (:seon.sci.reader/source form)
+             (subs source (:seon.sci.reader/source-start form) (:seon.sci.reader/source-end form))))
+      (is (= error-line (get-in (last (filter :seon.sci.reader/error result))
+                                [:seon.sci.reader/error :seon.error/data :seon.sci.reader/line]))
+          (pr-str source)))))
+
 (deftest recovery-never-anchors-on-inner-maps-or-vectors
   (doseq [[source expected]
           [["(db/transact! :seon [\n{:a 1}\n{:b 2}\n}]" [:error]]
