@@ -2087,7 +2087,8 @@
   {:malli/schema [:=> [:cat :seon.test/request]
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
-                   :seon.config/error :seon.db.write/error :seon.db/invalid-read-error
+                   :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
+                   :seon.db/invalid-read-error
                    :seon.schema/missing-projection-error :seon.instrument/registration-error
                    :seon.sci.eval/interpretation-error :seon.test/not-runnable-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection

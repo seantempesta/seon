@@ -2761,14 +2761,19 @@
       (when held? (registry/retire-branch! target))
       (registry/branch! (assoc target :seon.cluster.registry/from head)))
     (let [execution (cluster.agent/acquire-context! source nil {:seon.agent/branch branch})
+          ;; The candidate's write and its test run are the candidate branch's own
+          ;; work: under a caller's custody the writer refuses writes naming
+          ;; another branch (seon.db/foreign-connection-error).
           gate
           (try
-            (let [identities (write! execution)
-                  candidate-ms (ms started)]
-              (assoc (reaching-run execution identities)
-                     :seon.source/candidate branch
-                     :seon.source/phase-ms {:seon.source/candidate-ms candidate-ms
-                                            :seon.source/tests-ms (- (ms started) candidate-ms)}))
+            (db/call-with-custody
+             {:seon.db/connection (:seon.db/connection execution)}
+             #(let [identities (write! execution)
+                    candidate-ms (ms started)]
+                (assoc (reaching-run execution identities)
+                       :seon.source/candidate branch
+                       :seon.source/phase-ms {:seon.source/candidate-ms candidate-ms
+                                              :seon.source/tests-ms (- (ms started) candidate-ms)})))
             (finally (cluster.agent/release-context! execution)))]
       (if (:seon.test/passed? gate)
         (let [advancing (System/nanoTime)

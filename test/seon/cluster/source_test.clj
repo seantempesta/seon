@@ -306,6 +306,43 @@
             :seon.test.cache/removed ["src/b.clj"]}
            (seon.test.cache/changed-inputs before after)))))
 
+(deftest ^{:seon.test/long "Measured 5,590 ms at the REPL (2026-09-25): one nested seon.test/run of one member on the candidate branch (4,788 ms), the candidate write and acquisition."
+           :seon.test/long-ms 15000}
+  work-on-an-acquired-branch-runs-as-that-branchs-own-work-under-an-agents-custody
+  ;; Class regression (custody class, 2026-09-25): the candidate's write, its
+  ;; nested test run and the member acquisitions ran under the caller's custody,
+  ;; which the writer refuses for another branch. Under the body's own custody
+  ;; the gate records its members; a run whose recording write is refused
+  ;; returns the writer's declared refusal, never a contract finding.
+  (let [target (test-support/execution-handle nil)
+        held-store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        row #(test-support/program-row (db/db %1) %2 %3)
+        s (keyword (str "gate-class-" (id/id)))]
+    (test-support/transacted! h-conn [(test-support/namespace-row (db/db h-conn) 'scratch.gate-class)
+                                      (row h-conn '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 1)")])
+    (test-support/transacted! h-conn [(row h-conn '[:seon.test/sym scratch.gate-class/f-check]
+                                           "(clojure.test/deftest f-check (clojure.test/is (pos? (scratch.gate-class/f))))")])
+    (try
+      (let [gate (cluster/candidate-gate!
+                  target held-store s
+                  (fn [execution]
+                    (let [c (:seon.db/connection execution)]
+                      (test-support/transacted! c [(row c '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 2)")])
+                      #{[:seon.fn/sym 'scratch.gate-class/f]}))
+                  (constantly #{}))]
+        (is (true? (:seon.test/passed? gate)) (:seon.source/tally gate))
+        (is (str/includes? (:seon.source/tally gate) "executed 1 ")))
+      (let [execution (cluster.agent/acquire-context! target nil {:seon.agent/branch s})]
+        (try
+          (let [refused ((requiring-resolve 'seon.test/run)
+                         {:seon.test/policy :named :seon.test/execution execution
+                          :seon.test/recording-connection (:seon.db/connection execution)
+                          :seon.test/changed ['scratch.gate-class/f]})]
+            (is (:seon.db/transaction-refused refused) (pr-str (select-keys refused [:seon.error/message]))))
+          (finally (cluster.agent/release-context! execution))))
+      (finally (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})))))
+
 (deftest ^{:seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, lane-nsa-slice4-2026-09-23.md)."
            :seon.test/long-ms 120000}
   a-merge-naming-a-task-the-destination-lacks-refuses-and-an-admitted-task-survives-a-refused-merge
