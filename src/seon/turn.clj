@@ -4428,7 +4428,12 @@
           rendered
           (when-not (:seon.config.ai/no-provider settings)
           (phase
-           #(@cluster-prompt-prompt prompt-db
+           ;; The prompt takes the observed value and the run id: its
+           ;; acquisition derives the opening itself (`render/acquire-context!`).
+           ;; Handing it `prompt-db` nested a second as-of whose origin has no
+           ;; committed identity, so every render node re-keyed the projection
+           ;; from declaration datoms (~40 ms each, 36 s per prompt).
+           #(@cluster-prompt-prompt observed-db
                            {:seon.turn/id run-id
                             :seon.agent/id agent-id
                             :seon.db/connection connection
