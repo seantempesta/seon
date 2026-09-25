@@ -80,17 +80,18 @@
            (let [value (merge entity facts)
                  test-name (:seon.test/sym value)
                  source (render.test/render-ai {:seon.render/value value})
-                 [summary evidence changed] (rest (read-string (str "(do\n" source "\n)")))]
+                 [summary evidence changed host] (rest (read-string (str "(do\n" source "\n)")))]
              (is (every? #(not (str/starts-with? (str/triml %) ";")) (str/split-lines source))
                  "Rendered source carries no comment-prefixed prose")
              (is (= 'clojure.core/identity (first summary)) (pr-str summary))
              (is (= (str "Test " test-name ": " expected)
                     (first (str/split-lines (second summary))))
                  (pr-str summary))
-             (is (= 'seon.db/pull (first evidence)) (pr-str evidence))
-             (is (= (list 'quote [:seon.test/sym test-name]) (last evidence)) (pr-str evidence))
+             (is (= (list 'seon.test/recorded-result (list 'seon.db/db) (list 'quote test-name)) evidence)
+                 (pr-str evidence))
              (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote test-name)) changed)
                  (pr-str changed))
+             (is (= (list 'seon.test/host (list 'seon.db/db) (list 'quote test-name)) host) (pr-str host))
              (is (hiccup/hiccup? (render.test/render-html {:seon.render/value value}))))))))))
 
 (deftest function-entity-pair-is-selected-through-the-issue-walk
