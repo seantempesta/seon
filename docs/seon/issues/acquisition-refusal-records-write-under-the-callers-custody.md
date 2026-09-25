@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: closed
 severity: defect
 tags: [issue, agent, sci, custody]
 ---
@@ -26,3 +26,13 @@ The branch-assignment write a few lines earlier already uses
 `(db/call-with-custody {} ...)`. The refusal record belongs to the acquired
 branch too, so it should be written under that branch's custody. It should
 not inherit the caller's.
+
+## Closed 2026-09-25 by c1e40b7e8
+
+`acquire-context!` now runs `sci.eval/acquire!` under the acquired branch's
+own custody. I verified this at the REPL on default 6ab6c29c, lane
+fix-test-failure-facts-opus. Under custody of `:agent-c82a20d87134`, I
+committed an uninstallable `:agent` row, `(defn boom [] (no-such-fn-xyz 1))`.
+I then acquired an isolated child, `:agent-602aca407681`, from that commit.
+Acquisition did not throw, and the child's database held the recorded
+`seon.sci.eval/install-row!` error.

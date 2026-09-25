@@ -55,6 +55,26 @@
       (check test-symbol test-var mode)
       (finally (remove-ns namespace-name)))))
 
+(defn- replacement-tx
+  "Transaction data leaving `declaration` exactly as analyzed from `source`
+  with `overrides`. An exact replacement leaves that row, not the stored one
+  merged with it, so the row is digested as it stands."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity :string :map]
+                  :seon.store/transaction-data]}
+  [database declaration source overrides]
+  (let [row (support/program-row database declaration source overrides)]
+    (if-let [stored (db/pull database '[*] declaration)]
+      (program/exact-replacement-tx
+       stored (support/revised-row database (dissoc row :seon.program/definition-digest) {}))
+      [row])))
+
+(defn- replace-declaration!
+  "Replace one declaration exactly; see `replacement-tx`."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.program/identity :string :map]
+                  :seon.db/transaction-report]}
+  [connection declaration source overrides]
+  (support/transacted! connection (replacement-tx (db/db connection) declaration source overrides)))
+
 (defn- redeclare-probe!
   "Declare `forms` in the probe's namespace and the probe as the host test
   `test-form`, from one analyzed source, replacing each stored row exactly."
@@ -67,11 +87,7 @@
         path (get-in (db/pull database '[{:seon.fn/file [:seon.fn.file/relative-path]}]
                               [:seon.test/sym test-symbol])
                      [:seon.fn/file :seon.fn.file/relative-path])
-        replacement (fn [declaration overrides]
-                      (let [row (support/program-row database declaration source overrides)]
-                        (if-let [stored (db/pull database '[*] declaration)]
-                          (program/exact-replacement-tx stored row)
-                          [row])))]
+        replacement #(replacement-tx database %1 source %2)]
     (support/transacted!
      connection
      (into (replacement [:seon.test/sym test-symbol]
@@ -89,13 +105,21 @@
                          #{(symbol (str (:ns (meta test-var))) (str (:name (meta test-var))))}})]
     (if (:seon.error/at result) result (first (:seon.test/results result)))))
 
-(deftest one-failing-is-becomes-one-failure-entity
+(defn- reports
+  "The failure reports a recorded result carries."
+  {:malli/schema [:=> [:cat :map] [:sequential :map]]}
+  [result]
+  (:seon.test.failure/reports result))
+
+(deftest one-failing-is-becomes-one-failure-report
+  ;; An admitted run records immutable member reports; the test row carries no
+  ;; latest-result failure family.
   (support/with-database
     (fn [connection]
       (with-probe connection
         (fn [s v _]
           (let [result (run-probe connection v)
-                failures (:seon.test/failures result)]
+                failures (reports result)]
             (is (= 2 (:seon.test/fail-count result)) (pr-str result))
             (is (= 2 (count failures)))
             (is (= #{"first claim" "second claim"} (set (map :seon.test.failure/message failures))))
@@ -104,45 +128,52 @@
               (is (string? (:seon.test.failure/expected failure)))
               (is (string? (:seon.test.failure/actual failure)))
               (is (pos-int? (:seon.test.failure/line failure)))
-              (is (int? (get-in failure [:seon.test.failure/file :db/id])))
+              (is (= "test/seon/test_failure_facts_test.clj" (:seon.test.failure/reported-file failure)))
               (is (= [[0 "outer"] [1 "inner"]] (sort-by first (:seon.test.failure/contexts failure)))))
-            (is (= 2 (count (db/q '[:find ?f :in $ ?s
-                                    :where [?t :seon.test/sym ?s]
-                                           [?t :seon.test/failures ?f]
-                                           [?f :seon.test.failure/file ?file]
-                                           [?file :seon.fn.file/relative-path]] (db/db connection) s))))))))))
+            (is (= 2 (count (db/q '[:find ?report :in $ ?s
+                                    :where [?member :seon.test.member/symbol ?s]
+                                           [?member :seon.test.member/failures ?report]]
+                                  (db/db connection) s))))
+            (is (nil? (:seon.test/failures (db/pull (db/db connection) [:seon.test/failures]
+                                                    [:seon.test/sym s]))))))))))
 
-(deftest a-repeated-failure-upserts-its-entity
+(deftest a-repeated-failure-is-the-same-report
   (support/with-database
     (fn [connection]
       (with-probe connection
-        (fn [_ v _]
-          (let [before (:seon.test/failures (run-probe connection v))
-                after (:seon.test/failures (run-probe connection v))]
-            (is (= 2 (count before) (count after)))
-            (is (= (set (map :seon.test.failure/id before)) (set (map :seon.test.failure/id after))))
-            (is (= #{2} (set (map :seon.test.failure/seen-count after)))))
-          (let [again (:seon.test/failures (run-probe connection v))]
-            (is (= #{3} (set (map :seon.test.failure/seen-count again))))
-            (is (every? #(not= (:seon.test.failure/first-run %) (:seon.test.failure/last-run %)) again))))))))
+        (fn [s v _]
+          (let [ids #(set (map :seon.test.report/id (reports %)))
+                before (run-probe connection v)
+                after (run-probe connection v)]
+            (is (= 2 (count (ids before))))
+            (is (= (ids before) (ids after)) "an equal claim at one position is one report")
+            (is (= 2 (count (db/q '[:find [?id ...] :in $ ?s
+                                    :where [?member :seon.test.member/symbol ?s]
+                                           [?member :seon.test.member/failures ?report]
+                                           [?report :seon.test.report/id ?id]]
+                                  (db/db connection) s))))))))))
 
-(deftest a-green-run-retracts-its-failures
+(deftest a-green-run-is-the-latest-result-and-keeps-red-history
   (support/with-database
     (fn [connection]
       (with-probe connection
         (fn [s v mode]
-          (let [red (run-probe connection v) ids (mapv :seon.test.failure/id (:seon.test/failures red))]
-            (is (= 2 (count ids)))
+          (let [red (run-probe connection v)]
+            (is (= 2 (count (reports red))))
             (reset! mode :green)
-            (let [green (run-probe connection v)]
+            (let [green (run-probe connection v)
+                  latest (sut/recorded-result (db/db connection) s)]
               (is (= 1 (:seon.test/pass-count green)))
-              (is (nil? (:seon.test/failures green)))
-              (is (nil? (:seon.test/failing-assertions green)))
-              (is (nil? (:seon.test/failure-message green)))
-              (is (empty? (db/q '[:find ?e :in $ [?id ...]
-                                  :where [?e :seon.test.failure/id ?id]] (db/db connection) ids)))
-              (is (nil? (:seon.test/failures (db/pull (db/db connection)
-                                             [:seon.test/failures] [:seon.test/sym s])))))))))))
+              (is (empty? (reports green)))
+              (is (= [1 0 0] ((juxt :seon.test/pass-count :seon.test/fail-count :seon.test/error-count) latest)))
+              (is (empty? (reports latest)))
+              (is (= (set (map :seon.test.report/id (reports red)))
+                     (set (db/q '[:find [?id ...] :in $ ?s
+                                  :where [?member :seon.test.member/symbol ?s]
+                                         [?member :seon.test.member/failures ?report]
+                                         [?report :seon.test.report/id ?id]]
+                                (db/db connection) s)))
+                  "the red member's reports are immutable history"))))))))
 
 (deftest an-oversized-actual-settles-into-a-blob
   (support/with-database
@@ -151,7 +182,7 @@
       (with-probe connection
         (fn [_ v mode]
           (reset! mode :blob)
-          (let [failure (first (:seon.test/failures (run-probe connection v)))
+          (let [failure (first (reports (run-probe connection v)))
                 digest (:seon.test.failure/actual-blob failure)
                 content (when digest (blob/get connection digest))]
             (is (string? digest))
@@ -169,21 +200,15 @@
       (with-probe connection
         (fn [s v _]
           ;; The agent's own row: its member interprets this source in SCI.
-          (let [database (db/db connection)
-                source (str "(ns " (namespace s) " (:require [clojure.test :refer [deftest is]]))\n"
+          (let [source (str "(ns " (namespace s) " (:require [clojure.test :refer [deftest is]]))\n"
                             "(deftest probe (is (= 1 2)))")
-                _ (support/transacted! connection
-                    (program/exact-replacement-tx
-                     (db/pull database '[*] [:seon.test/sym s])
-                     (support/program-row database [:seon.test/sym s] source)))
+                _ (replace-declaration! connection [:seon.test/sym s] source {})
                 result (run-probe connection v)
-                failure (first (:seon.test/failures result))]
+                failure (first (reports result))]
             (is (= 1 (:seon.test/fail-count result)) (pr-str result))
-            (is (nil? (:seon.test.failure/file failure)))
-            (is (nil? (:seon.test.failure/line failure)))
-            (is (= (id/id [s [:fail nil (:seon.test.failure/expected failure)
-                              (:seon.test.failure/actual failure) nil] 0])
-                   (:seon.test.failure/id failure)))))))))
+            (is (= "(= 1 2)" (:seon.test.failure/expected failure)) (pr-str failure))
+            (is (nil? (:seon.test.failure/reported-file failure)))
+            (is (nil? (:seon.test.failure/line failure)))))))))
 
 (deftest failures-render-their-site-and-claim
   (support/with-database
@@ -211,23 +236,22 @@
           (reset! mode :green)
           (is (= 1 (:seon.test/pass-count (run-probe connection v))))
           (reset! mode :red)
-          (let [red (run-probe connection v)
-                namespace-name (symbol (namespace (symbol s)))
-                reached (symbol (str namespace-name) "reached")
-                ;; The test now calls `reached`: reach derives from the row's
-                ;; analyzed calls, so `reached` is a changed dependency.
+          ;; The change that makes it red: the test now calls `reached`. Reach
+          ;; derives from the row's analyzed calls, so `reached` is a changed
+          ;; dependency, and the changed program is executed, not reused.
+          (let [reached (symbol (namespace s) "reached")
                 tx (redeclare-probe! connection s
                                      "(deftest probe (reached) (is (= 1 2)) (is (= :a :b)))"
                                      "(defn reached [] :changed)")
+                red (run-probe connection v)
                 database (db/db connection)
                 changed (sut/changed-since-green database s)
                 unit {:seon.db/db database
                       :seon.render/value (db/pull database '[*] [:seon.test/sym s])}
                 [summary _evidence changed-form]
                 (rest (read-string (str "(do\n" (render/render-ai unit) "\n)")))
-                sites (set (map (juxt #(get-in % [:seon.test.failure/file :seon.fn.file/relative-path])
-                                      :seon.test.failure/line)
-                                (:seon.test/failures red)))
+                sites (set (map (juxt :seon.test.failure/reported-file :seon.test.failure/line)
+                                (reports red)))
                 links (filter #(and (vector? %) (= :a (first %)) (map? (second %)))
                               (tree-seq coll? seq (render/render-html unit)))]
             (is (:db-after tx) (pr-str tx))
@@ -340,9 +364,7 @@
   [connection declaration form]
   (let [database (db/db connection)
         source (synthetic-source (symbol (namespace (second declaration))) [form])]
-    (support/transacted! connection
-      (program/exact-replacement-tx (db/pull database '[*] declaration)
-                                    (support/program-row database declaration source)))))
+    (support/transacted! connection (replacement-tx database declaration source {}))))
 
 (deftest publication-replaces-cardinality-many-tuples
   (support/with-database

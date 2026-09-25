@@ -1,107 +1,105 @@
 ---
 type: report
-status: unverified
+status: measured
 created: 2026-09-25
 tags: [agent-platform, test, landing]
 ---
 
 # Lane fix-test-failure-facts-opus (2026-09-25)
 
-## Not yet proven
+The failure-facts tests drive real nested `seon.test/run` requests of a host
+probe. Admitted runs record immutable member outcomes and reports
+(`runner/complete-members`). The tests now assert that model, and they build
+their worlds through the canonical writers.
 
-- **The fix is unrun.** Under the load rule, the lane ran no test request. Root
-  runs the commands below. A nested `seon.test/run` could not be reproduced
-  faithfully at the REPL. With a hand-built parent handle off default's head,
-  member acquisition threw "Program acquisition could not record its
-  refusals." This is filed as
-  `docs/seon/issues/acquisition-refusal-records-write-under-the-callers-custody.md`.
-  So the lane has NOT observed pass-count 1 from a nested run of the host probe.
-- **Bounds.** The failure-facts members that drive nested runs cost about 4 s
-  per run. On 005.txt they measured 8.0, 8.8 and 10.5 s against the 5,000 ms
-  bound. After this change `a-repeated-failure-upserts-its-entity` (3 runs),
-  `a-green-run-retracts-its-failures`,
-  `a-recorded-test-renders-its-sites-and-changed-dependencies` and
-  `what-made-it-red-names-changed-functions` (2 runs each) are still expected
-  to fail their bounds. The cost is the nested run's, filed as
-  `docs/seon/issues/a-nested-test-run-costs-four-seconds.md`. Bounds were not
-  raised.
+## Broken or unproven
 
-## Cause (producer), verified
+- **Bounds.** Each nested run costs 3.6–4.8 s. Members with nested runs measured
+  6.0–11.6 s on the REPL (see the table below), and root's run 1852 measured
+  8.7, 8.6, 6.2 and 5.1 s, all against the 5,000 ms bound. The owner of that
+  cost is `docs/seon/issues/a-nested-test-run-costs-four-seconds.md`. I did not
+  raise any bound.
+- **Not yet run by root.** Root's run (verify-1852) was against commit
+  72578e81a. This revision is newer and has only been run at the lane's REPL,
+  as described below.
+- **One harness gap at the REPL.**
+  `recording-keeps-an-absent-reach-member-as-its-symbol` errored there, because
+  `(seon.schema/handed-projection)` is nil outside a member. It was green in
+  root's run 1852, and this revision leaves that test unchanged.
 
-1. **Host probe became an agent row.** d3edec1cf moved `with-probe` onto
-   `support/program-row`, and that admits `:agent`. The REPL confirmed it:
-   `:seon.schema.admission/source :agent`, even with the `:seon.fn/file`
-   override. For an `:agent` row, `seon.test/resolve-test` (test.clj:1455)
-   takes the `sci/resolve` branch and runs the row's SCI-interpreted source
-   `(deftest probe (is (= 1 2)) (is (= :a :b)))`. It never runs the interned
-   Var whose body follows `mode`. The effects in 005.txt:
-   - A green run still fails twice (pass-count 0, and the old
-     failing-assertions remain).
-   - No messages and no site are recorded.
-   - The interpreted test reports 2 fails instead of 1.
+## Causes, verified at the REPL
 
-   The fix restores `:core` on the probe row, which was the design before
-   65893d82f/d3edec1cf. SCI acquisition skips `:core` test rows (sci/eval.clj,
-   around lines 2552–2560, `agent-authored?` filter), and `resolve-test`
-   `requiring-resolve`s the host Var. The REPL showed that the definition
-   digest is independent of the admission value, and the writer accepted the
-   `:core` row.
-2. **The reach tests predate the retype.** `:seon.test/reach` has been
-   `:db.type/symbol` since 0e8f7d323/2a30b98b8 (verified live:
-   `{:db/valueType :db.type/symbol}`). The tests still carried
-   `[:seon.fn/sym x]` vectors and queried `?f :seon.fn/sym`. `record-tx` needs
-   a set (runner.clj `wanted-reach (when (set? ...))`), so a vector records
-   `reach-unknown`. A REPL `record-tx` with symbol sets produced exactly
-   `[[:seon.test/reach member.facts/b false]]` on the drop. The producer is
-   correct.
-3. **The `changed-since-green` readers are stale.** The function returns a
-   vector of symbols, but the tests mapped `:seon.fn/sym` over it. It reads
-   `:seon.test.member/*` rows from admitted runs, and a hand `completion`
-   passed to `commit-results!` never creates those rows.
-   `what-made-it-red-names-changed-functions` therefore now uses real nested
-   runs of the host probe. The rendered changed form quotes its symbol, which
-   is correct and evaluable, and the test now expects `(quote s)`.
+1. **The probe row was admitted as `:agent`.** d3edec1cf moved `with-probe` onto
+   `support/program-row`, which defaults to `:agent`, so `resolve-test` ran the
+   row's SCI source instead of the host Var. The fix, landed in 72578e81a,
+   admits the probe row as `:core`. Re-verified: the nested run now records the
+   host Var's messages, contexts and line 39.
+2. **The tests asserted a retired model.** Admitted runs never write the legacy
+   latest-result family: no `:seon.test/failures` entities on the test row, no
+   seen-count, no retraction on green (runner.clj `record-tx` routes to
+   `complete-members`; `docs/seon/issues/admitted-test-results-are-invisible-to-legacy-consumers.md`).
+   A run's claims are `:seon.test.failure/reports` on its result and
+   `:seon.test.member/failures` on the member. REPL, one probe world:
+   - Two red runs produce the same two report ids.
+   - The oversized actual is stored as `actual-blob` with size 10019.
+   - The green run gives pass 1, fail 0 and no reports, and `recorded-result`
+     returns green.
+   - Three distinct reports remain in member history.
+   - The test row's `:seon.test/failures` is nil.
 
-`record-latest-tx`, `prepare-failures!` and `commit-results!` all record
-correctly. No write refusal and no silent recording tx refusal was found. The
-nested run DID execute its body, but it executed the wrong one.
+   The tests are converted to that model:
+   - `one-failing-is-becomes-one-failure-report`
+   - `a-repeated-failure-is-the-same-report`
+   - `a-green-run-is-the-latest-result-and-keeps-red-history`
+   - the blob, interpreted-site and sites tests
+3. **Content-keyed reuse.** A run whose program is unchanged reuses its green
+   result. Flipping the host Var's `mode` atom changes no input, so
+   `a-recorded-test-…`'s red run returned the green result with
+   `:seon.test/unchanged true`. The producer is correct. The test now changes
+   the program first (the probe calls a new `reached`) and then runs red.
+4. **The redeclaration digest was stale.** Since 8e731ac68, `program-row`
+   digests the stored row merged with the new one. An exact replacement leaves
+   the new row alone, so the digest must be taken of that row. The new
+   `replacement-tx` re-digests the exact row through `support/revised-row`;
+   `redeclare-probe!`, `redeclare!` and the interpreted test all use it.
 
-## Change
+## REPL proof
 
-The only file changed is `test/seon/test_failure_facts_test.clj`, +89/−65:
+The committed file was loaded into a scratch namespace with `Compiler/load`
+under its own source name (so file sites resolve), and each test was run with
+`clojure.test/test-var`. The parent handle was default's live handle, extended
+to a full execution handle. Each test ran on its own disposable `with-database`
+branch.
 
-- `with-probe` writes the host `:core` row.
-- `redeclare-probe!` re-declares the probe and its sibling functions from one
-  analyzed source, keeping `:core` and the file.
-- `stored-reach` reads the symbol-typed reach within the test's namespace.
-- The interpreted test writes its own `:agent` row.
-- `recording-mints-an-absent-identity…` is renamed to
-  `recording-keeps-an-absent-reach-member-as-its-symbol`. It asserts that the
-  symbol is recorded and that no row is minted. Tombstone minting was retired
-  with the retype.
+| test | pass/fail/error | ms |
+|---|---|---|
+| what-made-it-red-names-changed-functions | 7/0/0 | 11,619 |
+| a-recorded-test-renders-its-sites-and-changed-dependencies | 11/0/0 | 10,784 |
+| an-interpreted-test-failure-records-no-false-site | 5/0/0 | 6,481 |
+| one-failing-is-becomes-one-failure-report | 18/0/0 | 6,358 |
+| a-repeated-failure-is-the-same-report | 4/0/0 | 9,273 |
+| a-green-run-is-the-latest-result-and-keeps-red-history | 7/0/0 | 9,247 |
+| an-oversized-actual-settles-into-a-blob | 6/0/0 | 6,400 |
+| failures-render-their-site-and-claim | 6/0/0 | 6,119 |
+| failure-readers-use-the-structured-claims | 5/0/0 | 6,024 |
+| the other seven | green | 0–2,774 |
+| recording-keeps-an-absent-reach-member-as-its-symbol | 0/0/1 | harness gap above |
 
-## REPL evidence (default, lane-tff scratch ns, disposable with-database branches)
+The custody issue is closed. I verified it by acquiring a child branch under
+another branch's custody from a commit holding an uninstallable row: the
+`install-row!` error was recorded on the child branch, with no throw.
 
-- The `program-row` admission probe returned `:agent`. The digest was the same
-  under the `:agent` and `:core` namespace rows (`c1d78b5a…`).
-- `record-tx` with symbol sets: first pass wrote reach a, b, check; second pass
-  wrote only `b` retracted. The stored set was `[a check]`.
-- Writer: accepted the `:core` probe row plus its `:agent` replacement.
-  `redeclare-probe!` ran ×4 and every write was accepted. Admission stayed
-  `:core` with the file, a's digest changed on each redeclaration, reach
-  included `a` and then `reached`, and `changed-since-green` returned unknown
-  before any green. Timings: 1.6–3.5 s per disposable branch body, mostly
-  acquisition and `with-declarations`.
+## Change and size
 
-## Root runs (serial, quiet window)
+The only file changed is `test/seon/test_failure_facts_test.clj`. Against
+72578e81a it is +80/−58 lines, and against the original d3edec1cf it is about
++150/−105. There are no production edits.
+
+## Root runs
 
 ```
 bin/test-check default --ns seon.test-failure-facts-test
 ```
 
-Expected: every assertion green. Bound failures are possible on the four
-multi-run members named above, from the nested-run cost issue.
-
-## Commits
-
-One commit: the test file, this note and the two issues.
+Expected result: every assertion green. Bound failures on the nested-run
+members are expected until the nested-run cost issue is fixed.
