@@ -16,11 +16,11 @@
 
 (deftest literal-constructor-keys-are-not-declared-function-attributes
   (support/with-database
-   (fn [connection]
-     (let [projection (db/carried-projection (db/db connection))]
+   (fn [_]
+     (let [invoked #{:seon.render/ai}]
        (is (= {:seon.render/ai #{'example/render}}
               (#'functions/declared-function-targets
-               projection [{:not 'example/render :maybe 'example/render
+               invoked [{:not 'example/render :maybe 'example/render
                             :and 'example/render :or 'example/render
                             :seon.render/ai 'example/render}]
                #{'example/render})))))))

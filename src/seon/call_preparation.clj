@@ -241,7 +241,7 @@
   (let [{order :seon.fn.arity/order argument-count :seon.fn.arity/argument-count
          [argument] ::arity-arguments output ::arity-output}
         (first (filter #(seq (::arity-arguments %)) (get contracts supplier)))
-        arms (when (= :or (m/type output)) (set (map m/form (m/children output))))]
+        arms (when (and output (= :or (m/type output))) (set (map m/form (m/children output))))]
     (cond
       (nil? argument)
       (incoherent candidate
@@ -769,9 +769,19 @@
          :seon.fn/sym]
     [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [database current sym]
-  (let [contract-t (contract-transaction database sym)]
-    (if-not (number? contract-t)
-      contract-t
+  (let [contract-t (contract-transaction database sym)
+        ;; The plan is a function of the supplied-default rows and this
+        ;; contract. The snapshot memo and the projection's index record no
+        ;; read, so these two reads are what enter the caller's evidence.
+        reads (when (number? contract-t)
+                [(db/q database row-query)
+                 (db/q database '[:find ?spec . :in $ ?sym
+                                  :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
+                       sym)])]
+    (cond
+      (not (number? contract-t)) contract-t
+      (refused-read reads) (refused-read reads)
+      :else
       (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))
             arities (get (contract-arities (db/carried-projection database)) sym)
             arguments (for [arity arities argument (::arity-arguments arity)]

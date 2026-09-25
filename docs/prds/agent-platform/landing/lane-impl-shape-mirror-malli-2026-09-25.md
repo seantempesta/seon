@@ -198,3 +198,48 @@ obligations.
 - Not proven: the later publication steps (schema-row and program-row republication) through
   `seon.db/transact!`. My raw `d/with` cannot stand in for them because it skips seon.db's value encoding.
   Root's adoption run is the proof for those steps.
+
+## Re-land and red classification (HEAD 6ab6f5fb, `tmp/orchestrator/verify-reds.out.d/003-009`)
+
+The 0bd3a38b4 retirement could not be adopted into the live store: the writer validated the attribute
+retirement against the stored schema rows, which still required the shape refs. Root reverted it
+(e00a3ccda). The re-land was split in two:
+- A (e7b9e8791) made those members optional.
+- B (e6066f091) re-applied 0bd3a38b4 on top of A.
+
+The owner then rebuilt default from a fresh database, so no stored shape rows remain.
+
+Caused by this lane, and fixed:
+- `call-preparation-test/a-row-naming-an-absent-supplier-is-refused`: `coherent-supplier` called `m/type` on
+  the nil output of an absent supplier.
+- `call-preparation-test/call-preparation-cache-coherence-does-not-widen-evaluation-evidence`: the Malli
+  planner read nothing from the database, so an evaluation's evidence no longer depended on the
+  supplied-default rows or the callee's contract. `plan-for` now reads the row query and the callee's
+  `:seon.fn/spec` through `db/q` on a cold plan. Proven at the REPL: 2 evidence entries, all row attributes
+  covered, no `:all` plan.
+
+Retired assumption, updated:
+- `fn.publication-test/literal-constructor-keys-are-not-declared-function-attributes` passed a projection
+  where `declared-function-targets` has taken the invoked-attribute set since 33842ead4.
+
+Pre-existing, with the same names and causes in `verify-6ab6ae2a-results.txt` (before this lane):
+- `program-test`: four definition-digest fixture refusals.
+- `schema-test`: four reds (duration, `:-schema` on a map, `:seon.cluster.wake/offer-observation`,
+  `:seon.message/unknown-recipient`).
+- `fn-test`: `contracted-rows…` (the same spec/arities/analysis transaction assertion), `indexing-resolves…`,
+  `indexing-uses-a-prebuilt…`, `publication-writes-one-definition-digest…`.
+- `instrument-test/host-diagnostics…`: the digest fixture.
+
+Environment, after the nuke:
+- `fn-test`: `declared-function-values…`, `re-index…`, `the-indexer-emits…` and, most likely,
+  `settled-form-records-calls…` refuse with "clj-kondo holds no analysis of seon.db/seon.effect". Run
+  `(seon.fn.analyzer/analyze-dependencies!)` at default's REPL and rerun.
+- `instrument-test`: `named-generators…`, `parsed-shown-error-entities…` and `stored-error-pull…` saw an
+  instrumented set that lacked `db/pull`, `repl/shown-value` and `db/database-value-identity`. Default now
+  has 2,109 armed Vars, including `db/pull`. Rerun.
+
+Not caused, no earlier run:
+- `schema-audit-test/every-permissive-graph-position-has-its-own-justification` (58). No earlier verify run
+  executed it; it was listed as pending. The findings are unjustified `:bare-value`/`:undefined` contract
+  positions of named functions. The test reads contracts and forms only; this lane changed just its
+  `unguarded` assertion, which throws rather than fails.
