@@ -120,7 +120,7 @@ O(number of that function's alternatives × validation cost). No registry scan o
 
 ## 2. Render functions choose content
 
-Keep the existing **one merged unit argument** (`producer-argument`, `render.clj:251–267`), including value, original caller path, target `:seon.render/ai` or `:seon.render/html`, retrieval provenance and needed DB/SCI custody.
+Keep the existing **one merged unit argument** (`producer-argument`), including value, original caller path, target `:seon.render/ai` or `:seon.render/html` and retrieval provenance. **The database is not a caller argument of the unit** (owner, 2026-09-25): `:seon.render/unit` declares `:seon.db/db` as an optional entry, and `seon.call-preparation` supplies it when a render function declares it (map entry, or a positional `:seon.db/database-value`), scoped to the request's own database; a caller's value wins. An inline function gets the same defaults once call preparation can plan a closure from its contract.
 Remove `:seon.render/profile` from producer units; only the floor receives B. No two-argument migration of 89 producers. A renderer returns a **smaller ordinary value or final text** (existing HTML Hiccup remains final target output).
 Adjust output contracts at these boundaries; authors need no print-node grammar. Renderers choose counts, identities,
 relevant fields and queries; they may hand sub-values to the same path, preserving original paths and declarations.
