@@ -55,25 +55,12 @@
       (check test-symbol test-var mode)
       (finally (remove-ns namespace-name)))))
 
-(defn- replacement-tx
-  "Transaction data leaving `declaration` exactly as analyzed from `source`
-  with `overrides`. An exact replacement leaves that row, not the stored one
-  merged with it, so the row is digested as it stands."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity :string :map]
-                  :seon.store/transaction-data]}
-  [database declaration source overrides]
-  (let [row (support/program-row database declaration source overrides)]
-    (if-let [stored (db/pull database '[*] declaration)]
-      (program/exact-replacement-tx
-       stored (support/revised-row database (dissoc row :seon.program/definition-digest) {}))
-      [row])))
-
 (defn- replace-declaration!
-  "Replace one declaration exactly; see `replacement-tx`."
+  "Replace one declaration exactly; see `seon.test-support/replacement-tx`."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.program/identity :string :map]
                   :seon.db/transaction-report]}
   [connection declaration source overrides]
-  (support/transacted! connection (replacement-tx (db/db connection) declaration source overrides)))
+  (support/transacted! connection (support/replacement-tx (db/db connection) declaration source overrides)))
 
 (defn- redeclare-probe!
   "Declare `forms` in the probe's namespace and the probe as the host test
@@ -87,7 +74,7 @@
         path (get-in (db/pull database '[{:seon.fn/file [:seon.fn.file/relative-path]}]
                               [:seon.test/sym test-symbol])
                      [:seon.fn/file :seon.fn.file/relative-path])
-        replacement #(replacement-tx database %1 source %2)]
+        replacement #(support/replacement-tx database %1 source %2)]
     (support/transacted!
      connection
      (into (replacement [:seon.test/sym test-symbol]
@@ -364,7 +351,7 @@
   [connection declaration form]
   (let [database (db/db connection)
         source (synthetic-source (symbol (namespace (second declaration))) [form])]
-    (support/transacted! connection (replacement-tx database declaration source {}))))
+    (support/transacted! connection (support/replacement-tx database declaration source {}))))
 
 (deftest publication-replaces-cardinality-many-tuples
   (support/with-database

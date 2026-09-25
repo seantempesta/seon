@@ -801,20 +801,25 @@
          rows (seon.fn/source-rows
                database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
-     (let [row (merge (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
-                          (throw (ex-info "The fixture source did not define the requested declaration."
-                                          {:seon.program/identity identity :seon.program/source source})))
-                      overrides)
-           declared (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute declaration-symbol)
-           ;; An upsert onto a stored declaration: the writer digests the final
-           ;; value, the stored row with this one merged as `revision` merges it.
-           final (if declared
-                   (merge-with #(if (set? %1) (into %1 %2) %2)
-                               (@#'seon.db/declaration-value database (db/identity-attributes database) declared)
-                               row)
-                   row)]
-       (assoc row :seon.program/definition-digest
-              (:seon.program/definition-digest (revised-row database final {} ns-row)))))))
+     (revised-row
+      database
+      (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
+          (throw (ex-info "The fixture source did not define the requested declaration."
+                          {:seon.program/identity identity :seon.program/source source})))
+      overrides ns-row))))
+
+(defn replacement-tx
+  "Transaction data leaving `identity` exactly as analyzed from `source` with
+   `overrides`: a new declaration is its row; a stored one is replaced through
+   `seon.program/exact-replacement-tx`, which retracts the owned attributes and
+   components the new row drops, so the writer's final value is this row."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity :string :map]
+                  :seon.store/transaction-data]}
+  [database identity source overrides]
+  (let [row (program-row database identity source overrides)]
+    (if-let [stored (db/pull database '[*] identity)]
+      (program/exact-replacement-tx stored row)
+      [row])))
 
 (defn program-fn-row
   "A complete indexed declaration, or an explicitly analyzed agent fixture.
