@@ -155,6 +155,20 @@ contracts now declare the alternative the producer actually returns, `:seon.db/i
 refusal and the source/hiccup value and still reject an arbitrary map. The render pipeline renders it through
 the error schema's declared pair.
 
+## Round 4, R5 (shown-text reparsing): browser half landed, grader half blocked
+
+- `src/seon/repl.clj` (−10/+2): `pretty-response` deleted. The browser's evaluation entry now shows the exact
+  saved shown text (or the live value's prepared text) instead of re-reading it as EDN and pretty-printing it a
+  second time. REPL, 69 saved `:seon.eval/shown` values on default: the reparse changed 58 of them (re-laid-out
+  and rewritten into namespaced-map syntax), so the page showed text the agent never saw. No test asserted the
+  pretty form.
+- `src/seon/eval/drive.clj` `read-result` (13) NOT deleted: the ruling's premise does not hold on the stored
+  facts. A completed turn stores `:seon.turn/disposition :completed` but no result text: the `:my.turn/result`
+  exists only inside `:seon.turn/reply` (source) and `:seon.eval/shown`, and `seon.cluster.message/reply` makes
+  no message when the requester is outside the agent population, which is exactly an eval objective. The
+  inspect-ai provider grades `:seon.eval.drive/completed-result` (`src-inspect-ai/src/seon_inspect/provider.py:81`).
+  Options are in the final report.
+
 ## Round 4, C6: test-only projection serializer (root ruling option 1)
 
 - Survivor: `seon.schema/build-projection`, the one constructor `projection-from-rows` calls after parsing rows.

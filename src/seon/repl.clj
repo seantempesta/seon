@@ -454,14 +454,6 @@
     (when (seq (:seon.cluster.eval/source emission))
       (text emission))))
 
-(defn- pretty-response
-  "Format readable saved data for humans; non-readable shown text stays exact."
-  [answer]
-  (try
-    (binding [*print-length* nil *print-level* nil *print-meta* false]
-      (pprint/write (edn/read-string answer) :stream nil :right-margin 100))
-    (catch Throwable _ answer)))
-
 (defn- live-response
   [unit emission]
   (let [routing (:seon.agent/routing unit)
@@ -491,14 +483,12 @@
                   (:seon.render.value/root-description live) [:pre (pr-str live)]
                   producer (value/render-html-data live)
                   live [:pre [:code {:class "seon-eval-response"}
-                              (pretty-response
-                               (response (assoc emission :seon.eval/shown
-                                                         (:seon.render.value/text live))))]]
+                              (response (assoc emission :seon.eval/shown
+                                                        (:seon.render.value/text live)))]]
                   (and answer (:seon.eval/renderer emission))
                   (into [:ul {:class "seon-eval-lines"}]
                         (map #(vector :li %) (str/split-lines answer)))
-                  answer [:pre [:code {:class "seon-eval-response"}
-                                (pretty-response answer)]])]
+                  answer [:pre [:code {:class "seon-eval-response"} answer]])]
     (when (seq (:seon.cluster.eval/source emission))
       (cond-> (cond-> [:article {:class "seon-family-entry seon-eval-entry"}]
                 ;; THE AGENT'S THINKING IS ITS OWN BLOCK on the page: the
