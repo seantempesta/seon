@@ -1695,9 +1695,12 @@
                 schema-report
                 (when schema?
           (report-source-progress! "schema population started")
-          ;; Complete publication admits schema rows with their renderer
-          ;; definitions in index!'s one final transaction.
-          (let [report (accrete-schema-population! connection nil (some? classes))]
+          ;; Schema rows land with their renderer definitions in index!'s one
+          ;; final transaction whenever program rows publish too (always, for
+          ;; a complete or an incremental publication); publishing them first
+          ;; refused a schema naming a renderer its own publication defines.
+          (let [report (accrete-schema-population!
+                        connection nil (and (some? classes) (not (classes :program))))]
             (report-source-progress!
              (str "schema population complete; dropped "
                   (:seon.db/datom-count dropped 0) " datoms"))
