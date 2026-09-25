@@ -160,6 +160,39 @@ There are 61 in all. Pairs exist for 23, including `:seon.fn/fn`, `:seon.test/te
 
 I edited no pair: each pair's file belongs to another owner, and none of the fixes is a one-liner.
 
+## Reds at 6ab6fd7a (verify-2350 019, 020)
+
+**Caused by this lane (fixed in 4ff20ea91).** The graph-page case (`web_debug_test.clj` :1108 and :1110) was
+selecting by tag and by substring:
+
+- It picked up the floor printer's own `details` inside a face as nodes, which produced a `nil` node id.
+- It matched `seon-graph-faces` as a face.
+
+It now selects by exact class token. The case's "no `seon.render.unknown`" assertion passed.
+
+**Pre-existing, not from this lane's commits.** Only the page calls `walk/graph` (rg). This lane changed no
+evaluation, history, issue or error producer.
+
+| red | cause | owner |
+|---|---|---|
+| `saved-history…` :406; `the-agent-page-shows-a-comment…` :478–501; `the-outline-toggle…` :1028/:1037 | `repl/render-ai` returns the raw evaluation map, so the evaluation pair is not selected | Render dispatch: `render.clj` / `repl.clj`. The same lines were fixed once in d315faa6f |
+| `reverse-declarations…` :628 | The fault card renders with nil kicker and message | Error pair |
+| `reverse-blocks…` :567 | Error at the fixture write: component validation refuses as `unowned-entity` | `seon.db` validation |
+| `outline-origin…` :1083 | Error at the fixture write: issue-tests retraction refused ("only the creator may remove tests") | `issue.clj` authority |
+| `turn-details…` | 34 s against a 5 s bound; a ledger byte mismatch (93,676 vs 116,494); `seon.error/recording` refuses a request that lacks `:seon.error/declared-schema` (:295) | `error.clj` recording contract, plus the ledger |
+
+**walk-graph-test (019): "The admitted identity has no executable test Var". This is a platform defect.**
+
+- `seon.render.walk-graph-test` was in `*loaded-libs*`, but `find-ns` returned nil.
+- `seon.test/resolve-test` (`src/seon/test.clj:1462`) uses plain `requiring-resolve`. That cannot load an absent
+  namespace that is still registered.
+- `seon.sci.eval/host-namespace!` (`eval.clj:1925-1933`) handles exactly this case with `:reload`, and resolution
+  should use that owner. The earlier run, verify-reds 021, executed 0.
+- I loaded the absent namespace once, `(require 'seon.render.walk-graph-test :reload)`: 12 ms, 7 interns. It
+  replaced nothing, since it was absent. A rerun can now resolve it.
+- **Limit:** that load did not arm the test namespace's contracts through adoption. Root should adopt or arm it
+  before the rerun if armed private helpers matter.
+
 ## Limits
 
 - The page walks from an agent only, and default has one agent (root). Task-rooted graphs of 400–2,000 nodes were
