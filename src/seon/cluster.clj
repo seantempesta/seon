@@ -626,39 +626,13 @@
                       [?file :seon.fn.file/relative-path ?path]]
              database '[clojure.core/defn clojure.core/defn-])))
 
-(def ^:private observation-top
-  "How many open faults the MCP observation carries whole; the rest are counted."
-  10)
-
-(defn- bounded-face
-  "`value` with each sequential member over `observation-top` entries kept to
-  its first ones and each string over 300 characters cut to 300, both named
-  with their size under `:seon.dev.mcp/omitted`; maps and scalars are kept."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [value]
-  (reduce-kv (fn [face k v]
-               (cond (and (sequential? v) (< observation-top (count v)))
-                     (-> face (assoc k (vec (take observation-top v))) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
-                     (and (string? v) (< 300 (count v)))
-                     (-> face (assoc k (subs v 0 300)) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
-                     :else face))
-             value value))
-
-(defn- bounded-summary
-  "`value` as [[bounded-face]] with each collection dropped and its size named
-  under `:seon.dev.mcp/omitted`. The whole value stays with its producer; the
-  observation crosses a prepl to MCP."
-  {:malli/schema [:=> [:cat :map] :map]}
-  [value]
-  (bounded-face
-   (reduce-kv (fn [summary k v]
-                (cond-> summary
-                  (coll? v) (-> (dissoc k) (assoc-in [:seon.dev.mcp/omitted k] (count v)))))
-              value value)))
-
 (defn mcp-runtime-observation
-  "Derive health and Flow observations for one root-discovered cluster."
-  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :map]}
+  "Derive health and Flow observations for one root-discovered cluster.
+
+  The whole value; its declared pair (`:seon.dev.mcp/runtime-observation`,
+  [[runtime-observation-ai]]) selects what a status reader sees, and the value
+  printer is the one place anything is clipped."
+  {:malli/schema [:=> [:cat :seon.boot/cluster-name] :seon.dev.mcp/runtime-observation]}
   [cluster-name]
   (let [instance (mcp-instance cluster-name)
         connection (:seon.boot/cluster-connection instance)
@@ -684,27 +658,22 @@
         (when (and connection ready (not unavailable))
           (problems/open-faults (db/db connection)
                                 (vec (:seon.problems/error-signatures problems))))
-        ;; The newest few, message-bounded; the chain stays in the database.
+        ;; Newest first; the chain stays in the database.
         shown-faults
         (->> open-faults
              (sort-by #(get-in % [:seon.error/fact :seon.error.occurrence/last-at]) #(compare %2 %1))
-             (take observation-top)
              (mapv (fn [{fact :seon.error/fact :as entry}]
-                     (-> (select-keys entry [:seon.error/signature :seon.error/operation
-                                             :seon.problems/occurrences])
-                         (merge (select-keys fact [:seon.error.occurrence/last-at :seon.error/message
-                                                   :seon.error/exception-class]))
-                         bounded-summary
-                         (merge (select-keys fact [:seon.error/frame]))))))
+                     (merge (select-keys entry [:seon.error/signature :seon.error/operation
+                                                :seon.problems/occurrences])
+                            (select-keys fact [:seon.error.occurrence/last-at :seon.error/message
+                                               :seon.error/exception-class :seon.error/frame])))))
         resolved-count
         (when (and connection ready (not unavailable))
           (count (filter :seon.error/resolution (:seon.problems/error-signatures problems))))
         replaced-roots
         (when connection
           (instrument/replaced-roots (program-function-files (db/db connection))))
-        readiness-face
-        (when ready
-          (bounded-face (dissoc ready :seon.problems/problems)))
+        readiness-face (when ready (dissoc ready :seon.problems/problems))
         ;; A failed adoption leaves the JVM's loaded program unknown.
         unloaded (let [loaded @sci.eval/loaded-identity] (when (:seon.error/at loaded) loaded))]
     (cond-> {:seon.dev.mcp/cluster cluster-name
@@ -716,7 +685,7 @@
              ;; own compile: a redefinition outside a reload, named.
              :seon.dev.mcp/replaced-roots
              (if connection
-               (mapv bounded-summary (take observation-top replaced-roots))
+               (vec replaced-roots)
                {:seon.dev.mcp/replaced-roots-unknown
                 "The cluster has no database connection; replaced roots cannot be observed."})
              ;; Health is derived from open faults, never from a connection's
@@ -729,16 +698,63 @@
                (let [flow (schema/call-with-projection-state
                            projection-state
                            #(oversight/flow-status (db/db connection) instance))]
-                 (cond-> flow (map? flow) bounded-face))
+                 flow)
                :unknown)}
       connection (assoc :seon.dev.mcp/replaced-root-count (count replaced-roots))
       resolved-count (assoc :seon.dev.mcp/resolved-fault-count resolved-count)
-      unloaded (assoc :seon.dev.mcp/program-unavailable (bounded-summary unloaded))
+      unloaded (assoc :seon.dev.mcp/program-unavailable unloaded)
       (seq open-faults) (assoc :seon.dev.mcp/open-faults shown-faults
                                :seon.dev.mcp/open-fault-count (count open-faults))
       problem-counts (assoc :seon.dev.mcp/problem-counts problem-counts)
-      unavailable (assoc :seon.dev.mcp/problems-unavailable (bounded-summary unavailable))
+      unavailable (assoc :seon.dev.mcp/problems-unavailable unavailable)
       readiness-face (assoc :seon.dev.mcp/readiness readiness-face))))
+
+(defn runtime-observation-ai
+  "`:seon.render/ai` for one runtime observation: its health, counts and the
+  newest entries of each unbounded family, each naming its total. It renders
+  less rather than clipping: a fault or failure is named by operation, never
+  by its message, whose size is unbounded. The whole value, messages
+  included, is MCP `runtime_status`, or `bin/seon status --verbose`."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.dev.mcp/runtime-status]}
+  [unit]
+  (let [observation (:seon.render/value unit)
+        top (fn [entries select-entry total]
+              (let [shown (mapv select-entry (take 5 entries))]
+                (cond-> {:seon.dev.mcp/count total :seon.dev.mcp/top shown}
+                  (< (count shown) total) (assoc :seon.dev.mcp/omitted (- total (count shown))))))
+        failure #(select-keys % [:seon.error/operation :seon.error/layer])
+        faults (:seon.dev.mcp/open-faults observation)
+        flow (:seon.dev.mcp/flow observation)
+        procs (when (map? flow)
+                (for [row (:seon.oversight/agents flow) proc (:seon.oversight/procs row)] proc))
+        roots (:seon.dev.mcp/replaced-roots observation)]
+    (cond-> (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health
+                                      :seon.dev.mcp/problem-counts :seon.dev.mcp/resolved-fault-count])
+      (:seon.dev.mcp/readiness observation)
+      (assoc :seon.dev.mcp/readiness (select-keys (:seon.dev.mcp/readiness observation)
+                                                  [:seon.boot/missing-layers :seon.boot/ready-ms
+                                                   :seon.render.web/url]))
+      (seq faults)
+      (assoc :seon.dev.mcp/open-faults
+             (top faults #(select-keys % [:seon.error/operation :seon.problems/occurrences
+                                          :seon.error/exception-class :seon.error.occurrence/last-at])
+                  (:seon.dev.mcp/open-fault-count observation (count faults))))
+      (map? flow)
+      (assoc :seon.dev.mcp/flow {:seon.dev.mcp/agents (count (:seon.oversight/agents flow))
+                                 :seon.dev.mcp/procs (count procs)
+                                 :seon.dev.mcp/unanswered
+                                 (count (remove #(= :reply (:seon.oversight/ping %)) procs))})
+      (seq roots)
+      (assoc :seon.dev.mcp/replaced-roots
+             (if (map? roots) roots
+                 (top roots identity (:seon.dev.mcp/replaced-root-count observation (count roots)))))
+      (:seon.dev.mcp/problems-unavailable observation)
+      (assoc :seon.dev.mcp/problems-unavailable (failure (:seon.dev.mcp/problems-unavailable observation)))
+      (:seon.dev.mcp/program-unavailable observation)
+      (assoc :seon.dev.mcp/program-unavailable (failure (:seon.dev.mcp/program-unavailable observation)))
+      (:seon.dev.mcp/profile observation)
+      (assoc :seon.profile/over-second-lines
+             (get-in observation [:seon.dev.mcp/profile :seon.profile/over-second-lines])))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Pure resolution — defaults are THE defaults document for this layer

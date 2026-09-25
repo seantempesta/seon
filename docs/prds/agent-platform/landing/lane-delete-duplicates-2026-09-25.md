@@ -162,6 +162,35 @@ the error schema's declared pair.
 keys differ; operation, member, message, data, layer and exception class are equal. Both are occurrence
 evidence, so the assertion now compares the refusal without them.
 
+## Round 5, R4: one status face, declared on the observation
+
+- `src/seon/cluster.clj`: `observation-top`, `bounded-face`, `bounded-summary` deleted (27), and their five call
+  sites; `mcp-runtime-observation` returns the whole value (every open fault newest first, whole messages,
+  readiness, flow, roots) and declares `:seon.dev.mcp/runtime-observation`, whose `:seon.render/ai` is the new
+  `runtime-observation-ai`. That face renders less instead of clipping: counts, the newest five entries of each
+  family with their totals and omissions, faults and failures named by operation, never by their unbounded
+  message. Net +63/−47.
+- `script/seon/operator.clj`: `status-top`, `top`, `short-message`, `cluster-summary`, `status-summary` and the
+  `-main` branch deleted (−68); `bin/seon status` prints the value the JVM rendered.
+- `src/seon/cluster/boot.clj` `:status`: each observation through its AI face; `--verbose` the whole value
+  (+8/−1).
+- `resources/seon/schemas/seon.dev.mcp.edn`: `:seon.dev.mcp/health`, `:seon.dev.mcp/runtime-observation` (with
+  the pair) and `:seon.dev.mcp/runtime-status` (+10).
+- Tests: `mcp_test` asserts the whole producer value (all faults, the whole 1,000-character message) and the AI
+  face (count, top five, omitted, no message, under 4 KB, the declared contract); `operator_test`'s test of the
+  deleted `status-summary` is removed (that file was not in the grant; it only deletes the deleted machinery's
+  test, whose 500-fault / 1.5 MB case the mcp_test face assertions replace).
+- REPL (the pair's source evaluated in a scratch namespace, removed after): default's real observation renders
+  to 2,231 chars (whole 5,646) and satisfies the status contract; a hostile observation of 50 faults with
+  3,000-char messages and a 30,000-char failure renders to 575 chars, count 50, omitted 45.
+- Babashka: `(require 'seon.operator)` loads, `-main` resolves, `status-summary` is gone; the hook loads;
+  `bin/seon status` runs end to end (against the not-yet-adopted JVM it prints the old bounded value as sent).
+- Not done, needs `script/seon/dev/mcp.clj` (bridge owner): MCP `runtime_status` prints the whole observation
+  through the value projection (the one clipper), not through this face; to use the face its form
+  (`mcp.clj:690`) must call `seon.cluster/runtime-observation-ai` on the observation. Risk for the same owner:
+  `discovery-rows` (`mcp.clj:110`) reads the observation with `:seon.dev.mcp/project? false` on every call and
+  needs only `:seon.dev.mcp/health`; the producer is now unbounded, so that read should ask for health alone.
+
 ## Round 5, R5 grader half (root ruling option 1): completion is a fact
 
 - Settlement (`src/seon/turn.clj`, the `side-tx` beside the disposition) writes `:seon.turn/result`, the

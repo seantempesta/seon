@@ -3,7 +3,7 @@
   (:require [clojure.core.async :as async]
             [clojure.edn :as edn]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.cluster.boot :as boot]
             [seon.config :as config]
@@ -309,11 +309,11 @@
            (:seon.error/exception-class face)))
     (is (= first-party-frame (:seon.error/frame face)))))
 
-(deftest runtime-observation-bounds-open-faults-and-counts-them-whole
-  ;; The observation crossed the prepl whole (12,758 chars for 16 faults on
-  ;; default, 2026-09-25). It carries the newest ten open faults with strings
-  ;; cut to 300 characters, and counts every open and resolved fault.
-  ;; Problem families cross as counts; the readiness face omits their facts.
+(deftest runtime-observation-is-whole-and-its-ai-face-renders-less
+  ;; The producer returns every open fault whole, newest first; the value
+  ;; printer is the one clipper. Its declared AI face, which `bin/seon status`
+  ;; prints, names counts and the newest five by operation, never a message.
+  ;; Problem families are counts; the readiness value omits their facts.
   (support/with-database
    (fn [connection]
      (let [cluster-name (str "mcp-observation-bound-" (random-uuid))
@@ -337,20 +337,30 @@
        (try
          (let [result (cluster/mcp-runtime-observation cluster-name)
                shown (:seon.dev.mcp/open-faults result)
-               strings (filter string? (tree-seq coll? seq (dissoc result :seon.dev.mcp/flow :seon.dev.mcp/profile)))]
-           (is (= 10 (count shown)))
+               status (cluster/runtime-observation-ai {:seon.render/value result})
+               status-faults (:seon.dev.mcp/open-faults status)]
            ;; the fixture branch also carries its parent's open and resolved faults
            (is (<= 50 (:seon.dev.mcp/open-fault-count result)))
+           (is (= (:seon.dev.mcp/open-fault-count result) (count shown)) "every open fault, whole")
            (is (<= 1 (:seon.dev.mcp/resolved-fault-count result)))
            (is (not-any? #{(:seon.error/signature (first receipts))} (map :seon.error/signature shown)))
-           (is (= 1000 (some #(when (= (:seon.error/signature long-receipt) (:seon.error/signature %))
-                                (get-in % [:seon.dev.mcp/omitted :seon.error/message]))
-                             shown))
-               "the newest fault is shown, its message cut and its length named")
-           (is (every? #(<= (count %) 300) strings) (pr-str (remove #(<= (count %) 300) strings)))
+           (is (= (apply str (repeat 1000 \x))
+                  (some #(when (= (:seon.error/signature long-receipt) (:seon.error/signature %))
+                           (:seon.error/message %))
+                        shown))
+               "the producer keeps the whole message")
            (is (<= 50 (get-in result [:seon.dev.mcp/problem-counts :seon.problems/error-signatures]))
                "each problem family is a count, never its facts")
-           (is (not (contains? (:seon.dev.mcp/readiness result) :seon.problems/problems))))
+           (is (not (contains? (:seon.dev.mcp/readiness result) :seon.problems/problems)))
+           (testing "the declared AI face renders less"
+             (is (= :seon.dev.mcp/runtime-observation
+                    (last (:malli/schema (meta #'cluster/mcp-runtime-observation)))))
+             (is (= (count shown) (:seon.dev.mcp/count status-faults)))
+             (is (= 5 (count (:seon.dev.mcp/top status-faults))))
+             (is (= (- (count shown) 5) (:seon.dev.mcp/omitted status-faults)))
+             (is (not-any? :seon.error/message (:seon.dev.mcp/top status-faults))
+                 "a fault is named by operation, never by its unbounded message")
+             (is (< (count (pr-str (dissoc status :seon.profile/over-second-lines))) 4096))))
          (finally (swap! running-instances dissoc cluster-name)))))))
 
 (deftest ^{:seon.test/fixture-observation

@@ -578,9 +578,16 @@
                  (merge identity {:seon.boot/cluster-name (or name "default")
                                   :seon.boot/readiness (readiness instance)}
                         (select-keys instance [:seon.source/commit-id])))
+        ;; Each observation prints through its declared AI face; `--verbose`
+        ;; asks for the whole value.
         :status (cond-> (merge identity
                               {:seon.operator/clusters
-                               (mapv (fn [[n _]] (cluster/mcp-runtime-observation n))
+                               (mapv (fn [[n _]]
+                                       (let [observation (cluster/mcp-runtime-observation n)]
+                                         (if (:seon.operator/verbose? request)
+                                           observation
+                                           (cluster/runtime-observation-ai
+                                            {:seon.render/value observation}))))
                                      (filter (comp map? val) @running-instances))})
                   (:seon.operator/verbose? request)
                   (assoc :seon.operator/footprint (fs/footprint (str (io/file root "data")))))
