@@ -37,7 +37,7 @@ updated: 2026-09-26
 - **References are decided at the one producer** (`var-row` and siblings from clj-kondo analysis). Program references become
   validated refs with named schema keys where the design proves it (`references-as-refs-design`); `:seon.db/reference-to`
   names targets; docstring links come from a markdown library's parse tree (no regex); error members stay symbol values;
-  `:seon.render/face` is a declared fact. Every top-level def is a declaration (P2-A).
+  a render function's face is its attachment key or its declared output schema — no face fact (owner: code smell). Every top-level def is a declaration (P2-A).
 - **Faults:** core faults deliver to root by default AND surface as errors in the cluster's MCP replies.
 - **Tests:** slow = poorly designed. A test member's world is a branch of a prepared commit (ms), never a file store, full
   canonical population, whole-program rebuild or nested full run. One way to write a test for us and for agents (deftest via

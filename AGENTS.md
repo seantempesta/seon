@@ -235,7 +235,7 @@ Private experiments remain possible; local green never implies shared acceptance
   `:seon.render/ai` or `:seon.render/html` key (the master override: a renderer symbol, an inline
   function, or rendered data); a render function whose contract fits the value, defined in the
   viewing agent's namespace (that agent's own defaults); the schema's declared pair (the shipped
-  default); the floor. A render function is known by its face role; its output may be any spec'd
+  default); the floor. A render function's face (AI or HTML) is its attachment key where attached, else its declared output schema, never a separate fact; its output may be any spec'd
   shape, rendered in turn. Before calling it, read its contract: inputs it declares but the caller
   omits (the database, the unit) are supplied as defaults by declared schema name, as for every
   function, and caller arguments always win. Components/declared queries render in their own blocks;
