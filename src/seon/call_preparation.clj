@@ -348,7 +348,6 @@
     :where
     [?value-shape :seon.schema.shape/fingerprint ?fingerprint]
     [?entry :seon.schema.shape.entry/schema ?value-shape]
-    [?entry :seon.schema.shape.entry/optional? false]
     [?entry :seon.schema.map-entry/key-keyword ?entry-key]
     [?argument-shape :seon.schema.shape/entries ?entry]
     [?argument :seon.fn.argument/schema ?argument-shape]
@@ -372,13 +371,13 @@
          (if (= :map (m/type compiled))
            (reduce
             (fn [facts [key properties child]]
-              (if (:optional properties)
-                facts
-                (let [candidate (get by-key key)]
-                  (cond-> (update facts :seon.schema.shape/required-map-entries conj [parent key])
+              (let [candidate (get by-key key)]
+                (cond-> facts
+                    (not (:optional properties))
+                    (update :seon.schema.shape/required-map-entries conj [parent key])
                     (and candidate (= (m/form child) (:seon.call-preparation/schema-key candidate)))
                     (update :seon.schema.shape/supplied-map-entries conj
-                            [parent key (:seon.call-preparation/shape candidate)])))))
+                            [parent key (:seon.call-preparation/shape candidate)]))))
             facts (m/children compiled))
            facts)))
      {:seon.schema.shape/required-map-entries []
@@ -799,7 +798,9 @@
               (group-by first rows)))))
 
 (def ^:private map-entry-query
-  ;; REQUIRED keys of a top-level argument map only. Selection joins BOTH the
+  ;; Keys of a top-level argument map, required or optional: an optional entry
+  ;; whose schema is a supplied default is a declared request for that
+  ;; default (owner, 2026-09-25); the caller's own value still wins. Selection joins BOTH the
   ;; declared key and the value shape: `seon.cluster.wake/route!` declares
   ;; `:seon.cluster.wake/connection` with the `:seon.db/connection` shape, and
   ;; matching on shape alone would fill a key nobody declared as a default.
@@ -814,7 +815,6 @@
     [?argument :seon.fn.argument/rest? false]
     [?argument :seon.fn.argument/schema ?argument-shape]
     [?argument-shape :seon.schema.shape/entries ?entry]
-    [?entry :seon.schema.shape.entry/optional? false]
     [?entry :seon.schema.map-entry/key-keyword ?entry-key]
     [?entry :seon.schema.shape.entry/schema ?value-shape]
     [?value-shape :seon.schema.shape/fingerprint ?fingerprint]])
