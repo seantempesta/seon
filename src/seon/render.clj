@@ -351,31 +351,36 @@
                (every? (get owned row #{}) (keys value)))
       row)))
 
+(defn- named-alternatives
+  "The named schemas `form` admits, flattened through `:or`/`:maybe`/`:and`
+  and named unions, without `:seon.error/base`."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] [:vector :qualified-keyword]]}
+  [projection form]
+  (let [forms (:seon.schema.projection/forms projection)
+        branches (fn branches [seen form]
+                   (cond
+                     (and (qualified-keyword? form) (not (seen form)))
+                     (let [named (get forms form)]
+                       (cons form (when (and (vector? named) (#{:or :maybe} (first named)))
+                                    (branches (conj seen form) named))))
+                     (and (vector? form) (#{:or :maybe :and} (first form)))
+                     (mapcat #(branches seen %) (remove map? (rest form)))))]
+    (into [] (comp (remove #{:seon.error/base}) (distinct)) (branches #{} form))))
+
 (defn- output-alternatives
   "The named schemas one contracted function declares it returns, once per
-  projection: every arity's output, flattened through `:or`/`:maybe`/`:and`
-  and named unions, without `:seon.error/base`. Nil for no contract."
+  projection: every arity's output's named alternatives. Nil for no contract."
   {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol]
                   [:maybe [:vector :qualified-keyword]]]}
   [projection function-symbol]
   (schema/projection-cache-value
    projection [::output-alternatives function-symbol]
    (fn []
-     (let [forms (:seon.schema.projection/forms projection)
-           branches (fn branches [seen form]
-                      (cond
-                        (and (qualified-keyword? form) (not (seen form)))
-                        (let [named (get forms form)]
-                          (cons form (when (and (vector? named) (#{:or :maybe} (first named)))
-                                       (branches (conj seen form) named))))
-                        (and (vector? form) (#{:or :maybe :and} (first form)))
-                        (mapcat #(branches seen %) (remove map? (rest form)))))]
-       (some->> (mr/schema (:seon.schema.projection/registry projection) function-symbol)
-                m/-function-schema-arities
-                (mapcat #(branches #{} (m/form (:output (m/-function-info %)))))
-                (remove #{:seon.error/base})
-                distinct
-                vec)))))
+     (some->> (mr/schema (:seon.schema.projection/registry projection) function-symbol)
+              m/-function-schema-arities
+              (mapcat #(named-alternatives projection (m/form (:output (m/-function-info %)))))
+              distinct
+              vec))))
 
 (defn- satisfied-alternatives
   "The declared return alternatives of `function-symbol` that `value`
@@ -385,6 +390,32 @@
   [projection function-symbol value]
   (some->> (output-alternatives projection function-symbol)
            (filterv #((schema/projection-validator projection %) value))))
+
+(defn- attribute-identity
+  "The named schema a registered attribute gives the value at `path`: its
+  declared component schema, else its named reference (or `:maybe` of one),
+  else itself when it is an entity schema; an element of a collection
+  attribute gets its `:vector`/`:set`/`:sequential`/`:maybe` element's name."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe [:vector :seon.schema/value]]]
+                  [:maybe :qualified-keyword]]}
+  [projection path]
+  (let [registry (:seon.schema.projection/registry projection)
+        tail (peek path)
+        parent (when (next path) (peek (pop path)))
+        [attribute element?] (cond (qualified-keyword? tail) [tail false]
+                                   (qualified-keyword? parent) [parent true])
+        definition (some->> attribute (mr/schema registry))
+        form (get (:seon.schema.projection/forms projection) attribute)
+        element (fn [form] (when (and (vector? form) (#{:vector :set :sequential :maybe} (first form))
+                                      (qualified-keyword? (peek form)))
+                             (peek form)))]
+    (when definition
+      (or (:seon.db/component-schema (m/properties definition))
+          (if element?
+            (element form)
+            (cond (qualified-keyword? form) form
+                  (and (vector? form) (= :maybe (first form))) (element form)
+                  (internal/entity-schema? definition) attribute))))))
 
 (defn- error-alternatives
   "The alternatives an error value satisfies among its own operation's
@@ -544,7 +575,10 @@
       (pairs (error-alternatives projection value))
       (and function (identical? value (render-value request)))
       (pairs (satisfied-alternatives projection function value))
-      :else (pairs (some-> (entity-owner projection value) vector)))))
+      :else (pairs (or (some-> (entity-owner projection value) vector)
+                       (some->> (attribute-identity projection (:seon.render.data/path request))
+                                (named-alternatives projection)
+                                (filterv #((schema/projection-validator projection %) value))))))))
 
 (defn- declared-producer
   {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.render/output]
