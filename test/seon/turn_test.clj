@@ -397,7 +397,12 @@
                 {:seon.turn.loop/cluster handle
                  :seon.turn.loop/work {:seon.turn.work/situation :open :seon.agent/id "reader"}
                  :seon.turn.loop/now (java.util.Date.)
-                 :seon.turn.loop/report (fn [& arguments] (swap! reported conj (vec arguments)))})
+                 ;; The report answers the declared turn-report, as the proc's does.
+                 :seon.turn.loop/report
+                 (fn [outcome forms-run & _]
+                   (swap! reported conj [outcome forms-run])
+                   {:seon.agent/id "reader" :seon.turn.work/situation :open
+                    :seon.turn.loop/forms-run forms-run :seon.turn.loop/outcome outcome})})
              database (db/db connection)
              refusals (db/q '[:find [?error ...]
                               :where [?error :seon.turn/rule _]]

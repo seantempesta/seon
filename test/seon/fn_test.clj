@@ -483,13 +483,20 @@
                    :seon.cluster.eval/read-evidence (db/read-evidence @captured)
                    :seon.cluster.eval/read-basis-transaction (db/basis-t database)})))
               (is (= [:closed 1]
-                     (#'turn/resume-turn
+                     ((juxt :seon.turn.loop/outcome :seon.turn.loop/forms-run)
+                      (#'turn/resume-turn
                       {:seon.turn.loop/cluster cluster
-                       :seon.turn.loop/work {:seon.agent/id run-id
+                       :seon.turn.loop/work {:seon.turn.work/situation :resume
+                                             :seon.agent/id run-id
                                              :seon.turn/id run-id
                                              :seon.cluster.eval/ordinal 0}
                        :seon.turn.loop/now (java.util.Date.)
-                       :seon.turn.loop/report (fn [outcome n] [outcome n])}))))
+                       ;; The report answers the declared turn-report.
+                       :seon.turn.loop/report
+                       (fn [outcome n & _]
+                         {:seon.agent/id run-id :seon.turn/id run-id
+                          :seon.turn.work/situation :resume
+                          :seon.turn.loop/forms-run n :seon.turn.loop/outcome outcome})})))))
             (let [calls (set (db/q '[:find [?symbol ...]
                                     :in $ ?id
                                     :where [?evaluation :seon.cluster.eval/id ?id]
@@ -1971,11 +1978,16 @@
                                 ::identity-value]
                                [::identity-ref {:optional true}
                                 ::identity-ref]))
-             rows [{:seon.ns/name target-namespace}
-                   {:seon.ns/name owner-namespace
-                    ::identity-value identity-pair
-                    ::identity-ref identity-pair}]
-             tx-data (reconcile-in (program/shapes-in (seon.schema/build-projection forms))
+             row-projection (seon.schema/build-projection forms)
+             ;; Declarations through their owner, which derives each digest.
+             rows (mapv #(program/declaration-row row-projection % :all :agent)
+                        [{:seon.ns/name target-namespace
+                          :seon.ns/source (pr-str (list 'ns target-namespace))}
+                         {:seon.ns/name owner-namespace
+                          :seon.ns/source (pr-str (list 'ns owner-namespace))
+                          ::identity-value identity-pair
+                          ::identity-ref identity-pair}])
+             tx-data (reconcile-in (program/shapes-in row-projection)
                                    database rows [])
              target-tempid
              (some (fn [[operation tempid attribute value]]
