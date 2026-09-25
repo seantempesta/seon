@@ -79,6 +79,23 @@
 (defn- fail! [message evidence]
   (throw (ex-info message (diagnostic message evidence :refused))))
 
+(defn- reap-child!
+  "Force `child`'s exit within `bound` ms; a survivor refuses, named by its pid."
+  [^Process child bound evidence]
+  (.destroyForcibly child)
+  (when-not (.waitFor child bound TimeUnit/MILLISECONDS)
+    (fail! "Child survived forced termination." (assoc evidence :seon.boot/pid (.pid child)))))
+
+(defn- joined
+  "`task`'s outcome once the `resource` it blocks on is closed: its value or
+  its failure, awaited within `bound` ms; a task outliving that close refuses."
+  [^java.io.Closeable resource ^CompletableFuture task bound]
+  (.close resource)
+  (try {:seon.operator/task-value (.get task bound TimeUnit/MILLISECONDS)}
+       (catch java.util.concurrent.ExecutionException failure {:seon.operator/task-failure (.getCause failure)})
+       (catch java.util.concurrent.TimeoutException _
+         (fail! "A task outlived its closed resource." {:seon.operator/timeout-ms bound}))))
+
 (defn canonical-root [root]
   (when-not (and (string? root) (not (str/blank? root)) (.isDirectory (io/file root)))
     (fail! "Operator root must be an existing directory." {:seon.operator/root root}))
@@ -292,11 +309,15 @@
         handle (or (matching-handle identity) (fail! "Selected process already exited." identity))
         result (try
                  (prepl-value! endpoint (request-form (merge request identity)))
-                 (catch Exception _ ::disconnected))]
-    (if (= ::disconnected result)
-      (do (.get (.onExit handle) (operator-silence-backstop-ms {}) TimeUnit/MILLISECONDS)
+                 (catch Exception cause cause))]
+    ;; A failed reply completes the stop only with the observed exit, and is kept.
+    (if (instance? Exception result)
+      (do (try (.get (.onExit handle) (operator-silence-backstop-ms {}) TimeUnit/MILLISECONDS)
+               (catch java.util.concurrent.TimeoutException never (.addSuppressed ^Exception result never)
+                 (throw result)))
           {:seon.boot/cluster-name (:seon.boot/cluster-name endpoint)
-           :seon.operator/stopped? true})
+           :seon.operator/stopped? true
+           :seon.operator/reply-failure (diagnostic (ex-message result) {} :client-failed result)})
       result)))
 
 (defn- child-environment [root]
@@ -551,9 +572,15 @@
             child (.start builder)
             exited (.thenApply (.onExit child) (reify Function (apply [_ _] ::exited)))
             accepted (CompletableFuture/supplyAsync (reify Supplier (get [_] (.accept callback))))
-            event (.get (CompletableFuture/anyOf (into-array CompletableFuture [accepted exited]))
-                        bound TimeUnit/MILLISECONDS)]
-        (when (= ::exited event) (fail! "Child exited before opening its REPL." {:seon.operator/log (str log)}))
+            event (try (.get (CompletableFuture/anyOf (into-array CompletableFuture [accepted exited]))
+                             bound TimeUnit/MILLISECONDS)
+                       (catch java.util.concurrent.TimeoutException _ ::timeout))]
+        ;; The child is not ours to kill here; the losing accept is joined and its socket closed.
+        (when-not (instance? Socket event)
+          (let [accept (joined callback accepted bound)]
+            (some-> ^Socket (:seon.operator/task-value accept) .close)
+            (fail! "Child exited or opened no REPL within its bound."
+                   {:seon.operator/log (str log) :seon.operator/event event :seon.operator/accept accept})))
         (with-open [socket event reader (java.io.BufferedReader. (io/reader socket))]
           (.setSoTimeout socket bound)
           (let [coordinates (edn/read-string (.readLine reader))
@@ -575,11 +602,13 @@
                 terminal (CompletableFuture/supplyAsync
                           (reify Supplier (get [_] (if-let [line (.readLine reader)]
                                                     (edn/read-string {:default tagged-literal} line) ::eof))))
-                value (.get (CompletableFuture/anyOf (into-array CompletableFuture [terminal exited]))
-                            boot-bound TimeUnit/MILLISECONDS)]
+                value (try (.get (CompletableFuture/anyOf (into-array CompletableFuture [terminal exited]))
+                                 boot-bound TimeUnit/MILLISECONDS)
+                           (catch java.util.concurrent.TimeoutException _ ::timeout))]
             (when-not (map? value)
               (fail! "Child exited or closed its boot channel before readiness."
                      (cond-> {:seon.operator/event value :seon.operator/log (str log)
+                              :seon.operator/read (joined socket terminal bound)
                               :seon.boot/advertisement coordinates}
                        heads (assoc :seon.operator/captured-heads heads))))
             (when (some #(and (map? %)
@@ -614,14 +643,15 @@
                         (.redirectOutput out)))]
     (try
       (when-not (.waitFor child bound TimeUnit/MILLISECONDS)
-        (.destroyForcibly child)
+        (reap-child! child bound {:seon.operator/argv argv})
         (fail! "Command did not exit within its bound." {:seon.operator/argv argv :seon.operator/timeout-ms bound}))
       (let [text (slurp out)]
         (when-not (zero? (.exitValue child))
           (fail! "Command failed." {:seon.operator/argv argv :seon.operator/exit (.exitValue child)
                                     :seon.operator/output text}))
         text)
-      (finally (.delete out)))))
+      ;; A survivor may still write its output file; it is kept for inspection.
+      (finally (when-not (.isAlive child) (.delete out))))))
 
 (defn- gitlinks
   "Every submodule path and pinned commit recorded in `sha`'s tree."
@@ -755,7 +785,11 @@
             _ (fs/delete-tree staging)
             ;; The submodule census runs beside the tree's extraction.
             census (future (checkout-pins repository))
-            _ (extract-archive! repository sha staging)
+            ;; The census is read on every exit; its failure is suppressed onto extraction's.
+            _ (try (extract-archive! repository sha staging)
+                   (catch Throwable primary
+                     (try @census (catch Throwable late (.addSuppressed primary late)))
+                     (throw primary)))
             {:seon.operator/keys [index-pins unclean]} @census
             submodules
             (mapv (fn [{:keys [path pin]}]
@@ -899,7 +933,7 @@
                         (.directory (io/file repository))
                         (.redirectErrorStream true)))]
     (when-not (.waitFor child 30000 TimeUnit/MILLISECONDS)
-      (.destroyForcibly child)
+      (reap-child! child 30000 {:seon.operator/commits [a b]})
       (fail! "git diff did not exit within its bound." {:seon.operator/commits [a b]}))
     (case (.exitValue child)
       0 true
@@ -1511,7 +1545,7 @@
         (= :open (:seon.operator/command request))
         (let [child (.start (ProcessBuilder. ^java.util.List ["open" (:seon.render.web/url result)]))]
           (when-not (.waitFor child (operator-silence-backstop-ms {}) TimeUnit/MILLISECONDS)
-            (.destroyForcibly child) (fail! "OS opener did not exit." result))
+            (reap-child! child (operator-silence-backstop-ms {}) result) (fail! "OS opener did not exit." result))
           (when-not (zero? (.exitValue child)) (fail! "OS opener failed." result)))
         (and (= :status (:seon.operator/command request)) (not (:seon.operator/verbose? request)))
         (prn (status-summary result))
