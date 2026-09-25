@@ -50,6 +50,15 @@ failed+unknown, 473 are STALE (recorded before their class's fix; only 8 ran on 
 Candidate regressions: instrument-test 12 fail / 4 error after F2 (lane fix-instrument-f2-regressions); one-request reuse +
 hold (lane fix-one-request-reuse-and-hold).
 
+## New platform findings (2026-09-25)
+
+- A namespace loaded after boot arming (e.g. a test namespace) is NOT armed: its own contracts do not refuse (found by lane
+  fix-instrument-f2-regressions; tests now arm explicitly via instrument/apply!). Law: rows → load → arm → record; loading
+  must arm. Owner: adoption/instrument. Not yet assigned.
+- seon.test/failure-text (test.clj:39) prints a blob hint `(seon.blob/get digest)` that refuses when followed (get takes a
+  connection and a digest) → queued for the test.clj owner.
+- Every seon.db read on an as-of view rebuilds its projection (2,334 ms for 18 reads) — the cold as-of projection item.
+
 ## Recurring classes — root causes, not symptoms (owner 2026-09-24: "step back and find root causes")
 
 1. **Unbounded printed values kill default** — FOURTH OOM 2026-09-24T23:27Z ("Requested array size exceeds VM limit",
