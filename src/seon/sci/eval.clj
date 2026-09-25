@@ -453,25 +453,103 @@
 
 (declare missing-contract install-function-contract!)
 
+(defn- program-value?
+  "Whether an intern's root makes it a program declaration: a function or test."
+  {:malli/schema [:=> [:cat :seon.sci.eval/intern] :boolean]}
+  [{value :seon.sci.eval/value metadata :seon.sci.eval/metadata}]
+  (and (not (identical? absent-intern value))
+       (boolean (or (fn? value) (:test metadata)))))
+
+(defn- held-intern
+  "The intern `qualified` names in the held namespace maps, as `turn-interns`
+  would report it: an inherited Var is copied before any write, so its root and
+  metadata here are the prior ones."
+  {:malli/schema [:=> [:cat :seon.sci.eval/namespaces :qualified-symbol]
+                  [:maybe :seon.sci.eval/intern]]}
+  [namespaces qualified]
+  (let [sci-var (get-in namespaces [(symbol (namespace qualified)) (symbol (name qualified))])]
+    (when (sci.utils/var? sci-var)
+      {:seon.sci.eval/var sci-var
+       :seon.sci.eval/metadata (meta sci-var)
+       :seon.sci.eval/value (if (sci.vars/hasRoot sci-var) @sci-var absent-intern)})))
+
 (defn- program-definitions
-  "This form's definitions: the function and test Vars whose root or Var
-  metadata changed between `before` and `after` (both `turn-interns`).
-  Other defs (data, atoms, protocol and multimethod objects) are private
-  state, never program declarations. Roots compare by identity first; only
-  function values reach `=`."
-  {:malli/schema [:=> [:cat :seon.sci.eval/interns :seon.sci.eval/interns]
+  "This form's definitions: the Vars whose root or Var metadata changed
+  between the prior intern (`before`, else the held namespace maps) and
+  `after`, when either the prior or the final root is a program value.
+  Replacing a function with data is therefore still a definition, marked
+  `::prior-program?`. Other defs (data, atoms, protocol and multimethod
+  objects) are private state. Roots compare by identity first; only function
+  values reach `=`."
+  {:malli/schema [:=> [:cat :seon.sci.eval/namespaces :seon.sci.eval/interns :seon.sci.eval/interns]
                   [:sequential [:tuple :qualified-symbol :seon.sci.eval/intern]]]}
-  [before after]
-  (sort-by (comp str key)
-           (filter (fn [[qualified {value :seon.sci.eval/value
-                                    metadata :seon.sci.eval/metadata}]]
-                     (let [prior (get before qualified)]
-                       (and (not (identical? absent-intern value))
-                            (or (fn? value) (:test metadata))
-                            (or (not (same-intern-value?
-                                      (get prior :seon.sci.eval/value absent-intern) value))
-                                (not (identical? (:seon.sci.eval/metadata prior) metadata))))))
-                   after)))
+  [before-namespaces before after]
+  (sort-by (comp str first)
+           (keep (fn [[qualified {value :seon.sci.eval/value
+                                  metadata :seon.sci.eval/metadata :as entry}]]
+                   (let [prior (or (get before qualified)
+                                   (held-intern before-namespaces qualified))
+                         prior-program? (boolean (some-> prior program-value?))]
+                     (when (and (or prior-program? (program-value? entry))
+                                (or (not (same-intern-value?
+                                          (get prior :seon.sci.eval/value absent-intern) value))
+                                    (not (identical? (:seon.sci.eval/metadata prior) metadata))))
+                       [qualified (assoc entry ::prior-program? prior-program?)])))
+                 after)))
+
+(defn- source-position
+  "The `[line column]` where `text` starts inside `source`, read at `start`."
+  {:malli/schema [:=> [:cat :string :seon.sci.eval/position :string]
+                  [:maybe :seon.sci.eval/position]]}
+  [source [line column] text]
+  (when-let [offset (str/index-of source text)]
+    (let [before (subs source 0 offset)
+          newline (str/last-index-of before "\n")]
+      [(+ line (count (filter #{\newline} before)))
+       (if newline (- offset newline) (+ column offset))])))
+
+(defn- program-change
+  "Classify this form's definitions against its analyzed rows by provenance.
+  SCI gives a defined Var the `:line`/`:column` of the declaration that ran;
+  a definition is matched only when exactly one analyzed row names it and
+  that row's source starts there. Otherwise it is unindexed: an `eval` or
+  macro expansion, a second occurrence overwriting the analyzed one, or a
+  function replaced by data. Repeated occurrences of one name are repeated
+  declarations. A Var no row names is a helper of a host-bound declaration
+  (record or type) only when it was defined at that declaration's position.
+  Host-bound rows group by their shared declaration position."
+  {:malli/schema [:=> [:cat [:sequential [:tuple :qualified-symbol :seon.sci.eval/intern]]
+                       [:vector :map] :string :seon.sci.eval/position]
+                  :seon.sci.eval/program-change]}
+  [definitions analyzed source start]
+  (let [position #(when-let [text (or (:seon.fn/source %) (:seon.test/source %))]
+                    (source-position source start text))
+        identity-of #(or (:seon.fn/sym %) (:seon.test/sym %))
+        by-name (group-by identity-of analyzed)
+        host-positions (into #{} (comp (filter :seon.fn/host-bound?) (keep position)) analyzed)
+        classify
+        (fn [[qualified {sci-var :seon.sci.eval/var :as entry}]]
+          (let [occurrences (get by-name qualified)
+                defined-at (some-> (meta sci-var) ((juxt :line :column)))]
+            (cond
+              (and (::prior-program? entry) (not (program-value? entry))) {::unmatched qualified}
+              (< 1 (count occurrences)) {::repeated (repeat (count occurrences) qualified)}
+              (and (= 1 (count occurrences)) (= defined-at (position (first occurrences))))
+              {::row (first occurrences) ::var sci-var}
+              (and (empty? occurrences) (contains? host-positions defined-at)) {}
+              :else {::unmatched qualified})))
+        classified (map classify definitions)
+        matched (keep #(when (::row %) %) classified)]
+    {::matched (vec matched)
+     ::unmatched (into [] (keep ::unmatched) classified)
+     ::declared (into (vec (mapcat ::repeated classified))
+                      (concat (keep #(when-not (:seon.fn/host-bound? (::row %))
+                                       (identity-of (::row %)))
+                                    matched)
+                              (->> (filter #(:seon.fn/host-bound? (::row %)) matched)
+                                   (group-by #(position (::row %)))
+                                   vals
+                                   (map #(identity-of (::row (first %)))))))}))
 
 (defn- row-backed?
   "Whether `qualified` names a stored function or test row in `db`."
@@ -594,9 +672,10 @@
    (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
    {:seon.error/message
     (str "This form changed " (str/join ", " (sort-by str members))
-         ", which its analysis declares no definition for (eval, a macro "
-         "expansion, a nested unmap, or a point-free def such as (def f (comp ...))). "
-         "Define or remove it with its own top-level form so it is indexed and contracted.")
+         ", which its analysis declares no definition for at the place it ran: an eval, a "
+         "macro expansion, a second definition of the name, a nested unmap, a point-free "
+         "def such as (def f (comp ...)), or a function replaced by a value. Define it with "
+         "its own defn, or remove it first with a top-level ns-unmap.")
     :seon.error/member :seon.program/row
     ::unindexed (set members)}))
 
@@ -614,7 +693,7 @@
                                         (map #(str "removal of " %) (sort-by str removed))))
                  ". Send each declaration as its own top-level form.")
             :seon.error/member :seon.program/row
-            ::declarations (set declared)}
+            ::declarations (vec declared)}
      (seq removed) (assoc ::removals (set removed)))))
 
 (defn- program-identity-name
@@ -625,64 +704,60 @@
       (:seon.ns/name row)
       (some-> row :seon.program/delete-identities first second)))
 
-(defn- definition-rows
-  "Analyze the accepted source once; SCI contributes only runtime contract facts.
-  Each FINAL row (after spec, workload, test markers and contract facts) takes
-  its digest from `seon.db/definition-digest-of` with the namespace row its
-  transaction leaves stored: an earlier form's row in this settlement, else the
-  database's, else SCI's for a namespace not yet stored. That is the digest
-  the writer recomputes. Answers `[qualified row]` for every definition of
-  `program-definitions`, the row nil when the analysis declares none."
-  [database projection definitions source namespace-row settled-namespaces]
+(defn- analyzed-rows
+  "Analyze the accepted form source once, answering its declaration rows."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :string
+                       :seon.sci.eval/namespace-row]
+                  [:vector :map]]}
+  [database projection source namespace-row]
+  (vec (seon.fn/source-rows
+        database
+        (program/shapes-in projection)
+        (assoc namespace-row :seon.program/definition-digest
+               (program/definition-digest namespace-row)) source
+        (set (keys (:seon.schema.projection/forms projection))))))
+
+(defn- definition-row
+  "One matched analyzed row made FINAL: runtime contract, workload and test
+  markers from the Var, contract facts, and the digest from
+  `seon.db/definition-digest-of` with the namespace row its transaction
+  leaves stored (an earlier form's row in this settlement, else the
+  database's, else SCI's for a namespace not yet stored), the digest the
+  writer recomputes."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection :map
+                       [:maybe :seon.sci.eval/settled-namespaces] :map :seon.sci.eval/sci-var]
+                  :map]}
+  [database projection namespace-row settled-namespaces analysed-row sci-var]
   (let [namespace-name (:seon.ns/name namespace-row)
         digest-namespace (or (get settled-namespaces namespace-name)
                              (db/pull database '[*] [:seon.ns/name namespace-name])
                              namespace-row)
-        digested #(assoc % :seon.program/definition-digest
-                         (db/definition-digest-of projection % digest-namespace))
-        source-rows
-        (delay (seon.fn/source-rows
-                database
-                (program/shapes-in projection)
-                (assoc namespace-row :seon.program/definition-digest
-                       (program/definition-digest namespace-row)) source
-                (set (keys (:seon.schema.projection/forms projection)))))]
-  (mapv
-   (fn [[qualified {sci-var :seon.sci.eval/var}]]
-       (let [metadata (meta sci-var)
-             analysed-row
-             (some #(when (= qualified
-                             (or (:seon.fn/sym %) (:seon.test/sym %))) %)
-                   @source-rows)
-             event
-             (when analysed-row
-               (cond-> analysed-row
-                 (:malli/schema metadata)
-                 (assoc :seon.fn/spec
-                        (pr-str (accretion/data-contract! (:malli/schema metadata))))
-                 (contains? #{:io :compute} (:seon.workload metadata))
-                 (assoc :seon.fn/workload (:seon.workload metadata))
-                 (:test metadata)
-                 (merge (program/test-markers metadata (meta (:ns metadata))))))
-             row (when event
-                   (assoc event ::evaluated? true))]
-         [qualified
-          (some-> (if (:seon.fn/spec row)
-                   (let [definition (edn/read-string (:seon.fn/spec row))]
-                     (schema/projection-with-function-contract
-                      projection qualified definition
-                      {:seon.schema.admission/source :agent})
-                     (program/with-contract-facts
-                      {:seon.program/row row
-                       :seon.program/compile-options
-                       (:seon.schema.projection/compile-options projection)
-                       :seon.program/predicate-functions
-                       (schema/predicate-functions-in projection)
-                       :seon.program/schema-keys
-                       (set (keys (:seon.schema.projection/forms projection)))}))
-                   row)
-                 digested)]))
-   definitions)))
+        metadata (meta sci-var)
+        qualified (or (:seon.fn/sym analysed-row) (:seon.test/sym analysed-row))
+        row (cond-> (assoc analysed-row ::evaluated? true)
+              (:malli/schema metadata)
+              (assoc :seon.fn/spec
+                     (pr-str (accretion/data-contract! (:malli/schema metadata))))
+              (contains? #{:io :compute} (:seon.workload metadata))
+              (assoc :seon.fn/workload (:seon.workload metadata))
+              (:test metadata)
+              (merge (program/test-markers metadata (meta (:ns metadata)))))
+        row (if (:seon.fn/spec row)
+              (let [definition (edn/read-string (:seon.fn/spec row))]
+                (schema/projection-with-function-contract
+                 projection qualified definition
+                 {:seon.schema.admission/source :agent})
+                (program/with-contract-facts
+                 {:seon.program/row row
+                  :seon.program/compile-options
+                  (:seon.schema.projection/compile-options projection)
+                  :seon.program/predicate-functions
+                  (schema/predicate-functions-in projection)
+                  :seon.program/schema-keys
+                  (set (keys (:seon.schema.projection/forms projection)))}))
+              row)]
+    (assoc row :seon.program/definition-digest
+           (db/definition-digest-of projection row digest-namespace))))
 
 (defn- admit-program-change!
   "The one definition authority for one evaluated form. Every definition
@@ -691,29 +766,28 @@
   declaration: several, or one beside a removal, refuse as
   `:seon.sci.eval/multiple-declarations-error`; a change its analysis does not
   declare refuses as `:seon.sci.eval/unindexed-change-error`; an uncontracted
-  function as `:seon.sci.eval/declaration-absent-error`. Contracts are
-  validated and armed inside this boundary, and any refusal or throw restores
-  the whole change before it leaves. Host-bound rows (record and type
-  factories) are one declaration whose SCI expansion also defines helper Vars
-  without rows. Answers the admitted rows."
+  function as `:seon.sci.eval/declaration-absent-error`. `program-change`
+  decides the match by provenance. Contracts are validated and armed inside
+  this boundary, and any refusal or throw restores the whole change before it
+  leaves. Answers the admitted rows."
   {:malli/schema [:=> [:cat :seon.sci.eval/admission-request] [:vector :map]]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db current :seon.sci.eval/current-db
     projection :seon.schema/projection source :seon.cluster.eval/source
+    start :seon.sci.eval/form-start
     before :seon.sci.eval/before-owned before-namespaces :seon.sci.eval/before-namespaces
     reader-row :seon.sci.eval/reader-row namespace-row :seon.sci.eval/namespace-row
     settled :seon.sci.eval/settled-namespaces restore! :seon.sci.eval/restore
     namespace-unmap? :seon.sci.eval/namespace-unmap?}]
   (try
-    (let [pairs (definition-rows database projection
-                                 (program-definitions before (turn-interns ctx))
-                                 source namespace-row settled)
-          rows (into [] (keep second) pairs)
-          host-bound (filter :seon.fn/host-bound? rows)
-          declared (cond-> (mapv program-identity-name (remove :seon.fn/host-bound? rows))
-                     (seq host-bound) (conj (program-identity-name (first host-bound)))
+    (let [definitions (program-definitions before-namespaces before (turn-interns ctx))
+          {matched ::matched unindexed ::unmatched declared ::declared}
+          (if (seq definitions)
+            (program-change definitions
+                            (analyzed-rows database projection source namespace-row)
+                            source start)
+            {})
+          declared (cond-> (vec declared)
                      reader-row (conj (program-identity-name reader-row)))
-          unindexed (when (empty? host-bound)
-                      (into [] (keep (fn [[qualified row]] (when-not row qualified))) pairs))
           removed (when-not namespace-unmap?
                     (into [] (comp (map (fn [[n i _]] (symbol (str n) (str i))))
                                    (filter #(row-backed? current %)))
@@ -724,6 +798,9 @@
         (or (< 1 (count declared)) (and (seq declared) (seq removed)))
         (refuse! (multiple-declarations declared removed))
         (seq removed) (refuse! (unindexed-change removed)))
+      (let [rows (mapv #(definition-row database projection namespace-row settled
+                                        (::row %) (::var %))
+                       matched)]
       (when-let [missing (first (sort-by str (for [row rows
                                                    :when (and (:seon.fn/sym row)
                                                               (not (:seon.fn/spec row))
@@ -736,7 +813,7 @@
       ;; later install re-wraps the interpreted original idempotently.
       (doseq [row rows :when (:seon.fn/spec row)]
         (install-function-contract! ctx row projection database))
-      rows)
+      rows))
     (catch Throwable failure
       (restore!)
       (throw failure))))
@@ -4104,6 +4181,8 @@
                 ;; the raw request: the reader drops trailing input such as a
                 ;; stray `)`, which clj-kondo's parser cannot analyze.
                 :seon.cluster.eval/source (or (:seon.sci.reader/source event) source)
+                :seon.sci.eval/form-start [(:seon.sci.reader/line event 1)
+                                           (:seon.sci.reader/column event 1)]
                 :seon.sci.eval/before-owned before-owned
                 :seon.sci.eval/before-namespaces before-namespaces
                 :seon.sci.eval/namespace-row

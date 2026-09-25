@@ -137,6 +137,29 @@
              (str source " is an unindexed change: " (pr-str refusal)))
          (is (absent? (str changed)) source))
        (value (str "(defn kept \"D.\" " contract " [x] (inc x))"))
+       (doseq [source ["(def kept 42)" "(def kept nil)"]]
+         (is (= '#{scratch.entry-gate/kept} (:seon.sci.eval/unindexed (value source)))
+             (str source ": a function replaced by a value is a definition change"))
+         (is (= 2 (value "(kept 1)")) source))
+       (is (= '#{scratch.entry-gate/->One scratch.entry-gate/->Two}
+              (set (:seon.sci.eval/declarations
+                    (value "(do (defrecord One [x]) (defrecord Two [y]))"))))
+           "two records are two declarations")
+       (is (= '#{scratch.entry-gate/hidden}
+              (:seon.sci.eval/unindexed
+               (value (str "(do (defrecord Pair [a]) (eval '(defn hidden \"D.\" " contract " [x] x)))"))))
+           "a record exempts only the helpers defined at its own declaration")
+       (is (absent? "hidden"))
+       (is (= '[scratch.entry-gate/twin scratch.entry-gate/twin]
+              (:seon.sci.eval/declarations
+               (value (str "(do (defn twin \"D.\" " contract " [x] x) "
+                           "(defn twin \"D.\" " contract " [x] (inc x)))"))))
+           "two occurrences of one name are two declarations")
+       (is (= '#{scratch.entry-gate/overwritten}
+              (:seon.sci.eval/unindexed
+               (value (str "(do (defn overwritten \"D.\" " contract " [x] x)\n"
+                           " (eval '(defn overwritten \"E.\" " contract " [x] (inc x))))"))))
+           "an analyzed name is not the declaration that ran when a later eval overwrote it")
        (value (str "(defn trailing \"D.\" " contract " [x] x))"))
        (is (= 1 (value "(trailing 1)"))
            "analysis reads the form the reader accepted, not a stray trailing paren")

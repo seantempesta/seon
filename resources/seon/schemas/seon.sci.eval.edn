@@ -315,6 +315,7 @@
 [:map
  [:seon.sci.eval/var :seon.sci.eval/sci-var]
  [:seon.sci.eval/metadata :map]
+ [:seon.sci.eval/prior-program? {:optional true} :boolean]
  [:seon.sci.eval/value
   [:any
    {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
@@ -357,13 +358,20 @@
  [:seon.sci.eval/namespace-row :seon.sci.eval/namespace-row]
  [:seon.sci.eval/settled-namespaces {:optional true} :seon.sci.eval/settled-namespaces]
  [:seon.sci.eval/restore :seon.sci.eval/restore]
- [:seon.sci.eval/namespace-unmap? :boolean]]
+ [:seon.sci.eval/namespace-unmap? :boolean]
+ [:seon.sci.eval/form-start :seon.sci.eval/position]]
+:position [:tuple {:description "The line and column (1-based) where a form or a declaration inside it starts."} [:int {:min 1}] [:int {:min 1}]]
+:program-change
+[:map {:description "One form's definitions classified by provenance: rows matched to the Var that ran them, unindexed changes, and every declaration made, repeats kept."}
+ [:seon.sci.eval/matched [:vector [:map [:seon.sci.eval/row :map] [:seon.sci.eval/var :seon.sci.eval/sci-var]]]]
+ [:seon.sci.eval/unmatched [:vector :qualified-symbol]]
+ [:seon.sci.eval/declared [:vector :seon.sci.eval/program-name]]]
 :program-name [:or :symbol :qualified-keyword]
 :unindexed [:set {:min 1 :description "Function or test Vars a form changed, or stored rows' Vars it removed, that its analysis declares no definition for."} :qualified-symbol]
 :unindexed-change-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
  [:map [:seon.sci.eval/unindexed :seon.sci.eval/unindexed]]]
-:declarations [:set {:min 1 :description "The program declarations one form made: definitions, schema, namespace or deletion identities."} :seon.sci.eval/program-name]
+:declarations [:vector {:min 1 :description "The program declarations one form made, in order and with repeated occurrences of one name kept: definitions, schema, namespace or deletion identities."} :seon.sci.eval/program-name]
 :removals [:set {:min 1 :description "Stored rows' Vars the same form removed beside its declarations."} :qualified-symbol]
 :multiple-declarations-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  :seon.error/base
