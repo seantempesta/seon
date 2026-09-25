@@ -82,7 +82,8 @@
         (is (false? @ran) "admission's program is not the execution's")))))
 
 (deftest an-adoption-failing-after-roots-change-keeps-the-program-unknown-until-one-records
-  (let [loaded (atom {})
+  (let [jvm-loaded @sci.eval/loaded-identity
+        loaded (atom {})
         database (db/db (:seon.db/connection (support/execution-handle nil)))
         entries (atom 0)
         member #(sci.eval/call-detecting-program-change
@@ -123,4 +124,15 @@
         (is (= {:seon.source/commit-id commit} @loaded))
         (is (= :entered (member)))
         (is (= 1 @entries))))
+    (testing "a loaded commit this value's store lacks, known or unknown, still keys a projection"
+      ;; A failed materialization cached as a thrown `delay` once refused every later read.
+      (let [absent (random-uuid)
+            builder #(@#'db/loaded-builder database % nil)]
+        (doseq [program [{:seon.source/commit-id absent}
+                         (let [failed (atom {})]
+                           (adopt! failed absent #(throw (ex-info "arming refused" {})))
+                           @failed)]]
+          (is (string? (builder program)))
+          (is (= (builder program) (builder program)) "nothing failed was cached"))))
+    (is (= jvm-loaded @sci.eval/loaded-identity) "the JVM's loaded identity is untouched")
     (remove-ns (symbol scratch))))

@@ -1437,18 +1437,25 @@
   unknown identity), the loaded code is mixed: an unchanged builder keeps its
   digest, a changed one keys a projection to that adoption alone, so no mixed
   construction is ever reused. Boot commits that disagree refuse by name. A JVM
-  with no running instance keys by the value's own commit or rows."
+  with no running instance keys by the value's own commit or rows.
+
+  A value whose store lacks the loaded commit (another store's value) keys by
+  that commit and its own builder, and a miss that materializes nothing caches
+  nothing: `delay` rethrows a stored failure on every deref, so one such read
+  refused every later read of the commit (lane-fix-unknown-identity-blocks-reads)."
   {:malli/schema [:=> [:cat :seon.db/database-value :map [:maybe [:sequential :map]]]
                   :seon.source/digest]}
   [database loaded instances]
   (let [memo (fn [commit]
-               @(cache/lookup-or-miss
-                 projection-cache [::builder commit]
-                 (fn [_] (delay (builder-digest
-                                 (or (d/commit-as-db database commit {:secondary-indices? false})
-                                     (throw (ex-info "The JVM's loaded source commit is unavailable."
-                                                     {:seon.error/expected :seon.source/commit-id
-                                                      :seon.error/offending commit}))))))))
+               (when commit
+                 (or (some-> (cache/lookup projection-cache [::builder commit]) deref)
+                     (when-let [program (d/commit-as-db database commit {:secondary-indices? false})]
+                       @(cache/lookup-or-miss projection-cache [::builder commit]
+                                              (fn [_] (delay (builder-digest program))))))))
+        own (fn [] (if-let [commit (:datahike.value/commit-id (datahike.db/committed-value-identity database))]
+                     (or (memo commit) (builder-digest database))
+                     (builder-digest database)))
+        loaded-key (fn [commit] (or (memo commit) (id/digest 64 [::foreign-store commit (own)])))
         boots (into #{} (keep :seon.source/commit-id) instances)]
     (cond
       (:seon.error/at loaded)
@@ -1459,18 +1466,16 @@
                                              [:seon.cluster/name (get-in % [:seon.boot/advertisement
                                                                             :seon.boot/cluster-name])])))
                          instances)]
-        (if (and (seq priors) (every? #(= target (memo %)) priors))
+        (if (and target (seq priors) (every? #(= target (memo %)) priors))
           target
           (id/digest 64 [::mixed-program (str (:seon.error/at loaded)) (str (:seon.source/commit-id loaded))])))
 
-      (:seon.source/commit-id loaded) (memo (:seon.source/commit-id loaded))
-      (= 1 (count boots)) (memo (first boots))
+      (:seon.source/commit-id loaded) (loaded-key (:seon.source/commit-id loaded))
+      (= 1 (count boots)) (loaded-key (first boots))
       (seq boots) (throw (ex-info "The running instances booted different programs; the loaded projection builder is ambiguous."
                                   {:seon.error/expected :seon.source/commit-id
                                    :seon.error/offending boots}))
-      :else (if-let [commit (:datahike.value/commit-id (datahike.db/committed-value-identity database))]
-              (memo commit)
-              (builder-digest database)))))
+      :else (own))))
 
 (defn carried-projection
   "Derive this database value's projection, memoized by what it reads.
