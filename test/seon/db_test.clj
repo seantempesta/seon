@@ -2623,6 +2623,10 @@
          (toggle! false))
        (is (empty? @compared) "the committed basis's comparison is reused")))))
 
+(deftest call-reach-includes-the-root-ends-cycles-and-treats-absent-symbols-as-leaves
+  (is (= '#{a/x a/y a/z} (db/call-reach '{a/x [a/y] a/y [a/x a/z]} 'a/x)))
+  (is (= '#{a/absent} (db/call-reach {} 'a/absent))))
+
 (deftest a-changed-projection-builder-misses-the-projection-cache
   ;; A projection derives from the builder's code as well as the declaration
   ;; rows: a changed builder derives anew, an unchanged one reuses.

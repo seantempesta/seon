@@ -1413,21 +1413,43 @@
       (let [failure (projection-fallback 'seon.db/carried-projection)]
         (throw (ex-info (:seon.error/message failure) failure)))))
 
+(defn call-reach
+  "Every symbol reached from `root` through `calls`, the root included.
+  `calls` maps a symbol to its callees: stored rows (`stored-call-reach`) or
+  a proposed overlay. The visited set ends cycles; absent symbols are leaves."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :symbol] [:set :symbol]]}
+  [calls root]
+  (loop [pending (list root) reached #{}]
+    (if-let [[function & more] (seq pending)]
+      (if (reached function)
+        (recur more reached)
+        (recur (into more (calls function)) (conj reached function)))
+      reached)))
+
+(defn stored-call-reach
+  "`call-reach` over `database`'s stored `:seon.fn/calls`.
+  Two index lookups per reached symbol, so cost follows the root's reach.
+  Pull recursion follows only refs (datahike pull_api.cljc:340) and a
+  recursive rule derives the whole graph first (3.3 s). Records no read
+  evidence."
+  {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :symbol]]}
+  [database root]
+  (call-reach (fn [function]
+                (when-let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
+                  (map :v (d/datoms database :eavt entity :seon.fn/calls))))
+              root))
+
 (defn- builder-digest
   "The projection builder's identity in `database`: the digest of the
-  definition digests reached from `seon.schema/load-projection` through
-  stored `:seon.fn/calls`: one index lookup per reached symbol, ~1.6 ms."
+  definition digests reached from `seon.schema/load-projection`, ~2 ms."
   {:malli/schema [:=> [:cat :seon.db/database-value] :seon.source/digest]}
   [database]
-  (loop [reached {} pending ['seon.schema/load-projection]]
-    (if-let [[function & more] (seq pending)]
-      (if (find reached function)
-        (recur reached more)
-        (let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
-          (recur (assoc reached function
-                        (when entity (:v (first (d/datoms database :eavt entity :seon.program/definition-digest)))))
-                 (into more (when entity (map :v (d/datoms database :eavt entity :seon.fn/calls)))))))
-      (id/digest 64 [(into (sorted-map) (filter val) reached)]))))
+  (id/digest 64 [(into (sorted-map)
+                       (keep (fn [function]
+                               (when-let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
+                                 (some->> (first (d/datoms database :eavt entity :seon.program/definition-digest))
+                                          :v (vector function)))))
+                       (stored-call-reach database 'seon.schema/load-projection))]))
 
 (defn- loaded-builder
   "The builder digest of the program this JVM loaded, memoized by its commit.
