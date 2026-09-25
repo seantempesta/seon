@@ -1,11 +1,11 @@
 (ns seon.test.cache
   "Declared test and publication input readers: the inventory of files a
   program's evidence depends on and their content digests."
-  (:require [babashka.process :as process]
-            [clojure.edn :as edn]
+  (:require [clojure.edn :as edn]
             [hasch.core :as hasch]
             [clojure.java.io :as io]
-            [clojure.string :as str])
+            [clojure.string :as str]
+            [seon.cluster.process :as process])
   (:import [java.io File]
            [java.nio.file Files]))
 
@@ -18,6 +18,20 @@
   Git read allowance. Expiry refuses selection rather than omitting inputs."
   30000)
 
+(defn- git-output
+  "Git's stdout for `argv` run in `root` through the process owner, within the
+  inventory bound. Expiry refuses there; any nonzero exit refuses here."
+  {:malli/schema [:=> [:cat :string [:vector :string] :string] :string]}
+  [root argv message]
+  (let [{:seon.operator.subprocess/keys [exit output]}
+        (process/run-process! {:seon.operator.subprocess/argv argv
+                               :seon.operator.subprocess/directory root
+                               :seon.operator.subprocess/deadline-ms inventory-bound-ms})]
+    (when-not (zero? exit)
+      (throw (ex-info message {::root root :seon.operator.subprocess/argv argv
+                               :seon.operator.subprocess/exit exit})))
+    output))
+
 (defn input-paths
   "Git's input paths, or the exact inventory carried by an exported snapshot."
   {:malli/schema [:=> [:cat :string] [:vector :string]]}
@@ -26,19 +40,12 @@
         recorded (io/file root "test-input-paths.txt")]
     (if (.isFile recorded)
       (vec (enumeration-seq (java.util.StringTokenizer. (slurp recorded) (str (char 0)))))
-      (let [child (process/process
-               ["git" "--work-tree" (.getPath root) "ls-files"
-                "--cached" "--others" "--exclude-standard" "-z"]
-               {:dir (.getPath root) :out :string :err :string})]
-    (try
-      (let [result (deref child inventory-bound-ms ::expired)]
-        (when (or (= ::expired result) (not= 0 (:exit result)))
-          (throw (ex-info "Git could not enumerate test inputs."
-                          {:seon.test.cache/root (.getPath root)
-                           :seon.test.cache/result result})))
-        (vec (enumeration-seq
-              (java.util.StringTokenizer. (:out result) (str (char 0))))))
-      (finally (process/destroy-tree child)))))))
+      (vec (enumeration-seq
+            (java.util.StringTokenizer.
+             (git-output (.getPath root) ["git" "--work-tree" (.getPath root) "ls-files"
+                                          "--cached" "--others" "--exclude-standard" "-z"]
+                         "Git could not enumerate test inputs.")
+             (str (char 0))))))))
 
 (defn- file-input-digests
   "Hash Git's tracked and non-ignored files by repository-relative path.
@@ -178,16 +185,8 @@
   (let [recorded (io/file root "dependency-pins.txt")
         text (if (.isFile recorded)
                (slurp recorded)
-               (let [child (process/process
-                            ["git" "--work-tree" root "ls-files" "--stage"]
-                            {:dir root :out :string :err :string})]
-                 (try
-                   (let [result (deref child inventory-bound-ms ::expired)]
-                     (when (or (= ::expired result) (not= 0 (:exit result)))
-                       (throw (ex-info "Git could not enumerate input gitlinks."
-                                       {::root root ::result result})))
-                     (:out result))
-                   (finally (process/destroy-tree child)))))]
+               (git-output root ["git" "--work-tree" root "ls-files" "--stage"]
+                           "Git could not enumerate input gitlinks."))]
     (into {}
           (keep (fn [line]
                   (when (str/starts-with? line "160000 ")
