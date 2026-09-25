@@ -49,6 +49,10 @@ running system: a specification or source citation is not evidence of installati
    shared context: keep probes disposable. Report and record degraded/missing tools first.
    Reproduce with one small form, inspect the complete envelope and installed schema,
    call the owner, then try the smaller algorithm. Record exact forms, values and timings.
+   Develop REPL-first on real data before implementing: parse the real input, transform it,
+   validate each value against its schema, store it (on a disposable branch or `d/with`),
+   pull it back and compare. Evaluate new code only in a scratch namespace or branch with
+   finite inputs. Regressions are the edge cases that session found, not a handful of examples.
 3. **Design the smallest composition.** Begin the owning spec or landing note with one
    or two lines naming what exists, its data flow and the principal Clojure approach.
    State what disappears, each operation's cost and target complexity, concerns separated,
