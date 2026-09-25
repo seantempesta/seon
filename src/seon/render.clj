@@ -385,6 +385,68 @@
                (every? (get owned row #{}) (keys value)))
       row)))
 
+(defn- output-alternatives
+  "The named schemas one contracted function declares it returns, once per
+  projection: every arity's output, flattened through `:or`/`:maybe`/`:and`
+  and named unions, without `:seon.error/base`. Nil for no contract."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol]
+                  [:maybe [:vector :qualified-keyword]]]}
+  [projection function-symbol]
+  (schema/projection-cache-value
+   projection [::output-alternatives function-symbol]
+   (fn []
+     (let [forms (:seon.schema.projection/forms projection)
+           branches (fn branches [seen form]
+                      (cond
+                        (and (qualified-keyword? form) (not (seen form)))
+                        (let [named (get forms form)]
+                          (cons form (when (and (vector? named) (#{:or :maybe} (first named)))
+                                       (branches (conj seen form) named))))
+                        (and (vector? form) (#{:or :maybe :and} (first form)))
+                        (mapcat #(branches seen %) (remove map? (rest form)))))]
+       (some->> (mr/schema (:seon.schema.projection/registry projection) function-symbol)
+                m/-function-schema-arities
+                (mapcat #(branches #{} (m/form (:output (m/-function-info %)))))
+                (remove #{:seon.error/base})
+                distinct
+                vec)))))
+
+(defn- satisfied-alternatives
+  "The declared return alternatives of `function-symbol` that `value`
+  satisfies, by each schema's cached Malli validator. Nil for no contract."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-symbol :seon.schema/value]
+                  [:maybe [:vector :qualified-keyword]]]}
+  [projection function-symbol value]
+  (some->> (output-alternatives projection function-symbol)
+           (filterv #((schema/projection-validator projection %) value))))
+
+(defn- error-alternatives
+  "The alternatives an error value satisfies among its own operation's
+  declared returns (`:seon.error/operation`); nil when that is uncontracted."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:maybe [:vector :qualified-keyword]]]}
+  [projection value]
+  (let [operation (:seon.error/operation value)]
+    (when (qualified-symbol? operation)
+      (satisfied-alternatives projection operation value))))
+
+(defn- head-function
+  "The contracted function a top-level call form names: its head symbol
+  resolved in `namespace-name` of `ctx`. Macros, locals, literals and interop
+  name no producer, so they answer nil."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.sci.eval/ctx :symbol :seon.schema/value]
+                  [:maybe :qualified-symbol]]}
+  [projection ctx namespace-name form]
+  (when (and (seq? form) (symbol? (first form)))
+    (when-let [namespace-object (sci/find-ns ctx namespace-name)]
+      (let [resolved (sci/binding [sci/ns namespace-object]
+                       (sci/resolve ctx (first form)))
+            function-symbol (when (and (instance? sci.lang.Var resolved)
+                                       (not (:macro (meta resolved))))
+                              (sci/var->symbol resolved))]
+        (when (and function-symbol
+                   (get (:seon.schema.projection/function-contracts projection) function-symbol))
+          function-symbol)))))
+
 (defn- schema-producers
   [projection request value output]
   (schema/call-with-projection
