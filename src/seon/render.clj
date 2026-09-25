@@ -1103,13 +1103,15 @@
      #(sci.kernel/invoke
        (cond->
         {:seon.sci.eval/ctx ctx
-         :seon.db/db (:seon.db/db request)
          :seon.fn/sym selected
          :seon.sci.eval/args [argument]
          :seon.sci.admit/unbounded? true
          :seon.sci.eval/time-limit-ms time-limit-ms
          :seon.sci.admit/caps caps
          :seon.config/on-core-error on-core-error}
+         ;; A request without a database leaves the key absent, and the
+         ;; runtime supplies it; never a stored nil.
+         (:seon.db/db request) (assoc :seon.db/db (:seon.db/db request))
          (:seon.render.call/captured-reads request)
          (assoc :seon.db/read-evidence-sink
                 (:seon.render.call/captured-reads request)))))))
