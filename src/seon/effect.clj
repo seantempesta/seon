@@ -141,26 +141,17 @@
             "Blob digest " [:code digest]]]))))))
 
 (defn capabilities
-  "Capability-owner symbols reachable from `function-symbol`, the root included.
-  Walks stored `:seon.fn/calls` one `pull-many` per depth, so cost follows the
-  root's reach, never the program's call graph."
+  "Capability-owner symbols reachable from `function-symbol`, the root included:
+  its `db/stored-call-reach` meeting the rows carrying `:seon.effect/capability`,
+  so cost follows the root's reach, never the program's call graph."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:set :seon.fn/sym]]}
   [database function-symbol]
-  (loop [pending #{function-symbol} visited #{} owners #{}]
-    (if (empty? pending)
-      owners
-      (let [rows (db/pull-many database
-                               '[:seon.fn/sym (limit :seon.fn/calls nil)
-                                 :seon.effect/capability]
-                               (mapv #(vector :seon.fn/sym %) pending))
-            visited (into visited pending)]
-        (when (map? rows) (throw (ex-info (str (:seon.error/message rows)) rows)))
-        (recur (into #{} (comp (mapcat :seon.fn/calls) (remove visited)) rows)
-               visited
-               (into owners (comp (filter :seon.effect/capability)
-                                  (map :seon.fn/sym))
-                     rows))))))
+  (let [owners (db/q '[:find [?symbol ...]
+                       :where [?function :seon.effect/capability _]
+                              [?function :seon.fn/sym ?symbol]] database)]
+    (when (map? owners) (throw (ex-info (str (:seon.error/message owners)) owners)))
+    (into #{} (filter (db/stored-call-reach database function-symbol)) owners)))
 
 (defn- owner-symbol
   [owner]
