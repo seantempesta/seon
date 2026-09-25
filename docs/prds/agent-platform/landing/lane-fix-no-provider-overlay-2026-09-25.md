@@ -63,22 +63,20 @@ apart from recording the keys.
 - **`src/seon/schema/edn.clj` is outside my listed files.** I changed one line in `derive-config-forms`: the config
   entity gains `[:seon.config/overlay-keys {:optional true} ...]`. No running ledger row holds that file. Root
   should record it.
-- **Expected red: `seon.schema.datahike-test` parity.** The oracle `test/seon/schema/datahike_parity.edn` has no
-  entry for the new attribute, and its input digest changes. That file is not mine. Regenerate the baseline with
-  `:seon.config/overlay-keys` (cardinality many, keyword) and the new `:seon.config/entity` form. The shape-mirror
-  lane's schema deletions change the same digest.
-- **Test worlds still resolve the shipped paid provider when they name none.** The assignment asked that "a test
-  world resolves no-provider unless the test supplies a provider explicitly". That reverses root's ruled option A
-  (3a7ffa69c: "test worlds compiled from config/default.edn reach their provider stand-ins"). About 15 test files
-  reach the call path through `with-redefs` of `ai/complete` without naming a provider, and one of them is
-  `cluster/turn_test.clj`, which another lane holds. **Root rules.** Options:
-  1. Keep option A as it is now (recommended now that the owner has said the calls were cheap). A world that names a
-     provider keeps it through every apply. A world that names none still resolves DeepSeek.
-  2. Flip `config/default.edn` to `:seon.config.ai/no-provider true` and delete that entry from
-     `config/development.edn`. Every world is then no-provider unless a layer supplies
-     `:seon.config.ai/no-provider :seon.config/absent`. Cost: two EDN lines, plus a one-key opt-in in each stand-in
-     fixture (about 15 files, including held `cluster/turn_test.clj`).
-  3. Option 2, plus the `seon.ai/complete` guard below.
+- **`seon.schema.datahike-test` parity is already red, and I did not regenerate it.**
+  - I compared the oracle `test/seon/schema/datahike_parity.edn` (baseline-commit 19a11478e) with the checkout's
+    packaged forms, derived in a read-only scratch namespace with this change's entity line.
+  - The oracle is stale by far more than this change: 516 forms differ, about 53 attributes are extra and 32 are
+    missing. The missing ones include every `seon.schema.shape.*` and `seon.fn.arity/*`. Its input digest no longer
+    matches the packaged forms even without this change.
+  - This change adds one attribute (`:seon.config/overlay-keys`, many-valued keyword, in the core attributes) and
+    one entry in `:seon.config/entity`.
+  - Regenerating now would approve weeks of other lanes' drift without the explanation the test demands ("Canonical
+    input drift requires an explained baseline update"). That calls for its own assignment. It should also be
+    computed inside a test world's handed projection, not from default's loaded code.
+- **Test worlds that name no provider still resolve the shipped DeepSeek endpoint.** The owner's ruling stands:
+  option A is kept (3a7ffa69c), because cheap calls are fine. A world that names a provider now keeps it through
+  every apply.
 - **Defence in depth is not done.** `seon.ai/complete` ignores the `:seon.ai/no-provider` request attribute. Only
   the turn's own check stops a call. Filed as
   `docs/seon/issues/provider-completion-ignores-the-no-provider-request-attribute.md` (`src/seon/ai.clj` is not
@@ -163,6 +161,6 @@ bin/test-check default --ns seon.config-test
 bin/seon down && bin/seon start                          # boot on an existing store whose default lacks the attribute
 bin/test-check default --ns seon.config-application-test
 bin/test-check default --ns seon.no-provider-test
-bin/test-check default --ns seon.schema.datahike-test   # expected red until the parity baseline is regenerated
+bin/test-check default --ns seon.schema.datahike-test   # already red (stale oracle, see above); expect one more extra attribute
 bin/test-check default --ns seon.turn-loop-test         # watches for any test that relied on an exact reset
 ```

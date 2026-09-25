@@ -8,8 +8,9 @@
   and derives one canonical effective map and desired row.
 
   Runtime consumers read only the database row. Omission from a sparse overlay
-  inherits the shipped decision; it does not retract a defaulted optional
-  attribute. `:seon.config/absent` is the one explicit retraction form, is
+  inherits the decision beneath it: the cluster's held overlay decisions
+  (`:seon.config/overlay-keys`), else the shipped decision; it does not retract
+  a defaulted optional attribute. `:seon.config/absent` is the one explicit retraction form, is
   refused for required attributes, and never becomes nil or a datom."
   (:require [seon.error.refusal]
             [clojure.edn :as edn]
@@ -20,6 +21,7 @@
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.schema.datahike :as schema.datahike]
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.schema.internal :as internal]))
@@ -546,12 +548,18 @@
     (let [document (default-document)
           projection (schema/declaration-projection (schema.edn/packaged-forms))
           initialization (admit-initialization projection (get document initialization-key []))
-          compiled (compile-settings projection document request)]
+          compiled (compile-settings projection document request)
+          ;; The row records which dials a layer above the shipped defaults
+          ;; decided, so a later apply can hold them underneath its own keys.
+          overlay-keys (into #{} (filter (dial-attributes projection))
+                             (keys (merge (:seon.config/manifest request)
+                                          (:seon.config/environment request))))]
       (assoc compiled
              :seon.config/initialization initialization
              :seon.config/desired-row
-             (assoc (:seon.config/effective compiled)
-                    :seon.config/cluster cluster-name)))))
+             (cond-> (assoc (:seon.config/effective compiled)
+                            :seon.config/cluster cluster-name)
+               (seq overlay-keys) (assoc :seon.config/overlay-keys overlay-keys))))))
 
 (def defaults
   "The immutable shipped default configuration, compiled at namespace load.
@@ -658,12 +666,40 @@
         replacements (zipmap rows (population-transaction-data projection database rows))]
     (mapv #(get replacements % %) tx-data)))
 
+(defn- accrete-row-attributes!
+  "Install each attribute the desired rows name that the branch has not installed.
+
+  Rows compile from the checkout's declarations, but boot writes them onto a
+  branch whose program may not have adopted those declarations yet, and
+  Datahike's `:write` schema mode refuses an uninstalled attribute. Each
+  missing declaration is derived from the same packaged projection the rows
+  compiled from and transacted before the row. Adoption later installs the
+  declaration row itself; a converged branch pays one schema lookup per key."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector :map]] :nil]}
+  [connection rows]
+  (let [installed (:schema (db/db connection))
+        missing (into (sorted-set)
+                      (comp (mapcat keys) (filter qualified-keyword?)
+                            (remove #(contains? installed %)))
+                      rows)]
+    (when (seq missing)
+      (let [projection (schema/declaration-projection (schema.edn/packaged-forms))
+            result (db/transact!
+                    connection
+                    ;; The schema population's own accretion shape (`seon.cluster/accrete-schema-population!`).
+                    {:tx-data (mapv #(schema.datahike/malli->datahike-attr-in projection %) missing)})]
+        (when (:seon.error/at result)
+          (throw (ex-info (str (:seon.error/message result)) result))))))
+  nil)
+
 (defn apply-compiled!
   "Exact-reconcile one already-compiled desired config row."
   {:malli/schema
    [:=> [:cat :seon.db/connection :seon.config/compiled]
     :seon.reconcile/result]}
   [connection compiled]
+  (accrete-row-attributes! connection (into [(:seon.config/desired-row compiled)]
+                                           (:seon.config/initialization compiled)))
   (let [database (db/db connection)
         projection (or (db/carried-projection database)
                        (schema/handed-projection)
@@ -728,32 +764,55 @@
       (throw (ex-info (:seon.error/message result) result)))
     result))
 
+(defn- held-overlay
+  "The overlay decisions one cluster's row records, as a sparse manifest.
+
+  A key `:seon.config/overlay-keys` lists but the row lacks was decided absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.boot/cluster-name]
+                  :seon.config/manifest]}
+  [database cluster-name]
+  (let [row (db/pull database '[*] [:seon.config/cluster cluster-name])]
+    (when (:seon.db/invalid-read row)
+      (throw (ex-info (str (:seon.error/message row)) row)))
+    (into {} (map (fn [config-key] [config-key (get row config-key absent)]))
+          (:seon.config/overlay-keys row))))
+
 (defn apply!
   "Compile once and exact-reconcile the one desired config row.
 
+  The request's manifest layers over the decisions the cluster's row already
+  holds (boot's overlays, earlier applies, the environment), so an apply
+  changes only its own keys; a key returns to the shipped decision only by
+  applying the shipped document. Undecided dials follow the shipped defaults,
+  and a hand edit of one is reconciled away.
+
   With a path, read one selected EDN document. The shipped document selects
-  defaults and their initialization rows; any other document is a sparse
-  overlay and obeys the same admission rules as an in-memory manifest."
+  defaults and their initialization rows and replaces every held decision; any
+  other document is a sparse overlay and obeys the same admission rules as an
+  in-memory manifest."
   {:malli/schema
    [:function
     [:=> [:cat :seon.config/apply-request] :seon.reconcile/result]
     [:=> [:cat :seon.config/apply-request :seon.config/path]
      :seon.reconcile/result]]}
   ([request]
-   (apply-compiled!
-    (:seon.db/connection request)
-    (compile-manifest
-     (select-keys
-      request
-      [:seon.config/manifest
-       :seon.config/environment
-       :seon.boot/cluster-name]))))
+   (let [connection (:seon.db/connection request)
+         cluster-name (:seon.boot/cluster-name request)
+         ;; An omitted cluster is refused by name in `compile-manifest`.
+         held (when (and (string? cluster-name) (seq cluster-name))
+                (held-overlay (db/db connection) cluster-name))]
+     (apply-compiled!
+      connection
+      (compile-manifest
+       (cond-> (select-keys request [:seon.config/environment :seon.boot/cluster-name])
+         (or (seq held) (:seon.config/manifest request))
+         (assoc :seon.config/manifest (merge held (:seon.config/manifest request))))))))
   ([request path]
-   (let [document (read-edn-map path)
-         manifest (if (= document (default-document))
-                    {}
-                    document)]
-     (apply! (assoc request :seon.config/manifest manifest)))))
+   (let [document (read-edn-map path)]
+     (if (= document (default-document))
+       (apply-compiled! (:seon.db/connection request)
+                        (compile-manifest (select-keys request [:seon.boot/cluster-name])))
+       (apply! (assoc request :seon.config/manifest document))))))
 
 (declare effective-in)
 
