@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-unverified
 severity: defect
 created: 2026-09-25
 tags: [program-graph, db, writer]
@@ -49,3 +49,19 @@ a transaction that changes `:seon.fn/source` but keeps the old digest is refused
 
 src/seon/db.clj write admission (`write-entity-error` / the final-report validator), or `seon.fn/reconcile-tx` if
 program rows must enter only through it. Root routes it.
+
+## Fix (2026-09-25, 79b6d9abd, lane fix-writer-digest-opus)
+
+`seon.db/write-digest-error`, called from `write-report-error`, reads each function and test entity in the
+report's `:tx-data` back as the row that wrote it (`declaration-value`). It recomputes `program/definition-digest`
+once per row, with `seon.fn/stored-namespace-context` of the row's namespace. A mismatch refuses: member
+`:seon.program/definition-digest`, `:seon.error/expected` the produced digest, `:seon.error/offending` the stored
+one (`:seon.error/unknown` when there is none), and `:seon.error/data :seon.db/entity` the identity.
+
+- **Reconstruction:** the read-back reproduced all 7,022 live stored digests.
+- **Cost, armed:** 0.32 ms for one row; 249 µs per row across a 7,022-row report.
+- **Scope:** namespace and schema rows are not checked. Their stored digests omit attributes written after them;
+  see the landing's out-of-scope finding.
+- **Regression:** `seon.db-test/a-program-row-keeps-only-the-definition-digest-it-produces`.
+- **Pending:** root's runs, and the tests that write stale digests. Both are listed in
+  `docs/prds/agent-platform/landing/lane-fix-writer-digest-2026-09-25.md`.
