@@ -426,3 +426,252 @@ the implementation/root lanes' work. This review releases its single path after 
 
 Document checks: balanced fences/front matter, required review sections and clean whitespace;
 these are document checks only, not Seon tests or runtime proof.
+
+## Re-review of e5f9b923e (2026-09-25)
+
+**Verdict: proceed after fixes.** Keep the revised composition and the narrowed replacement-only
+milestone. Do not implement §3.3's publish-then-compare writer as specified, or claim §6's deletion
+budget is available to S2 unchanged. The remaining blockers are local to acceptance, deletion,
+write-back and entrant ownership; they do not justify another evaluator, registry or runner.
+
+This is a static independent review of design commit `e5f9b923ec3b7cc158e3dacc3a9da80e84388688`
+against review `7117f211f`. Below, **D** means
+`docs/research/agent-platform/one-repl-language-2026-09-25.md` at that commit; **L** means
+`docs/research/agent-platform/duplicate-paths-audit-2026-09-25.md`, §11, the sole deletion-credit
+authority (source pin `056ef6fe0`). Source citations below use the design's pin `3785970b9`,
+unless explicitly labelled otherwise. The source was read from Git objects so concurrent edits
+cannot change this evidence. Dependency pins: SCI `fcbd8862800e638dc0f8f5521111f999279cbcd2`,
+Malli `befcd302a8e626a67d84b80aabee0cd1b38dadb6`. No installation is inferred from source.
+
+### Disposition of every previous P0/P1
+
+RESOLVED below means resolved **in the design**, not implemented or proven in the running JVM.
+
+| Finding | Status | Design evidence and remaining requirement |
+|---|---|---|
+| P0-A, accepted definition authority | **PARTLY** | D:162–189 now names metadata changes, unmatched mutations, the one-declaration constraint, restoration, preflight limits and `:warn`. Good. D:168–173 still matches removals to analyzed definition rows, although §3.2 derives deletion from the intern difference. Specify separate definition and removal members of the one change set. Also explicitly cover a program mutation followed by a throw before the normal post-evaluation check, contract installation failure, and later settlement refusal. Preserving private state must not retain a refused replacement of an existing program Var. |
+| P0-B, deletion authority/isolation | **PARTLY** | D:348–379 eliminates the separate transaction and forbids shared-base mutation; writer-side referrer validation is correct. The snapshot, namespace-removal, mixed-change and failure issues below remain. D:381 correctly defers deletion merge. |
+| P0-C, landable write-back | **PARTLY** | D:385–409 correctly rejects bare `my.edit/form!` and selects the real pure `seon.edit/form`; D:413–431 now requires the issue, intermediate tests and named acceptance. The post-publication equivalence check is too late, and the provenance needed to perform the splice is still unimplemented. Fix before B or C. |
+| P1-A, read once | **RESOLVED** | D:126–138 accurately labels it a target, retains reader events and reader context, requires sequential namespace effects and counts reader invocations. Delivery still needs a named owning slice: none of S1/S2/S3 explicitly owns all `reply`/`turn` event propagation. Until then, narrow “one path” to shared owners rather than a once-only parse guarantee. |
+| P1-B, qualified definitions | **RESOLVED** | D:140–158 withdraws nonexistent APIs, defers the feature, separates reader and evaluation contexts and requires a single-expansion proof. Existing namespace selection is sufficient for M1. No speculative macro shim is authorized. |
+| P1-C, tests through recorder | **PARTLY** | D:309–330 incorporates once-only capture, host backend, retaining-branch evidence, native report operands and ordinary candidate requests. It still needs the actual common recording seam and explicit task-proof and selection-refusal treatment; the inventory at D:202 alone does not define these. “Host-bound members keep running unarmed” at D:317 must mean no extra outer SCI arm, not disabling their function contracts. The adapter/retention budget cannot disappear in the fallback at D:650. |
+| P1-D, execution identity/completion | **PARTLY** | D:270–302 supplies branch custody, explicit session, no-provider settings, namespace continuation, timeout/run requery and exit-aware retirement. The branch-local-id correction is valid for database uniqueness. It does not establish custody of a live agent/context, actual-exit admission, or safe retirement of all agents matching an id prefix; see below. |
+| P1-E, result/store/render contract | **PARTLY** | D:196–233 and D:247–258 now distinguish facts, live results, exact shown text, historical/current views and bounded encoding, and expose the owner's open retrieval decision. D:217 still describes `render.value/artifact` as reusable for a non-print-node artifact, contradicting its implementation. The +70/three-attribute estimate omits an established representation and retention proof. Deferral is acceptable for M1, not resolution of the durable-value design. |
+| P1-F, host diagnostic behavior | **RESOLVED** | D:259–266 retains no-database diagnostics, bounds output at its producer, keeps whole causes, preserves host invalidation and the runtime-status caller, and forbids clipping machine responses. These are the required guarantees; their implementation and R7's separate host reader remain unproved. |
+
+### Verification of the new §0 defects
+
+**Deletion: confirmed, with a stronger qualification.** D:47–56 accurately distinguishes the two
+owners. At the source pin, `src/seon/sci/eval.clj:3729–3746` takes the full intern snapshot only
+for the reader-marked case; `unmap-row` at `:3143–3157` has the same guard.
+`src/my/program.clj:527–542` checks references in a transaction function, commits, then mutates
+both executing context and base. `native-call-refusal` at `:636–641` omits `ns-unmap` and still
+intercepts `remove-ns`. Thus the nested unmap hole follows from the code. This review did not
+reproduce its live occurrence. Several evaluation citations in D use older offsets: e.g. the
+contract conversion is `eval.clj:515–516` at the declared pin, not `:499–502`.
+
+D:352–357's “snapshot the gate already takes” is insufficient for the proposed implementation.
+`turn-interns` (`eval.clj:388–426`) includes only generation-owned Vars. It cannot alone observe
+removal of an inherited program Var. SCI's `namespace-state` is an O(1) held persistent map;
+`namespace-interns` traverses all namespace maps (`reference-code/sci/src/sci/core.cljc:732–760`).
+Taking the latter before and after every read would introduce whole-context work, not the
+O(changed Vars) claimed at D:191. Use the held namespace maps and their identity sharing to
+bound inspection to changed namespace maps, with cost stated honestly; retain prior roots and
+metadata separately because the maps contain mutable Vars.
+
+The deletion cut must also distinguish these cases before retiring its current owner:
+
+- A removal matches a row-backed identity in the held before-state, not an analyzed `defn` row.
+  Private unmap produces no program deletion. Mixed replacement/removal cannot silently choose
+  one row (`eval.clj:3851`); explicitly refuse unsupported mixed changes in the first slice.
+- `remove-ns` changes namespace identity, aliases, imports and resolver state, including an empty
+  namespace with no interns. The function/test-only helper at `eval.clj:370–384` cannot describe
+  it. Preserve the existing schema-owning-namespace refusal and decide the whole namespace
+  change at the writer. Remove the native redirect only when its replacement works.
+- A nested unmap followed by a throw has already changed the fork. D:364's “nothing has been
+  written” does not mean the context is restored. Restore on evaluation, admission, arming and
+  settlement failure; if restoration fails, make that execution unavailable. Do not restore
+  over an intervening acquisition. Reuse execution ownership, not a second rollback manager.
+
+SCI's native operations confirm the distinction: `sci-ns-unmap` also removes refers/imports,
+whereas `sci-remove-ns` removes a whole namespace map
+(`reference-code/sci/src/sci/impl/namespaces.cljc:567–587`, `:604–609`). Add namespace and
+throw-after-mutation cases to the **future** proof list at D:373; none was run here. Preserve or
+convert callers of the retiring `my.program` functions; the current AGENTS.md names those
+public deletion forms. The native-only replacement is a proposed authority/API change requiring
+root ruling, not an already-settled consequence of the rendering/config rulings.
+
+**`config apply` losing layers: confirmed.** Boot merges development and the request at
+`src/seon/cluster/boot.clj:432–437`; apply passes only the submitted manifest at `:629–634`;
+publication recompiles development at `:660–676`. The operator reads one file and sends only
+its map (`script/seon/operator.clj:1405–1412`). Exact reconciliation in
+`src/seon/config.clj:673–725` makes loss of earlier layer decisions real. D:79–80 should narrow
+“last writer erases the others” to the same cluster's reconciled decisions: other clusters'
+referenced config rows are deliberately retained at `config.clj:677–705`.
+
+**Nine arbitrary-row readers: confirmed as nine sites, not identical query syntax.** The
+sites are `src/seon/turn.clj:2697–2700`, `:4012–4017`; `src/seon/agent.clj:132`, `:185–187`;
+`src/seon/repl.clj:69–72`; `src/seon/issue.clj:1232–1233`; `src/seon/bootstrap.clj:131–134`;
+`src/seon/render/transcript.clj:1180–1182`; `src/seon/sci/eval.clj:738–745`. Each lacks a bound
+cluster identity. The extra all-entity blob-threshold query is `turn.clj:4020–4023` at this pin.
+Multiple eligible rows are enough to make the selection unrelated to custody; the design's
+one-row probe does not demonstrate a wrong live result and should remain labelled accordingly.
+
+**Inline render defaults: confirmed.** `src/seon/sci/kernel.clj:633–640` explicitly bypasses
+preparation for a function value. Even passing it to the present hook is insufficient:
+`src/seon/call_preparation.clj:1538–1541` passes through a callee with no program identity.
+The render unit contains database/context fields (`src/seon/render.clj:196–249`); the ordinary
+producer route passes that unit at `:452–482`. D:92–96 and D:470–477 correctly identify both
+producers, but “whole unit” is not universal: declared attribute renderers may receive the
+raw attribute instead. The shared preparation owner must consume the inline function's
+retained declared contract, preserving ambiguity refusals and caller-wins. Do not infer a
+contract from shape or build a renderer-only supplier. Malli's `schema`, `properties` and
+cached `validator` (`reference-code/malli/src/malli/core.cljc:2561`, `:2592`, `:2637`) are the
+existing seams; derivation follows changed contract content, not every render call.
+
+### P0-C remains: fix write-back before publication
+
+The pure splice is the right choice. `seon.edit/form` (`src/seon/edit.clj:314–373`) selects by
+head/name and optional dispatch, rejects missing/ambiguous matches, and verifies the surrounding
+bytes through `lossless-candidate` (`:261–285`). Its signature also requires a context-byte
+bound. It does not check acceptance, file identity, namespace/resolver equivalence, or a
+concurrent filesystem write. Give it the held complete file string and fold all replacements
+for that file over one candidate string, not independent edits of the original.
+
+Four corrections are required to D:389–405:
+
+1. **Capture and authenticate the bases.** Bind the root's acceptance, destination before/after
+   commits, tested intermediate commit, accepted identities and source-file bases. Resolve
+   transaction datoms through the existing identity owner; an unchanged identity attribute
+   need not occur in the replacement datoms. `accept-merge!` returns a transaction report,
+   not a ready write-back manifest (`src/seon/cluster/source.clj:803–806`, `:843–844`). A stale
+   report must refuse after the destination/source head moves. The source publication head
+   and accepted cluster head are distinct authorities and both need explicit fences.
+2. **Recover real provenance.** D:394's refusal is honest but cannot be the entire M1 path.
+   `program/overrides` explicitly documents that replacement removes file coordinates
+   (`src/seon/program.cljc:96–105`). Preserve the base identity/file association or derive
+   it from the held accepted transaction's before-state, rather than requiring the REPL row
+   to contain coordinates it may intentionally lack. Resolve the file entity to its path;
+   use the base declaration's exact selector, including its head. Refuse unsupported cases.
+3. **Prove the candidate before exposing it.** `publish!` already populates a scratch branch
+   before moving `current-src` (`source.clj:601–638`, `:661–685`). Put equivalence validation
+   in that existing preparation/publication sequence, before its guarded pointer update.
+   Reindex staged candidate bytes with the ordinary analyzer, check exact accepted identities
+   and their semantic digests, and ensure no other compared declaration changed. Comparing
+   only the requested delta can miss an unintended extra declaration. `program/digest-map`
+   deliberately excludes file/lint rows (`program.cljc:462–476`); semantic equality therefore
+   accompanies, rather than replaces, exact file and resolver-context checks. Missing evidence
+   or equal-looking refusal maps are never equality proof.
+4. **Fence installation and failure recovery.** A digest check at D:397 followed by later writes
+   has a filesystem race. Recheck at the existing file writer's installation boundary and
+   name how overlapping publication is excluded/detected. Stage all files first. Cover partial
+   write, publication refusal/throw, and recovery failure, not just digest inequality. Restore
+   a path only while its bytes still equal this operation's candidate; never overwrite a
+   colleague's intervening edit. A failed restore leaves named unavailable state and retained
+   evidence. Process loss cannot be repaired by originals held only in memory. Initially
+   constrain M1 to one physical file if that is the smallest provable installation contract.
+
+Publishing a bad candidate and then republishing originals is not rollback: observers may see
+the candidate, history advances, and restoring files does not undo the already accepted cluster
+rows. Report that accepted-but-not-written state explicitly on failure. Keep one source owner,
+one analyzer and the existing guarded publication; do not add a general filesystem transaction
+framework to defend the +45 estimate. Reprice S5 after these guarantees are concrete.
+
+### Owner rulings and remaining disagreements
+
+**Render selection: accepted.** D:237–258 and D:445–477 correctly implement the four-level
+per-face ruling, put default pairs on schemas, and leave personal overrides with the viewing
+agent. No reverse-metadata migration earns deletion credit. Selection and invocation must use
+the same contract/default preparation so a function does not fail selection merely because
+its declared default is absent from caller arguments. Deferring that owner cut is honest;
+it remains a dependency of the full “all functions” claim.
+
+**Configuration: keep the move, repair the read contract.** D:542–584 preserves the ruled
+ordering, explicit absence, processor-derived defaults and separate initialization data.
+However D:552 says the effective row contains only layers 1–3, while D:568–569 sends agentless
+readers to `effective`. That function currently returns only the stored row's dials
+(`config.clj:778–789`), so those readers would omit layer 4. Make `effective` itself derive
+layers 1–4, and the agent variant add layer 5 (or use one optional-agent reader). Propagate
+read errors before `merge`, and validate the final owning effective value; an error map is
+also a map. Keep the historical database value at the transcript reader instead of replacing
+its opening-time observation with a latest-head read.
+
+Record the layer selection and effective decisions atomically. Define whether an explicit
+`apply PATH…` replaces the selected stack; startup without an explicit replacement should
+reuse it. Resolve paths relative to a named root. Reapply on changed dial-schema defaults and
+initialization content as well as overlay documents: D:561's document-only trigger loses the
+defaults after D:575 moves them. `{:path … :digest …}` alone also omits typed environment
+decisions and schema-default provenance promised at D:498–500/D:607. Reuse compiled inputs
+for this evidence; do not add a second configuration authority. Price these caller/writer
+changes before claiming C2's +45 covers them.
+
+**Tasks: accepted target, still open ingestion.** Requirements §7:143–153 is the authority:
+metadata contains ids; tests own proof edges; EDN owns task data; reverse lookup builds context;
+attempts/decisions remain runtime facts. D:511–512, D:527–528 and D:630 correctly leave 7.9/7.9b
+open and preserve all three seed forms. Keep this explicit in the owning task design and
+supersede its earlier authored-`done-when`/proof-only-subject claims there. Do not interpret
+D:608's “explicit subjects” as permission to duplicate code-owned subject lists in EDN;
+runtime/unborn-subject exceptions are already specified in §7.
+
+**MCP identity: accept the local-id correction, retain execution custody.** A branch-local
+database id need not encode root/cluster/branch. Nevertheless those values must select the
+live handle and routing on every submission and retrieval. Forks inherit agent rows; their
+presence is not a newly armed agent. The bridge currently keys sessions by `[root cluster
+session-id]` (`script/seon/dev/mcp.clj:685–691`). Explicit session ids help but are not ownership
+proof. Retire only the entrant's owned, exited agent(s), not every branch row matching
+`mcp/*` as D:301–302 says. The current busy comment at `agent.clj:638–642` describes an open
+run, not proof of an actual-exit fence after settlement. Name the existing execution owner
+that enforces the latter; no second bridge busy registry. Register a branch/agent observation
+before submission, then filter/recheck using the returned run id (allocated within submission
+at `agent.clj:697`), rather than assuming that id is available before the call.
+
+**Durable values: deferral accepted, representation claim rejected.** At the source pin,
+`src/seon/render/value.clj:683–710` explicitly makes the print node the artifact's sole value
+source. Reusing its name does not make a plain-data artifact. Nor is `{:entity lookup :basis-t t}`
+a globally pinned observation across divergent branches without a retained database/commit
+identity and history retention. Keep the owner's retrieval decision open and its implementation
+unpriced; preserve M1's complete durable error/test evidence independently of any live-only
+success-result handle. Proposed schemas must use fully namespaced keys, not the sketch's
+`:entity`/`:artifact`/`:live` keys as literal admitted data.
+
+### M1 pricing against the sole ledger
+
+The headline arithmetic is correct **if all credited ranges really retire in these slices**:
+A = 30 + 60 − 80 = +10; B = A + 45 = +55; C = B + 95 − 87 − 50 = +13.
+That condition is not yet met.
+
+| Credit/cost | Ledger check and required correction |
+|---|---|
+| S2, R7 = 80 | L:429–440 lists exactly six bridge-reader definitions. `execute-clj-eval` calls `require-single-clj-form!` before choosing either JVM or SCI mode (`mcp.clj:692–705`); `jvm-evaluation-form` uses `read-string` at `:486–499`. Moving SCI to reply submission alone leaves the JVM reader live. Either include the shared host reader's complete-input/refusal conversion and price it, or book **0** R7 until that caller retires. Do not replace the scanner with another bridge scanner. The non-settling template/window has no additional §11 credit. |
+| S3, C1 = 87 | L:459–467 matches the three candidate functions. Credit remains conditional on the actual candidate's fixture/input/source-location and complete ordinary-request evidence; copying their behavior into the adapter is no retirement. The +45 is an estimate, not proof. |
+| S3, R10 = 50 | L:579–587 matches only `report-value`, `message-text`, `failure-message`. `failure-report` and `report-identity` conversions add no credit. R10 was allocated to rendering in the audit's cross-plan discussion; root must assign it once across the two implementation budgets. The §11 ranges remain the sole quantity. |
+| C fallback at D:650 | +160/−130/+30 is **B plus only the +25 R10 replacement**, dropping the other +25 adapter/retention work. If that work remains, the quoted fallback is **+185/−130/+55**; it still lacks candidate unification and cannot promise every entrant. If it is removed, call it B plus report-value cleanup. |
+| S4/C2/D0 | Correctly book zero: the 64 `my.program` lines, moved config data, nine reader-query removals and obsolete six-line config file are not §11 credits. C2's net column must not subtract its “unbooked” ~30. Distinguish this design's C2 configuration label from ledger C2's unrelated test snapshot/restore cut. |
+
+Without R7 retirement, the same addition estimates give A **+90/0/+90**, B **+135/0/+135**,
+C **+230/−137/+93** (C1 still conditional, R10 assigned once). These are conservative scope
+budgets, not measured implementation sizes. Schema, caller and regression costs must be shown
+separately; the ledger itself says its ceilings precede those costs (L:283). The common reader
+propagation, exit custody and corrected write-back still need pricing. C is not uniquely compliant
+with the shrinking law just because it totals +13 on paper; all three are growth, and each must
+justify the smallest needed mechanism before integration.
+
+**Proposed hybrid:** retain A as the bounded private experiment; recommend corrected **B** as
+the first landable milestone, using one existing function, existing reaching tests and initially
+one physical file. Repair S1's complete refusal semantics, S2's custody/exit guarantees and S5's
+staged equivalence first. Use the current test harness honestly. Land S3 when its recorder and
+conditional C1 proofs are ready, booking R10 once; then claim test-entrant unification. Keep the
+owner-ordered configuration move as its separate defect cut. Defer qualified definitions, general
+deletion/additions and durable-value representation as the revision proposes. Do not widen B with
+unrelated deletions merely to balance its budget; root must accept the repriced growth explicitly.
+
+### Delivery and verification limits
+
+Only this append is authored. Production source/test delta: **0 / 0**. No code, tests, `bin/seon`,
+MCP/JVM probes, adoption, arming, browser or paid provider calls were run. Runtime timings,
+allocation and retained memory are **unmeasured**; this is no performance or installed-health
+approval. There was no dependency on another lane's runtime health and no other lane was contacted.
+The unrelated `reference-code/http-kit` state was preserved. Document checks verify an unchanged
+original prefix, one requested heading, balanced fences and clean whitespace. Commit scope is
+this review file only via `git commit --only`; its hash is reported with the delivery. This path
+is released after that commit; push, merge and implementation remain outside this assignment.
