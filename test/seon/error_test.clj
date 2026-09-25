@@ -1155,8 +1155,9 @@
    (fn [connection]
      (let [projection (schema/handed-projection)
            unavailable {:seon.error-test/unavailable true}
-           raw (try (schema/projection-from-database unavailable)
-                    (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
+           ;; The producer itself: projection-from-database now meets
+           ;; seon.db/carried-projection's input contract before this refusal.
+           raw (#'schema/refuse-projection-source unavailable)
            recording (error/recording (db/db connection) (commit-request raw {:seon.error/declared-schema :seon.schema/validation-refusal}))
            report (test-support/transacted! connection (:seon.db/tx-data recording))
            root (db/pull (:db-after report) (error/observation-selector projection)
