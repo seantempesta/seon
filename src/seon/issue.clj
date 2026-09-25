@@ -608,6 +608,88 @@
   (let [stored (stored-tasks database (set (map file-namespace (keys files))))]
     (or (read-error stored) (update-vals stored #(declaration (db/carried-projection database) %)))))
 
+(defn tasks-tx
+  "The writer's delta from stored tasks to the declared `files`, by handle. A touched
+  task whose current declaration differs from the caller's `basis` refuses with base,
+  current and proposed (7.16); unchanged input is empty; a removed entry retracts."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
+  [database files basis]
+  (let [projection (db/carried-projection database)
+        proposed (into [] (mapcat (fn [[path text]] (file-declarations projection path text))) files)
+        by-id (into {} (map (juxt :seon.task/id identity)) proposed)
+        stored (stored-tasks database (set (map file-namespace (keys files))))
+        owned (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))]
+    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (when-let [id (some (fn [[id n]] (when (< 1 n) id)) (frequencies (map :seon.task/id proposed)))]
+      (functions/task-refused! 'seon.issue/tasks-tx :duplicate-id (:seon.task/ns (by-id id)) id {}))
+    (into []
+          (mapcat (fn [id]
+                    (let [current (declaration projection (stored id)) wanted (declaration projection (by-id id))]
+                      (cond
+                        (= current wanted) []
+                        (not= (get basis id) current)
+                        (functions/task-refused! 'seon.issue/tasks-tx :revision-conflict (:seon.task/ns (or (by-id id) (stored id))) id
+                                                 (cond-> {} (get basis id) (assoc :seon.task/base (get basis id))
+                                                   current (assoc :seon.task/current current) wanted (assoc :seon.task/proposed wanted)))
+                        (nil? wanted) [[:db/retractEntity (:db/id (stored id))]]
+                        current (replacement-tx (stored id) (by-id id) owned)
+                        :else [(by-id id)]))))
+          (sort (into (set (keys stored)) (keys by-id))))))
+
+(defn index-tasks!
+  "Reconcile task files through the writer against the declarations the caller read
+  (`:seon.task/basis`, else read now); an unchanged set writes nothing. Refusals return."
+  {:malli/schema [:=> [:cat :seon.task/request]
+                  [:or :seon.task/report :seon.task/refused-error :seon.task/conflict-error
+                   :seon.db/invalid-read-error :seon.db/transaction-refused-error]]}
+  [{connection :seon.db/connection files :seon.task/files basis :seon.task/basis}]
+  (let [database (db/db connection)
+        basis (or basis (task-basis database files))]
+    (or (read-error basis)
+        (try (if (empty? (tasks-tx database files basis))
+               {:seon.task/changed? false}
+               (let [report (db/transact! connection [[:db.fn/call #'tasks-tx files basis]])]
+                 (or (read-error report) {:seon.task/changed? true :seon.db/transaction-report report})))
+             (catch clojure.lang.ExceptionInfo failure
+               (if (:seon.task/refused (ex-data failure)) (ex-data failure) (throw failure)))))))
+
+(defn task-edges
+  "A task's subjects (functions, namespaces), proofs (deftests), and the definitions,
+  namespaces and tasks whose must-read names one of its subjects, over one held value."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle] [:or :seon.task/edges :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [holders (db/q database '[:find ?s ?proof :in $ ?t :where [?e :seon.task/tasks ?t]
+                                 (or (and [?e :seon.test/sym ?s] [(ground true) ?proof])
+                                     (and (or [?e :seon.fn/sym ?s] [?e :seon.ns/name ?s]) [(ground false) ?proof]))] handle)
+        subjects (when-not (read-error holders) (set (keep (fn [[s proof]] (when-not proof s)) holders)))
+        referrers (when subjects
+                    (db/q database '[:find [?h ...] :in $ [?target ...]
+                                     :where (or (and [?e :seon.fn/must-read ?target]
+                                                     (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h]))
+                                                (and [?e :seon.task/must-read ?target] [?e :seon.task/id ?h]))] (vec subjects)))]
+    (or (read-error holders) (read-error referrers)
+        {:seon.task/subjects subjects :seon.task/proofs (set (keep (fn [[s proof]] (when proof s)) holders))
+         :seon.task/referrers (set referrers)})))
+
+(defn open-tasks
+  "The task handles a definition still lists; listing is openness (spec 7.2, 7.6)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:tuple :qualified-keyword :symbol]]
+                  [:or [:set :seon.task/handle] :seon.db/invalid-read-error :seon.db/pull-budget-error]]}
+  [database program-identity]
+  (let [pulled (db/pull database [:seon.task/tasks] program-identity)]
+    (or (read-error pulled) (set (:seon.task/tasks pulled)))))
+
+(defn task-findings
+  "`:seon.task/dangling` handles listed in code with no task entity, by holder (the
+  program gate refuses them), and `:seon.task/triage` tasks with no subject or proof."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or :seon.task/findings :seon.db/invalid-read-error]]}
+  [database]
+  (let [dangling (db/q database '[:find ?t ?h :where [?e :seon.task/tasks ?t] (not [_ :seon.task/id ?t])
+                                  (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h] [?e :seon.ns/name ?h])])
+        triage (db/q database '[:find [?t ...] :where [_ :seon.task/id ?t] (not [_ :seon.task/tasks ?t])])]
+    (or (read-error dangling) (read-error triage)
+        {:seon.task/dangling (update-vals (group-by first dangling) #(set (map second %)))
+         :seon.task/triage (set triage)})))
 (def ^:private generated-prose
   "Attributes a detector proposes once. A human's or a worker's edit survives
   every later run: the generator writes them only when the issue holds none."
