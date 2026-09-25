@@ -758,7 +758,7 @@
             row (:seon.program/row evaluation)]
         (is (= 'user/parsed-at-runtime (:seon.fn/sym row)))
         (is (= 1 (count (:seon.fn/arities row))))
-        (is (every? :seon.fn.arity/argument-count (:seon.fn/arities row)))))))
+        (is (every? :seon.fn.arity/return-schema (:seon.fn/arities row)))))))
 
 (deftest
   static-and-runtime-contracted-definitions-publish-identical-facts
@@ -1260,7 +1260,15 @@
               :seon.schema/form "[:int {:min 0}]"
               :seon.schema.admission/source :agent
               :seon.schema/generatable? true}
-             row)))
+             (dissoc row :seon.schema/shape)))
+      (is (= {:seon.schema.shape/type :int
+              :seon.schema.shape/form "[:int {:min 0}]"
+              :seon.schema.shape/properties "{:min 0}"
+              :seon.schema.shape/comparison :exact}
+             (select-keys (:seon.schema/shape row)
+                          [:seon.schema.shape/type :seon.schema.shape/form
+                           :seon.schema.shape/properties
+                           :seon.schema.shape/comparison]))))
     (is (= :user/direct-schema (:seon.sci.eval/schema-value result)))
     (is (false? (:seon.sci.eval/live-declaration? result)))
     (is (= before (seon.schema/registered-schemas))

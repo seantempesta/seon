@@ -96,7 +96,11 @@ count; its complete value is the index key, not each member
 (`reference-code/datahike/src/datahike/index/persistent_set.cljc:31-132`).
 Choose components when children belong to one parent's value. Datahike's
 cascade does not enforce exclusive ownership (`db/transaction.cljc:832-836`);
-shared, independently identified values stay behind ordinary refs.
+shared fingerprint-identified shapes stay behind ordinary refs. The existing
+shape model owns child/entry occurrence rows but their `/schema` refs lead
+to shared shapes (`resources/seon/schemas/seon.schema.shape.edn:10-13`,
+`resources/seon/schemas/seon.schema.shape.child.edn:3-4`). Preserve that
+distinction when merging another representation into it.
 
 Validate complete owning values, including owners discovered from before and
 after a child-only edit or unlink. Pull is not a completeness proof: a
@@ -106,7 +110,7 @@ yield id-only maps (`reference-code/datahike/src/datahike/pull_api.cljc:238-243`
 Obtain the complete value under the declared work bound or refuse.
 Every owned relation declares `:seon.db/component-schema`; the final writer
 validates those typed values as well as the root (`write-owned-values-error`,
-`src/seon/db.clj:3498`). The config schema declares
+`src/seon/db.clj:3372`). The config schema declares
 `:seon.config.db/validation-node-limit`
 (`resources/seon/schemas/seon.config.db.edn:1`), carried by
 projection acquisition and shared across writers; there is no per-constructor
@@ -152,7 +156,7 @@ Do not generalize allowances for in-memory polymorphic results to
 stored attributes.
 
 Authored incomplete contracts and predicate requirements are checked at
-`assert-complete-schema!` (`src/seon/schema/internal.cljc:309`). Malli
+`assert-complete-schema!` (`src/seon/schema/internal.cljc:291`). Malli
 generator overrides are selected at
 `reference-code/malli/src/malli/generator.cljc:466`; mapping an output occurs
 at `:489` (`-create-from-fmap`). Neither proves the generated
@@ -161,7 +165,7 @@ validate against the same projection, and exercise meaningful domain
 partitions. The clojure-testing skill owns the fixture and assertion.
 
 Config composites already derive from leaf declarations
-(`derive-config-forms`, `src/seon/schema/edn.clj:63`). A new dial belongs in its owning
+(`derive-config-forms`, `src/seon/schema/edn.clj:62`). A new dial belongs in its owning
 schema family, not a manually maintained second composite.
 
 ## Record and render contract — target
@@ -185,8 +189,8 @@ generated-form family.
 ## Results and identity
 
 Installed: the agent retains a context handle; `fork-for-turn`
-(`src/seon/sci/eval.clj:2956`) forks the current base and
-`regenerate-agent-context!` (`:2885-2954`) carries its private layer over it.
+(`src/seon/sci/eval.clj:2287`) forks the current base and
+`regenerate-agent-context!` (`:2224-2285`) carries its private layer over it.
 Its private defs, atoms, and result objects remain in memory.
 Shown text is stored because it records what was seen, not because
 it can restore the object. The profile is applied once at evaluation
@@ -205,4 +209,4 @@ Program identity tombstones are RETIRED by owner ruling 2026-09-16
 past is a temporal query; `src/` carries no tombstone mechanism.
 The final report refuses identity removal or rename when surviving symbol
 observers still name it; repairs are judged in the same final database
-(`removed-definition-error`, `src/seon/db.clj:4061`; `deletion-error`, `:4121`).
+(`removed-definition-error`, `src/seon/db.clj:3916`; `deletion-error`, `:3976`).

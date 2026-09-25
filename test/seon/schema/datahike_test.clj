@@ -516,12 +516,16 @@
              '[[?row :seon.call-preparation/key ?key]
                [?row :seon.call-preparation/schema ?schema]
                [?schema :seon.schema/key ?schema-key]
+               [?schema :seon.schema/shape ?shape]
+               [?shape :seon.schema.shape/fingerprint ?fingerprint]
                [?row :seon.call-preparation/supplier ?function]
                [?function :seon.fn/sym ?supplier]]
              attributes
              [:seon.call-preparation/key
               :seon.call-preparation/schema
               :seon.schema/key
+              :seon.schema/shape
+              :seon.schema.shape/fingerprint
               :seon.call-preparation/supplier
               :seon.fn/sym]
              ascending-set (into (sorted-set-by compare) attributes)
@@ -530,14 +534,14 @@
                    attributes)
              query
              (array-map
-              :find '[?key ?schema-key ?supplier]
+              :find '[?key ?schema-key ?fingerprint ?supplier]
               :in '[$]
               :where where)
              reversed-query
              (array-map
               :where where
               :in '[$]
-              :find '[?key ?schema-key ?supplier])
+              :find '[?key ?schema-key ?fingerprint ?supplier])
              request
              (array-map
               :seon.db/read-operation :q

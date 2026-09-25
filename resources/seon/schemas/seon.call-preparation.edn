@@ -21,9 +21,10 @@
  ;; dispatch map, a case expression, or a naming convention.
  :key [:qualified-keyword {:seon.db/identity true :seon.program/row-schema :seon.call-preparation/row}],
 
- ;; Ref to the registered `:seon.schema/key` row naming the supplied value
- ;; contract. Only that authored schema name matches; an inline structural
- ;; copy or differently named alias requests no default.
+ ;; Ref to the registered `:seon.schema/key` row whose `:seon.schema/shape`
+ ;; names the supplied value contract. Only that authored schema name matches;
+ ;; an inline structural copy or differently named alias requests no default.
+ ;; Shape fingerprints include the name and its referenced definition.
  :schema :seon.db/ref,
 
  ;; Ref to the supplier's `:seon.fn/sym` row. The symbol is DATA: it is
@@ -41,11 +42,13 @@
  ;; --- the acquired snapshot ------------------------------------------------
  :supplier-symbol :qualified-symbol,
  :schema-key :qualified-keyword,
+ :shape :seon.source/digest,
 
  :supplied-default
  [:map
   [:seon.call-preparation/key :seon.call-preparation/key]
   [:seon.call-preparation/schema-key :seon.call-preparation/schema-key]
+  [:seon.call-preparation/shape :seon.call-preparation/shape]
   [:seon.call-preparation/supplier-symbol
    :seon.call-preparation/supplier-symbol]],
 
@@ -58,7 +61,7 @@
  :refusals [:vector [:or :seon.call-preparation/incoherent-supplier-error :seon.db/error-result]],
 
  ;; THE HOT-PATH GATE. Every identity in this cluster whose contract could be
- ;; prepared at all, derived from the same contracts the plan is compiled from.
+ ;; prepared at all, derived by the same query set the plan is compiled from.
  ;; The hook is armed on every call in the cluster, so the path that matters is
  ;; the one for a callee declaring nothing suppliable: it ends at one lookup in
  ;; this set. A conservative superset (a required key whose value shape matches
@@ -88,8 +91,6 @@
 
  ;; --- the derived invocation plan ------------------------------------------
  :entry-key :qualified-keyword,
- ;; An optional map entry: an unavailable supplier leaves it absent, never refuses.
- :optional? [:= true],
 
  :slot
  [:map
@@ -99,8 +100,7 @@
    :seon.call-preparation/supplier-symbol]
   [:seon.call-preparation/entry-key
    {:optional true}
-   :seon.call-preparation/entry-key]
-  [:seon.call-preparation/optional? {:optional true} :seon.call-preparation/optional?]],
+   :seon.call-preparation/entry-key]],
 
  :slots [:vector :seon.call-preparation/slot],
 

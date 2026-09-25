@@ -694,7 +694,8 @@
             (db/q '[:find [?arity ...]
                     :where
                     [_ :seon.fn/arities ?arity]
-                    [?arity :seon.fn.arity/argument-count]]
+                    [?arity :seon.fn.arity/argument-count]
+                    [?arity :seon.fn.arity/return-schema]]
                   db)
             assertion-transactions
             (db/q '[:find ?function ?spec-tx ?arities-tx ?analysis-tx
@@ -704,21 +705,23 @@
                    [?function :seon.program/analyzed-source-digest _ ?analysis-tx]]
                  db)
             arity-assertion-transactions
-            (db/q '[:find ?function ?spec-tx ?arity-tx ?count-tx
+            (db/q '[:find ?function ?spec-tx ?arity-tx ?count-tx ?return-tx
                     :where
                     [?function :seon.fn/spec _ ?spec-tx]
                     [?function :seon.fn/arities ?arity ?arity-tx]
-                    [?arity :seon.fn.arity/argument-count _ ?count-tx]]
+                    [?arity :seon.fn.arity/argument-count _ ?count-tx]
+                    [?arity :seon.fn.arity/return-schema _ ?return-tx]]
                   db)
             argument-assertion-transactions
             (db/q '[:find ?function ?spec-tx ?argument-tx ?index-tx
-                           ?binding-tx
+                           ?binding-tx ?schema-tx
                     :where
                     [?function :seon.fn/spec _ ?spec-tx]
                     [?function :seon.fn/arities ?arity]
                     [?arity :seon.fn.arity/arguments ?argument ?argument-tx]
                     [?argument :seon.fn.argument/index _ ?index-tx]
-                    [?argument :seon.fn.argument/binding _ ?binding-tx]]
+                    [?argument :seon.fn.argument/binding _ ?binding-tx]
+                    [?argument :seon.fn.argument/schema _ ?schema-tx]]
                   db)
             functions-by-role
             (db/q '[:find ?role ?function-symbol
@@ -741,11 +744,12 @@
           (is (every? (fn [[_ spec-tx arities-tx analysis-tx]]
                         (= spec-tx arities-tx analysis-tx))
                       assertion-transactions))
-          (is (every? (fn [[_ spec-tx arity-tx count-tx]]
-                        (= spec-tx arity-tx count-tx))
+          (is (every? (fn [[_ spec-tx arity-tx count-tx return-tx]]
+                        (= spec-tx arity-tx count-tx return-tx))
                       arity-assertion-transactions))
-          (is (every? (fn [[_ spec-tx argument-tx index-tx binding-tx]]
-                        (= spec-tx argument-tx index-tx binding-tx))
+          (is (every? (fn [[_ spec-tx argument-tx index-tx binding-tx
+                            schema-tx]]
+                        (= spec-tx argument-tx index-tx binding-tx schema-tx))
                       argument-assertion-transactions)))
         (testing "one query answers both directions for a given schema"
           (is (seq (filter (comp #{:input} first) functions-by-role)))
@@ -799,7 +803,9 @@
                         (not [?function :seon.fn/arities])
                         (not [?function :seon.program/analyzed-source-digest])
                         (and [?function :seon.fn/arities ?arity]
-                             (not [?arity :seon.fn.arity/argument-count])))]
+                             (not [?arity :seon.fn.arity/argument-count]))
+                        (and [?function :seon.fn/arities ?arity]
+                             (not [?arity :seon.fn.arity/return-schema])))]
                     @connection))))))))
 
 (deftest publication-refuses-a-required-artifact-load-finding
@@ -1632,7 +1638,7 @@
                            :seon.source/database @connection}))))))
 
 (deftest ^{:seon.test/long
-           "One complete canonical program population into a fresh memory store verifies exclusive component ownership."
+           "One complete canonical program population into a fresh memory store verifies transaction-local shape sharing."
            :seon.test/long-ms 180000}
   fresh-population-flattens-with-its-supplied-declarations
   (let [configuration {:store {:backend :memory :id (random-uuid)}
@@ -1671,13 +1677,36 @@
                                :seon.db/process boot-process
                                :seon.fn/manifest manifest})]
                   (is (pos? (:seon.reconcile/operations result)) (pr-str result))))
-             (let [database (db/db connection)
+             (let [entities (:seon.fn/index-entities @compiled)
+                   shape-ids (into #{}
+                                   (keep (fn [[_ eid attribute]]
+                                           (when (= :seon.schema.shape/fingerprint attribute)
+                                             eid)))
+                                   (:seon.fn/index-identity-operations @compiled))
+                   shape-rows (filter #(shape-ids (:db/id %)) entities)
+                   nested-shapes
+                   (for [entity entities
+                         value (rest (tree-seq coll? seq entity))
+                         :when (and (map? value) (:seon.schema.shape/fingerprint value))]
+                     value)
+                   database (db/db connection)
                    component-attributes
                    (into []
                          (keep (fn [[attribute declaration]]
                                  (when (:db/isComponent declaration) attribute)))
-                         (:schema database))]
-               (is (seq (:seon.fn/index-entities @compiled)) "the population compiled")
+                         (:schema database))
+                   fingerprints (db/q '[:find ?fingerprint
+                                        :where [_ :seon.schema.shape/fingerprint ?fingerprint]]
+                                      database)]
+               (is (seq shape-ids) "the subject includes real shared contract shapes")
+               (is (empty? nested-shapes)
+                   "identified shapes are emitted once, never repeated inside declarations")
+               (is (= (count shape-ids) (count shape-rows) (count fingerprints)))
+               (is (seq (db/q '[:find ?shape
+                                :where [?a :seon.fn.arity/input-schema ?shape]
+                                       [?b :seon.fn.arity/input-schema ?shape]
+                                       [(not= ?a ?b)]] database))
+                   "distinct arities retain their shared shape reference")
                (is (seq component-attributes)
                    "the installed schema declares the component relationships checked")
                (is (empty?

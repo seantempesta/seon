@@ -1131,7 +1131,7 @@
     (testing "the widening is confined to component positions"
       (is (false? ((schema/projection-validator projection :seon.db/ref) entity))
           ":seon.db/ref requires :db/id on a reference map")
-      (is (false? ((schema/projection-validator projection :seon.call-preparation/schema) entity))
+      (is (false? ((schema/projection-validator projection :seon.fn.arity/input-schema) entity))
           "a non-component ref requires :db/id on a reference map")
       (is (false? ((schema/projection-validator projection :seon.fn/arities) [{}]))
           "an empty map is not a component entity"))
@@ -1237,14 +1237,37 @@
                        (select-keys configuration [:seon.config/on-core-error
                                                    :seon.config.error/max-evidence-bytes]))))))
        (testing "call preparation's argument validators compile"
-         (let [arities (#'call-preparation/contract-arities bare)
-               arguments (for [[_ function-arities] arities
-                               arity function-arities
-                               argument (:seon.call-preparation/arity-arguments arity)]
-                           argument)]
-           (is (seq arguments) "the canonical contracts declare arguments")
-           (is (every? #(fn? (m/validator (:seon.call-preparation/argument-schema %)))
-                       arguments))))))))
+         (let [with-slots
+               (->> (keys contracts)
+                    sort
+                    (filter (fn [function-symbol]
+                              (seq (seon.db/q
+                                    database
+                                    '[:find ?order ?index
+                                      :in $ ?sym
+                                      :where
+                                      [?function :seon.fn/sym ?sym]
+                                      [?function :seon.fn/arities ?arity]
+                                      [?arity :seon.fn.arity/order ?order]
+                                      [?arity :seon.fn.arity/arguments ?argument]
+                                      [?argument :seon.fn.argument/index ?index]
+                                      [?argument :seon.fn.argument/schema _]]
+                                    function-symbol))))
+                    (take 25))]
+           (is (seq with-slots)
+               "the canonical program graph declares argument shapes")
+           (is (= {}
+                  (into (sorted-map)
+                        (keep (fn [function-symbol]
+                                (when-let [message
+                                           (failure-of
+                                            #(#'call-preparation/argument-validators
+                                              database
+                                              (assoc @#'call-preparation/empty-snapshot
+                                                     :seon.schema/projection bare)
+                                              function-symbol))]
+                                  [function-symbol message])))
+                        with-slots)))))))))
 
 (deftest one-derivation-owns-the-projection-predicate-bindings
   ;; AGENTS §2.2. Nine spellings of

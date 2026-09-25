@@ -17,15 +17,12 @@
                          :where [?f :seon.fn/sym ?sym]
                          [?f :seon.fn/private? false]
                          [?f :seon.fn/spec ?spec]] database)
-        registry (:seon.schema.projection/registry (db/carried-projection database))
-        ;; A variadic arity without a Malli guard, read from the compiled contract.
-        unguarded (into #{}
-                        (keep (fn [[sym]]
-                                (when (some #(let [info (m/-function-info %)]
-                                               (and (= :varargs (:arity info)) (not (:guard info))))
-                                            (some-> (mr/schema registry sym) m/-function-schema-arities))
-                                  [sym])))
-                        functions)
+        unguarded (db/q '[:find ?sym
+                         :where [?f :seon.fn/sym ?sym]
+                         [?f :seon.fn/private? false]
+                         [?f :seon.fn/arities ?arity]
+                         (not [?arity :seon.fn.arity/max])
+                         (not [?arity :seon.fn.arity/guard-schema])] database)
         schemas (db/q '[:find ?key ?form
                        :where [?s :seon.schema/key ?key]
                        [?s :seon.schema/form ?form]] database)]

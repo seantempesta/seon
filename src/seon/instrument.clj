@@ -21,6 +21,7 @@
             [seon.db :as db]
             [seon.effect :as effect]
             [seon.env :as env]
+            [seon.fn.schema-shape :as schema-shape]
             [seon.error :as error]
             [seon.id]
             [seon.profile :as profile]
@@ -568,14 +569,6 @@
                        :seon.error.key/bound-bytes
                        (:seon.error.projection/bound-bytes projected)}})) path)))))
 
-(defn- expected-shape
-  "The identity of the schema a value failed: a digest of its authored form
-  (`schema/canonical-definition` reads bound predicates back to their names)."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:fn malli.core/schema?]] :seon.error/expected-shape]}
-  [projection compiled]
-  (seon.id/digest 64 [(schema/canonical-definition (m/form compiled)
-                                                   (schema/predicate-functions-in projection))]))
-
 (defn- boundary-refusal
   "Construct boundary evidence independently of the body's output contract."
   {:malli/schema [:=> [:cat :map :seon.sci.admit/caps :qualified-keyword :map [:vector :map]] :seon.instrument/refusal-result]}
@@ -608,14 +601,21 @@
                       :seon.instrument.explanation/value-location
                       (observation-location caps (:in problem))
                       :seon.instrument.explanation/expected-shape
-                      (expected-shape projection (:schema problem))
+                      (:seon.schema.shape/fingerprint
+                       (schema-shape/normalized-form (:schema problem)
+                         (:seon.schema.projection/forms projection)
+                         (schema/predicate-functions-in projection)))
                       :seon.instrument.explanation/actual
                       (error/project-observation caps (:value problem))
                       :seon.instrument.explanation/humanization-unavailable
                       "The original problem is represented by its schema and value paths."})
                    (:errors explanation))]
         (assoc base :seon.instrument/check check
-               :seon.error/expected-shape (expected-shape projection contract)
+               :seon.error/expected-shape
+               (:seon.schema.shape/fingerprint
+                (schema-shape/normalized-form contract
+                  (:seon.schema.projection/forms projection)
+                  (schema/predicate-functions-in projection)))
                :seon.error/location (observation-location caps [])
                :seon.instrument/explanations
                {:seon.instrument.explanations/count (count items)

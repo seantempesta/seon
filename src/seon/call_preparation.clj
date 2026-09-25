@@ -12,8 +12,8 @@
 
   Three facts make a value suppliable, and they live in the database as
   ordinary initialization rows: `:seon.call-preparation/key`,
-  `/schema` (the registered schema whose declared name is the value
-  contract), and `/supplier` (the
+  `/schema` (the registered schema whose content-addressed
+  `:seon.schema/shape` is the value contract), and `/supplier` (the
   function that produces it). Adding a third supplied default is adding one
   row plus one ordinary contracted function.
 
@@ -43,6 +43,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal :as error]
+            [seon.fn.schema-shape :as schema-shape]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]))
 
@@ -149,64 +150,54 @@
 ;;; ---------------------------------------------------------------------------
 
 (def ^:private row-query
-  '[:find ?key ?schema-key ?supplier
+  '[:find ?key ?schema-key ?fingerprint ?supplier
     :in $
     :where
     [?row :seon.call-preparation/key ?key]
     [?row :seon.call-preparation/schema ?schema]
     [?schema :seon.schema/key ?schema-key]
+    [?schema :seon.schema/shape ?shape]
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]
     [?row :seon.call-preparation/supplier ?function]
     [?function :seon.fn/sym ?supplier]])
 
-;;; ---------------------------------------------------------------------------
-;;; Contract arities — read from the projection's compiled Malli registry
-;;; ---------------------------------------------------------------------------
+(def ^:private supplier-shape-query
+  ;; A supplier's declared call shape and return shape, for the coherence
+  ;; proof: one argument (this cluster's environment) and an `:or`
+  ;; return — the row's value shape plus declared error declared-schemas.
+  '[:find ?order ?count ?argument-fingerprint ?return-type
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/argument-count ?count]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index 0]
+    [?argument :seon.fn.argument/schema ?argument-shape]
+    [?argument-shape :seon.schema.shape/fingerprint ?argument-fingerprint]
+    [?arity :seon.fn.arity/return-schema ?return]
+    [?return :seon.schema.shape/type ?return-type]])
 
-(defn- argument-facts
-  "One argument slot: its index, rest position, compiled schema and authored
-  schema name; for a map (inline or named, through `m/deref-all`) its
-  `[key optional? value-form]` entries."
-  {:malli/schema [:=> [:cat :int :boolean [:fn malli.core/schema?]] :map]}
-  [index rest? child]
-  (let [form (m/form child)
-        target (m/deref-all child)]
-    (cond-> {:seon.fn.argument/index index :seon.fn.argument/rest? rest? ::argument-schema child}
-      (qualified-keyword? form) (assoc :seon.call-preparation/schema-key form)
-      (and (not rest?) (= :map (m/type target)))
-      (assoc ::map-entries (mapv (fn [[entry-key properties value]]
-                               [entry-key (true? (:optional properties)) (m/form value)])
-                             (m/children target))))))
+(def ^:private supplier-return-arms-query
+  '[:find ?child-fingerprint
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order 0]
+    [?arity :seon.fn.arity/return-schema ?return]
+    [?return :seon.schema.shape/children ?child]
+    [?child :seon.schema.shape.child/schema ?child-shape]
+    [?child-shape :seon.schema.shape/fingerprint ?child-fingerprint]])
 
-(defn- arity-facts
-  "One compiled function schema's arities, ordered and indexed as
-  `seon.program/contract-facts` orders them (`m/-function-schema-arities`,
-  then the `:cat`/`:catn` input's children); a variadic arity's last slot is its rest."
-  {:malli/schema [:=> [:cat [:fn malli.core/schema?]] [:vector :map]]}
-  [compiled]
-  (mapv (fn [order arity]
-          (let [{input :input output :output kind :arity minimum :min} (m/-function-info arity)
-                slots (mapv #(if (m/schema? %) % (last %)) (m/children input))
-                variadic? (= :varargs kind)]
-            {:seon.fn.arity/order order
-             :seon.fn.arity/min minimum
-             :seon.fn.arity/argument-count (count slots)
-             :seon.call-preparation/variadic? variadic?
-             ::arity-output output
-             ::arity-arguments (mapv #(argument-facts %1 (and variadic? (= %1 (dec (count slots)))) %2)
-                               (range) slots)}))
-        (range) (m/-function-schema-arities compiled)))
-
-(defn- contract-arities
-  "`{sym arities}` for every function contract `projection` compiled. Malli's
-  registry retains the compiled schemas (`mr/schema`); this reads them once per
-  projection, held by the projection itself (`schema/projection-cache-value`)."
-  {:malli/schema [:=> [:cat :seon.schema/projection] [:map-of :qualified-symbol [:vector :map]]]}
-  [projection]
-  (schema/projection-cache-value
-   projection ::contract-arities
-   #(let [registry (:seon.schema.projection/registry projection)]
-      (into {} (keep (fn [sym] (some->> (mr/schema registry sym) arity-facts (vector sym))))
-            (keys (:seon.schema.projection/function-contracts projection))))))
+(def ^:private schema-fingerprint-query
+  '[:find ?fingerprint .
+    :in $ ?key
+    :where
+    [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/shape ?shape]
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]])
 
 (defn- incoherent
   {:malli/schema [:=> [:cat :seon.call-preparation/supplied-default :string :map]
@@ -224,64 +215,72 @@
   :seon.error/offending data}))
 
 (defn- coherent-supplier
-  "Prove one row against the program's contracts, or refuse it as a value.
+  "Prove one row against the program graph, or refuse it as a value.
 
   Refusing at acquisition is the point: an incoherent row is never
   installed, so a wrong-shaped value can never be handed to a target
-  function and disguised as that function's own contract violation.
-  Schemas are matched by declared name, never by structure."
+  function and disguised as that function's own contract violation."
   {:malli/schema
-   [:=> [:cat [:map-of :qualified-symbol [:vector :map]] :seon.call-preparation/supplied-default
-         [:set :qualified-keyword]]
-    [:or :nil :seon.call-preparation/incoherent-supplier-error]]}
-  [contracts
+   [:=> [:cat :seon.db/database-value :seon.call-preparation/supplied-default
+         [:or :nil :seon.call-preparation/shape] [:set :seon.call-preparation/shape]]
+    [:or :nil :seon.call-preparation/incoherent-supplier-error :seon.db/error-result]]}
+  [database
    {schema-key :seon.call-preparation/schema-key
+    fingerprint :seon.call-preparation/shape
     supplier :seon.call-preparation/supplier-symbol :as candidate}
-   error-keys]
-  (let [{order :seon.fn.arity/order argument-count :seon.fn.arity/argument-count
-         [argument] ::arity-arguments output ::arity-output}
-        (first (filter #(seq (::arity-arguments %)) (get contracts supplier)))
-        arms (when (= :or (m/type output)) (set (map m/form (m/children output))))]
+   environment-fingerprint error-fingerprints]
+  (let [shapes (db/q database supplier-shape-query supplier)]
     (cond
-      (nil? argument)
+      (or (:seon.db/invalid-read shapes) (:seon.schema/expected-value shapes))
+ shapes
+
+      (empty? shapes)
       (incoherent candidate
                   (str "no function named " supplier
                        " with a contracted one-argument arity is in this "
                        "cluster's program graph.")
                   {:seon.call-preparation/supplier-symbol supplier})
 
-      (not (and (zero? (long order)) (= 1 (long argument-count))))
-      (incoherent candidate
-                  (str supplier " must take exactly one argument, this "
-                       "cluster's environment; it declares "
-                       argument-count ".")
-                  {:seon.call-preparation/supplier-symbol supplier
-                   :seon.fn.arity/argument-count argument-count})
+      :else
+      (let [[order argument-count argument-fingerprint return-type]
+            (first (sort-by first shapes))
+            arms (into #{}
+                       (map first)
+                       (db/q database supplier-return-arms-query
+                             supplier))]
+        (cond
+          (not (and (zero? (long order)) (= 1 (long argument-count))))
+          (incoherent candidate
+                      (str supplier " must take exactly one argument, this "
+                           "cluster's environment; it declares "
+                           argument-count ".")
+                      {:seon.call-preparation/supplier-symbol supplier
+                       :seon.fn.arity/argument-count argument-count})
 
-      (not= :seon.env/environment (:seon.call-preparation/schema-key argument))
-      (incoherent candidate
-                  (str supplier "'s argument is not "
-                       ":seon.env/environment. A supplier reads the "
-                       "environment it is called with and nothing else.")
-                  {:seon.call-preparation/supplier-symbol supplier})
+          (not= argument-fingerprint environment-fingerprint)
+          (incoherent candidate
+                      (str supplier "'s argument is not "
+                           ":seon.env/environment. A supplier reads the "
+                           "environment it is called with and nothing else.")
+                      {:seon.call-preparation/supplier-symbol supplier})
 
-      (nil? arms)
-      (incoherent candidate
-                  (str supplier " must declare a union return: its "
-                       "value schema or declared error declared-schemas. It declares a "
-                       (pr-str (m/type output)) ".")
-                  {:seon.call-preparation/supplier-symbol supplier})
+          (not= :or return-type)
+          (incoherent candidate
+                      (str supplier " must declare a union return: its "
+                           "value schema or declared error declared-schemas. It declares a "
+                           (pr-str return-type) ".")
+                      {:seon.call-preparation/supplier-symbol supplier})
 
-      (not (and (contains? arms schema-key)
-                (seq (disj arms schema-key))
-                (every? error-keys (disj arms schema-key))))
-      (incoherent candidate
-                  (str supplier "'s declared return does not agree with "
-                       "the row's value schema " schema-key ".")
-                  {:seon.call-preparation/supplier-symbol supplier
-                   :seon.call-preparation/schema-key schema-key})
+          (not (and (contains? arms fingerprint)
+                    (seq (disj arms fingerprint))
+                    (every? error-fingerprints (disj arms fingerprint))))
+          (incoherent candidate
+                      (str supplier "'s declared return does not agree with "
+                           "the row's value schema " schema-key ".")
+                      {:seon.call-preparation/supplier-symbol supplier
+                       :seon.call-preparation/schema-key schema-key})
 
-      :else nil)))
+          :else nil)))))
 
 (defn- refused-read
   "The first of `reads` that is the database owner's declared read error, or
@@ -326,38 +325,117 @@
           (refused-read ranges)
           (transduce (comp cat (map :tx)) max 0 ranges)))))
 
-(defn- by-schema-key
-  {:malli/schema [:=> [:cat :seon.call-preparation/supplied-defaults]
-                  [:map-of :qualified-keyword :seon.call-preparation/supplied-default]]}
+(defn- by-fingerprint
   [supplied-defaults]
-  (into {} (map (fn [[_ candidate]] [(:seon.call-preparation/schema-key candidate) candidate]))
+  (into {}
+        (map (fn [[_ candidate]]
+               [(:seon.call-preparation/shape candidate) candidate]))
         supplied-defaults))
+
+(def ^:private prepared-positional-query
+  '[:find [?sym ...]
+    :in $ [?fingerprint ...]
+    :where
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?function :seon.fn/arities ?arity]
+    [?function :seon.fn/sym ?sym]])
+
+(def ^:private prepared-entry-query
+  '[:find ?sym ?entry-key ?fingerprint
+    :in $ [?fingerprint ...]
+    :where
+    [?value-shape :seon.schema.shape/fingerprint ?fingerprint]
+    [?entry :seon.schema.shape.entry/schema ?value-shape]
+    [?entry :seon.schema.map-entry/key-keyword ?entry-key]
+    [?argument-shape :seon.schema.shape/entries ?entry]
+    [?argument :seon.fn.argument/schema ?argument-shape]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?function :seon.fn/arities ?arity]
+    [?function :seon.fn/sym ?sym]])
+
+(defn- named-entry-facts
+  "Required map entries derive from this database's already compiled registry.
+  The projection's attribute index selects candidates; no schema population scan."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map] :map]}
+  [database index]
+  (let [projection (db/carried-projection database)
+        registry (:seon.schema.projection/registry projection)
+        by-key (into {} (map (juxt :seon.call-preparation/key identity)) (vals index))
+        parents (into #{} (mapcat #(get (:seon.schema.projection/shape-index projection) %))
+                      (keys by-key))]
+    (reduce
+     (fn [facts parent]
+       (let [compiled (m/deref-all (mr/schema registry parent))]
+         (if (= :map (m/type compiled))
+           (reduce
+            (fn [facts [key properties child]]
+              (let [candidate (get by-key key)]
+                (cond-> facts
+                    (not (:optional properties))
+                    (update :seon.schema.shape/required-map-entries conj [parent key])
+                    (and candidate (= (m/form child) (:seon.call-preparation/schema-key candidate)))
+                    (update :seon.schema.shape/supplied-map-entries conj
+                            [parent key (:seon.call-preparation/shape candidate)]))))
+            facts (m/children compiled))
+           facts)))
+     {:seon.schema.shape/required-map-entries []
+      :seon.schema.shape/supplied-map-entries []}
+     (sort parents))))
+
+(def ^:private prepared-named-entry-query
+  '[:find ?sym ?entry-key ?fingerprint
+    :in $ [[?schema-key ?entry-key ?fingerprint]]
+    :where
+    [?argument-shape :seon.schema.shape/type ?schema-key]
+    [?argument :seon.fn.argument/schema ?argument-shape]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?function :seon.fn/arities ?arity]
+    [?function :seon.fn/sym ?sym]])
 
 (defn- prepared-symbols
   "Every identity in this cluster whose contract could be prepared.
 
-  THE HOT-PATH GATE: an identity absent here provably declares no
-  suppliable positional slot and no suppliable map entry, inline or named,
-  so the hook returns its arguments after one set lookup — no plan
-  compilation, no supplier call. Derived once per snapshot from the
-  contracts of the database value the snapshot is derived from.
+  THE HOT-PATH GATE, and a query rather than a list: an identity absent
+  here provably declares no suppliable positional slot and no suppliable
+  required map key, so the hook returns its arguments after one set
+  lookup — no plan compilation, no Datalog, no supplier call. Derived
+  once per snapshot from the same database value the snapshot is derived
+  from, so a newly published function is gated in at the same basis the
+  row is.
 
-  A conservative SUPERSET: over-including costs one cached empty plan;
-  under-including would silently skip preparation."
-  {:malli/schema [:=> [:cat [:map-of :qualified-symbol [:vector :map]]
-                       [:map-of :qualified-keyword :seon.call-preparation/supplied-default]]
-                  :seon.call-preparation/prepared-symbols]}
-  [contracts by-schema]
-  (into #{}
-        (keep (fn [[sym arities]]
-                (when (some (fn [{schema-key :seon.call-preparation/schema-key entries ::map-entries}]
-                              (or (contains? by-schema schema-key)
-                                  (some (fn [[entry-key _ value]]
-                                          (= entry-key (:seon.call-preparation/key (get by-schema value))))
-                                        entries)))
-                            (mapcat ::arity-arguments arities))
-                  sym)))
-        contracts))
+  Deliberately a conservative SUPERSET: a required map key whose value
+  shape matches while its keyword does not is admitted here and rejected
+  by the plan's own two-part join. Over-including costs one cached empty
+  plan; under-including would silently skip preparation."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :seon.schema.shape/supplied-map-entries]
+                  [:or :seon.call-preparation/prepared-symbols :seon.db/error-result]]}
+  [database index named-entries]
+  (let [fingerprints (vec (keys index))]
+    (if (empty? fingerprints)
+      #{}
+      (let [positional (db/q database prepared-positional-query fingerprints)
+            entries (db/q database prepared-entry-query fingerprints)
+            named (db/q database prepared-named-entry-query named-entries)]
+        (cond
+          (or (:seon.db/invalid-read positional) (:seon.schema/expected-value positional)) positional
+          (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries)) entries
+          (or (:seon.db/invalid-read named) (:seon.schema/expected-value named)) named
+          :else
+          (into (set positional)
+                (comp (filter (fn [[_ entry-key fingerprint]]
+                                (= entry-key
+                                   (:seon.call-preparation/key
+                                    (get index fingerprint)))))
+                      (map first))
+                (concat entries named)))))))
+
+(def ^:private error-fingerprints-query
+  '[:find [?fingerprint ...] :in $ [?key ...]
+    :where [?schema :seon.schema/key ?key]
+    [?schema :seon.schema/shape ?shape]
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]])
 
 (defn- derive-snapshot
   "The snapshot's program-derived members, from one database value.
@@ -376,18 +454,25 @@
     (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
 
       rows
-      (let [contracts (contract-arities (db/carried-projection database))
+      (let [environment-fingerprint
+            (db/q database schema-fingerprint-query :seon.env/environment)
+            error-fingerprints
             ;; debt: seon.db supplied-database-value and supplied-connection still declare :seon.error/value.
-            error-keys (conj (set (@error-declared-schema-keys projection)) :seon.error/value)
+            (set (db/q database error-fingerprints-query
+                       (conj (@error-declared-schema-keys projection) :seon.error/value)))
             candidates
-            (mapv (fn [[default-key schema-key supplier]]
+            (mapv (fn [[default-key schema-key fingerprint supplier]]
                     {:seon.call-preparation/key default-key
                      :seon.call-preparation/schema-key schema-key
+                     :seon.call-preparation/shape fingerprint
                      :seon.call-preparation/supplier-symbol (symbol supplier)})
                   rows)
             proved
             (mapv (fn [candidate]
-                    [candidate (coherent-supplier contracts candidate error-keys)])
+                    [candidate
+                     (coherent-supplier database candidate
+                                        environment-fingerprint
+                                        error-fingerprints)])
                   candidates)
             ;; Compiling the value validator is part of proving the row: a
             ;; value schema the acquired projection cannot compile is an
@@ -418,19 +503,34 @@
                                [(:seon.call-preparation/key candidate)
                                 candidate])))
                   compiled)
+            fingerprint-index
+            (into {}
+                  (map (fn [[_ candidate]]
+                         [(:seon.call-preparation/shape candidate) candidate]))
+                  admitted)
+            named-facts (named-entry-facts database fingerprint-index)
+            prepared (prepared-symbols database fingerprint-index
+                                       (:seon.schema.shape/supplied-map-entries named-facts))
             basis (newest-row-transaction database (row-attributes))]
-        (if (refused-read [basis])
+        (cond
+          (or (:seon.db/invalid-read prepared) (:seon.schema/expected-value prepared))
+          prepared
+
+          (refused-read [basis])
           basis
-          {:seon.call-preparation/supplied-defaults admitted
-           :seon.call-preparation/prepared-symbols (prepared-symbols contracts (by-schema-key admitted))
-           :seon.call-preparation/validators
-           (into {}
-                 (comp (remove second)
-                       (map (fn [[candidate _ valid?]]
-                              [(:seon.call-preparation/key candidate) valid?])))
-                 compiled)
-           :seon.call-preparation/refusals (into [] (keep second) compiled)
-           :seon.call-preparation/basis-t basis})))))
+
+          :else
+          (merge named-facts
+                 {:seon.call-preparation/supplied-defaults admitted
+                  :seon.call-preparation/prepared-symbols prepared
+                  :seon.call-preparation/validators
+                  (into {}
+                        (comp (remove second)
+                              (map (fn [[candidate _ valid?]]
+                                     [(:seon.call-preparation/key candidate) valid?])))
+                        compiled)
+                  :seon.call-preparation/refusals (into [] (keep second) compiled)
+                  :seon.call-preparation/basis-t basis}))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The snapshot memo — keyed by what the derivation reads
@@ -439,22 +539,22 @@
 (def ^:private snapshot-queries
   ;; Every query `derive-snapshot` issues. The read set below is derived from
   ;; these forms by Datahike itself, so a query added here widens the key.
-  [row-query])
+  [row-query supplier-shape-query supplier-return-arms-query
+   schema-fingerprint-query error-fingerprints-query
+   prepared-positional-query prepared-entry-query prepared-named-entry-query])
 
 (def ^:private snapshot-read-attributes
   ;; `datahike.query/query-attribute-dependencies` (query.cljc:2923) is the
   ;; projection Datahike's own query cache compares, pure over the query form.
-  ;; The row attributes add the basis ranges, and `schema/projection-attributes`
-  ;; the carried projection's, whose contracts the derivation reads. `:all`
-  ;; from any query means no revision can prove the key, and the revision tier
-  ;; is not used.
+  ;; The row attributes add the basis ranges. `:all` from any query means no
+  ;; revision can prove the key, and the revision tier is not used.
   (delay
     (reduce (fn [attributes query]
               (let [dependencies (d/query-attribute-dependencies query)]
                 (if (or (= :all attributes) (= :all dependencies))
                   :all
                   (into attributes dependencies))))
-            (into (set (row-attributes)) schema/projection-attributes)
+            (set (row-attributes))
             snapshot-queries)))
 
 (def snapshot-cache-policy
@@ -583,11 +683,10 @@
             (long (:seon.call-preparation/checked-through-t derived)))
       current
       (cond-> (assoc current :seon.call-preparation/snapshot derived)
-        ;; A new derivation (changed rows or contracts; the memo hands an
-        ;; unchanged program its held members) invalidates every compiled
-        ;; plan; dropping them keeps the cache from holding two generations.
-        (not (identical? (:seon.call-preparation/prepared-symbols existing)
-                         (:seon.call-preparation/prepared-symbols derived)))
+        ;; A changed row basis invalidates every compiled plan by key;
+        ;; dropping them keeps the cache from holding two generations at once.
+        (not= (:seon.call-preparation/basis-t existing)
+              (:seon.call-preparation/basis-t derived))
         (assoc :seon.call-preparation/plans {})))))
 
 (defn current-snapshot
@@ -620,7 +719,7 @@
                (swap! call-state adopt derived)))))))
 
 ;;; ---------------------------------------------------------------------------
-;;; Plan derivation — the contract's arities joined to the supplied defaults
+;;; Plan derivation — one Datalog query set over the P12 argument addresses
 ;;; ---------------------------------------------------------------------------
 
 (defn- contract-transaction
@@ -646,26 +745,161 @@
               facts
               (transduce (map :tx) max 0 facts))))))))
 
+(def ^:private arity-query
+  '[:find ?order ?min ?count ?max
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/min ?min]
+    [?arity :seon.fn.arity/argument-count ?count]
+    [(get-else $ ?arity :seon.fn.arity/max -1) ?max]])
+
+(def ^:private positional-query
+  ;; A positional slot is eligible only when the slot's COMPLETE normalized
+  ;; shape is a supplied default's value shape. Containing that shape below
+  ;; `:or`, a collection, or a regex tail does not make the slot suppliable.
+  '[:find ?order ?index ?rest? ?fingerprint
+    :in $ ?sym [?fingerprint ...]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? ?rest?]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/fingerprint ?fingerprint]])
+
+(def ^:private argument-shape-query
+  '[:find ?order ?index ?shape
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/schema ?shape]])
+
+(defn- argument-validators
+  "Each fixed arity's compiled argument validators, in argument order, or
+  the database owner's read error when the argument shapes cannot be read."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot :seon.fn/sym]
+    [:or [:map-of :seon.fn.arity/order :seon.call-preparation/argument-validators]
+     :seon.db/error-result]]}
+  [database _current sym]
+  (let [rows (db/q database argument-shape-query sym)]
+    (or (refused-read [rows])
+        (into {}
+              (map (fn [[order rows]]
+                     [order (mapv (fn [[_ _ entity]]
+                                    (m/validator (schema-shape/compiled-in database entity)))
+                                  (sort-by second rows))]))
+              (group-by first rows)))))
+
+(def ^:private map-entry-query
+  ;; Keys of a top-level argument map, required or optional: an optional entry
+  ;; whose schema is a supplied default is a declared request for that
+  ;; default (owner, 2026-09-25); the caller's own value still wins. Selection joins BOTH the
+  ;; declared key and the value shape: `seon.cluster.wake/route!` declares
+  ;; `:seon.cluster.wake/connection` with the `:seon.db/connection` shape, and
+  ;; matching on shape alone would fill a key nobody declared as a default.
+  '[:find ?order ?index ?entry-key ?fingerprint
+    :in $ ?sym [?fingerprint ...]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?argument-shape]
+    [?argument-shape :seon.schema.shape/entries ?entry]
+    [?entry :seon.schema.map-entry/key-keyword ?entry-key]
+    [?entry :seon.schema.shape.entry/schema ?value-shape]
+    [?value-shape :seon.schema.shape/fingerprint ?fingerprint]])
+
+(def ^:private required-map-entry-query
+  '[:find ?order ?index ?entry-key
+    :in $ ?sym
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/type :map]
+    [?shape :seon.schema.shape/entries ?entry]
+    [?entry :seon.schema.shape.entry/optional? false]
+    [?entry :seon.schema.map-entry/key-keyword ?entry-key]])
+
+(def ^:private named-map-entry-query
+  '[:find ?order ?index ?entry-key ?fingerprint
+    :in $ ?sym [[?schema-key ?entry-key ?fingerprint]]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/type ?schema-key]])
+
+(def ^:private required-named-map-entry-query
+  '[:find ?order ?index ?entry-key
+    :in $ ?sym [[?schema-key ?entry-key]]
+    :where
+    [?function :seon.fn/sym ?sym]
+    [?function :seon.fn/arities ?arity]
+    [?arity :seon.fn.arity/order ?order]
+    [?arity :seon.fn.arity/arguments ?argument]
+    [?argument :seon.fn.argument/index ?index]
+    [?argument :seon.fn.argument/rest? false]
+    [?argument :seon.fn.argument/schema ?shape]
+    [?shape :seon.schema.shape/type ?schema-key]])
+
 (defn supplied-map-entries
   "Return [arity-order argument-index key] for declared supplied map entries.
 
-  An entry of a map argument, inline or named, whose key and value schema
-  name are one supplied-default row's, exactly as preparation requires.
-  Positional defaults are not map entries."
+  Uses the plan's required, top-level map-entry query and supplier rows.
+  Both the key and complete value shape must match, exactly as preparation
+  requires. Optional entries and positional defaults are not map entries."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.fn/sym]
     [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.db/error-result]]}
   [database sym]
   (let [rows (db/q database row-query)]
-    (or (refused-read [rows])
-        (let [declared (into #{} (map (fn [[entry-key schema-key _]] [entry-key schema-key])) rows)]
-          (->> (for [arity (get (contract-arities (db/carried-projection database)) sym)
-                     {index :seon.fn.argument/index entries ::map-entries} (::arity-arguments arity)
-                     [entry-key _ value] entries
-                     :when (contains? declared [entry-key value])]
-                 [(:seon.fn.arity/order arity) index entry-key])
+    (if (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
+
+      rows
+      (let [declared (into #{} (map (fn [[entry-key _ fingerprint _]] [entry-key fingerprint])) rows)
+            fingerprints (vec (distinct (map #(nth % 2) rows)))
+            index (into {} (map (fn [[key schema-key fingerprint supplier]]
+                                  [fingerprint {:seon.call-preparation/key key
+                                                :seon.call-preparation/schema-key schema-key
+                                                :seon.call-preparation/shape fingerprint
+                                                :seon.call-preparation/supplier-symbol supplier}])) rows)
+            facts (named-entry-facts database index)
+            entries (if (seq fingerprints)
+                      (db/q database map-entry-query sym fingerprints) [])
+            named (if (seq fingerprints)
+                    (db/q database named-map-entry-query sym
+                          (:seon.schema.shape/supplied-map-entries facts)) [])]
+        (cond
+          (or (:seon.db/invalid-read entries) (:seon.schema/expected-value entries)) entries
+          (or (:seon.db/invalid-read named) (:seon.schema/expected-value named)) named
+          :else
+          (->> (concat entries named)
+               (filter (fn [[_ _ entry-key fingerprint]] (contains? declared [entry-key fingerprint])))
+               (map #(subvec (vec %) 0 3))
                sort
-               vec)))))
+               vec))))))
 
 (defn- candidate-indexes
   [candidates]
@@ -739,12 +973,12 @@
 
 (defn- arity-plan-rows
   [arities slots-by-arity entries-by-arity]
-  (mapv (fn [arity]
-          (let [order (:seon.fn.arity/order arity)]
+  (mapv (fn [[order minimum argument-count maximum]]
+          (let [order (long order)]
             {:seon.fn.arity/order order
-             :seon.fn.arity/min (long (:seon.fn.arity/min arity))
-             :seon.fn.arity/argument-count (:seon.fn.arity/argument-count arity)
-             :seon.call-preparation/variadic? (:seon.call-preparation/variadic? arity)
+             :seon.fn.arity/min (long minimum)
+             :seon.fn.arity/argument-count (long argument-count)
+             :seon.call-preparation/variadic? (neg? (long maximum))
              :seon.call-preparation/rest-slot?
              (true? (get-in slots-by-arity [order :rest-slot?]))
              :seon.call-preparation/slots
@@ -753,44 +987,49 @@
              :seon.call-preparation/entries
              (vec (sort-by :seon.fn.argument/index
                            (get entries-by-arity order [])))}))
-        arities))
+        (sort-by first arities)))
 
 (defn plan-for
-  "Compile one function identity's invocation plan from its contract.
+  "Compile one function identity's invocation plan from database facts.
 
-  The database value's carried projection holds the compiled contract
-  (`contract-arities`); its slots and map entries, inline or named, are
-  joined to the acquired supplied-default rows by declared schema name.
-  Returns nil when the identity is not a function in this cluster's program
-  graph, and the database owner's read error when its identity could not be
-  read: an unreadable program graph is never \"not contracted\"."
+  One query set over the P12 argument addresses joined to the acquired
+  supplied-default rows. It never reads `:seon.fn/spec`, source text, a
+  serialized AST string, or a hand-maintained list. Returns nil when the
+  identity is not a contracted function in this cluster's program graph,
+  and the database owner's read error when any of its reads could not be
+  answered: an unreadable program graph is never \"not contracted\"."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot
          :seon.fn/sym]
     [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [database current sym]
-  (let [contract-t (contract-transaction database sym)]
-    (if-not (number? contract-t)
-      contract-t
-      (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))
-            arities (get (contract-arities (db/carried-projection database)) sym)
-            arguments (for [arity arities argument (::arity-arguments arity)]
-                        [(:seon.fn.arity/order arity) argument])
-            positional (for [[order {position :seon.fn.argument/index rest? :seon.fn.argument/rest?
-                                     schema-key :seon.call-preparation/schema-key}] arguments
-                             :when (get index schema-key)]
-                         [order position rest? schema-key])
-            entries (for [[order {position :seon.fn.argument/index entries ::map-entries}] arguments
-                          [entry-key optional? value] entries
-                          :when (get index value)]
-                      [order position entry-key value optional?])
-            required (for [[order {position :seon.fn.argument/index entries ::map-entries}] arguments
-                           [entry-key optional? _] entries
-                           :when (not optional?)]
-                       [order position entry-key])
+  (let [contract-t (contract-transaction database sym)
+        index (by-fingerprint (:seon.call-preparation/supplied-defaults current))
+        fingerprints (vec (keys index))
+        reads (when (number? contract-t)
+                {:arities (db/q database arity-query sym)
+                 :positional (when (seq fingerprints)
+                               (db/q database positional-query sym fingerprints))
+                 :map-entries (when (seq fingerprints)
+                                (db/q database map-entry-query sym fingerprints))
+                 :named-entries (when (seq fingerprints)
+                                  (db/q database named-map-entry-query sym
+                                        (:seon.schema.shape/supplied-map-entries current)))
+                 :required (db/q database required-map-entry-query sym)
+                 :required-named (db/q database required-named-map-entry-query sym
+                                       (:seon.schema.shape/required-map-entries current))})
+        ;; An uncontracted identity reads nothing; `(vals nil)` is nil, not a sequence.
+        refused (refused-read (vec (vals reads)))]
+    (cond
+      (not (number? contract-t)) contract-t
+      refused refused
+      :else
+      (let [{:keys [arities positional map-entries named-entries required
+                    required-named]} reads
+            entries (concat map-entries named-entries)
             positional-slots-by-arity
-            (reduce (fn [acc [order position rest? schema-key]]
-                      (let [candidate (get index schema-key)]
+            (reduce (fn [acc [order position rest? fingerprint]]
+                      (let [candidate (get index fingerprint)]
                         (cond-> acc
                           (and candidate (not rest?))
                           (update-in [(long order) :slots]
@@ -801,17 +1040,17 @@
                     {}
                     positional)
             entries-by-arity
-            (reduce (fn [acc [order position entry-key schema-key optional?]]
-                      (let [candidate (get index schema-key)]
+            (reduce (fn [acc [order position entry-key fingerprint]]
+                      (let [candidate (get index fingerprint)]
                         ;; Both halves of the ruled join: declared key AND
-                        ;; value schema name.
+                        ;; value shape.
                         (if (and candidate
                                  (= entry-key
                                     (:seon.call-preparation/key candidate)))
                           (update acc (long order) (fnil conj [])
-                                  (cond-> (assoc (slot-of candidate position)
-                                                 :seon.call-preparation/entry-key entry-key)
-                                    optional? (assoc :seon.call-preparation/optional? true)))
+                                  (assoc (slot-of candidate position)
+                                         :seon.call-preparation/entry-key
+                                         entry-key))
                           acc)))
                     {}
                     entries)
@@ -827,16 +1066,18 @@
                                :seon.call-preparation/entries entries})
                    acc)))
              positional-slots-by-arity
-             (group-by (fn [[order position _]] [order position]) required))
-            arguments-by-order (into {} (map (juxt :seon.fn.arity/order ::arity-arguments)) arities)
+             (group-by (fn [[order position _]] [order position])
+                       (concat required required-named)))
+            validators (when (some #(> (count (:slots %)) 1)
+                                   (vals slots-by-arity))
+                         (argument-validators database current sym))
             arity-plans
             (mapv (fn [arity]
                     (cond-> arity
                       (and (not (:seon.call-preparation/variadic? arity))
                            (> (count (:seon.call-preparation/slots arity)) 1))
                       (assoc :seon.call-preparation/argument-validators
-                             (mapv (comp m/validator ::argument-schema)
-                                   (get arguments-by-order (:seon.fn.arity/order arity))))))
+                             (get validators (:seon.fn.arity/order arity)))))
                   (arity-plan-rows arities slots-by-arity entries-by-arity))
             fixed (remove :seon.call-preparation/variadic? arity-plans)
             exact-by-count
@@ -882,7 +1123,9 @@
                         (keys derived-by-count)))
             variadic (first (filter :seon.call-preparation/variadic?
                                     arity-plans))]
-        (cond-> {:seon.fn/sym sym
+        (or
+         (refused-read [validators])
+         (cond-> {:seon.fn/sym sym
                   :seon.call-preparation/contract-t (long contract-t)
                   :seon.call-preparation/basis-t
                   (long (:seon.call-preparation/basis-t current))
@@ -902,7 +1145,7 @@
                    :seon.call-preparation/rest-slot?
                    (:seon.call-preparation/rest-slot? variadic)
                    :seon.call-preparation/entries
-                   (:seon.call-preparation/entries variadic)}))))))
+                   (:seon.call-preparation/entries variadic)})))))))
 
 (defn prepared-arities
   "Source argument-count ranges compatible with an invocation plan.
@@ -1212,16 +1455,11 @@
 
         :else
         (let [refusal (volatile! nil)
-              absent (Object.)
               value-for (fn [slot]
-                          (let [produced (supply current environment slot sym)
-                                unavailable? (and (map? produced) (:seon.call-preparation/unavailable-key produced))]
-                            (cond
-                              ;; Optional is a declared absence: the call runs without the key.
-                              (and unavailable? (:seon.call-preparation/optional? slot)) absent
-                              (or unavailable? (and (map? produced) (:seon.call-preparation/invalid-key produced)))
-                              (vreset! refusal produced)
-                              :else produced)))
+                          (let [produced (supply current environment slot sym)]
+                            (when (and (map? produced) (or (:seon.call-preparation/unavailable-key produced) (:seon.call-preparation/invalid-key produced)))
+                              (vreset! refusal produced))
+                            produced))
               with-inserts
               (reduce (fn [args slot]
                         (let [position (:seon.fn.argument/index slot)
@@ -1244,7 +1482,7 @@
                                   (contains? target entry-key))
                             args
                             (let [produced (value-for entry)]
-                              (if (or @refusal (identical? absent produced))
+                              (if @refusal
                                 args
                                 (assoc args position
                                        (assoc target entry-key produced)))))))

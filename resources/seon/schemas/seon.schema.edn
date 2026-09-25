@@ -78,6 +78,7 @@
                 :seon.program/row-schema :seon.schema/schema,
                 :seon.program/source-attribute :seon.schema/form}],
               :form :string,
+              :shape :seon.db/ref,
               :ns [:and {:description "The namespace where this schema was declared."} :seon.db/ref],
               :references
               [:set
@@ -104,6 +105,7 @@
                [:seon.schema/form :seon.schema/form]
                [:seon.schema/generatable? {:optional true} :seon.schema/generatable?]
                [:seon.schema/ns {:optional true} :seon.schema/ns]
+               [:seon.schema/shape {:optional true} :seon.schema/shape]
                [:seon.schema/references
                 {:optional true}
                 :seon.schema/references]
