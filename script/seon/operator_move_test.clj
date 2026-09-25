@@ -21,9 +21,13 @@
                     _ (.put (.environment builder) "GIT_INDEX_FILE" (str index))
                     child (.start builder)
                     out (future (slurp (.getInputStream child)))]
-                (is (.waitFor child 10000 TimeUnit/MILLISECONDS) (str argv " exits within 10 s"))
-                (is (zero? (.exitValue child)) (str argv))
-                @out))]
+                (when-not (.waitFor child 10000 TimeUnit/MILLISECONDS)
+                  (.destroyForcibly child) (.waitFor child 10000 TimeUnit/MILLISECONDS))
+                (let [text (deref out 10000 ::unfinished)]
+                  (is (not (.isAlive child)) (str argv " exits within 10 s"))
+                  (is (not= ::unfinished text) (str argv " output ends after its exit"))
+                  (is (zero? (.exitValue child)) (str argv))
+                  text)))]
     (run ["git" "read-tree" "HEAD"])
     (run ["git" "ls-files" "--stage" "--" "reference-code"])))
 
@@ -108,7 +112,7 @@
       (finally
         (when-let [child @holder]
           (.destroy child)
-          (.waitFor child 5000 TimeUnit/MILLISECONDS))
+          (is (.waitFor child 5000 TimeUnit/MILLISECONDS) "the holder exits before its base is deleted"))
         (fs/delete-tree base)))))
 
 (deftest start-head-is-argv-data
