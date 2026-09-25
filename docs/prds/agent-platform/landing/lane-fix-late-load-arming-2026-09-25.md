@@ -18,29 +18,38 @@ source: docs/prds/agent-platform/landing/lane-fix-instrument-f2-regressions-2026
   stays for now.
 - Profiling cells armed on this path carry no definition digest. Adoption's `definition-digests` is private in
   `cluster.clj`, which is held.
-- The wrapper compiles against the request database's carried projection. That is default's database for a
-  default request. For a candidate-branch request it is the candidate's projection.
+- The branch-contract check covers the requested namespaces only. A namespace loaded transitively by their
+  `require` is armed, against the loaded projection, but is not compared with the branch.
 - **RESET NEEDED: no.**
 
-## Fix (root ruling: option 1)
+## Fix (root ruling: option 1; correction: the loaded program's projection)
 
-`seon.test/arm-first-loads!` (`src/seon/test.clj`) is called in `run` after exclusions and before the reach
-read. So it runs once per request and never inside a member body.
-
-- It keeps the runnable `:core` test symbols whose namespace `find-ns` does not find, and requires those
-  namespaces.
-- It then makes one `instrument/apply!` call with `:seon.instrument/changed-identities` set to exactly those
-  namespaces' interns, and nothing else.
-- The call passes adoption's inputs: `:seon.config/on-core-error`, caps and max evidence bytes from the
-  request's `effective`, the carried projection under `schema/call-with-projection`, and the context's
-  `commit-fault!` (the same expression as `cluster.clj:2654`).
-- A registration error is returned as the request's answer. `run`'s output schema adds
-  `:seon.instrument/registration-error`.
-- Cost when nothing is freshly loaded: 543 loaded-namespace members took 0.50 ms, and an unknown symbol 0.45 ms
-  (one pull). Measured with a scratch-namespace copy (`lane-late-load`, removed afterwards).
-- Net: src +33/−1 (docstring and contract included). New regression `test/seon/test/first_load_arming_test.clj`
-  (+19). It is a namespace that no boot or adoption loads, and its body asserts its own contracted Var is armed
-  and that an invalid input refuses with `:seon.instrument/check :input`.
+- In `run`, after exclusions and before the reach read, the runnable `:core` test symbols whose namespace
+  `find-ns` does not find name the namespaces to load. `seon.test/arm-first-loads!` (`src/seon/test.clj`)
+  handles them once per request, never inside a member body.
+- It compiles against the **loaded** program's projection: the carried projection of the context's
+  `:seon.sci.eval/loaded-database`. On default that is commit 6ab5bf39, which equals `loaded-identity`. It never
+  uses the requesting branch's projection.
+- Before loading, it compares each declaration's contract in those namespaces between the loaded projection and
+  the branch's projection. The first that differs refuses by name with `:seon.sci.eval/interpretation-error`
+  ("Host-bound declaration … must change through the loaded source files."). Nothing is loaded and nothing is
+  armed.
+- Otherwise it requires the namespaces. It then makes one `instrument/apply!` call with
+  `:seon.instrument/changed-identities` set to the interns of every namespace that the load added. The call
+  passes adoption's policy inputs: mode, caps, evidence bytes and the context's `commit-fault!`.
+- `run`'s output schema adds `:seon.instrument/registration-error` and `:seon.sci.eval/interpretation-error`.
+- Cost when nothing is freshly loaded: 0.49 ms. Measured with a scratch-namespace copy (`lane-late-load`,
+  removed). On default, the loaded and current contract maps (2,060 contracts) differ only in
+  `my.agents.root/largest`, which is outside any test namespace. Building the two projections took 60 ms, paid
+  only when a namespace is freshly loaded.
+- Net: src +44/−1 (docstring and contract included).
+- Regression `test/seon/test/first_load_arming_test.clj` has two tests:
+  - The first asserts that this namespace, first loaded by the request, has its contracted Var armed and that an
+    invalid input refuses with `:input`.
+  - The second is on a `with-database` branch whose `seon.test.first-load-branch-fixture/identity-int` contract
+    changes. It asserts that `arm-first-loads!` refuses by that name and that the fixture namespace stays
+    unloaded.
+- The fixture is `test/seon/test/first_load_branch_fixture.clj`, a namespace that nothing requires.
 
 ## Evidence (read-only JVM probes on default, 2026-09-25)
 
@@ -83,10 +92,11 @@ Armed means the root carries `:malli.instrument/original`. Contracted means `:ma
 
 ## Root runs
 
-1. Publish and adopt `src/seon/test.clj` and the new test file.
+1. Publish and adopt `src/seon/test.clj` and both new test files, so the fixture's rows are in the loaded program.
 2. Before running anything else, check that `(find-ns 'seon.test.first-load-arming-test)` is nil.
-3. `bin/test-check default --ns seon.test.first-load-arming-test`. Expect green. Before the fix, `identity-int`
-   returns the string.
+3. `bin/test-check default --ns seon.test.first-load-arming-test`. Expect both tests green. Before the fix,
+   `identity-int` returns the string. Also check that `(find-ns 'seon.test.first-load-branch-fixture)` is still
+   nil afterwards.
 4. `bin/test-check default --ns seon.instrument-test` shows the change caused no regression there.
 5. Repeat the census probe from the evidence section. Expect `seon.test.first-load-arming-test` to show 1 of 1
    armed.

@@ -12,6 +12,7 @@
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.error.refusal]
             [seon.fn :as functions]
             [seon.id :as id]
             [seon.instrument :as instrument]
@@ -1920,33 +1921,46 @@
        (zero? (:seon.test/error-count result 0))))
 
 (defn- arm-first-loads!
-  "Load the host test namespaces `symbols` name that this JVM has not loaded, then
-  arm exactly their contracted Vars once, with the policy adoption passes; before
-  any member body, so no body loads an unarmed namespace (test.clj `resolve-test`)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.config/effective :seon.sci.eval/ctx [:vector :seon.test/sym]]
-                  [:or :nil :seon.instrument/applied :seon.instrument/registration-error]]}
-  [database effective ctx symbols]
-  (let [fresh (into (sorted-set)
-                    (comp (remove (comp find-ns symbol namespace))
-                          (filter #(= :core (:seon.schema.admission/source
-                                             (db/pull database [:seon.schema.admission/source] [:seon.test/sym %]))))
-                          (map (comp symbol namespace)))
-                    symbols)]
-    (when (seq fresh)
-      (run! require fresh)
-      (let [projection (db/carried-projection database)
-            commit-fault! (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
-            evidence-bytes (:seon.config.error/max-evidence-bytes effective)]
+  "Load the `namespaces` this JVM has not loaded, then arm exactly the Vars that
+  load interned, once, before any member body, against the LOADED program's
+  projection (the context's `:seon.sci.eval/loaded-database`), never the
+  requesting branch's. A branch whose contract for one of their declarations
+  differs from the loaded one refuses by name, before loading anything."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.config/effective :seon.sci.eval/ctx [:set :symbol]]
+                  [:or :nil :seon.instrument/applied :seon.instrument/registration-error :seon.sci.eval/interpretation-error]]}
+  [database effective ctx namespaces]
+  (let [fresh (into (sorted-set) (remove find-ns) namespaces)
+        snapshot (when (seq fresh) @(:seon.sci.kernel/program-snapshot ctx))
+        projection (when (seq fresh) (db/carried-projection (:seon.sci.eval/loaded-database snapshot)))
+        contracts (:seon.schema.projection/function-contracts projection)
+        branch-contracts (when (seq fresh) (:seon.schema.projection/function-contracts (db/carried-projection database)))
+        changed (first (sort (filter #(and (fresh (symbol (namespace %)))
+                                           (not= (get contracts % ::absent) (get branch-contracts % ::absent)))
+                                     (into (set (keys contracts)) (keys branch-contracts)))))
+        evidence-bytes (:seon.config.error/max-evidence-bytes effective)]
+    (cond
+      (empty? fresh) nil
+      changed
+      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program `arm-first-loads!
+       {:seon.error/message (str "Cannot interpret " changed ": Host-bound declaration " changed
+                                 " must change through the loaded source files.")
+        :seon.error/expected :seon.sci.eval/interpretable-definition
+        :seon.sci.eval/refused-function changed
+        :seon.sci.eval/interpretation-reason "its branch contract differs from the loaded program's"})
+      :else
+      (let [before (set (all-ns))
+            _ (run! require fresh)
+            interns (for [n (remove before (all-ns)) s (keys (ns-interns n))] (symbol (str n) (str s)))]
         (schema/call-with-projection
          projection
          #(instrument/apply!
            (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
                     :seon.sci.admit/caps (config/result-caps effective)
                     :seon.schema/projection projection
-                    :seon.instrument/changed-identities
-                    (into #{} (for [n fresh s (keys (ns-interns n))] [:seon.fn/sym (symbol (str n) (str s))]))}
+                    :seon.instrument/changed-identities (into #{} (map (fn [sym] [:seon.fn/sym sym])) interns)}
              evidence-bytes (assoc :seon.config.error/max-evidence-bytes evidence-bytes)
-             commit-fault! (assoc :seon.flow/commit-fault! commit-fault!))))))))
+             (:seon.flow/commit-fault! snapshot)
+             (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! snapshot)))))))))
 
 (defn run
   "Answer one test request on the execution value it names.
@@ -1978,7 +1992,8 @@
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db/invalid-read-error
-                   :seon.schema/missing-projection-error :seon.instrument/registration-error]]}
+                   :seon.schema/missing-projection-error :seon.instrument/registration-error
+                   :seon.sci.eval/interpretation-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
     namespaces :seon.test/namespaces :as request}]
@@ -2023,8 +2038,15 @@
                                                 (concat (:seon.test/destructive-excluded exclusions)
                                                         (:seon.test/deferred exclusions))))]
                          (vec (remove excluded selected))))
+            ;; Host test namespaces first loaded by this request arm before any body.
             armed (when (seq runnable)
-                    (arm-first-loads! database effective (:seon.sci.eval/ctx execution) runnable))
+                    (arm-first-loads!
+                     database effective (:seon.sci.eval/ctx execution)
+                     (into #{} (comp (remove (comp find-ns symbol namespace))
+                                     (filter #(= :core (:seon.schema.admission/source
+                                                        (db/pull database [:seon.schema.admission/source] [:seon.test/sym %]))))
+                                     (map (comp symbol namespace)))
+                           runnable)))
             ;; One reach read over every runnable member: each member's
             ;; recording then reads the index (68 members 1,086 ms, against
             ;; 317 ms for each member read alone, 2026-09-23).
