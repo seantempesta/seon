@@ -1196,6 +1196,27 @@
                                          [(>= ?order 0)]]
                                 database (vec runs) symbols jvm-started))
                          [])
+            ;; A body not observed to exit holds its test in every scope of
+            ;; its cluster. The program digest names a commit, so any write
+            ;; since that body's admission (its own recording) changes it.
+            live (if (or snapshot? (empty? symbols))
+                   []
+                   (let [since-start (selection-read!
+                                      (db/q '[:find [?run ...] :in $ ?cluster ?since
+                                              :where [?run :seon.test.run/cluster ?cluster]
+                                                     [?run :seon.test.run/selection-tx]
+                                                     [?run :seon.test.run/at ?at]
+                                                     [(compare ?at ?since) ?order]
+                                                     [(>= ?order 0)]]
+                                            database cluster-id jvm-started))]
+                     (selection-read!
+                      (db/q '[:find ?run ?member ?symbol :in $ [?run ...] [?symbol ...]
+                              :where [?run :seon.test.run/members ?member]
+                                     [?member :seon.test.member/symbol ?symbol]
+                                     [?member :seon.test.member/completed-tx]
+                                     (not [?member :seon.test.member/terminated-tx])]
+                            database (vec since-start) symbols))))
+            candidates (distinct (concat candidates live))
             scope-of (memoize
                       (fn [run-eid]
                         (let [candidate (selection-read! (db/pull database selector run-eid))]
