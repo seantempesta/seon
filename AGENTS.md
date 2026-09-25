@@ -132,7 +132,9 @@ branch. The MCP server, the test harness and the web interface are views into th
 enter through the agent's path and render its values, and hold no second model, evaluator, printer or store.
 **The one REPL path** is read → eval → record → print, from the agent's side of the prompt.
 Every entrant uses it: product agents, outside agents through MCP, and tests through the
-harness; none builds a second evaluator, printer or result store. A form is parsed once and
+harness; none builds a second evaluator, printer or result store. The path is a composition of stages
+(read, evaluate, record, print); an entrant that needs another reader or evaluator (JVM mode, a file, a
+test body) supplies that stage as a value to the same pipeline, never a parallel pipeline. A form is parsed once and
 evaluated once; its results and facts are stored and queryable. Everything before the print is
 a real value under its Malli schema, live in the runtime, a database fact or a blob, never a
 string built to be clipped. Printing happens only at the edge, by the declared renderer or the
