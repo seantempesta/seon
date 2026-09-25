@@ -1941,7 +1941,9 @@
                          (update :seon.test/failure-message
                                  #(str (when % (str % "\n"))
                                        "Live cluster schema registry changed and was restored: "
-                                       (pr-str drifted)))))]
+                                       ;; bounded once by the floor: the drift can
+                                       ;; be whole registry entries
+                                       (value/bounded-text drifted)))))]
         (when-not @handed? (vreset! handed? true) (release! false))
         {:seon.test/result (cond-> (with-cleanup-failure result)
                              (not (:seon.test.run/terminated? result))
