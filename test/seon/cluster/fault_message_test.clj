@@ -87,7 +87,8 @@
        ;; resolve, then recur with no escalation owner: the old message is not delivery
        (support/transacted! connection [[:db/add [:seon.error/signature signature]
                                          :seon.error/resolved-tx "datomic.tx"]])
-       (let [reopened (fault/fault! (world connection cluster {:seon.config/on-core-error :record})
+       (let [reopened (fault/fault! (world connection cluster {:seon.config/on-core-error :record
+                                                               :seon.config.error/escalate-to :seon.config/absent})
                                     (failure) (context "delivery-c"))]
          (is (true? (:seon.fault/committed? reopened)))
          (is (= #{} (:seon.fault/delivered-to reopened))

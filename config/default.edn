@@ -277,18 +277,18 @@
  :seon.config.run/max-episode-runs 100
 
  ; WHO hears what nobody else can be told about: the agent a core fault
- ; with no namespace steward and no attributable run is mailed to, which
- ; wakes that agent's turn. Absent, the fault is still committed and still
- ; shown (runtime status, the MCP error window, the problems page); only
- ; the escalation message is not written. `commit-tx` refuses to address
- ; an agent this cluster does not have, so a typo costs the message, never
- ; the record. A namespace steward still gets its fault either way.
- ; Provenance: owner ruling 2026-09-24 — a core fault does not wake root's
- ; paid LLM turn until root's context can act on one (nine fault-woken
- ; root turns at ~25k prompt tokens each, all ignoring the fault:
- ; docs/research/agent-platform/open-errors-triage-2026-09-24.md). A
- ; manifest names "root" here to turn the wake back on.
- :seon.config.error/escalate-to :seon.config/absent
+ ; with no namespace steward is mailed to, which wakes that agent's turn.
+ ; `commit-tx` refuses to address an agent this cluster does not have, so a
+ ; typo costs the message, never the record; the fault's receipt then names
+ ; no recipient (`:seon.fault/delivered-to #{}`), and R4 of the lost-error
+ ; seams design panics on that. A namespace steward still gets its fault.
+ ; Provenance: owner ruling 2026-09-25 20:50Z — core faults deliver to root
+ ; by default, and surface on the cluster's MCP interactions. Delivery is
+ ; the message fact; whether it starts a paid turn is root's provider
+ ; configuration (the default cluster runs no-provider), not this dial.
+ ; Supersedes the 2026-09-24 absent default, under which 23 of 32 recorded
+ ; fault signatures were delivered to no one (measured 2026-09-25).
+ :seon.config.error/escalate-to "root"
 
  ; Unit: categorical core-fault disposition.
  ; Provenance: the 2026-07-27 error ruling requires development to fail
