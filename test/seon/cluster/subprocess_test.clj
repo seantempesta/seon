@@ -134,6 +134,28 @@
       (finally
         (deliver release-capture true)))))
 
+(deftest foreign-process-joins-its-output-observer-on-every-exit
+  ;; A timed-out child's observer is joined before the refusal; one outliving
+  ;; that join is named, and an observer's own failure is the refusal's cause.
+  (let [finished (atom nil)
+        refusal (fn [pause-ms]
+                  (ex-data (caught #(operator.process/run-process!
+                                     {:seon.operator.subprocess/argv ["/bin/sh" "-c" "echo a; sleep 5"]
+                                      :seon.operator.subprocess/deadline-ms 300
+                                      :seon.operator.subprocess/observe-output!
+                                      (fn [_] (Thread/sleep (long pause-ms)) (reset! finished pause-ms) nil)}))))
+        joined (refusal 600)]
+    (is (= 600 @finished) "the refusal follows the observer's exit")
+    (is (= :process-exit (:seon.operator.subprocess/phase joined)))
+    (is (nil? (:seon.operator.subprocess/unjoined joined)))
+    (is (= [:stdout] (:seon.operator.subprocess/unjoined (refusal 2500))))
+    (is (= "observer refused"
+           (ex-message (ex-cause (caught #(operator.process/run-process!
+                                          {:seon.operator.subprocess/argv ["/bin/echo" "a"]
+                                           :seon.operator.subprocess/deadline-ms 2000
+                                           :seon.operator.subprocess/observe-output!
+                                           (fn [_] (throw (ex-info "observer refused" {})))}))))))))
+
 (deftest plain-babashka-cannot-load-the-quarry
   (let [{:keys [exit err]}
         (run-babashka "(require 'seon.time)")]

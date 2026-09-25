@@ -122,13 +122,16 @@
   [deadline-ns]
   (max 0 (long (/ (- deadline-ns (System/nanoTime)) 1000000))))
 
-(defn- await-subprocess-value
-  "Generic future-or-value join; the caller owns both result and identity sentinel."
-  {:malli/schema [:=> [:cat :seon.schema/value :int :seon.schema/value] :seon.schema/value]}
-  [value deadline-ns timeout-value]
-  (if (future? value)
-    (deref value (subprocess-remaining-ms deadline-ns) timeout-value)
-    value))
+(defn- join-output
+  "Each capture task's outcome by `deadline-ns`: its value, the Throwable it
+  ended with, or `timeout-value` while it still runs."
+  {:malli/schema [:=> [:cat [:vector :seon.schema/value] :int :seon.schema/value] [:vector :seon.schema/value]]}
+  [tasks deadline-ns timeout-value]
+  (mapv #(if (future? %)
+           (try (deref % (subprocess-remaining-ms deadline-ns) timeout-value)
+                (catch java.util.concurrent.ExecutionException failure (.getCause failure)))
+           %)
+        tasks))
 
 (defn- subprocess-identity
   "`handle`'s identity, or nil when it has already exited."
@@ -286,40 +289,44 @@
                                :else false)))
                      (finally (when silence-ms (remove-watch progress watch-key))))
         output-deadline (if silence-ms (+ @last-progress (* 1000000 (long silence-ms))) deadline-ns)
-        output (when completed?
-                 (cond streamed-output (await-subprocess-value streamed-output output-deadline timeout-value)
-                       output-file ""
-                       :else (await-subprocess-value (:out process-record) output-deadline timeout-value)))
-        error-output (when completed?
-                       (if merge-error?
-                         ""
-                         (await-subprocess-value (:err process-record)
-                                                 output-deadline timeout-value)))
+        tasks [(cond streamed-output streamed-output output-file "" :else (:out process-record))
+               (if merge-error? "" (:err process-record))]
+        [output error-output] (when completed? (join-output tasks output-deadline timeout-value))
+        missing? #(or (identical? timeout-value %) (instance? Throwable %))
         phase (cond
                 (not completed?) :process-exit
-                (identical? timeout-value output) :stdout
-                (identical? timeout-value error-output) :stderr
+                (missing? output) :stdout
+                (missing? error-output) :stderr
                 :else nil)]
     (if phase
       (let [survivors (terminate-subprocess! process-record identities
                                               subprocess-grace-ms subprocess-cleanup-ms)
+            ;; Every capture is joined: termination closed its pipe, so only a blocked observer outlives this.
+            joined (join-output tasks (+ (System/nanoTime) (* 1000000 subprocess-grace-ms)) timeout-value)
+            unjoined (into [] (keep (fn [[stream outcome]] (when (identical? timeout-value outcome) stream)))
+                           (map vector [:stdout :stderr] joined))
+            [cause & suppressed] (filter #(instance? Throwable %) joined)
             ;; A root that exited before its launch capture has no recorded instant.
             root-start (some #(when (= (.pid child) (:seon.boot/pid %)) (:seon.boot/start-instant %))
-                             identities)]
-        (throw
-         (ex-info
-          "The process and its output must finish within the declared bound."
-          (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
-           (cond-> {:seon.error/message "The process and its output must finish within the declared bound."
-                    :seon.error/offending argv
-                    :seon.error/member :seon.operator.subprocess/deadline-ms
-                    :seon.error/expected deadline-ms
-                    :seon.operator.subprocess/argv argv
-                    :seon.operator.subprocess/deadline-ms deadline-ms
-                    :seon.operator.subprocess/phase phase
-                    :seon.operator.subprocess/pid (.pid child)
-                    :seon.operator.subprocess/reaped? (empty? survivors)}
-             root-start (assoc :seon.operator.subprocess/start-instant root-start))))))
+                             identities)
+            refusal (ex-info
+                     "The process and its output must finish within the declared bound."
+                     (seon.error.refusal/diagnostic (java.util.Date.) :seon.operator/lifecycle 'seon.cluster.process/run-process!
+                      (cond-> {:seon.error/message "The process and its output must finish within the declared bound."
+                               :seon.error/offending argv
+                               :seon.error/member :seon.operator.subprocess/deadline-ms
+                               :seon.error/expected deadline-ms
+                               :seon.operator.subprocess/argv argv
+                               :seon.operator.subprocess/deadline-ms deadline-ms
+                               :seon.operator.subprocess/phase phase
+                               :seon.operator.subprocess/pid (.pid child)
+                               :seon.operator.subprocess/reaped? (empty? survivors)}
+                        (seq survivors) (assoc :seon.operator.subprocess/survivors survivors)
+                        (seq unjoined) (assoc :seon.operator.subprocess/unjoined unjoined)
+                        root-start (assoc :seon.operator.subprocess/start-instant root-start)))
+                     cause)]
+        (doseq [failure suppressed] (.addSuppressed refusal failure))
+        (throw refusal))
       {:seon.operator.subprocess/argv argv
        :seon.operator.subprocess/exit (.exitValue child)
        :seon.operator.subprocess/output output
