@@ -1,7 +1,10 @@
 (ns seon.cluster.agent-custody-test
   (:require [clojure.test :refer [deftest is]]
             [seon.cluster.agent :as agent]
+            [seon.config :as config]
             [seon.db :as db]
+            [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.test-support :as support]))
 
 (defn- created!
@@ -55,3 +58,63 @@
           "a write by the child's agent is absent from the parent")
       (is (nil? (recorded-branch parent-connection "custody-child")))
       (finally (agent/release-context! child)))))
+
+(defn- poisoned-child!
+  "An isolated child of `parent` holding one good row and one row its program
+  cannot install (it names an unresolvable dependency)."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :string] :map]}
+  [parent tag]
+  (let [child (agent/acquire-context! parent nil {:seon.agent/isolate? true})
+        connection (:seon.db/connection child)
+        namespace-name (symbol (str "custody.poison-" tag))
+        member #(symbol (str namespace-name) %)]
+    (support/transacted! connection [(support/namespace-row (db/db connection) namespace-name)])
+    (support/transacted! connection (agent/creation-tx {:seon.agent/id (str "poison-" tag)
+                                                        :seon.ns/name namespace-name
+                                                        :seon.cluster/name (:seon.cluster/name parent)}))
+    (support/transacted! connection
+                         [(support/program-fn-row (db/db connection) (member "bad")
+                                                  "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))")
+                          (support/program-fn-row (db/db connection) (member "good")
+                                                  "(defn ^{:malli/schema [:=> [:cat :int] :int]} good [x] (inc x))")])
+    {:child child :bad (member "bad") :good (member "good") :agent-id (str "poison-" tag)}))
+
+(defn- recorded-refusal
+  "The stored acquisition refusal naming `row-member` on `connection`'s branch, or nil."
+  {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol] [:maybe :int]]}
+  [connection row-member]
+  (db/q '[:find ?error . :in $ ?member
+          :where [?error :seon.error/occurrences ?occurrence]
+                 [?occurrence :seon.sci.eval/row-member ?member]]
+        (db/db connection) row-member))
+
+(deftest an-acquisition-records-its-refusal-on-the-acquired-branch-under-another-custody
+  ;; Astra de1075aa3 finding 1: recording an un-installable row is the acquired
+  ;; branch's own write, whether acquisition enters through the agent entrance or
+  ;; through a lazy first invocation, and whoever's custody the caller holds.
+  (let [parent (support/execution-handle db/*conn*)
+        parent-connection (:seon.db/connection parent)
+        entrance (poisoned-child! parent "entrance")
+        lazy (poisoned-child! parent "lazy")]
+    (try
+      (is (identical? parent-connection db/*conn*) "the body runs under the parent's custody")
+      (let [before (db/basis-t (db/db parent-connection))
+            entrance-connection (:seon.db/connection (:child entrance))
+            lazy-connection (:seon.db/connection (:child lazy))]
+        ;; The agent entrance: acquisition throws if it could not record.
+        (agent/acquire-context! (:child entrance) (:agent-id entrance))
+        (is (some? (recorded-refusal entrance-connection (:bad entrance))))
+        ;; Lazy invocation: a fresh context acquires at its first named call.
+        (let [ctx (sci.eval/cluster-ctx (db/db lazy-connection) lazy-connection)
+              invoked (kernel/invoke {:seon.sci.eval/ctx ctx :seon.db/db (db/db lazy-connection)
+                                      :seon.fn/sym (:good lazy) :seon.sci.eval/args [41]
+                                      :seon.sci.eval/time-limit-ms 5000
+                                      :seon.sci.admit/caps (config/result-caps config/defaults)
+                                      :seon.config/on-core-error :panic})]
+          (is (= 42 (:seon.sci.admit/value invoked)) (pr-str (select-keys invoked [:seon.error/message])))
+          (is (some? (recorded-refusal lazy-connection (:bad lazy)))))
+        (is (= before (db/basis-t (db/db parent-connection))) "the caller's branch is unchanged")
+        (is (nil? (recorded-refusal parent-connection (:bad entrance)))))
+      (finally
+        (agent/release-context! (:child entrance))
+        (agent/release-context! (:child lazy))))))

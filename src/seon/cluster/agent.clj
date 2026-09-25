@@ -983,9 +983,8 @@
                  ;; acquisition (an agent's row as its mistake, a core row as a
                  ;; core fault) and the rest of the program arms. Only a
                  ;; database that cannot store that record refuses here. The
-                 ;; record is this branch's own work, never the caller's custody.
-                 acquired (db/call-with-custody {:seon.db/connection connection}
-                            #(sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db selected}))
+                 ;; recorder binds the acquired branch's custody itself.
+                 acquired (sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db selected})
                  _ (when-let [failure (:seon.sci.eval/acquisition-recording-error acquired)]
                      (throw (ex-info "Program acquisition could not record its refusals."
                                      {:seon.sci.eval/acquisition-recording-error failure})))

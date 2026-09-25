@@ -1,7 +1,7 @@
 ---
 type: landing
 lane: fix-custody-round4-opus
-status: committed-unrun; C regression written, awaiting eval.clj
+status: committed-unrun (A, B, C)
 date: 2026-09-25
 authority: docs/research/agent-platform/custody-and-ingestion-p1-review-2026-09-25.md (Astra de1075aa3) findings 1-3; takes over lane-fix-ingestion-p1s-2026-09-25.md round 4
 ---
@@ -20,7 +20,7 @@ the binding in `record-acquisition-refusals!`. Under the LOAD RULE no test reque
   reading the code. Nothing was loaded into default. Default is `:faulted` and reports
   "JVM RESTART NEEDED: loaded dependencies changed (reference-code/sci)", from another lane's
   submodule edit. **RESTART NEEDED** before root's runs; it is not a reset.
-- **C, finding 1 agent half, is blocked.** The `acquire-context!` wrapper
+- **C, finding 1 agent half: done (see C below); the original blocker note follows.** The `acquire-context!` wrapper
   (`src/seon/cluster/agent.clj`, the `acquired (db/call-with-custody …)` binding) stays until
   eval.clj binds custody at its recording owner. Removing it first would reopen the defect.
   The planned regression is below.
@@ -125,7 +125,7 @@ No new union, no retry.
 | agent_test release regression: redundant outer custody wrapper | −1 (plus parens) |
 | agent_test concurrent arm/release: redundant custody wrapper | −1 |
 | acquisition_test `declare!`: redundant `(call-with-custody {} …)` around `transacted!` (commit d5fbee2ce) | −1 |
-| Planned (C): agent.clj `acquire-context!`'s acquisition wrapper | −2 |
+| C: agent.clj `acquire-context!`'s acquisition wrapper | −2 |
 
 **Kept, and why:**
 - agent.clj's `(call-with-custody {} …)` around the branch-assignment write: it is the
@@ -156,7 +156,7 @@ No new union, no retry.
 3. **Environment.** `env/environment` over `{cluster-name, connection, caps}` gives
    `environment? true`. 3 ms.
 
-## C, finding 1 agent half: regression written, uncommitted until eval.clj lands
+## C, finding 1 agent half: committed with the wrapper deletion, after eval.clj e8cada147
 
 `test/seon/cluster/agent_custody_test.clj`,
 `an-acquisition-records-its-refusal-on-the-acquired-branch-under-another-custody` (+66 lines).
@@ -176,11 +176,10 @@ no refusal was recorded on the parent.
 **Why two branches.** `record-refusals-once!` records once per program identity and recording
 target. A second path on the same branch would therefore record nothing new.
 
-**Expected on the current tree.** The entrance half is green, protected by agent.clj's
-wrapper. The lazy half is red until eval.clj binds custody at `record-acquisition-refusals!`.
+**Expected.** Both halves are green now that the recorder binds custody itself (e8cada147).
 
-**On root's signal:** delete agent.clj's acquisition wrapper (−2 lines), then commit it with
-this test. **Unmeasured:** two fresh acquisitions. One complete acquisition was measured at
+**Done after root's signal (e8cada147):** agent.clj's acquisition wrapper is deleted (+2/−3), in
+the same commit as this test. **Unmeasured:** two fresh acquisitions. One complete acquisition was measured at
 1,090 ms (branch_execution_test); the test runs under the default 5 s bound.
 
 ## Commits
