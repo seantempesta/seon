@@ -93,9 +93,7 @@
                              "{:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"))
        (doseq [source ["(do (defn nested \"No contract.\" [x] x))"
                        "(let [k 3] (defn nested \"No contract.\" [x] (* k x)))"
-                       "(def nested (fn [x] x))"
-                       ;; A point-free def is a declaration since P2-A (1a7029d81): gated like any function.
-                       "(def nested (comp inc inc))"]]
+                       "(def nested (fn [x] x))"]]
          (let [refusal (:seon.sci.admit/value (evaluate-in ctx source))]
            (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)) source)
            (is (absent? "nested") source)
@@ -128,6 +126,7 @@
            contract "{:malli/schema [:=> [:cat :int] :int]}"
            stored "seon.note/render-notes-ai"]
        (doseq [[source changed] [[(str "(eval '(defn quoted \"D.\" " contract " [x] x))") 'quoted]
+                                 ["(def point-free (comp inc inc))" 'point-free]
                                  [(str "(defmacro make [n] (list 'defn n \"D.\" '" contract " '[x] 'x))") nil]
                                  ["(make generated)" 'generated]
                                  [(str "(defn scratch.entry-gate/same-ns \"D.\" " contract " [x] x)") 'same-ns]]
