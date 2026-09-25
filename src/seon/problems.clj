@@ -111,7 +111,7 @@
     (update :seon.error/regressions #(into #{} (map (fn [r] (restore-error-ref r :db/id))) %))))
 
 (defn- error-signatures
-  "Errors ordered by the sum of their occurrence counts."
+  "Errors ordered by the sum of their occurrence counts; a resolved one carries its `seon.error/resolution`."
   [database]
   (->> (db/q '[:find [(pull ?error
                             [*
@@ -120,14 +120,17 @@
                                  {:seon.error.occurrence/agent [:db/id :seon.agent/id]}]}]) ...]
                 :where [?error :seon.error/signature]] database)
        (mapv (fn [row]
-               (let [fact (restore-error-fact (error/latest-fact row))]
-                 {:seon.error/signature (:seon.error/signature row)
-                  :seon.error/at (:seon.error/at fact)
-                  :seon.error/layer (:seon.error/layer fact)
-                  :seon.error/operation (:seon.error/operation fact)
-                  :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
-                                                            (:seon.error/occurrences row)))
-                  :seon.error/fact fact})))
+               (let [fact (restore-error-fact (error/latest-fact row))
+                     resolution (error/resolution database (:seon.error/signature row))]
+                 (cond->
+                  {:seon.error/signature (:seon.error/signature row)
+                   :seon.error/at (:seon.error/at fact)
+                   :seon.error/layer (:seon.error/layer fact)
+                   :seon.error/operation (:seon.error/operation fact)
+                   :seon.problems/occurrences (reduce + 0 (map :seon.error.occurrence/count
+                                                             (:seon.error/occurrences row)))
+                   :seon.error/fact fact}
+                  (:seon.error/resolved-by resolution) (assoc :seon.error/resolution resolution)))))
        (sort-by (juxt (comp - :seon.problems/occurrences) :seon.error/signature))
        vec))
 
@@ -465,6 +468,13 @@
       [:span {:class "seon-problems-label"} label]
       [:span {:class "seon-problems-value"} (str value)]])])
 
+(defn- resolution-text
+  "Why a fault reads resolved, so a reader can check a false resolution; nil while open."
+  {:malli/schema [:=> [:cat [:maybe :seon.error/resolution]] [:maybe :string]]}
+  [{:seon.error/keys [digest-then digest-now resolved-tx] function :seon.instrument/fn :as resolution}]
+  (cond digest-now (str "by change to " function " (" (subs digest-then 0 8) "→" (subs digest-now 0 8) ")")
+        resolution (str "by resolve! in transaction " resolved-tx)))
+
 (defn stale-var-html
   "A stale loaded Var as one problems-surface row."
   {:malli/schema
@@ -534,7 +544,8 @@
     (for [entry (:seon.problems/error-signatures found)]
       (row "seen" (:seon.problems/occurrences entry)
            "signature" (:seon.error/signature entry)
-           "latest" (:seon.error/message (:seon.error/fact entry)))))
+           "latest" (:seon.error/message (:seon.error/fact entry))
+           "resolved" (resolution-text (:seon.error/resolution entry)))))
 
    (family-section
     "failed runs"

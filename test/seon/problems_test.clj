@@ -390,6 +390,13 @@
           (is (= function (:seon.instrument/fn resolved)))
           (is (not= (:seon.error/digest-then resolved) (:seon.error/digest-now resolved))))
         (is (not (open?)) "a changed definition resolves it without resolve!")
+        (let [value (found connection)
+              entry (some #(when (= (signature) (:seon.error/signature %)) %) (:seon.problems/error-signatures value))]
+          (is (= :seon.program/definition-digest (get-in entry [:seon.error/resolution :seon.error/resolved-by]))
+              "the problems value keeps the resolved signature and says why")
+          (is ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.problems/problems) value))
+          (is (str/includes? (pr-str (problems/html-report value)) "by change to my.resolution.fixture/target")
+              "the problems page shows the resolution, so a false one can be checked"))
         (fault!)
         (is (open?) "a recurrence under the changed code reopens it")
         (is (= 2 (messages)) "the reopening is delivered once")
