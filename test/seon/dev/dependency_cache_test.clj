@@ -19,10 +19,11 @@
     root))
 
 (defn- private-var
-  [sym]
-  (or (ns-resolve 'dev-cache sym)
-      (throw (ex-info "The dependency-cache test seam is absent."
-                      {:seon.dev-cache/symbol sym}))))
+  ([sym] (private-var 'dev-cache sym))
+  ([owner sym]
+   (or (some-> (find-ns owner) (ns-resolve sym))
+       (throw (ex-info "The dependency-cache test seam is absent."
+                       {:seon.dev-cache/symbol sym :seon.dev-cache/namespace owner})))))
 
 (defn- source-row
   [source-root namespace-symbol]
@@ -221,7 +222,7 @@
 
 (defn- pins-file-name
   []
-  @(private-var 'dependency-pins-file))
+  @(private-var 'seon.dev.dependency-digest 'dependency-pins-file))
 
 (defn- snapshot-root!
   "A run-root-shaped directory: `deps.edn`, optional recorded pins, no work tree."
@@ -264,7 +265,7 @@
   (let [root (snapshot-root! nil)]
     (try
       (testing "the git query is silent, not empty-handed, in such a root"
-        (is (nil? ((private-var 'git-dependency-pins)
+        (is (nil? ((private-var 'seon.dev.dependency-digest 'git-dependency-pins)
                    (.getCanonicalPath root)))))
       (testing "the refusal is a typed value naming the root and both sources"
         (let [refusal (try (configuration-digest root)
@@ -282,7 +283,7 @@
         (test-support/delete-recursively! root)))))
 
 (deftest a-recorded-snapshot-digests-exactly-as-the-checkout-it-came-from
-  (let [checkout-pins ((private-var 'dependency-pins)
+  (let [checkout-pins ((private-var 'seon.dev.dependency-digest 'dependency-pins)
                        (.getCanonicalPath project-root))
         recorded (snapshot-root! checkout-pins)]
     (try

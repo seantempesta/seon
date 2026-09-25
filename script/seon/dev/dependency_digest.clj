@@ -110,18 +110,15 @@
           " carries no " dependency-pins-file " recorded by bin/test. An empty"
           " pin set would key the dependency-class cache to every fork commit"
           " at once, so no cache is reused or created here.")
-     :seon.error/data
-     {:seon.error/layer :seon.dev-cache/dependency-configuration
-      :seon.error/operation 'dev-cache/dependency-pins
-      :seon.error/member :seon.dev-cache/dependency-pins
-      :seon.error/expected {:seon.dev-cache/git-command
-       ["git" "-C" (.getCanonicalPath directory) "ls-files" "--stage" "--"
-        "reference-code"]
-       :seon.dev-cache/recorded-pins-file dependency-pins-file}
-      :seon.error/offending (.getCanonicalPath directory)
-      :seon.error/data {:seon.dev-cache/git-pins-stated false
-       :seon.dev-cache/recorded-pins-present
-       (.isFile (io/file directory dependency-pins-file))}}}))
+     :seon.error/member :seon.dev-cache/dependency-pins
+     :seon.error/expected {:seon.dev-cache/git-command
+                           ["git" "-C" (.getCanonicalPath directory) "ls-files" "--stage" "--"
+                            "reference-code"]
+                           :seon.dev-cache/recorded-pins-file dependency-pins-file}
+     :seon.error/offending (.getCanonicalPath directory)
+     :seon.error/data {:seon.dev-cache/git-pins-stated false
+                       :seon.dev-cache/recorded-pins-present
+                       (.isFile (io/file directory dependency-pins-file))}}))
 
 (defn dependency-pins
   "The submodule pins this root's dependency classes are keyed on.
