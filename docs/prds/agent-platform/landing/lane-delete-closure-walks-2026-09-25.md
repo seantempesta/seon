@@ -86,6 +86,20 @@ Every result below was compared with the loaded old Var on the same db value.
   and the `render-program-evidence` pull-many loop (17 lines).
 - Net source: +2. Net with the test: +6. After the `reaches?` and runner conversions, about −25.
 
+## Follow-up: accretion-test red on adopted HEAD (root run 2412142b8bfc)
+
+Not caused by `capabilities`.
+All four errors are the writer refusing the fixture rows in `admit!` (accretion_test.clj:19,
+called at fixture setup, e.g. :277), before any capability walk runs. The rows carried
+the retired shapes: string `:seon.fn/sym`/`:seon.test/sym`, lookup-ref `:seon.fn/calls`
+and `:seon.test/subject`, and the deleted `:seon.test/pending-subject`. REPL, on default's
+carried projection: a string `:seon.fn/sym` is invalid, a symbol valid; `#{[:seon.fn/sym "x"]}` calls
+invalid, `#{'x}` valid; an unresolved symbol `:seon.test/subject` valid. On a `d/with` value with
+one capability row, adopted `effect/capabilities` answers `#{fixture.probe-cwalk/capability}`
+for the owner and `#{}` for an absent root. Fixed in a646e65a9 (test only, +32/−33).
+The fifth red, `source-harvest-keeps-refusal-render-contracts-coherent`, exceeded its 5 s bound
+(11.3 s). That is a timing bound, not a fixture shape, and is not in this lane.
+
 ## Root runs (serially, quiet window, after adopting the three commits)
 
 ```
