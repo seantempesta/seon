@@ -4,6 +4,7 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clj-kondo.core]
+            [malli.core :as m]
             [my.program :as my.program]
             [seon.cluster :as cluster]
             [seon.cluster.store :as store]
@@ -343,9 +344,12 @@
                     (get by-id [:seon.fn/sym (quote sample.core/helper)]))))
         (is (= "([f])" (:seon.fn/arglists
                          (get by-id [:seon.fn/sym (quote sample.core/contracted)]))))
-        (is (= "[:=> [:cat clojure.core/fn?] clojure.core/string?]"
-               (:seon.fn/spec
-                (get by-id [:seon.fn/sym (quote sample.core/contracted)]))))
+        ;; Malli's own predicate schemas stay themselves: `clojure.core/fn?`
+        ;; names no schema and refused the whole projection (2026-09-25).
+        (let [spec (:seon.fn/spec
+                    (get by-id [:seon.fn/sym (quote sample.core/contracted)]))]
+          (is (= "[:=> [:cat fn?] string?]" spec))
+          (is (m/function-schema (edn/read-string spec))))
         (is (= :compute (:seon.fn/workload
                          (get by-id [:seon.fn/sym (quote sample.core/contracted)]))))
         (is (= :ai-visible-text

@@ -1828,7 +1828,7 @@
   answer to each request document."
   {:malli/schema [:function
                   [:=> [:cat [:sequential :keyword]] :map]
-                  [:=> [:cat [:sequential :keyword] ifn?] :map]]}
+                  [:=> [:cat [:sequential :keyword] [:fn ifn?]] :map]]}
   ([operations]
    (routing-trial operations (constantly "(seon.run/complete \"done\")")))
   ([operations reply]

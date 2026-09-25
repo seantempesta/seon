@@ -192,20 +192,31 @@
     [(offset (::analyzer/row entry) (::analyzer/col entry))
      (offset (::analyzer/end-row entry) (::analyzer/end-col entry))]))
 
+;; A simple symbol in schema position that Malli's default registry names
+;; (`ifn?`, `string?`) is that Malli schema and stays itself; qualifying it to
+;; `clojure.core/ifn?` names no schema and refuses the whole projection.
+;; Inside `[:fn …]` a symbol is a predicate and resolves as source does.
 (defn- qualify-schema-symbols [form {:keys [aliases refers]}]
-  (walk/postwalk
-   (fn [value]
-     (if-not (symbol? value)
-       value
-       (if-let [symbol-ns (namespace value)]
-         (if-let [target (get aliases (symbol symbol-ns))]
-           (symbol (str target) (name value))
-           value)
-         (or (get refers value)
-             (when (ns-resolve 'clojure.core value)
-               (symbol "clojure.core" (name value)))
-             value))))
-   form))
+  (let [qualify
+        (fn [value]
+          (if-not (symbol? value)
+            value
+            (if-let [symbol-ns (namespace value)]
+              (if-let [target (get aliases (symbol symbol-ns))]
+                (symbol (str target) (name value))
+                value)
+              (or (get refers value)
+                  (when (ns-resolve 'clojure.core value)
+                    (symbol "clojure.core" (name value)))
+                  value))))
+        malli-schemas (m/default-schemas)]
+    ((fn walk [value]
+       (cond
+         (and (vector? value) (= :fn (first value))) (walk/postwalk qualify value)
+         (and (simple-symbol? value) (contains? malli-schemas value)) value
+         (coll? value) (walk/walk walk identity value)
+         :else (qualify value)))
+     form)))
 
 (defn- namespace-row [contexts context entry]
   (let [namespace-name (::analyzer/name entry)
