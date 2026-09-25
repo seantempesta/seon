@@ -245,16 +245,20 @@
               [:seon.render.block/name block-name])
             (identity-address unit))]
     (if-not root-address
+      ;; The offending value is the identity members the unit HAS, never the
+      ;; unit: it carries the SCI ctx and the database, and admitting that
+      ;; copy cost 4.6 s and 22.8 GB (render-graph research §0.1).
+      (let [identity-members (select-keys unit [:seon.agent/id :seon.render.call/id
+                                                :seon.render.value/root :db/id
+                                                :seon.render.block/name])]
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.value/identity 'seon.render.value/node-id
        {:seon.error/message "A rendered value root requires a caller-supplied block id."
         :seon.error/fix "Supply :seon.render.call/id, :seon.render.value/root, or an entity identity."
-        :seon.render.value/root-description (pr-str (select-keys unit [:seon.agent/id :seon.render.call/id
-                                   :seon.render.value/root :db/id
-                                   :seon.render.block/name]))
+        :seon.render.value/root-description (pr-str identity-members)
         :seon.error/member :seon.render.value/root
         :seon.error/expected "a caller-supplied block or entity identity"
-        :seon.error/offending unit
-        :seon.error/data {:seon.agent/id (:seon.agent/id unit) :seon.render.data/path path}})
+        :seon.error/offending identity-members
+        :seon.error/data {:seon.agent/id (:seon.agent/id unit) :seon.render.data/path path}}))
       (str "seon-value-"
            (id/digest 24 [(:seon.agent/id unit) root-address path])))))
 
