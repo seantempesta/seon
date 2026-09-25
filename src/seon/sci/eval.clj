@@ -821,8 +821,11 @@
     ;; context's own definition, which survives its first install (AGENTS.md).
     (when-not (and (not (contains? interpreted function-symbol))
                    (not (overridden-row? loaded (db/pull db '[*] [:seon.fn/sym function-symbol])))
-                   (or (contains? (get-in @(:env ctx) [:namespaces namespace-name])
-                                  (symbol (name function-symbol)))
+                   (or (when (contains? (get-in @(:env ctx) [:namespaces namespace-name])
+                                        (symbol (name function-symbol)))
+                         ;; Recorded so `acquire!` still carries it once installed.
+                         (swap! (::kernel/program-snapshot ctx) assoc-in
+                                [:functions function-symbol ::context-defined?] true))
                        (install-jvm-root! ctx function-symbol)))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
@@ -2475,6 +2478,16 @@
   (identical? (get (meta left) ::instrument/interpreted-original left)
               (get (meta right) ::instrument/interpreted-original right)))
 
+(defn- replaced-definitions
+  "The `symbols` whose program row changed between two acquired program
+  snapshots. A context's own definition survives its symbol's first lazy
+  install, but at an idle boundary the program advances in place over it."
+  [before after symbols]
+  (into (sorted-set)
+        (filter #(not= (get-in before [:functions % ::function-source])
+                       (get-in after [:functions % ::function-source])))
+        symbols))
+
 (defn- regenerate-agent-context!
   "Fork the replacement base and carry the private layer as actual objects.
 
@@ -2485,6 +2498,9 @@
   (let [generation (:sci/generation @(:env ctx))
         previous @(::base-bindings ctx)
         current (base-bindings base)
+        changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
+                                             @(::kernel/program-snapshot base)
+                                             [(symbol (str %1) (str %2))]))
         private-bindings
         (for [[namespace-name entries] (sci/namespace-state ctx)
               [local-name entry] entries
@@ -2492,6 +2508,7 @@
               :let [path [namespace-name local-name]
                     root (if (sci.vars/hasRoot entry) @entry absent-intern)]
               :when (and (= generation (:sci/generation (meta entry)))
+                         (not (changed? namespace-name local-name))
                          (not (or (when-let [prior (get previous path)]
                                     (same-program-root? root (first prior)))
                                   (when-let [next (get current path)]
@@ -2900,14 +2917,20 @@
                                   (assoc :seon.flow/commit-fault! commit-fault!)))
             acquired (::acquisition generated)
             ;; This context's own definitions (its generation's Vars that no
-            ;; program install bound) survive the program change as objects,
-            ;; as `regenerate-agent-context!` carries them for a turn fork.
+            ;; program install bound) survive as objects, as
+            ;; `regenerate-agent-context!` carries them for a turn fork,
+            ;; unless the program changed their symbol's row.
             generation (:sci/generation @(:env ctx))
             installed @(::kernel/installed-functions ctx)
+            interns (turn-interns ctx)
+            replaced (replaced-definitions snapshot @(::kernel/program-snapshot generated)
+                                           (keys interns))
             own (into [] (keep (fn [[qualified {sci-var :seon.sci.eval/var}]]
-                                 (when-not (contains? installed qualified)
+                                 (when-not (or (and (contains? installed qualified)
+                                                    (not (get-in snapshot [:functions qualified ::context-defined?])))
+                                               (contains? replaced qualified))
                                    [(symbol (namespace qualified)) (symbol (name qualified)) sci-var])))
-                      (turn-interns ctx))]
+                      interns)]
         ;; SCI stamps later definitions with this generation. Installing the
         ;; unforked base loses the provenance that definition-row observes.
         (reset! (:env ctx) @(:env (sci/fork generated)))
@@ -3612,6 +3635,7 @@
         ending-namespace (volatile! namespace-name)
         print-options (volatile! {})
         session-observation (volatile! nil)
+        replaced-notice (volatile! nil)
         projection-state
         (or (::projection-state evaluation-ctx)
             (atom {:seon.schema/projection
@@ -3726,14 +3750,24 @@
           (when (contains? evaluation-ctx ::custody)
             (when-let [database (:seon.db/db request)]
               (when-not (acquired-database? evaluation-ctx database)
-                (let [base (or (::base-ctx evaluation-ctx) evaluation-ctx)
+                (let [before-snapshot @(::kernel/program-snapshot evaluation-ctx)
+                      own (keys (turn-interns evaluation-ctx))
+                      base (or (::base-ctx evaluation-ctx) evaluation-ctx)
                       result (acquire! {:seon.sci.eval/ctx base :seon.db/db database})]
                   (when-let [failure (first (::acquisition-refusals result))]
                     (throw (ex-info "SCI program acquisition refused a declaration." failure)))
                   (when-let [failure (::acquisition-recording-error result)]
                     (throw (ex-info "SCI acquisition could not record a row fault." failure)))
                   (when (::base-ctx evaluation-ctx)
-                    (regenerate-agent-context! evaluation-ctx base))))))
+                    (regenerate-agent-context! evaluation-ctx base))
+                  ;; Say so loudly: the program advanced over these.
+                  (when-let [replaced (seq (replaced-definitions
+                                            before-snapshot
+                                            @(::kernel/program-snapshot evaluation-ctx) own))]
+                    (vreset! replaced-notice
+                             (str ";; PROGRAM CHANGE replaced your definition of "
+                                  (str/join ", " replaced)
+                                  " with its changed program row; re-evaluate yours to redefine it.")))))))
           (when-let [failure (first (:seon.test/acquisition-refusals
                                     (acquired-program evaluation-ctx)))]
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
@@ -3916,6 +3950,7 @@
             (str/join "\n"
                       (remove str/blank?
                                [output-prefix
+                                @replaced-notice
                                 (when row
                                   (accretion/non-generatable-advisory row))]))
             :seon.sci.eval/namespace-name namespace-name

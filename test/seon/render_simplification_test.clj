@@ -817,6 +817,39 @@
                          :seon.turn.loop/completion]]
               (clojure.core.async/close! (get handle key)))))))))
 
+(deftest a-program-change-replaces-a-private-definition-and-says-so
+  ;; Root ruling 2026-09-25: a context's own definition survives its symbol's
+  ;; first lazy install, but a changed program row advances in place over it
+  ;; at the next idle boundary, and the evaluation says so.
+  (support/with-database
+   (fn [connection]
+     (declare-fixture-subjects! connection)
+     (let [ctx (support/fork-cluster-ctx connection)
+           renderer 'seon.render-simplification.fixture-a/namespace-ai
+           render #(target-call 'seon.render 'render-call
+                                (assoc (render-request (db/db connection) ctx fixture-a
+                                                       {:seon.ns/name fixture-a})
+                                       :seon.render/output :seon.render/ai))]
+       (sci/binding [sci/ns (sci/create-ns fixture-a)]
+         (sci/eval-form ctx '(defn namespace-ai [value] (str "private:" (:seon.ns/name value)))))
+       (is (= (str "private:" fixture-a) (render)) "the first lazy install keeps it")
+       (support/transacted!
+        connection
+        [(support/revision (db/db connection) [:seon.fn/sym renderer]
+                           {:seon.fn/source "(defn namespace-ai [value] (str \"program:\" (:seon.ns/name value)))"})])
+       (let [evaluation (eval/evaluate
+                         {:seon.sci.eval/ctx ctx
+                          :seon.db/db (db/db connection)
+                          :seon.cluster.eval/ns [:seon.ns/name fixture-a]
+                          :seon.cluster.eval/source "1"
+                          :seon.sci.admit/caps caps
+                          :seon.sci.eval/time-limit-ms 2000
+                          :seon.config/on-core-error :panic})]
+         (is (str/includes? (pr-str evaluation)
+                            (str "PROGRAM CHANGE replaced your definition of " renderer))
+             (pr-str evaluation)))
+       (is (= (str "program:" fixture-a) (render)) "the changed program row runs")))))
+
 (deftest generic-renderer-receives-the-acquired-entity-id
   (support/with-database
    (fn [connection]
