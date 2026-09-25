@@ -171,6 +171,12 @@
        (is (= 2 (value "(kept 1)")) "and restores the prior root")
        (value (str "(def held (var " stored "))"))
        (is (= #{(symbol stored)}
+              (:seon.sci.eval/unindexed
+               (value (str "(alter-meta! (var " stored ") assoc :doc \"changed\")"))))
+           "an inherited stored Var's metadata change is a definition change")
+       (is (not= "changed" (value "(:doc (meta held))"))
+           "and SCI copied the Var before writing it, so the shared one never changed")
+       (is (= #{(symbol stored)}
               (:seon.sci.eval/unindexed (value (str "(do (ns-unmap 'seon.note 'render-notes-ai) 1)"))))
            "a nested unmap of a stored row's Var refuses as unindexed")
        (let [refusal (value (str "(do (defn fresh \"D.\" " contract " [x] x) "
