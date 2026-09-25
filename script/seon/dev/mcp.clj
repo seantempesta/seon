@@ -368,77 +368,16 @@
         :else event))
     event))
 
-(defn- elision-value
-  [path next-offset]
-  {:seon.print/face :seon.print/elided
-   :seon.print/omitted 1
-   :seon.print/elision-unit :children
-   :seon.render.data/path path
-   :seon.render.data/next-offset next-offset
-   :seon.render.profile/id :seon.render.profile/agent
-   :seon.print/requery-refusal
-   "the MCP projection retained no stable identity for this cut"})
-
-(declare enrich-collection-tail-elisions)
-
-(defn- enrich-sequential-tail
-  [value path rebuild]
-  (let [items (vec value)
-        final-index (dec (count items))]
-    (rebuild
-     (map-indexed
-      (fn [index item]
-        (if (and (= index final-index)
-                 (= :seon.sci.admit/elided item))
-          (elision-value path index)
-          (enrich-collection-tail-elisions item (conj path index))))
-      items))))
-
-(defn- enrich-collection-tail-elisions
-  [value path]
-  (cond
-    (vector? value)
-    (enrich-sequential-tail value path vec)
-
-    (list? value)
-    (enrich-sequential-tail value path #(apply list %))
-
-    (map? value)
-    (reduce-kv
-     (fn [result key child]
-       (assoc result key (enrich-collection-tail-elisions child
-                                                          (conj path key))))
-     (empty value)
-     value)
-
-    :else value))
-
-(defn- enrich-projection-elisions
-  ;; KEYED ON THE SENTINEL, not on a retired flag. This asked
-  ;; `:seon.sci.admit/capped?`, which admission stopped writing when a value
-  ;; became faithful-or-missing (2026-09-07); the read then answered nil
-  ;; forever and the tail sentinel reached the tool unenriched. The walk is
-  ;; a no-op when no sentinel is present, so the positive signal is enough.
-  ;;
-  ;; ONLY A MAP `:val` CARRIES THE PROJECTION. A raw io-prepl `:ret` carries
-  ;; the printed STRING there; `update-in` cast it to `Associative` and threw,
-  ;; which is the whole transport failing on a shape it was never handed
-  ;; before. The enrichment is for the projection it knows, and every other
-  ;; `:val` passes through untouched.
+(defn- shown-event
+  ;; The agent path already printed its value: an SCI evaluation's shown text
+  ;; (`:seon.dev.mcp/text`) becomes the event's value beside its evaluation
+  ;; keys, and every other `:val` keeps the printed bytes the JVM sent. The
+  ;; bridge reprints nothing.
   [event]
-  (if (and (= :ret (:tag event)) (map? (:val event)))
-    (update-in event [:val :seon.dev.mcp/value]
-               enrich-collection-tail-elisions [])
-    event))
-
-(defn- printed-value-event
-  ;; The value crosses as its printed EDN so keywords and symbols read as
-  ;; themselves; JSON would turn both into strings.
-  [event]
-  (if (and (= :ret (:tag event)) (map? (:val event)))
-    (update-in event [:val :seon.dev.mcp/value]
-               #(binding [*print-length* nil *print-level* nil] (pr-str %)))
-    event))
+  (let [value (:seon.dev.mcp/value (:val (decoded-projection-event event)))]
+    (if (string? (:seon.dev.mcp/text value))
+      (merge event (dissoc value :seon.dev.mcp/text) {:val (:seon.dev.mcp/text value)})
+      event)))
 
 (defn- one-shot-events!
   [root cluster remote-form timeout-ms]
@@ -730,9 +669,7 @@
           (.flush ^java.io.Writer writer)
           (let [events (mapv (fn [event]
                                (-> event
-                                   decoded-projection-event
-                                   enrich-projection-elisions
-                                   printed-value-event
+                                   shown-event
                                    ;; SCI's namespace is the response's; the
                                    ;; host prepl *ns* would mislabel it.
                                    (cond-> (= "sci" mode) (dissoc :ns))

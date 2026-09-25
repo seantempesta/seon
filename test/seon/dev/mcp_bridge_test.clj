@@ -347,54 +347,6 @@
             (str mode " events retain their prepl structure on "
                  (if exception? "evaluation error" "success")))))))
 
-(deftest capped-list-tail-is-a-declared-elision-value
-  (let [event {:tag :ret
-               :val (pr-str
-                     {:seon.dev.mcp/value
-                      '(0 1 :seon.sci.admit/elided)})}
-        decoded ((bridge-var 'decoded-projection-event) event)
-        enriched ((bridge-var 'enrich-projection-elisions) decoded)
-        value (get-in enriched [:val :seon.dev.mcp/value])
-        elision (last value)]
-    (is (list? value) "projection must preserve the returned collection")
-    (is (= {:seon.print/face :seon.print/elided
-            :seon.print/omitted 1
-            :seon.print/elision-unit :children
-            :seon.render.data/path []
-            :seon.render.data/next-offset 2
-            :seon.render.profile/id :seon.render.profile/agent
-            :seon.print/requery-refusal
-            "the MCP projection retained no stable identity for this cut"}
-           elision))))
-
-(deftest a-raw-prepl-ret-value-passes-the-enrichment-untouched
-  ;; THE CLASS: an enrichment that assumes the shape it knows. A `:ret`
-  ;; event's `:val` is a PRINTED STRING on the raw io-prepl path — the
-  ;; projection map only exists after `decoded-projection-event` — and
-  ;; `update-in` on a string threw `String cannot be cast to Associative`,
-  ;; failing the whole transport rather than the one value it could not
-  ;; enrich. Only a map carries the projection; every other `:val` is data
-  ;; this walk has nothing to say about.
-  (let [raw {:tag :ret :val "42" :ns "user" :ms 1 :form "(+ 40 2)"}
-        vector-val {:tag :ret :val [:not :a :projection]}
-        other-tag {:tag :out :val "printed"}
-        enrich (bridge-var 'enrich-projection-elisions)]
-    (is (= raw (enrich raw))
-        "a raw io-prepl :ret carries its printed string through unchanged")
-    (is (= vector-val (enrich vector-val))
-        "and so does any other non-map :val")
-    (is (= other-tag (enrich other-tag))
-        "and an event that is not a :ret at all")
-    (let [decoded ((bridge-var 'decoded-projection-event)
-                   {:tag :ret
-                    :val (pr-str {:seon.dev.mcp/value
-                                  '(0 1 :seon.sci.admit/elided)})})]
-      (is (= :seon.print/elided
-             (:seon.print/face
-              (last (get-in (enrich decoded)
-                            [:val :seon.dev.mcp/value]))))
-          "while a decoded map projection still reaches the walk"))))
-
 (deftest duplicate-live-cluster-identities-fail-with-candidates
   (let [fixture-root (io/file project-root "tmp" (str "mcp-ambiguous-" (random-uuid)))
         root (.getCanonicalPath (doto fixture-root .mkdirs))
@@ -694,9 +646,15 @@
 (deftest results-carry-the-printed-value-and-the-authored-form
   ;; Keywords and symbols read as themselves, name metadata crosses to the
   ;; JVM, and a branch reply carries its value, never the generated form.
-  (let [event {:tag :ret :val {:seon.dev.mcp/value {:k :a.b/c :s 'd/e}}}]
-    (is (= "{:k :a.b/c, :s d/e}"
-           (get-in ((bridge-var 'printed-value-event) event) [:val :seon.dev.mcp/value]))))
+  ;; The bridge reprints nothing: SCI's shown text is the value verbatim, and
+  ;; a JVM return keeps the bytes the cluster printed.
+  (let [shown (bridge-var 'shown-event)
+        jvm {:tag :ret :val (pr-str {:seon.dev.mcp/value {:k :a.b/c :s 'd/e}})}]
+    (is (= {:tag :ret :val "{:k :a.b/c, :s \"x\"}" :seon.sci.eval/ending-ns 'user}
+           (shown {:tag :ret :val (pr-str {:seon.dev.mcp/value {:seon.sci.eval/ending-ns 'user
+                                                                :seon.dev.mcp/text "{:k :a.b/c, :s \"x\"}"}})})))
+    (is (= jvm (shown jvm)))
+    (is (= {:tag :out :val "o"} (shown {:tag :out :val "o"}))))
   (let [namespace-symbol (symbol (str "mcp.meta-" (random-uuid)))
         original (ns-name *ns*)
         source "(do (defn ^{:probe/x 1} f \"doc\" [x] x) (:probe/x (meta #'f)))"
