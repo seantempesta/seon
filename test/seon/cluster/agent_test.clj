@@ -7,8 +7,8 @@
   the graphs, and against the real transitions where the claim is about
   the derivation. Per-trial in-memory databases through the canonical
   attribute population; a recorded provider reply (no paid call anywhere), and real SCI
-  evaluation. Temporary evaluator wrappers observe execution without
-  replacing its semantics."
+  evaluation. The shipped evaluator runs unreplaced: no fixture redefines
+  `seon.sci.eval/evaluate`."
   (:require [clojure.core.async :as async]
             [clojure.core.async.impl.protocols :as async.impl]
             [clojure.core.async.flow :as flow]
@@ -36,7 +36,6 @@
             [seon.render :as render]
             [seon.repl :as repl]
             [sci.core :as sci]
-            [seon.sci.eval :as sci.eval]
             [seon.id :as id]
             [seon.render.web :as web]
             [seon.test-support :as test-support])
@@ -68,25 +67,14 @@
 
 (def ^:private now (Date. 1700000000000))
 
-(def ^:private real-evaluate
-  "The shipped evaluator, captured before any stand-in replaces its Var."
-  sci.eval/evaluate)
-
-(defn fixture-evaluate
-  "The real SCI evaluator, exposed as a Var for execution observations."
-  [request]
-  (real-evaluate request))
-
 (defn- with-connection
   "Drive `body` against a canonical database, real SCI and per-agent graphs.
 
-  THE EVALUATOR IS A VAR, NOT A CONFIG FACT. `seon.turn/evaluate-sources`
-  calls `seon.sci.eval/evaluate` directly so the program graph carries the edge,
-  so an observation wrapper is installed by replacing that Var's root value — which every
-  proc thread sees, unlike a dynamic binding. The evaluator is passed as a Var
-  so a test may observe calls and still execute the actual source."
-  ([body] (with-connection #'fixture-evaluate body))
-  ([evaluator body]
+  The shipped `seon.sci.eval/evaluate` runs as installed. A root redefinition
+  here was JVM-global: a body that never exited left it in place, the next
+  fixture captured it as the real evaluator, and it invoked itself (census
+  2026-09-25c, StackOverflowError x11)."
+  [body]
   (test-support/with-database
     (fn [connection]
       (let [ctx (test-support/fork-cluster-ctx connection)
@@ -150,23 +138,14 @@
         (async/go-loop [] (when (async/<! error-chan) (recur)))
         (try
           (flow/resume graph)
-          ;; THE EVALUATOR IS A VAR, NOT A CONFIG FACT. `evaluate-sources`
-          ;; calls `seon.sci.eval/evaluate` directly so the program graph
-          ;; carries the edge; a stand-in is installed by replacing that
-          ;; Var's root value, which every proc thread sees.
-          (let [armed-evaluate sci.eval/evaluate
-                selected-evaluate (if (identical? evaluator real-evaluate)
-                                    armed-evaluate evaluator)]
-           (with-redefs [real-evaluate armed-evaluate
-                         sci.eval/evaluate selected-evaluate]
-            (binding [*work-launcher* launcher
-                      *context-channel* context-channel
-                      *stream-channel* stream-channel]
-              (body connection ctx))))
+          (binding [*work-launcher* launcher
+                    *context-channel* context-channel
+                    *stream-channel* stream-channel]
+            (body connection ctx))
           (finally
             (flow/stop graph)
             (test-support/await-event! completion ::render-stopped)
-            (seon.flow/stop-work-launcher! launcher))))))))
+            (seon.flow/stop-work-launcher! launcher)))))))
 
 (defn- handle
   "The cluster handle `arm!` declares, from `test-support/cluster-handle`.
@@ -368,7 +347,7 @@
   (async/close! (:seon.cluster.agent-test/events event-source)))
 
 (deftest a-function-without-a-contract-never-enters-the-program
-  (with-connection real-evaluate
+  (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
             events (database-events connection)
@@ -411,7 +390,7 @@
             (disarm-all! routing)))))))
 
 (deftest system-source-submission-uses-the-ordinary-durable-run
-  (with-connection real-evaluate
+  (with-connection
     (fn [connection ctx]
       (let [routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
@@ -1627,8 +1606,7 @@
       (let [dead "99999-1"
             routing (armory connection)
             ledger (atom [])
-            evaluation-sources (atom [])
-            evaluate fixture-evaluate]
+]
         (test-support/transacted! connection
                                 [(agent-row connection "midfold")
                                  (agent-row connection "waiting")
@@ -1666,12 +1644,7 @@
         (try
           (with-redefs [ai/complete
                         (recording-completer
-                         ledger (fn [_] "(seon.run/complete \"done\")"))
-                        fixture-evaluate
-                        (fn [request]
-                          (swap! evaluation-sources conj
-                                 (:seon.cluster.eval/source request))
-                          (evaluate request))]
+                         ledger (fn [_] "(seon.run/complete \"done\")"))]
             (let [events (database-events connection)
                   ;; BOOT-SHAPE RE-ARM: recover, then re-stamp + prime. The
                   ;; listener stands before either action, so terminal facts
@@ -1753,10 +1726,7 @@
                   (is (nil? (:seon.eval/shown suffix))
                       "the unstarted capability-shaped suffix settled no result")
                   (is (nil? (:seon.cluster.eval/error suffix))
-                      "and recorded no evaluation error"))
-                (is (not-any? #(str/includes? % "my.message/send")
-                              @evaluation-sources)
-                    "and it never reached the evaluator"))
+                      "and recorded no evaluation error")))
               (testing "unanswered pre-crash messages start new episodes"
                 (is (= 2 (count @ledger))
                     "one fresh provider call for each unanswered message")
@@ -1804,9 +1774,14 @@
   (with-connection
     (fn [connection ctx]
       (test-support/seed-cluster! connection "route-trial")
+      ;; The completer stand-in is this trial's provider, so the machine's
+      ;; no-provider dial is retracted as `provider-backstop-config` does;
+      ;; under it no turn reaches the stand-in and every trial waits out
+      ;; the event backstop.
       (test-support/transacted! connection
                                 [(config-row "route-trial"
-                                             {:seon.config.run/max-episode-runs 100})])
+                                             {:seon.config.run/max-episode-runs 100
+                                              :seon.config.ai/no-provider :seon.config/absent})])
       (let [routing (armory connection)
             armer-channel (async/chan (async/sliding-buffer 1))
             armer-handle (assoc (handle connection ctx "route-trial")
@@ -1955,6 +1930,11 @@
             (async/close! armer-channel)))))))
 
 (deftest wake-routing-conservation-property
+  ;; BOUND: a passing run is 12 trials. A failing trial costs at least the
+  ;; 20 s event backstop (test-support/event-backstop-seconds), and
+  ;; test.check 1.1.1's shrink loop has no time limit, so a red here repeats
+  ;; that cost per shrink step until the request's check limit leaves the
+  ;; body live (census 2026-09-25c: 115.9 s remainder, thread 1974).
   (let [result
         (tc/quick-check
          12
