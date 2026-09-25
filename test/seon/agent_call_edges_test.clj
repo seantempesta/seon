@@ -68,12 +68,7 @@
                                     [attribute sym]))))]
         (swap! routing assoc :seon.agent/fault-channel faults)
         (try
-          (let [created (db/transact! connection
-                         [{:seon.agent/id agent-id
-                           :seon.agent/namespace {:seon.ns/name namespace-name}
-                           :seon.agent/settings {:seon.config/agent [:seon.agent/id agent-id]
-                                                 :seon.config.ai/no-provider true}}])]
-            (when (:seon.db.write.attempt/request-id created) (throw (ex-info "Probe agent refused" created))))
+          (support/transacted! connection (support/agent-tx @connection agent-id namespace-name))
           (agent/arm! request)
           (submit "(defn target {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
           (submit "(clojure.test/deftest target-test (clojure.test/is (= 3 (target 2))))")
@@ -107,7 +102,7 @@
 (deftest admitted-declarations-retain-call-dependencies-across-turn-order
   (support/with-database
    (fn [connection]
-     (support/seed-cluster! connection "agent-call-edges")
+     (support/seed-cluster! connection "agent-call-edges" {:seon.config.ai/no-provider true})
      (let [result (exercise! connection "agent-call-edges" "edge-probe" 'my.agents.edge-probe)
            target (:seon.test/target result)
            later (:seon.test/later result)]

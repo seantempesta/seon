@@ -18,8 +18,8 @@
                   [{:seon.turn/id "origin-run" :seon.turn/agent [:seon.agent/id "background-agent"] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}
                    {:seon.effect/id "background-effect"
                     :seon.effect/run [:seon.turn/id "origin-run"]
-                    :seon.effect/owner [:seon.fn/sym 'clojure.core/identity]
-                    :seon.effect/capability 'clojure.core/identity
+                    :seon.effect/owner [:seon.fn/sym 'my.shell/run!]
+                    :seon.effect/capability 'my.shell/run!
                     :seon.effect/form-ordinal 0
                     :seon.effect/ordinal 0
                     :seon.effect/request-edn "{}"

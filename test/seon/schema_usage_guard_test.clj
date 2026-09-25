@@ -78,13 +78,19 @@
   [probe-forms]
   (schema/build-projection (merge (schema/snapshot) probe-forms)))
 
+(defn- printed
+  "`form` printed as `seon.schema/canonical-schema-rows` stores `:seon.schema/form`."
+  {:malli/schema [:=> [:cat :any] :string]}
+  [form]
+  (binding [*print-namespace-maps* false] (pr-str form)))
+
 (defn- schema-row
   "One canonical schema declaration row, as the agent's declaration path
   derives it against the fixture's current projection."
   {:malli/schema [:=> [:cat :seon.db/connection :qualified-keyword :any] :seon.program/declaration-row]}
   [connection schema-key definition]
   (program/declaration-row (schema/projection-from-database @connection)
-                           {:seon.schema/key schema-key :seon.schema/form (pr-str definition)}
+                           {:seon.schema/key schema-key :seon.schema/form (printed definition)}
                            :all :core))
 
 (defn- held
@@ -147,13 +153,14 @@
     report))
 
 (defn- schema-reference-edges
+  "Stored reference edges; `:seon.schema/references` holds the referenced keys
+   themselves, so a name survives its target's retraction."
   [database]
   (db/q
    '[:find ?source-key ?target-key
      :where
      [?source :seon.schema/key ?source-key]
-     [?source :seon.schema/references ?target]
-     [?target :seon.schema/key ?target-key]]
+     [?source :seon.schema/references ?target-key]]
    database))
 
 (defn- live-schema-row?
@@ -267,7 +274,7 @@
                   (schema-row connection base-key
                               [:string {:seon.db/index true}])))]
             (is (nil? (:error result)) (pr-str (:error result)))
-            (is (= (pr-str [:string {:seon.db/index true}])
+            (is (= (printed [:string {:seon.db/index true}])
                    (:seon.schema/form
                     (db/pull @connection [:seon.schema/form]
                             [:seon.schema/key base-key]))))
@@ -297,7 +304,7 @@
              connection
              (row-tx (schema-row connection base-key (get forms base-key))))]
         (is (nil? (:error result)))
-        (is (= (pr-str (get forms base-key))
+        (is (= (printed (get forms base-key))
                (:seon.schema/form
                 (db/pull @connection [:seon.schema/form]
                         [:seon.schema/key base-key]))))
@@ -369,7 +376,7 @@
                       connection
                       (row-tx request
                               (schema-row connection base-key [:string {:seon.db/index true}]))))))
-          (is (= (pr-str [:string {:seon.db/index true}])
+          (is (= (printed [:string {:seon.db/index true}])
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]
                            [:seon.schema/key base-key]))))
@@ -392,7 +399,7 @@
             (is (= :seon.turn/program-row-changed-after-open
                    (get-in refusal [:error :seon.turn/rule]))
                 "divergence from the opening basis is named as divergence")
-            (is (= (pr-str [:string {:seon.db/index true}])
+            (is (= (printed [:string {:seon.db/index true}])
                    (:seon.schema/form
                     (db/pull @connection [:seon.schema/form]
                              [:seon.schema/key unrelated-key]))))))))))
@@ -422,7 +429,7 @@
                connection
                (row-tx (schema-row connection entity-key replacement-form)))]
           (is (nil? (:error result)) (pr-str (:error result)))
-          (is (= (pr-str replacement-form)
+          (is (= (printed replacement-form)
                  (:seon.schema/form
                   (db/pull @connection [:seon.schema/form]
                           [:seon.schema/key entity-key]))))
@@ -542,7 +549,7 @@
                         :where [_ ?attribute ?value]]
                       past base-key))
               "as-of Datalog retains the pre-retraction value")
-          (is (= (pr-str (get forms base-key))
+          (is (= (printed (get forms base-key))
                  (:seon.schema/form
                   (db/pull past [:seon.schema/form]
                           [:seon.schema/key base-key])))

@@ -2,6 +2,7 @@
   "The minimal durable current-note home and its rebirth property."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.cluster.message :as message]
             [seon.note :as note]
             [seon.db :as db]
             [seon.schema]
@@ -11,43 +12,45 @@
   [f]
   (support/with-database
     (fn [connection]
-      (let [written (db/transact! connection
-                                  (into (support/agents-tx @connection ["alice" "bob"])
-                                    [[:db/add "subject" :seon.message/id "subject-1"]]))]
-        (is (:db-after written) (pr-str written)))
+      (support/transacted! connection (support/agents-tx @connection ["alice" "bob"]))
+      (let [sent (message/send! {:my.message/to "bob" :my.message/content "The note's subject."}
+                                connection "alice")]
+        (is (:seon.message/id sent) (pr-str sent)))
       (f connection))))
 
 (deftest add-upserts-current-content-by-identity
   (with-notes
     (fn [connection]
-      (is (= {:my.note/id "design"
-              :my.note/agent
-              (db/q '[:find ?agent .
-                      :where [?agent :seon.agent/id "alice"]]
-                    @connection)
-              :my.note/content "Prefer one current fact."
-              :my.note/about
-              (db/q '[:find ?subject .
-                      :where [?subject :seon.message/id "subject-1"]]
-                    @connection)}
-             (note/add! "design" "Prefer one current fact."
-                        [:seon.message/id "subject-1"]
-                        connection "alice")))
-      (is (= "Prefer current facts only."
-             (:my.note/content
-              (note/add! "design" "Prefer current facts only."
-                         connection "alice"))))
-      (is (= 1
-             (db/q '[:find (count ?note) .
-                     :where [?note :my.note/id "design"]]
-                   @connection)))
-      (is (= "Prefer current facts only."
-             (db/q '[:find ?content .
-                     :where
-                     [?note :my.note/id "design"]
-                     [?note :my.note/content ?content]]
-                   @connection)))
-      (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.note/note) (first (note/notes @connection "alice")))))))
+      (let [subject-id (db/q '[:find ?id . :where [_ :seon.message/id ?id]] @connection)]
+        (is (string? subject-id))
+        (is (= {:my.note/id "design"
+                :my.note/agent
+                (db/q '[:find ?agent .
+                        :where [?agent :seon.agent/id "alice"]]
+                      @connection)
+                :my.note/content "Prefer one current fact."
+                :my.note/about
+                (db/q '[:find ?subject .
+                        :in $ ?id :where [?subject :seon.message/id ?id]]
+                      @connection subject-id)}
+               (note/add! "design" "Prefer one current fact."
+                          [:seon.message/id subject-id]
+                          connection "alice")))
+        (is (= "Prefer current facts only."
+               (:my.note/content
+                (note/add! "design" "Prefer current facts only."
+                           connection "alice"))))
+        (is (= 1
+               (db/q '[:find (count ?note) .
+                       :where [?note :my.note/id "design"]]
+                     @connection)))
+        (is (= "Prefer current facts only."
+               (db/q '[:find ?content .
+                       :where
+                       [?note :my.note/id "design"]
+                       [?note :my.note/content ?content]]
+                     @connection)))
+        (is ((seon.schema/projection-validator (seon.schema/handed-projection) :my.note/note) (first (note/notes @connection "alice"))))))))
 
 (deftest forget-retracts-current-entity-and-history-keeps-content
   (with-notes
