@@ -2560,17 +2560,17 @@
                                          (when (= :seon.issue/id attribute) value))) identities)
         tx-data (into
                  (cond-> [[:db.fn/call registry/head-guard-tx
-                          {:seon.source/branch source/current-branch
-                           :seon.source/expected-commit-id (:seon.source/commit-id published)}]]
-                  (some #(= :seon.schema/key (first %)) identities)
-                  (conj [:db.fn/call (fn [database] (declaration-changes database projection))])
-                  (seq program-identities)
-                  (into (require-committed! (seon.fn/adoption-tx projection published-database program-identities)
-                                            {:seon.boot/population :seon.fn/population}))
-                  (seq issue-identities)
-                  (into (require-committed! ((requiring-resolve 'seon.issue/adopt-call)
-                                             published-database issue-identities)
-                                            {:seon.boot/population :seon.issue/rows})))
+                           {:seon.source/branch source/current-branch
+                            :seon.source/expected-commit-id (:seon.source/commit-id published)}]]
+                   (some #(= :seon.schema/key (first %)) identities)
+                   (conj [:db.fn/call (fn [database] (declaration-changes database projection))])
+                   (seq program-identities)
+                   (into (require-committed! (seon.fn/adoption-tx projection published-database program-identities)
+                                             {:seon.boot/population :seon.fn/population}))
+                   (seq issue-identities)
+                   (into (require-committed! ((requiring-resolve 'seon.issue/adopt-call)
+                                              published-database issue-identities)
+                                             {:seon.boot/population :seon.issue/rows})))
                  ;; Tasks are data the publication admitted, never program rows;
                  ;; the whole set reconciles, empty when the cluster agrees.
                  (require-committed! ((requiring-resolve 'seon.issue/adopt-tasks-call)
