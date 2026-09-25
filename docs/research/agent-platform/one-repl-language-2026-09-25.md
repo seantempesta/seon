@@ -45,7 +45,7 @@ as a value, with a default. No new loop, recorder, printer or store is added.
 (`exception-summary` family, `:334-367`), the dead `mcp-io-prepl` (`:535-553`), the bridge's two evaluation forms,
 its error window and window bases, its re-decoding of shown text and its status printer
 (`script/seon/dev/mcp.clj:37-38`, `:280-303`, `:347-431`, `:511-563`; `cluster.clj:633-658`, already retired by 79d052d15): about 565 source lines
-against about 295 added over P1-P5, and about 134 more with retrieval (P7, Q3 (c) as ruled). Until P7 and P6 land the milestone is a partial
+against about 285 added over P1-P4, and about 134 more with retrieval (P7, Q3 (c) as ruled). Until P7 and P6 land the milestone is a partial
 migration (§2.9).
 
 ## 0. Broken things first
@@ -103,9 +103,11 @@ replaced by root's nuke, so they are historical and revision 5 ran none) through
 9. **A submitted run may pay the whole-history refresh.** After a closed non-generate run, an agent that holds an issue
    runs `system-turn` (`turn.clj:5295-5305`), whose candidate selection cost 3.3 s for root
    (task-context design §0.3, reported there). The task-context design owns the fix, and M1 is blocked on it (§2.10).
-9a. **No product-agent writer exists.** The only agent-row writer found is `seed-root-agent!` (`cluster.clj:3231`);
-   `arm!` requires a committed agent entity (`agent.clj:1060-1062`). A named outside agent for MCP therefore has no
-   writer to call, which is why §2.6 uses root on a branch, behind probe P-RB.
+9a. **The product-agent writer is `seon.cluster.agent/creation-tx`** (`agent.clj:205`, contract
+   `:seon.agent/creation-tx`), which fixtures use through `seon.test-support/agent-tx`; `arm!` then requires the
+   committed entity (`agent.clj:1060-1062`). Revision 5 said no such writer existed; that was wrong. A named outside
+   agent for MCP therefore needs no new writer; §2.6 still uses root, as ruled (Q2), with named agents as the priced
+   alternative.
 9b. **Stage compatibility cannot come from arming alone.** Malli instruments a function against the schema it is
    given (`reference-code/malli/src/malli/core.cljc:3131-3153`); an armed Var with another contract can still return
    the wrong stage value. §2.0 checks the declared schema by name.
@@ -435,14 +437,16 @@ live run. A branch held by an agent the session did not arm keeps today's refusa
 
 **P-RB (UNVERIFIED, first step of P3):** that root's inherited row can be armed on a lane branch's handle through the
 existing `arm!` (`agent.clj:1044`, which requires a committed agent entity, `:1060-1062`) and routed separately from
-root on the cluster branch. If it cannot, branch SCI needs a named outside agent, and **no product-agent writer
-exists**: the only agent writer found is `seed-root-agent!` (`cluster.clj:3231`). That writer, its contract and its
-failure cleanup would then be a priced prerequisite (about +25 in `seon.agent`), not bridge state.
+root on the cluster branch. If it cannot, branch SCI uses a named outside agent written by the existing
+`seon.cluster.agent/creation-tx` (`agent.clj:205`) and armed by `arm!`, with the session recording what it created
+and armed; no new writer and no bridge state.
 
 **What the bridge keeps:** transport, discovery, sessions, and adapters for `runtime_status`, `branch` and `get_value`
-that call owners and encode their answers. `runtime_status`'s observation renders through ordinary selection (P5,
-render slice 6 row 9); `branch`'s refusals become declared errors produced by `seon.cluster.registry` (P5);
-`get_value` follows Q3.
+that call owners and encode their answers. `runtime_status`'s observation already renders through its declared AI face (79d052d15). The `branch` tool's
+refusals divide by owner (P5, folded into P3): "agents hold this branch" is custody and joins P3's retirement; "the
+name exists" is the transport's lane policy over the registry's deliberately idempotent `branch!`
+(`registry.clj:192-237`), which stays idempotent; "the cluster layer is not running" is discovery. `get_value`
+follows Q3.
 
 ### 2.7 Tests: the member enters the same composition
 
@@ -501,8 +505,8 @@ including every caller of `project-next-prepl-value!` (`mcp.clj:108`, `:354`, `:
 | `mcp-projection-error`, `mcp-project`, `mcp-valf`, `mcp-io-prepl` | `cluster.clj:368-553` | 187 | P4 | the one print; the host prepl's bounded `valf` |
 | projection lookup | `prepl.clj:26-27` | 2 | P4 | — |
 | `bounded-face`, `bounded-summary` | `cluster.clj:633-658` | (26, already retired by 79d052d15, not booked here) | — | the observation's declared AI face |
-| the bridge's `refuse#` maps | `mcp.clj:442-482` | ≈ 8 | P5 | registry-declared errors |
-| **Total, P1-P5** | | **≈ 567** | | |
+| the bridge's `refuse#` maps | `mcp.clj:442-482` | ≈ 8 | P3 (P5 folded) | the custody owner's retirement answer; transport policy stays |
+| **Total, P1-P4** | | **≈ 567** | | |
 | `get_value`'s old-artifact adapter: `hex-digit?`, `digest!`, `path!`, `execute-get-value`; `mcp-get-value`; `mcp-effective` | `mcp.clj:728-782`; `cluster.clj:555-611`, `:309-333` | ≈ 134 (137 less the mark call P4 removes) | P7 | the one continuation entrance |
 | `record-evaluated-tx`, `record-evaluated-call` and helpers | `turn.clj:1454-1585` | ≈ 130 | root's call | `virtual-turn!` in fixtures |
 | R10, C1 (conditional) | runner, test, eval | 137 | P6 | §2.7 |
@@ -511,7 +515,7 @@ including every caller of `project-next-prepl-value!` (`mcp.clj:108`, `:354`, `:
 the JVM stage, and the JVM reader mapping (`mcp.clj:357-364`) into `read-context`.
 
 **Compliance and Q3.** The owner chose Q3 (c): retrieval through the one continuation entrance. "MCP is transport,
-custody and stage choice" is true only after P1-P5 and P7. Between P4 and P7 the milestone is a **partial
+custody and stage choice" is true only after P1-P4 and P7. Between P4 and P7 the milestone is a **partial
 migration**, and says so:
 
 - P4 deletes `mcp-project`, the artifact producer, and removes the deleted mark call from `execute-get-value`
@@ -562,7 +566,7 @@ first, or M1 is declared blocked on it. P3's proof exercises a task-bearing root
 | read first | `(my.program/callers …)`, `tests-reaching`, `breaks`, `reads-key`, `history` | `src/my/program.clj` | exists |
 | test | `(my.test/check {:seon.test/changed ['n/f]})` | `src/my/test.clj:14-28` | exists; cost on branch rows UNVERIFIED |
 | merge | root: `prepare-merge!`, then `accept-merge!` | `src/seon/cluster/source.clj:747-844` | replacements only |
-| write back | root: `write-back!` after accept | §3.3 | **missing** |
+| write back | root: `write-back!` after accept | §3.3 | **landed** (S5, f26ad4eca); its full-loop regression follows |
 
 ### 3.2 Deletion: one authority, the public forms kept (P0-B)
 
@@ -610,84 +614,42 @@ decide.
 
 Deletion is still **not merged**: `prepare-merge!` refuses retractions (`source.clj:767`) until R8.
 
-### 3.3 Write-back: prove the candidate before exposing it (P0-C)
+### 3.3 Write-back: prove the candidate before exposing it (P0-C; landed as S5, f26ad4eca)
 
-`my.edit/form!` is an effect capability that refuses without an evaluation context (`src/my/edit.clj:35-60`;
-`effect.clj:724-735`). A digest fence proves fresh bytes, not acceptance or equivalence. Publishing a candidate
-and then republishing the originals is not rollback either: observers may already have seen the candidate,
-history has advanced, and restoring the files does not undo the accepted cluster rows.
+`my.edit/form!` is an effect capability that refuses without an evaluation context (`src/my/edit.clj:35-60`). A
+digest fence proves fresh bytes, not acceptance or equivalence, and republishing originals after a failed publication
+is not rollback. Write-back therefore proves the candidate in memory and exposes nothing until it is proven.
 
-**The route.** Root calls `seon.cluster.source/write-back!` with `[source held-store acceptance]`.
-**M1 constrains it to one physical file.**
+**What landed:** `seon.cluster.source/write-back!` takes `{:seon.db/connection :seon.source/accepted :seon.fn/root}`,
+where the accepted value is `accept-merge!`'s transaction report. M1 constrains it to one physical file.
 
-1. **Capture and authenticate the bases.**
-   - `accept-merge!` accretes two members onto its transaction report (open map; `source.clj:803-844`):
-     `:seon.source/accepted-identities`, the `delta` it already computes, and `:seon.source/tested-commit`, the
-     `e-id` it already reads.
-   - The acceptance value is that report plus root's named acceptance. It carries the destination before and
-     after commits, the tested commit, the accepted identities and the source-publication commit whose file
-     digests are the base.
-   - Transaction entities are resolved to identities through the identity owner on the report's `db-after`. An
-     unchanged identity attribute need not appear in the tx datoms.
-   - **There are two fences, because there are two authorities.** The cluster head must still equal the
-     report's after-commit. The source publication head (`current-src`) must still equal the base commit.
-     Either move refuses the stale acceptance.
-2. **Recover the provenance from the before-state.** A replacement row may intentionally lack file
-   coordinates (`src/seon/program.cljc:96-105`), so the base declaration is read from the report's
-   **`db-before`**:
-   - its `:seon.fn/file` entity, resolved to a path;
-   - its exact selector: head (`defn` or `defn-`), name, and dispatch.
+1. **Replaced identities** are `program/changed-identities` between the report's `db-before` and `db-after`: the
+   functions and tests the merge replaced (merge refuses additions and retractions, so R9b stays later).
+2. **Provenance from the before-state.** A merged replacement row carries no file or span (probe: after
+   `reconcile-tx` the head row kept only its digest), so each declaration's file, file digest and exact byte span
+   (`:seon.fn/form-span`, analyzer byte offsets) are pulled from `db-before`.
+3. **Fences.** The connection's head must still be the report's `db-after` commit (`:head-moved`); every replaced
+   declaration must name one file (`:one-file`); the file must exist under the root (`:file-absent`) and hash
+   (SHA-256 through hasch, as publication records `:seon.fn.file/digest`) to the base digest (`:file-changed`); each
+   span must still hold its declaration's recorded source (`:span-mismatch`). The base digest is the source
+   publication's own record of the file, so a separate source-head fence is unnecessary.
+4. **Candidate and proof before exposure.** The candidate is the base bytes with each span replaced by the accepted
+   row's canonical source. It is reindexed **in memory** by the ordinary analyzer, `seon.fn/analyze-rows` over the
+   captured text (`:seon.fn.analyzer/sources`, the seam publication itself uses), and must declare exactly the
+   accepted digests for the replaced identities and the before-state digests for every other declaration of the
+   file, namespace row included (`:not-equivalent`). clj-kondo's cache entry written from captured text is marked
+   stale and rebuilt by the analyzer's own check (`src/seon/fn/analyzer.clj:268-300`).
+5. **Installation.** The disk digest is checked again, then the candidate is written to a sibling and renamed with
+   `ATOMIC_MOVE` (`:install-failed` otherwise, the sibling deleted). A colleague's edit is never overwritten.
+6. **Publication stays with its owner.** The answer names the changed path and the base and candidate digests; the
+   ordinary publication of that path (hook or `refresh-source!`) reindexes it, and its rows are a deterministic
+   function of the proven bytes. Revision 3's in-write-back `publish!`, published-digest check and guarded restore
+   are withdrawn: nothing is published before the proof, so there is nothing to restore.
 
-   A target with no base file, or one whose file is absent from the base commit's
-   `:seon.source/relative-file-digests`, refuses by name. The replacement bytes are the accepted row's stored
-   **canonical** source (1.14). Files and rendered context therefore agree.
-3. **Build and prove the candidate in memory, before anything is exposed.**
-   - Read the file's held bytes and check that their digest equals the base digest.
-   - Fold every replacement for the file over **one** candidate string with `seon.edit/form`
-     (`src/seon/edit.clj:314-373`: pure, lossless, unambiguous), passing its context-byte bound.
-   - Analyze the candidate string with the ordinary analyzer through its existing stdin seam
-     (`analyzer/analyze` with `::analyzer/paths ["-"]`, as `src/seon/fn.clj:933-934` does). Analyze the base
-     bytes the same way.
-   - **Require three things:**
-     - every accepted identity's semantic digest in the candidate equals the accepted row's digest;
-     - every other declaration in the file has a digest equal to the base;
-     - the `ns` form and its requires and aliases (the resolver context) are byte-equal to the base.
-
-     `program/digest-map` deliberately excludes file and lint rows (`program.cljc:462-476`), which is why the
-     third, exact check accompanies the semantic ones.
-   - Missing evidence, or equal-looking refusal maps, is never proof of equality.
-
-   *Disagreement with the review, with evidence.* The review puts this check inside `publish!`, before its
-   guarded pointer update (`source.clj:601-685`). But `publish!` populates from files on disk, so a check
-   there comes after the candidate is already on disk and visible to colleagues and hooks. The in-memory proof
-   comes before any exposure and uses the same analyzer. It leaves `publish!` without a second verification
-   seam.
-
-   *Hybrid.* Prove in memory (this step). Then let `publish!` reindex the real path ordinarily. Then require
-   that the published commit's recorded digest for the path equals the candidate's digest, and that the
-   analyzer digest is unchanged (step 4). Rows are a deterministic function of bytes and analyzer, so this
-   carries the in-memory proof over to the published head.
-4. **Fence the installation, and name every failure.**
-   - At the existing file writer's installation boundary, recheck that the disk digest still equals the base.
-     If a colleague has edited the file, refuse and write nothing.
-   - Write the candidate to a temporary sibling and rename it atomically.
-   - Call `publish!` with `:seon.source/expected-commit-id` set to the fenced source head. Overlapping
-     publication is **detected**, not locked: the pre-scratch check refuses (`source.clj:586-593`), and
-     `d/force-branch!` refuses inside it with `:expected-current-commit`.
-   - Then check the published digest (step 3's hybrid).
-   - **Failures:**
-     - If the publication refuses or throws, or the published digest differs, restore the original bytes
-       **only while the disk bytes still equal this candidate**. A colleague's intervening edit is never
-       overwritten.
-     - A failed restore leaves a named **write-back-unavailable** state for the path, with the evidence
-       retained.
-     - Every failure reports **accepted-but-not-written**: the accepted cluster rows are not undone.
-   - **Process loss** after the rename and before publication leaves the disk holding a candidate already
-     proven equal. The next ordinary publication converges it. The originals held in memory are not relied
-     on.
-
-There is one source owner, one analyzer and the existing guarded publication. No filesystem transaction
-framework is added. Additions and retractions in write-back are **R9b**, after R8. Price: S5 in §6.
+**REPL proof** (branch `impl-one-pipeline-wb`, a temp fixture file, 2026-09-25): 136 ms end to end; the in-memory
+reindex of the real `src/seon/edit.clj` takes about 180-220 ms; after installation the file re-analysed from disk
+gives the merged row's digest; a second call refuses `:file-changed`. Additions and retractions in write-back are
+**R9b**, after R8.
 
 ### 3.4 Milestones, ordered
 
@@ -918,18 +880,18 @@ renders whole (5.8).
 | **S1** | landed: one definition authority | — | — | — | +59 measured | its landings |
 | **P1** | one finalization point: all result replacements including the disposition's completion, then one print; constructors answer native values; the refusal branch renders through the same owner (the `pr-str`s at `turn.clj:3704`, `:3753` retire, with F10's owner); the evaluator carries the head function as data; the form's sink covers print; the database value supplied to renderers by schema name | `src/seon/sci/eval.clj`, `src/seon/turn.clj` | +40 | −26 | +14 | a refused install, a disposition refusal and a success each save one rendering; a writer-time refusal publishes no speculative success; a completed disposition's value and text agree; a batch refusal uses ordinary selection; failed refusal storage is a core failure; `unrun-evaluation` prints nothing; render reads stay in the form's evidence; preview and refresh comparisons hold |
 | **P2** | read once: segments keep raw source; the loop reads the next form with the stage's reader context and passes the event; the reader's next-event-from-offset entry if missing; remainder kept on refusal; stage keys and their three function schemas; the submission-time stage check | `src/seon/turn.clj`, `src/seon/cluster/reply.clj`, `src/seon/sci/reader.cljc`, `src/seon/cluster/agent.clj` (check only), the turn and eval schemas | +55 | −25 (traced) | +30 | the §2.2 proofs; an incompatible stage symbol refuses before any run |
-| **P3** | MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −130 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54) | −65 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
+| **P3** | MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody; the `branch` tool's custody refusal and `refuse#` maps (P5, folded) | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −138 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54, `refuse#` ≈ 8) | −73 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
 | **P3m** | the fault observation, exactly lost-error design §M (folded here as its "pipeline that owns MCP reply assembly"): the cluster value captured before settlement, saved shown text, the `fault-window` component, the committed-cursor and last-form rules, lineage unknowns, `occurred-since` in place, one budget, outcome and `isError` | the settlement writer, `seon.cluster.eval` schema (+1 attribute and component, +1 error schema, counted once across both plans), `src/seon/error.clj`, `render/transcript.clj`, `mcp.clj` | +45 | −100 (window 55, transcript ≈ 45) | −55 | lost-error §M's class regression rows, including a fault resolved inside the window, a later recurrence leaving earlier saved text unchanged, and a failed settlement not advancing the lower bound |
 | **P4** | MCP JVM mode is root's run with the JVM stage; `mode "host"` with a bounded `valf`; the MCP projection, error summary, marks and dead prepl deleted; `get_value` reduced to the labelled old-artifact adapter (its mark call removed) | new `src/seon/repl/jvm.clj`, `src/seon/turn.clj` (refresh exclusion), `src/seon/cluster.clj`, `mcp.clj`, `resources/seon/operator/prepl.clj`, `script/seon/operator.clj`, the eval schema, `test/seon/cluster/mcp_test.clj`, `test/seon/mcp_test.clj`, `test/seon/render/web_context_test.clj` | +80 | −278 (R6 34, projection/valf/io-prepl 187, marks 31, JVM form 24, lookups 2) | −198 | M1's JVM proofs; `bin/seon status`, `start` and `config apply` read their replies; a large host value is bounded in `mode "host"` |
-| **P5** | `branch` refusals are registry-declared errors (the status half landed in 79d052d15: the observation is whole and declares its AI face) | `src/seon/cluster/registry.clj`, its schema, `mcp.clj` | +10 | −8 | +2 | branch answers unchanged in content, refusals validate against their declared schemas and render by them |
+| **P5** | folded into P3 (root, 2026-09-25): the `branch` tool's custody refusal joins P3's retirement, and its create policy stays transport over the registry's idempotent `branch!`; the status half landed in 79d052d15 | — | — | — | — | — |
 | **P7** | retrieval through the one continuation entrance (Q3 (c), owner's choice): `get_value` validates wire input and calls the render owner's `units` with the evaluation's source reference; a result with no retained backing answers the typed unavailable cut; the old-artifact adapter deleted | `mcp.clj`, `src/seon/cluster.clj` | +20 | −134 | −114 | a live SCI result expands beyond the budget; a JVM result answers unavailable; nothing replays |
-| **S5** | write-back of one file (§3.3) | `src/seon/cluster/source.clj` | +75 | 0 | +75 | the M1 write-back proofs |
+| **S5** | landed (f26ad4eca): write-back of one file (§3.3) | `src/seon/cluster/source.clj`, `seon.source.edn` | +162 measured (+136 source, +26 schema; root accepted the overage) | 0 | +162 | the full-loop regression (§3.4) |
 | **P6** | tests enter the composition: `capture-evaluate`, recording through `evaluation-facts` and the recording writer, native report printed once, candidate gate as one request | `src/seon/test.clj`, `src/seon/test/runner.clj`, `src/seon/sci/eval.clj`, the test schema | +90 | −137 (R10 50, C1 87, conditional) | −47 | a member leaves one evaluation on the retaining branch, read once; failure keeps native operands; the candidate gate records a whole run |
 | **S4** | deletion's removal member (§3.2) | `src/seon/sci/eval.clj`, `src/seon/sci/reader.cljc`, `src/my/program.clj` | +30 | ≈ −50 | −20 | the §3.2 proofs |
 | **S6** | accepted-change observation (§5 row 1) | `src/my/program.clj`, `src/seon/turn.clj` | +40 | 0 | +40 | ≤ 50 ms measured |
 | **S7** | configuration (§4.4) | config owners | +75 | ≈ −30 | +45 | the §4.4 proof list |
 | **D0** | delete `config/test.edn` after a no-reader check | file | 0 | −6 | −6 | HEAD loads |
-| later | qualified definitions; R8; R9b; the completed-run recorder (≈ −130, root's call); a product-agent writer if P-RB fails (≈ +25); the planner's silent drops | — | unpriced | — | — | — |
+| later | qualified definitions; R8; R9b; the completed-run recorder (≈ −130, root's call); the planner's silent drops | — | unpriced | — | — | — |
 
 **Dependencies.** P2 needs P1's finalization point (the loop owns both). P3 and P4 need P2 and the task-context
 design's incremental refresh (§2.10). P3m follows lost-error P2 (delivery evidence) and R4, and needs **render slice 2(i)** (one render path for the
@@ -943,9 +905,9 @@ entrance itself is the render plan's unpriced cut.
 
 | Option | Slices | Guarantee | Added / deleted / net | Sacrifice |
 |---|---|---|---|---|
-| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 + P5 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +295 / −567 / **−272** | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
-| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +370 / −567 / **−197** | as A; tests outside the composition until P6 |
-| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +480 / −838 / **−358** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −271) |
+| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +285 / −567 / **−282** | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
+| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +447 / −567 / **−120** | as A; tests outside the composition until P6 |
+| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +557 / −838 / **−281** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −194) |
 
 B is recommended as the first dogfood milestone: it lands the owner's MCP law and the dogfood path without waiting
 for the continuation entrance, and it is labelled partial until P7 and P6 land. All three wait on the refresh cut and,
@@ -998,7 +960,7 @@ Revision 2's own row numbers 11.x-13.x collided with them and are withdrawn. Wha
 - **Revision 5 is source reading only**, at 19a29c683 (`eval.clj` via `git show HEAD:`): Astra's revision-4 review
   (5f7558427); lost-error design §M; the render plan §3g; `agent.clj` (`arm!`, `disarm!`, the namespace pull);
   `turn.clj` (`run-receipts`, `current-run`, the refresh call sites); `unrun-evaluation`; the ending-namespace schema;
-  the agent writers (only `seed-root-agent!` found); the owner rulings of 20:50Z and 23:00Z.
+  the agent writers (`creation-tx`, `agent.clj:205`, and `seed-root-agent!`); the owner rulings of 20:50Z and 23:00Z.
 - **Not run:** no write, submission, test, adoption, arming or new code.
 - **Unverified, established by the owning slice:**
   - P-RB: arming root's inherited row on a lane branch's handle (P3's first step);
