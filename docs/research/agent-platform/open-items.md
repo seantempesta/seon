@@ -23,6 +23,16 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**RULINGS 2026-09-25 (owner):** floor slice 2 lands as ONE slice with the 100-line bound waived (conditions: §3
+fixes folded in, ≤+20% time, compact elisions, Astra diff review). Harness S4c: attempt agent/turn only for members
+whose reach includes effect/request*; a reach miss refuses loudly. **(root):** namespace-specific pages deleted (one
+pair per entity schema); MCP JVM mode renders floor-only (no custody); error.clj bounded-text is STORAGE → canonical
+EDN, not the floor; no-provider moves to config/development.edn applied by boot to default (census c option A);
+overlay candidate attributes belong in its world. Census c (fe2f67953): 127 red + 17 never started; lanes
+fix-config-boot, fix-test-shapes, fix-agent-test-redefs running. Kondo dependency cache refilled (434 files, 0 errors,
+4.5 s). UGLY: MCP eval echoes every clj-kondo stderr line (~230 "already linted" events) unbounded — events bypass the
+one render path; route events through the floor.
+
 **OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
 (responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
 (snippets of every branch of deep large values); nothing else clips. Clipping audit c6e75e57c (21 sites). Design
