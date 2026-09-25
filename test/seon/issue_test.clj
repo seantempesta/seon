@@ -500,3 +500,16 @@
          (clojure.test/is (= "Cites a deleted file"
                              (:seon.issue/title (seon.db/pull (seon.db/db connection) [:seon.issue/title]
                                                               [:seon.issue/id "cites-a-deleted-file"])))))))))
+
+(clojure.test/deftest issue-history-refuses-a-failed-git-read
+  ;; A nonzero git exit is a cause-bearing refusal, never notes without dates.
+  (let [root (clojure.java.io/file (System/getProperty "java.io.tmpdir") (str "seon-issue-history-" (random-uuid)))]
+    (.mkdirs (clojure.java.io/file root "docs/seon/issues"))
+    (try
+      (let [data (try (seon.issue/notes (.getPath root)) nil (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+        (clojure.test/is (= 'seon.issue/note-opened (:seon.error/operation data)) (pr-str data))
+        (clojure.test/is (= (.getPath root) (:seon.issue/history-root data)))
+        (clojure.test/is (pos-int? (:seon.operator.subprocess/exit data))))
+      ;; Outside the checkout, so git finds no enclosing repository; only empty directories to remove.
+      (finally (doseq [path ["docs/seon/issues" "docs/seon" "docs" ""]]
+                 (.delete (clojure.java.io/file root path)))))))

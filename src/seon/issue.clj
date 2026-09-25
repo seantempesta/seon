@@ -1,13 +1,13 @@
 (ns seon.issue
   "Issues connect authored problem statements to program identities."
-  (:require [babashka.process :as process]
-            [clojure.edn :as edn]
+  (:require [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str]
             [edamame.core :as edamame]
             [malli.error :as me]
             [seon.ai :as ai]
             [seon.cluster.message :as message]
+            [seon.cluster.process :as process]
             [seon.cluster.registry :as registry]
             [seon.db :as db]
             [seon.id :as id]
@@ -72,29 +72,29 @@
   "Earliest authored commit second per issue note file name, from one git read.
   The file name follows the note through its move into `archive/`."
   [root]
-  (let [child (process/process ["git" "log" "--format=%x00%at" "--name-only" "--" "docs/seon/issues"]
-                               {:dir (str root) :out :string :err :string})
-        result (deref child (* 1000 git-bound-seconds) ::expired)]
-    (if (= ::expired result)
-      (do (process/destroy-tree child)
-          (throw (ex-info "Git did not report issue note history within its declared bound."
-                          {:seon.error/at (java.util.Date.)
-        :seon.error/layer :seon.issue/request
-        :seon.error/operation 'seon.issue/note-opened
-        :seon.error/message "Issue operation requires issue history within the declared process deadline."
-        :seon.error/offending (str root)
-        :seon.issue/history-root (str root)
-        :seon.error/expected "issue history within the declared process deadline"})))
-      (when (zero? (:exit result))
-        (second
-         (reduce (fn [[seconds dates] line]
-                   (cond
-                     (str/starts-with? line record-separator) [(parse-long (subs line 1)) dates]
-                     (or (str/blank? line) (nil? seconds)) [seconds dates]
-                     :else (let [file-name (.getName (io/file line))]
-                             [seconds (if (< seconds (get dates file-name Long/MAX_VALUE))
-                                        (assoc dates file-name seconds) dates)])))
-                 [nil {}] (str/split-lines (:out result))))))))
+  (let [{:seon.operator.subprocess/keys [exit output]}
+        (process/run-process! {:seon.operator.subprocess/argv ["git" "log" "--format=%x00%at" "--name-only" "--" "docs/seon/issues"]
+                               :seon.operator.subprocess/directory (str root)
+                               :seon.operator.subprocess/deadline-ms (* 1000 git-bound-seconds)})]
+    (if-not (zero? exit)
+      (throw (ex-info "Git did not report issue note history."
+                      {:seon.error/at (java.util.Date.)
+                       :seon.error/layer :seon.issue/request
+                       :seon.error/operation 'seon.issue/note-opened
+                       :seon.error/message "Issue operation requires issue history; git exited nonzero."
+                       :seon.error/offending exit
+                       :seon.issue/history-root (str root)
+                       :seon.operator.subprocess/exit exit
+                       :seon.error/expected "git log exiting 0 in the issue root"}))
+      (second
+       (reduce (fn [[seconds dates] line]
+                 (cond
+                   (str/starts-with? line record-separator) [(parse-long (subs line 1)) dates]
+                   (or (str/blank? line) (nil? seconds)) [seconds dates]
+                   :else (let [file-name (.getName (io/file line))]
+                           [seconds (if (< seconds (get dates file-name Long/MAX_VALUE))
+                                      (assoc dates file-name seconds) dates)])))
+               [nil {}] (str/split-lines output))))))
 
 (defn- parse-note [{:seon.issue/keys [path text opened]}]
   (let [lines (str/split-lines text)
