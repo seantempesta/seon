@@ -1951,17 +1951,18 @@
       [{:db/ident ::identity-value
         :db/valueType :db.type/tuple
         :db/tupleTypes [:db.type/keyword :db.type/symbol]
-        :db/cardinality :db.cardinality/one
-        :seon.schema/key ::identity-value
-        :seon.schema/form "[:tuple :keyword :symbol]"
-        :seon.schema.admission/source :agent}
+        :db/cardinality :db.cardinality/one}
        {:db/ident ::identity-ref
         :db/valueType :db.type/ref
-        :db/cardinality :db.cardinality/one
-        :seon.schema/key ::identity-ref
-        :seon.schema/form ":seon.db/ref"
-        :seon.schema.admission/source :agent}]}
+        :db/cardinality :db.cardinality/one}]}
      (fn [connection]
+       (let [declared {::identity-value [:tuple :keyword :symbol] ::identity-ref :seon.db/ref}]
+         (test-support/transacted!
+          connection
+          (seon.schema/canonical-schema-rows
+           (reduce-kv #(seon.schema/projection-with-schema %1 %2 %3 {:seon.schema.admission/source :agent})
+                      (db/carried-projection @connection) declared)
+           declared)))
        (let [database @connection
              projection (db/carried-projection database)
              forms (-> (:seon.schema.projection/forms projection)
@@ -2858,9 +2859,7 @@
                 refusal (db/transact! connection [row])]
             (is (string? (:seon.db.write.attempt/request-id refusal))
                 (pr-str refusal))
-            (is (= :seon.fn/calls
-                   (get-in refusal
-                           [:seon.error/data :seon.error/member]))
+            (is (= :seon.fn/calls (:seon.db/attribute refusal))
                 (pr-str refusal))))))))
 
 (deftest cross-file-implementations-keep-edges-or-widen
