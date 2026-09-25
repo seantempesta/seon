@@ -1016,6 +1016,7 @@
                       {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
                         :seon.error/layer :seon.program/declaration
                         :seon.error/operation 'seon.program/arity-row
+                        :seon.error/member function-symbol
                         :seon.error/message "Source bindings and contract slots differ; declare one slot per binding."
                         :seon.error/offending source-signature
                         :seon.program/signature-member :seon.fn.arity/argument-count
@@ -1098,6 +1099,7 @@
                 {:seon.error/at #?(:clj (java.util.Date.) :cljs (js/Date.))
                   :seon.error/layer :seon.program/declaration
                   :seon.error/operation 'seon.program/contract-facts
+                  :seon.error/member function-symbol
                   :seon.error/message "Source and contract arities differ; give each source arity a matching contract."
                   :seon.error/offending malli-keys
                   :seon.program/signature-member :seon.fn/arities

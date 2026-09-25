@@ -1192,16 +1192,22 @@
   A host call into a namespace it lacks refuses as
   `:seon.fn/dependency-analysis-missing-error`."
   {:malli/schema
-   [:=> [:cat :seon.db/database-value
-         [:vector [:map
-                   [:seon.cluster.eval/source
-                    :seon.cluster.eval/source]
-                   [:seon.cluster.eval/ns
-                    :seon.cluster.eval/ns]
-                   [:seon.program/row {:optional true} :seon.program/row]]]
-         [:? [:maybe [:map-of :symbol :map]]]]
-    [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
-     :seon.error/value :seon.fn/namespace-unresolvable-error]]}
+   [:function
+    [:=> [:cat :seon.db/database-value
+          [:vector [:map
+                    [:seon.cluster.eval/source :seon.cluster.eval/source]
+                    [:seon.cluster.eval/ns :seon.cluster.eval/ns]
+                    [:seon.program/row {:optional true} :seon.program/row]]]]
+     [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
+      :seon.error/value :seon.fn/namespace-unresolvable-error]]
+    [:=> [:cat :seon.db/database-value
+          [:vector [:map
+                    [:seon.cluster.eval/source :seon.cluster.eval/source]
+                    [:seon.cluster.eval/ns :seon.cluster.eval/ns]
+                    [:seon.program/row {:optional true} :seon.program/row]]]
+          [:maybe [:map-of :symbol :map]]]
+     [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
+      :seon.error/value :seon.fn/namespace-unresolvable-error]]]}
   ([database requests] (analyze-forms database requests nil))
   ([database requests dependencies]
   (let [resolved

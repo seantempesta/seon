@@ -580,7 +580,16 @@
     (let [failure (refusal-data (request "(defn join [x y] x)" '([x y])))]
       (is (= :seon.fn/arities (:seon.program/signature-member failure)))
       (is (= 1 (:seon.program/signature-count failure)))
-      (is (= 'seon.program/contract-facts (:seon.error/operation failure))))
+      (is (= 'seon.program/contract-facts (:seon.error/operation failure)))
+      (is (= 'sample/join (:seon.error/member failure))))
+    ;; An optional trailing slot is one Malli varargs arity, never two fixed
+    ;; ones; the refusal names the declaration and both arity sets.
+    (let [failure (refusal-data
+                   #(source-contract (quote sample/join) [:=> [:cat :int [:? :int]] :int] {}
+                                     "(defn join ([x] x) ([x y] y))" '([x] [x y])))]
+      (is (= 'sample/join (:seon.error/member failure)))
+      (is (= #{[:variadic 1]} (:seon.error/offending failure)))
+      (is (= #{[:fixed 1] [:fixed 2]} (:seon.error/expected failure))))
     (is (= :unsupported-declaration
            (:seon.fn.signature/reason
             (refusal-data
