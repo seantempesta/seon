@@ -470,8 +470,10 @@
                             (not (get-in unit [:seon.render.value/options
                                               :seon.render.value/structural?])))
                    (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
+                         ;; The node's path names its attribute, whose named
+                         ;; schema identifies an identity-less child value.
                          projected (@render-project-node
-                                    unit value node output)]
+                                    (assoc unit :seon.render.data/path path) value node output)]
                      (when (not= node projected) projected)))]
     (when ai? (vswap! remaining dec))
     (cond
