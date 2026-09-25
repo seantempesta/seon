@@ -13,6 +13,27 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Tenth follow-up: inline faces restored (owner correction)
+
+- `aa91ecb34` (+69/−11): selection `:explicit-value` → `:declared` → `:floor`; face value is a renderer symbol or rendered
+  data; data reaches the face's floor emitter (`inline-rendered`), AI strings and HTML Hiccup as given; nested values in
+  the floor follow the same order; face keys no longer void entity ownership; `:seon.render/inline` declared; enum and
+  `{:min 3 :max 3}` bound; `:seon.render.selection.stage/value` and web.clj's debug read restored. `:explicit-request`
+  stays deleted: no live caller (transcript's was converted in 1c).
+- `82c63dbfb` class regression `an-inline-face-overrides-the-schema-default-for-just-that-face` (ai only, html only, both,
+  data in place of a symbol). `a54278422` design §1 corrected in place.
+- **Inline functions not implemented — stopped for a ruling.** (1) `seon.sci.kernel/invoke` (sci/kernel.clj:585-640)
+  resolves and applies only a named Var (`:seon.fn/sym` → `ensure-function!` → `sci/resolve`); invoking a function
+  value through the same arm/admission needs an invocation-request member for a value, in kernel.clj (not this row).
+  (2) `producer-argument`/`render-argument` (render.clj:190-267) decide no custody by input keys today: every producer
+  receives the whole merged unit including `:seon.db/db`. "Only when its input keys ask" is new behaviour for all
+  renderers. (3) A live SCI fn value carries no source form, so "the keys its argument map destructures" is not
+  recoverable from the value; only a declared schema (`:malli/schema` meta) is.
+
+Reruns: `bin/test-check default --ns seon.render.entity-pairs-test`, `--ns seon.render-simplification-test`,
+`--ns seon.render.web-test`, `--ns seon.render-source-test`, `--ns seon.contracts-install-test` (explicit
+contract-error faces), and the lists above.
+
 ## Ninth follow-up
 
 - `0336ec323` (ruling 2, value.clj granted for this only, now **released**): the floor's identity projection passes the
