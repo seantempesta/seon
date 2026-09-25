@@ -122,6 +122,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 - Agent HTML face refuses "did not return an observation" after 417 ms on the fresh store (task-graph S1 landing item 11); renderer owner.
 - Graph walk: the node-count cut never fires because query work is capped by the same `max-nodes` (S1 landing item 10) — separate query-work cap is a config decision (owner).
 - Task-graph S1 4f18ab5db over budget (+206/0): accepted on condition that T0 (retire neighborhood + declared-sources walks onto `graph`) lands next.
+- registry-test runs out of time (62.6 s for 11 members; two stay pending): each member builds a file store and writes every canonical attribute (~2 s). Shrink assignment: one populated store per namespace, members branch from it (custody lane, 87cd929d7 landing).
 - Datahike parity baseline (`test/seon/schema/datahike_parity.edn`) is weeks stale (516 forms differ, ~53 extra / 32 missing attributes): regenerate inside a test world with a per-attribute explanation, as its own assignment — never as a side effect of another lane.
 - `seon.ai/complete` ignores `:seon.ai/no-provider` (issue provider-completion-ignores-the-no-provider-request-attribute.md; ai.clj owner).
 - Concurrency: long-tier suites (independence 137 s pool, streams, publication-concurrency) run with --include-long at a quiet window; concurrency-test "Agent creation refused" error unassigned.
