@@ -4,6 +4,8 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clj-kondo.core]
+            [clj-kondo.impl.cache]
+            [clj-kondo.impl.core]
             [malli.core :as m]
             [my.program :as my.program]
             [seon.cluster :as cluster]
@@ -3091,6 +3093,31 @@
                               (when-let [sym (:seon.fn/sym row)]
                                 [sym (:seon.fn/host-bound? row)])))
                    (rows))))
+      ;; A submitted batch reads the dependency analysis it is given, a value:
+      ;; lacking core.async it refuses by the declared schema, holding the
+      ;; filled cache's entry it classifies the macro, whatever the checkout holds.
+      (test-support/with-database
+        (fn [connection]
+          (test-support/transacted! connection {:tx-data [(test-support/namespace-row @connection 'sample.env-batch)]})
+          (let [here [:seon.ns/name 'sample.env-batch]
+                source "(defn looping [c] (async/go-loop [] (when (async/<! c) (recur))))"
+                requests [{:seon.cluster.eval/source "(require '[clojure.core.async :as async])" :seon.cluster.eval/ns here}
+                          {:seon.cluster.eval/source source :seon.cluster.eval/ns here
+                           :seon.program/row {:seon.fn/sym 'sample.env-batch/looping :seon.fn/ns here :seon.fn/source source
+                                              :seon.fn/arglists "([c])" :seon.fn/private? false
+                                              :seon.schema.admission/source :agent}}]
+                refusal (try (seon.fn/analyze-forms @connection requests {})
+                             (catch clojure.lang.ExceptionInfo refused refused))
+                async (clj-kondo.impl.cache/from-cache-1
+                       (clj-kondo.impl.core/resolve-cache-dir (str (io/file root ".clj-kondo")) true cache)
+                       :clj 'clojure.core.async)]
+            (is (= :seon.fn/dependency-analysis-missing-error
+                   (:seon.error/declared-schema (meta (ex-data refusal)))) (pr-str refusal))
+            (is (m/validate :seon.fn/dependency-analysis-missing-error (ex-data refusal)
+                            {:registry (:seon.schema.projection/registry (db/carried-projection @connection))}))
+            (is (= '[clojure.core.async/<! clojure.core.async/go-loop] (:seon.fn/unresolved-targets (ex-data refusal))))
+            (is (true? (:seon.fn/host-bound?
+                        (second (second (seon.fn/analyze-forms @connection requests {'clojure.core.async async})))))))))
       (finally (test-support/delete-recursively! root)))))
 
 (deftest canonical-program-has-complete-host-binding-facts

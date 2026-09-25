@@ -24,6 +24,8 @@
             [malli.error :as me]
             [malli.registry :as mr]
             [seon.schema.internal :as schema.internal]
+            [clj-kondo.impl.cache :as kondo.cache]
+            [clj-kondo.impl.core :as kondo.core]
             [clj-kondo.impl.utils :as kondo.utils]
             [seon.test.accretion :as accretion])
   (:import [java.nio.charset StandardCharsets]
@@ -1152,13 +1154,43 @@
     ;; analysis facts (receipts assert no program attribute).
     [{} merged-row]))
 
+(defn- shared-dependency-analysis
+  "The checkout's clj-kondo dependency analysis of `namespaces`, read and never
+  written: a submitted form is analyzed without a cache, because kondo writes
+  every namespace it lints into the cache it reads (clj_kondo/impl/cache.clj:165).
+  Each entry is kondo's own cached namespace (`from-cache-1`, :23), absent when unanalyzed."
+  {:malli/schema [:=> [:cat [:set :symbol]] [:map-of :symbol :map]]}
+  [namespaces]
+  (let [root (kondo.core/resolve-cache-dir analyzer/config-directory true nil)]
+    (into {} (keep (fn [namespace-name]
+                     (some->> (some #(kondo.cache/from-cache-1 root % namespace-name) [:clj :cljc])
+                              (vector namespace-name))))
+          namespaces)))
+
+(defn- with-dependency-analysis
+  "Resolve the usages a cacheless analysis left unanalyzed against `dependencies`:
+  a supplied namespace is analyzed, and its cached `:macro` marks each usage."
+  {:malli/schema [:=> [:cat :map [:map-of :symbol :map]] :map]}
+  [analysis dependencies]
+  (-> analysis
+      (update ::analyzer/unanalyzed-namespaces #(into (sorted-set) (remove (set (keys dependencies))) %))
+      (update ::analyzer/var-usages
+              (partial mapv #(cond-> %
+                               (get-in dependencies [(::analyzer/to %) (::analyzer/name %) :macro])
+                               (assoc ::analyzer/macro true))))))
+
 (defn analyze-forms
   "Analyze submitted forms in one kondo batch, returning form-local facts.
 
   A declaration row owns its edges. The first tuple member is empty: static
   form analysis without a declaration is not evidence that a call executed,
   and a receipt asserts no program attribute (`seon.turn` settlement analyzes
-  declarations alone). No synthetic function is minted."
+  declarations alone). No synthetic function is minted.
+
+  `dependencies` is the dependency analysis, namespace to kondo's cached
+  namespace; it defaults to the checkout's cache (`shared-dependency-analysis`).
+  A host call into a namespace it lacks refuses as
+  `:seon.fn/dependency-analysis-missing-error`."
   {:malli/schema
    [:=> [:cat :seon.db/database-value
          [:vector [:map
@@ -1166,10 +1198,12 @@
                     :seon.cluster.eval/source]
                    [:seon.cluster.eval/ns
                     :seon.cluster.eval/ns]
-                   [:seon.program/row {:optional true} :seon.program/row]]]]
+                   [:seon.program/row {:optional true} :seon.program/row]]]
+         [:? [:maybe [:map-of :symbol :map]]]]
     [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
      :seon.error/value :seon.fn/namespace-unresolvable-error]]}
-  [database requests]
+  ([database requests] (analyze-forms database requests nil))
+  ([database requests dependencies]
   (let [resolved
         (mapv
          (fn [{source :seon.cluster.eval/source
@@ -1201,6 +1235,10 @@
              analyzed-source :seon.fn/source
              function-rows :seon.fn/function-rows}
             (runtime-analysis-batch database resolved)
+            analysis (with-dependency-analysis
+                      analysis
+                      (or dependencies
+                          (shared-dependency-analysis (::analyzer/unanalyzed-namespaces analysis))))
             projection (or (db/carried-projection database)
                            (schema/projection-from-database database))]
         (mapv (fn [request [first-row last-row]]
@@ -1211,7 +1249,7 @@
                          (assoc :seon.program/analyzed-source-digest
                                 (:seon.fn.file/digest (text-context analyzed-source))))
                  projection))
-              requests spans)))))
+              requests spans))))))
 
 (defn analyze-form
   "Analyze one planned form through the static program-graph owner."
