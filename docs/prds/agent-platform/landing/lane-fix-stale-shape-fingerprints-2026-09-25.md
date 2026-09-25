@@ -122,3 +122,19 @@ Then run the census J list in lane-fix-sci-zero-arg-and-names-2026-09-25.md.
 Root runs: `bin/test-check default --ns seon.fn.shape-dependents-test`, then
 `bin/seon init --dev default` (any publication converges the drift), then
 `bin/test-check default --ns seon.call-preparation-test`.
+
+## Follow-up 2: the contract refused built-in keys (third commit)
+
+- **Defect:** `drifted-schema-keys` declared its fingerprint map's keys as
+  `:qualified-keyword`. The projection's definition fingerprints include built-in keys
+  such as `:inst`, so the armed contract refused every call.
+  - It now uses the registry's key schema, `:seon.schema/key`
+    (seon.schema.edn:75, `:keyword`). `shape-dependent-rows` does the same.
+- **Why default did not converge:** the second init found no change, so it returned the
+  published commit (cluster.clj:2009) and never ran `desired-rows`. Nothing refused
+  silently. Default's error facts hold no `seon.fn/drifted-schema-keys` error, and the
+  environment row is still eb3694….
+- **Publication hazard:** default has the refusing contract loaded (the Var and the
+  4-arity `add-contract-facts` resolve). Publishing this fix through the loaded code
+  runs the old `drifted-schema-keys` and refuses at `:inst`. Root must first reload
+  `seon.fn` from the checkout (or restart default), then publish.

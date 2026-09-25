@@ -3073,8 +3073,8 @@
 ;; A stored schema row's shape fingerprint is its key's definition fingerprint;
 ;; one that differs from this projection's is drift an earlier publication left.
 (defn- drifted-schema-keys
-  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :qualified-keyword :string]]
-                  [:set :qualified-keyword]]}
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :seon.schema/key :string]]
+                  [:set :seon.schema/key]]}
   [database definition-fingerprints]
   (let [stored (db/q '[:find ?key ?fingerprint
                        :where [?row :seon.schema/key ?key]
@@ -3092,7 +3092,7 @@
 ;; every shape reaching it. Unchanged stored rows in that closure are re-derived
 ;; in the same publication; otherwise one reference holds two shapes.
 (defn- shape-dependent-rows
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:set :keyword]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:set :seon.schema/key]
                        [:set [:tuple :qualified-keyword :seon.schema/value]]]
                   :seon.program/rows]}
   [database projection schema-keys derived]
