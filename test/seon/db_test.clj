@@ -1982,6 +1982,33 @@
                        [:db/add [:seon.fn/sym caller] :seon.fn/call-arities [callee 2]]]))
          (is (empty? (:seon.fn/arity-mismatches (db/arity-mismatches (db/db connection))))))))))
 
+(deftest a-program-row-keeps-only-the-definition-digest-it-produces
+  ;; CLASS: an identity every reader trusts that the writer never checked. A
+  ;; row whose source changed but whose stored digest did not read "unchanged"
+  ;; to acquisition, install and test reach. The writer refuses it by name.
+  (test-support/with-database
+   (fn [connection]
+     (let [function 'sample.digest/target
+           row (test-support/program-fn-row (db/db connection) function "(defn target [x] x)")]
+       (test-support/transacted!
+        connection [(test-support/namespace-row (db/db connection) 'sample.digest) row])
+       (let [basis (db/basis-t (db/db connection))
+             stale (assoc row :seon.fn/source "(defn target [x] (inc x))")
+             refusal (db/transact! connection [stale])
+             produced (:seon.program/definition-digest
+                       (test-support/program-fn-row (db/db connection) function (:seon.fn/source stale)))]
+         (is (= :seon.program/definition-digest (:seon.error/member refusal)) (pr-str refusal))
+         (is (= 'seon.db/transact! (:seon.error/operation refusal)))
+         (is (= (:seon.program/definition-digest row) (:seon.error/offending refusal)))
+         (is (= produced (:seon.error/expected refusal)))
+         (is (= {:seon.fn/sym function} (get-in refusal [:seon.error/data :seon.db/entity])))
+         (is (= basis (db/basis-t (db/db connection))))
+         (test-support/transacted!
+          connection [(test-support/program-fn-row (db/db connection) function (:seon.fn/source stale))])
+         (is (= produced (:seon.program/definition-digest
+                          (db/pull (db/db connection) [:seon.program/definition-digest]
+                                   [:seon.fn/sym function])))))))))
+
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
    (fn [connection]

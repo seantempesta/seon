@@ -4161,6 +4161,66 @@
           (merge datahike.schema/implicit-schema-spec
                  (dbi/-schema database)))))
 
+;; `seon.program` and `seon.fn` require `seon.db` (through `seon.fn.schema-shape`).
+(defonce ^:private program-definition-digest
+  (delay (requiring-resolve 'seon.program/definition-digest)))
+;; The one owner of a namespace row's resolver context (`seon.fn` digests with it).
+(defonce ^:private stored-namespace-context
+  (delay (requiring-resolve 'seon.fn/stored-namespace-context)))
+
+(defn- declaration-value
+  "`entity-id` in `database` as the row that wrote it: a component as its nested
+  row, another reference as its target's identity lookup ref, a
+  cardinality-many value as a set. `seon.program/definition-digest` of this
+  value reproduced all 7,022 stored function and test digests (2026-09-25)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-keyword] :int] :map]}
+  [database identity-attrs entity-id]
+  (reduce (fn [row {:keys [a v]}]
+            (let [installed (get (dbi/-schema database) a)
+                  v (cond (not= :db.type/ref (:db/valueType installed)) v
+                          (:db/isComponent installed) (declaration-value database identity-attrs v)
+                          :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
+                                          identity-attrs)
+                                    v))]
+              (if (= :db.cardinality/many (:db/cardinality installed))
+                (update row a (fnil conj #{}) v)
+                (assoc row a v))))
+          {} (d/datoms database :eavt entity-id)))
+
+(defn- write-digest-error
+  "The first function or test row this report changed whose stored definition
+  digest is not the one its final value produces with its namespace's resolver
+  context, as `seon.fn` produces it. Every digest comparison (acquisition,
+  install, test reach) trusts the stored digest, so the writer decides it."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report [:vector :qualified-keyword]]
+                  [:or :nil :seon.error/base]]}
+  [report identity-attrs]
+  (let [database (:db-after report)
+        ;; One resolver context per namespace in the report, not per row.
+        context-of (memoize #(@stored-namespace-context (declaration-value database identity-attrs %)))]
+    (some (fn [entity-id]
+            (when-let [identity-attribute (some #(when (first (d/datoms database :eavt entity-id %)) %)
+                                                [:seon.fn/sym :seon.test/sym])]
+              (let [row (declaration-value database identity-attrs entity-id)
+                    namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))
+                    namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
+                    context (some-> namespace-entity context-of)
+                    stored (:seon.program/definition-digest row)
+                    produced (@program-definition-digest row context)]
+                (when (not= stored produced)
+                  (diagnostic
+                   {::transaction-refused true
+                    :seon.error/message
+                    (str "The stored definition digest of " (pr-str [identity-attribute (get row identity-attribute)])
+                         " is not the one its definition produces. Write the row its canonical writer produced.")
+                    :seon.error/layer :database-write
+                    :seon.error/operation 'seon.db/transact!
+                    :seon.error/member :seon.program/definition-digest
+                    :seon.error/expected produced
+                    :seon.error/offending (or stored :seon.error/unknown)
+                    :seon.error/data {::entity {identity-attribute (get row identity-attribute)}}})))))
+          (into (sorted-set) (map :e) (:tx-data report)))))
+
 (defn- write-report-error
   "One final check for native operations and all expanded transaction-function output."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report] [:or :nil :seon.db/error-result]]}
@@ -4195,6 +4255,7 @@
      (write-deletion-error before database affected identity-attrs)
      (write-owned-values-error projection report attribute-plans identity-attrs
                                changed-identity-attributes)
+     (write-digest-error report (identity-attributes database))
      ;; A render target breaks only by a declaration this report wrote or a
      ;; function it removed. Written rows are read alone; a removed function
      ;; can be named by any row, so that report reads them all.
