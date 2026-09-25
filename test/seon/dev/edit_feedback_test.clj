@@ -69,6 +69,40 @@
       (finally
         (delete-files! [config directory])))))
 
+(deftest pre-edit-blocks-a-multi-edit-that-leaves-unreadable-clojure
+  ;; MultiEdit once passed Pre unchecked and Post excluded its named path
+  ;; from the derived scan: the one edit tool nothing ever linted
+  (let [directory (fixture-directory)
+        config (io/file directory "hook.edn")
+        source (io/file directory "multi.clj")
+        pre (fn [edits]
+              (let [result
+                    (run-process
+                     {::command [(str (io/file repo-root "bin/seon-hook"))]
+                      ::directory repo-root
+                      ::environment {"SEON_HOOK_CONFIG" (str config)}
+                      ::input
+                      (json/generate-string
+                       {:hook_event_name "PreToolUse"
+                        :tool_name "MultiEdit"
+                        :tool_input {:file_path (str source) :edits edits}})})]
+                (is (hook-exit-honest? result) (::stderr result))
+                (json/parse-string (str/trim (::stdout result)) true)))]
+    (try
+      (spit config "{:seon.config/on-core-error :log}\n")
+      (spit source "(ns multi)\n\n(defn f [x]\n  (inc x))\n")
+      (let [response (pre [{:old_string "[x]" :new_string "[y]"}
+                           {:old_string "(inc x))" :new_string "(inc y)"}])]
+        (is (= "block" (:decision response))
+            "The second edit, applied after the first, drops a paren.")
+        (is (str/includes? (:reason response) "multi.clj"))
+        (is (str/includes? (:reason response) "[error/syntax]")))
+      (is (true? (:continue (pre [{:old_string "[x]" :new_string "[y]"}
+                                  {:old_string "(inc x)" :new_string "(inc y)"}])))
+          "A readable result passes.")
+      (finally
+        (delete-files! [source config directory])))))
+
 (deftest pre-edit-exact-reconstruction-uses-structural-edit-refusals
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")

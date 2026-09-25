@@ -864,6 +864,25 @@
                :seon.hook.reconstruction/reason message
                :seon.hook.reconstruction/chain chain}))))
 
+      ;; Claude Code's MultiEdit applies its edits in order to one file
+      (= tool-name "MultiEdit")
+      (try
+        (reduce (fn [prior edit]
+                  (let [step (reconstruct-exact-edit
+                              (:seon.hook.reconstruction/source prior) edit)]
+                    (if (= :available (:seon.hook.reconstruction/status step))
+                      step
+                      (reduced (or step {:seon.hook.reconstruction/status :refused})))))
+                {:seon.hook.reconstruction/status :available
+                 :seon.hook.reconstruction/source
+                 (slurp (absolute-file-path file-path))}
+                (:edits tool-input))
+        (catch Exception error
+          (let [{:keys [message chain]} (failure-cause error)]
+            {:seon.hook.reconstruction/status :unavailable
+             :seon.hook.reconstruction/reason message
+             :seon.hook.reconstruction/chain chain})))
+
       ;; an edit tool the hook has no reconstruction for is a file it cannot
       ;; lint; naming that is the whole point of the check
       :else
@@ -1842,7 +1861,10 @@
         event-name (:hook_event_name event)
         tool-name (:tool_name event)
         edit-event? (and (#{"PreToolUse" "PostToolUse"} event-name)
-                         (#{"apply_patch" "Edit" "Write"} tool-name))
+                         ;; MultiEdit was missing: its payload passed Pre
+                         ;; unchecked and Post excluded its named path from
+                         ;; the derived scan, so nothing ever linted it
+                         (#{"apply_patch" "Edit" "MultiEdit" "Write"} tool-name))
         local-paths (filterv repository-file? file-paths)
         mixed-scope? (and (seq local-paths)
                           (not= (count local-paths) (count file-paths)))
