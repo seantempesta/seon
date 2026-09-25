@@ -220,8 +220,10 @@ Private experiments remain possible; local green never implies shared acceptance
   agents; preserve task/agent identity on loud, resumable budget exhaustion.
 - **Render ordinary values totally.** Use one AI/HTML pair per entity schema, scalars in
   its block, components/declared queries in theirs. A value's own `:seon.render/ai` or
-  `:seon.render/html` key overrides that default for its face (a renderer symbol or the rendered
-  data itself), so any REPL result can carry its presentation. Default to the attribute-map printer;
+  `:seon.render/html` key overrides that default for its face (a renderer symbol, an inline
+  function admitted like any agent function, or the rendered data itself), so any REPL result
+  can carry its presentation. A render function receives one unit; the database and other
+  render inputs are supplied when its declared input keys ask for them. Default to the attribute-map printer;
   failed rendering gives a diagnostic. Compose error base and satisfied schema renderers.
   An attribute request stays an attribute request; report ugly output and estimate tokens.
 - **Apply presentation limits once.** One render path: a value's declared render function renders less, else the floor value
