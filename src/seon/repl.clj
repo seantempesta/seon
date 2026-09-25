@@ -448,7 +448,7 @@
 
 (defn render-ai
   "`:seon.render/ai` — one evaluation, as the REPL session it was."
-  {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :string]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :string]]}
   [unit]
   (let [emission (entity-emission unit)]
     (when (seq (:seon.cluster.eval/source emission))
@@ -481,7 +481,7 @@
 
 (defn render-html
   "Render the prompt and complete agent input together, then its response."
-  {:malli/schema [:=> [:cat :seon.repl/entity-request] [:maybe :seon.render/hiccup]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/hiccup]]}
   [unit]
   (let [emission (entity-emission unit)
         answer (response emission)

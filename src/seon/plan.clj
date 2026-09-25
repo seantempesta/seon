@@ -1426,7 +1426,7 @@
 
 (defn render-item-html
   "Show a step's state, completion time, and expected outcome."
-  {:malli/schema [:=> [:cat :my.plan/render-step] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [step]
   (item-html step
              (when-let [database (:seon.db/db step)]

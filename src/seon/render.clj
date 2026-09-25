@@ -195,9 +195,11 @@
 
 (defn- render-argument
   [request]
+  ;; The database is not a unit member here: a render function that declares
+  ;; it gets it as a supplied default (call preparation), scoped to this
+  ;; request's database by `invoke-selected`.
   (let [context (select-keys request
-                             [:seon.db/db
-                              :seon.sci.eval/ctx
+                             [:seon.sci.eval/ctx
                               :seon.agent/id
                               :seon.turn/id
                               :seon.render.call/id
@@ -598,7 +600,8 @@
     (and (= :seon.render/html output) (hiccup/hiccup? rendered)) rendered
     (= :seon.render/form output) rendered
     :else ((if (= :seon.render/html output) render.value/render-html render.value/render-ai)
-           (assoc (render-argument request) :seon.render/value rendered))))
+           (cond-> (assoc (render-argument request) :seon.render/value rendered)
+             (:seon.db/db request) (assoc :seon.db/db (:seon.db/db request))))))
 
 (defn- viewing-namespace
   "The namespace of the agent the value is rendered for: the request's own
@@ -1079,6 +1082,13 @@
     :as request}
    selected]
   (let [projection (request-projection request)
+        ;; The request's database is the one a declared :seon.db/db input
+        ;; is supplied with: scoped on the invocation's environment, so the
+        ;; supplier (seon.db/supplied-database-value) answers it, not the
+        ;; connection's current value. Caller arguments still win.
+        scoped (when-let [database (:seon.db/db request)]
+                 (some-> (env/of ctx) (env/scope {:seon.db/db database})))
+        ctx (if (env/environment? scoped) (env/carry-state ctx (env/environment-state scoped)) ctx)
         ;; RECORD WHAT IS RENDERING. A producer may hand its own value
         ;; to another producer — the value floor is the common case —
         ;; so the producers already on this chain travel with the

@@ -1156,7 +1156,7 @@
 
 (defn notice-prose
   "`:seon.render/ai` for one notice: steering for a contract arm's fact, else its evidence."
-  {:malli/schema [:=> [:cat :seon.error/notice] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [notice]
   (let [fact (:seon.error/fact notice)]
     (if (and (qualified-symbol? (:seon.instrument/fn fact))
@@ -1785,7 +1785,7 @@
 
 (defn render-ai
   "Render the flat error value, preserving its recorded diagnostic data."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         source (when (:seon.error/data-edn value) (fact-source value))]
@@ -1800,7 +1800,7 @@
 
 (defn render-html
   "Render one fault's operation, message, time, function, turn, and evidence link."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [value (rendered-error-value unit)
         turn (:seon.error/run value)
@@ -2041,7 +2041,7 @@
 
 (defn elision-prose
   "`:seon.render/ai` — a neutral account of bounded render-walk elision."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         evidence (:seon.error/data value)]
@@ -2054,7 +2054,7 @@
 
 (defn elision-html
   "`:seon.render/html` — a neutral elision notice, never an error card."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [value (rendered-error-value unit)
         evidence (:seon.error/data value)]
@@ -2085,7 +2085,7 @@
 
 (defn mcp-prose
   "`:seon.render/ai` — retrieval evidence for a failed MCP value lookup."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         evidence (merge (:seon.error/data value)
@@ -2099,7 +2099,7 @@
 
 (defn index-refusal-prose
   "`:seon.render/ai` — the precise evidence that stopped program indexing."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The total error render boundary receives a raw error, an acquired entity or a render unit and must describe unrecognized values without refusing them.", :gen/elements [nil false 0 "" :k [] {}]}]] [:string {:min 1}]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:string {:min 1}]]}
   [unit]
   (let [value (rendered-error-value unit)
         evidence (merge (:seon.error/data value)

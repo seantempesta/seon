@@ -204,13 +204,9 @@
               :page [:vector :seon.render/hiccup],
               :surface-id [:string {:min 9}],
               :unit
-              [:map-of :qualified-keyword
-               [:any
-                {:seon.schema.admission/exemption
-                 :seon.schema.admission/polymorphic-boundary
-                 :seon.schema.admission/reason
-                 "A render unit is an open map from render keys to their own declared values; each key is bounded by its own schema, so the map-of value is genuinely heterogeneous here."
-                 :gen/return nil}]],
+              [:map
+               {:description "The open render unit: the value under :seon.render/value with the render inputs its function declares. The database is a declared input: omitted, call preparation supplies it (the invocation's scoped database)."}
+               [:seon.db/db {:optional true} :seon.db/database-value]],
               :value
               [:any
                {:seon.schema.admission/exemption
