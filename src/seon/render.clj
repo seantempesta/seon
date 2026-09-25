@@ -164,7 +164,8 @@
                :seon.error/fix "Supply the expected member and repeat the requested operation."
                :seon.render/refused-member :seon.schema/projection
                :seon.error/expected [:or :seon.render/profile :seon.schema/handed-projection]
-               :seon.error/offending request})]
+               ;; the members the request HAS, never the request (it carries its world)
+               :seon.error/offending (vec (sort (keys request)))})]
           observation))))
 
 (defn- target-profile
