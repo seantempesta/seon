@@ -18,7 +18,9 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.effect :as effect]
+            [seon.env :as env]
             [seon.error :as error]
+            [seon.fault :as fault]
             [seon.flow :as seon.flow]
             [seon.fn :as seon.fn]
             [seon.id :as id]
@@ -3413,6 +3415,33 @@
               (or (:seon.error/operation (error/refusal failure)) 'seon.turn/phase)})
        {:seon.error/declared-schema :seon.turn.loop/phase-failed-error}))))
 
+(defn- analyze-submitted
+  "Analyze a pass's declarations; a failure becomes the phase's flat refusal.
+
+  A failure declaring `:seon.fn/dependency-analysis-missing-error` is the
+  platform's fault, not the author's mistake: it is stored and delivered
+  (`seon.fault/fault!`, whose `:panic` throws to this turn's caller) before the
+  pass records it, so the agent is never asked to correct it."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id :seon.db/database-value
+                       [:vector :map]]
+                  [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
+                   :seon.fn/namespace-unresolvable-error :seon.turn.loop/phase-failed-error]]}
+  [cluster agent-id database requests]
+  (try
+    (seon.fn/analyze-forms database requests)
+    (catch InterruptedException interrupted
+      (throw interrupted))
+    (catch Throwable failure
+      (when (= :seon.fn/dependency-analysis-missing-error
+               (:seon.error/declared-schema (meta (ex-data failure))))
+        (fault/fault! (env/of cluster) failure
+                      {:seon.error/layer :seon.turn/phase
+                       :seon.error/operation 'seon.fn/analyze-forms
+                       :seon.db.process/id (:seon.db.process/id cluster)
+                       :seon.agent/id agent-id
+                       :seon.error/declared-schema :seon.fn/dependency-analysis-missing-error}))
+      (phase #(throw failure)))))
+
 (defn- closing-settlement?
   "True when this settlement closes the ordinary turn.
   Derived from the settled disposition and the undisposed agent form, the
@@ -4919,7 +4948,7 @@
             analyzed
             (cond
               (:seon.turn.loop/phase-failed evaluated) evaluated
-              (seq submitted) (phase #(seon.fn/analyze-forms database (mapv second submitted)))
+              (seq submitted) (analyze-submitted cluster agent-id database (mapv second submitted))
               :else [])]
         (if (or (:seon.turn.loop/phase-failed analyzed)
                 (:seon.fn/namespace-unresolvable analyzed))
