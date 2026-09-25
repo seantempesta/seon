@@ -517,6 +517,8 @@
                               (:seon.operator/clusters response))]
            (is (nil? (:seon.error/at response)) (pr-str (select-keys response [:seon.error/message])))
            (is (= :faulted (:seon.dev.mcp/health observed)))
+           (is (nat-int? (:seon.agent/count (boot/readiness (get @runtime/running-instances cluster-name))))
+               "an agentless world counts 0 agents, never nil")
            ;; the fixture branch also carries whatever open faults its parent had
            (is (some #{(:seon.error/signature receipt)}
                      (map :seon.error/signature (:seon.dev.mcp/open-faults observed))))

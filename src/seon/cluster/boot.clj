@@ -464,7 +464,10 @@
                   :seon.render.web/served]]
     (merge (:seon.boot/advertisement instance)
            {:seon.boot/missing-layers (filterv #(not (get instance %)) required)
-            :seon.agent/count (if database (db/q '[:find (count ?a) . :where [?a :seon.agent/id _]] database) 0)
+            :seon.agent/count (or (when database
+                                     ;; Datalog's count over no bindings answers nil, not 0.
+                                     (db/q '[:find (count ?a) . :where [?a :seon.agent/id _]] database))
+                                   0)
             :seon.problems/problems (if database (problems/problems database {}) {})}
            (select-keys instance [:seon.boot/ready-ms :seon.boot/recovered-runs])
            (select-keys (:seon.render.web/served instance) [:seon.render.web/url :seon.render.web/wanted-port]))))
