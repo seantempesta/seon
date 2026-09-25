@@ -53,6 +53,20 @@ SCI Var remains unchanged. This threatens the claim that a preview is never
 promoted: later parent discovery, contract selection or lazy installation can
 observe candidate metadata without a committed definition.
 
+## Live reproduction — 2026-09-25
+
+The Var itself is affected. Its fixtures now admit through the canonical writers (`9cebcb7b1`), so
+`seon.test.accretion-test/candidate-tests-run-on-a-copy-on-write-turn-fork` reached its parent assertions
+for the first time today. Root run `e3a4b2f03b87` (`tmp/orchestrator/verify-final.out.d/003.txt`) failed
+two of them:
+
+- `accretion_test.clj:220`: after `evaluate-candidate`, the parent's `fixture.candidate/target` Var is no
+  longer `identical?` to the one resolved before it.
+- `accretion_test.clj:222`: the parent's Var root bytes differ.
+
+The parent's `(fixture.candidate/target 1)` still answered 1. The mutating step is not yet isolated at a
+REPL; the candidates are `install-candidate-function!` and `advance-context-projection!` on the fork.
+
 ## Existing coverage and missing proof
 
 `test/seon/test/accretion_test.clj:211` exercises `evaluate-candidate`, both

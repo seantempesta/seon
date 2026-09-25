@@ -129,6 +129,26 @@ The fifth red, `source-harvest-keeps-refusal-render-contracts-coherent`, exceede
   5 s bound in every run today. The work is `seon.fn/rows` over all source roots plus `build-projection`,
   whole-program work that no path of mine reaches.
 
+### Fourth round (root run e3a4b2f03b87: 37 pass, 4 fail, 0 errors)
+
+The fixture fix worked. Of the four fails, none is mine and one is not only timing:
+
+- **`source-harvest-keeps-refusal-render-contracts-coherent` (16.4 s against a 5 s bound): not mine.** It
+  is whole-program work (`seon.fn/rows` plus `build-projection`) and was red in every run today.
+- **`a-gate-test-runs-with-its-authors-cluster-custody` (6.3 s against a 5 s bound): newly measurable.**
+  This is its first run past fixture admission today, with nothing earlier to compare. Canonical fixtures
+  (agent-tx plus one analyzer call) cost tens of milliseconds at the REPL (program-fn-row about 40 ms), so
+  the remainder is `evaluate-candidate` and the gate test run. That is for the candidate-evaluation owner
+  to profile.
+- **`candidate-tests-run-on-a-copy-on-write-turn-fork`, two assertions (:220 and :222): a pre-existing
+  product defect, now exposed.** A candidate evaluation replaced the parent's Var and its root bytes.
+  - This belongs to the existing issue
+    `docs/seon/issues/candidate-context-shares-parent-program-metadata.md`. I added a dated live
+    reproduction section to it.
+  - The owner is `seon.sci.eval` (`fork-for-turn` / `install-candidate-function!`), which is not in this
+    lane.
+  - The test asserts the wanted behaviour, so it stays red until that owner fixes it.
+
 ## Root runs (serially, quiet window, after adopting the three commits)
 
 ```
