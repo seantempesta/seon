@@ -257,3 +257,30 @@
        (is (= 'seon.error/render-ai
               (selected "viewer" (assoc agent-value :seon.render/ai 'seon.error/render-ai) :seon.render/ai))
            "and the value's own face beats both")))))
+
+(deftest a-declared-database-input-is-supplied-and-a-callers-is-kept
+  ;; Inputs are the contract's (owner, 2026-09-25): a render function taking
+  ;; :seon.render/unit declares :seon.db/db; omitted, call preparation supplies
+  ;; the request's own database; a value that carries one keeps it.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx @connection "db-viewer" 'my.agents.db-viewer))
+     (let [earlier (db/db connection)]
+       (support/transacted!
+        connection
+        [(support/program-fn-row
+          (db/db connection) 'my.agents.db-viewer/probe-view
+          "(defn probe-view {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]} [unit] (str \"db:\" (some-> (:seon.db/db unit) :max-tx)))")])
+       (let [database (db/db connection)
+             ctx (support/fork-cluster-ctx connection)
+             rendered (fn [value]
+                        (render/render-ai
+                         {:seon.db/db database :seon.sci.eval/ctx ctx :seon.render/value value
+                          :seon.agent/id "db-viewer"
+                          :seon.render/profile (render/agent-render-profile config/defaults)
+                          :seon.sci.admit/caps (config/result-caps config/defaults)
+                          :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic}))]
+         (is (= (str "db:" (:max-tx database)) (rendered {:probe/label "x"}))
+             "an omitted declared database is the request's own, supplied")
+         (is (= (str "db:" (:max-tx earlier)) (rendered {:probe/label "x" :seon.db/db earlier}))
+             "a database the caller's value carries is never replaced"))))))
