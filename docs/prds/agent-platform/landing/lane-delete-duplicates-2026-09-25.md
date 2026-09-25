@@ -146,6 +146,15 @@ five `process-handle?` slots) are quoted symbols, the form `seon.schema/canonica
 recorded in the two issue notes; `test/seon/dev/publication_test.clj:34`'s `(true? reaped?)` is correct again
 without change. Sizes: src +8/−8.
 
+## Round 4 red: `bounded-read-refusals-remain-flat-errors` (root run d19b257f5c49)
+
+`render-ai`/`render-html` returned the `seon.db/q` refusal correctly, but their armed output contracts named
+`:seon.db.read/error`, which that refusal does not satisfy (REPL: the real bounded refusal validates as
+`:seon.db/invalid-read-error` true, `:seon.db.read/error` false). The error stays a value to the edge, so the
+contracts now declare the alternative the producer actually returns, `:seon.db/invalid-read-error`; both admit the
+refusal and the source/hiccup value and still reject an arbitrary map. The render pipeline renders it through
+the error schema's declared pair.
+
 ## Round 4, C6: test-only projection serializer (root ruling option 1)
 
 - Survivor: `seon.schema/build-projection`, the one constructor `projection-from-rows` calls after parsing rows.

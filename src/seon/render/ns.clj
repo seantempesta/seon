@@ -732,7 +732,7 @@
 (defn render-ai
   "Render a namespace as valid, distance-sensitive Clojure."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or [:maybe :seon.render/source] :seon.db.read/error]]}
+                  [:or [:maybe :seon.render/source] :seon.db/invalid-read-error]]}
   [unit]
   (let [database (:seon.db/db unit)
         namespace-name (:seon.ns/name unit)
@@ -765,7 +765,7 @@
 (defn render-html
   "Render the namespace's same definitions as stable HTML entries."
   {:malli/schema [:=> [:cat :seon.render/unit]
-                  [:or [:maybe :seon.render/hiccup] :seon.db.read/error]]}
+                  [:or [:maybe :seon.render/hiccup] :seon.db/invalid-read-error]]}
   [unit]
   (let [data (render-data unit)]
     (if (read-refusal? data)
