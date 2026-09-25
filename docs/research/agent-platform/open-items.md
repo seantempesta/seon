@@ -8,11 +8,12 @@ updated: 2026-09-24
 
 ## Now (rewritten 2026-09-24 ~22:10Z; ledger: tmp/orchestrator/file-ownership.md)
 
-**PLATFORM FAILURE (2026-09-25 ~02:45Z): call preparation dead on default** — a schema edit leaves dependent shape
-fingerprints stale (publication never recomputes them): :seon.env/environment has two fingerprints, both database suppliers
-refuse, custody elision fails ((my.plan/plan) "argument count of 0"); 25 schema rows stale, the base commit carries it into
-every test world (issue a-schema-edit-leaves-dependent-shape-fingerprints-stale.md). Root ruled option 2: publication
-re-derives shapes of every dependent in the changed closure (lane fix-stale-shape-fingerprints), then republish default.
+**RESOLVED (2026-09-25 ~03:30Z): call preparation dead on default** — stale dependent shape fingerprints. Fixed a0d2db39a
+(a schema edit re-derives its dependents' shapes), 757bd7004 (a publication re-derives rows whose stored shape disagrees
+with the projection), 7610ba9e9 (contract keys :seon.schema/key). After `(require 'seon.fn :reload)` + one publication,
+default converged: seon.call-preparation-test 127/0 (was 80/21/13), supplier coherence 2/0. Not healed: 39 referenced
+shapes whose own schema row is correct (finding them needs a hand list of shape-pointing attributes — not done).
+Hub schema edit re-derives ~1,500 rows in 3 s, 2.4 s in seon.test.accretion/generatable? (unassigned).
 
 **OWNER RULING 2026-09-25: no budgets anywhere; ONE render path** — a value is rendered by its schema's declared render
 function (responsible: renders less), else by the floor printer (the only clipper; clips intelligently with its own fixed
