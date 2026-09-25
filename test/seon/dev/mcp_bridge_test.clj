@@ -631,7 +631,7 @@
     (try
       (is (:seon.cluster/created? (run "create" branch)))
       (is (:seon.error/message (run "create" branch)) "an existing name refuses; never shared silently")
-      (is (= "#'user/lane-mcp-probe" (sci "(defn lane-mcp-probe [x] (+ x 41))" branch)))
+      (is (= "#'user/lane-mcp-probe" (sci "(defn lane-mcp-probe \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))" branch)))
       (is (= "42" (sci "(lane-mcp-probe 1)" branch)) "the retained branch context keeps the def")
       (is (str/includes? (sci "(resolve 'user/lane-mcp-probe)") "nil") "the shared context never sees it")
       (is (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch)))
