@@ -98,7 +98,8 @@
                  [:seon.error/operation :seon.error/operation]
                  [:seon.problems/occurrences
                   :seon.problems/occurrences]
-                 [:seon.error/fact :seon.error/fact]],
+                 [:seon.error/fact :seon.error/fact]
+                 [:seon.error/resolution {:optional true} :seon.error/resolution]],
                 :occurrences [:int {:min 1}],
                 :author :seon.agent/id
  ; Additive error declaration manifest, 2026-09-18.

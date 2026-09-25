@@ -9,9 +9,11 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.env :as env]
+            [seon.fault :as fault]
             [seon.operator.runtime :refer [running-instances]]
             [seon.oversight :as oversight]
             [seon.print :as print]
+            [seon.problems :as problems]
             [seon.render :as render]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
@@ -362,6 +364,46 @@
                               :seon.problems/problems)))))
       (finally
         (swap! running-instances dissoc cluster-name)))))
+
+(deftest runtime-observation-bounds-open-faults-and-counts-them-whole
+  ;; The observation crossed the prepl whole (12,758 chars for 16 faults on
+  ;; default, 2026-09-25). It carries the newest ten open faults with strings
+  ;; cut to 300 characters, and counts every open and resolved fault.
+  (support/with-database
+   (fn [connection]
+     (let [cluster-name (str "mcp-observation-bound-" (random-uuid))
+           live (some #(when (map? %) %) (vals @running-instances))
+           _ (support/apply-config! connection cluster-name {:seon.config/on-core-error :record})
+           environment (env/environment {:seon.boot/cluster-name cluster-name :seon.db/connection connection})
+           record! (fn [i message]
+                     (fault/fault! environment (IllegalStateException. ^String message)
+                                   {:seon.error/layer ::observation-bound
+                                    :seon.error/operation (symbol "seon.cluster.mcp-test" (str "fault-" i))
+                                    :seon.db.process/id "mcp-test"}))
+           receipts (mapv #(record! % "bounded fault") (range 50))
+           long-receipt (record! 50 (apply str (repeat 1000 \x)))
+           _ (problems/resolve! connection (:seon.error/signature (first receipts)))]
+       (is (some? live) "the observation reads this JVM's live instance's structural members")
+       (swap! running-instances assoc cluster-name
+              (-> (select-keys live [:seon.boot/config :seon.boot/advertisement
+                                     :seon.boot/prepl-server :seon.boot/executors])
+                  (assoc-in [:seon.boot/config :seon.boot/cluster-name] cluster-name)
+                  (assoc :seon.boot/cluster-connection connection)))
+       (try
+         (let [result (cluster/mcp-runtime-observation cluster-name)
+               shown (:seon.dev.mcp/open-faults result)
+               strings (filter string? (tree-seq coll? seq (dissoc result :seon.dev.mcp/flow :seon.dev.mcp/profile)))]
+           (is (= 10 (count shown)))
+           ;; the fixture branch also carries its parent's open and resolved faults
+           (is (<= 50 (:seon.dev.mcp/open-fault-count result)))
+           (is (<= 1 (:seon.dev.mcp/resolved-fault-count result)))
+           (is (not-any? #{(:seon.error/signature (first receipts))} (map :seon.error/signature shown)))
+           (is (= 1000 (some #(when (= (:seon.error/signature long-receipt) (:seon.error/signature %))
+                                (get-in % [:seon.dev.mcp/omitted :seon.error/message]))
+                             shown))
+               "the newest fault is shown, its message cut and its length named")
+           (is (every? #(<= (count %) 300) strings) (pr-str (remove #(<= (count %) 300) strings))))
+         (finally (swap! running-instances dissoc cluster-name)))))))
 
 (deftest ^{:seon.test/fixture-observation
            "Observes that flow health uses an ordinary canonical branch; the fresh-store owner is referenced only to assert zero acquisitions."}

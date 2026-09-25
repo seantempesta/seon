@@ -630,18 +630,31 @@
   "How many open faults the MCP observation carries whole; the rest are counted."
   10)
 
-(defn- bounded-summary
-  "`value` with each string over 300 characters cut to 300 and each collection
-  dropped, both named with their size under `:seon.dev.mcp/omitted`. The whole
-  value stays with its producer; the observation crosses a prepl to MCP."
+(defn- bounded-face
+  "`value` with each sequential member over `observation-top` entries kept to
+  its first ones and each string over 300 characters cut to 300, both named
+  with their size under `:seon.dev.mcp/omitted`; maps and scalars are kept."
   {:malli/schema [:=> [:cat :map] :map]}
   [value]
-  (reduce-kv (fn [summary k v]
-               (cond (coll? v) (-> summary (dissoc k) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
+  (reduce-kv (fn [face k v]
+               (cond (and (sequential? v) (< observation-top (count v)))
+                     (-> face (assoc k (vec (take observation-top v))) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
                      (and (string? v) (< 300 (count v)))
-                     (-> summary (assoc k (subs v 0 300)) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
-                     :else summary))
+                     (-> face (assoc k (subs v 0 300)) (assoc-in [:seon.dev.mcp/omitted k] (count v)))
+                     :else face))
              value value))
+
+(defn- bounded-summary
+  "`value` as [[bounded-face]] with each collection dropped and its size named
+  under `:seon.dev.mcp/omitted`. The whole value stays with its producer; the
+  observation crosses a prepl to MCP."
+  {:malli/schema [:=> [:cat :map] :map]}
+  [value]
+  (bounded-face
+   (reduce-kv (fn [summary k v]
+                (cond-> summary
+                  (coll? v) (-> (dissoc k) (assoc-in [:seon.dev.mcp/omitted k] (count v)))))
+              value value)))
 
 (defn mcp-runtime-observation
   "Derive health and Flow observations for one root-discovered cluster."
@@ -683,9 +696,15 @@
                                                    :seon.error/exception-class]))
                          bounded-summary
                          (merge (select-keys fact [:seon.error/frame]))))))
+        resolved-count
+        (when (and connection ready (not unavailable))
+          (count (filter :seon.error/resolution (:seon.problems/error-signatures problems))))
+        replaced-roots
+        (when connection
+          (instrument/replaced-roots (program-function-files (db/db connection))))
         readiness-face
         (when ready
-          (dissoc ready :seon.problems/problems))
+          (bounded-face (dissoc ready :seon.problems/problems)))
         ;; A failed adoption leaves the JVM's loaded program unknown.
         unloaded (let [loaded @sci.eval/loaded-identity] (when (:seon.error/at loaded) loaded))]
     (cond-> {:seon.dev.mcp/cluster cluster-name
@@ -697,7 +716,7 @@
              ;; own compile: a redefinition outside a reload, named.
              :seon.dev.mcp/replaced-roots
              (if connection
-               (instrument/replaced-roots (program-function-files (db/db connection)))
+               (mapv bounded-summary (take observation-top replaced-roots))
                {:seon.dev.mcp/replaced-roots-unknown
                 "The cluster has no database connection; replaced roots cannot be observed."})
              ;; Health is derived from open faults, never from a connection's
@@ -707,10 +726,13 @@
                    (seq open-faults) :faulted :else :observed)
              :seon.dev.mcp/flow
              (if (and connection (:seon.flow/graph instance))
-               (schema/call-with-projection-state
-                projection-state
-                #(oversight/flow-status (db/db connection) instance))
+               (let [flow (schema/call-with-projection-state
+                           projection-state
+                           #(oversight/flow-status (db/db connection) instance))]
+                 (cond-> flow (map? flow) bounded-face))
                :unknown)}
+      connection (assoc :seon.dev.mcp/replaced-root-count (count replaced-roots))
+      resolved-count (assoc :seon.dev.mcp/resolved-fault-count resolved-count)
       unloaded (assoc :seon.dev.mcp/program-unavailable (bounded-summary unloaded))
       (seq open-faults) (assoc :seon.dev.mcp/open-faults shown-faults
                                :seon.dev.mcp/open-fault-count (count open-faults))

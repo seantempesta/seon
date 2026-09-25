@@ -1436,10 +1436,13 @@
   "How many whole entries of each unbounded status family the terminal shows."
   5)
 
-(defn- top [entries select-entry]
-  (cond-> {:seon.operator/count (count entries)
-           :seon.operator/top (mapv select-entry (take status-top entries))}
-    (< status-top (count entries)) (assoc :seon.operator/omitted (- (count entries) status-top))))
+(defn- top
+  "The first `status-top` of `entries`, selected, with `total` (default their count) and how many are omitted."
+  ([entries select-entry] (top entries select-entry (count entries)))
+  ([entries select-entry total]
+   (let [shown (mapv select-entry (take status-top entries))]
+     (cond-> {:seon.operator/count total :seon.operator/top shown}
+       (< (count shown) total) (assoc :seon.operator/omitted (- total (count shown)))))))
 
 (defn- short-message
   "The message when it is at most 300 characters, else its length by name."
@@ -1455,7 +1458,8 @@
                     proc (:seon.oversight/procs row)] proc)
         failures (fn [value] (when value (merge (select-keys value [:seon.error/operation :seon.error/layer])
                                                  (short-message value))))]
-    (cond-> (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health :seon.dev.mcp/problem-counts])
+    (cond-> (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health :seon.dev.mcp/problem-counts
+                                  :seon.dev.mcp/resolved-fault-count])
       (:seon.dev.mcp/readiness observation)
       (assoc :seon.dev.mcp/readiness (select-keys (:seon.dev.mcp/readiness observation)
                                                   [:seon.boot/missing-layers :seon.boot/ready-ms :seon.render.web/url]))
@@ -1463,13 +1467,18 @@
       (assoc :seon.dev.mcp/open-faults
              (top faults #(merge (select-keys % [:seon.error/operation :seon.problems/occurrences
                                                  :seon.error/exception-class :seon.error.occurrence/last-at])
-                                 (short-message %))))
+                                 (short-message %))
+                  (:seon.dev.mcp/open-fault-count observation (count faults))))
       (map? (:seon.dev.mcp/flow observation))
-      (assoc :seon.dev.mcp/flow {:seon.operator/procs (count procs)
+      (assoc :seon.dev.mcp/flow {:seon.operator/agents (get-in observation [:seon.dev.mcp/flow :seon.dev.mcp/omitted :seon.oversight/agents]
+                                                               (count (get-in observation [:seon.dev.mcp/flow :seon.oversight/agents])))
+                                 :seon.operator/procs (count procs)
                                  :seon.operator/unanswered (count (remove #(= :reply (:seon.oversight/ping %)) procs))})
       (seq (:seon.dev.mcp/replaced-roots observation))
       (assoc :seon.dev.mcp/replaced-roots (let [roots (:seon.dev.mcp/replaced-roots observation)]
-                                            (if (map? roots) roots (top roots clojure.core/identity))))
+                                            (if (map? roots) roots
+                                                (top roots clojure.core/identity
+                                                     (:seon.dev.mcp/replaced-root-count observation (count roots))))))
       (:seon.dev.mcp/problems-unavailable observation)
       (assoc :seon.dev.mcp/problems-unavailable (failures (:seon.dev.mcp/problems-unavailable observation)))
       (:seon.dev.mcp/program-unavailable observation)
