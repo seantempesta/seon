@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: 4 commits landed (81f78faa3..49669dc31); shell and dependency-cache tests await root
+status: 5 code commits (81f78faa3..fc5ea0890); shell.jvm-test 5 CAUSED reds fixed, rerun awaits root
 ---
 # Lane impl-seams-s-scripts-opus: lost-error seams cut S-scripts (2026-09-25)
 
@@ -9,6 +9,17 @@ S-scripts, correction 7 (bootstrap and operator scripts stay on JDK primitives).
 No Seon runtime import was added to a script.
 
 ## Broken or unproved first
+
+- **Root's run 018 at `6ab6f5fb`: shell.jvm-test had 12 pass and 5 fail. All 5 were CAUSED, and all came from my new
+  row.** The armed `finish-evidence` contract refused the row's nil connection. The fix, `fc5ea0890`:
+  - Split out `task-outcomes`, which reads the tasks without the database world.
+  - `finish-evidence` now only describes the outputs.
+  - Later timeouts move to `::later-timeouts` under `:seon.error/data`, because that schema is `:map`.
+  - Added a positive row: after reaping, a broken stdin pipe gives `[nil nil nil]`.
+
+  Checked at default's REPL with a scratch copy: every case answers as predicted, the timeout validates against the
+  installed `:seon.await/timeout-error`, and the new contract compiles against the projection registry. No reds
+  were PRE-EXISTING or RETIRED ASSUMPTIONS.
 
 - **Not run by this lane (LOAD RULE):** `seon.shell.jvm-test` and the dependency-cache test. Root runs them (commands
   below). The new `every-capture-outcome-is-read-and-none-is-lost` row was run only as a scratch-namespace copy (see
@@ -57,11 +68,11 @@ Deleted per-site copies:
 
 | File | + | − | net |
 |---|---|---|---|
-| src/seon/shell/jvm.clj | 56 | 50 | +6 |
+| src/seon/shell/jvm.clj | 79 | 63 | +16 |
 | script/seon/dev/dependency_digest.clj | 13 | 15 | −2 |
 | script/seon/operator.clj | 48 | 14 | +34 |
-| **source total** | 117 | 79 | **+38** (design estimated −10/+47) |
-| test/seon/shell/jvm_test.clj | 25 | 1 | +24 |
+| **source total** | 140 | 92 | **+48** (design estimated −10/+47) |
+| test/seon/shell/jvm_test.clj | 28 | 3 | +25 |
 | script/seon/operator_move_test.clj | 8 | 4 | +4 |
 
 Commits: `81f78faa3` (shell), `e98de259c` (digest), `298753fc2` (operator), `49669dc31` (move test).
