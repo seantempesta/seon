@@ -2257,7 +2257,7 @@
                                                              [?ns :seon.ns/name ?name]]
                                                     database symbols)]
                          (doseq [result [facts macro-namespaces]]
-                           (when (:seon.error/at result)
+                           (when (:seon.db/invalid-read result)
                              (refused! "Declaration reload facts could not be read." result)))
                          (into {} (map (fn [[declared head inline?]]
                                          [declared (declaration-reload-rule
@@ -2273,7 +2273,7 @@
                                               :where [?e :seon.fn/sym ?symbol]
                                                      [?e :seon.program/definition-digest ?digest]]
                                             database symbols)]
-                             (when (:seon.error/at rows)
+                             (when (:seon.db/invalid-read rows)
                                (refused! "Declaration definition digests could not be read." rows))
                              (into {} rows)))
                          databases))
@@ -2287,7 +2287,7 @@
                          (let [names (db/q '[:find [?name ...] :in $ [?name ...]
                                              :where [_ :seon.ns/name ?name]]
                                            database namespace-names)]
-                           (when (:seon.error/at names)
+                           (when (:seon.db/invalid-read names)
                              (refused! "Changed namespace rows could not be read." names))
                            (set names)))
                        databases)
@@ -2316,7 +2316,7 @@
                                                     :where [?ns :seon.ns/requires ?required]
                                                     [?ns :seon.ns/name ?name]]
                                                   value (vec pending))]
-                                  (when (:seon.error/at result)
+                                  (when (:seon.db/invalid-read result)
                                     (refused! "Development namespace dependents could not be read." result))
                                   result)))
                              databases)
@@ -2588,8 +2588,12 @@
         cluster-name (get-in instance [:seon.boot/advertisement :seon.boot/cluster-name])
         cluster-ref [:seon.cluster/name cluster-name]
         ctx (:seon.sci.eval/ctx instance)
-        prior-commit (:seon.source/commit-id
-                      (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref))]
+        ;; A refused pull (invalid read or budget) is not "no adopted commit",
+        ;; which would adopt every row.
+        prior (db/pull (db/db connection) [:seon.source/commit-id] cluster-ref)
+        _ (when (or (:seon.db/invalid-read prior) (:seon.error/at prior))
+            (refused! "The adopted source commit could not be read." prior))
+        prior-commit (:seon.source/commit-id prior)]
     (cond
       (and prior-commit (= prior-commit (:seon.source/commit-id published)))
       (do (report-source-progress! "development cluster converged")

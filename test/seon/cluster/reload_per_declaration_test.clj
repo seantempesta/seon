@@ -1,5 +1,6 @@
 (ns seon.cluster.reload-per-declaration-test
   (:require [clojure.java.io :as io]
+            [clojure.string]
             [clojure.test :refer [deftest is]]
             [seon.cluster :as cluster]
             [seon.db :as db]
@@ -150,3 +151,21 @@
         (is (= '#{sample.reload.base sample.reload.impl sample.reload.caller}
                (cluster/development-namespaces moved edited [macro]))))
       nil)))
+
+(deftest a-refused-dependents-read-refuses-adoption
+  ;; Every seon.db read refusal carries :seon.db/invalid-read; not every one
+  ;; carries :seon.error/at (db.clj `q` returns a refused source argument as
+  ;; given). A check on the wrong key iterated such a refusal as namespace
+  ;; names and fed its map entries back in as `:seon.ns/requires` values.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           refused (assoc database :seon.db/invalid-read true
+                          :seon.db/refused-read-operation 'seon.db/db)
+           outcome (try (cluster/development-namespaces refused database
+                                                        [[:seon.fn/sym 'sample.reload.base/value]])
+                        (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+       (is (map? outcome) "a refused read never answers namespaces")
+       (is (clojure.string/includes? (str (:seon.error/message outcome)) "could not be read")
+           "the refusal names the read that refused"))
+     nil)))

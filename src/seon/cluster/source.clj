@@ -323,7 +323,7 @@
                               before after
                               (vec (d/datoms (d/since (d/history after) (db/basis-t before))
                                              :eavt)))]
-              (when (:seon.error/at identities)
+              (when (:seon.db/invalid-read identities)
                 (refuse! ::publish-readback-failed "Publication changes could not be read." identities))
               identities)
             (finally (d/release-materialized-db after))))
