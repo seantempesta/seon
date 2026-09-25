@@ -128,7 +128,9 @@
   Maps are tx-data; a function maps the previous entry's database to `:seon.test.seed/value`
   (manifest via `config/apply!`, tx-data via the checked writer). The first refusal stops
   entry; else the member reacquires its own branch head through the agent entrance, so the
-  held handle, its program and the commit canonical fixtures branch from are the prepared ones."
+  held handle, its program and the commit canonical fixtures branch from are the prepared ones.
+  Seeds that change the test's own `:seon.program/definition-digest` refuse (`:changes-test`):
+  the body would run the Var resolved before them."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/execution-handle] :seon.test/sym :seon.test/var]
                   [:or [:maybe :seon.agent/execution-handle] :seon.test.seed/preparation-error]]}
   [member test-symbol test-var]
@@ -141,26 +143,34 @@
       (empty? seeds) member
       (nil? member) (refusal :no-member nil (str test-symbol " declares seeds but runs without a member.") seeds)
       :else
-      (or
-       (reduce-kv
-       (fn [_ ordinal entry]
-         ;; Each entry reads the head the previous one left on the member branch.
-         (let [value (cond (map? entry) {:seon.test.seed/tx-data [entry]}
-                           (vector? entry) {:seon.test.seed/tx-data entry}
-                           :else (entry {:seon.db/db (db/db connection)}))
-               refuse #(reduced (refusal %1 ordinal (str "Seed entry " ordinal " of " test-symbol " could not prepare its world: " %2) %3))
-               {manifest :seon.config/manifest tx-data :seon.test.seed/tx-data} value
-               applied (delay (when manifest (config/apply! {:seon.db/connection connection :seon.config/manifest manifest
-                                                             :seon.boot/cluster-name (:seon.cluster/name member)})))
-               written (delay (when (seq tx-data) (db/transact! connection tx-data)))]
-           (cond
-             (schema/explain-candidate-value (:seon.schema/projection member) :seon.test.seed/value value)
-             (refuse :invalid-value "it does not return :seon.test.seed/value." value)
-             (:seon.error/at @applied) (refuse :write-refused (:seon.error/message @applied) @applied)
-             (:seon.error/at @written) (refuse :write-refused (:seon.error/message @written) @written)
-             :else nil)))
-       nil seeds)
-       (@acquire-context! member nil {:seon.agent/branch (:seon.agent/branch member)})))))
+      (let [digest #(:seon.program/definition-digest
+                     (db/pull (db/db connection) [:seon.program/definition-digest] [:seon.test/sym test-symbol]))
+            before (digest)]
+        (or
+         (reduce-kv
+         (fn [_ ordinal entry]
+           ;; Each entry reads the head the previous one left on the member branch.
+           (let [value (cond (map? entry) {:seon.test.seed/tx-data [entry]}
+                             (vector? entry) {:seon.test.seed/tx-data entry}
+                             :else (entry {:seon.db/db (db/db connection)}))
+                 refuse #(reduced (refusal %1 ordinal (str "Seed entry " ordinal " of " test-symbol " could not prepare its world: " %2) %3))
+                 {manifest :seon.config/manifest tx-data :seon.test.seed/tx-data} value
+                 applied (delay (when manifest (config/apply! {:seon.db/connection connection :seon.config/manifest manifest
+                                                               :seon.boot/cluster-name (:seon.cluster/name member)})))
+                 written (delay (when (seq tx-data) (db/transact! connection tx-data)))]
+             (cond
+               (schema/explain-candidate-value (:seon.schema/projection member) :seon.test.seed/value value)
+               (refuse :invalid-value "it does not return :seon.test.seed/value." value)
+               (:seon.error/at @applied) (refuse :write-refused (:seon.error/message @applied) @applied)
+               (:seon.error/at @written) (refuse :write-refused (:seon.error/message @written) @written)
+               :else nil)))
+         nil seeds)
+         ;; The body runs the Var resolved before seeding; a seed redefining its test refuses.
+         (let [after (digest)]
+           (when (not= before after)
+             (refusal :changes-test nil (str "Seeds of " test-symbol " change its own definition digest,"
+                                             " so its body would run the pre-seed Var.") seeds)))
+         (@acquire-context! member nil {:seon.agent/branch (:seon.agent/branch member)}))))))
 
 (def ^:private attempt-writers
   (delay {:agent (requiring-resolve 'seon.cluster.agent/creation-tx)

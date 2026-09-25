@@ -1,22 +1,24 @@
 (ns seon.test.seed-preparation-test
   (:require [clojure.java.io :as io] [clojure.string :as str] [clojure.test :refer [deftest is]]
-            [seon.db :as db] [seon.fn :as seon.fn] [seon.schema :as schema] [seon.schema.edn :as schema.edn]
+            [seon.db :as db] [seon.fn :as seon.fn] [seon.program :as program] [seon.schema :as schema] [seon.schema.edn :as schema.edn]
             [seon.test :as sut] [seon.test-support :as support]))
 
 (defn- run-seeded
-  "Run one host probe Var carrying `seeds` as a member body on a fixture branch."
-  [seeds body]
-  (support/with-database
-   (fn [connection]
-     (let [handle (support/execution-handle connection)
-           owned (create-ns (gensym "seon.test.seed-preparation-test.probe-"))
-           probe (intern owned (with-meta 'probe {:test body :seon.test/seed seeds}) nil)]
-       ;; As in `member-result`, the caller hands the body no custody of its own.
-       (try (db/call-without-custody
-             #(#'sut/bounded-result (atom {}) {} (symbol probe) (constantly probe) 5000
-                                    {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.test/member handle}
-                                    (fn [_] nil)))
-            (finally (remove-ns (ns-name owned))))))))
+  "Run one host probe Var carrying `seeds` as a member body on a fixture branch,
+  reported under `test-symbol` when given (the probe's own symbol otherwise)."
+  ([seeds body] (run-seeded nil seeds body))
+  ([test-symbol seeds body]
+    (support/with-database
+     (fn [connection]
+       (let [handle (support/execution-handle connection)
+             owned (create-ns (gensym "seon.test.seed-preparation-test.probe-"))
+             probe (intern owned (with-meta 'probe {:test body :seon.test/seed seeds}) nil)]
+         ;; As in `member-result`, the caller hands the body no custody of its own.
+         (try (db/call-without-custody
+               #(#'sut/bounded-result (atom {}) {} (or test-symbol (symbol probe)) (constantly probe) 5000
+                                      {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.test/member handle}
+                                      (fn [_] nil)))
+              (finally (remove-ns (ns-name owned)))))))))
 
 (defn- reasons [database] (set (db/q '[:find [?r ...] :where [_ :seon.test/skip-reason ?r]] database)))
 
@@ -58,3 +60,19 @@
     (try (is (every? (set (:seon.fn/keywords (first (filter :seon.test/sym (seon.fn/rows {:seon.fn/roots [(.getPath root)] :seon.schema/projection (schema/build-projection (schema.edn/packaged-forms))})))))
                      [:seon.test/skip-reason :seon.test/long-ms :seon.test.seed/tx-data]))
          (finally (run! io/delete-file (reverse (file-seq root)))))))
+
+(deftest a-seed-that-redefines-its-own-test-refuses-by-name
+  ;; The body would run the Var resolved before seeding, so a changed definition digest refuses.
+  (let [test-symbol 'seon.test.seed-preparation-test/redefined-by-its-own-seed
+        redefine (fn [{database :seon.db/db}]
+                   (let [namespace-row (let [row {:seon.ns/name 'seon.test.seed-preparation-test
+                                                  :seon.ns/source "(ns seon.test.seed-preparation-test (:require [clojure.test :refer [deftest is]]))"}]
+                                         (assoc row :seon.program/definition-digest (program/definition-digest row)))
+                         rows (seon.fn/source-rows database (program/shapes-in (schema/projection-from-database database))
+                                                   namespace-row "(deftest redefined-by-its-own-seed (is false))" #{})]
+                     {:seon.test.seed/tx-data (seon.fn/reconcile-tx database rows [])}))
+        entered (atom false)
+        result (run-seeded test-symbol [redefine] #(reset! entered true))]
+    (is (false? @entered) "the pre-seed Var never runs")
+    (is (str/includes? (str (:seon.test/failure-message result)) "change its own definition digest")
+        (:seon.test/failure-message result))))
