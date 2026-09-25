@@ -118,6 +118,17 @@ The fifth red, `source-harvest-keeps-refusal-render-contracts-coherent`, exceede
   - The same three were red in root's run at 19:38Z (verify-1955.out.d/005.txt), before dea61e080
     (19:45Z). None of them touches `capabilities`. I have not fixed them.
 
+### Third round (root run on 64be831ab: 20 pass, 1 fail, 3 errors)
+
+- **3 errors: retired assumption.** The hand-built agent maps lacked `:seon.agent/branch`. The fixtures now
+  create their agents through `test-support/agent-tx`, which calls `agent/creation-tx` to seed the namespace
+  with clojure.test referred and to run branch-call and steward-call. That is the same pattern as
+  `turn_loop_test.clj:644`. `agent-tx` needs an executing test handle, so the REPL could not run it; this
+  round depends on root's run.
+- **1 fail: `source-harvest-keeps-refusal-render-contracts-coherent`, not mine.** It ran 10.7–17.5 s against a
+  5 s bound in every run today. The work is `seon.fn/rows` over all source roots plus `build-projection`,
+  whole-program work that no path of mine reaches.
+
 ## Root runs (serially, quiet window, after adopting the three commits)
 
 ```
