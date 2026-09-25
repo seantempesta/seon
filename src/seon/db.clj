@@ -3734,9 +3734,19 @@
   ;; Commit id -> the same derived base; small keys, so it retains more.
   (cache/lru-cache-factory {} :threshold 16))
 
+(defn- arity-content-key
+  "The arity cache key naming a value by the datoms the gate reads."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:tuple :qualified-keyword [:vector :seon.schema/value]]]}
+  [database]
+  [::arity-content (mapv (fn [attribute]
+                           [attribute (if (get (dbi/-schema database) attribute)
+                                        (vec (d/datoms database :aevt attribute))
+                                        [])])
+                         arity-attributes)])
+
 (defn- arity-base
   "The arity gate's whole-program input for a value, memoized by the datoms it
-  reads: edges, bounds, the comparison, and the edges indexed by caller and
+  reads: edges, bounds, the comparison, and the edge sets indexed by caller and
   callee so a report can replace only the ones it touched."
   {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
   [database]
@@ -3746,8 +3756,8 @@
                    (merge (arity-comparison edges bounds)
                           {::edge-set edges
                            ::bounds bounds
-                           ::by-caller (group-by first edges)
-                           ::by-callee (group-by (comp first second) edges)})))]
+                           ::by-caller (update-vals (group-by first edges) set)
+                           ::by-callee (update-vals (group-by (comp first second) edges) set)})))]
     ;; Keyed by the datoms it reads. The writer's own `:db-before` carries no
     ;; committed identity (Datahike's writer loop threads each report's
     ;; `:db-after`, `datahike/writer.cljc:118`, whose context is speculative,
@@ -3757,18 +3767,32 @@
     ;; (Datahike derives it from content), so a later write on a fresh branch
     ;; of a seen commit hits without reading its ~78,000 arity datoms (114 ms)
     ;; to build the content key, and a new commit of seen content still hits.
+    ;; A report seeds its final value's base (`report-arity-comparison`), so
+    ;; the first write on a fork of a just-written head hits too.
     (let [by-content #(deref (cache/lookup-or-miss
-                              arity-base-cache
-                              [::arity-content (mapv (fn [attribute]
-                                                       [attribute (if (get (dbi/-schema database) attribute)
-                                                                    (vec (d/datoms database :aevt attribute))
-                                                                    [])])
-                                                     arity-attributes)]
+                              arity-base-cache (arity-content-key database)
                               (fn [_] (delay (derive)))))
           {:datahike.cache/keys [committed? commit-id]} (:cache-context database)]
       (if (and committed? commit-id)
         @(cache/lookup-or-miss arity-commit-cache commit-id (fn [_] (delay (by-content))))
         (by-content)))))
+
+(defn- advanced-arity-base
+  "The final value's base from its `:db-before` base: `removed` edges leave,
+  `affected` edges enter, and `comparison` is the report's own answer."
+  {:malli/schema [:=> [:cat :map [:set :seon.schema/value] [:set :seon.schema/value] :map] :map]}
+  [base removed affected comparison]
+  (let [index (fn [by key-of]
+                (as-> by by
+                  (reduce (fn [by edge]
+                            (let [k (key-of edge) remaining (disj (get by k) edge)]
+                              (if (seq remaining) (assoc by k remaining) (dissoc by k))))
+                          by removed)
+                  (reduce (fn [by edge] (update by (key-of edge) (fnil conj #{}) edge)) by affected)))]
+    (assoc comparison
+           ::edge-set (into (reduce disj (::edge-set base) removed) affected)
+           ::by-caller (index (::by-caller base) first)
+           ::by-callee (index (::by-callee base) (comp first second)))))
 
 (defn- report-arity-comparison
   "The arity comparison of a report's final value from its `:db-before`'s
@@ -3839,11 +3863,17 @@
                                    (remove #(caller-symbols (first %)))
                                    (mapcat (::by-callee base) callee-symbols))
                     prior (arity-comparison removed (::bounds base))
-                    current (arity-comparison affected bounds)]
-                {::candidates (into (reduce disj (::candidates base) removed) (::candidates current))
-                 ::checked (+ (- (::checked base) (::checked prior)) (::checked current))
-                 ::edges (+ (- (::edges base) (::edges prior)) (::edges current))
-                 ::bounds bounds}))))))
+                    current (arity-comparison affected bounds)
+                    comparison
+                    {::candidates (into (reduce disj (::candidates base) removed) (::candidates current))
+                     ::checked (+ (- (::checked base) (::checked prior)) (::checked current))
+                     ::edges (+ (- (::edges base) (::edges prior)) (::edges current))
+                     ::bounds bounds}]
+                ;; Seed the final value's base lazily: a later write whose
+                ;; `:db-before` holds these datoms (a fork of this head) hits.
+                (cache/lookup-or-miss arity-base-cache (arity-content-key after)
+                                      (fn [_] (delay (advanced-arity-base base removed affected comparison))))
+                comparison))))))
 
 (defn- arity-verdict
   "Refuse or report the candidates whose prepared arities also refuse.

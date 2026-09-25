@@ -1,5 +1,6 @@
 (ns seon.db-test
   (:require [clojure.core.async :as async]
+            [clojure.core.cache :as cache]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
@@ -1899,6 +1900,35 @@
              (is (= attribute (:seon.db/attribute refusal)))
              (is (some #{expected} (vals entity)) (pr-str refusal))
              (is (= basis (db/basis-t (db/db connection)))))))))))
+
+(deftest a-write-seeds-its-final-values-arity-base
+  ;; CLASS: whole-program rederivation per branch. A fork of a just-written head
+  ;; (a publication's scratch branch) read the head's arity base, which no report
+  ;; had derived: the gate rebuilt every call edge (1.2 s measured). The report
+  ;; seeds its final value's base by content, and that base equals a full build.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted!
+      connection
+      [(test-support/namespace-row (db/db connection) 'sample.seed)
+       (assoc (test-support/program-fn-row (db/db connection) 'sample.seed/caller "(defn caller [x] (str x))")
+              :seon.schema.admission/source :agent
+              :seon.fn/source "(defn caller [x] (str x))"
+              :seon.fn/arglists "([x])"
+              :seon.fn/private? false
+              :seon.fn/call-arities #{['clojure.core/str 1]})])
+     (let [head (db/db connection)
+           content-key (@#'db/arity-content-key head)
+           seeded? (cache/has? @@#'db/arity-base-cache content-key)
+           edges (set (d/q @#'db/call-edges-query head))
+           bounds (@#'db/declared-arity-bounds d/q head)
+           built (merge (@#'db/arity-comparison edges bounds)
+                        {::db/edge-set edges ::db/bounds bounds
+                         ::db/by-caller (update-vals (group-by first edges) set)
+                         ::db/by-callee (update-vals (group-by (comp first second) edges) set)})]
+       (is seeded? "the write's report seeded the head's base before any read")
+       (is (contains? edges ['sample.seed/caller ['clojure.core/str 1]]))
+       (is (= built (@#'db/arity-base head)))))))
 
 (deftest arity-components-and-callers-are-checked-in-the-final-state
   (test-support/with-database
