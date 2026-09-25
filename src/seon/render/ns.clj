@@ -396,9 +396,6 @@
                ::requires (vec (require-specs row))
                ::functions functions
                ::own-schemas own-schemas
-               ::profile-id (get-in unit [:seon.render/profile
-                                          :seon.render.profile/id]
-                                    :seon.render.profile/unspecified)
                ::schema-row-cache
                (atom (into {} (map (juxt :seon.schema/key identity))
                            own-schemas))
@@ -410,18 +407,6 @@
 ;;; ---------------------------------------------------------------------------
 ;;; Bounded, whole-section assembly
 ;;; ---------------------------------------------------------------------------
-
-(defn- omission-value
-  [namespace-name profile-id offset requires-count definitions-count]
-  (let [omitted (+ requires-count definitions-count)]
-    {:seon.print/face :seon.print/elided
-     :seon.print/omitted omitted
-     :seon.print/elision-unit :children
-     :seon.render.data/total (+ offset omitted)
-     :seon.render.data/path []
-     :seon.render.data/next-offset offset
-     :seon.render.profile/id profile-id
-     :seon.print/requery-id [:seon.ns/name namespace-name]}))
 
 (defn- empty-comment
   "The ordinary state of a fresh agent namespace, said as source.
@@ -435,17 +420,6 @@
        (when owner-agent-id (str "; it belongs to agent " owner-agent-id))
        ".\n"
        ";; Every `defn` evaluated here with a :malli/schema becomes one."))
-
-(defn- omission-text
-  [requires-count definitions-count]
-  (str (when (pos? requires-count)
-         (str requires-count " require declaration"
-              (when (not= 1 requires-count) "s")
-              (when (pos? definitions-count) " and ")))
-       (when (pos? definitions-count)
-         (str definitions-count " definition"
-              (when (not= 1 definitions-count) "s")))
-       " omitted by the namespace render budget."))
 
 (defn- empty-text
   [owner-agent-id]
@@ -559,19 +533,11 @@
                    "+ referenced schemas are reachable through the database.")}])))))))
 
 (defn- compact-ai-text
-  [{::keys [namespace-name requires functions own-schemas owner-agent-id
-            profile-id]}
-   items included-count]
-  (let [included (subvec items 0 included-count)
-        omitted (- (count items) included-count)
-        no-members? (and (empty? functions) (empty? own-schemas))]
+  [{::keys [namespace-name requires functions own-schemas owner-agent-id]}
+   items]
+  (let [no-members? (and (empty? functions) (empty? own-schemas))]
     (str (when no-members? (str (empty-comment owner-agent-id) "\n"))
-         (pr-str
-          (cond-> [(ns-form namespace-name requires)]
-            (seq included) (into included)
-            (pos? omitted)
-            (conj (omission-value namespace-name profile-id included-count
-                                  0 omitted)))))))
+         (pr-str (into [(ns-form namespace-name requires)] items)))))
 
 (defn- ai-text
   [data]
@@ -581,7 +547,7 @@
     (let [items (compact-ai-items data)]
       (if (read-refusal? items)
         items
-        (compact-ai-text data items (count items))))))
+        (compact-ai-text data items)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; HTML twin
@@ -637,10 +603,8 @@
 (defn- full-html-view
   [{::keys [db schema-row-cache namespace-name namespace-source namespace-doc
             requires functions own-schemas owner-agent-id] :as data}
-   included-count include-detail?]
+   include-detail?]
   (let [bounds (::read-bounds data)
-        included (subvec functions 0 included-count)
-        omitted (- (count functions) included-count)
         source (if (str/blank? namespace-source)
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
@@ -656,12 +620,9 @@
          (first-doc-line namespace-doc)
          (conj [:p {:class "seon-namespace-description"}
                 (first-doc-line namespace-doc)])
-         (seq included)
+         (seq functions)
          (conj (into [:dl {:class "seon-namespace-definitions"}]
-                     (mapcat compact-function-html included)))
-         (pos? omitted)
-         (conj [:p {:class "seon-namespace-elision"}
-                (omission-text 0 omitted)])
+                     (mapcat compact-function-html functions)))
          (and include-detail? (seq requires))
          (conj (requires-html requires))
          (and include-detail? (seq own-schemas))
@@ -690,14 +651,11 @@
 
 (defn- compact-html-view
   [{::keys [db schema-row-cache namespace-name requires functions own-schemas
-            owner-agent-id] :as data}
-   included-count]
+            owner-agent-id] :as data}]
   (let [bounds (::read-bounds data)
-        included (subvec functions 0 included-count)
-        omitted (- (count functions) included-count)
         schema-section
         (referenced-schema-html db bounds schema-row-cache
-                                included own-schemas)]
+                                functions own-schemas)]
     (if (read-refusal? schema-section)
       schema-section
       (into
@@ -710,26 +668,23 @@
          (conj [:pre {:class "seon-namespace-own-schemas"}
                 [:code (str/join "\n" (map compact-schema-line own-schemas))]])
          schema-section (conj schema-section)
-         (seq included)
+         (seq functions)
          (conj (into [:dl {:class "seon-namespace-definitions"}]
-                     (mapcat compact-function-html included)))
+                     (mapcat compact-function-html functions)))
          (and (empty? functions) (empty? own-schemas))
          (conj [:p {:class "seon-namespace-empty"}
-                (empty-text owner-agent-id)])
-         (pos? omitted)
-         (conj [:p {:class "seon-namespace-elision"}
-                (omission-text 0 omitted)]))))))
+                (empty-text owner-agent-id)]))))))
 
 (defn- html-view
-  [data included-count]
+  [data]
   (case (::distance data)
     0 [:section {:class "seon-family-entry seon-namespace-entry"}
        [:h2
         [:a {:href (route/path ::route/namespace
                                {:namespace (str (::namespace-name data))})}
          [:code (str (::namespace-name data))]]]]
-    1 (full-html-view data included-count true)
-    (compact-html-view data included-count)))
+    1 (full-html-view data true)
+    (compact-html-view data)))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Family defaults
@@ -833,4 +788,4 @@
   (let [data (render-data unit)]
     (if (read-refusal? data)
       data
-      (html-view data (count (::functions data))))))
+      (html-view data))))

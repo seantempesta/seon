@@ -1,6 +1,6 @@
 ---
 type: landing
-status: in progress; tests owed to root
+status: landed (e9e8176e9, b16c62792, slice 3 commit); tests owed to root
 lane: delete-duplicates-opus
 created: 2026-09-25
 ---
@@ -78,3 +78,41 @@ and [script/dev roots audit](../../../research/agent-platform/script-dev-roots-a
 - Deleted: `omission-value` 11, `omission-text` 10, the `included-count` parameter/`subvec`/`omitted`
   bindings and the three `(pos? omitted)` branches in `compact-ai-text`, `full-html-view`,
   `compact-html-view`, `html-view`.
+- Also deleted: the `::profile-id` entry of `render-data`, whose only reader was `omission-value`.
+- Equivalence evidence (default JVM, one captured `seon.db/db`): the edited file was loaded with
+  `load-string` into scratch namespace `delete-duplicates.scratch-render-ns` (30.6 ms; no default Var
+  redefined; `remove-ns` afterwards). For every one of the 459 `:seon.ns/name` entities at distances
+  0, 1 and 2, `seon.render.ns/render-ai` and `render-html` (HEAD, still carrying `omission-text`) equal
+  the scratch copies: **1,377/1,377 AI strings and 1,377/1,377 hiccup vectors equal, 0 mismatches**, and
+  no HEAD output contained an elision. Whole probe 8.7 s for 5,508 renders (≈1.6 ms each); the profile
+  line naming `seon.effect/capabilities` 11.3 s ×3 was concurrent work, the cost fix-cost-capabilities
+  owns. No test asserts the omission text or class.
+- Lint: clj-kondo 0 errors, 0 warnings. Sizes: src +17/−62 (net −45).
+
+## Totals
+
+| Slice | Commit | Deleted | Added | Net |
+|---|---|---:|---:|---:|
+| 1 changed-test family | e9e8176e9 | script/bin 698, tests 133, docs 5 | 18, 4, 13 | −680 src/script, −129 test |
+| 2 schema-split CLI | b16c62792 | script 141 | 0 | −141 |
+| 3 ns omission helpers | see git log | src 62 | 17 | −45 |
+
+Source/script net **−866**; tests net **−129**.
+
+## Root runs
+
+Serially, in a quiet window (none were run by this lane):
+
+```sh
+bin/test-check default --ns seon.cluster.subprocess-test
+bin/test-check default --ns seon.dev.edit-feedback-test
+bin/test-check default --ns seon.dev.dependency-cache-test
+bin/test-check default --ns seon.render.ns-test
+bin/test-check default --ns seon.render.entity-pairs-test
+bin/test-check default --ns seon.html-views-test
+```
+
+Adoption: `src/seon/render/ns.clj` is the only JVM program file changed; the script/bin/test deletions
+retire namespaces that were never program rows (`script/` is outside `seon.fn/source-roots`), except
+`test/seon/dev/clj_kondo_test.clj` and the renamed `seon.dev.changed-test-test`, whose test rows retire at
+the next publication. No RESET NEEDED.
