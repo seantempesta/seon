@@ -48,6 +48,12 @@ full rerun of every red/unknown (batches of 40, then the unknowns in batches of 
 red/unknown, mostly stale). Census #3 of the now-current reds running (census-red-baseline-3).
 
 ## New platform findings (2026-09-25)
+- Small publication 14.6 s: 9.4 s was relinting all 179 callers of zero-argument functions whose arity rows never compared
+  equal (empty :seon.fn.arity/arguments written, never stored) — FIXED 5d8309442 (root applied the lane's patch; regression
+  green). Remaining >1 s: seon.db arity check rebuilds its whole-program input on a branch's first write (1.2 s,
+  db.clj:3738); Datahike transaction ~1.8 s. Analyzer-digest reach KEPT (root ruling: seon.db/schema/program genuinely shape
+  rows; narrowing risks stale rows, a marker is a maintained list) — a db.clj edit costs one full reanalysis until full
+  analysis is cheap. Restart procedure: checkpoint (init --dev) before down/start.
 
 - A namespace loaded after boot arming is NOT armed (4d849406e): boot arms only src/ namespaces (cluster.clj:2419, by design
   in ed62a3e06); a test request loads its namespace lazily via requiring-resolve inside the member body (test.clj:1364) and
