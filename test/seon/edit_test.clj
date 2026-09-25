@@ -342,7 +342,7 @@
               "write-back provenance is the writer's, not the agent's"))
         (testing "the effect refs the indexed file and the declaration it wrote"
           (is (= (fs/relative-path (fs/source-directory) path) (get-in receipt [:seon.effect/file :seon.fn.file/relative-path])))
-          (is (= "fixture-subject/subject"
+          (is (= 'fixture-subject/subject
                  (get-in receipt [:seon.effect/program :seon.fn/sym])))
           (is (= (:seon.effect/form-span receipt)
                  (get-in receipt [:seon.effect/program :seon.fn/form-span]))
@@ -416,7 +416,7 @@
                                     (str "(defn " declaration-name " [] 2)")}))]
               (is (string? (:my.edit/after-digest result)) (pr-str result))
               (recur (inc ordinal) (:my.edit/after-digest result) (next names)))))
-        (is (= #{"fixture-changed/alpha" "fixture-changed/beta"}
+        (is (= #{'fixture-changed/alpha 'fixture-changed/beta}
                (set (db/q '[:find [?symbol ...]
                             :in $ ?basis
                             :where

@@ -376,7 +376,7 @@
                               "(seon.run/complete \"Installed.\")")})]
           (let [reports (drive! (dissoc cluster :seon.config.test/auto-check-cases) 10)
                 installed (db/pull @connection [:seon.fn/spec]
-                                   [:seon.fn/sym "my.agents.agent-a/configured-inc"])
+                                   [:seon.fn/sym 'my.agents.agent-a/configured-inc])
                 cases (db/q '[:find [?n ...]
                               :where [_ :seon.test.accretion/case-count ?n]]
                             @connection)]
@@ -535,21 +535,21 @@
                         :where
                         [?fn :seon.fn/sym ?sym]
                         [?fn :seon.fn/spec ?spec]]
-                      @connection "my.agents.agent-a/durable"))
+                      @connection 'my.agents.agent-a/durable))
                 "the open input-map contract admits and persists")
             (is (empty?
                  (db/q '[:find ?entity
                         :where
-                        [?entity :seon.fn/sym "my.agents.agent-a/x"]]
+                        [?entity :seon.fn/sym my.agents.agent-a/x]]
                       @connection)))))))))
 
 (deftest ns-unmap-retracts-the-owned-function-after-the-terminal-commit
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            identity [:seon.fn/sym "my.agents.agent-a/obsolete"]
+            identity [:seon.fn/sym 'my.agents.agent-a/obsolete]
             deletion {:seon.program/delete-identities
-                      [identity [:seon.test/sym "my.agents.agent-a/obsolete"]]
+                      [identity [:seon.test/sym 'my.agents.agent-a/obsolete]]
                       :seon.program/source "(ns-unmap 'my.agents.agent-a 'obsolete)"}]
         (is (true? (sci.eval/committed-row? (db/db connection) deletion))
             "an identity that never existed has no remaining definition facts")
@@ -701,7 +701,7 @@
                [{:db/id [:seon.config/cluster "turn-test"]
                :seon.config.run/max-episode-runs cap}
               {:seon.ns/name 'seon.config}
-              {:db/id [:seon.fn/sym "seon.config/defaults"]
+              {:db/id [:seon.fn/sym 'seon.config/defaults]
                :seon.fn/ns [:seon.ns/name 'seon.config]
                :seon.fn/source "(defn defaults [] {})"
                :seon.fn/spec "[:=> [:cat] :map]"}]]))]
@@ -746,7 +746,7 @@
                      (transact! target transaction))))
                sci.eval/install-row!
                (fn [request]
-                 (when (some #{[:seon.fn/sym "seon.config/defaults"]}
+                 (when (some #{[:seon.fn/sym 'seon.config/defaults]}
                              (get-in request [:seon.program/row
                                               :seon.program/delete-identities]))
                    (swap! installations conj request))
@@ -805,7 +805,7 @@
                        (:seon.fn/source
                         (db/pull db
                                 [:seon.fn/source]
-                                [:seon.fn/sym "seon.config/defaults"])))
+                                [:seon.fn/sym 'seon.config/defaults])))
                     "commit-first leaves the program row unchanged")
                 (test-support/transacted!
                              connection
@@ -858,7 +858,7 @@
                       :in $ ?sym
                       :where
                       [?fn :seon.fn/sym ?sym]]
-                    @connection "my.gen.alpha/f")))
+                    @connection 'my.gen.alpha/f)))
           (is (= ['my.agents.agent-a 'my.gen.alpha 'my.gen.alpha]
                  (mapv #(get-in % [:seon.cluster.eval/ns :seon.ns/name])
                        (agent-evaluations (db/db connection))))
@@ -883,7 +883,7 @@
                  (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))
           (let [row (db/pull @connection
                             '[*]
-                            [:seon.fn/sym "my.agents.agent-a/f"])]
+                            [:seon.fn/sym 'my.agents.agent-a/f])]
             (is (= "(defn ^{:malli/schema [:=> [:cat :int] :int]} f [x] (+ x 2))"
                    (:seon.fn/source row)))
             (is (= :agent (:seon.schema.admission/source row)))
@@ -909,7 +909,7 @@
           (is (nil?
                (db/pull @connection
                        [:seon.fn/sym]
-                       [:seon.fn/sym "my.agents.agent-a/bad"]))
+                       [:seon.fn/sym 'my.agents.agent-a/bad]))
               "the failed declaration commits no program fact"))))))
 
 (deftest runtime-schema-registration-commits-the-evaluated-form-and-attribute
@@ -1054,7 +1054,7 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            test-sym "my.agents.agent-a/versioned-test"]
+            test-sym 'my.agents.agent-a/versioned-test]
         (with-redefs [ai/complete
                       (fn [_projection _]
                         {:seon.ai/text
@@ -1147,7 +1147,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             function-symbol (symbol "seon.eval.drive/uuid-text")
-            original (db/pull @connection '[*] [:seon.fn/sym "seon.eval.drive/uuid-text"])
+            original (db/pull @connection '[*] [:seon.fn/sym 'seon.eval.drive/uuid-text])
             source "(defn- uuid-text {:malli/schema [:=> [:cat] :string]} [] \"s3-database-definition\")"
             replies (atom [(str source "\n(seon.run/complete \"published\")")
                            "(seon.run/complete (seon.eval.drive/uuid-text))"])]
@@ -1168,7 +1168,7 @@
                                             "(seon.run/complete \"finished\")")}))]
           (drive-agent! (assoc cluster :seon.sci.eval/agent-ctx author) "agent-a" 2)
           (let [admitted (db/pull @connection '[*]
-                                 [:seon.fn/sym "seon.eval.drive/uuid-text"])]
+                                 [:seon.fn/sym 'seon.eval.drive/uuid-text])]
             (is (= :agent (:seon.schema.admission/source admitted))
                 (pr-str (mapv #(select-keys % [:seon.cluster.eval/source
                                                :seon.cluster.eval/error
@@ -1258,7 +1258,7 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            function-sym "my.agents.agent-a/refused-live"
+            function-sym 'my.agents.agent-a/refused-live
             agent-ctx (:seon.sci.eval/ctx
                        (sci.eval/fork-for-turn
                         {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
@@ -1364,14 +1364,14 @@
             function-result
             (db/transact!
              connection
-             [{:seon.fn/sym "authored.target/increment"
+             [{:seon.fn/sym 'authored.target/increment
                :seon.schema.admission/source :agent
                :seon.fn/ns [:seon.ns/name 'authored.target]
                :seon.fn/source target-source
                :seon.fn/arglists "([x])"
                :seon.fn/private? false
                :seon.fn/spec "[:=> [:cat :int] :int]"}
-              {:seon.fn/sym "authored.consumer/call-plus"
+              {:seon.fn/sym 'authored.consumer/call-plus
                :seon.schema.admission/source :agent
                :seon.fn/ns [:seon.ns/name 'authored.consumer]
                :seon.fn/source consumer-source
@@ -2634,8 +2634,8 @@
         (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text source})]
           (drive! cluster 12))
         (let [database @connection
-              function-symbol "my.agents.agent-a/extract-id"
-              test-symbol "my.agents.agent-a/extract-id-test"
+              function-symbol 'my.agents.agent-a/extract-id
+              test-symbol 'my.agents.agent-a/extract-id-test
               function-row
               (db/pull database
                        '[:seon.fn/sym :seon.fn/spec
@@ -2671,7 +2671,7 @@
           (is (contains?
                (into #{} (map :seon.fn/sym)
                      (:seon.fn/calls function-row))
-               "clojure.core/inc")
+               'clojure.core/inc)
               "the function row carries its kondo-resolved population call")
           (is (= #{:my.agents.agent-a/item} (set direct-contract-keys)))
           (is (= #{:my.agents.agent-a/item-id} (set child-schema-keys))

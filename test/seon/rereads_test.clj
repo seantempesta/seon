@@ -161,7 +161,7 @@
             (is (= :unchanged (:seon.turn/status (get by-source documentation))))
             (is (nil? (:seon.turn/id (turn/system-turn request))))
             (is (= 1 (count (entries connection documentation)))))
-          (support/transacted! connection [[:db/add [:seon.fn/sym "my.plan/current!"]
+          (support/transacted! connection [[:db/add [:seon.fn/sym 'my.plan/current!]
                                            :seon.fn/doc "Select the current plan item. Reread proof."]])
           (let [plan (#'turn/system-plan @connection []
                                         (#'turn/latest-evaluations @connection "juniper"))]
