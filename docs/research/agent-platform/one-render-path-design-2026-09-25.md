@@ -1,26 +1,29 @@
 ---
 type: design
-status: proposed
+status: "revised after Opus review 8a9e946d7; awaiting owner go"
 created: 2026-09-25
 scope: One schema dispatch and one shape-aware, budget-owning floor printer
 ---
 # One render path
 
+Changes after [Opus review 8a9e946d7](one-render-path-review-2026-09-25.md), all findings accepted by root:
+Declared identity ownership and producer error/return alternatives replace structural discovery without losing pairs.
+The floor uses one character allowance, cheapest-first equal shares and emitter-owned costs; renderers keep merged units.
+Problems returns data; prepare owns offset retrieval; overlong renderer text yields a named diagnostic.
+The revised slices land replacements before dispatch removal, convert explicit owners atomically, and price prompt admission.
+
 Seon has declared schema pairs, a structural floor, and several competing selection and clipping paths. Compose the existing schema registry, guarded invocation and print nodes: **value + declared identity → schema renderer, else floor**.
 
 ## Authority and evidence
 
-**The owner's correction supersedes the initial brief and current CLAUDE wording:**
+**The owner's correction and current CLAUDE presentation law govern this revision:**
 “the floor printer was supposed to be smart and show snippets of each part of shapes so deeply nested large values still show part of the values while staying under the budget. This has a budget.”
 There is **one presentation budget, inside the floor**. Render functions choose what to show; callers do not clip. Do not replace that budget with fixed depth/children/string limits. Those would preserve the wrong behavior.
-The “Render ordinary values totally” and “Apply presentation limits once” laws remain, interpreted by this correction.
-Only this document is authorized for editing; the orchestrator must reconcile the stale law wording during implementation.
-Read end to end: CLAUDE.md and [clipping inventory](clipping-sites-2026-09-25.md) (`c6e75e57c`),
-[prompt pipeline](agent-context-render-pipeline-2026-09-24.md), [context/query design](context-as-query-and-render-2026-09-23.md),
-and [rendering census](one-happy-path/rendering-2026-09-24.md). Their proposals are evidence, not cumulative requirements.
-Source anchors below are at `ddecb2ba4011bedb779cf9aa46efec48bb37d54f`; foreign edits were `src/seon/fn.clj` and the http-kit submodule.
+The “Render ordinary values totally” and “Apply presentation limits once” laws remain, interpreted by this correction. Only this document is authorized for editing. The review was read end to end; accepted findings are integrated below.
+Read end to end: CLAUDE.md and [clipping inventory](clipping-sites-2026-09-25.md) (`c6e75e57c`), [prompt pipeline](agent-context-render-pipeline-2026-09-24.md), [context/query design](context-as-query-and-render-2026-09-23.md), and [rendering census](one-happy-path/rendering-2026-09-24.md). Their proposals are evidence, not cumulative requirements.
+Original source/probe anchors are at `ddecb2ba4011bedb779cf9aa46efec48bb37d54f`; review anchors are at `4f509ca3b`.
 The assignment's MCP-lane finding—declared renderers rarely apply, almost everything falls to `render-ai`—is reported evidence, not a measured frequency here.
-**Live boundary:** MCP only, explicit root `/Users/sean/src/seon`, cluster `default`, JVM mode, `read_only=true`, 5,000-ms deadline.
+**Historical live evidence from the initial design (not rerun for this revision):** MCP only, explicit root `/Users/sean/src/seon`, cluster `default`, JVM mode, `read_only=true`, 5,000-ms deadline.
 `runtime_status` found PID 67823, start `2026-09-25T00:50:43Z`, alive but **faulted**, 15 open signatures, 365 failed tests and 18 unknown tests.
 Its top-ten fault face is itself evidence of audit site 9; the counts exceed the displayed list. No JVM start, reload, adoption, test or provider call ran.
 The first selection probe was refused because my request omitted required `:seon.db/db`; that is a malformed probe, not a product defect.
@@ -30,9 +33,8 @@ I then called the smaller installed selection owner with the database supplied:
 (let [start (System/nanoTime)
       database @(seon.cluster.boot/connection "default")
       projection (seon.db/carried-projection database)
-      result (mapv (fn [value]
-                     [value (#'seon.render/schema-producers
-                             projection {:seon.db/db database} value :seon.render/ai)])
+      result (mapv (fn [value] [value (#'seon.render/schema-producers projection
+                                       {:seon.db/db database} value :seon.render/ai)])
                    [{:example/x 1} {} {:seon.problems/failed-tests []}])]
   {:design/schema-producers result
    :design/declared-problems (get-in projection [:seon.schema.projection/forms :seon.problems/problems])
@@ -40,136 +42,135 @@ I then called the smaller installed selection owner with the database supplied:
 ```
 
 Result: `[[#:example{:x 1} []] [{} []] [#:seon.problems{:failed-tests []} [seon.problems/ai-prose]]]`, **0.391666 ms**, prepl **2 ms**.
-The returned installed problems declaration contains its AI/HTML pair; MCP retained the response artifact at digest
-`b10a6f2b755655f366fa61b977c9220debd20b171dd2e4bf2afac9e794a2dd5a` (5,234 bytes).
-This verifies that named-attribute matching works for that value today, but an empty all-optional return loses its renderer.
+The returned installed problems declaration contains its AI/HTML pair; MCP retained the response artifact at digest `b10a6f2b755655f366fa61b977c9220debd20b171dd2e4bf2afac9e794a2dd5a` (5,234 bytes).
+At that observation, named-attribute matching worked; an empty all-optional return lost its renderer.
 
 ```clojure
 (let [start (System/nanoTime)
-      profile (assoc (seon.render/agent-render-profile seon.config/defaults)
-                     :seon.render.profile/token-budget 128
+      profile (assoc (seon.render/agent-render-profile seon.config/defaults) :seon.render.profile/token-budget 128
                      :seon.render.profile/max-depth 8 :seon.render.profile/max-children 8)
       value {:sample/a {:sample/deep {:sample/text (apply str (repeat 500 "a"))}}
              :sample/b {:sample/deep {:sample/text (apply str (repeat 500 "b"))}}
              :sample/c {:sample/deep {:sample/text (apply str (repeat 500 "c"))}}}
-      prepared (seon.render.value/prepare
-                {:seon.render/value value :seon.render/profile profile
-                 :seon.render.value/root [:design/probe 1]})]
+      prepared (seon.render.value/prepare {:seon.render/value value :seon.render/profile profile
+                                          :seon.render.value/root [:design/probe 1]})]
   {:design/text (:seon.render.value/text prepared)
    :design/elapsed-ms (/ (- (System/nanoTime) start) 1000000.0)})
 ```
 
-Result: **2.136833 ms**, prepl **4 ms**. Text retained only `:sample/a`, replaced its subtree with an elision
-(`omitted 1`, path `[:sample/a]`), then an elision for the other two children (`omitted 2`, path `[]`, next-offset 1).
+Result: **2.136833 ms**, prepl **4 ms**. Text retained only `:sample/a`, replaced its subtree with an elision (`omitted 1`, path `[:sample/a]`), then an elision for the other two children (`omitted 2`, path `[]`, next-offset 1).
 Both named the token budget and “the value has no result handle”; **no a/b/c leaf snippet survived**.
-This is current floor behavior, not a target proof. Memory/allocation and end-to-end rendering frequency were not measured.
+This was observed floor behavior, not a target proof. Memory/allocation and end-to-end rendering frequency were not measured.
 
 ## 1. One selection, based on declarations
 
-Keep `seon.render/selection` as the sole decision and `invoke-selected` as its guarded SCI invocation owner. Remove independent decisions in `project-node*` and the explicit-value/request/namespace compatibility search.
-Never interpret a map's `:seon.render/ai` member as executable dispatch instructions; plain maps remain data.
-AI/HTML entry points select the target and serialize the answer; they do not select a second time.
-Carry the **named schema reference**, not a structurally inferred type, beside the value in the existing render request:
+Keep `seon.render/selection` and guarded SCI `invoke-selected`. Replace structural matching only when these lookups and their caller conversions land together. No new registry, ambient last-return state or `vary-meta` provenance stamp.
+The review's live census found 326 paired schemas: 28 identity-bearing maps, 165 identity-less maps and 133 `:and` forms; **298 error/report pairs need producer alternatives**. Of 55 identity attributes, 29 occur in multiple maps.
+These are review measurements (2.7-ms census, prepl 6 ms; ownership prepl 7 ms), not fresh measurements here.
 
-1. The producing call supplies its declared return schema and actual arity/branch evidence. Reuse
-   `schema/function-matching-outputs-in` (`schema.clj:3888`), preserving named references before dereferencing.
-   Follow collection element/attribute declarations through Malli paths for children. `:any`, anonymous maps and
-   ambiguous `:or` branches convey no unique identity; never scan the registry to invent one. A producer may supply
-   its already-known named branch. Invalid or contradictory identity evidence yields a diagnostic, not a guess.
-2. For pulled entities, resolve **declared attribute ownership** in the held projection: identity attribute → owning
-   entity schema. Existing `:seon.program/row-schema` (`seon.fn.edn:209`, `schema.clj:3368`) is a verified seam for
-   program rows, not proof that all entities have it. Otherwise use the unique entity declaration owning the identity
-   attribute; conflicting owners require producer evidence. A partial pull keeps that provenance without claiming
-   it is a complete validated entity. An arbitrary `:db/id` or similarly named keys do not establish ownership.
-3. A value's own declared shape means an explicit named declaration supplied by its producer/type adapter, checked
-   against the held registry; it is not a `:kind` stamp or a search for every open map the value might satisfy.
-   Return-schema provenance can identify a report about an entity; it need not dispatch as that underlying entity.
+1. **Errors at any depth:** resolve the value's own `:seon.error/operation` to that function's declared error output
+   alternatives in the held projection's `:seon.schema.projection/function-contracts`. Validate against those only,
+   using cached `malli.core/validator`: exactly one satisfied alternative supplies the schema; multiple matches name
+   an ambiguity diagnostic. Compose its declared renderer with the error base. An uncontracted operation uses the
+   base renderer; a contracted operation with no satisfied error alternative yields a named contract diagnostic.
+   This applies inside faults/test results too; no top-level return provenance is needed for nested errors.
+2. **Direct contracted calls/reports:** for a top-level `(f args…)`, resolve its head to the actual contracted Var
+   under the evaluation's held namespace/program. Reuse `schema/function-matching-outputs-in` (`schema.clj:3888`)
+   when evaluated arity/arguments are available; otherwise inspect that function's declared output alternatives.
+   Validate the result against those alternatives only, preserving named schema references: one match selects,
+   multiple matches diagnose, no match to a contracted return diagnoses. Do not re-evaluate argument forms.
+   `let`, threading, `map`/`for`, literals and interop supply no inferred final-producer identity and go to the floor,
+   where nested errors and entity maps still receive rules 1 and 3. No tracing of whichever function returned last.
+3. **Entity maps:** declare the owner once on each identity attribute's schema using existing
+   `:seon.program/row-schema` (`program.cljc:170–205`). Every identity attribute present must name the same schema.
+   Select it only if **every present map key belongs to that schema, plus `:db/id`**. Missing/conflicting ownership
+   or foreign envelope keys means floor, not agent/entity rendering. Partial pulls need not contain every required
+   entity field; this is a closed-key ownership check, not a claim of complete validation. `:db/id` alone names no owner.
+   Never search all schemas containing the attribute. Adding this property does not turn runtime rows into program rows.
 
-Read the selected schema's existing `:seon.render/ai` or `:seon.render/html` property. Missing pair means floor. Known schema with no renderer does not authorize searching for a less specific schema. Conflicting declarations
-name the candidates. Error schema composition explicitly combines its base and declared facets, without extra guessing.
-Attribute-only requests preserve the attribute's declared value schema and never borrow the parent entity renderer.
-Untyped Clojure data, including `{}`, `nil`, scalars and collections, reaches the floor without DB or SCI custody.
-`14a9291ad` widened shape indexing to all-optional maps with render properties. Retain that fix for schema diagnostics;
-`matching-shapes-in` (`schema.clj:4100`) validates structural candidates and is **not** the new identity authority.
-Today's specificity ranking (`render.clj:359`) and two pulled/transacted matching passes disappear from render dispatch.
-Wire provenance at actual producers: SCI `shown-result` (`sci/eval.clj:3181`), MCP projection (`cluster.clj:392`), and entity reads.
-Do not force callers through `render-ai` without the declaration, then try to rediscover it inside the floor.
+Order: the error's own operation, then a known direct-call return, then eligible entity ownership, else floor. A declared report result may legitimately contain an entity identity; rule 3 must not capture that report envelope.
+Existing explicitly supplied declared shapes remain valid producer evidence, not arbitrary renderer symbols in data.
+For attribute/child identity, look up the registered attribute key and its named `:vector`/`:set`/`:maybe` element
+reference in the registry; no Malli path propagation. Anonymous nested schemas convey no new named identity.
+An attribute request stays about that value, never its parent. Missing declared pair means floor, not a wider search.
+Plain Clojure values, including `{}`, `nil` and scalars, render without DB/SCI custody when no declaration is available.
 
-Dependency seam: Malli `befcd302a8e626a67d84b80aabee0cd1b38dadb6`, `core.cljc:2561,2592,2637`
-(`schema`, `properties`, cached `validator`), `util.cljc:168,196` (`subschemas`, `in->paths`).
-Compile declaration/path derivations once per changed schema/contract in the existing projection cache; lookup is O(1),
-path propagation O(path length), entity ownership O(present attributes). No new registry or per-node registry validation sweep.
+Convert explicit and namespace owners in the **same dispatch-switch slice**: `oversight/unit` (`oversight.clj:211`)
+declares its pair on `:seon.oversight/unit` and supplies that declared shape; make `seon.run/render-namespace-ai`
+reachable by declaration, convert its four fixtures, and change walk/bootstrap/web owners (`walk.clj:774`,
+`bootstrap.clj:324`, `web.clj:1463`). Wire SCI `shown-result` (`sci/eval.clj:3181`) and MCP (`cluster.clj:392`) there too.
+Then remove explicit-value/request/namespace stages, specificity ranking and pulled/transacted matching from dispatch.
+Retain `matching-shapes-in` and `14a9291ad` for independent schema diagnostics; do not delete the library function.
+Malli seam: `befcd302a8e626a67d84b80aabee0cd1b38dadb6`, `core.cljc:2561,2592,2637`
+(`schema`, `properties`, cached `validator`). Cache declared alternatives/owned-key sets in the existing projection
+by their declaration inputs; recompute when those change. Ownership is O(present keys), alternative selection is
+O(number of that function's alternatives × validation cost). No registry scan or per-node contract compilation.
 
 ## 2. Render functions choose content
 
-Contract: `(render-fn value context) → renderable node | text`, with the schema's actual value contract,
-and a declared context carrying target **`:ai`/`:html`**, original caller path, held projection, retrieval provenance,
-and explicit database/SCI inputs only where used. Reuse existing namespaced request members and node/Hiccup schemas;
-the short target names here describe the existing `:seon.render/ai` and `:seon.render/html` targets.
-Migrate current merged value/context arguments together with their callers and declarations; no permanent dual API.
+Keep the existing **one merged unit argument** (`producer-argument`, `render.clj:251–267`), including value, original caller path, target `:seon.render/ai` or `:seon.render/html`, retrieval provenance and needed DB/SCI custody.
+Remove `:seon.render/profile` from producer units; only the floor receives B. No two-argument migration of 89 producers. A renderer returns a **smaller ordinary value or final text** (existing HTML Hiccup remains final target output).
+Adjust output contracts at these boundaries; authors need no print-node grammar. Renderers choose counts, identities,
+relevant fields and queries; they may hand sub-values to the same path, preserving original paths and declarations.
+The floor allocates a returned value within the current share with that producer excluded at that path; it neither
+redispatches into the same producer nor starts a fresh B. Nested calls share this invocation, never serialize early.
 
-A renderer selects counts, identities, relevant fields, descriptions and links. It receives no spend counter or size dial. It may call the same path for sub-values, extending the **original** value path and preserving their declared schemas.
-Compose those child nodes before final floor preparation: nested calls neither serialize nor receive a fresh full budget.
-Existing print nodes carry the composition; no second rendering language. Renderer-owned text/Hiccup is terminal and
-is neither redispatched nor fitted. Raw embedded values remain floor inputs; already rendered text remains exact text.
-An overlong authored renderer is repaired at that renderer, not trimmed by its consumer. Use value/path-aware recursion detection: recursive schemas may render distinct children; the same value/path cannot re-enter itself.
-A throwing or invalid renderer contributes a named diagnostic, whose evidence goes through the floor with that producer disabled.
+Final renderer text is charged in full against its share using the same emitter. If it overruns, replace it with a
+**named renderer-overage diagnostic** identifying producer/path/allowance/actual cost, never trim the text or rerun
+with a smaller dial. Diagnose at the parent if even that diagnostic cannot fit locally. The same rule covers failures
+and invalid output. Final HTML is not substring-clipped; its visible text charge comes from its owning emitter,
+not a second pretty-print cost model. Saved historical shown text remains terminal and is selected only as whole units.
+`problems/ai-prose` returns its family-lines map: remove its nested `render-ai` call and `config/defaults` fallback.
+Missing floor policy is derived once at the entrance from supplied custody or explicitly refused, never defaulted inside a renderer.
 
-## 3. The floor owns one budget and distributes it across shape
+## 3. One floor budget, single-pass fair shares
 
-**Keep what works.** `print/fit` (`print.cljc:1294`) shrinks breadth and strings together before depth;
-its comments correctly reject spending everything on one dimension. `fit-text` retains prefixes, `fit-children` keeps
-map keys whole, and elisions retain coordinates/requery. `ordered-head` (`value.clj:425`) avoids whole-map sorting.
-These are useful mechanisms, not duplicates simply because they contain a bound. **Replace the waste.** `prepare` (`value.clj:608`) first spends a depth-first node counter named token-budget, then
-calls `fit`, which repeatedly emits/estimates candidates and halves global limits. Already dropped branches cannot return.
-`fit-node` (`print.cljc:1247`) and even `emit-node` (`:856`) sort again using emitted key text; remove both repeat sorts. `window` sorts by `pr-str`.
-The Throwable floor (`value.clj:37–131`) has separate fixed caps and an 8,192-character final `subs`.
-Use the existing floor in `seon.render.value`, retaining `:seon.render.profile/token-budget` **only as its input**.
-`request-profile` acquires that policy once; render functions/callers do not inspect it. Remove the token-named node
-counter, global halving loop, secondary ordering, and independently tunable presentation depth/width/string ceilings.
-Query-work, admission/storage and execution bounds remain distinct and report their own failures.
-**One allocation traversal, one emission:**
+Keep `fit`'s intent: shrink breadth and strings together, retain identities and string prefixes, keep map keys whole,
+and preserve elision paths/counts/requery. Replace the depth-first token-named node counter in `prepare` (`value.clj:608`)
+and repeated emit/estimate/halve loop in `print/fit` (`print.cljc:1294`). Already dropped branches cannot be recovered
+by fitting. `fit-node` (`:1247`) and `emit-node` (`:856`) both re-sort by emitted text; remove these duplicate sorts.
+`bounded-text`/Throwable floor (`value.clj:37–131`) also loses independent fixed caps and the final 8,192-character cut.
+**Only characters participate in allocation.** Convert the floor's B once with `tokens/estimate-chars` and supplied
+calibration (`tokens.cljc:159–169`). A collection count orders work; it is never added to a character cost. Use the emitter's own leaf printing (`emit-text` on scalar nodes) for escaped scalar costs and retain those leaf bytes;
+use its delimiter/elision constants and namespace-map factoring for structural cost. No parallel cost formula.
 
-1. Convert B estimated tokens to a character allowance once through `seon.ai.tokens/estimate-chars`, with the supplied
-   calibration. Charge actual escaped text, delimiters, labels and compact elision syntax; estimate final output once
-   for observation, never to drive another search. This guarantees the estimator's bound, not a model-tokenizer bound.
-2. At each collection, establish sibling identities/counts and reserve container syntax, whole keys, and retrieval
-   evidence **before descending**. Give every affordable sibling a minimum snippet share; split the remainder fairly
-   using shallow demand (scalar encoded length, cheap counted size; unknown demand gets the same initial share).
-   Shrink demands proportionally, redistributing surplus from small scalars among siblings before expansion.
-   Carry those shares as local floor arguments, not new independent budgets or mutable caller policy.
-3. Expand the reserved frontier across siblings before deepening any one branch. A long unary chain spends its share
-   on a compact path plus a leaf snippet rather than a fixed-depth wall. Retain original full paths in node data.
-   Each inspected value builds one node; already built nodes are never printed to choose another fit.
-4. Preserve vector/list order; for entity maps put declared identities first, then canonical attribute order.
-   Order unordered maps/sets once using the existing comparator/heap for simple finite keys; reuse that order for
-   rendering and offset retrieval. Do not compare arbitrary objects by calling their printer or `toString`.
-   Complex keys are indivisible; an unaffordable key causes a whole-entry elision, never a changed key.
-5. If all sibling identities cannot fit, show affordable representatives and one explicit group elision with count
-   and path; never claim that arbitrarily many branches can all be visible in finite B. Reserve this evidence first.
-   Every represented branch receives a snippet before surplus deep detail. No hard depth/child/string replacement.
-   If mandatory root/retrieval evidence alone exceeds B, return a named insufficient-floor-budget diagnostic;
-   do not silently exceed B or loop. Small values remain complete.
+1. Establish canonical child order and reserve container syntax, whole keys and omission/retrieval evidence.
+   Derive the minimum representative share from **that child's first level**: its whole keys plus one-token value
+   snippets (converted to characters with the same calibration), including required syntax/elision overhead.
+   Choose the largest affordable representative prefix whose equal shares cover those minima; remaining members
+   get a counted group elision. This shallow selection inspects no hidden subtree and introduces no tunable minimum.
+2. Visit selected children cheapest first: known scalar encoded lengths ascending, then collections by cheap counted
+   size; unknown-cost/opaque values last. These are separate ordering categories, not interchangeable cost units.
+   For child i, `share = remaining-characters ÷ children-left`; recurse once and subtract actual characters used.
+   Small children finish whole and pass unused space forward. There is **no redistribution or refitting loop**.
+3. Place completed children back in canonical order, without printing/sorting them again. Descend only while the
+   share lasts; at exhaustion use the existing `:subtree` elision and original path. No frontier expansion,
+   deep-leaf search, leaf-snippet face or depth/children/string ceiling. Never rebuild paths by reading printed keys:
+   retaining original paths deletes `fit-entry`'s `edn/read-string` round trip (`print.cljc:1133–1140`).
+4. Emit the completed node once and compare its character count with the allowance once. An overage is a named
+   allocator defect with path, not a second attempt. Mandatory root evidence that alone exceeds B yields an explicit
+   insufficient-floor-budget diagnostic; never claim arbitrary metadata or infinitely many snippets fit finite B.
 
-Reuse existing elision nodes: bound, omitted count/unit, original path, total when known, next-offset and digest/requery.
-Unknown counts are explicitly unknown, not a fabricated 1. Factor repeated retrieval roots into one visible legend;
-each compact elision names its path and legend reference. AI receives **text**; HTML receives **Hiccup data**, built
-from the same floor decision. MCP agent-facing content receives that text, with digest/cursor metadata alongside it;
-do not turn the rendered node back into a map and print it again. HTML serialization never clips the resulting HTML.
-Saved shown text is terminal in both targets, never floor input a second time.
-Totality includes Throwables **inside** this floor: class, message, ex-data, causes, suppressed exceptions and frames
-share the same allocation. Use safe core values/identity faces; catch failing accessors locally and name the failure.
-Never dereference an atom or invoke arbitrary print methods. Untrusted lazy sequences/host iterators may execute or
-block even on their first element: show an opaque identity plus explicit inspection/requery, not a false termination
-promise. Known safe sequences can expose a bounded frontier; cycles retain an identity reference. Missing retrieval
-custody produces an explicit unavailable reason, not a missing-root error that prevents plain values from rendering.
-`floor`, `bounded-text`, `render-ai` become thin entries to this same projection-free core; no emergency second clipper.
-Cost: O(visited nodes + emitted characters), plus one O(n log k) selection for each inspected unordered collection
-(O(n log n) if all n are shown); retained working space O(frontier + output). Ordering arbitrary complex keys needs
-honest work accounting, not a blanket O(B) claim. Recompute on changed value/declaration/renderer/B/calibration/path,
-using existing content-valid caches. No full hidden-subtree scan merely to apportion display space.
-The [Clojure printing guide](https://clojure.org/guides/repl/data_visualization_at_the_repl) supplies length/depth controls,
-not shape-wide budget allocation or retrieval-bearing elisions; keep Seon's existing node seam rather than replacing it with those controls.
+Canonical order preserves vectors/lists and puts declared entity identities first, then attributes. Select unordered map/set members once with the existing heap for safe finite keys. The comparator must also treat lazy/host values as
+opaque: class and identity hash, with stable held-value tie order, never `toString`, custom printing, dereference or
+recursive sorting inside comparisons. Compute safe composite ordering keys once per reached key; count their work.
+An unaffordable complex key elides its entire entry. Across restarts opaque-object identity is unavailable, not stable.
+`get_value` drills by path and passes offset to **prepare**; its elision supplies the next offset. Delete `window`,
+its `pr-str` sort and preselected presentation page size. Preserve total/steps/beyond-end and missing-artifact evidence.
+
+AI gets text; HTML gets Hiccup from the floor's same decision, with no later HTML clipping. MCP emits text plus retrieval metadata, never reprints a semantic map of the rendered node. Elisions name bound, count/unit (unknown
+explicitly), original path and digest/requery; preserve carried admission `::truncated-string` lengths and `:children`
+totals, and `preserve-requery`. A compact shared retrieval legend is charged once through the emitter, not free text.
+Throwables are inside this allocator: class/message/ex-data/causes/suppressed/frames share the allowance. Catch failing
+accessors locally. Do not execute untrusted lazy sequences/host iterators to render them; show opaque identity and
+inspection/requery instead. Cycles show references. Missing retrieval custody says unavailable but does not prevent
+plain-value rendering. `floor`, `bounded-text` and `render-ai` become entries to the same projection-free core.
+
+Cost: O(visited values + output characters + selected-child cost ordering), plus O(n log k) unordered selection
+and explicitly measured composite-key inspection. Space is O(selected nodes + output); no O(B) claim for all inputs.
+Reuse existing caches by value/declaration/renderer/B/calibration/path/offset inputs. No hidden full-subtree scan.
+The [Clojure printing guide](https://clojure.org/guides/repl/data_visualization_at_the_repl) offers depth/length controls,
+not the required shape-sharing and retrieval evidence; retain the current node/emitter seam rather than substitute those controls.
 
 ## 4. Re-adjudication of all 21 audit sites
 
@@ -187,9 +188,9 @@ Numbers/anchors refer to the linked inventory; **D** marks one of its original n
 | 8 | KEEP delegation | `report-value` routes to the one path; remove the caller's Throwable special branch. |
 | 9 D | CONVERT | Delete `bounded-face`, `bounded-summary`, top-10. `seon.cluster/render-runtime-observation` shows health/counts and fault identity/operation/class/last-at; preserves complete observation as input. |
 | 10 | CONVERT | `seon.cluster/render-runtime-observation` also supplies terminal status; operator emits its text. Counts and fault identities replace message bodies; no status-top/short-message. |
-| 11 | KEEP | `problems/ai-prose` is a legitimate declared renderer; structured family sub-values use the common floor. |
-| 12 | CONVERT | `seon.render.transcript/render-history` shows an explicitly queried recent turn page, total and older-page link; reuse saved evaluation units. Delete max-children/max-nodes as presentation inputs; keep honest query bounds. |
-| 13 D | KEEP retrieval | `mcp-get-value`/`window` pages by requested path/offset. Keep steps, total, next offset, beyond-end/missing-artifact evidence. Separate retrieval page size from print width; reuse §3 ordering and render the requested page once. |
+| 11 | CONVERT | `problems/ai-prose` returns its family-lines map; no nested `render-ai`, fresh B or `config/defaults` fallback. Its data uses the current floor share. |
+| 12 | CONVERT | `seon.render.transcript/render-history` shows an explicitly queried recent turn page, total and older-page link; reuse saved evaluation units. Page N is a constant of this renderer/query, never a configuration dial. Delete presentation max-children/max-nodes; keep honest query bounds. |
+| 13 D | DELETE window; KEEP retrieval | `mcp-get-value` passes drilled path/offset to `prepare`; its one floor allocation chooses the page and next offset. Delete `window`, separate page-size cut and `pr-str` sort; preserve total/steps/beyond-end/missing-artifact evidence. |
 | 14 D | CONVERT | `seon.render.web/render-connections` shows count and the requested page with existing pager. Delete post-query `take width`; explicit page acquisition remains, never HTML substring clipping. |
 | 15 D | DELETE dead code | Namespace omission/included-count always receives the full count; remove dead parameter and elision. |
 | 16 | CONVERT | `seon.render.ns/render-referenced-schemas` shows complete referenced schema names/count and definition queries, not first 40 full definitions. Names go through the one path. |
@@ -199,14 +200,13 @@ Numbers/anchors refer to the linked inventory; **D** marks one of its original n
 | 20 D | CONVERT / DELETE | `seon.cluster/render-branch-errors` shows counts and error identities plus branch/basis; bridge emits it. Keep an explicit since/cursor query window, remove hidden max-20 display loss; delete form-preview echo, caller already has the form. |
 | 21 D | DELETE local clipping | Docstring/markdown/changed-test/citations script report truncations: print complete reports or send report data to the same floor. An explicitly requested ranked query is still lawful. |
 
-The audit's six domain conversions are 10,12,16,17,18,19, each named above; 9 and 10 deliberately share one renderer.
-Admission byte limits, blob thresholds, agent-requested file/search windows, deadlines and legitimate ranking queries
+The audit's six domain conversions are 10,12,16,17,18,19, each named above; 9 and 10 deliberately share one renderer. Admission byte limits, blob thresholds, agent-requested file/search windows, deadlines and legitimate ranking queries
 stay. They must expose missing/partial acquisition and cannot be used as covert display limits. This design does not
 delete admission or transcript subsystems wholesale; the census's larger deletion estimates require separate caller proof.
 
 ## 5. Prompt units
 
-**Recommend keeping whole-unit selection**, not replacing it with automatic destructive compaction in this cut.
+**Keep whole-unit selection**, following root acceptance of the review; this is provider admission, not value clipping.
 `:seon.config.ai/prompt-token-budget` belongs to provider-context admission, outside the value render system; it may
 select whole historical evaluations, never fit their text. “Apply presentation limits once” explicitly permits
 “select whole prompt units”; “Recover facts, not execution” preserves exact shown bytes. Record which units were omitted.
@@ -217,27 +217,33 @@ and regenerates opening under “Derive wakes and completion”; it is a distinc
 
 ## 6. Ordered implementation slices and proof
 
-Root obtains independent design review before production edits; this bounded design lane launches no agents. Owners below are responsibilities, not permission to touch currently held files. Root checks its ledger before assignment.
-Each row is a loadable cut with **≤100 added physical lines including contracts/tests**; estimates include deletions.
-If the actual producer-family migration cannot fit, split by named family before writing, never keep a second dispatcher.
+Independent review `8a9e946d7` is complete and root accepts all findings; **implementation still awaits owner go**. Owners below are responsibilities, not file assignments; root checks the ledger. Every slice is ≤100 added physical
+lines including declarations/contracts/regressions. Preparatory accretion leaves current dispatch active; the switch
+is atomic with every named caller conversion. If that cut exceeds 100 additions, return a smaller reviewed cut before
+writing, not a partial switch. Shared `value.clj` slices run sequentially; there is no 89-renderer API migration.
 
-| Slice / owner | Change and required installed probe | Est. + / − |
+| Slice / owner | Change, exit criterion and installed probe | Est. + / − |
 |---|---|---|
-| 1 schema/render | Named-identity selection; remove namespace/specificity stages. Probe `{}` with/without declared problems return, conflicting identities, scalar and attribute-only values. | 60 / 180 |
-| 2 SCI/MCP | Carry actual return/element provenance through shown-result and mcp-project. Probe declared vector children and raw `{}` through both real entrances. | 70 / 60 |
-| 3 floor/print | One fair allocator in value owner, retire fit loop/node counter. Repeat three-branch probe, huge first vs tiny siblings, deep chains, escaped strings, tiny B. | 90 / 180 |
-| 4 floor/error | Fold Throwable/bounded-text core into allocator; plain values need no DOM identity. Probe nested ex-data, accessor failure, opaque lazy/object and cycles. | 70 / 100 |
-| 5 render/domain | Convert existing pair arguments and nested calls by family; remove project-node redispatch. Probe no fresh B on children, one invocation, failed producer diagnostic. | 80 / 160 |
-| 6 cluster/operator | Shared runtime and branch-error renderers (9,10,20). Probe >20 faults: counts, identities and retrieval agree; terminal/MCP use same face. | 60 / 75 |
-| 7 floor/MCP/web | Keep offset retrieval, reuse ordering; connections pager (13,14). Probe all pages reconstruct original including long strings, complex keys and end offsets. | 65 / 85 |
-| 8 transcript/walk | Render queried history units; remove walk presentation min (5,12). Probe requested page membership and unchanged stored shown bytes in AI/HTML. | 50 / 75 |
-| 9 namespace/bootstrap | Referenced-name and opening renderers; dead omission removal (15–17). Probe >40 names, small opening forms, no token spend outside floor. | 50 / 90 |
-| 10 test-report | Native refusal/drift data and one message path (7,8,18,19). Probe large offender/whole drift set remains retrievable; no caller Throwable branch. | 35 / 65 |
-| 11 scripts/config | Remove remaining dev truncations and presentation dials; preserve floor B, query/storage bounds (3,21). Search every original site and consumer. | 40 / 80 |
+| 0a schema | Declare missing identity owners with `:seon.program/row-schema`; prepare owned-key sets without changing dispatch. Probe agent-id envelope, two identities agreeing/conflicting, partial entity and non-program row classification. | 55 / 0 |
+| 0b schema/render | Add cached error-operation and contracted head-Var alternative lookup without switching dispatch. Probe nested specific error, uncontracted base, ambiguous/no-match alternatives, direct report and `let` floor. | 60 / 0 |
+| 1 render/SCI/MCP + explicit owners | Activate all three lookups; carry head Var into shown-result/MCP. In this same cut convert `oversight/unit`, `seon.run/render-namespace-ai`, four fixtures and walk/bootstrap/web owners. Only then remove old stages/specificity matching. Probe every converted entrance and no paired-error/report loss. | 75 / 260 |
+| 2 floor/print | Fair-share allocation and emitter-owned costs. Exit requires deletion of `fit`, `fit-node`, `fit-children`, `fit-entry`, `structural-elision`, node counter and emit-node re-sort (~220-line core). Probe three branches, huge+tiny siblings, 50 long strings, tiny B, complex/lazy keys and exact charging. | 80 / 250 |
+| 3 floor/error | Fold Throwable/bounded-text into same allocator; retire independent caps. Probe nested ex-data, throwing accessors, opaque lazy values, cycles and identity-free roots. | 45 / 100 |
+| 4 render/problems | Retire `project-node*` redispatch; accept smaller data/final text using merged units without profile. Convert `ai-prose` to data. Probe nested problems uses one share, text-overage diagnostic, no defaults fallback and no repeated producer. | 30 / 140 |
+| 5 floor/MCP | Offset retrieval inside prepare; delete window and page-size cut. Probe path/offset progress, original keys, full reconstruction, end offsets, missing digest and carried admission elisions. | 25 / 100 |
+| 6 cluster/operator | Shared runtime/branch-error renderers (9,10,20). Probe >20 faults: complete counts, identities/requery, same terminal/MCP face. | 40 / 75 |
+| 7 transcript/walk/web | Render declared history/connection query pages; remove walk presentation min (5,12,14). Probe membership, count/link and exact historical AI/HTML bytes. | 30 / 70 |
+| 8 namespace/bootstrap | Referenced names/opening subjects; remove dead omission (15–17). Probe >40 names and small forms; no display token spending. | 35 / 90 |
+| 9 test-report | Native refusal/drift data and one message path (7,8,18,19). Probe complete offender/drift retrieval and no caller Throwable branch. | 25 / 65 |
+| 10 scripts/config | Remove dev clipping and max-depth/max-children/max-string-length from profile schema/config and all readers; keep only floor B and real query/storage bounds (3,21). Audit all 21 sites. | 20 / 80 |
+| 11 prompt | Own §5 capacity behavior: include frame/separators/notice, retain whole units, diagnose an oversized newest unit or explicitly invoke existing compaction. Probe exact saved bytes and no silent overrun. | 20 / 35 |
 
-Planning estimate: **670 added, 1,150 deleted, net ~480 lines deleted**, including contract/regression edits; not a measured diff. Slice 5 is least certain: inventory actual pair callers before assigning its first family; revise the estimate rather than
-hide adapters or count unrelated census retirements. Existing emitters, elision nodes, projection cache and SCI guard are retained.
-After each authorized implementation cut, root proves rows → load → arm → adoption, then runs focused real-SCI probes. At completion root owns affected/platform and bulk proof once, plus browser paint, exact saved-text preservation and page reconstruction.
-Measure elapsed/allocation, node visits, ordering passes, emit count and floor elisions on parent/change; target ordinary
-operations <1 s, zero repeated fitting emissions, no >20% or 50-ms regression. Large-map scans must state proportional cost.
-This landing changes **zero source/test lines**. Only read-only MCP observations above are live evidence; implementation, arming, browser, performance improvement and memory proof remain outstanding. The unrelated faulted system was not reset.
+Repriced estimate: **540 added, 1,265 deleted, net ~725 lines deleted**, including schema/contract/regression edits; not measured implementation. Compared with 670/1,150, this removes migration/frontier/path/leaf-face machinery and
+prices identity declarations, emitter charging, offset consolidation and prompt admission explicitly. Slice 1's atomic
+caller sweep is the main sizing uncertainty; no claim that 89 producers change within 75 lines.
+Must-pass retained regressions: `value-test/background-poll-keeps-identity-while-payloads-grow`, `fit-preserves-breadth-and-long-strings`, carried string/children totals and `preserve-requery`. Add producer overage,
+envelope ownership and nested operation-error cases; no green inferred from code or the review's hand calculations.
+Root proves publication/load/arming/adoption, runs focused real-SCI probes, then affected/platform/bulk proof once
+and browser paint. Record elapsed/allocation, visited nodes, order/emit counts and floor hits on parent/change:
+ordinary <1 s, one final emission/comparison, no >20% or 50-ms regression; name proportional large-input cost.
+This revision changes zero source/test lines and runs no JVM/tests or new live probes. Historical evidence above is retained; current health, memory and implementation performance are unverified. The foreign http-kit submodule remains untouched.
