@@ -3545,6 +3545,11 @@
          (when settled
            [[:db/add [:seon.turn/id run-id]
              :seon.turn/disposition (:my.turn/disposition settled)]])
+         ;; The completion's reply text is a fact beside its disposition, so a
+         ;; reader never recovers it from the shown text.
+         (when (= :completed (:my.turn/disposition settled))
+           [[:db/add [:seon.turn/id run-id]
+             :seon.turn/result (:my.turn/result settled)]])
          (when closing?
            (close-tx
             {:seon.turn/id run-id :seon.db.process/id process}))

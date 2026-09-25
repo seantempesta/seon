@@ -507,18 +507,18 @@
             (into {}
                   (map (juxt :seon.cluster.eval/ordinal identity))
                   (get receipts-by-run (::run-id spec)))
-            query-result
-            (:seon.eval.drive/value (get by-ordinal 1))
-            call-result
-            (:seon.eval.drive/value (get by-ordinal 3))
-            completion
-            (:seon.eval.drive/value (get by-ordinal 5))]
-        (is (= (set (::row-ids spec)) (set query-result))
-            "each agent queried exactly the rows it had just committed")
-        (is (= (+ 1001 (::index spec)) call-result)
+            ;; Shown text is the stored observation the agent saw; the
+            ;; completion is the settlement's facts.
+            query-shown (:seon.eval/shown (get by-ordinal 1))
+            call-shown (:seon.eval/shown (get by-ordinal 3))
+            completion (db/pull database [:seon.turn/disposition :seon.turn/result]
+                                [:seon.turn/id (::run-id spec)])]
+        (is (every? #(str/includes? (str query-shown) (pr-str %)) (::row-ids spec))
+            "each agent queried the rows it had just committed")
+        (is (= (str (+ 1001 (::index spec))) call-shown)
             "the contracted function call used this agent's own definition")
-        (is (= {:my.turn/disposition :completed
-                :my.turn/result (str "complete|" (::agent-id spec) "|")}
+        (is (= {:seon.turn/disposition :completed
+                :seon.turn/result (str "complete|" (::agent-id spec) "|")}
                completion))))))
 
 (defn- with-message-identities

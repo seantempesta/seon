@@ -73,7 +73,6 @@
                  :seon.cluster.eval/ordinal 0
                  :seon.cluster.eval/source "(+ 1 1)"
                  :seon.cluster.eval/result-edn "2"
-                 :seon.eval.drive/value 2
                  :seon.cluster.eval/error ""
 
                  :seon.cluster.eval/at (java.util.Date.)}

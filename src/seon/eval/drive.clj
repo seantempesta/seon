@@ -1,7 +1,6 @@
 (ns seon.eval.drive
   "Run one bounded agent episode against an already-published source basis."
   (:require [clojure.core.async :as async]
-            [clojure.edn :as edn]
             [clojure.string :as str]
             [datahike.api :as d]
             [seon.db :as db]
@@ -12,7 +11,6 @@
             [seon.cluster.registry :as registry]
             [seon.turn :as turn]
             [seon.config :as config]
-            [seon.print :as print]
             [seon.render.transcript :as transcript])
   (:import [java.util Date UUID]))
 
@@ -122,20 +120,6 @@
        (sort-by second)
        (mapv first)))
 
-(defn read-result
-  "Read one admitted receipt result through the grader's print-face seam."
-  {:malli/schema [:=> [:cat :string] :seon.schema/value]}
-  [serialized]
-  (when (string? serialized)
-    (try
-      (let [parsed (edn/read-string {:default (fn [_ value] value)}
-                                    serialized)]
-        (if (:seon.print/face parsed)
-          (edn/read-string {:default (fn [_ value] value)}
-                           (print/emit-text parsed {}))
-          parsed))
-      (catch Throwable _ ::unreadable))))
-
 (defn run-receipts
   "Ordered fact-space receipt values for `run-ids`."
   {:malli/schema [:=> [:cat :seon.db/database-value
@@ -163,23 +147,35 @@
                           :seon.cluster.eval/ordinal ordinal
                           :seon.cluster.eval/source source
                           :seon.cluster.eval/at at}
-                   (not= ::absent result) (assoc :seon.eval/shown result
-                                                 :seon.eval.drive/value (read-result result))
+                   (not= ::absent result) (assoc :seon.eval/shown result)
                    (not= ::absent error) (assoc :seon.cluster.eval/error error)))))
     []))
 
-(defn- completion-values [receipts]
-  (into []
-        (comp (map :seon.eval.drive/value)
-              (filter #(= :completed (:my.turn/disposition %))))
-        receipts))
+(defn- completed-results
+  "The `:seon.turn/result` of each of `run-ids` settled `:completed`, in run order.
+  Completion is the settlement's facts, never a reading of shown text."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.turn/id]]
+                  [:vector :seon.turn/result]]}
+  [db run-ids]
+  (if (seq run-ids)
+    (->> (db/q '[:find ?opened-tx ?result
+                :in $ [?run-id ...]
+                :where
+                [?run :seon.turn/id ?run-id]
+                [?run :seon.turn/disposition :completed]
+                [?run :seon.turn/opened-tx ?opened-tx]
+                [?run :seon.turn/result ?result]]
+              db run-ids)
+         (sort-by first)
+         (mapv second))
+    []))
 
 (defn completed-result
-  "The last completed result represented by ordered grader receipts."
-  {:malli/schema [:=> [:cat [:vector :seon.eval.drive/evaluation]]
-                  [:maybe :seon.schema/value]]}
-  [receipts]
-  (:my.turn/result (last (completion-values receipts))))
+  "The last completed result of `run-ids`, from the settlement's facts."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.turn/id]]
+                  [:maybe :seon.turn/result]]}
+  [db run-ids]
+  (peek (completed-results db run-ids)))
 
 (defn- model-attempts
   {:malli/schema [:=> [:cat :seon.db/database-value [:vector :seon.turn/id]]
@@ -246,8 +242,7 @@
   ([db agent-id process request]
    (let [run-ids (:seon.eval.drive/run-ids request)
          run-cap (:seon.eval.drive/run-cap request)
-        receipts (run-receipts db run-ids)
-        completions (completion-values receipts)
+        completions (completed-results db run-ids)
         undisposed? (and (seq run-ids) (empty? completions)
                           (every? #(some? (:seon.turn/closed-tx %))
                                   (run-records db run-ids)))
@@ -360,7 +355,7 @@
        :seon.eval.drive/runs (run-records ending-db run-ids)
        :seon.eval.drive/model-attempts (model-attempts ending-db run-ids)
        :seon.eval.drive/receipts receipts
-       :seon.eval.drive/completed-result (completed-result receipts)
+       :seon.eval.drive/completed-result (completed-result ending-db run-ids)
        :seon.eval.drive/transcript
        (full-transcript ending-db agent-id instance settings)
        :seon.eval.drive/model (:seon.config.ai/model settings)

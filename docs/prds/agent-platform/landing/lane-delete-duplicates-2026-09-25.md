@@ -162,6 +162,32 @@ the error schema's declared pair.
 keys differ; operation, member, message, data, layer and exception class are equal. Both are occurrence
 evidence, so the assertion now compares the refusal without them.
 
+## Round 5, R5 grader half (root ruling option 1): completion is a fact
+
+- Settlement (`src/seon/turn.clj`, the `side-tx` beside the disposition) writes `:seon.turn/result`, the
+  `:my.turn/result` of a `:completed` disposition, in the same transaction. Declared in
+  `resources/seon/schemas/seon.turn.edn` (`[:and {...} :my.turn/result]`, optional on `:seon.turn/turn`).
+- `src/seon/eval/drive.clj`: `read-result` (13 lines) and `completion-values` deleted; `completed-results` /
+  `completed-result` read disposition and result facts in run order; receipts carry shown text only. The now
+  unused `clojure.edn` and `seon.print` requires go. `:seon.eval.drive/value` and its entry are removed from
+  `resources/seon/schemas/seon.eval.drive.edn` (the declaration of the dropped key; not listed in the grant).
+- Installable on an existing store, proven on MCP branch `delete-duplicates-turn-result` (default's head,
+  lacking the attribute), JVM against the branch connection: the write before accretion refuses "expected an
+  installed attribute, got an undeclared attribute :seon.turn/result"; `seon.cluster/accrete-schema-population!`
+  (the choke point every opened branch passes before a domain write) installs it, string/one, 970 ms; the write
+  then commits and pulls back; a second accretion converges with no transaction, 595 ms. Publish the resource
+  with `turn.clj` in one adoption.
+- Reader proven on branch `delete-duplicates-turn-result-2`: after accretion and two completed turns with results,
+  the edited namespace (scratch-loaded) answers `["first reply" "second reply"]`, last `"second reply"`, nil for
+  no runs or an unknown run; receipts carry only id, ordinal, source, at and shown. Both branches retired.
+- Tests: `eval/drive_test` asserts shown text and no parsed value; `concurrency_independence_test` asserts the
+  query rows and call result in the shown text (the stored observation) and the completion from the turn facts;
+  `schema/program_test` drops the key from its sample receipt.
+- Pre-existing, not this lane: `test/seon/schema/datahike_parity.edn`'s current-population baseline is stale:
+  545 of 3,454 packaged forms differ from it (baseline last refreshed 2026-09-22), so
+  `canonical-population-native-parity` is red independent of this cut; these two schema edits add 3 keys to that
+  drift. Refreshing the baseline is its own task.
+
 ## Round 4, R5 (shown-text reparsing): browser half landed, grader half blocked
 
 - `src/seon/repl.clj` (−10/+2): `pretty-response` deleted. The browser's evaluation entry now shows the exact
