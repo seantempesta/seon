@@ -55,6 +55,11 @@ workstream is judged by whether it moves an entrant onto that path or deletes a 
 - Standing: no paid agent calls (default runs no-provider via `config/development.edn`); root parks dirty lane edits as
   patches itself for publishes and restarts (never waits); no PRs; push personal forks.
 
+### Definition of done (owner 2026-09-25: "one step at a time… refined components we can keep building with")
+A component is DONE only when it is REPL-proven on real data, green on published default, Astra diff-reviewed and
+measured. No new implementation starts on top of anything that is not done; in-flight work narrows to what completes the
+current component. Unverified commits are debt, not progress.
+
 ### Critical path, in order
 1. **DONE 18:05Z:** the task-gate block is fixed (`f06358c74`..`153c9b584`): publication reconciles every task file, and
    adoption carries tasks into clusters as data. Default runs `6ab6ae2a`; `seon.issue.task-ingestion-test` 7/0.
@@ -75,7 +80,7 @@ workstream is judged by whether it moves an entrant onto that path or deletes a 
 
 ### Running lanes (18:20Z) — read each landing note before touching its files
 impl-repl-m1-opus (S1 one definition authority + qualified defn; then S2) · impl-task-slice2-opus (3 records) ·
-impl-derived-prereqs-opus (S0, S2, F1 fork push) · design-floor-revise-opus (then Astra re-review, then implement) ·
+impl-derived-prereqs-opus (S0 ONLY; S2 and F1 wait for green) · design-floor-revise-opus (then Astra re-review, then implement) ·
 root verification run bhklahejy (`tmp/orchestrator/verify-6ab6ae2a.txt`, 65 commands, cluster.turn-test first).
 REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate, store, pull back — before implementing.
 
