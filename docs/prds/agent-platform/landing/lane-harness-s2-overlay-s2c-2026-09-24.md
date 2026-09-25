@@ -245,6 +245,36 @@ reproduced in a throwaway namespace.
   - Bounds are not re-declared. Raising a bound needs `:seon.test/long`, which moves the test
     out of the default tier. Measure after these commits before marking anything long.
 
+## Fifth follow-up (e1f50b058)
+
+- **The reach digest is recorded.**
+  - `seon.test.runner/commit-results!` computes reach digests on the completion's
+    `:seon.db/db`, which is the execution value, not a member world.
+  - `complete-members` stores them as `:seon.test.member/reach-digest` (runner.clj ~1419), and
+    `recorded-member-results` returns that key.
+  - Reuse (`test.clj` ~858) and `verified?` read the member key from the recording connection.
+  - `:seon.test.run/loaded-commit-id` comes from the recording cluster row at the writer.
+  - The reaching test compared `:seon.test/reach-digest`, the pre-f3a4b33d9 key. **No runner
+    change.**
+- **Four stale reaching assertions were updated to their owners' rules** (each predates S2):
+  - A data-only write derives nothing, following the content-keyed index (7154084b9).
+  - An observed fixture never verifies (b0b5eedfe).
+  - The member reach key is `:seon.test.member/reach-digest` (f3a4b33d9).
+  - An excluded long test leaves `passed?` false (57f02fd5b).
+- **one-request :87 (second identical request re-executes) and :203 (held member executes):
+  not diagnosed.**
+  - For reuse, the source requires all of the following on the recording branch: the latest
+    member green with a reach digest, a `loaded-commit-id`, no `:seon.test/loaded-source`
+    drift, the member not reached from changes since the last completed basis, and an equal
+    current reach.
+  - Admission holding a member requires another run whose program digest and input digest
+    equal the new request's (`admit-run`, test.clj ~1168).
+  - Next probe (root or next lane): in each test, after the second request, read the held or
+    reused member's run for `:seon.test.run/program-digest`, `:seon.test.run/input-digest` and
+    `:seon.test.run/loaded-commit-id`, and compare them with the second request's provenance.
+    If the program digest differs, some write between the two requests touched a program
+    attribute; name it with `runner/program-written-since?`.
+
 ## Root runs (serially, after adopting the three commits)
 
 1. `bin/test-check default --test seon.test.scoped-first-run-test/a-first-incremental-request-naming-a-change-selects-only-its-reach`
