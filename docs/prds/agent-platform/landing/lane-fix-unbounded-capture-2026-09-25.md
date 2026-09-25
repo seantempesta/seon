@@ -1,15 +1,18 @@
 ---
 type: landing
-status: partial (producer fix committed; edge designed, needs files outside the row); tests owed to root
+status: landed 44e7ad4b0 76d644bd2 b95676d59; tests owed to root
 lane: fix-unbounded-capture-opus
 created: 2026-09-25
 ---
 
 # Lane fix-unbounded-capture (2026-09-25): errors and facts copy their world
 
-Status: PARTIAL, stopped at root's wind-down for the store nuke. One producer fix committed; the
-admission-edge fix is designed below but not written (it needs three files outside this lane's row).
-No test request was run (LOAD RULE). **RESET NEEDED: no** (root is nuking anyway).
+Status: round 1 (before the nuke) fixed one producer and recorded the store census. Round 2 (grant
+widened, fresh default pid 39484) wrote the admission edge, the per-node multiplier fix and one more
+producer. Both class regressions are committed. No test request was run (LOAD RULE); root runs the
+list below. **RESET NEEDED: no.** Hook publication was on while I edited, so default loaded an
+intermediate `admit.clj` (it resolves `sci-context?` but not `leaf-edn`). Root should adopt the
+committed HEAD.
 
 ## Broken things first
 
@@ -106,7 +109,61 @@ No test request was run (LOAD RULE). **RESET NEEDED: no** (root is nuking anyway
   database. Linted clean: 0 errors; the 2 warnings are pre-existing shadowed vars. It has not been
   run at the REPL, because root's wind-down stopped probes.
 
-## Designed, not written: the edge (needs files outside this row)
+## Round 2: the edge, written (76d644bd2)
+
+- `seon.sci.eval.edn` `:ctx-reference`, `seon.env.edn` `:environment-reference` and
+  `seon.schema.edn` `:projection-reference` are identity-only `:fn` declarations, the same mechanism
+  `seon.db.edn` uses for the database and the connection.
+  - The predicates are `seon.sci.admit/sci-context?` (the `sci.impl.opts.Ctx` record),
+    `seon.env/environment?` and `seon.schema/projection-value?` (a map with a registry and a
+    fingerprint).
+  - I did not mark `:seon.sci.eval/ctx` itself, because its `ctx?` predicate is any map with `:env`.
+    It would have turned a user's `{:env "prod"}` into a reference.
+- The identities are themselves made of references:
+  - ctx → environment, projection and custody connection;
+  - environment → cluster name, basis-t, connection and projection;
+  - projection → fingerprint and version.
+- `seon.error` hands its projection to all six evidence admission helpers
+  (`project-observation` gains a 3-arity; its 2-arity callers in `instrument.clj` are unchanged).
+- **The multiplier.** The walk derives `schema/identity-only-projector` once per walk instead of
+  calling the armed `identity-only-projection-in` per node. Scalar leaves print as a fixed prefix
+  plus `print-method`, byte-identical to `canonical-edn` on every scalar face (probed): 458 B instead
+  of 7 KB per leaf.
+- REPL proof on default: the committed `admit.clj` was loaded as the scratch namespace
+  `scratch.fuc-admit`, and three test declarations were added to the live projection with
+  `projection-with-schema`. No default Var was redefined.
+  - A value holding db, conn, ctx, env and projection admits in 2.36 ms and 1.09 MB. It stores
+    5,823 B of EDN, every world object as its typed identity. Before, 1 MB of the ctx prefix alone
+    cost 349 MB and 232 ms.
+  - A 2,000-entry map allocates 14.99 MB instead of 41.8 MB, with identical EDN; time was unchanged
+    (10.6 ms against 9.1 ms, one sample).
+- Regressions:
+  - `seon.sci.admit-test/a-value-carrying-its-world-admits-references-not-copies`: under 5 ms and
+    5 MB, and asserts the typed identities.
+  - `seon.error-test/a-fifty-thousand-entry-offending-value-stores-bounded-text-and-a-digest`: the
+    fact's `data-edn` stays under the 16,384 B family bound; the staged blob digest retrieves all
+    50,000 entries.
+- Lines: admit +60, schema +36, error +5 net, schema resources +22, tests +65. There are no
+  deletions. This is over 100 added source lines, written under root's widened grant.
+
+## Round 2: producer (b95676d59)
+
+- `src/seon/test.clj:1944`: the schema-drift failure message printed the whole drift with
+  `pr-str`. It now uses `value/bounded-text`.
+- The test-runner assertion text that produced the 895 MB ctx blob was already fixed by
+  `aa00e58fc` (Sep 24 17:39), after that blob was written (12:41).
+
+## Remaining producers (the edge now references their world, but each still copies its request)
+
+- The `request`/`unit` offending sites listed above; the owners are named by file.
+- `seon.error/prepare-result` (`error.clj:~466`) renders the offending value as complete HTML and
+  stores it as a second blob beside `:seon.error/data-content`. The fix is to store once and
+  reference that one digest. Owner: this lane, next round.
+- `render.clj:1098` still admits every render result unbounded.
+- `kernel.clj:679` still offends with the whole unadmittable failure. It is left as is because it is
+  the only faithful evidence.
+
+## Original design (round 1)
 
 Reuse the registry identity-only mechanism (`seon.schema/identity-only-descriptors-in`,
 `src/seon/schema.clj:3887-3952`). Admission then records each world type as a typed reference,
@@ -149,12 +206,18 @@ Regressions to add with it (root runs; each has a declared bound):
 - **`render.clj:1098` passes `unbounded? true` for every render result.** The edge fix makes world
   types safe under it, but ordinary large error values are still admitted unbounded.
 
-## Root runs (after adoption)
+## Root runs (after adoption of HEAD, serially)
 
-- `bin/test-check default --ns seon.render.value-test`
-- `bin/test-check default --ns seon.error-test`
+1. `bin/test-check default --test seon.sci.admit-test/a-value-carrying-its-world-admits-references-not-copies`
+2. `bin/test-check default --test seon.error-test/a-fifty-thousand-entry-offending-value-stores-bounded-text-and-a-digest`
+3. `bin/test-check default --ns seon.sci.admit-test`: identical EDN for the leaf fast path.
+4. `bin/test-check default --ns seon.error-test`: the projection threading.
+5. `bin/test-check default --ns seon.render.value-test`
+6. `bin/test-check default --ns seon.schema-test`: the projector refactor and the new declarations.
+7. Publication of the three schema resources: a canonical projection builds with the new
+   identity-only keys.
 
 ## Commits
 
 See `git log -- src/seon/render/value.clj docs/prds/agent-platform/landing/lane-fix-unbounded-capture-2026-09-25.md`.
-Net source lines: +6 / -3.
+Net source lines: round 1 +6/−3; round 2 about +125/−22 source and +65 tests.
