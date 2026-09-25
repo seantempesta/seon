@@ -39,8 +39,8 @@ made capable and reused everywhere: value+schema, fact store, function, evaluati
   patches itself for publishes and restarts (never waits); no PRs; push personal forks.
 
 ### Critical path, in order
-1. **PLATFORM:** publication is blocked: "seon.fn/gate-set is refused: dangling-id" — default's cluster has zero task
-   entities (lane fix-task-gate-publication-opus). Then publish HEAD.
+1. **DONE 18:05Z:** the task-gate block is fixed (`f06358c74`..`153c9b584`): publication reconciles every task file, and
+   adoption carries tasks into clusters as data. Default runs `6ab6ae2a`; `seon.issue.task-ingestion-test` 7/0.
 2. **Verify:** read `tmp/orchestrator/verify-6ab6a945-results.txt` (50 focused commands, run b7sqnn06h); then run the
    queued lists in `tmp/orchestrator/verification-queue-2026-09-24.md` newest sections (render hand-off, turn, test rows,
    digest). **`seon.cluster.turn-test` first after publishing:** every turn opened `:error` before any model call until
