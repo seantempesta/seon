@@ -749,26 +749,19 @@
   [database agent-ids]
   (into [] (mapcat #(agent-tx database %)) agent-ids))
 
-(defn- namespace-context
-  "The resolver context the writer digests a row of `namespace-name` with:
-   its stored namespace in `database`, read as `seon.fn` reads it, else none."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ns/name]] :map]}
-  [database namespace-name]
-  (@#'seon.fn/stored-namespace-context
-   (when (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]] database namespace-name)
-     (db/pull database '[:seon.ns/requires {:seon.ns/aliases [*]} {:seon.ns/imports [*]} {:seon.ns/refers [*]}]
-              [:seon.ns/name namespace-name]))))
-
 (defn revised-row
-  "`row` with `overrides` merged, digested from that FINAL row through
-   `program/definition-digest` with its namespace's context in `database`,
-   the digest `seon.db/write-digest-error` reproduces. Never assoc onto a row."
+  "`row` with `overrides` merged, digested from that FINAL row through the one
+   digest owner `seon.db/definition-digest-of` with its namespace's stored row
+   in `database`, the digest `seon.db/write-digest-error` reproduces. Never
+   assoc onto a row."
   {:malli/schema [:=> [:cat :seon.db/database-value :map :map] :map]}
   [database row overrides]
   (let [row (merge row overrides)
         namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))]
     (assoc row :seon.program/definition-digest
-           (program/definition-digest row (namespace-context database namespace-name)))))
+           (db/definition-digest-of
+            (db/carried-projection database) row
+            (some->> namespace-name (vector :seon.ns/name) (db/pull database '[*]))))))
 
 (defn revision
   "The upsert changing the STORED declaration `identity` by `overrides`, with the

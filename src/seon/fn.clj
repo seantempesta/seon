@@ -262,7 +262,7 @@
       (seq (::analyzer/arglist-strs entry))
       (= 'clojure.core/defmulti (::analyzer/defined-by->lint-as entry))))
 
-(defn- stored-namespace-context
+(defn stored-namespace-context
   [{:seon.ns/keys [requires aliases refers imports]}]
   {:requires (set requires)
    :aliases (into {} (map (juxt :seon.ns.alias/local
@@ -1478,6 +1478,8 @@
         functions (into (first-party-function-symbols analysis)
                         (map :seon.fn/sym) function-rows)
         submitted (source-analysis analysis first-row last-row)
+        projection (or (db/carried-projection database)
+                       (schema/projection-from-database database))
         rows (analysis-rows-by-file
               submitted
               functions {"<stdin>" (text-context text)}
@@ -1486,17 +1488,15 @@
                                 (db/carried-projection database)
                                 (invoked-attributes submitted))
                                functions)
-              (or (db/carried-projection database)
-                  (schema/projection-from-database database)))
-        ;; The analysis `ns` form is widened by interpreter refers; identity
-        ;; uses the namespace's own facts, as the indexer does.
-        resolver-context (stored-namespace-context namespace-row)]
+              projection)]
     (assert-seed-contracts! (get rows "<stdin>" []) database #{})
     (into []
           (comp
            (filter #(or (:seon.fn/sym %) (:seon.test/sym %)))
+           ;; The one digest owner: the namespace's own facts, never the
+           ;; analysis `ns` form widened by interpreter refers.
            (map #(assoc % :seon.program/definition-digest
-                        (program/definition-digest % resolver-context)))
+                        (db/definition-digest-of projection % namespace-row)))
            (map #(program/declaration-row
                   (db/carried-projection database)
                   (program/canonical-row

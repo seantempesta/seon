@@ -487,9 +487,17 @@
         (throw (ex-info (:seon.error/message refusal) refusal))))))
 
 (defn- definition-rows
-  "Analyze the accepted source once; SCI contributes only runtime contract facts."
+  "Analyze the accepted source once; SCI contributes only runtime contract facts.
+  Each FINAL row (after spec, workload, test markers and contract facts) takes
+  its digest from `seon.db/definition-digest-of` with the namespace row the
+  database stores, else SCI's for a namespace not yet stored: the digest the
+  writer recomputes."
   [ctx database projection before source namespace-row]
-  (let [source-rows
+  (let [digest-namespace (or (db/pull database '[*] [:seon.ns/name (:seon.ns/name namespace-row)])
+                             namespace-row)
+        digested #(assoc % :seon.program/definition-digest
+                         (db/definition-digest-of projection % digest-namespace))
+        source-rows
         (delay (seon.fn/source-rows
                 database
                 (program/shapes-in projection)
@@ -520,20 +528,21 @@
                  (merge (program/test-markers metadata (meta (:ns metadata))))))
              row (when event
                    (assoc event ::evaluated? true))]
-         (if (:seon.fn/spec row)
-           (let [definition (edn/read-string (:seon.fn/spec row))]
-             (schema/projection-with-function-contract
-              projection qualified definition
-              {:seon.schema.admission/source :agent})
-             (program/with-contract-facts
-              {:seon.program/row row
-               :seon.program/compile-options
-               (:seon.schema.projection/compile-options projection)
-               :seon.program/predicate-functions
-               (schema/predicate-functions-in projection)
-               :seon.program/schema-keys
-               (set (keys (:seon.schema.projection/forms projection)))}))
-           row))))
+         (some-> (if (:seon.fn/spec row)
+                   (let [definition (edn/read-string (:seon.fn/spec row))]
+                     (schema/projection-with-function-contract
+                      projection qualified definition
+                      {:seon.schema.admission/source :agent})
+                     (program/with-contract-facts
+                      {:seon.program/row row
+                       :seon.program/compile-options
+                       (:seon.schema.projection/compile-options projection)
+                       :seon.program/predicate-functions
+                       (schema/predicate-functions-in projection)
+                       :seon.program/schema-keys
+                       (set (keys (:seon.schema.projection/forms projection)))}))
+                   row)
+                 digested))))
    (sort-by (comp str key) (turn-interns ctx)))))
 
 (defn- bindings
