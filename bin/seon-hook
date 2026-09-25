@@ -1243,7 +1243,9 @@
         ;; FileLock.close through SCI.
         (transition)))
     (catch Exception error
-      (log! "REVIEW_PENDING_LOCK_ERROR" (.getMessage error))
+      ;; the class too: a bare NPE logged an empty message 11 times a day
+      (log! "REVIEW_PENDING_LOCK_ERROR" (.getName (class error))
+            (.getMessage error))
       nil)))
 
 (defn- parse-pending-entry [line]
@@ -1494,10 +1496,13 @@
 
 (defn- process-alive?
   [pid]
-  ;; An absent process is an empty Optional; nothing is parsed, so a
+  ;; No worker record is the ordinary idle state, not a parse: `(long nil)`
+  ;; threw here on every edit from 72fa85fc3 (2026-09-22) on, so no review
+  ;; window ever opened again. An absent process is an empty Optional; a
   ;; platform failure propagates.
-  (let [process (java.lang.ProcessHandle/of (long pid))]
-    (and (.isPresent process) (.isAlive (.get process)))))
+  (when pid
+    (let [process (java.lang.ProcessHandle/of (long pid))]
+      (and (.isPresent process) (.isAlive (.get process))))))
 
 (defn- read-review-worker-unlocked []
   (try

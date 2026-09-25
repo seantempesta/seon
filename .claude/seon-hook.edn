@@ -46,8 +46,14 @@
  ;; of the current JVM/Clojure tree; the pod-era
  ;; skills (clojurescript, datastar-web-ui, ui-canvas, seon-context-config)
  ;; and the agent-REPL skill are deliberately absent.
+ ;; OFF (2026-09-25): the owner's standing rule is no provider call that is
+ ;; not a deliberate verification, and each window is one `agy` call. The
+ ;; batch had in fact been dead since 72fa85fc3 (2026-09-22): the worker
+ ;; admission threw on a missing worker record. Turning it on is the
+ ;; owner's call; the output lands only in `tmp/reviews/`, never in the
+ ;; editing agent's context.
  :review
- {:enabled true
+ {:enabled false
   :interval-seconds 120
   :skills ["data-oriented-clojure" "data-modeling" "datahike" "clojure-testing"]
   ;; Per-document caps. Clojure sources under `:max-code-length` arrive
