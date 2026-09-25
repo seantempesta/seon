@@ -3874,7 +3874,9 @@
       answer)))
 
 (defn- form-read-sink
-  "The sink collecting one form's own reads: the request's, else the ambient one."
+  "The sink collecting one form's own reads: the request's, else the ambient one.
+  `evaluate` takes it once and unbinds the ambient sink for everything else, so
+  acquisition, program install, identity and gate reads never enter it."
   {:malli/schema [:=> [:cat :map] [:maybe :seon.db/read-evidence-sink]]}
   [request]
   (or (:seon.db/read-evidence-sink request) db/*read-evidence-sink*))
@@ -3925,6 +3927,8 @@
     time-limit-ms :seon.sci.eval/time-limit-ms
     on-core-error :seon.config/on-core-error
     :as request}]
+  (let [form-sink (form-read-sink request)]
+  (binding [db/*read-evidence-sink* nil]
   (let [;; The profile window opens before any work: an evaluation over one
         ;; second returns what the armed definitions did (`seon.profile`).
         profile-mark (profile/begin)
@@ -4243,7 +4247,7 @@
                   ;; Read evidence is what the form read: the request's sink
                   ;; is bound here and around its shown result, never around
                   ;; acquisition, identity checks or install.
-                  (let [value (binding [db/*read-evidence-sink* (form-read-sink request)]
+                  (let [value (binding [db/*read-evidence-sink* form-sink]
                                 (sci/eval-form execution-ctx form))]
                     (vreset! ending-namespace (sci/ns-name @sci/ns))
                     value)
@@ -4376,7 +4380,7 @@
               ;; declared returns; any other form supplies no producer.
               head (some-> (render/request-projection request)
                            (render/head-function execution-ctx namespace-name form))
-              admitted (binding [db/*read-evidence-sink* (form-read-sink request)]
+              admitted (binding [db/*read-evidence-sink* form-sink]
                          (shown-result value (cond-> request
                                                head (assoc :seon.render.call/function head))
                                        evaluation-record))]
@@ -4403,7 +4407,7 @@
         (catch Throwable throwable
           (if @arm-state
             (throw throwable)
-            (failure-result throwable)))))))))))))
+            (failure-result throwable)))))))))))))))
 
 (defn fork-candidate-ctx
   "Fork one candidate through the generation-aware turn path.

@@ -44,6 +44,12 @@
                       :seon.db/pattern-value juniper} %)
                  patterns)
            (pr-str evidence))
+       ;; The form's evidence is what the form read on its own branch: the
+       ;; context's acquisition held the pre-write value and the host
+       ;; program's rows, and neither is the form's read.
+       (is (= #{(:datahike.cache/connection-id (:cache-context @connection))}
+              (into #{} (map #(get-in % [:datahike.read/revision :datahike.cache/connection-id])) evidence))
+           (pr-str (mapv :datahike.read/revision evidence)))
        (is (true? (db/read-evidence-current? @connection evidence))
            (pr-str (into [] (comp (remove #(db/read-evidence-current? @connection [%]))
                                   (map #(select-keys % [:seon.db/read-request :seon.db/read-result-digest
