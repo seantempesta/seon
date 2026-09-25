@@ -936,38 +936,40 @@
         (interpreter-refer-rows
          (or (db/carried-projection database)
              (schema/projection-from-database database)))
+        ;; One namespace form per run of consecutive requests in one
+        ;; namespace: a later form then sees the aliases an earlier form of
+        ;; the batch required, as SCI evaluates them.
         {:keys [source spans]}
-        (loop [remaining requests
-               source (if (seq prelude) (str prelude "\n") "")
-               spans []]
-          (if-let [{:keys [namespace-name form-source]
-                    supplied-namespace :seon.fn/namespace-row} (first remaining)]
-            (let [namespace-row
-                  (or supplied-namespace
-                      (db/pull database
-                           '[:seon.ns/name
-                             :seon.ns/requires
-                             {:seon.ns/aliases [*]}
-                             {:seon.ns/imports [*]}
-                             {:seon.ns/refers [*]}]
-                           [:seon.ns/name namespace-name]))
-                  referenced-namespaces
-                  (analyzer/referenced-program-namespaces
-                   namespace-name [form-source])
-                  namespace-source
-                  (pr-str (runtime-namespace-form
-                           namespace-name
-                           (update namespace-row :seon.ns/refers
-                                   (fnil into []) interpreter-refers)
-                           referenced-namespaces))
-                  prefix (str source namespace-source "\n")
-                  first-source-row (inc (count (filter #{\newline} prefix)))
-                  last-source-row (+ first-source-row
-                                     (count (filter #{\newline} form-source)))]
-              (recur (next remaining)
-                     (str prefix form-source "\n")
-                     (conj spans [first-source-row last-source-row])))
-            {:source source :spans spans}))
+        (reduce
+         (fn [{:keys [source spans]} group]
+           (let [{namespace-name :namespace-name
+                  supplied-namespace :seon.fn/namespace-row} (first group)
+                 namespace-row
+                 (or supplied-namespace
+                     (db/pull database
+                          '[:seon.ns/name
+                            :seon.ns/requires
+                            {:seon.ns/aliases [*]}
+                            {:seon.ns/imports [*]}
+                            {:seon.ns/refers [*]}]
+                          [:seon.ns/name namespace-name]))
+                 namespace-source
+                 (pr-str (runtime-namespace-form
+                          namespace-name
+                          (update namespace-row :seon.ns/refers
+                                  (fnil into []) interpreter-refers)
+                          (analyzer/referenced-program-namespaces
+                           namespace-name (mapv :form-source group))))]
+             (reduce (fn [{:keys [source spans]} {form-source :form-source}]
+                       (let [first-source-row (inc (count (filter #{\newline} source)))]
+                         {:source (str source form-source "\n")
+                          :spans (conj spans [first-source-row
+                                              (+ first-source-row
+                                                 (count (filter #{\newline} form-source)))])}))
+                     {:source (str source namespace-source "\n") :spans spans}
+                     group)))
+         {:source (if (seq prelude) (str prelude "\n") "") :spans []}
+         (partition-by :namespace-name requests))
         analysis
         (with-in-str source
           (analyzer/analyze {::analyzer/paths ["-"]}))]

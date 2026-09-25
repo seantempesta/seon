@@ -72,6 +72,39 @@
                (get-in result
                        [:seon.error/offending])))))))
 
+(deftest an-alias-an-earlier-form-requires-resolves-in-later-forms-of-the-batch
+  ;; One namespace form per run of one namespace (lane fix-turn-hang-2026-09-25):
+  ;; a per-form namespace form from the stored row lost the batch's own
+  ;; `require`, so `schema/register!` read as the unanalyzed namespace `schema`
+  ;; and the whole batch refused as a host-binding fault.
+  (test-support/with-database
+    (fn [connection]
+      (test-support/transacted!
+       connection
+       {:tx-data [(test-support/namespace-row @connection 'sample.alias-batch)
+                  (test-support/namespace-row @connection 'sample.alias-other)]})
+      (let [here [:seon.ns/name 'sample.alias-batch]
+            other [:seon.ns/name 'sample.alias-other]
+            row (fn [namespace-ref sym source]
+                  {:seon.fn/sym sym :seon.fn/ns namespace-ref :seon.fn/source source
+                   :seon.fn/arglists "([])" :seon.fn/private? false
+                   :seon.schema.admission/source :agent})
+            aliased "(defn registers [] (schema/register! ::item-id :int))"
+            elsewhere "(defn elsewhere [] (seon.fn/tests-reaching nil 'x/y))"
+            results (seon.fn/analyze-forms
+                     @connection
+                     [{:seon.cluster.eval/source "(require '[seon.schema :as schema])"
+                       :seon.cluster.eval/ns here}
+                      {:seon.cluster.eval/source aliased :seon.cluster.eval/ns here
+                       :seon.program/row (row here 'sample.alias-batch/registers aliased)}
+                      {:seon.cluster.eval/source elsewhere :seon.cluster.eval/ns other
+                       :seon.program/row (row other 'sample.alias-other/elsewhere elsewhere)}])]
+        (is (vector? results) (pr-str results))
+        (is (contains? (set (:seon.fn/calls (second (nth results 1)))) 'seon.schema/register!)
+            "the alias an earlier form required resolves to its namespace")
+        (is (contains? (set (:seon.fn/calls (second (nth results 2)))) 'seon.fn/tests-reaching)
+            "a form of another namespace keeps its own namespace")))))
+
 (deftest defining-forms-share-one-form-local-kondo-batch
   (test-support/with-database
     (fn [connection]
