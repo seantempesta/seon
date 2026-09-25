@@ -327,7 +327,7 @@
   suppressed, else the first timeout carrying the later ones, else the
   outcomes. After reaping, a closed stdin pipe (the JDK's two messages, no
   subclass) is the expected end of input; no other failure is."
-  {:malli/schema [:=> [:cat [:vector :map] :map :boolean]
+  {:malli/schema [:=> [:cat [:vector [:tuple :qualified-keyword :map]] :map :boolean]
                   [:or [:vector [:or :nil :seon.blob/staged-write]] :seon.await/timeout-error]]}
   [tasks effective reaped?]
   (let [deadline (+ (System/nanoTime) (* 1000000 (long (:seon.config.eval/time-limit-ms effective))))
@@ -351,7 +351,7 @@
       :else outcomes)))
 
 (defn- finish-evidence
-  {:malli/schema [:=> [:cat :seon.db/connection [:vector :map] :map :boolean]
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector [:tuple :qualified-keyword :map]] :map :boolean]
                   [:or [:map [:my.shell/stdout :my.shell.output/value]
                              [:my.shell/stderr :my.shell.output/value]
                              [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]
