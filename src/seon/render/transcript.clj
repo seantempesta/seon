@@ -1440,7 +1440,9 @@
        [:p {:class "seon-session-meta"}
         (str (format "%,d" (utf8-size prompt)) " bytes · ≈" (format "%,d" (tokens/estimate prompt))
              " tokens · " (count entries) " emissions · oldest → newest")])]
-     (if (:seon.render.web/refused-member acquired)
+     ;; An acquisition without prompt text is the refusal caught above (or a
+     ;; web refusal); it renders as that failure, never as an empty prompt.
+     (if (or (:seon.render.web/refused-member acquired) (not (string? prompt)))
        [:div {:class "seon-emission-error"}
         (error/render-html (assoc request :seon.render/value acquired))
         (value/render-html (assoc request :seon.render/value acquired))]
