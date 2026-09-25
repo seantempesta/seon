@@ -174,6 +174,40 @@ Repeat these probes after adoption:
   `render.clj:783-803`, `db.clj:1413-1427` (`builder-digest`), `fn.clj:2288-2302` and `effect.clj`.
   Root should file this.
 
+## Round 2: reds on 6ab6cd5e (commit 775057d2a, tests only)
+
+- **db-test.** I compared 006.txt against the earlier baseline
+  `verify-6ab6ae2a-results.txt.d/015.txt`. The only new red member is my own
+  `the-stable-walk-costs-less-than-encoding-the-read-result`. Its assertion was wrong:
+  `stable-value` keeps the parent's shape with a false flag, so for a nested database or connection
+  it returns `[false [{:db nil}]]`, not `[false nil]`. The test now asserts the flag.
+- **The 13 `(identical? upstream (read-call))` fails, and the other db-test reds, were already red
+  in the baseline.** Their upstream value is a
+  `projection-fallback` refusal. Eight baseline reds are now gone.
+- **read-evidence-test.** No earlier run of it is on disk; every earlier file lists it as "pending
+  (not started)".
+  - All four fails come from one cause: line 47,
+    `(read-evidence-current? @connection evidence)`, is false on the same database value,
+    immediately after the SCI evaluation and before any write. The `(empty? changes)` fail follows
+    from it. The old `{}` full scan would also have returned a changed datom once the read was
+    judged stale.
+  - By reading the code, none of my three db.clj slices changes that answer:
+    - 901bcaa5b computes the same `[stable? value]` pair and digest. `record?` covers every
+      Datahike value, and a connection falls to `:else`.
+    - d46bbae77 does not touch `read-evidence-current?`.
+    - 70d52e826 reaches `construction-projection` under the same `declares-program?` condition as
+      before.
+  - I could not reproduce it at the REPL: `with-database` needs a `seon.test/run` handle, and the
+    MCP SCI binding of the sink does not reach the host.
+  - The commits in the same adoption that change this evaluation's captured reads are ca17618c0,
+    which binds the form's sink inside `evaluate`, and 9481086e0, which records no call-preparation
+    reads.
+  - The assertion now prints each stale read's request, digest and revision, so one rerun names the
+    read. I prepared no db.clj patch because no fault in db.clj is shown.
+- Root runs:
+  `bin/test-check default --test seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current`
+  and `bin/test-check default --test seon.db-test/the-stable-walk-costs-less-than-encoding-the-read-result`.
+
 ## Verification limits
 
 - The lane ran no tests, per the load rule.
