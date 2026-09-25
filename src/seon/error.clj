@@ -22,6 +22,7 @@
             [seon.call-preparation :as call-preparation]
             [seon.blob :as blob]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
             [seon.repl :as repl]
@@ -464,13 +465,18 @@
           (recur (max 1 (quot field-limit 2))))))))
 
 (defn prepare-result
-  "Render one result twice through the value printer and retain its live binding.
-  A supplied SCI context carries its owner's binding operation. Complete text
-  is blob content; only the AI rendering applies the supplied profile."
+  "Render one result's shown text, store the value ONCE, and retain its live binding.
+
+  The blob is the value's admitted artifact (the record `get_value` reads),
+  under the storage bound and with its world as references. It used to be the
+  complete HTML face rendered unbounded: a second, larger copy of the value
+  whose admission walked every object it reached. A supplied SCI context
+  carries its owner's binding operation and, absent explicit caps, the bound."
   {:malli/schema
    [:=> [:cat [:map [:seon.db/connection :seon.db/connection]
                     [:seon.render/profile :seon.render.profile/profile]
                     [:seon.error/source :seon.error/source]
+                    [:seon.sci.admit/caps {:optional true} :seon.sci.admit/caps]
                     [:seon.sci.eval/ctx {:optional true}
                      [:and :seon.sci.eval/ctx
                       [:map [:seon.sci.eval/bind-result! :seon.instrument/callable]]]]]]
@@ -488,9 +494,23 @@
         unit (assoc (select-keys request [:seon.schema/projection :seon.render/profile])
                     :seon.render/value value :seon.repl/handle handle
                     :seon.render.call/id handle)
-        complete (render.value/render-ai-data (render.value/prepare unit :seon.render/html))
+        caps (or (:seon.sci.admit/caps request)
+                 (some-> ctx env/of :seon.sci.admit/caps)
+                 (throw (ex-info "A stored result requires its storage bound."
+                                 (seon.error.refusal/diagnostic (java.util.Date.) :seon.error/recording 'seon.error/prepare-result
+                                  {:seon.error/message "Supply :seon.sci.admit/caps or an SCI context whose environment carries them."
+                                   :seon.error/member :seon.sci.admit/caps
+                                   :seon.error/expected :seon.sci.admit/caps}))))
+        admitted (admit/admit-value
+                  (cond-> {:seon.sci.admit/value value
+                           :seon.sci.admit/interrupt-fn (constantly nil)
+                           :seon.sci.admit/caps caps
+                           :seon.config/on-core-error :record}
+                    (:seon.schema/projection request)
+                    (assoc :seon.schema/projection (:seon.schema/projection request))))
         shown (render.value/render-ai-data (render.value/prepare unit))
-        digest (blob/put! (:seon.db/connection request) complete)]
+        digest (blob/put! (:seon.db/connection request)
+                          (render.value/artifact-edn (render.value/artifact admitted)))]
     (when ctx
       ((:seon.sci.eval/bind-result! ctx) ctx handle value))
     {:seon.error/result-id result-id

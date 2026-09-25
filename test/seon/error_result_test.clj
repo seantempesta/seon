@@ -70,16 +70,20 @@
               :seon.render.call/id (admit/result-handle result-id)
               :seon.schema/projection projection
               :seon.render/profile (:seon.render/profile request)}
-        complete (render.value/render-ai-data (render.value/prepare unit :seon.render/html))
+        ;; the value is stored ONCE, as its admitted artifact (the record
+        ;; get_value reads), never as a second full-HTML copy
+        complete (blob/get connection (:seon.error/data-blob stored))
+        artifact (render.value/read-artifact complete)
         shown (render.value/render-ai-data (render.value/prepare unit))]
     (is (< elapsed-ms 1000) (str "error recording and transaction: " elapsed-ms " ms"))
     (is (string? result-id))
-    (is (= complete (blob/get connection (:seon.error/data-blob stored))))
+    (is (map? (:seon.sci.admit/print-node artifact)))
     (is (= shown (:seon.error/shown stored)))
     (is (schema/valid-candidate-value? projection :seon.error/base stored))
     (is (str/includes? (error/render-ai {:seon.render/value row}) shown))
     (is (:seon.error/data-edn stored) "Legacy evidence remains written during accretion.")
-    {:stored stored :complete complete :shown shown}))
+    {:stored stored :complete complete :shown shown
+     :stored-value (render.value/artifact-value artifact)}))
 
 (deftest core-results-use-the-printer-for-arbitrary-objects
   (support/with-database
@@ -93,7 +97,8 @@
      (let [value (mapv (fn [n] {:error-result-test/n n :error-result-test/items (vec (range 20))}) (range 20))
            request (-> (request connection (observation value))
                        (assoc-in [:seon.render/profile :seon.render.profile/max-children] 2))
-           {:keys [complete shown]} (verify-stored! connection request value)]
+           {:keys [complete shown stored-value]} (verify-stored! connection request value)]
+       (is (= value stored-value) "the digest retrieves the whole value")
        (is (not= complete shown))
        (is (< (count shown) (count complete)))))))
 
