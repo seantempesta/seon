@@ -910,7 +910,8 @@
              :reverse ['[[?t ?a ?e]] '[?a ...] refs true]
              :value-forward ['[[?e ?a ?v] [?t ?i ?v]] '[[?a ?i] ...] values false]
              :value-reverse ['[[?e ?i ?v] [?t ?a ?v]] '[[?a ?i] ...] values true]
-             :identity ['[[?e ?a ?t]] '[?a ...] (vec (keys (::identity-owners structure))) false])
+             ;; The identity VALUE is not a target: bind ?t to the holder, so every family yields `[entity attribute entity]`.
+             :identity ['[[?e ?a _] [(identity ?e) ?t]] '[?a ...] (vec (keys (::identity-owners structure))) false])
            found (db/q (assoc bounds :query (-> '[:find ?e ?a ?t :in $ [?e ...]] (conj bind :where) (into clauses))
                               :args [db (vec frontier) attributes]))]
        (if (:seon.db/invalid-read found)
