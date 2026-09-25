@@ -2,7 +2,7 @@
 type: landing
 status: current
 created: 2026-09-24
-scope: One render path 0a, 0b, 1a, part of 1b, bounded-text storage and census class 12 landed; 1b remainder and 1c stopped
+scope: One render path slices 0a–1c landed (declared selection, child identity carriage), plus error.clj census fixes
 ---
 # Lane render-dispatch-opus: one render path 0a, 0b, 1a, 1b (part) — 2026-09-24
 
@@ -12,6 +12,34 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/seon/render_source_test.clj`, `test/seon/render/transcript_run_test.clj`, `test/seon/render/retained_test.clj`,
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
+
+## Fourth follow-up: carriage and 1c landed
+
+- `4bb8f07df` `render/value.clj:470` hands `project-node` `(assoc unit :seon.render.data/path path)` (+3/−1). Selection
+  input only; traversal, limits and clipping unchanged; `render-argument` still excludes the path from invocation
+  arguments and cache evidence. **value.clj released** to the floor redesign lane.
+- `44dc30ae6` 1c (+84/−243): selection is `[:declared :floor]`. Deleted explicit-value/explicit-request/schema stages,
+  schema-producer(s), specificity, `transaction-shape`, project-node's `(get value output)`; cost facts name the owning
+  row schema. Errors with no satisfied, paired alternative compose the `:seon.error/base` pair. **Deviation for ruling:**
+  the design's "contracted operation with no satisfied alternative → named contract diagnostic" is the base pair here.
+  Transcript prefix uses `prefix-subject` (rule 2). `matching-shapes-in` stays for diagnostics (walk.clj:101, schema).
+- Selection enum keeps `:explicit-value :explicit-request :namespace :schema` because `test/seon/render/web_test.clj`
+  (692, 747, 795) builds synthetic stage data with them; trim with that file's owner.
+- **Expected reds outside this row:** `test/seon/sci/eval_test.clj:2221` (explicit request producer; needs a declared
+  subject); `test/seon/render/page_settings_test.clj:27` (root-rendered settings component has no identity; add
+  `:seon.render.walk/attribute :seon.agent/settings`); any test asserting a nested pair under an unregistered key, or an
+  explicit `:seon.render/ai`/`:html` request producer (render_coverage_test, mcp_test, turn_loop_test, ns_test,
+  value_test, schema tests use pairs in schema declarations, which still work).
+- **Pair reach census (per rule) not re-run** after adoption under PROBE SAFETY (no unrun code in default). The
+  committed-shape script is `tmp/render-dispatch-opus/pair-census.clj` (read-only; rule 1 = error, 2 = named return,
+  3 = row schema, attr = component/element/named attribute). Pre-adoption run (357 paired): 142 reached by no rule, of
+  which the generic `seon.error/render-ai` errors are now served by the base pair; the non-generic unreached included
+  `:seon.agent/plan`, `:seon.agent/settings`, `:seon.cluster.status/concern`, `:seon.eval/entity`, `:seon.message/to`,
+  `:seon.problems/missing-model`, `:seon.repl/directory`, `:seon.runtime/turns`, `:seon.turn/agent`,
+  `:seon.render.data/snapshot`, `seon.error/index-refusal-prose` (12) and `mcp-prose` (3) errors whose operations do not
+  declare them, and `:seon.error/agent`/`:of-steward`; ns alias/import/refer bindings are reached by attribute
+  (component schema; probed for import). Root run: MCP `eval_clj` jvm `(pr-str (load-string (slurp
+  "/Users/sean/src/seon/tmp/render-dispatch-opus/pair-census.clj")))` after review.
 
 ## Third follow-up (blockers ruled: my.turn page deleted, vehicles rewritten, child identity required)
 
