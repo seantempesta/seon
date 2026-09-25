@@ -4,7 +4,9 @@
             [malli.registry :as mr]
             [seon.schema.internal] [malli.core] [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
+            [seon.cluster.store :as store]
             [seon.maintenance :as maintenance]
+            [seon.operator.runtime :as operator.runtime]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.test-support :as test-support])
@@ -471,3 +473,21 @@
         (is (true? (:seon.operator.collect/complete? result))))
       (finally
         (test-support/delete-recursively! repository-root)))))
+
+(deftest maintenance-holds-the-cluster-store-through-its-owner-count
+  ;; A cluster in this JVM holds the operator root's store; maintenance
+  ;; takes one more hold on that same value and gives only that one back.
+  (let [root (store/declared-operator-root)
+        path (.getCanonicalPath (io/file root "data" "store"))
+        holders #(get-in @operator.runtime/root-store-holder
+                         [path :seon.cluster/holders])
+        shared (get-in @operator.runtime/root-store-holder
+                       [path :seon.store/store])
+        before (holders)
+        [inside same?] (#'maintenance/with-root-store!
+                        root (fn [held] [(holders) (identical? held shared)]))]
+    (is (pos-int? before) "a running cluster holds the operator root's store")
+    (is (= (inc before) inside))
+    (is (true? same?))
+    (is (= before (holders)))
+    (is (.isValid ^java.nio.channels.FileLock (:seon.store/lock shared)))))

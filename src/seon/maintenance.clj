@@ -8,9 +8,7 @@
             [konserve.core :as k]
             [konserve.protocols]
             [seon.cluster.registry :as registry]
-            [seon.cluster.store :as store]
             [seon.fs :as fs]
-            [seon.operator.runtime :as runtime]
             [seon.db :as db]
             [seon.error :as error]
             [seon.schema :as schema]
@@ -511,23 +509,22 @@
   (.getCanonicalPath
    (io/file managed-root "data" "store")))
 
-(defn- valid-store?
-  {:malli/schema [:=> [:cat [:or :nil :map]] :boolean]}
-  [value]
-  (boolean (and (map? value)
-                (some-> ^java.nio.channels.FileLock (:seon.store/lock value)
-                        .isValid))))
-
-(defn- acquire-operation-store!
-  {:malli/schema [:=> [:cat :string [:or :nil :seon.store/store]] [:tuple :seon.store/store :boolean]]}
-  [managed-root supplied]
+(defn- with-root-store!
+  "Call `f` with the process-root store held through its owner's reference
+  count, `seon.cluster/acquire-root-store!`, and drop that one hold after.
+  A store a cluster holds is the same shared value and survives this call;
+  a store no cluster holds opens and releases through the same owner, so
+  maintenance never opens a second holder. Resolved at call time because
+  `seon.cluster` requires this namespace through `seon.schedule`.
+  Returns whatever `f` returns, so its output is `:any`."
+  {:malli/schema [:=> [:cat :string [:fn clojure.core/ifn?]] :any]}
+  [managed-root f]
   (let [path (store-dir managed-root)
-        held (some-> (get @runtime/root-store-holder path)
-                     :seon.store/store)]
-    (cond
-      (valid-store? supplied) [supplied false]
-      (valid-store? held) [held false]
-      :else [(store/open-store! {:seon.store/dir path}) true])))
+        held ((requiring-resolve 'seon.cluster/acquire-root-store!) path)]
+    (try
+      (f held)
+      (finally
+        ((requiring-resolve 'seon.cluster/release-root-store!) path)))))
 
 
 (defn konserve-store?
@@ -949,13 +946,13 @@
      :seon.maintenance/disabled-collection-flag :seon.config.maintenance/collect?})
     (attempt
      #(let [_ (refuse-misspelled-options! request)
-            root (.getCanonicalPath (io/file root))
-            [held release?] (acquire-operation-store! root nil)]
-        (try
-          (if (:seon.operator.collect/dry-run? request)
-            (dry-run-store! root held)
-            (collect-store! root held))
-          (finally (when release? (store/release-store! held))))))))
+            root (.getCanonicalPath (io/file root))]
+        (with-root-store!
+          root
+          (fn [held]
+            (if (:seon.operator.collect/dry-run? request)
+              (dry-run-store! root held)
+              (collect-store! root held))))))))
 
 (defn observe-footprint!
   "Measure only this managed data directory; the schedule records the result."
