@@ -495,7 +495,10 @@
                                (filter qualified-symbol?) (distinct))
                       schema-keys))]
     (cond
-      (or (nil? projection) (not (map? value)) (attribute-scoped? request)) []
+      (nil? projection) []
+      ;; An attribute request stays about that attribute: its own pair.
+      (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
+      (not (map? value)) []
       (and (:seon.error/at value) (qualified-symbol? (:seon.error/operation value)))
       ;; The satisfied alternative's pair; a contracted operation none of whose
       ;; alternatives the error satisfies is a contract finding shown with the
