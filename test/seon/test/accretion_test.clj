@@ -127,46 +127,29 @@
     (fn [connection]
       (admit!
        connection
-       [(test-support/namespace-row @connection 'fixture.gate)
-        {:seon.fn/sym 'fixture.gate/target
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'fixture.gate]
-         :seon.fn/source "(defn target [] 1)"
-         :seon.fn/arglists "([])" :seon.fn/private? false}
-        {:seon.fn/sym 'fixture.gate/caller
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'fixture.gate]
-         :seon.fn/source "(defn caller [] (target))"
-         :seon.fn/arglists "([])" :seon.fn/private? false
-         :seon.fn/calls #{'fixture.gate/target}}])
-      (admit!
-       connection
-       [{:seon.test/sym 'fixture.gate/direct-test
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.gate]
-         :seon.test/source "(deftest direct-test)"
-         :seon.fn/calls #{'fixture.gate/target}}
-        {:seon.test/sym 'fixture.gate/caller-test
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.gate]
-         :seon.test/source "(deftest caller-test)"
-         :seon.fn/calls #{'fixture.gate/caller}}
-        {:seon.test/sym 'fixture.gate/subject-test
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.gate]
-         :seon.test/source "(deftest subject-test)"
-         :seon.test/subject 'fixture.gate/target}
-        {:seon.test/sym 'fixture.gate/pending-test
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.gate]
-         :seon.test/source "(deftest pending-test)"
-         :seon.test/subject 'fixture.gate/future}])
+       [(test-support/namespace-row @connection 'fixture.gate)])
+      (let [source "(defn target [] 1)\n(defn caller [] (target))"]
+        (admit! connection
+                [(test-support/program-fn-row @connection 'fixture.gate/target source)
+                 (test-support/program-fn-row @connection 'fixture.gate/caller source)]))
+      (let [test-row (fn [test-symbol source overrides]
+                       (test-support/program-row @connection [:seon.test/sym test-symbol] source overrides))]
+        (admit! connection
+                [(test-row 'fixture.gate/direct-test "(clojure.test/deftest direct-test (target))" {})
+                 (test-row 'fixture.gate/caller-test "(clojure.test/deftest caller-test (caller))" {})
+                 (test-row 'fixture.gate/subject-test "(clojure.test/deftest subject-test)"
+                           {:seon.test/subject 'fixture.gate/target})
+                 (test-row 'fixture.gate/pending-test "(clojure.test/deftest pending-test)"
+                           {:seon.test/subject 'fixture.gate/future})]))
+      ;; The branch also holds this test's own row, which quotes the fixture symbols.
       (is (= ['fixture.gate/caller-test
               'fixture.gate/direct-test
               'fixture.gate/subject-test]
-             (seon.fn/gate-set @connection 'fixture.gate/target)))
+             (filterv #(= "fixture.gate" (namespace %))
+                      (seon.fn/gate-set @connection 'fixture.gate/target))))
       (is (= ['fixture.gate/pending-test]
-             (seon.fn/gate-set @connection 'fixture.gate/future)))
+             (filterv #(= "fixture.gate" (namespace %))
+                      (seon.fn/gate-set @connection 'fixture.gate/future))))
       (is (= (seon.fn/gate-set @connection 'fixture.gate/target)
              (seon.fn/tests-reaching @connection 'fixture.gate/target))))))
 
@@ -183,28 +166,14 @@
            :seon.ns/source
            (str "(ns fixture.candidate "
                 "(:require [clojure.test :refer [deftest is]]))")}
-          :all :agent)}
-        {:seon.fn/sym 'fixture.candidate/target
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'fixture.candidate]
-         :seon.fn/source
-         (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-              "target [x] x)")
-         :seon.fn/arglists "([x])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat :int] :int]"}
-        {:seon.test/sym 'fixture.candidate/green-test
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.candidate]
-         :seon.test/source
-         (str "(clojure.test/deftest green-test "
-              "(clojure.test/is (= 2 (target 1))))")}
-        {:seon.test/sym 'fixture.candidate/red-test
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.candidate]
-         :seon.test/source
-         (str "(clojure.test/deftest red-test "
-              "(clojure.test/is (= 3 (target 1))))")}])
+          :all :agent)}])
+      (let [source (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)\n"
+                        "(clojure.test/deftest green-test (clojure.test/is (= 2 (target 1))))\n"
+                        "(clojure.test/deftest red-test (clojure.test/is (= 3 (target 1))))")]
+        (admit! connection
+                [(test-support/program-fn-row @connection 'fixture.candidate/target source)
+                 (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/green-test] source {})
+                 (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/red-test] source {})]))
       (let [parent (test-support/fork-cluster-ctx connection)
             _ (when-not (sci/find-ns parent 'fixture.candidate)
                 (sci/add-namespace! parent 'fixture.candidate {}))
@@ -284,13 +253,13 @@
            :seon.ns/source
            (str "(ns fixture.custody "
                 "(:require [clojure.test :refer [deftest is]]))")}
-          :all :agent)}
-        {:seon.test/sym 'fixture.custody/reads-its-own-cluster
-         :seon.schema.admission/source :agent
-         :seon.test/ns [:seon.ns/name 'fixture.custody]
-         :seon.test/source
-         (str "(clojure.test/deftest reads-its-own-cluster "
-              "(clojure.test/is (int? (seon.db/basis-t (seon.db/db)))))")}])
+          :all :agent)}])
+      (admit! connection
+              [(test-support/program-row
+                @connection [:seon.test/sym 'fixture.custody/reads-its-own-cluster]
+                (str "(clojure.test/deftest reads-its-own-cluster "
+                     "(clojure.test/is (int? (seon.db/basis-t (seon.db/db)))))")
+                {})])
       (let [parent (test-support/fork-cluster-ctx connection)
             result
             (sci.eval/evaluate-candidate
@@ -325,11 +294,11 @@
        connection
        [{:seon.agent/id "auto-check-author"
          :seon.agent/namespace
-         (test-support/namespace-row @connection 'fixture.auto-check)}
-        {:seon.fn/sym 'fixture.auto-check/capability
-         :seon.schema.admission/source :agent
-         :seon.fn/ns [:seon.ns/name 'fixture.auto-check]
-         :seon.effect/capability 'fixture.auto-check/handler}])
+         (test-support/namespace-row @connection 'fixture.auto-check)}])
+      (admit! connection
+              [(test-support/program-fn-row @connection 'fixture.auto-check/capability
+                                            "(defn capability [] nil)"
+                                            {:seon.effect/capability 'fixture.auto-check/handler})])
       (let [parent (test-support/fork-cluster-ctx connection)
             candidate-request
             (fn [source]
