@@ -1,13 +1,17 @@
 (ns seon.test.clean-world-test
   "A cluster's test member runs in the loaded published program plus the facts
   boot seeds for a cluster and the cluster's differing program rows: none of
-  its agents, turns, messages or errors reach it."
+  its agents, turns, messages or errors reach it. A member whose reach includes
+  `seon.effect/request*`, as this one does through `boot/connection`'s refusal
+  path, also holds exactly its own attempt agent and turn (design §2c, owner
+  2026-09-25), which the test names from its request context."
   (:require [clojure.test :refer [deftest is]]
             [seon.cluster.boot :as boot]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.source :as source]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.effect :as effect]
             [seon.program :as program]
             [seon.test-support :as support]))
 
@@ -27,12 +31,23 @@
                                (entity world [:seon.config/cluster cluster])
                                (entity world [:seon.db.process/id
                                               (cluster.process/id (cluster.process/current-identity))])]))
-        added (remove #(= (:e %) (:tx %))
+        attempt effect/*request-context*
+        attempt-txs (set (for [[attribute value] [[:seon.agent/id (:seon.agent/id attempt)]
+                                                  [:seon.turn/id (:seon.turn/id attempt)]]
+                               :when value
+                               datom (db/datoms world :avet attribute value)]
+                           (:tx datom)))
+        added (remove #(or (= (:e %) (:tx %)) (attempt-txs (:tx %)))
                       (db/datoms (db/since world (db/basis-t published)) :eavt))]
     (is (= "root" (:seon.agent/id (db/pull live [:seon.agent/id] [:seon.agent/id "root"])))
         "the subject: boot seeded root in the cluster itself")
     (is (= :isolated (:seon.agent/mode member)))
-    (doseq [attribute [:seon.agent/id :seon.error/id :seon.message/about :seon.turn/id]]
+    (is (= 2 (count attempt-txs)) "this effect-reaching member's attempt agent and turn are written")
+    (is (= [(:seon.agent/id attempt)] (map :v (db/datoms world :aevt :seon.agent/id)))
+        "the member's only agent is its own attempt agent")
+    (is (= [(:seon.turn/id attempt)] (map :v (db/datoms world :aevt :seon.turn/id)))
+        "the member's only turn is its attempt's")
+    (doseq [attribute [:seon.error/id :seon.message/about]]
       (is (empty? (db/datoms world :aevt attribute))
           (str "the member inherits no " attribute " rows")))
     (is (< 100 (count program-attributes)) "the program partition is derived from entity schemas")
@@ -48,4 +63,4 @@
                                (remove (comp program-attributes :a))
                                (map :e))
                      added))
-        "beside program rows only the cluster, config and process entities are added")))
+        "beside program rows and the attempt's two transactions only the cluster, config and process entities are added")))
