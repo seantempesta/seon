@@ -1,15 +1,18 @@
 ;; Direct development-hook configuration.
 ;;
-;; bin/seon-hook runs entirely in Babashka. It does not require a running
-;; Seon process: syntax validation happens before an edit; the canonical
-;; Markdown and docstring linters run after it. The hook never publishes:
-;; program changes reach default only through root integration (D1).
-;; Gemini review is one asynchronous, coalesced batch per two-minute window;
-;; it never delays edit feedback or creates parallel review workers.
-;; Every numeric bound this hook enforces is declared here and nowhere else:
-;; the review size limits, and the review call's own
-;; bound. The hook has no numeric fallback — an absent or non-positive value
-;; refuses by exact key path rather than substituting a literal.
+;; bin/seon-hook runs in Babashka. Syntax validation (clj-kondo over the
+;; reconstructed buffer) happens before an edit; clj-kondo, the canonical
+;; Markdown and docstring linters run after it. The one live-JVM call is
+;; the contract compile check (`:contract-compile`, on unless declared
+;; off): a src/ or test/ Clojure edit asks the running root at
+;; `:current-source` to compile its contracts, and reports it unavailable
+;; when no root answers. The hook never publishes: program changes reach
+;; default only through root integration (D1). The only automatic fix is
+;; Markdown formatting (whitespace, blank lines, final newline), which the
+;; hook rewrites in place and reports; Clojure is refused, never repaired.
+;; The review sizes and call bound below refuse by key path when absent;
+;; `:feedback :max-tokens` (per message) and `:interval-seconds` still
+;; carry literal fallbacks in bin/seon-hook.
 ;; SEON_HOOK_CONFIG selects a complete fixture config.
 
 {:lint
@@ -25,10 +28,10 @@
  ;; heredoc, `python`, `sed`, `cat >` — hands the hook no path, so the
  ;; changed files are derived: every root below is walked after the tool
  ;; returns and each Clojure file's content digest is compared with the
- ;; digest recorded at this session's previous event. A syntax error left
- ;; on disk blocks immediately, naming the path and the tool. Measured
- ;; 2026-09-17: the complete walk plus digests is 112 ms over 553 files,
- ;; where scoping by `git status --porcelain` would cost 2.7 s warm.
+ ;; digest this session's agent recorded before the tool ran. A syntax
+ ;; error left on disk blocks immediately, naming the path and the tool.
+ ;; Measured 2026-09-25: the walk plus digests is 60 ms over 693 files,
+ ;; where scoping by `git status --porcelain` cost 2.7 s warm (2026-09-17).
  :shell-writes
  {:enabled true
   :roots ["src" "test" "resources" "script" "bin"]}
