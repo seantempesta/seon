@@ -839,16 +839,9 @@
 (defn apply-config!
   "Set one cluster's config dials through the production path.
 
-   A fixture that upserts `{:seon.config/cluster name :seon.config.x/dial v}`
-   is writing a PARTIAL config entity. Write admission reads an identity-keyed
-   map against the WHOLE config schema, so it refuses the row for
-   `:seon.config/applied-manifest-digest` — a digest only `compile-manifest`
-   can compute from the complete effective config. Such a seed has been
-   landing nothing; the dial the test thought it set stayed at its default.
-
-   `config/apply!` compiles the manifest and exact-reconciles the one desired
-   row, exactly as `bin/seon config apply` does. It is EXACT: the manifest is
-   the cluster's whole overlay, not an addition to an earlier one."
+   `config/apply!` compiles the manifest over the decisions the cluster's row
+   already holds and exact-reconciles the one desired row, exactly as
+   `bin/seon config apply` does. A later manifest changes only its own keys."
   [connection cluster-name manifest]
   (checked-fixture-result
    (db/call-with-custody {:seon.db/connection connection}

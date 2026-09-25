@@ -6,6 +6,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.agent :as agent]
+            [seon.ai :as ai]
             [seon.cluster.agent :as cluster-agent]
             [seon.config :as config]
             [seon.reconcile :as reconcile]
@@ -267,8 +268,12 @@
                    :seon.config.flow.compute/queue-depth]]
                 (filterv vector? tx-data)))
          (is (= 1 (count rows)))
-         (is (= #{:db/id :seon.config/cluster :seon.config.flow.compute/queue-depth}
+         (is (= #{:db/id :seon.config/cluster :seon.config.flow.compute/queue-depth
+                  :seon.config/overlay-keys}
                 (set (keys (first rows)))))
+         (is (= #{:seon.config.flow.compute/queue-depth}
+                (:seon.config/overlay-keys (first rows)))
+             "the row records the one dial this apply decided")
          (is (= 23 (:seon.config.flow.compute/queue-depth (first rows)))))))))
 
 (deftest converged-apply-uses-carried-projection-and-remains-exact
@@ -374,6 +379,52 @@
               (:seon.config/effective
                (config/compile-manifest {:seon.boot/cluster-name "default"
                                          :seon.config/manifest (config/development-manifest)}))))))
+
+(deftest a-sparse-apply-changes-only-its-keys-and-keeps-no-provider
+  ;; Class regression (issue a-sparse-config-apply-drops-the-no-provider-overlay-
+  ;; and-calls-a-paid-provider): a one-key apply once recompiled from the shipped
+  ;; defaults alone, so a fixture's provider stand-in fell back to the shipped
+  ;; paid endpoint and credential. Resolution only; no provider call is made.
+  (test-support/with-database
+   (fn [connection]
+     (let [request {:seon.db/connection connection
+                    :seon.boot/cluster-name "sparse-apply"}
+           stand-in "http://127.0.0.1:1/v1"
+           shipped (config/compile-manifest {:seon.boot/cluster-name "sparse-apply"})
+           _ (config/apply! (assoc request :seon.config/manifest
+                                   {:seon.config.ai/no-provider true
+                                    :seon.config.ai/endpoint stand-in
+                                    :seon.config.ai.backup/model config/absent}))
+           sparse (config/apply! (assoc request :seon.config/manifest
+                                        {:seon.config.run/max-episode-runs 1}))
+           effective (config/effective @connection "sparse-apply")
+           primary (:seon.ai/primary (ai/targets (or (db/carried-projection @connection)
+                                                        (schema/handed-projection))
+                                                    effective))]
+       (is (boolean? (:seon.reconcile/converged? sparse)) (pr-str sparse))
+       (is (= 1 (:seon.config.run/max-episode-runs effective)))
+       (is (true? (:seon.config.ai/no-provider effective))
+           "the sparse apply keeps the no-provider decision beneath it")
+       (is (= stand-in (:seon.config.ai/endpoint effective)))
+       (is (nil? (find effective :seon.config.ai.backup/model))
+           "a held absence stays absent")
+       (is (true? (:seon.ai/no-provider primary))
+           "the resolved provider target is the no-provider one")
+       (is (not= (get-in shipped [:seon.config/effective :seon.config.ai/endpoint])
+                 (:seon.ai/endpoint primary))
+           "the shipped paid endpoint is never resolved")
+       (is (= #{:seon.config.ai/no-provider :seon.config.ai/endpoint
+                :seon.config.ai.backup/model :seon.config.run/max-episode-runs}
+              (set (:seon.config/overlay-keys
+                    (db/pull @connection [:seon.config/overlay-keys]
+                             [:seon.config/cluster "sparse-apply"])))))
+       (config/apply! request config/default-manifest-path)
+       (let [reset (config/effective @connection "sparse-apply")]
+         (is (= (select-keys (:seon.config/effective shipped)
+                             [:seon.config.ai/endpoint :seon.config.run/max-episode-runs])
+                (select-keys reset [:seon.config.ai/endpoint :seon.config.run/max-episode-runs]))
+             "applying the shipped document replaces every held decision")
+         (is (nil? (find reset :seon.config.ai/no-provider))))))))
 
 (deftest apply-surfaces-a-refused-reconcile-as-its-flat-rule-error
   ;; A real refusal inside the reconcile transaction: the desired row names a
