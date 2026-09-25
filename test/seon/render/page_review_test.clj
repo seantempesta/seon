@@ -47,8 +47,7 @@
                      [{:seon.agent/id "page"
                        :seon.agent/runtime
                        {:seon.runtime/agent [:seon.agent/id "page"]
-                        :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])}}
-                      [:db/retract [:seon.turn/id "current"] :seon.turn/agent [:seon.agent/id "page"]]])))
+                        :seon.runtime/turns (mapv #(vector :seon.turn/id %) ["old" "current" "late-old"])}}])))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            evaluations (evaluation/of-agent database "page")
