@@ -26,7 +26,8 @@
             [seon.id]
             [seon.profile :as profile]
             [seon.schema :as schema]
-            [seon.schema.edn :as schema.edn]))
+            [seon.schema.edn :as schema.edn]
+            [seon.sci.kernel :as kernel]))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Schemas — resources/seon/schema.edn
@@ -677,9 +678,16 @@
                                                         ": the refusal could not be built.")
                                :seon.error/throwable failure}
                         offending (assoc :seon.error/offending (val offending))))]))
+        ;; A BOUND FIRING IS ITS OWN REPORT: explaining re-checks the value, so
+        ;; an evaluation deadline can fire mid-refusal (or mid-validation,
+        ;; which Malli reports as ::invalid-schema-at-call). SCI's interrupt
+        ;; leaves unchanged so the bound reports what never arrived.
+        reraise-bound! (fn [failure]
+                         (when (kernel/interrupted? failure) (throw failure)))
         refusal (fn [kind data]
                   (if (= :malli.core/invalid-schema-at-call kind)
-                    (minimal kind data (:exception data))
+                    (do (reraise-bound! (:exception data))
+                        (minimal kind data (:exception data)))
                     (try
                       (let [value (boundary-refusal projection caps kind
                                                     (assoc data :fn-name function-symbol) arities)]
@@ -691,7 +699,9 @@
                                                   (mapv #(select-keys % [:path :in])
                                                         (:errors (m/explain :seon.instrument/refusal-result
                                                                             value options)))}))))
-                      (catch Throwable failure (minimal kind data failure)))))
+                      (catch Throwable failure
+                        (reraise-bound! failure)
+                        (minimal kind data failure)))))
         wrapped
         (m/-instrument
          {:schema compiled :scope #{:input :output :guard}
