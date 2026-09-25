@@ -30,10 +30,34 @@
          [?run :seon.turn/id ?id]]
        db agent-id))
 
+(def ^:private reference-members
+  "The references a producer may name on a fault; each is stored as a
+  reference on the occurrence (`seon.error/commit-call`), never its world."
+  [:seon.effect/id :seon.error/related-occurrence :seon.error/obligation])
+
+(defn- delivered-to
+  "The recipients of the notifications the writer selected for `signature`'s
+  current opening in this transaction: the `:seon.error/notified` messages it
+  asserted, plus the prior selection as of its own `:db-before` that it did
+  not retract. Read from this transaction's own report, never the batch's
+  `:db-after` as the selection (Datahike's writer hands every report of a
+  batch the batch's database, `datahike/writer.cljc:229-264`)."
+  {:malli/schema [:=> [:cat :seon.db/transaction-report :seon.error/signature] [:set :seon.agent/id]]}
+  [{:keys [tx-data db-before db-after]} signature]
+  (let [changes (filter #(= :seon.error/notified (:a %)) tx-data)
+        retracted (into #{} (comp (remove :added) (map :v)) changes)
+        prior (->> (db/pull db-before [{:seon.error/notified [:db/id]}] [:seon.error/signature signature])
+                   :seon.error/notified (map :db/id))
+        messages (into (into #{} (comp (filter :added) (map :v)) changes)
+                       (remove retracted) (when (sequential? prior) prior))]
+    (into #{} (keep #(get-in (db/pull db-after [{:seon.message/to [:seon.agent/id]}] %)
+                             [:seon.message/to :seon.agent/id]))
+          messages)))
+
 (defn record!
   "Commit one escaped Throwable as one durable fact per delivery.
 
-  TOTAL, never throws. Returns `[fact outcome occurrence]`
+  TOTAL, never throws. Returns `[fact outcome occurrence delivered-to]`
   (`:seon.fault/recording`), deriving
   `fact` and its content signature before the transaction attempt. Every
   delivery reaches the writer. `outcome` is `:seon.flow/committed` or the
@@ -90,7 +114,9 @@
             (assoc :seon.config.error/escalate-to
                    (:seon.config.error/escalate-to dials))
             run-id (assoc :seon.turn/id run-id)
-            agent-id (assoc :seon.agent/id agent-id))
+            agent-id (assoc :seon.agent/id agent-id)
+            ;; the declared references a producer names, never its world
+            true (merge (select-keys (:seon.error/references observation) reference-members)))
           ;; The fault family's own bound decides how much evidence the
           ;; durable fact keeps; a capped fact's whole evidence is staged by
           ;; `error/evidence-stage` and published below with its commit.
@@ -138,26 +164,29 @@
                      (nil? result) data
                      (db/database-value? (:db-after result)) :seon.flow/committed
                      :else result)
-                   (:seon.error.occurrence/ref data)]))
+                   (:seon.error.occurrence/ref data)
+                   (when (db/database-value? (:db-after result))
+                     (delivered-to result (:seon.error/signature prepared-fact)))]))
               home (cluster.branch/cluster-branch cluster-name)
               ;; no copy when this process runs no such cluster (a fixture's name)
               copy? (and (not= home origin) (or (= home here) (some? (db/branch-connection db home))))
-              [[outcome occurrence] :as outcomes] (mapv commit-on (cond-> [origin] copy? (conj home)))]
+              [[outcome occurrence recipients] :as outcomes] (mapv commit-on (cond-> [origin] copy? (conj home)))]
           [fact (or (some #(when (not= :seon.flow/committed %) %) (map first outcomes)) outcome)
-           occurrence])
+           occurrence recipients])
         (catch Throwable failure
-          [fact failure (:seon.error.occurrence/ref recording)])))
+          [fact failure (:seon.error.occurrence/ref recording) nil])))
     (catch Throwable failure
       ;; `error/commit-tx` is total. This last-resort shape is only for a
       ;; failure before its fact exists, so no content signature is available
       ;; for Flow to collapse honestly.
       (let [fault (:seon.error/source observation)
             cause (if (instance? Throwable fault) fault (::flow.core/ex fault))
+            ;; never a printed copy of the fault: its value stays in the tuple's cause
             message (or (:seon.error/message fault)
                         (when (instance? Throwable cause)
                           (str (.getName (class cause)) ": " (ex-message cause)))
-                        (str fault))]
-        [{:seon.error/message message} failure nil]))))
+                        "A core fault failed before its fact existed.")]
+        [{:seon.error/message message} failure nil nil]))))
 
 
 (defn policy
@@ -184,9 +213,13 @@
   was recorded by this propagation: it is rethrown, never recounted.
 
   The wake is the writer's decision (`seon.error/commit-call`): the
-  namespace steward, else the configured `:seon.config.error/escalate-to`
-  (root by default). The dial is read after the write, from the cluster's
-  current configuration; no write is retried."
+  namespace steward, else the configured `:seon.config.error/escalate-to`.
+  The receipt names, as `:seon.fault/delivered-to`, the recipients of the
+  notifications the writer selected for the fault's current opening, read from
+  the transaction's own report. The dial is read once, BEFORE the write: under
+  `:panic` (or an unreadable dial) the execution owner's declared
+  `:seon.fault/stop-request!` runs first, so a stalled or failing recording
+  cannot stand between the panic and the stop. No write is retried."
   {:malli/schema [:=> [:cat :seon.env/environment [:or :seon.error/throwable :seon.error/base]
                        :seon.fault/context]
                   :seon.fault/recorded]}
@@ -200,27 +233,34 @@
                  (config/result-caps (config/effective (db/db connection) cluster-name)))
         agent-id (:seon.agent/id context)
         throwable? (instance? Throwable failure)
-        [fact outcome occurrence]
+        [mode read-failure]
+        (try [(:seon.config/on-core-error (config/effective (db/db connection) cluster-name))]
+             (catch Throwable read-failure [nil read-failure]))
+        ;; the owner's stop request never prevents the recording it precedes
+        request-stop! #(when-let [stop-request! (:seon.fault/stop-request! context)]
+                         (try (stop-request!) nil (catch Throwable stop-failure stop-failure)))
+        early-stop-failure (when (not= :record mode) (request-stop!))
+        [fact outcome occurrence recipients]
         (record! connection cluster-name (:seon.db.process/id context) caps
                  {:seon.error/source
                   (cond-> (if throwable? {::flow.core/ex failure} failure)
                     agent-id (assoc :seon.agent/id agent-id))
+                  :seon.error/references (select-keys context reference-members)
                   :seon.error/declared-schema
                   (or (:seon.error/declared-schema context)
                       (when throwable? (:seon.error/declared-schema (meta (ex-data failure))))
                       :seon.flow/exception-error)})
         committed? (= :seon.flow/committed outcome)
-        [mode read-failure]
-        (when committed?
-          (try [(:seon.config/on-core-error (config/effective (db/db connection) cluster-name))]
-               (catch Throwable read-failure [nil read-failure])))
+        stop-failure (or early-stop-failure
+                         (when (and (= :record mode) (not committed?)) (request-stop!)))
         receipt (cond-> {:seon.boot/cluster-name cluster-name
                          :seon.error/layer (:seon.error/layer context)
                          :seon.error/operation (:seon.error/operation context)
                          :seon.fault/committed? committed?
                          :seon.fault/policy (policy mode committed?)}
                   (:seon.error/signature fact) (assoc :seon.error/signature (:seon.error/signature fact))
-                  occurrence (assoc :seon.error.occurrence/id (second occurrence)))]
+                  occurrence (assoc :seon.error.occurrence/id (second occurrence))
+                  recipients (assoc :seon.fault/delivered-to recipients))]
     (if (= :record (:seon.fault/policy receipt))
       receipt
       (let [panic (ex-info (str "SEON CORE FAULT (panic): "
@@ -229,6 +269,6 @@
                              (not throwable?) (assoc :seon.error/base failure)
                              (map? outcome) (assoc :seon.fault/outcome outcome))
                            (when throwable? failure))]
-        (doseq [suppressed [outcome read-failure] :when (instance? Throwable suppressed)]
+        (doseq [suppressed [outcome read-failure stop-failure] :when (instance? Throwable suppressed)]
           (.addSuppressed panic suppressed))
         (throw panic)))))

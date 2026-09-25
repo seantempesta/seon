@@ -1336,13 +1336,23 @@
       (map? recorded) recorded
       (nil? recorded) 0)))
 
+(defn- notification-id
+  "The one message identity for `recipient` in a signature's `opening`: the
+  first opening (0) is `[signature recipient]`, a later one appends its token."
+  {:malli/schema [:=> [:cat :seon.error/signature :seon.agent/id
+                       [:or [:int {:min 0}] :seon.program/definition-digest]]
+                  :seon.message/id]}
+  [error-signature recipient opening-token]
+  (id/id (cond-> [error-signature recipient] (not= 0 opening-token) (conj opening-token))))
+
 (defn- message-tx
   {:malli/schema [:=> [:cat :seon.error/fact :seon.agent/id :seon.agent/id :seon.error/reason :map
                        [:or [:int {:min 0}] :seon.program/definition-digest]]
                   :map]}
   [fact sender recipient reason notification opening]
   ;; one message per opening: a re-opened signature is a new message, so it wakes again
-  {:seon.message/id (id/id (cond-> [(:seon.error/signature fact) recipient] (not= 0 opening) (conj opening)))
+  {:db/id (str "seon.error/notified-" recipient)
+   :seon.message/id (notification-id (:seon.error/signature fact) recipient opening)
    :seon.message/to [:seon.agent/id recipient]
    :seon.message/from [:seon.agent/id sender]
    :seon.message/content (ai-prose (notice (merge {:seon.error/fact fact
@@ -1365,6 +1375,11 @@
         occurrence-id (:seon.error.occurrence/id request)
         occurrence-ref [:seon.error.occurrence/id occurrence-id]
         old (db/pull database '[*] occurrence-ref)
+        ;; the messages the writer selected for the signature's current opening
+        notified (db/q '[:find [?message ...] :in $ ?signature
+                         :where [?error :seon.error/signature ?signature]
+                                [?error :seon.error/notified ?message]]
+                       database signature)
         agent-id (second (:seon.error/agent fact))
         turn-id (second (:seon.error/run fact))
         escalate-to (:seon.config.error/escalate-to request)
@@ -1381,6 +1396,7 @@
                                         (qualified-symbol? (:seon.error/operation observation)))
                                observation))
                            [(when-not (:seon.error.occurrence/id old) old)
+                            (when (map? notified) notified)
                             agent-present turn-present escalation-present
                             steward-id steward-present opened])]
     (if read-refusal
@@ -1447,7 +1463,14 @@
                      agent-id (assoc :seon.error.occurrence/agent [:seon.agent/id agent-id])
                      turn-id (assoc :seon.error.occurrence/turn [:seon.turn/id turn-id])
                      digest (assoc :seon.error.occurrence/data-blob
-                                   [:seon.error.occurrence/blob-digest digest]))
+                                   [:seon.error.occurrence/blob-digest digest])
+                     ;; the world by reference: the failing request's effect and
+                     ;; the occurrence this one follows
+                     (:seon.effect/id request)
+                     (assoc :seon.error.occurrence/effect [:seon.effect/id (:seon.effect/id request)])
+                     (:seon.error/related-occurrence request)
+                     (assoc :seon.error.occurrence/related
+                            [:seon.error.occurrence/id (:seon.error/related-occurrence request)]))
         error-row (assoc (select-keys fact [:seon.error/signature :seon.error/id :seon.error/declared-schema
                                           :seon.error/layer :seon.error/operation :seon.instrument/fn :seon.error/frame
                                           :seon.error/exception-class])
@@ -1465,18 +1488,27 @@
                        ;; a throwable is its agent's mistake, already returned to
                        ;; that agent in its turn.
                        (and escalation-present (nil? agent-id)) {escalate-to :no-attributable-agent}
-                       :else {}))]
-    (into (cond-> (into [{:seon.db.process/id process}] replacements)
-            digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
-            (and (nil? digest) (:seon.error.occurrence/data-blob old))
-            (conj [:db/retract occurrence-ref :seon.error.occurrence/data-blob
-                   (:db/id (:seon.error.occurrence/data-blob old))])
-            true (conj error-row))
-          (keep (fn [[recipient reason]]
-                  (message-tx fact (or agent-id
-                                      (when escalation-present escalate-to)
-                                      steward-id) recipient reason notification opened)))
-          recipients)))))
+                       :else {}))
+        messages (mapv (fn [[recipient reason]]
+                         (message-tx fact (or agent-id
+                                             (when escalation-present escalate-to)
+                                             steward-id) recipient reason notification opened))
+                       recipients)]
+    (if (and (:seon.error/obligation request) (:seon.error.occurrence/id old))
+      ;; ONE OBLIGATION, ONE DISPOSITION: this occurrence already answers it
+      [{:seon.db.process/id process}]
+      (into (cond-> (into [{:seon.db.process/id process}] replacements)
+              digest (conj {:seon.error.occurrence/blob-digest digest :seon.error/data-blob digest})
+              (and (nil? digest) (:seon.error.occurrence/data-blob old))
+              (conj [:db/retract occurrence-ref :seon.error.occurrence/data-blob
+                     (:db/id (:seon.error.occurrence/data-blob old))])
+              ;; a new opening replaces the selection; a recurrence keeps it
+              (some? opened) (into (map #(vector :db/retract [:seon.error/signature signature]
+                                                  :seon.error/notified %))
+                                   notified)
+              true (conj (cond-> error-row
+                           (seq messages) (assoc :seon.error/notified (set (map :db/id messages))))))
+            messages))))))
 
 (defn evidence-stage
   "One prepared fact with its WHOLE evidence staged when the fact kept less.
@@ -1560,14 +1592,18 @@
          agent-id (second (:seon.error/agent fact))
          turn-id (second (:seon.error/run fact))
          origin (:seon.error.occurrence/branch request)
+         obligation (:seon.error/obligation request)
          occurrence-id (id/id (into (sorted-map)
                                    (cond-> {:seon.error/signature signature}
                                      ;; a copy from another branch never merges with this branch's own
                                      (and origin (not= origin (get-in database [:config :branch])))
                                      (assoc :seon.store/branch origin)
                                      agent-id (assoc :seon.agent/id agent-id)
-                                     turn-id (assoc :seon.turn/id turn-id)
-                                     (nil? turn-id) (assoc :seon.db.process/id (:seon.error/process fact)))))
+                                     ;; an obligation is one identity across turns and processes
+                                     obligation (assoc :seon.error/obligation obligation)
+                                     (and turn-id (not obligation)) (assoc :seon.turn/id turn-id)
+                                     (and (nil? turn-id) (not obligation))
+                                     (assoc :seon.db.process/id (:seon.error/process fact)))))
          rows [{:db/id (fact-tempid (:seon.error/id request))
                 :seon.error/id signature :seon.error/signature signature
                 :seon.error/declared-schema (:seon.error/declared-schema fact)

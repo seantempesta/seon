@@ -3,7 +3,16 @@
               {:description "What `seon.fault/record!` observed: the recorded fact (or the pre-fact message), the write outcome, and the occurrence lookup ref."}
               :map
               [:or [:= :seon.flow/committed] :map :seon.error/throwable]
-              [:or :nil [:tuple [:= :seon.error.occurrence/id] :seon.error.occurrence/id]]],
+              [:or :nil [:tuple [:= :seon.error.occurrence/id] :seon.error.occurrence/id]]
+              [:or :nil :seon.fault/delivered-to]],
+             :delivered-to
+             [:set {:description "The recipients of the notifications the writer selected for the fault's current opening, read from the transaction's own report; an empty set is committed but undeliverable."}
+              :seon.agent/id],
+             :stop-request!
+             [:fn {:description "The execution owner's stop request, called before recording under :panic and after a failed recording under :record."
+                   :error/message "must be a function of no arguments"
+                   :gen/schema [:=> [:cat] :nil]}
+              clojure.core/ifn?],
              :policy [:enum :record :panic],
              :committed? :boolean,
              :outcome :map,
@@ -14,7 +23,11 @@
               [:seon.error/operation :seon.error/operation]
               [:seon.db.process/id :seon.db.process/id]
               [:seon.agent/id {:optional true} :seon.agent/id]
-              [:seon.error/declared-schema {:optional true} :seon.error/declared-schema]],
+              [:seon.error/declared-schema {:optional true} :seon.error/declared-schema]
+              [:seon.fault/stop-request! {:optional true} :seon.fault/stop-request!]
+              [:seon.effect/id {:optional true} :seon.effect/id]
+              [:seon.error/related-occurrence {:optional true} :seon.error/related-occurrence]
+              [:seon.error/obligation {:optional true} :seon.error/obligation]],
              :recorded
              [:map
               {:description "The receipt of one core fault recorded once per propagation; a panic carries it in its ex-data."}
@@ -24,4 +37,5 @@
               [:seon.fault/committed? :seon.fault/committed?]
               [:seon.fault/policy :seon.fault/policy]
               [:seon.error/signature {:optional true} :seon.error/signature]
-              [:seon.error.occurrence/id {:optional true} :seon.error.occurrence/id]]}
+              [:seon.error.occurrence/id {:optional true} :seon.error.occurrence/id]
+              [:seon.fault/delivered-to {:optional true} :seon.fault/delivered-to]]}

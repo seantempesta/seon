@@ -55,6 +55,14 @@
               [:seon.agent/id {:optional true} :seon.agent/id]],
              :capped? :boolean,
              :occurrences [:set {:seon.db/component true :seon.db/component-schema :seon.error.occurrence/occurrence} :seon.db/ref],
+             :notified [:set {:description "The notification messages the writer selected for the signature's current opening; a new opening replaces them, a recurrence keeps them."} :seon.db/ref],
+             :obligation [:and {:description "The unanswered wake a fault answers for: one occurrence identity across turns, re-arms and processes."} :seon.message/id],
+             :related-occurrence [:and {:description "The occurrence a later failure of the same execution follows, by reference."} :seon.error.occurrence/id],
+             :references
+             [:map {:description "The declared references a producer names on a core fault; never its world."}
+              [:seon.effect/id {:optional true} :seon.effect/id]
+              [:seon.error/related-occurrence {:optional true} :seon.error/related-occurrence]
+              [:seon.error/obligation {:optional true} :seon.error/obligation]],
              :occurrence-count [:int {:min 1}],
              :reason
              [:enum
@@ -84,7 +92,8 @@
              :recording-observation
              [:map
               [:seon.error/source :seon.error/source]
-              [:seon.error/declared-schema :seon.error/declared-schema]],
+              [:seon.error/declared-schema :seon.error/declared-schema]
+              [:seon.error/references {:optional true} :seon.error/references]],
              :normalize-request
              [:map
               [:seon.schema/projection :seon.schema/projection]
@@ -192,7 +201,10 @@
               [:seon.config.error/max-evidence-bytes
                :seon.config.error/max-evidence-bytes]
               [:seon.error/fact {:optional true} :seon.error/fact]
-              [:seon.error.occurrence/branch {:optional true} :seon.error.occurrence/branch]],
+              [:seon.error.occurrence/branch {:optional true} :seon.error.occurrence/branch]
+              [:seon.effect/id {:optional true} :seon.effect/id]
+              [:seon.error/related-occurrence {:optional true} :seon.error/related-occurrence]
+              [:seon.error/obligation {:optional true} :seon.error/obligation]],
              :error
              [:map {:seon.db/attributes true
                     :seon.render/ai seon.error/render-ai
@@ -206,6 +218,7 @@
               [:seon.error/frame {:optional true} :seon.error/frame]
               [:seon.error/exception-class {:optional true} :seon.error/exception-class]
               [:seon.error/occurrences {:optional true} :seon.error/occurrences]
+              [:seon.error/notified {:optional true} :seon.error/notified]
               [:seon.error/regressions {:optional true} :seon.error/regressions]
               [:seon.error/issue {:optional true} :seon.error/issue]
               [:seon.error/resolved-tx {:optional true} :seon.error/resolved-tx]],

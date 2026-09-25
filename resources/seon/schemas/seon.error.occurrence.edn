@@ -9,6 +9,9 @@
  :proc-fn :seon.db/ref
  :data-blob :seon.db/ref
  :message :string
+ ; the world by reference (lost-error seams §0.4): the failing request's effect, the occurrence it follows
+ :effect :seon.db/ref
+ :related :seon.db/ref
  ; the branch where the error happened; a core fault's cluster-branch copy names its origin
  :branch :seon.store/branch
  :blob-digest [:and {:seon.db/identity true :seon.program/row-schema :seon.error.occurrence/blob} :seon.blob/digest]
@@ -28,6 +31,8 @@
   [:seon.error.occurrence/data-blob {:optional true} :seon.error.occurrence/data-blob]
   [:seon.error.occurrence/message :seon.error.occurrence/message]
   [:seon.error.occurrence/branch {:optional true} :seon.error.occurrence/branch]
+  [:seon.error.occurrence/effect {:optional true} :seon.error.occurrence/effect]
+  [:seon.error.occurrence/related {:optional true} :seon.error.occurrence/related]
   [:seon.error/process :seon.error/process]
   [:seon.instrument/fn {:optional true} :seon.instrument/fn]
   [:seon.error/proc {:optional true} :seon.error/proc]
