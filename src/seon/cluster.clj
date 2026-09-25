@@ -712,8 +712,8 @@
 (defn runtime-observation-ai
   "`:seon.render/ai` for one runtime observation: its health, counts and the
   newest entries of each unbounded family, each naming its total. It renders
-  less rather than clipping: a fault or failure is named by operation, never
-  by its message, whose size is unbounded. The whole value, messages
+  less rather than clipping: a fault is named by signature and operation, a
+  failure by operation, never by a message, whose size is unbounded. The whole value, messages
   included, is MCP `runtime_status`, or `bin/seon status --verbose`."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.dev.mcp/runtime-status]}
   [unit]
@@ -736,8 +736,9 @@
                                                    :seon.render.web/url]))
       (seq faults)
       (assoc :seon.dev.mcp/open-faults
-             (top faults #(select-keys % [:seon.error/operation :seon.problems/occurrences
-                                          :seon.error/exception-class :seon.error.occurrence/last-at])
+             (top faults #(select-keys % [:seon.error/signature :seon.error/operation
+                                          :seon.problems/occurrences :seon.error/exception-class
+                                          :seon.error.occurrence/last-at])
                   (:seon.dev.mcp/open-fault-count observation (count faults))))
       (map? flow)
       (assoc :seon.dev.mcp/flow {:seon.dev.mcp/agents (count (:seon.oversight/agents flow))

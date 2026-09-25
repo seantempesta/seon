@@ -162,6 +162,18 @@ the error schema's declared pair.
 keys differ; operation, member, message, data, layer and exception class are equal. Both are occurrence
 evidence, so the assertion now compares the refusal without them.
 
+## Final batch on adopted 6ab6fe30 (`tmp/orchestrator/verify-final.out.d/`), classified
+
+| Out | Red | Class | Evidence / action |
+|---|---|---|---|
+| 010 | boot-test `status-answers-faulted-health-and-lists-the-open-fault` | CAUSED | `:status` now answers the AI face, whose open faults are `{count top omitted}` and whose entries named no signature. Fixed: the face names each fault by `:seon.error/signature` (bounded id, the requery handle) and the test reads the face's `top`. |
+| 009 | mcp-test `runtime-observation-is-whole-and-its-ai-face-renders-less` (8 fails + the NPE error) | PRE-EXISTING cause | Every assertion follows from the fixture's faults being absent: `problems/problems` reports 1 error signature for 50 `fault!` calls with distinct operations (the signature includes the operation, `error.clj:138`), before the observation code runs. The predecessor test was red on the same fixture (`verify-checkpoint-results-2026-09-25.txt:256`). Route: fault recording / test fixture owner. |
+| 009 | `nested-bulk…`, `ordinary-mcp-results…`, `sci-top-level-strings…` | PRE-EXISTING | Red in `red-adopted-2026-09-25.txt` and `rerun-results-2026-09-25.txt`. |
+| 008 | mcp-bridge-test `a-new-branch-window-opens-at-its-fork-basis` (worker drift: `seon.dev.mcp/sci-evaluation-form` no longer instrumented) | PRE-EXISTING mechanism, exposed | The var exists; the test file `load-file`s the bridge once per JVM (`loaded-bridge`), which redefines its Vars over their armed wrappers. The `mcp.clj` change made the suite re-execute rather than reuse. Route: bridge test owner (load the bridge without redefining armed Vars). |
+| 012 | program-test `rows-have-one-canonical-persisted-shape`, `program-owned-values-validate-at-their-producer` | RETIRED ASSUMPTION, not this lane | REPL: the sample `:seon.ns/ns` row fails only for the required `:seon.program/definition-digest`; hand-built rows. Routed to impl-shape-mirror-malli. |
+| 012 | program-test `database-shape-render-declarations-resolve` | RETIRED ASSUMPTION, not this lane | `:seon.fn/fn` now declares `seon.render.ns/function-ai`/`function-html` (present before this lane); the test still expects the family bare. |
+| 013, 014 | turn-test (8 members), cluster.turn-test batched turn | PRE-EXISTING | Each is listed red in `red-adopted-2026-09-25.txt` / `red-6ab6920a.txt`. None asserts `:seon.turn/result`. |
+
 ## Round 5, R4: one status face, declared on the observation
 
 - `src/seon/cluster.clj`: `observation-top`, `bounded-face`, `bounded-summary` deleted (27), and their five call

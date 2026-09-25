@@ -519,8 +519,10 @@
            (is (= :faulted (:seon.dev.mcp/health observed)))
            (is (nat-int? (:seon.agent/count (boot/readiness (get @runtime/running-instances cluster-name))))
                "an agentless world counts 0 agents, never nil")
-           ;; the fixture branch also carries whatever open faults its parent had
+           ;; status prints the observation's AI face; the fixture's fault is the
+           ;; newest, so it is among the face's top entries, named by signature
            (is (some #{(:seon.error/signature receipt)}
-                     (map :seon.error/signature (:seon.dev.mcp/open-faults observed))))
+                     (map :seon.error/signature
+                          (get-in observed [:seon.dev.mcp/open-faults :seon.dev.mcp/top]))))
            (println "STATUS-FAULTED" elapsed-ms "ms"))
          (finally (swap! runtime/running-instances dissoc cluster-name)))))))
