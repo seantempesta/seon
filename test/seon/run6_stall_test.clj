@@ -1,6 +1,7 @@
 (ns seon.run6-stall-test
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is]]
+            [seon.agent]
             [seon.config :as config]
             [seon.db :as db]
             [seon.error :as error]
@@ -19,13 +20,15 @@
 (deftest an-open-session-provider-refusal-is-the-first-problem
   (support/with-database
    (fn [connection]
-     ;; The fixture's own cluster, so its agent reads this dial rather than
-     ;; the test world's shipped cluster row.
-     (support/seed-cluster! connection "run6-stall" {:seon.config.ai/no-provider true
-                                                     :seon.config.run/max-episode-runs 3})
+     ;; The fixture's own cluster. Its turn bound is the agent's own override:
+     ;; the world also carries boot's config row, and the cluster-default read
+     ;; does not select between config rows.
+     (support/seed-cluster! connection "run6-stall" {:seon.config.ai/no-provider true})
      (is (:db-after
           (transact! connection
                      (support/agent-tx @connection "run6-stall" 'my.agents.run6-stall))))
+     (is (= 3 (:seon.config.run/max-episode-runs
+               (seon.agent/settings! {:seon.config.run/max-episode-runs 3} connection "run6-stall"))))
      ;; The plan is the agent's own component; its identity names the owner.
      (is (:db-after
           (transact! connection

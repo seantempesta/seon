@@ -2,6 +2,7 @@
   "The live help situation and its declared agent render."
   (:require [clojure.test :refer [deftest is testing]]
             [seon.bootstrap :as bootstrap]
+            [seon.agent]
             [seon.cluster.agent :as agent]
             [seon.db :as db]
             [seon.env :as env]
@@ -10,14 +11,13 @@
 
 (defn- seed-situation!
   [connection]
-  ;; The fixture's own cluster and dial; the test world's cluster row carries
-  ;; boot's shipped configuration instead.
-  (support/seed-cluster! connection "situation" {:seon.config.run/max-episode-runs 2})
+  ;; The fixture's own cluster. Its turn bound is the agent's own override:
+  ;; the world also carries boot's config row, and the cluster-default read
+  ;; does not select between config rows.
+  (support/seed-cluster! connection "situation")
   (support/transacted!
           connection
-          (into [{:seon.ns/name 'my.turn}
-                 {:seon.ns/name 'my.message}
-                 (program/declaration-row
+          (into [(program/declaration-row
             (db/carried-projection @connection)
             {:seon.ns/name 'my.agents.situation :seon.ns/source "(ns my.agents.situation)"
              :seon.ns/requires #{'my.turn 'my.message}}
@@ -25,7 +25,9 @@
                 cat
                 [(support/agent-tx @connection "situation" 'my.agents.situation)
                  [{:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
-                  {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me"}]])))
+                  {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me"}]]))
+  (is (= 2 (:seon.config.run/max-episode-runs
+             (seon.agent/settings! {:seon.config.run/max-episode-runs 2} connection "situation")))))
 
 (deftest situation-is-the-live-derived-control-surface
   (support/with-database
