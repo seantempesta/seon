@@ -44,10 +44,10 @@
                    (schema/canonical-schema-rows)))
      (support/transacted!
              connection
-             [(support/namespace-row @connection 'fixture.history)
-              {:seon.agent/id "history-agent"
-               :seon.agent/namespace [:seon.ns/name 'fixture.history]}
-              {:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me."}])
+             (into [(support/namespace-row @connection 'fixture.history)]
+                   cat
+                   [(support/agent-tx @connection "history-agent" 'fixture.history)
+                    [{:seon.message/id "history-message" :seon.message/to [:seon.agent/id "history-agent"] :seon.message/content "Read me."}]]))
      (let [database @connection
            ctx (support/fork-cluster-ctx connection)
            selected
@@ -145,9 +145,9 @@
             (schema/canonical-schema-rows)))
      (support/transacted!
       connection
-      [(support/namespace-row @connection 'fixture.neighbour)
-       {:seon.agent/id "neighbour-agent"
-        :seon.agent/namespace [:seon.ns/name 'fixture.neighbour]}])
+      (into [(support/namespace-row @connection 'fixture.neighbour)]
+            cat
+            [(support/agent-tx @connection "neighbour-agent" 'fixture.neighbour)]))
      (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            agent-lookup [:seon.agent/id "neighbour-agent"]

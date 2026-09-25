@@ -215,7 +215,7 @@
           "the config population does not own agent schedule rows")
       (test-support/transacted!
                    connection
-                   (into [{:seon.agent/id "root"}]
+                   (into (test-support/agent-tx @connection "root")
                          (map (fn [row] (test-support/program-fn-row (:seon.fn/sym row))))
                          portfolio))
       (let [first-result

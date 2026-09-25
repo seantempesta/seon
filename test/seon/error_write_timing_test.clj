@@ -62,8 +62,7 @@
         connection
         [[:db.fn/call (fn [_ supplied]
                        (reset! received supplied)
-                       [{:seon.agent/id "error-write-request"}
-                        {:seon.issue/id "error-write-function-output"
+                       [{:seon.issue/id "error-write-function-output"
                          :seon.issue/title "Normalize returned storage data"
                          :seon.issue/problem "The request object stays unchanged."
                          :seon.issue/status :open :seon.issue/severity :cleanup

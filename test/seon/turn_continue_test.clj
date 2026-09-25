@@ -36,8 +36,7 @@
                           :seon.boot/cluster-name "loop-continue"
                           :seon.config/manifest {:seon.config.ai/no-provider true
                                                  :seon.config.agent/turn-completion-backstop-ms 5000}})
-           (support/transacted! connection [{:seon.agent/id "root"
-                                            :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+           (support/transacted! connection (support/agent-tx @connection "root" 'my.agents.root))
            (cluster/ensure-cluster-entity! connection "loop-continue" cluster/boot-process-identity)
            (let [ctx (support/fork-cluster-ctx connection)
                  environment (support/environment "loop-continue" connection)

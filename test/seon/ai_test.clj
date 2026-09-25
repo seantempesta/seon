@@ -23,6 +23,7 @@
             [seon.ai :as ai]
             [seon.config :as config]
             [seon.cluster.reply :as reply]
+            [seon.agent]
             [seon.cluster.agent :as agent]
             [seon.sci.eval :as sci.eval]
             [seon.turn :as turn]
@@ -602,11 +603,10 @@
 (deftest agent-overlay-reads-only-derived-per-agent-attributes
   (test-support/with-database
     (fn [connection]
-      (test-support/transacted! connection
-                              [{:seon.agent/id "planner"
-                                :seon.agent/settings
-                                {:seon.config.ai/model "planner-model"
-                                 :seon.config.ai/thinking :high}}])
+      (test-support/transacted! connection (test-support/agent-tx @connection "planner"))
+      (seon.agent/settings! {:seon.config.ai/model "planner-model"
+                             :seon.config.ai/thinking :high}
+                            connection "planner")
       (is (= {:seon.config.ai/model "planner-model"
               :seon.config.ai/thinking :high}
              (ai/agent-overlay @connection "planner")))

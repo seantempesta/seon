@@ -707,11 +707,10 @@
             terminal-data (private-loop-fn 'evaluation-terminal-data)]
         (test-support/transacted!
                      connection
-                     [(test-support/namespace-row @connection 'my.agents.undisposed-agent)
-                      {:seon.agent/id agent-id
-                       :seon.agent/namespace
-                       [:seon.ns/name 'my.agents.undisposed-agent]}
-                      {:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract"}])
+                     (into [(test-support/namespace-row @connection 'my.agents.undisposed-agent)]
+                           cat
+                           [(test-support/agent-tx @connection agent-id 'my.agents.undisposed-agent)
+                            [{:seon.message/id message-id :seon.message/to [:seon.agent/id agent-id] :seon.message/content "prove the contract"}]]))
         (test-support/transacted!
                      connection
                      (into [] cat

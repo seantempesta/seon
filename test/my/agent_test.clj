@@ -11,11 +11,10 @@
 (deftest settings-are-one-owned-component-with-a-derived-render-pair
   (support/with-database
    (fn [connection]
-     (support/transacted! connection
-                          [{:seon.agent/id "settings-owner"
-                            :seon.agent/settings
-                            {:seon.config.eval/time-limit-ms 1234
-                             :seon.config.agent/turn-completion-backstop-ms 5678}}])
+     (support/transacted! connection (support/agent-tx @connection "settings-owner"))
+     (agent/settings! {:seon.config.eval/time-limit-ms 1234
+                       :seon.config.agent/turn-completion-backstop-ms 5678}
+                      connection "settings-owner")
      (let [database @connection
            settings (agent/settings database "settings-owner")
            component (get-in (db/pull database

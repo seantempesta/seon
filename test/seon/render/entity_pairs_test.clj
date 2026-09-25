@@ -106,15 +106,15 @@
      (support/seed-cluster! connection "namespace-page")
      (support/transacted!
       connection
-      [(program/declaration-row
+      (into [(program/declaration-row
         (db/carried-projection @connection)
         {:seon.ns/name 'fixture.namespace-page
          :seon.ns/source
          "(ns fixture.namespace-page (:require [seon.id]))\n\n(def own-marker true)"
          :seon.ns/requires ['seon.id]}
-        :all :agent)
-       {:seon.agent/id "namespace-page-agent"
-        :seon.agent/namespace [:seon.ns/name 'fixture.namespace-page]}])
+        :all :agent)]
+            cat
+            [(support/agent-tx @connection "namespace-page-agent" 'fixture.namespace-page)]))
      (let [database (db/db connection)
            request {:seon.db/db database
                     :seon.db/connection connection

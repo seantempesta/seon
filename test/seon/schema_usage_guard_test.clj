@@ -342,10 +342,9 @@
             request {:seon.turn/id run-id}]
         (install-forms! connection {base-key (get forms base-key)
                                     unrelated-key [:int {:seon.db/index true}]})
-        (test-support/transacted! connection [(test-support/namespace-row @connection namespace-name)
-                                              {:seon.agent/id agent-id
-                                               :seon.agent/namespace
-                                               [:seon.ns/name namespace-name]}])
+        (test-support/transacted! connection (into [(test-support/namespace-row @connection namespace-name)]
+                                                   cat
+                                                   [(test-support/agent-tx @connection agent-id namespace-name)]))
         (test-support/transacted! connection [{base-key 7}])
         (test-support/transacted!
                      connection

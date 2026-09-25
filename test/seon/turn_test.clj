@@ -27,8 +27,7 @@
             [seon.error :as error]
             [seon.fn :as seon.fn]
             [seon.schema]
-            [seon.program :as program]
-            [seon.cluster.registry :as registry]))
+            [seon.program :as program]))
 
 (defn- namespace-row
   "A namespace row absent from the fixture branch, carrying the required
@@ -258,13 +257,13 @@
    (fn [connection]
      (checked-transact!
       connection
-      [{:seon.agent/id "busy" :seon.agent/branch (registry/cluster-branch "turn-test")}
-       {:seon.turn/id "open" :seon.turn/agent [:seon.agent/id "busy"] :seon.turn/opened-tx "datomic.tx"}
-       {:seon.cluster.eval/id "unfinished"
+      (into (support/agent-tx @connection "busy")
+            [{:seon.turn/id "open" :seon.turn/agent [:seon.agent/id "busy"] :seon.turn/opened-tx "datomic.tx"}
+             {:seon.cluster.eval/id "unfinished"
         :seon.cluster.eval/at (java.util.Date.)
         :seon.cluster.eval/run [:seon.turn/id "open"]
         :seon.cluster.eval/ordinal 0
-        :seon.cluster.eval/source "(+ 1 1)"}])
+        :seon.cluster.eval/source "(+ 1 1)"}]))
      (let [before (db/basis-t @connection)
            result (turn/compact! {:seon.db/connection connection
                                   :seon.agent/id "busy"})]
@@ -278,11 +277,11 @@
      (fn [connection]
        (checked-transact!
         connection
-        [{:seon.agent/id "decider" :seon.agent/branch (registry/cluster-branch "turn-test")}
-         {:seon.turn/id "still-open" :seon.turn/agent [:seon.agent/id "decider"]
+        (into (support/agent-tx @connection "decider")
+              [{:seon.turn/id "still-open" :seon.turn/agent [:seon.agent/id "decider"]
           :seon.turn/opened-tx "datomic.tx"}
-         {:seon.turn/id "already-closed" :seon.turn/agent [:seon.agent/id "decider"]
-          :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}])
+               {:seon.turn/id "already-closed" :seon.turn/agent [:seon.agent/id "decider"]
+          :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx"}]))
        (let [payload [[:db/add "probe" :seon.ns/name 'my.agents.decider]]
              call (fn [run-id]
                     (turn/open-run-tx-call (db/db connection) run-id payload))]
@@ -603,10 +602,7 @@
              (is (nil? (sci/resolve (agent-context "b") result-name)))
              (is (nil? (sci/resolve ctx result-name))))
            (checked-transact! connection
-                         [{:seon.agent/id "c"
-                           :seon.agent/branch (registry/cluster-branch "turn-test")
-                           :seon.agent/namespace
-                           (namespace-row 'my.agents.c)}])
+                         (support/agent-tx @connection "c" 'my.agents.c))
            (agent/arm! {:seon.turn.loop/cluster handle
                         :seon.agent/routing routing
                         :seon.agent/id "c"})
@@ -856,10 +852,10 @@
    (fn [connection]
      (let [now (java.util.Date.)]
        (support/transacted! connection
-                            [(namespace-row 'fixture.batch)
-                             {:seon.agent/id "batch"
-                              :seon.agent/branch (registry/cluster-branch "turn-test")}
-                             {:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}])
+                            (into [(namespace-row 'fixture.batch)]
+                                  cat
+                                  [(support/agent-tx @connection "batch")
+                                   [{:seon.turn/id "batch" :seon.turn/agent [:seon.agent/id "batch"] :seon.turn/opened-tx "datomic.tx"}]]))
        (doseq [ordinal (range 2)]
          (support/transacted! connection
                               (turn/receipt-start-tx
@@ -1028,11 +1024,9 @@
     (fn [connection]
       (support/transacted!
               connection
-              [(namespace-row 'my.agents.generated)
-               {:seon.agent/id "generated-agent"
-                :seon.agent/branch (registry/cluster-branch "turn-test")
-                :seon.agent/namespace
-                [:seon.ns/name 'my.agents.generated]}])
+              (into [(namespace-row 'my.agents.generated)]
+                    cat
+                    [(support/agent-tx @connection "generated-agent" 'my.agents.generated)]))
       (is (= ::committed
              (transact-or-refusal
               connection
@@ -1119,11 +1113,9 @@
     (fn [connection]
       (support/transacted!
               connection
-              [(namespace-row 'replay.start)
-               {:seon.agent/id "replay-agent"
-                :seon.agent/branch (registry/cluster-branch "turn-test")
-                :seon.agent/namespace
-                [:seon.ns/name 'replay.start]}])
+              (into [(namespace-row 'replay.start)]
+                    cat
+                    [(support/agent-tx @connection "replay-agent" 'replay.start)]))
       (support/transacted!
                 connection
                 (turn/system-run-tx
@@ -1191,12 +1183,10 @@
     (fn [connection]
       (support/transacted!
               connection
-              [(namespace-row 'my.agents.before)
-               (namespace-row 'my.agents.after)
-               {:seon.agent/id "moving-agent"
-                :seon.agent/branch (registry/cluster-branch "turn-test")
-                :seon.agent/namespace
-                [:seon.ns/name 'my.agents.before]}])
+              (into [(namespace-row 'my.agents.before)
+                     (namespace-row 'my.agents.after)]
+                    cat
+                    [(support/agent-tx @connection "moving-agent" 'my.agents.before)]))
       (let [before @connection
             outcome
             (db/transact!
@@ -1229,10 +1219,9 @@
     (fn [connection]
       (support/transacted!
               connection
-              [(namespace-row 'my.macro-caller)
-               {:seon.agent/id "macro-caller"
-                :seon.agent/branch (registry/cluster-branch "turn-test")
-                :seon.agent/namespace [:seon.ns/name 'my.macro-caller]}])
+              (into [(namespace-row 'my.macro-caller)]
+                    cat
+                    [(support/agent-tx @connection "macro-caller" 'my.macro-caller)]))
       (support/transacted!
               connection
               (turn/system-run-tx
@@ -1349,7 +1338,7 @@
     (when (and start-tx settle-tx)
       (with-model-database
         (fn [connection]
-          (support/transacted! connection [{:seon.agent/id "receipt-agent" :seon.agent/branch (registry/cluster-branch "turn-test")}])
+          (support/transacted! connection (support/agent-tx @connection "receipt-agent"))
           (support/transacted! connection
                              (turn/open-tx {::turn/id "receipts" ::turn/agent [:seon.agent/id "receipt-agent"] :seon.turn/opened-tx "datomic.tx"}))
 
@@ -1906,7 +1895,7 @@
 (deftest recovery-closes-a-turn-with-no-evaluations
   (with-model-database
     (fn [connection]
-      (support/transacted! connection [{:seon.agent/id "cut" :seon.agent/branch (registry/cluster-branch "turn-test")}])
+      (support/transacted! connection (support/agent-tx @connection "cut"))
       (support/transacted! connection
                            (turn/open-tx {::turn/id "cut-run" ::turn/agent [:seon.agent/id "cut"] :seon.turn/opened-tx "datomic.tx"}))
       (is (= ::committed
@@ -1929,9 +1918,9 @@
   (support/with-database
     (fn [connection]
       (checked-transact! connection
-                         [{:seon.agent/id "juno" :seon.agent/branch (registry/cluster-branch "turn-test")}
-                          {:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "juno"]
-                           :seon.turn/opened-tx "datomic.tx"}])
+                         (into (support/agent-tx @connection "juno")
+                               [{:seon.turn/id "run-1" :seon.turn/agent [:seon.agent/id "juno"]
+                           :seon.turn/opened-tx "datomic.tx"}]))
       (doseq [[kind message millis turn-id] [[:seon.instrument/contract-violated "older fault" 1700000000000 "run-1"]
                                             [:seon.db/rejected "newer fault" 1700000060000 nil]]]
         (checked-transact!
@@ -1977,7 +1966,7 @@
             bound 2
             fault-channel (async/chan 8)
             completion (async/chan 1)]
-        (checked-transact! connection [{:seon.agent/id agent-id}])
+        (checked-transact! connection (support/agent-tx @connection agent-id))
         (async/>!! completion :seon.agent/ready)
         ;; The dial rides the handle exactly as the turn completion allowance
         ;; does: a fixture pins its own bound, and the caller wins.

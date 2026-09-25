@@ -431,16 +431,15 @@
         (test-support/seed-cluster! connection "call-edges")
         (transact-fixture!
          connection
-         [(program/declaration-row
+         (into [(program/declaration-row
            (db/carried-projection @connection)
            {:seon.ns/name namespace-name
             :seon.ns/source "(ns my.agents.call-edges)"
             :seon.ns/requires #{(quote my.turn)}}
-           :all :agent)
-          {:seon.agent/id "call-edges-direct"
-           :seon.agent/namespace [:seon.ns/name namespace-name]}
-          {:seon.agent/id "call-edges-fold"
-           :seon.agent/namespace [:seon.ns/name namespace-name]}])
+           :all :agent)]
+               cat
+               [(test-support/agent-tx @connection "call-edges-direct" namespace-name)
+                (test-support/agent-tx @connection "call-edges-fold" namespace-name)]))
         (let [ctx (test-support/fork-cluster-ctx connection)
               cluster (test-support/cluster-handle
                        {:seon.db/connection connection
@@ -528,11 +527,10 @@
                        ;; The indexed row carries its file ref, so the emitted file rows
                        ;; are admitted first exactly as publication admits them.
                        (into (filterv :seon.fn.file/relative-path rows)
-                        [(test-support/namespace-row @connection namespace-name)
-                        (test-support/program-fn-row (db/db connection) (quote sample.settlement-parity/helper) "(defn helper [value] value)")
-                        {:seon.agent/id "settlement-parity-agent"
-                         :seon.agent/namespace
-                         [:seon.ns/name namespace-name]}]))
+                             cat
+                             [[(test-support/namespace-row @connection namespace-name)
+                               (test-support/program-fn-row (db/db connection) (quote sample.settlement-parity/helper) "(defn helper [value] value)")]
+                              (test-support/agent-tx @connection "settlement-parity-agent" namespace-name)]))
           (test-support/transacted!
                        connection
                        (turn/open-tx

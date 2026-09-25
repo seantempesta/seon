@@ -41,8 +41,10 @@
                     :seon.config/manifest {:seon.config.ai/no-provider true}})
      (cluster/ensure-cluster-entity! connection "debug-turns" cluster/boot-process-identity)
      (support/transacted! connection
-                          [{:seon.agent/id "root" :seon.agent/namespace {:seon.ns/name 'my.agents.root}}
-                           {:seon.agent/id "juniper" :seon.agent/namespace (support/namespace-row @connection 'my.agents.juniper)}])
+                          (into []
+                                cat
+                                [(support/agent-tx @connection "root" 'my.agents.root)
+                                 (support/agent-tx @connection "juniper" 'my.agents.juniper)]))
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "debug-turns" connection)
            routing (support/attempt-routing connection)]
@@ -350,16 +352,19 @@
 (deftest saved-history-preserves-shown-text-with-numeric-lookups
   (support/with-database
    (fn [connection]
-     (let [written
+     (let [_ (support/transacted!
+              connection
+              (into [(support/namespace-row @connection 'my.agents.history-probe)]
+                    (support/agent-tx @connection "history-probe" 'my.agents.history-probe)))
+           ;; The runtime and plan are the agent's own components; their
+           ;; identities name the owner.
+           written
            (db/transact!
             connection
-            [(support/namespace-row @connection 'my.agents.history-probe)
-             {:db/id "history-agent" :seon.agent/id "history-probe"
-              :seon.agent/namespace [:seon.ns/name 'my.agents.history-probe]
-              :seon.agent/runtime {:seon.runtime/agent "history-agent"
-                                   :seon.runtime/turns ["history-turn"]}
-              :seon.agent/plan {:my.plan/agent "history-agent"
-                                :my.plan/objective "An addressable component"}}
+            [{:seon.runtime/agent [:seon.agent/id "history-probe"]
+              :seon.runtime/turns ["history-turn"]}
+             {:my.plan/agent [:seon.agent/id "history-probe"]
+              :my.plan/objective "An addressable component"}
              {:db/id "history-turn" :seon.turn/id "history-probe-turn" :seon.turn/agent [:seon.agent/id "history-probe"] :seon.turn/opened-tx "datomic.tx"}
              {:seon.cluster.eval/id "history-probe-evaluation"
               :seon.cluster.eval/at (java.util.Date.)
@@ -421,10 +426,11 @@
      (let [written
            (support/transacted!
             connection
-            [(support/namespace-row @connection 'my.agents.thinking-probe)
-             {:db/id "thinking-agent" :seon.agent/id "thinking-probe"
-              :seon.agent/namespace [:seon.ns/name 'my.agents.thinking-probe]}
-             {:db/id "thinking-turn" :seon.turn/id "thinking-probe-turn"
+            (into
+             [(support/namespace-row @connection 'my.agents.thinking-probe)]
+             cat
+             [(support/agent-tx @connection "thinking-probe" 'my.agents.thinking-probe)
+              [{:db/id "thinking-turn" :seon.turn/id "thinking-probe-turn"
               :seon.turn/agent [:seon.agent/id "thinking-probe"]
               :seon.turn/opened-tx "datomic.tx"}
              {:seon.cluster.eval/id "thinking-probe-evaluation"
@@ -434,7 +440,7 @@
               :seon.cluster.eval/ns [:seon.ns/name 'my.agents.thinking-probe]
               :seon.cluster.eval/comment ";; I should read the plan first."
               :seon.cluster.eval/source "(my.plan/plan {})"
-              :seon.eval/shown "The plan's shown text."}])
+              :seon.eval/shown "The plan's shown text."}]]))
            _ (is (:db-after written) (pr-str written))
            database @connection
            lookup [:seon.cluster.eval/id "thinking-probe-evaluation"]
@@ -881,9 +887,9 @@
   (let [agent-written
         (support/transacted!
          connection
-         [(support/namespace-row @connection 'my.agents.outline-probe)
-          {:seon.agent/id "outline-probe"
-           :seon.agent/namespace [:seon.ns/name 'my.agents.outline-probe]}])
+         (into [(support/namespace-row @connection 'my.agents.outline-probe)]
+               cat
+               [(support/agent-tx @connection "outline-probe" 'my.agents.outline-probe)]))
         opening
         (support/transacted!
          connection

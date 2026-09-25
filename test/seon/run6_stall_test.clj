@@ -24,12 +24,15 @@
                                            :seon.config.run/max-episode-runs 3}})
      (is (:db-after
           (transact! connection
-                        [{:seon.agent/id "run6-stall"
-                          :seon.agent/namespace (support/namespace-row @connection 'my.agents.run6-stall)
-                          :seon.agent/plan {:my.plan/objective "Finish the work"
-                                            :my.plan/steps [{:my.plan.item/id "run6-step"
-                                                             :my.plan.item/title "Read"
-                                                             :my.plan.item/position 0}]}}])))
+                     (support/agent-tx @connection "run6-stall" 'my.agents.run6-stall))))
+     ;; The plan is the agent's own component; its identity names the owner.
+     (is (:db-after
+          (transact! connection
+                     [{:my.plan/agent [:seon.agent/id "run6-stall"]
+                       :my.plan/objective "Finish the work"
+                       :my.plan/steps [{:my.plan.item/id "run6-step"
+                                        :my.plan.item/title "Read"
+                                        :my.plan.item/position 0}]}])))
      (is (:db-after
           (transact! connection
                         (conj (turn/open-tx {:seon.turn/id "run6-refusal"

@@ -12,17 +12,17 @@
   [connection]
   (support/transacted!
           connection
-          [{:seon.ns/name 'my.turn}
-           {:seon.ns/name 'my.message}
-           (program/declaration-row
+          (into [{:seon.ns/name 'my.turn}
+                 {:seon.ns/name 'my.message}
+                 (program/declaration-row
             (db/carried-projection @connection)
             {:seon.ns/name 'my.agents.situation :seon.ns/source "(ns my.agents.situation)"
              :seon.ns/requires #{'my.turn 'my.message}}
-            :all :agent)
-           {:seon.agent/id "situation"
-            :seon.agent/namespace [:seon.ns/name 'my.agents.situation]}
-           {:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
-           {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me"}]))
+            :all :agent)]
+                cat
+                [(support/agent-tx @connection "situation" 'my.agents.situation)
+                 [{:seon.turn/id "situation-run" :seon.turn/agent [:seon.agent/id "situation"] :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name 'my.agents.situation]}
+                  {:seon.message/id "unread" :seon.message/to [:seon.agent/id "situation"] :seon.message/content "Read me"}]])))
 
 (deftest situation-is-the-live-derived-control-surface
   (support/with-database

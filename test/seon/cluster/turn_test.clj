@@ -20,7 +20,6 @@
             [seon.render.web :as web]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.cluster.registry :as registry]
             [seon.turn :as turn]
             [seon.error :as error]
             [seon.cluster.message :as message]
@@ -92,7 +91,8 @@
   excluding system reads.
 
   The fixture branches a live cluster whose own agents keep their history, so
-  only turns of agents on the fixture cluster's branch (`agent-row`) count."
+  only turns of agents on the branch this database holds count: the branch
+  `seon.cluster.agent/creation-tx` recorded for the fixture's own agents."
   {:malli/schema [:=> [:cat :seon.db/database-value] [:vector :map]]}
   [database]
   (let [rows (db/q '[:find ?turn-t ?ordinal (pull ?evaluation [* {:seon.cluster.eval/ns [:seon.ns/name]}])
@@ -104,7 +104,7 @@
                      [?evaluation :seon.cluster.eval/author :agent]
                      [?turn :seon.turn/id _ ?turn-t]
                      [?evaluation :seon.cluster.eval/ordinal ?ordinal]]
-                   database (registry/cluster-branch "turn-test"))]
+                   database (get-in database [:config :branch]))]
     (when (or (:seon.db/invalid-read rows) (:seon.schema/expected-value rows))
       (throw (ex-info "The evaluation observation was refused." rows)))
     (mapv #(nth % 2) (sort-by #(subvec % 0 2) rows))))
@@ -126,15 +126,6 @@
   [namespace-name]
   (let [row {:seon.ns/name namespace-name}]
     (assoc row :seon.program/definition-digest (program/definition-digest row))))
-
-(defn- agent-row
-  "One agent on the fixture cluster's branch; prompt membership is derived by
-  the namespace walk. The branch is the required member production's
-  `seon.cluster.agent/creation-tx` supplies."
-  [agent-id]
-  {:seon.agent/id agent-id
-   :seon.agent/branch (registry/cluster-branch "turn-test")
-   :seon.agent/namespace (namespace-row (symbol (str "my.agents." agent-id)))})
 
 (defn- with-render-context-proc
   [_connection cluster-handle body]
@@ -234,11 +225,13 @@
           (throw (ex-info "Turn fixture cluster was refused." result))))
       (let [result
             (db/transact! connection
-                  [(namespace-row 'clojure.set)
-                   (namespace-row 'clojure.test)
-                   {:seon.ns/name 'seon.schema}
-                   (agent-row "agent-a")
-                   {:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}])]
+                  (into [(namespace-row 'clojure.set)
+                         (namespace-row 'clojure.test)
+                         {:seon.ns/name 'seon.schema}
+                         (namespace-row 'my.agents.agent-a)]
+                        cat
+                        [(test-support/agent-tx @connection "agent-a")
+                         [{:seon.message/id "m-1" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "count the widgets"}]]))]
         (when (or (:seon.config/error-key result) (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result))
           (throw (ex-info "Turn fixture seed was refused." result))))
       (with-render-context-proc
@@ -309,12 +302,16 @@
     :seon.turn.work/now (Date.)}))
 
 (defn- agent-ids
-  "Every agent in facts, oldest name first.
+  "Every agent on the branch this database holds, oldest name first.
+  Agents a member inherits from its parent live on the parent's branch and
+  are not the fixture's; a test that needs one seeds its own.
   Production gives each of them its OWN turn proc; this suite drives
   them in one thread, so the driver asks each agent's own derivation in
   turn rather than asking a global one that no longer exists."
   [db]
-  (sort (db/q '[:find [?id ...] :where [?e :seon.agent/id ?id]] db)))
+  (sort (db/q '[:find [?id ...] :in $ ?branch
+                :where [?e :seon.agent/id ?id] [?e :seon.agent/branch ?branch]]
+              db (get-in db [:config :branch]))))
 
 (defn- any-agent-work
   "The first agent with work, derived through the AGENT-SCOPED
@@ -697,14 +694,17 @@
                 installations (atom [])]
             (let [seed (db/transact!
              connection
-             [(agent-row "peer")
-              {:db/id [:seon.config/cluster "turn-test"]
+             (into
+              [(namespace-row 'my.agents.peer)]
+              cat
+              [(test-support/agent-tx @connection "peer")
+               [{:db/id [:seon.config/cluster "turn-test"]
                :seon.config.run/max-episode-runs cap}
               {:seon.ns/name 'seon.config}
               {:db/id [:seon.fn/sym "seon.config/defaults"]
                :seon.fn/ns [:seon.ns/name 'seon.config]
                :seon.fn/source "(defn defaults [] {})"
-               :seon.fn/spec "[:=> [:cat] :map]"}])]
+               :seon.fn/spec "[:=> [:cat] :map]"}]]))]
               (when (:seon.db.write.attempt/request-id seed)
                 (throw (ex-info "Terminal refusal fixture seed was refused." seed))))
             ;; This test plants a pre-existing program row directly rather
@@ -1235,11 +1235,10 @@
           (drive-agent! cluster "agent-a" 2)
           (test-support/transacted!
                        connection
-                       [(namespace-row 'my.agents.agent-b)
-                        (assoc (agent-row "agent-b")
-                               :seon.agent/namespace
-                               [:seon.ns/name 'my.agents.agent-b])
-                        {:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract"}])
+                       (into [(namespace-row 'my.agents.agent-b)]
+                             cat
+                             [(test-support/agent-tx @connection "agent-b")
+                              [{:seon.message/id "m-contract-agent-b" :seon.message/to [:seon.agent/id "agent-b"] :seon.message/content "violate the published contract"}]]))
           (drive-agent! cluster "agent-b" 2)
           (let [evaluations
                 (db/q '[:find [(pull ?evaluation
@@ -1489,13 +1488,14 @@
             unbound-source "(inc \"x\")"]
         (test-support/transacted!
                      connection
-                     [(namespace-row 'my.gen.planner)
-                      (namespace-row 'my.gen.alpha)
-                      {:seon.agent/id "agent-b"
-                       :seon.agent/namespace [:seon.ns/name 'my.gen.alpha]}
-                      {:seon.agent/id "agent-a"
-                       :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
-                      {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program."}])
+                     (into [(namespace-row 'my.gen.planner)
+                            (namespace-row 'my.gen.alpha)]
+                           cat
+                           [(test-support/agent-tx @connection "agent-b" 'my.gen.alpha)
+                            ;; agent-a is the cluster fixture's own agent: reassign it.
+                            [{:seon.agent/id "agent-a"
+                              :seon.agent/namespace [:seon.ns/name 'my.gen.planner]}
+                             {:seon.message/id "route-goal" :seon.message/to [:seon.agent/id "agent-a"] :seon.message/content "Generate the program."}]]))
         (test-support/transacted!
                      connection
                      [{:seon.turn/id route-run :seon.turn/agent [:seon.agent/id "agent-a"] :seon.turn/trigger [:seon.message/id "route-goal"] :seon.turn/opened-tx "datomic.tx"}])
@@ -2288,7 +2288,7 @@
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
             requests (atom [])]
-        (is (some? (:db-after (db/transact! connection [(agent-row "agent-b")]))))
+        (is (some? (:db-after (db/transact! connection (into [(namespace-row 'my.agents.agent-b)] (test-support/agent-tx @connection "agent-b"))))))
         (with-redefs [ai/complete
                       (recording-completer
                        requests
@@ -2774,7 +2774,7 @@
             sequence-number (atom 0)
             cluster (assoc cluster :seon.config.error/escalate-to "root")
             run-phases (schema/enum-members (schema/handed-projection) :seon.turn.loop/phase)]
-        (test-support/transacted! connection [(agent-row "root")])
+        (test-support/transacted! connection (into [(namespace-row 'my.agents.root)] (test-support/agent-tx @connection "root")))
         (test-support/assert-check!
          (tc/quick-check
           24

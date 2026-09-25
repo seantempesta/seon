@@ -68,8 +68,7 @@
                     :seon.boot/cluster-name "running-fixture"
                     :seon.config/manifest
                     {:seon.config.run/max-episode-runs :seon.config/absent}})
-     (support/transacted! connection [{:seon.agent/id "root"
-                                      :seon.agent/namespace {:seon.ns/name 'my.agents.root}}])
+     (support/transacted! connection (support/agent-tx @connection "root" 'my.agents.root))
      (cluster/ensure-cluster-entity! connection "running-fixture" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "running-fixture" connection)
@@ -303,14 +302,13 @@
            configured
            (db/transact!
             connection
-            [(:seon.config/desired-row
+            (into [(:seon.config/desired-row
               (config/compile-manifest
                {:seon.boot/cluster-name "loop-proof"
-                :seon.config/manifest {:seon.config.ai/no-provider true}}))
-             {:seon.agent/id "other"
-              :seon.agent/namespace (support/namespace-row @connection 'my.agents.other)}
-             {:seon.agent/id "unobserved"
-              :seon.agent/namespace (support/namespace-row @connection 'my.agents.unobserved)}])
+                :seon.config/manifest {:seon.config.ai/no-provider true}}))]
+                  cat
+                  [(support/agent-tx @connection "other" 'my.agents.other)
+                   (support/agent-tx @connection "unobserved" 'my.agents.unobserved)]))
            _ (is (some? (:db-after configured)) (pr-str configured))
            _ (cluster/ensure-cluster-entity! connection "loop-proof" cluster/boot-process-identity)
            ctx (support/fork-cluster-ctx connection)
