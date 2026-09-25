@@ -155,11 +155,10 @@
      (let [absent @connection
            _ (ingest! connection (task-text "Prove ingestion." ""))
            published @connection
-           adopt! #(test-support/transacted! connection (issue/adopt-tasks-call % #{handle}))]
-       (is (= [[:db.fn/call #'issue/adopt-tasks-tx [] #{handle}]] (issue/adopt-tasks-call absent #{handle})))
+           adopt! #(test-support/transacted! connection (issue/adopt-tasks-call % @connection))]
+       (is (= [] (issue/adopt-tasks-call published published)) "an agreeing cluster adopts nothing")
        (adopt! absent)
        (is (nil? (:seon.task/id (db/pull @connection [:seon.task/id] [:seon.task/id handle]))) "absent at the source retracts")
+       (is (= [] (issue/adopt-tasks-call absent @connection)))
        (adopt! published)
-       (is (= "Prove ingestion." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))
-       (is (empty? (issue/adopt-tasks-tx @connection [(db/pull published '[*] [:seon.task/id handle])] #{handle}))
-           "an equal task adopts nothing")))))
+       (is (= "Prove ingestion." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))))))

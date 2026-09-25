@@ -598,7 +598,9 @@
   {:malli/schema [:=> [:cat :seon.db/database-value [:enum :seon.task/ns :seon.task/id] [:set [:or :seon.task/ns :seon.task/handle]]]
                   [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
   [database attribute values]
-  (let [rows (db/q database '[:find [(pull ?e [*]) ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))]
+  (let [rows (if (contains? (:schema database) attribute)
+               (db/q database '[:find [(pull ?e [*]) ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))
+               [])]
     (or (read-error rows) (into {} (map (juxt :seon.task/id identity)) rows))))
 
 (defn task-basis
@@ -656,12 +658,28 @@
     (task-delta projection stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) rows)
                 (update-vals stored #(declaration projection %)))))
 
+(defn- task-handles
+  "Every stored task handle; none when the database declares no tasks."
+  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
+  [database]
+  (if (contains? (:schema database) :seon.task/id)
+    (let [handles (db/q database '[:find [?h ...] :where [_ :seon.task/id ?h]])]
+      (or (read-error handles) (set handles)))
+    #{}))
+
 (defn adopt-tasks-call
-  "Transaction data adopting the selected task handles from `source`, the published database."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.task/handle]] [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
-  [source handles]
-  (let [rows (stored-tasks source :seon.task/id handles)]
-    (or (read-error rows) [[:db.fn/call #'adopt-tasks-tx (vec (vals rows)) handles]])))
+  "Transaction data reconciling `destination`'s tasks to every task `source`, the
+  published database, holds: the whole set, since an adopted commit never proved its
+  tasks admitted (a cluster adopted before tasks were adopted). Empty when they agree."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
+                  [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
+  [source destination]
+  (let [published (task-handles source) held (task-handles destination)
+        handles (when-not (or (read-error published) (read-error held)) (into published held))
+        rows (when handles (stored-tasks source :seon.task/id handles))]
+    (or (read-error published) (read-error held) (read-error rows)
+        (let [rows (vec (vals rows))]
+          (if (empty? (adopt-tasks-tx destination rows handles)) [] [[:db.fn/call #'adopt-tasks-tx rows handles]])))))
 
 (defn index-tasks!
   "Reconcile task files through the writer against the declarations the caller read

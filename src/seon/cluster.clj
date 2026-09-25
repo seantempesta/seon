@@ -2539,9 +2539,7 @@
   [held-store published prior-commit published-database]
   (if prior-commit
     (source/changed-identities held-store published prior-commit)
-    (cond-> (into #{} (keep program/row-identity) (seon.fn/published-index-rows published-database))
-      (contains? (:schema published-database) :seon.task/id)
-      (into (map #(vector :seon.task/id %)) (db/q '[:find [?h ...] :where [_ :seon.task/id ?h]] published-database)))))
+    (into #{} (keep program/row-identity) (seon.fn/published-index-rows published-database))))
 
 (defn- adopt-rows!
   "Write the schema, program, issue and task rows among `identities` from
@@ -2560,8 +2558,8 @@
         program-identities (into #{} (filter (comp (set program/identity-attributes) first)) identities)
         issue-identities (into #{} (keep (fn [[attribute value]]
                                          (when (= :seon.issue/id attribute) value))) identities)
-        task-handles (into #{} (keep (fn [[attribute value]] (when (= :seon.task/id attribute) value))) identities)
-        tx-data (cond-> [[:db.fn/call registry/head-guard-tx
+        tx-data (into
+                 (cond-> [[:db.fn/call registry/head-guard-tx
                           {:seon.source/branch source/current-branch
                            :seon.source/expected-commit-id (:seon.source/commit-id published)}]]
                   (some #(= :seon.schema/key (first %)) identities)
@@ -2572,12 +2570,12 @@
                   (seq issue-identities)
                   (into (require-committed! ((requiring-resolve 'seon.issue/adopt-call)
                                              published-database issue-identities)
-                                            {:seon.boot/population :seon.issue/rows}))
-                  ;; Tasks are data the publication admitted, never program rows.
-                  (seq task-handles)
-                  (into (require-committed! ((requiring-resolve 'seon.issue/adopt-tasks-call)
-                                             published-database task-handles)
-                                            {:seon.boot/population :seon.task/rows})))]
+                                            {:seon.boot/population :seon.issue/rows})))
+                 ;; Tasks are data the publication admitted, never program rows;
+                 ;; the whole set reconciles, empty when the cluster agrees.
+                 (require-committed! ((requiring-resolve 'seon.issue/adopt-tasks-call)
+                                      published-database (db/db connection))
+                                     {:seon.boot/population :seon.task/rows}))]
     (when (next tx-data)
       (report-source-progress! "development rows")
       (require-committed!
