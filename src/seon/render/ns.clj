@@ -124,51 +124,6 @@
   [unit]
   (list 'dir (list 'quote (:seon.ns/name unit))))
 
-(defn function-ai
-  "Emit one documentation read and exact, unevaluated queries for linked facts."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
-  [unit]
-  (let [entity (or (:seon.render/value unit) unit)
-        function-name (:seon.fn/sym entity)
-        lookup [:seon.fn/sym function-name]
-        installed (when-let [database (:seon.db/db unit)]
-                    (:schema (db/schema-database database)))
-        links (cond-> []
-                (get installed :seon.lint/fn) (conj [:seon.lint/_fn :seon.lint/id]))]
-    (str ";; Function " function-name ". Read its contract and docstring.\n"
-         (str/join "\n"
-           (for [[attribute identity-attribute] links]
-             (str ";; " attribute " (run to inspect): "
-                  (pr-str (list 'seon.db/pull
-                                (list 'quote [{attribute [identity-attribute]}]) (list 'quote lookup))))))
-         "\n;; Historical faults (run to inspect): "
-         (pr-str (list 'seon.db/q
-                       (list 'quote '[:find ?signature :in $ ?target
-                                      :where [?fault :seon.instrument/fn ?target]
-                                             [?fault :seon.error/signature ?signature]])
-                       (list 'seon.db/db) (list 'quote function-name)))
-         "\n;; Callers (run to inspect): "
-         (pr-str (list 'seon.db/q
-                       (list 'quote '[:find ?caller :in $ ?target
-                                      :where [?caller :seon.fn/calls ?target]])
-                       (list 'seon.db/db) (list 'quote function-name)))
-         "\n;; Reaching tests (run to inspect): "
-         (pr-str (list 'seon.fn/tests-reaching (list 'seon.db/db) (list 'quote function-name)))
-         "\n" (repl/source-text (list 'doc (symbol function-name))))))
-
-(defn function-html
-  "Render a function block with its namespace link and unevaluated queries."
-  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
-  [unit]
-  (let [entity (or (:seon.render/value unit) unit)
-        function-name (:seon.fn/sym entity)]
-    [:section {:class "seon-family-entry seon-function"}
-     [:h3 [:a {:href (route/path :seon.render.route/namespace
-                       {:namespace (namespace (symbol function-name))})} function-name]]
-     (when-let [doc (:seon.fn/doc entity)] [:p doc])
-     (when-let [spec (:seon.fn/spec entity)] [:pre spec])
-     [:pre (function-ai unit)]]))
-
 (defn schema-form
   "Return the ordinary `doc` form for a schema entity."
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
@@ -261,6 +216,67 @@
      (when doc [:p doc])
      (when (pos? (node-distance unit))
        [:pre [:code (repl/source-text (list 'seon.schema/register! schema-key form))]])]))
+
+(def ^:private callers-named
+  "Callers are named up to this count; beyond it the node renders less: the
+  count and the call that lists them."
+  20)
+
+(defn- function-neighbours
+  "The program functions among `calls`, and the functions calling `function-name`."
+  {:malli/schema [:=> [:cat :seon.render/unit :qualified-symbol [:maybe [:or [:set :symbol] [:sequential :symbol]]]]
+                  [:or [:tuple [:vector :symbol] [:vector :symbol]] :seon.db/invalid-read-error]]}
+  [unit function-name calls]
+  (let [database (:seon.db/db unit)
+        bounds (read-bounds unit)
+        callees (db/q (merge bounds {:query '[:find [?s ...] :in $ [?s ...] :where [_ :seon.fn/sym ?s]]
+                                     :args [database (vec (remove #{function-name} calls))]}))
+        callers (when-not (read-refusal? callees)
+                  (db/q (merge bounds {:query '[:find [?caller ...] :in $ ?target
+                                                :where [?c :seon.fn/calls ?target] [?c :seon.fn/sym ?caller]]
+                                       :args [database function-name]})))]
+    (or (first (filter read-refusal? [callees callers])) [(vec callees) (vec callers)])))
+
+(defn function-ai
+  "Render a function node: its authored source, then its callees and callers by name."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
+  [unit]
+  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec calls :seon.fn/calls}
+        (or (:seon.render/value unit) unit)
+        header (str ";; " function-name (some->> (first-doc-line doc) (str " — ")))
+        neighbours (when (pos? (node-distance unit)) (function-neighbours unit function-name calls))
+        [callees callers] neighbours]
+    (cond
+      (nil? neighbours) header
+      (read-refusal? neighbours) neighbours
+      :else (str header "\n" (or source (repl/source-text (list 'doc function-name)))
+                 ;; the contract is shown where the authored form does not carry it
+                 (when (and spec source (not (str/includes? source ":malli/schema"))) (str "\n;; contract: " spec))
+                 "\n;; calls: " (names callees)
+                 "\n;; called by: "
+                 (if (<= (count callers) callers-named)
+                   (names callers)
+                   (str (count callers) " functions, listed by "
+                        (repl/source-text (list 'my.program/callers {:seon.program/subject (list 'quote function-name)}))))))))
+
+(defn function-html
+  "Render a function node: its doc, authored source, callees and callers."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  [unit]
+  (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source calls :seon.fn/calls} (or (:seon.render/value unit) unit)
+        neighbours (when (pos? (node-distance unit)) (function-neighbours unit function-name calls))
+        [callees callers] neighbours
+        row (fn [label items]
+              [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
+    (if (read-refusal? neighbours)
+      neighbours
+      [:article {:class "seon-family-entry seon-function"}
+       [:header [:p {:class "seon-kicker"} "Function"]
+        [:h3 [:a {:href (route/path ::route/namespace {:namespace (namespace function-name)})} [:code (str function-name)]]]]
+       (when-let [line (first-doc-line doc)] [:p line])
+       (when neighbours
+         (list (when source [:pre [:code source]])
+               [:dl (row "Calls" callees) (row "Called by" callers)]))])))
 
 (defn- public-functions
   "The public functions a namespace declares, by name, under the unit's read bounds."

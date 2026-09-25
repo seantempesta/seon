@@ -197,3 +197,20 @@
        (testing "a described schema's header carries its doc line"
          (is (str/starts-with? (sut/schema-ai (unit [:seon.schema/key :seon.task/ns] 0))
                                ";; Schema :seon.task/ns — The owning namespace")))))))
+
+(deftest a-function-renders-its-source-and-neighbours-by-name
+  ;; Class regression: the function node is its authored form plus callees and
+  ;; callers as names; a widely called function renders less, never a clipped list.
+  (support/with-database
+    (fn [connection]
+      (let [db @connection
+            unit (fn [sym distance]
+                   (let [value (db/pull db '[*] [:seon.fn/sym sym])]
+                     (assoc value :seon.db/db db :seon.render/value value :seon.render/distance distance)))
+            launcher (sut/function-ai (unit 'seon.flow/start-work-launcher! 1))
+            query (sut/function-ai (unit 'seon.db/q 1))]
+        (is (= (str ";; seon.flow/start-work-launcher! — " (first (str/split-lines (:seon.fn/doc (unit 'seon.flow/start-work-launcher! 1)))))
+               (sut/function-ai (unit 'seon.flow/start-work-launcher! 0))))
+        (is (str/includes? launcher (str "\n" (:seon.fn/source (unit 'seon.flow/start-work-launcher! 1)) "\n;; calls: ")))
+        (is (re-find #"\n;; called by: \d+ functions, listed by \(my\.program/callers \{:seon\.program/subject 'seon\.db/q\}\)$" query))
+        (is (hiccup/hiccup? (sut/function-html (unit 'seon.flow/start-work-launcher! 1))))))))

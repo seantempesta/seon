@@ -63,15 +63,14 @@
            (is (nil? (:seon.error/value unit)) (pr-str unit))
            (is (= rendered (:seon.render/output unit)) (pr-str unit))))
        (when (= :seon.fn/sym (first entity-lookup))
-         (let [captured (atom [])
-               source (binding [db/*read-evidence-sink* captured]
-                        (render.ns/function-ai {:seon.db/db database :seon.render/value entity}))]
-           (is (empty? @captured) "Rendering queries must not execute them")
-           (is (= '(do (doc entity-pairs.fixture/function))
+         ;; The function node is its authored source with its neighbours by name
+         ;; (renderers read the supplied database value: owner ruling 2026-09-25).
+         (let [source (render.ns/function-ai {:seon.db/db database :seon.render/value entity})]
+           (is (= '(do (defn function [] true))
                   (read-string (str "(do\n" source "\n)"))))
-           (is (str/includes? source "seon.fn/tests-reaching"))
-           (is (str/includes? source ":seon.fn/calls"))
-           (is (not (str/includes? source "defn")))))
+           (is (str/includes? source "\n;; calls: none\n;; called by: none"))
+           (is (= ";; entity-pairs.fixture/function"
+                  (render.ns/function-ai {:seon.db/db database :seon.render/value entity :seon.render/distance 0})))))
        (when (= :seon.test/sym (first entity-lookup))
          (doseq [[facts expected] [[{} "unrun or incomplete"]
                                    [{:seon.test/pass-count 1 :seon.test/fail-count 0 :seon.test/error-count 0} "pass"]
