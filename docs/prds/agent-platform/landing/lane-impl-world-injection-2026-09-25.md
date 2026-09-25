@@ -73,6 +73,28 @@ Under the LOAD RULE no test request ran, and nothing was loaded into default.
     - The seon.test.edn change did not cause this red. `:seon.test/recording-writer` is
       in the projection but is not a storage attribute (`-schema` lacks it), so the
       test family's owned attributes are unchanged.
+- **Round 3 (run 3b7d8960d529 on 6ab6f5fb; the one-request error is fixed in 37d68b0ed, not rerun).**
+  - *The one-request error was still mine.* `replacement-tx` re-analyzes the source and
+    digests under the symbol's own namespace. The writer digests the final row under its
+    `:seon.test/ns` (`seon.db/write-digest-error`, db.clj:4270).
+    - `test-support/revision` digests the stored row with the override merged, under its
+      final namespace.
+    - Checked on a stored test row with `d/with`: `write-digest-error` returns nil for the
+      revision and refuses the naive upsert.
+  - *My contract regression, already fixed by root.* The `[:? …]` contract in d4b3c0e13
+    became one variadic Malli arity, so every publication reindexing seon.fn refused.
+    Root's 55b1e99a6 declares one arity per source arity.
+  - *fn-test reds (005.txt), none caused by the analyze-forms injection.*
+    - Seven were red at 12:01, before d4b3c0e13 (`verify-6ab6ae2a-results.txt`):
+      contracted-rows…, declared-function-values…, indexing-resolves…,
+      indexing-uses-a-prebuilt-manifest…, publication-writes-one-definition-digest…,
+      re-index-replaces…, the-indexer-emits-no-attribute….
+    - The host-binding refusals among them come from `analysis-rows-by-file`, the
+      publication path. The injection does not change that path.
+    - `settled-form-records-calls-across-every-program-namespace` is a retired
+      assumption. It expects `:seon.fn/calls` on an ordinary form's receipt, which
+      f2e6285cc (2026-09-22, turn.clj `analyze-settlement`) retired. It was also red on
+      2026-09-24. It is routed to fn-test's owner.
 - **Out-of-scope finding.** 75 decoy fixture namespaces (tmp/ mirrors) sit in the
   shared kondo cache. Issue:
   `docs/seon/issues/tmp-fixture-sources-write-decoy-entries-into-the-shared-kondo-cache.md` (6c7117400).
