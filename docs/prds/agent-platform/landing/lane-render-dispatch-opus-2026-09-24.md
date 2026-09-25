@@ -13,6 +13,44 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Sixth follow-up: root's verification (tmp/orchestrator/verify-render-1c-results-2026-09-25.txt, 105 reds)
+
+Fixed at the producer (one commit per class):
+- `bf84c299b` **class 1 (≥23 + most web/simplification/value/transcript/source errors):** `:seon.render/selection`
+  declared `[:vector {:min 5 :max 5} …]` stages; since 409fcf269/44dc30ae6 a selection has two. Probed on default:
+  a two-stage selection's only explanation was that bound. Now `{:min 2 :max 2}`.
+- `0b6cc87e6` **class 2 (definition-digest half, 16):** my declared-subject vehicle, the nested-report attribute and the
+  ambiguity schemas were hand-built schema maps; now `program/declaration-row` (probed: returns the digest).
+- `229860f78` retained-test's seed agent via `support/agent-tx` (was a hand-built agent map refused for
+  `:seon.agent/branch`); the standalone arity test warms the projection's arity holder before its `m/validator` trap
+  (the old test warmed it through `selection`).
+
+Not caused by this lane's commits (evidence), for root to assign:
+- `:seon.agent/branch` refusals in `test/seon/sci/eval_test.clj` (other than :2221) and `test/seon/render/web_test.clj`:
+  hand-built agent maps; the writer's `write-entity-schemas` (`db.clj:3162`) keys on required identity attributes, not
+  `:seon.program/row-schema`.
+- help-test: its cluster fixture write is refused at `:seon.cluster/config` (required), so `evaluation/of-agent` answers a
+  no-such-agent error map and `(first …)` hands `repl/render-ai` a map entry (the "lookup-ref vector").
+  `test/seon/help_test.clj` / config owner. oversight-test "Nothing found for entity id [:seon.config/cluster …]" is the
+  same config family.
+- `seon.db/pull` nil entity id at `test/seon/sci/eval_test.clj:1598`.
+- schema-test's 20 (`test/seon/schema_test.clj` :446 recursion-selector refusal shape, :981 render-contract refusal data,
+  :1176/:1288/:1320/:1471/:1505/:1646): synthetic-form schema.clj behaviour; none reads the render dispatch. The
+  schema.clj:3366 nested-selector target change (0a) is not among the reported lines.
+- turn-loop :630 and :777: 375a56048 is adopted (value carries the distinguishing members); the remaining assertions are
+  the escalation vector and the terminal verdict map. I need their `actual` values to attribute them.
+
+Needs the `actual` text before I can attribute: program-test `indexed-and-evaluated-declarations-are-the-same-entities`;
+error-test :74 and :154 (possibly 3d460e2eb: stored fault-field text now follows the value's own entry order);
+render-source-test `anonymous-values-refuse-to-forge-source-provenance` (:210 in the adopted file).
+
+Reruns (serially): `bin/test-check default --ns seon.render.entity-pairs-test`, `--ns seon.render-simplification-test`,
+`--ns seon.render.retained-test`, `--ns seon.render-source-test`, `--ns seon.render.web-test`,
+`--ns seon.render.page-settings-test`, `--ns seon.render.transcript-test`, `--ns seon.render.value-test`,
+`--ns seon.sci.eval-test`, `--ns seon.error-test`, `--ns seon.oversight-test`, `--ns seon.program-test`,
+`--test seon.turn-loop-test/a-refused-phase-escalates-once-per-signature-and-never-to-itself`,
+`--test seon.turn-loop-test/a-clean-last-form-without-a-disposition-is-loud-terminal-evidence`.
+
 ## Fifth follow-up: contract finding and remaining fallout
 
 - `e7c4deb4c` (ruling: follow the design): an error whose contracted operation's declared alternatives it satisfies
