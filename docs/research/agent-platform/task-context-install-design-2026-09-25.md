@@ -1,124 +1,118 @@
 ---
 type: design
-status: "Opus revision 3, following the owner's directions of 2026-09-25 (linked graph, presence of a render function decides, set-at-a-time joins) and Astra review 595048666 (ACCEPT-AFTER-FIXES, folded in, §11); awaiting Astra re-review; no source edited"
+status: "Opus revision 4: owner answers of 2026-09-25 (standing root task; references become real refs; the debug page at a selectable N comes first; evaluate deleting :seon.render/units) and Astra round-3 review 67a0358ab (seven corrections) folded in place; awaiting Astra re-review; no source edited"
 created: 2026-09-25
-scope: The agent's context is the rendering of the agent entity. One walk follows references level by level with set-at-a-time index joins; each reached node renders once through its own pair; one composer orders definitions before uses and turns by time. The reads re-checked before a turn are those whose captured subjects are graph nodes. Every duplicate walker retires.
-source-pin: 2d23029cb (src ranges valid there); AGENTS.md at ba41af0c0; Datahike reference-code at 4157916b
-aligned-with: language-requirements-2026-09-24.md §§1.9, 1.13, 5, 5a, 7, 11, 12; query-render-building-block-2026-09-25.md (this design is its acquisition half for entity graphs); one-render-path-design-2026-09-25.md §§1-3, 5; task-context-install-design-review-2026-09-25.md (Astra, 595048666)
+scope: The agent's context is the rendering of the agent entity. One walk follows references level by level with set-at-a-time index joins, and presence of a render pair decides inclusion. Nodes are ordered definitions-first and chronologically. Each node renders once through its own pure pair. The reads re-checked before a turn are those whose captured subjects touch the graph or are unknown. Slice 1 is the walk plus the owner's debug page.
+source-pin: 2d23029cb, with Astra's recounts at dc4f71d67 (the counted files were unchanged at 54c550e4c); Datahike 4157916b; Malli befcd302a
+aligned-with: language-requirements-2026-09-24.md §§1.9, 1.13, 5, 5a, 7, 11, 12; query-render-building-block-2026-09-25.md (this design is its acquisition half for entity graphs); one-render-path-design-2026-09-25.md §§1-3, 5; reviews 595048666 and 67a0358ab
+depends-on: design-references-as-refs-opus (refs replace the interim value joins, §4.1)
 ---
 
 # Task context: the agent renders its linked graph
 
-The owner, 2026-09-25: "I want the agent to render the task not as an all in one but as a linked graph that can be
-recursively rendered and composed together … Turn 1 comes before turn 2, the functions that are used are explained
-and the schemas referenced are defined. Not everything needs to be rendered … a dynamic system that takes any data and
-if there are render functions and we follow the same reference following rules we render it just by adding a
-reference to the agent's entity." And: "the presence of a render function determines skip and the other keywords are
-unnecessary. If we hit a ref we can pull it." And: "a very efficient way to pull the refs … a normal query … think
-about what you want to join to different entity ids, attributes or values."
+## What the owner asked for
 
-**What exists.**
+The owner, 2026-09-25:
 
-- The agent's opening runs `turn/system-turn` → `declared-sources` → `walk/neighborhood`.
-- The walk visits one entity at a time: `acquired-tree` pulls each entity, then follows its declared concerns
-  (`walk.clj:483-533`). It follows only `:db.type/ref` attributes (`walk.clj:103-122`).
-- The agent pair, `render-identity-ai`, reads the database inside the renderer and emits opening source text.
-- Task links are **values**: handles in `:seon.task/tasks`, symbols in `:seon.fn/calls`, keywords in the arity
-  contract refs. So today's walk cannot reach a task's functions, tests or schemas at all.
+- "render the task not as an all in one but as a linked graph that can be recursively rendered and composed
+  together … Turn 1 comes before turn 2, the functions that are used are explained and the schemas referenced are
+  defined. Not everything needs to be rendered … we render it just by adding a reference to the agent's entity";
+- "the presence of a render function determines skip … If we hit a ref we can pull it";
+- walk the references with "a normal query" that joins ids, attributes and values;
+- store references as real refs, so they validate and render clearly;
+- a standing root task;
+- **to see N**: first, a debug page with the AI and HTML faces side by side at a selectable N;
+- and a question: why `:seon.render/units` exists at all.
 
-**The data flow after this design.**
+## What exists
 
-1. **Structure.** It is derived once per schema projection and memoized by projection identity. It holds three
-   things:
-   - which attributes are refs;
-   - which attributes hold values naming an identity, and through which identity attribute;
-   - which identity attributes' entities have a render pair.
-2. **Walk.** Breadth-first from a root lookup, one level at a time. Each level runs a fixed handful of set-at-a-time
-   Datalog queries binding the whole frontier, and returns `[source attribute target]` edges. A visited set
-   deduplicates. It stops at depth N, a caller-overridable input.
-3. **Order.** A topological sort over those edges puts definitions before uses. Ties go to the entity's first
-   transaction, so turn 1 comes before turn 2. A cycle is broken by a back-reference.
-4. **Render.** Each node renders once, through its own pair, as a pure function of its pulled value and its remaining
-   distance. A node at the last level renders at distance 0, which is its name. A later reference to a rendered node
-   renders as a back-reference.
-5. **Compose.** The query+render building block's `seon.render/units` renders the ordered node list under one floor
-   budget, with one AI face (the prompt) and one HTML face (the debug page).
-6. **Refresh.** Before a turn, the plan re-checks the walk's own evaluation, plus every retained read whose captured
-   subjects touch a graph node or are unknown.
+- The opening runs `turn/system-turn` → `declared-sources` → `walk/neighborhood`.
+- That walk takes one entity at a time: `acquired-tree` pulls each entity and then follows its declared concerns
+  (`walk.clj:483-533`). It follows only ref attributes (`walk.clj:103-122`), so it never reaches a task's
+  functions, tests or schemas. Those links are stored as values: handles, symbols and keywords.
+- Renderers read the database themselves: agent AI and HTML, namespace AI and HTML.
+- The refresh before a turn re-checks every retained read-only evaluation.
 
-**The principal Clojure approach.** Joins are sets bound into Datalog, and the dependency ordering is a sort over
-plain edge data. Reference rules are declarations the registry already carries. No mode keyword, context-specific
-code, registry, cache or second renderer is added.
+## Data flow after this design
+
+1. **Structure.** Derived once per schema projection and memoized by projection identity. It holds:
+   - the ref attributes, followed forward through EAVT and in reverse through VAET;
+   - the interim value edges, until the references-as-refs lane converts them;
+   - the component attributes;
+   - the identity attributes whose row schema declares a render pair.
+2. **Walk.** Breadth-first from a root lookup, one level at a time, one set-at-a-time query per edge family,
+   binding the whole frontier. It returns every `[source attribute target]` edge. The visited set deduplicates
+   expansion but keeps dependency evidence. It stops at depth N, an input the caller can override.
+3. **Order.** Definition edges are sorted definitions-first, and turns follow `:seon.turn/opened-tx`. Membership
+   edges carry no order. A cycle renders once, with a back-reference.
+4. **Render.** Each node renders once through its own pure pair, over its acquired value and its remaining distance.
+5. **Compose.** `seon.render/units` renders the complete ordered list under one floor budget. The AI face is the
+   prompt; the HTML face is the debug page.
+6. **Refresh.** Retained reads are selected against the membership of the graph just acquired.
+
+**The principal Clojure approach.** Sets are bound into Datalog, the order is a sort over plain edge data, and the
+declarations are ones the registry already has. No mode keyword, registry, cache or second renderer is added.
 
 ## 0. Broken things first
 
-1. **The prototype is gone.** `scratch.task-context` was never committed: `git log -S` finds only requirement text
-   (b1af1d100) and an MCP note (3dbf90999), and `(find-ns 'scratch.task-context)` on default (pid 37460) is `nil`.
-   The 7.7 KB / 0.3 ms figure in requirement §5a.4 is not reproducible.
-2. **The task and schema rows have no render pair.** On default:
-   - `:seon.task/task` and `:seon.schema/schema` declare no `:seon.render/ai`;
-   - `:seon.fn/fn`, `:seon.test/test`, `:seon.ns/ns`, `:seon.turn/turn` and `:seon.agent/agent` do.
-
-   Under the owner's rule (presence decides), today's walk would **skip the task itself** and every referenced schema.
-   Both need a declared pair (§4.4).
-3. **The namespace pair is a namespace dump at distance ≥ 1.** `seon.render.ns/render-ai` renders the full page at
-   distance 1 (`ns.clj:750-781`; walk docstring: "distance 0 renders the name only" is a renderer convention). The
-   walk reaches `:seon.ns/ns` nodes through `:seon.fn/ns` and namespace subjects: 3 of them for task 132fee. The
-   namespace AI face must render doc + counts + `(dir ns)` at every distance before activation. This is
-   one-render-path audit sites 16/17.
+1. **The prototype is gone.** `scratch.task-context` was never committed, and `(find-ns 'scratch.task-context)` on
+   default (pid 37460) returns `nil`. The 7.7 KB / 0.3 ms figure in requirement §5a.4 is not reproducible.
+2. **Task and schema rows have no render pair.** On default, `:seon.task/task` and `:seon.schema/schema` declare no
+   `:seon.render/ai`, while `:seon.fn/fn`, `:seon.test/test`, `:seon.ns/ns`, `:seon.turn/turn` and
+   `:seon.agent/agent` do. Under the presence rule, every schema would be skipped, and so would the task wherever it
+   is not the root.
+   - `seon.render.ns/schema-form` is **not** a schema renderer. It returns a `(doc <key>)` form (`ns.clj:726-730`,
+     Astra correction 3). Real pairs are slice S2.
+3. **Two renderers read the database.**
+   - The namespace AI and HTML faces call `render-data`, which acquires the namespace's functions and schemas and
+     prints the whole page at distance ≥ 1 (`ns.clj:349-386, :732-773`).
+   - The agent's HTML face pulls identity and calls cluster status (`agent.clj:312-350`).
+   - Neither is fixed on HEAD.
 4. **Choosing refresh candidates costs about 3.3 s per system turn for root.** `latest-evaluations`
-   (`turn.clj:1925-1957`) pulls every retained evaluation with all of its read evidence: 18,673 rows over 45 forms.
-   It took 3,254 ms and then 3,369 ms under a concurrent test load. The same join without evidence took 3.1 ms.
-5. **Two effect calls pass `read-only-evaluation?`.** `(my.turn/complete …)` and `(my.agent/done)` record no effect
-   or receipt row (`turn.clj:1959-1975`). Candidate selection cannot make this safe; the producer must record the
-   effect (Astra fix 2). **Fixing that is a prerequisite of T2.**
+   (`turn.clj:1925-1957`) pulls all 18,673 read-evidence rows it retains. It took 3,254 ms and then 3,369 ms, under
+   test load. The same query without evidence took 3.1 ms.
+5. **Effect calls pass `read-only-evaluation?`.** `(my.turn/complete …)` and `(my.agent/done)` record no effect row.
+   Fixing that producer comes before any change to refresh selection (T2).
 6. **A task must-read names no definition.** Task `132fee0467c8` must-reads `seon.sci.eval/definition-rows`, which
-   has no row. The task writer admits dangling links, against requirement 4.1.
-7. **Pre-fix evidence is still stored.** Default started before `ca17618c0` (the form-scoped sink), so `(quote 1)`
-   still carries 7,286 reads.
-8. **A single rules query per level is slower, not faster.** The same edges as one rule-based query per level took
-   95–133 ms per task at N=2, and 2,244 ms for 132fee at N=3. Five plain queries per level took 14–71 ms (§2.2).
-   The owner's "one query per level" is refined to **one query per edge family per level**: a fixed five, independent
-   of the frontier size.
+   has no row. The task writer accepts dangling links, against requirement 4.1.
+7. **Pre-fix evidence is still stored.** Default predates `ca17618c0`, so `(quote 1)` still carries 7,286 reads.
+8. **Deriving value edges by schema name is refuted.** I matched each attribute's named value schema against the
+   named schema of an identity attribute. That produced **289** candidate edges, nearly all false: every ref shares
+   `:seon.db/ref`, and every blob digest shares `:seon.blob/digest`. Contract keys, `:seon.fn/keywords` and
+   `:seon.schema/references` are plain `:qualified-keyword`. Value edges must therefore be declared, or stored as
+   refs (§4.1).
+9. **One rules query per level is slower.** It took 95–133 ms per task at N=2 and 2,244 ms for task 132fee at N=3.
+   Plain queries, one per edge family, took 14–71 ms (§2.2).
 
-## 1. Current owners (file:line at 2d23029cb)
+## 1. Current owners (file:line at 2d23029cb; Astra's comparable spans at dc4f71d67)
 
 ### 1a. The walkers and context builders this replaces
 
-| Walker or builder | Where | Lines | What it walks |
+| Walker or builder | Where | Comparable lines | Fate |
 |---|---|---:|---|
-| Per-entity acquisition: `declared-concerns`, `connection-attributes`, `root-selector`, `shallow-entity`, `connection-observation`, `acquisition-members`, `join-membership`, `root-pull-plan`, `namespace-connections`, `acquire-entity`, `acquired-tree`, `root-acquisition`, `forward-refs` | `seon.render.walk` `:94-591` | ~498 physical | refs only, one pull per entity, concerns per schema |
-| `neighborhood` render loop | `walk.clj:710-807` | 98 | renders the acquired tree; its loop moves into `units` (building block S2) |
-| `ordered-episode`, plus helpers `reference-keys`, `introduced-subject?`, `form-symbols`, `explained-symbol?` | `walk.clj:817-924` | ~108 | an explain-before-use fixed point over a pull; callers are only `bootstrap/next-entry-in` (dead) and tests |
-| Bootstrap opening candidates, `entries` … `next-entry` | `bootstrap.clj:204-731` | 502 | production-unreachable (program graph: test callers only) |
-| `declared-sources` | `turn.clj:1870-1923` | 54 | calls `neighborhood`, then re-reads the printed source |
-| Agent pair with issue openings: `render-identity-ai`, `render-id-ai`, `identity-form` | `agent.clj:246-252, 278-310` | 39 | reads the database inside a renderer |
-| Issue openings | `seon.issue.opening` | 233 | its own links walk (`links`, `:39-66`) and seven candidates |
-| Namespace-page walkers: `namespace-row`, `function-rows`, `own-schema-rows`, `referenced-schema-closure` | `ns.clj:56-100, 171-227` | 100 | functions of a namespace, schema closure capped at 40 |
-| Ambient agent-facing walk | `render.clj:1812-1976` `seon.render/walk` | 159 | booked in the building block as Q2 |
-| Saved-history composition | `walk.clj:926-974` `history` | 49 | booked in the building block as Q1 |
-| Transcript acquisition adapters; `derive-context!`; the faults concern | `transcript.clj`, `web.clj:2537-2610`, `error.clj:1897-2004` | 204 / 74 / 66 | booked in the building block as Q6 / Q5 / Q3 |
-| Eval driver transcript | `eval/drive.clj:288-300` | 13 | reads the capture's exact bytes instead |
+| Per-entity acquisition (`declared-concerns` … `forward-refs`) | `walk.clj:94-591` | 482 | slice C, after its production callers `web.clj:2021-2030, :2043-2058`, the `render-data` users and the root-pull, walk, entity-pair and schedule tests are converted to `graph` |
+| `neighborhood`'s render loop | `walk.clj:710-807` | (98, moved) | moves into `units` (building block S2); no credit |
+| `ordered-episode` and its helpers | `walk.clj:817-924` | 100 | T0; callers are `bootstrap/next-entry-in` (dead) and `test/seon/render/episode_test.clj:42-47` plus the history tests |
+| Bootstrap opening candidates | `bootstrap.clj:204-731` | 502 | T0; six `bootstrap_test` cases (`:83, :162, :223, :279, :352, :373`) |
+| `declared-sources`, agent identity AI, situation AI | `turn.clj:1870-1923`; `agent.clj:246-310, :396-430` | 128 | S3 |
+| `latest-evaluations` + `system-plan` | `turn.clj:1925-2017` | 74 | T2, rewritten |
+| `seon.issue.opening` | whole file | 233 | T3, after the issue-to-task migration (requirement 7.11) |
+| Namespace-page walkers | `ns.clj:59-103, :174-230` | 100 | C, with `render-data`'s conversion |
+| `:seon.render/units` readers | `walk.clj:94-101`; `web.clj:694-715, :1682-1719` | 68 | U (§6) |
+| Booked in the building block | Q1 `history` 49; Q2 `seon.render/walk` 159; Q3 faults 66; Q5 `derive-context!` 74; Q6 transcript adapters 204 | — | not recounted here. Q4's 62 lines belong to T0 here, and **root must strike Q4 and S5's bootstrap work from the building block** |
 
-### 1b. Refresh today
+### 1b. Declarations the registry already has (searched before adding a key)
 
-`system-plan` (`turn.clj:1977-2017`) takes the declared sources plus every retained evaluation that passes
-`read-only-evaluation?` and has no `generated-read-fault`. It then checks each one with `db/read-evidence-current?`
-(`db.clj:1139`) and `read-evidence-changes` (`db.clj:1041`).
-
-### 1c. Declarations the registry already carries (searched before adding a key)
-
-| Need | Existing key | Where | Use here |
-|---|---|---|---|
-| A value names another entity's identity | `:seon.fn/reference-to` | `seon.fn.edn:17` ("Identity attribute of the function named by a declared reference value"). Used on `:seon.schedule.task/function`; read by `fn.clj:1698` and `test.clj:388` | declare it on the value-edge attributes (§4.1) |
-| An identity attribute's owning row schema | `:seon.program/row-schema` | on 46 identity attributes (`:seon.fn/sym` → `:seon.fn/fn`, …) | target entity → schema → pair presence |
-| A schema's render pair | `:seon.render/ai` / `:seon.render/html` | entity schema properties | presence decides whether a node is rendered |
-| Reverse relations a schema follows | `:seon.render/units` | e.g. the agent's `[:seon.agent/plan :seon.issue/_agent …]` | reverse edges only (§4.1); forward refs need no declaration |
-| Owned children | `:db/isComponent`, `:seon.db/component-schema` | 137 declarations | joined through within the owner's level; never nodes |
-| Depth | `:seon.render/distance` | `seon.render.edn:129`, `[:int {:min 0}]` | N, with the caller's value winning |
-| Query-work bound | `:seon.config.eval.result/max-nodes` | walk caps today | the visited-node cap |
-
-The owner's direction retires the round-3 proposal of `:content`/`:address`/`:skip` modes: no mode key is added.
+| Need | Existing key | Note |
+|---|---|---|
+| A value names an identity | `:seon.fn/reference-to` (`seon.fn.edn:17`) | Declared on a **ref** attribute today (`seon.schedule.task.edn:3`). Its reader `fn.clj:1692-1711` treats the target as an eid, and `test.clj:388` uses it for reach invalidation. It is **not reused** for value edges (§4.1) |
+| An identity's owning schema | `:seon.program/row-schema` | used to test whether a target has a pair |
+| Render pair | `:seon.render/ai`, `:seon.render/html` | presence decides inclusion |
+| Components | `:db/isComponent`, `:seon.db/component-schema` | §4.1 component rule |
+| Depth | `:seon.render/distance` (`seon.render.edn:129`) | N; the caller's value wins |
+| Query-work bounds | Datahike `:max-work`, `:max-results`, `:max-result-weight` through `seon.db/q` (`db.clj:2404-2455`; Datahike `query.cljc:4596, :4652`); mapped from caps as in `ns.clj:40-50` | §4.2 |
+| Turn chronology | `:seon.turn/opened-tx` (`seon.turn.edn:13`) | §4.3 |
+| Schema → schema references | `:seon.schema/references` (`seon.schema.edn:83`) | an existing relation, now walked |
 
 ## 2. REPL proof on real data (default, JVM mode, read-only, inline `let` forms)
 
@@ -126,399 +120,482 @@ The owner's direction retires the round-3 proposal of `:content`/`:address`/`:sk
 
 | Task | Subjects | Proofs | Must-read |
 |---|---|---|---|
-| `132fee0467c8` definitions-bypass-entry-gate | `seon.sci.eval/evaluate`, ns `seon.sci.restoration-test` | 3 deftests | `evaluate`, `definition-rows` (dangling) |
-| `300aca1ad57c` tests-reaching-saturates | `seon.fn/tests-reaching`, `seon.fn/gate-set` | none | `reverse-closure`, `gate-sets` |
-| `cea47b015b23` agents-can-validate | ns `seon.schema` | none | three `seon.schema` functions |
+| `132fee0467c8` | `seon.sci.eval/evaluate`, ns `seon.sci.restoration-test` | 3 deftests | `evaluate`, `definition-rows` (dangling) |
+| `300aca1ad57c` | `seon.fn/tests-reaching`, `seon.fn/gate-set` | none | `reverse-closure`, `gate-sets` |
+| `cea47b015b23` | ns `seon.schema` | none | three `seon.schema` functions |
 
-### 2.2 Set-at-a-time walk versus a per-node walk, with the same edges
+### 2.2 Set-at-a-time versus per-node, same edges, N=2 from the task
 
-**The structure.** It was derived in **1.1 ms** from `(:schema db)` and the projection:
+**The prototype edge families.** These were five queries per level, each binding `[?e ...]`:
 
-- 123 non-component ref attributes (260 ref attributes in all);
-- 56 identity attributes, of which 22 have a row schema with a pair, plus `:seon.task/id` and `:seon.schema/key`
-  assumed declared (§0.2).
+1. forward refs;
+2. interim value joins for `:seon.fn/calls`, `:seon.fn/must-read`, `:seon.task/must-read` and `:seon.fn/keywords`;
+3. contract keys through the arity component;
+4. reverse task handles;
+5. render presence.
 
-**Edge families per level.** There are five plain queries, each binding the frontier `[?e ...]`:
+This is a **prototype subset of §4.2**, as Astra's correction 1 notes: it lacks ordinary reverse refs,
+`:seon.fn/see-also`, forward `:seon.task/tasks` and `:seon.schema/references`.
 
-1. forward refs: `[?e ?a ?t]` with `[?a ...]` bound to the ref attributes (EAVT);
-2. value references: `[?e ?a ?v] [?t ?i ?v]` with `[[?a ?i]]` bound to `[[:seon.fn/calls :seon.fn/sym]
-   [:seon.fn/must-read :seon.fn/sym] [:seon.task/must-read :seon.fn/sym] [:seon.fn/keywords :seon.schema/key]]` (AVET
-   on the identity side);
-3. contract keys through the owned arity component: `[?e :seon.fn/arities ?ar] (or [?ar :seon.fn.arity/input-refs
-   ?k] [?ar :seon.fn.arity/output-refs ?k]) [?t :seon.schema/key ?k]`;
-4. declared reverse value references: `[?e :seon.task/id ?h] [?t :seon.task/tasks ?h]`;
-5. render presence over the candidate targets: `[?t ?ia _]` with `[?ia ...]` bound to the rendered identity
-   attributes.
+**Timings.** Both walks ran on fresh `as-of` values, so Datahike's query cache could not answer.
 
-**The per-node baseline** walks the same edge families for one entity at a time: `pull [*]`, then one query per
-value, contract, reverse and presence check. Both walks ran on fresh `as-of` values, so Datahike's query cache could
-not answer.
-
-| Task, N=2 | Nodes | Set-at-a-time: queries / cold ms / warm ms | Per-node: queries / cold ms / warm ms |
+| Task | Nodes | Set-at-a-time: queries / cold / warm | Per-node: queries / cold / warm |
 |---|---:|---|---|
-| 132fee | 134 | **10** / 182 / 100 | 3,823 / 288 / 264 |
+| 132fee | 134 | **10** / 182 ms / 100 ms | 3,823 / 288 ms / 264 ms |
 | 300aca | 16 | **10** / 41 / 37 | 871 / 69 / 68 |
 | cea47 | 11 | **10** / 35 / 36 | 483 / 80 / 76 |
 
-- **On the committed database value** (no `as-of` merge), the first set-at-a-time run took 71 / 14 / 14 ms. The
-  first ref query's plan compilation was 53 ms of the 71.
-- **At N=3, 132fee** reaches 348 nodes with 15 queries: 376 ms cold on an `as-of` value, 11 ms on a repeat against
-  the committed value.
-- **The cost unit is the query.** Queries per level are a constant 5, against 1 + values + frontier × checks for the
-  per-node walk. Work per query is the frontier's EAVT seeks plus the AVET joins it produces, bounded by the edges
-  touched, never by store size. Datoms touched were not counted directly. The edge count stands in for them: 157 at
-  N=2 and 686 at N=3 for 132fee.
-- **`as-of` views cost** 2–3× the committed value. That matches the cost-db landing's temporal-index finding. The walk
-  runs on the committed branch value.
+- On the committed database value, the first run took 71 / 14 / 14 ms. Of 132fee's 71 ms, 53 ms was the first
+  query's plan compilation.
+- At N=3, 132fee reaches 348 nodes in 15 queries: 376 ms cold on an `as-of` value.
+- Deriving the structure took 1.1 ms. It found 123 non-component ref attributes (260 in all), 56 identity
+  attributes, and 22 identity attributes that have a render pair.
 
-**Why not Datahike's recursive pull.** `pull_api.cljc:340-344` (at 4157916b) recurses per entity frame, depth first,
-over ref attributes only. It cannot follow a symbol, keyword or handle value to its identity. Only an AVET join can,
-and the join is set-at-a-time.
+**Cost caveat (Astra correction 1).** Datahike uses AVET point seeks only when one upstream relation binds both
+attribute and value, every attribute is indexed, and the pair set passes its selectivity threshold
+(`query/execute.cljc:458-486`). Otherwise it falls back to scanning and filtering (`:548-587`). "Bounded by edges
+touched, never by store size" is therefore **not established**. Slice S1 records each final query's plan and seeks.
+Datoms touched were not counted; edges stand in for them: 157 at N=2 and 686 at N=3.
 
-### 2.3 The graph, its order and render-once
+**Why not recursive pull.** `pull_api.cljc:340-344` recurses one entity frame at a time, over ref attributes only.
 
-For 132fee at N=2 from the task, the walk plus the topological order took **56 ms** on the committed value:
+### 2.3 The prototype graph and its order
 
-| Node kind | Nodes |
-|---|---:|
-| `:seon.fn/sym` | 62 |
-| `:seon.schema/key` | 65 |
-| `:seon.ns/name` | 3 |
-| `:seon.test/sym` | 3 |
-| **Edges** | **157** |
-| **Cycles broken** | **0** |
-| **Edges placed use-before-definition** | **0** |
+For 132fee at N=2, the walk plus the sort took 56 ms. It reached 62 functions, 65 schemas, 3 namespaces and 3 tests,
+over 157 edges: 0 cycles, and no use placed before its definition. The sort placed definitions first, with ties
+broken by earliest transaction.
 
-- **Ordering method.** The topological sort is Kahn's algorithm over use → definition edges. Ties go to the entity's
-  earliest transaction.
-- **The first twelve placed**, all definitions before their users: `seon.sci.eval/context-projection`,
-  `:seon.agent/id`, `:seon.eval/outcome`, `seon.sci.eval/interpreted-arity-message`, `:seon.error/member`,
-  `seon.id/evaluation`, `:seon.print/length`, `:seon.sci.admit/value`, `seon.env/environment-state`,
-  `:seon.cluster.eval/source`, `:seon.sci.admit/record`, `:seon.sci.eval/request`.
-- **The agent root** at N=2 (root has no task) reaches 47 nodes: 42 turns, its plan, a message, its namespace and its
-  runtime. The walk's BFS order of those turns is **not** transaction order (measured `false`), so the
-  earliest-transaction tie-break is load-bearing. The placed order of turns was not re-checked in this probe; it is a
-  witness required at landing (§9).
-- **An earlier variant graph** (the round-3 content rule, 113 nodes, 184 edges) also had 0 cycles and 0 violations.
+That result does **not** validate the final ordering (Astra correction 2):
 
-### 2.4 Render-cache reuse across turns
+- the final edge set adds two-way membership edges, such as task ↔ subject and namespace ↔ function;
+- the tie-break must be `:seon.turn/opened-tx`, not the earliest surviving datom;
+- the root agent's graph at N=2 (47 nodes, 42 of them turns) was not placed and checked. The walk's own order of those
+  turns is not transaction order (measured `false`).
 
-A node's render key is its content digest, face, producer program identity and distance. The content digest is:
+§4.3 defines the final relation; its witnesses are in §9.
 
-- `:seon.program/definition-digest` for functions and tests;
-- the schema form for schemas;
-- the pulled value for other entities.
+### 2.4 Reverse refs into the root agent (for the `:seon.render/units` question)
+
+One VAET query with the attribute unbound took **202 ms**. It found 96 holders over 13 attributes:
+
+| Attribute | Holders | Attribute | Holders |
+|---|---:|---|---:|
+| `:seon.turn/agent` | 42 | `:seon.message/to` | 17 |
+| `:seon.message/from` | 16 | `:seon.error.occurrence/agent` | 4 |
+| `:seon.schedule.task/owner` | 3 | `:seon.schedule.fire/agent` | 2 |
+| `:seon.maintenance.request/agent` | 2 | `:my.note/agent` | 2 |
+| `:seon.db/user` | 2 | `:seon.runtime/agent` | 1 |
+| `:seon.ns/steward` | 1 | `:my.plan/agent` | 1 |
+| `:seon.config/agent` | 1 | | |
+
+- **Bind the attribute.** An unbound attribute scans. The walk binds the ref-attribute set, giving one VAET seek per
+  attribute.
+- **Presence was undercounted.** A presence check through `:seon.program/row-schema` found **0** rendered holders.
+  `:seon.turn/id` and `:seon.message/id` name no row schema with a pair, although the turn and message schemas have
+  pairs. Presence must therefore be decided by the target entity's owning schema (one-render-path §1, rule 3), not
+  only by `row-schema`. This is a correction to S1.
+
+### 2.5 Content stability across turns
 
 | Span | Unchanged node digests |
 |---|---|
-| Root's two consecutive turns (tx 536878808 → 536878885) | **133 / 133** (112 + 11 + 10 nodes over the three tasks) |
-| Across a publication (tx 536872396 → now; 1,756 of 4,935 functions changed) | 4 / 9 function nodes, 4 / 4 schemas |
+| Two consecutive root turns | 133 / 133 |
+| Across a publication (1,756 of 4,935 functions changed) | 4 / 9 function nodes, 4 / 4 schemas |
 
-Unchanged nodes re-render nothing. The composer re-emits only changed nodes and their positions.
+These numbers show that **content is stable**. They are not cache hits (Astra correction 4, §4.5).
 
-### 2.5 Sizes at the edge of the graph
+## 3. Owner answers and review verdicts
 
-With no mode keywords, a node at the last level renders at distance 0: its name, about 40 characters. For 132fee the
-62 function nodes are:
-
-- 2 at level 1: `evaluate` itself (29,253 characters of source, whole, req 5.8) and the proof helper;
-- 60 at level 2, at about 2.5 KB of names in all.
-
-That is why no taught-vocabulary exclusion is needed any more: harness and `seon.db` functions reached as callees are
-names at the edge. Round 2's measured hop-3 name growth (5–7× per level) is why the default N stays small (§4.3).
-
-### 2.6 Read counts for refresh
-
-| Rule | Evidence rows read | Re-checked | Note |
-|---|---:|---:|---|
-| Today | 18,673 | 8 reads in 2 evaluations | the two effect calls, §0.5 |
-| Form constants (round 2) | 0 | 0 for 132fee | **refuted** by Astra fix 1: it misses reads through `result/e…`, bindings and empty results |
-| Captured-evidence subjects against graph nodes (this design) | 18,673 today; each form's own reads after `ca17618c0` | 60 in 2 evaluations for 132fee, plus 682 unattributable rows kept conservatively | §5 |
-
-## 3. Root's proposed shape: verified, refined or refuted
-
-| # | Proposal | Verdict and evidence |
+| # | Item | Verdict |
 |---|---|---|
-| 1 | The context is the rendering of the agent entity; attaching a reference puts it in | **Verified.** `:seon.agent/task` (a handle value, `:seon.fn/reference-to :seon.task/id`) is the only new link. Anything else attached by ref, or by a value declared with `reference-to`, is walked, and it appears if its schema has a pair. |
-| 2 | WALK / RENDER / COMPOSE | **Verified, one refinement.** The walk reads one held database value with 5 queries per level, not a single query (§0.8). Renderers are pure over the node value (the agent pair's database read retires, Astra fix 7). The composer is `units`. |
-| 3 | `:content` / `:address` / `:skip` modes | **Retired by the owner.** Presence of a pair decides skip. Distance decides content versus name: the last level renders at distance 0. Reverse edges still need the existing `:seon.render/units` declaration, because a walker cannot follow every reverse reference safely: the agent has 42 turns, and `:seon.fn/calls` has thousands of reverse holders. |
-| 4 | Order: topological, then by transaction; cycles broken by address | **Verified.** 0 violations and 0 cycles on 157 and 184 real edges (§2.3). The transaction tie-break is required: BFS order of turns is not transaction order. |
-| 5 | Each node renders once | **Verified.** The visited set is the dedupe. A later reference renders as a back-reference: the node's id plus "above". |
-| 6 | Cost follows the graph; nodes cached by digest | **Verified.** O(levels × 5) queries, each bounded by edges touched. 133/133 digests were reused across consecutive turns. The cache is `render-call`'s existing retention with the content digest added to its key (building block §3f). No new cache. |
-| 7 | One block for all consumers | **Verified.** The same structure, walk, order and composer serve the agent context, a task, the namespace page (namespace → reverse `:seon.fn/ns` declared in units) and an error (error → `:seon.error/operation` value → function). §7 names the retired walkers. |
-
-**The owner's three earlier alternatives** (round 2) resolve as follows:
-
-- "A render function for the agent that creates its context" becomes the agent's **pair**, over nodes the walk
-  acquired. The renderer does no acquisition.
-- "The task accumulates data on the turn" stays rejected: `task-delta` retracts removed task entities
-  (`issue.clj:634`), and runtime facts are separate entities (req 2.8, 7.7).
-- "The agent attaches the task and the context is a render on that" is this design.
+| O1 | Standing root task | **Adopted** (§5). |
+| O2 | References become real refs | **Adopted.** The walk is written against refs: EAVT forward, VAET reverse. The five value relations still stored as values use an interim declared join, retired by the references-as-refs lane (§4.1). |
+| O3 | See N first | **Adopted.** Slice S1 is the walk plus the debug page at N=0–3, faces side by side (§7). |
+| O4 | `:seon.render/units` | **Delete it** (§6). Forward refs and components are followed by the walk. Reverse refs come through VAET under the presence rule, bounded by N and a per-attribute collection cap. |
+| R1–R7 | Root's round-3 shape | Verified as in revision 3. The context is the agent's rendering; the three parts stand; there are no mode keywords, by the owner's direction; order is definitions-first plus chronology; each node renders once; cost follows the graph; one block serves every consumer. Corrections are in §11. |
 
 ## 4. Design
 
-### 4.1 Reference rules are declarations (edge-to-owner table, Astra fix 3)
+### 4.1 Edges
 
-Forward refs are followed automatically. A value edge is followed when its attribute declares `:seon.fn/reference-to`
-(the existing key, whose description is widened from "function" to "identity", §10 Q1). A reverse edge is followed
-when the holder schema lists it in `:seon.render/units`.
+**Refs (the target state).**
 
-| Edge | Stored as | Declaration to add | Status |
-|---|---|---|---|
-| agent → task | `:seon.agent/task` handle (new) | `{:seon.fn/reference-to :seon.task/id}` | new attribute, 2 lines |
-| task → subjects and proofs | `:seon.task/tasks` values on fn, ns and test rows | task schema `:seon.render/units [:seon.task/_tasks]`; `:seon.task/tasks {:seon.fn/reference-to :seon.task/id}` | 2 lines |
-| task → must-read | `:seon.task/must-read` symbols | `reference-to :seon.fn/sym` | 1 line |
-| fn → callees | `:seon.fn/calls` symbols | `reference-to :seon.fn/sym` | 1 line |
-| fn → must-read / see-also | `:seon.fn/must-read`, `:seon.fn/see-also` | `reference-to :seon.fn/sym` | 2 lines |
-| fn → contract schemas | `:seon.fn/arities` component → `:seon.fn.arity/input-refs` / `output-refs` keywords | `reference-to :seon.schema/key` on both arity attributes; the component is joined through | 2 lines |
-| test → keywords used | `:seon.fn/keywords` | `reference-to :seon.schema/key`, matching only registered keys, by the AVET join itself | 1 line |
-| fn → namespace | `:seon.fn/ns` ref | none (forward ref) | installed |
-| namespace → its functions | reverse `:seon.fn/ns` | namespace schema units `[:seon.fn/_ns]`, rendered at distance 0 (names) | 1 line |
-| fn → callers | reverse `:seon.fn/calls` | **not declared**: callers are fetched on demand with `(my.program/callers {:seon.program/subject 'f})`, the installed request shape | none |
-| fn → reaching tests | derived gate set | **not an edge**: `(my.program/tests-reaching {:seon.program/subject 'f})` on demand | none |
-| fn → open tasks | forward `:seon.task/tasks` | covered by the `reference-to` above | — |
-| agent → turns | `:seon.agent/runtime` component → `:seon.runtime/turns` | agent units already list the runtime; turns render their saved bytes (building block Q1) | installed |
-| agent → trigger message | `:seon.turn/trigger` ref from the open turn | forward ref | installed |
-| render referrers, config documents, prior art, literal lookups inside proofs | — | **data gaps**: no attribute holds them; named, not walked | gap |
+- Every ref attribute is followed forward (EAVT) and in reverse (VAET).
+- A target is included only if its owning schema has a pair (§2.4). The request's root is always included.
+- The owner's presence rule governs reverse edges too, bounded by N and by `max-collection` per node and attribute.
 
-**Precedence (Astra fix 3).** Subjects and must-reads are level-1 or level-2 nodes, reached before any incidental
-callee, so they always render at distance ≥ 1. A taught tool reached only as a callee is a name at the edge.
+**Interim value edges (retired by design-references-as-refs-opus).** One constant in `walk.clj`, named with its
+retirement, holds `[holder-attribute identity-attribute]` pairs:
 
-### 4.2 The walk
+- `:seon.fn/calls`, `:seon.fn/must-read`, `:seon.fn/see-also` and `:seon.task/must-read` → `:seon.fn/sym`;
+- `:seon.task/tasks` → `:seon.task/id`;
+- `:seon.fn.arity/input-refs`, `:seon.fn.arity/output-refs` and `:seon.schema/references` → `:seon.schema/key`.
+
+The walk follows each pair forward (holder value → identity) and in reverse (identity value → holders). This is an
+explicit, temporary table, not structural guessing (§0.8). It is not written into `:seon.fn/reference-to`, whose
+installed meaning is eid-targeted and reach-bearing (Astra correction 1). Each relation the refs lane converts drops
+its row. **`:seon.fn/keywords` is not an edge:** it records literal mentions and is not a declared reference, a
+point the refs lane decides.
+
+**Components.** An owned child with a render pair is a node. The agent's runtime and its turns are such nodes. An
+owned child without a pair (an arity row) is joined through inside its owner's level. It never becomes a node, and it
+needs no identity. The contract-key join `[?e :seon.fn/arities ?ar] [?ar ?contract-attribute ?k]` is the general
+component step for that case.
+
+**Must-reads and distance.** A transitive must-read, attached to a subject function or namespace, sits one level below
+that subject. At the default N it renders at distance 0, as its name. I keep the owner's ordinary distance rule, as
+Astra advised; §2 no longer claims that every must-read gets positive distance. A task that wants a transitive
+must-read shown in full raises N.
+
+**Data gaps, not walked:** render referrers, config documents read by a test world, prior art, and literal lookups
+inside proofs.
+
+### 4.2 The walk and its bounds
 
 ```clojure
-(seon.render.walk/graph {:seon.db/db db :seon.render.walk/lookup [:seon.agent/id "root"]
-                         :seon.render/distance 3 :seon.sci.admit/caps caps})
-;=> #:seon.render.walk{:nodes [{:seon.render.walk/lookup [:seon.task/id "132fee0467c8"] :seon.render.walk/level 1} …]
-;                      :edges [[source-eid attribute target-eid] …]
-;                      :order [eid …]                     ; §4.3
-;                      :cut   {…}}                        ; present only when a bound was reached
-;  | :seon.render.walk/elided-error | :seon.db/invalid-read-error
+(seon.render.walk/graph
+  {:seon.db/db db :seon.render.walk/lookup [:seon.agent/id agent-id]
+   :seon.render/distance 3 :seon.sci.admit/caps caps :seon.sci.eval/time-limit-ms ms})
+;=> #:seon.render.walk{:root eid
+;                      :nodes {eid {:seon.render.walk/level 1 :seon.render.walk/schema :seon.task/task}}
+;                      :edges [[source attribute target] …]   ; every edge, into visited nodes too
+;                      :order [eid …]                         ; §4.3
+;                      :skipped {schema-or-attribute count}   ; targets with no pair (shown on the debug page)
+;                      :cut {…}}                              ; only when a bound was reached
 ```
 
-- **Structure** (memoized on projection identity): the ref attributes, the `[[attribute identity-attribute]]` value
-  edges, reverse units per schema, component attributes, and the rendered identity attributes. It is O(schema), taking
-  1.1 ms, once per projection.
-- **One level** runs the five §2.2 queries through `seon.db/q`, so evidence capture and refusals apply. Each binds
-  the frontier as `[?e ...]`, and reverse edges bind only the frontier entities whose schema declares them. The next
-  frontier is the targets not yet visited that passed the presence check.
-- **Bounds (Astra fix 4).**
-  - Visited nodes are capped by `max-nodes`, and edges read per level by `max-collection` × frontier.
-  - Each query keeps its own deadline under the existing database bound.
-  - At exhaustion the value carries `:cut` naming the bound, level, visited count, the frontier not expanded and the
-    requery form. Counts are never claimed for work not done.
-- **Entities are pulled once.** Hop 1 content (source, doc, spec, schema form) is pulled with one `pull-many` per
-  node kind, over the nodes that render at distance ≥ 1, using the function-face selector. Nodes at distance 0 need
-  only their identity, already bound by the join.
-- **Replaces** `acquired-tree`/`acquire-entity`/`acquisition-members` and their helpers (§1a). `neighborhood`
-  becomes `units` over `graph` (building block S2), so the page keeps working through one walker.
+**One level runs four parameterized queries through `seon.db/q`, each binding `[?e ...]`:**
 
-### 4.3 N, order and render-once
+1. forward refs, `[?e ?a ?t]` with `[?a ...]` bound to the ref attributes;
+2. reverse refs, `[?t ?a ?e]` with `[?a ...]` bound to the ref attributes, which uses VAET;
+3. interim value edges, both directions:
+   - forward, `[?e ?a ?v] [?t ?i ?v]` with `[[?a ?i] ...]` bound;
+   - reverse, `[?e ?i ?v] [?t ?a ?v]`;
+   - the component step for pair-less owned children;
+4. presence: the target's owning-schema identity attributes, through the projection's owned-key sets
+   (one-render-path 0a).
 
-- **N is the number of levels from the root.** A node at level L renders at distance N − L:
-  - N=0: the root alone;
-  - N=1: the agent and its task's name;
-  - N=2: the task rendered, with its subjects, proofs and must-reads as names;
-  - **N=3 (default for the agent context):** subjects, proofs and must-reads rendered, and their callees and
-    contract schemas as names.
-- **The default lives in the function's `:or`,** and the caller's value wins.
-- **Measured N=3 from the agent** equals N=2 from the task: 134 / 16 / 11 nodes in 14–182 ms (§2.2).
-- **Order.** Kahn's algorithm over use → definition edges gives definitions first. Ties go to the earliest
-  transaction, then the lookup. A remaining cycle is broken at its earliest-transaction member, which renders as a
-  back-reference where it is used. It is O(V + E log V).
-- **Render-once.** The first placement renders the node. Every later edge into it renders `;; ↑ <id>`. Time-ordered
-  entities (turns, messages, errors) have no dependency edges among themselves, so the tie-break orders them.
+That is O(levels × 4) queries. The final plans are recorded in S1 (§2.2 caveat).
 
-### 4.4 Render: pure node pairs
+**Bounds (Astra correction 1).** Each query passes `:max-work`, `:max-results` and `:max-result-weight`, mapped from
+caps as `ns.clj:40-50` does, plus the request's time limit. Bounds apply inside Datahike, before results are
+materialized. When a query refuses, or the visited set reaches `max-nodes`:
 
-Each node renders through the ladder (value key → viewer's namespace function → schema pair → floor) over its pulled
-value plus `:seon.render/distance`. No renderer reads the database.
+- the level stops;
+- `:cut` names the bound, the level, the visited count and the frontier left unexpanded, with a requery form;
+- a partially completed level is reported as partial, never counted as complete.
 
-- **Declared pairs to add:**
-  - `:seon.task/task`: a task renderer that shows the intent, the handle and the callable `(seon.issue/task-edges
-    …)` form, in about 20 lines;
-  - `:seon.schema/schema`: the installed `seon.render.ns/schema-form` (`ns.clj:744`).
-- **The agent pair** is rewritten pure, in about 12 lines: identity, the task handle and the turns-left frame fact
-  from its supplied value. `render-identity-ai`'s issue query and `render-situation-ai`'s call to
-  `bootstrap/situation` leave the renderer (Astra fix 7).
-- **Situation facts:**
-  - the trigger message is an edge (`:seon.turn/trigger`);
-  - turns left stays in the prompt frame;
-  - the unread count is an address, `(seon.turn/unanswered-triggers …)` on demand.
-- **The namespace AI face** renders doc, counts and `(dir ns)` at every distance (§0.3).
+**Acquisition per node** comes from the selector its pair's contract declares, one `pull-many` per node schema:
 
-### 4.5 Compose and the opening
+- task rows: intent and handle;
+- schema rows: `:seon.schema/form`;
+- functions: the function-face selector;
+- namespaces: doc plus bounded counts, or `:unknown` at a cut;
+- turns: their saved units.
 
-- `units` receives the `graph` value's ordered nodes as its `:seon.render.walk/units` source (building block §3a).
-  It opens one floor allocation B, renders each node once and returns rendered units with occurrence ids = the node
-  path.
-- The HTML face is the same unit tree: the owner's debug page.
-- **The opening is one form:** `(my.render/walk {:seon.render.walk/lookup [:seon.agent/id "root"]})`. That is the
-  building block's Q2 custody adapter over `graph` + `units`, with defaults supplied for the database and the viewer.
-- The REPL evaluates it once, records it and prints it. Its read evidence is exactly the walk's queries, since
-  `ca17618c0` scopes the sink to the evaluation and its shown result.
-- `(help)` stays the first opening form.
+A node at distance 0 needs only its identity, which the join already bound.
 
-### 4.6 Activation order (Astra fixes 5, 6, 8)
+### 4.3 N and order (Astra correction 2)
 
-1. **W1, unused.**
-   - `graph` (structure, levels, order, cut), with its schema and the declarations of §4.1 and §4.4.
-   - A focused regression over the three real tasks, asserting three things: the node kinds; zero use-before-definition
-     edges; turns in transaction order.
-   - Nothing calls it yet.
-2. **W2, one activation**, after building block S2/S3 supply compositions and the shared floor.
-   - It lands in one loadable commit: `declared-sources` returns the two forms; the agent pair goes pure; the
-     namespace AI face is fixed; `neighborhood` delegates to `units` over `graph`.
-   - Prerequisites:
-     - a standing root task;
-     - `:seon.agent/task` assigned to every existing agent;
-     - one migration boundary for unmigrated issue workers, who keep `seon.issue.opening` until T3.
-   - Witnesses:
-     - a context, an identity-only agent and an agent nested in a message each select their own pair;
-     - the same value renders both faces;
-     - historical bytes are unchanged.
-3. **T0** (independent, any time): delete the production-unreachable bootstrap candidates and `ordered-episode` with
-   their helpers. Six named tests retire with them (`bootstrap_test.clj:83, :162, :223, :279, :352, :373`). T0 has
-   exclusive credit, so the building block drops Q4's 62 lines.
-4. **T2** (after §0.5's producer fix): the refresh of §5.
-5. **T3** (after 7.11): delete `seon.issue.opening`, the require at `agent.clj:82` and the caller at `:301`.
-6. **C** (after page parity is proved): delete the per-entity acquisition (§1a, about 498 lines) and the
-   namespace-page walkers (100).
+**N counts levels from the root.** A node at level L renders at distance N − L.
 
-## 5. Refresh: reads whose captured subjects are graph nodes (Astra fix 1 applied)
+| Agent-context N | What renders |
+|---|---|
+| 0 | the root alone |
+| 1 | the agent, with its task and other neighbours as names |
+| 2 | the task in full; its subjects, proofs and must-reads as names |
+| 3 (default) | subjects, proofs and must-reads in full; their callees and contract schemas as names |
 
-The subject of a read comes from its **captured evidence**, the authority (`db.clj:892-942`):
+N is the function's `:or` default, and the caller's value wins. Agent-root counts at N=3 are measured in S1; §2's
+task-root counts are not agent-root counts.
 
-- the pattern attributes and values of each dependency-plan source;
-- the query arguments of its `:seon.db/read-request`;
-- the eid or lookup of its pull.
+**The ordering relation uses definition edges only:**
 
-A retained read is re-checked when any of these hold:
+- function → callee;
+- function → contract schema;
+- schema → referenced schema;
+- test → function;
+- function → must-read.
 
-- it names a graph node, by eid, identity value or lookup;
-- its patterns name an attribute of a node's schema with no value bound, which is how an empty result that a new
-  insertion could fill is recognized;
-- its evidence is unknown: an `:all` plan or no attributable subject. These are kept conservatively. 682 of root's
-  18,673 rows are of this kind today.
+Each such edge means the target is defined before the holder, so the sort runs over the **reversed** edges: nodes
+with no remaining definitions go first.
 
-It is left alone only when its evidence **positively** names subjects that are all outside the graph. Such a read is
-not re-run; its shown text stays as that turn's observation, and the agent re-runs it on demand.
+**Membership edges are traversal only.** Task ↔ subject, namespace ↔ function, agent → turn and message ↔ agent make
+nodes reachable but never constrain order.
 
-**Context first.** `system-turn` evaluates the opening's walk form first. It then builds the plan against that one
-evaluation's node set. The walk runs once, and the plan never selects against stale membership. After a restart
-without a live value, the node set comes from the recorded evaluation's evidence, never from parsing shown text.
+**Cycles.** Strongly connected components of the definition relation are found with Tarjan's algorithm. Each
+component renders once, at the position of its member with the smallest `(opened-tx or first transaction, lookup)`.
+Its other members render in the same stable order. An edge that closes the cycle renders as `;; ↑ <id>`.
 
-**Cost.** The evidence pull stays in the database owner. Selection first queries evaluations that have evidence and
-no receipt or effect, keeping `read-only-evaluation?`'s non-empty-evidence concern as a join. It pulls evidence only
-for those. After `ca17618c0`, each form carries only its own reads, so the retained evidence stops growing with
-platform work. The target is the whole plan under 50 ms for root's history once pre-fix rows age out; parent-versus-
-change timing is required at landing.
+**Chronology.** Time-bearing nodes sort by `:seon.turn/opened-tx` (turns), `:seon.message/id` transaction (messages),
+then by lookup. A message shared by two turns renders once, at its first turn. Its later references are
+back-references.
 
-## 6. Agents without a task
+The whole ordering costs O(V + E log V).
 
-- **An absent task** makes the task edge absent. The walk still renders the agent: identity, turns and trigger at
-  N=3. The composer ends with the declared `:seon.task/no-task-error`, which names the member `:seon.agent/task`, the
-  expected handle, and the call that lists open tasks.
-- **A dangling handle** is a distinct `:seon.agent/dangling-task-error` at the walk. `task-findings`' symbol-keyed
-  schema is not coerced (Astra fix 6).
-- **An absent agent** is today's `agent-not-found` refusal.
-- **There is no namespace fallback.** Root gets a **standing root task** (`resources/seon/tasks/seon.cluster.edn`)
-  whose must-reads include the status, faults and agents functions. Current observations stay one call away, and
-  notifications keep their delivery path.
-- **MCP** reaches this through the shared agent/REPL entrance, once branch acquisition carries an agent identity. That
-  is a one-REPL prerequisite, named but not priced here (Astra fix 6).
+### 4.4 Render: pure pairs over acquired values (Astra correction 3)
 
-## 7. Ledger
+**Pairs added in S2:**
 
-| Slice | Change | Source + | Source − | Declarations |
-|---|---|---:|---:|---:|
-| T0 | bootstrap candidates (502), `ordered-episode` and its helpers (~108) | 0 | 610 | −8 est. (`seon.bootstrap.edn:2-8`) |
-| W1 | `graph`: structure (~15), level queries (~25), order and render-once (~20), cut (~10); the task renderer (~20) | 90 | 0 | +32: 11 `reference-to` or units lines, the `:seon.agent/task` attribute 2, the graph value schema 8, the no-task and dangling-task errors 11 |
-| W2 | opening forms (~12), pure agent pair (~12), namespace face at every distance (~8), `neighborhood` → `units` over `graph` (~10), context-first stage (~10); deletes the `declared-sources` walk and the renderer-side reads | 52 | 93 + 35 (`render-situation-ai`) | 0 |
-| T2 | evidence-subject refresh (§5) | 60 | 74 | 0 |
-| T3 | `seon.issue.opening` (conditional, 7.11) | 5 | 233 | −1 |
-| C | per-entity acquisition (~498) and namespace-page walkers (100), after parity | 10 | 598 | 0 |
-| **Total** | | **217** | **1,643** | **+23** |
+- `:seon.task/task`: AI and HTML over the acquired task row. They show the intent, the handle, and the expansion call
+  `(seon.issue/task-edges (seon.db/db) "<handle>")`.
+- `:seon.schema/schema`: AI and HTML over `:seon.schema/form`. The definition itself is printed by the floor. The
+  `doc` form is not executed.
 
-- **Net.** Source is **−1,426** if every conditional slice lands, and −711 for T0 + W1 + W2 + T2. Regressions are
-  about +150 lines. The retired bootstrap and history tests are credited when they land.
-- **Size bounds.** W1 is at 90 added lines and W2 at 52; every slice is under 100 added source lines. W1's
-  declarations are priced separately.
-- **Booked in the building block, not recounted:** Q1 (`history`, 49), Q2 (`seon.render/walk`, 159), Q3 (faults,
-  66), Q5 (`derive-context!`, 74), Q6 (transcript adapters, 204). Q4's 62 lines move to T0 here.
+**Rewritten pure in S3:**
 
-## 8. Simplest alternative
+- the agent pair, both faces: identity, the task handle, and turns left from the frame's value;
+- the namespace pair, both faces: doc, bounded counts, and `(dir ns)` at every distance.
 
-**Keep the per-entity walk and add value-edge following inside `acquired-tree`.** That is about +30 lines.
+**Presence and selection are separate questions.**
 
-- It works for small tasks.
-- It issues 483–3,823 queries per context (§2.2), 1 + values + checks per node. Its cost grows with the frontier's
-  row sizes.
-- It leaves the namespace page's schema-closure walker and `ordered-episode` as separate orderers.
+- *Membership* (is the node included?) is decided only by a schema pair.
+- *Selection* (which face renders it?) follows the full ladder: the value's own key, then the viewer's namespace
+  function, then the schema pair, then the floor.
 
-**Rejected** on the measured query counts. The set-at-a-time walk is roughly the same size and replaces three
-walkers.
+So a viewer override changes how a node looks, never whether the walk visits it.
 
-## 9. Required witnesses at landing
+Pairs are compiled against the packaged projection with Malli's `validator` and `explainer` (`core.cljc:2637, :2653`).
 
-1. The three real tasks' node kinds and counts, and zero use-before-definition edges.
-2. Turns placed in transaction order. BFS order alone fails, measured.
-3. A cycle is rendered once, with its back-reference.
-4. Missing pairs are skipped. A task without a pair is a named failure, not a silent skip, because it is the context
-   root.
-5. Cache: with no program change between two turns every node is a hit, and a publication re-renders only the changed
-   digests.
-6. Refresh:
-   - an empty-result read is re-checked after an insertion into a node schema's attribute;
-   - an `:all` read is kept;
-   - a read positively naming only non-node subjects is not re-run;
-   - an effect call is never re-run (after §0.5's fix).
-7. Parent-versus-change timing of `graph` + `units` and of `system-plan`, the queries per level, and memory, at
-   N=1/2/3 and on a high-degree root. The high-degree root is `evaluate`, with its 107 calls.
+### 4.5 Cache and composition (Astra correction 4)
 
-## 10. Open questions for the owner (priced; simplest viable first)
+`render-call`'s existing retention keeps every input it tracks today (`render.clj:783-827, :859-875`):
 
-1. **The value-edge key.**
-   - **A (recommended):** widen `:seon.fn/reference-to`'s description to "identity attribute named by a reference
-     value"; 1 line; its two readers (`fn.clj:1698`, `test.clj:388`) keep their meaning for `:seon.fn/sym`.
-   - **B:** a new `:seon.db/reference-to` plus migrating one declaration and two readers; about 1 hour; the cleaner
-     name.
-   - **C:** derive value edges by matching attribute and identity value types; 0 declarations, but it guesses: a
-     symbol attribute is not always a reference.
-2. **Reverse edges.**
-   - **A (recommended):** declared in the existing `:seon.render/units`; about 3 lines now.
-   - **B:** follow every reverse ref and reverse value; 0 declarations, but 42 turns, thousands of `:seon.fn/calls`
-     holders, and a context bounded only by `max-nodes`.
-   - **C:** no reverse edges; this loses the task's subjects and proofs.
-3. **Default N for the agent context.**
-   - **A (recommended):** N=3 from the agent (§4.3).
-   - **B:** N=2; the task's references become names only.
-   - **C:** N=4; 348 nodes for 132fee and 376 ms cold on `as-of` (§2.2).
-4. **Taskless root.**
-   - **A (recommended):** a standing root task (5 EDN lines).
-   - **B:** no-task error only; root must ask itself.
-   - **C:** refuse the turn; this stops root.
+- the program rows the producer reached;
+- the projection;
+- the selected callable and its arguments;
+- the environment;
+- the captured reads.
 
-## 11. Astra review 595048666: each fix, applied or superseded
+The node's content digest is added to that key. Distance, viewer, profile and membership are already inputs. There is
+no whole-program commit key.
 
-| Fix | Status | How |
+Every prompt is the **complete current context**. Render-once is request-local deduplication. Cross-turn reuse
+returns the retained bytes of unchanged nodes, and the composer still emits every required node in order. HTML may
+patch only the changed nodes.
+
+### 4.6 The opening and activation
+
+- **The opening is `(help)` plus one walk form.** The walk form goes through the building block's Q2 `my.*` custody
+  adapter, a dependency of S3. It uses the agent's configured lookup, never a literal.
+- **Its evaluation value is the `graph` value.** The value is printed by the graph schema's pair, which composes
+  through `units`. So the context-first refresh stage reads membership straight from that result (§4.7).
+- **Pair publication and implementation load together.** A published pair changes selection for existing values
+  immediately, so S2 lands its pairs and their functions in one loadable commit (Astra correction 6).
+
+### 4.7 Refresh (Astra correction 5)
+
+**Context first.** `system-turn` evaluates the walk form first. The plan then selects retained reads against that one
+result's node set. After a restart, the walk is reacquired once on the ordinary path. Membership is never
+reconstructed from evidence or from shown text.
+
+**A retained read is skipped only if every captured dependency is positively outside the graph.** Each dependency
+source (plan, request, pull) must satisfy all of:
+
+- every constrained entity position resolves: an eid, a lookup, or an identity value;
+- none of those resolved entities is a graph node;
+- the source database or branch coordinate is the context's.
+
+Everything else is re-checked:
+
+- `:all` plans;
+- unattributable sources;
+- mixed dependencies;
+- patterns with the entity unbound, whether the value is bound or not, because an insertion can make them relevant;
+- literal arguments that are not identities.
+
+The effect-producer fix (§0.5) comes first. Context-first must never evaluate a refresh candidate twice during the
+transition.
+
+## 5. The standing root task (owner O1)
+
+One entry in `resources/seon/tasks/seon.cluster.edn`:
+
+- **name** `"orchestrate-platform"`, **kind** `:namespace`;
+- **intent** "Orchestrate the agents and keep the platform healthy: every open fault has an owner, every running lane
+  is progressing, and the platform health checks are green";
+- **must-read** `seon.cluster.status/agents` and `seon.error/for-agent`.
+
+Its subject is namespace `seon.cluster`, through a `:seon/tasks #{"<handle>"}` annotation on the `ns` form.
+
+**Proofs** are the platform health deftests, each annotated with the task's handle. Root names them. I have not
+verified which existing tests qualify, so none is listed here.
+
+**References:**
+
+- **Open faults** come through the reverse ref `:seon.error.occurrence/agent` into the root agent: 4 holders today
+  (§2.4). They render through the error pair.
+- **Running lanes are a data gap.** No ref links a lane agent to root; `:seon.message/from` has 16 holders but means
+  something else. The references-as-refs lane should decide whether lane agents get a `:seon.agent/task` whose task
+  names root's task (a `:seon.task/needs` ref) or another relation. Until then, lanes are one call away:
+  `(seon.cluster.status/agents {})`.
+
+Root's opening at N=3 is its identity, this task and its must-reads, open-fault occurrences, the trigger, and recent
+turns. There is no namespace dump and no ask-yourself error.
+
+## 6. Deleting `:seon.render/units` (owner O4)
+
+| Use today | What it does | What the walk gives instead |
 |---|---|---|
-| 1 Refresh correctness | **Applied** | Subjects come from captured evidence; unknown and `:all` reads are kept; empty results are covered by node-schema attributes; a context-first stage evaluates the walk once; the form-constant rule is withdrawn (§5, §2.6) |
-| 2 Effect replay | **Applied** | The claim that selection contains it is removed; the producer fix is T2's prerequisite (§0.5) |
-| 3 Reference families, precedence, N | **Applied** for the edge table (with data gaps named) and for N=0–3 (§4.1, §4.3). **Superseded** for the taught-tool rule and its precedence: under the owner's model, subjects and must-reads are reached at levels 1–2 and render with distance left, while incidental callees are names at the edge. No exclusion list remains (§2.5) |
-| 4 Traversal policy and work bounds | **Superseded** for the separate task-view walker: there is no task-specific traversal; the one generic walk follows declared value edges. **Applied** for the bounds: `max-nodes`, per-query deadlines and a named cut, with timings at N=2/3 and a high-degree root required (§4.2, §9.7) |
-| 5 Activate one declared value with both faces | **Applied** | W1 is unused; W2 is one loadable activation after building block S2/S3, with selection witnesses for a context, an identity-only agent and an agent nested in a message (§4.6) |
-| 6 Assignment, migration, MCP | **Applied** | A standing root task and assignment of every agent come before W2; absent agent, absent task and dangling handle are distinct; unmigrated issue workers keep their opening until T3; MCP is named as a one-REPL prerequisite (§6) |
-| 7 Renderer-side reads; callable expansions | **Applied** | The situation and identity reads leave the renderers; turns-left stays in the frame and the trigger is an edge; expansions use `{:seon.program/subject 'f}` (§4.1, §4.4) |
-| 8 Ledger ownership | **Applied** | T0 has exclusive credit (Q4's 62 lines move here); the six affected tests are named; T3 removes the require at `agent.clj:82` and the caller at `:301`; the declarations are priced (§7) |
+| Agent schema (`seon.agent.edn:38-46`), 8 entries | Lists which relations render on the agent page and opening, and their order | `:seon.agent/plan`, `:seon.agent/settings`, `:seon.agent/namespace` and `:seon.agent/runtime` are forward refs and components, followed automatically. `:seon.issue/_agent`, `:seon.message/_to` and `:my.note/_agent` are reverse refs, found through VAET with presence. `:seon.error/of-steward` is a **derived concern** with no datoms (`seon.error.edn:228-236`, `:seon.render/derived true`); the root task's open-fault references replace it, and its faults renderer is building block Q3. Order comes from §4.3 |
+| Issue schema (`seon.issue.edn:46`), 4 entries | Lists the relations shown on an issue page | `:seon.issue/functions`, `:tests`, `:errors` and `:members` are forward refs, followed automatically |
+| `:seon.cluster.status/root` (`seon.cluster.status.edn:6-7`) | Attaches a derived status concern to the root agent page | Not a relation. The root task's must-read `seon.cluster.status/agents` and its fault references replace it. The derived-concern schema `:seon.cluster.status/concern` becomes the value of that ordinary call, rendered by its pair |
+| `walk.clj:94-101` `declared-concerns` (and its use in `connection-attributes`) | Reads the list for traversal | Replaced by the §4.1 structure. Already inside C's 482 lines, so no extra credit |
+| `web.clj:694-715` `declared-entity-units`, `:1682-1719` reverse-units pulls | The entity debug page pulls each declared reverse relation | The page renders the `graph` of its subject. That is 22 + 38 = 60 lines |
 
-**Parallel research lane.** `docs/research/agent-platform/render-graph-research-2026-09-25.md` did not exist when
-this revision was committed (`ls` at f2adbfa00). Its measurements are not adopted here. When it lands, root should
-reconcile its numbers against §§2.2–2.4 before Astra's re-review.
+**The deletion, slice U**, lands after S3 and after C's conversion of `web.clj`:
+
+- the `:units` definition (`seon.render.edn:171-175`, 5 lines) and the three schema entries (about 13 lines);
+- the two web definitions (60 lines);
+- `:seon.render/derived` and its reader at `walk.clj:671`, once Q3 and the status conversion land (about 4
+  declaration lines).
+
+Net: **−68 source lines and about −22 declaration lines**, with no replacement key.
+
+**Risk.** Following every reverse ref can pull in many holders: 42 turns reverse-refer to root. The bounds are N,
+`max-collection` per node and attribute (a cut names the rest), and the presence rule. The composer shows the newest
+`max-collection` turns. Whole-unit prompt selection (one-render-path §5) still owns admission.
+
+## 7. Slices
+
+### S1: the walk and the owner's debug page (first)
+
+**What it delivers.**
+
+- `seon.render.walk/graph`: the §4.1 structure, the §4.2 levels and bounds, the §4.3 order.
+- Nothing on the agent path calls it.
+- On `/agent/{id}/debug`, a `?n=0..3` selector. It shows the AI face and the HTML face side by side for each node,
+  in graph order. Each node is rendered through today's `render/render-call` per face, which is the one existing
+  render path. The page also shows a panel of `:skipped` targets (schemas with no pair, with counts) and the `:cut`
+  when one was reached.
+- The existing route and debug page (`route.clj:15`, `web.clj:3667`) are reused. No new route is added.
+
+**What it does not do.** It changes no pair, no opening and no refresh. Task and schema nodes render through the
+floor until S2, so the page shows the owner exactly what is missing.
+
+**File grant (exact):**
+
+| Path | Change | Estimate |
+|---|---|---:|
+| `src/seon/render/walk.clj` | add `graph`, its structure memo, the level queries and the order; no existing function changes | +65 |
+| `resources/seon/schemas/seon.render.walk.edn` | `:seon.render.walk/graph`, node, edge and cut schemas | +12 declaration lines |
+| `src/seon/render/web.clj` | the N selector and side-by-side node faces on the agent debug page | +30 |
+| `test/seon/render/walk_graph_test.clj` (new) | a world built by canonical writers (task EDN through `seon.issue/index-tasks!`, program rows from test source) | +70 test lines |
+| `test/seon/render/web_debug_test.clj` | one case: N=0..3 renders both faces in the same node order | +20 test lines |
+| `docs/prds/agent-platform/landing/lane-impl-task-graph-s1-2026-09-25.md` (new) | the landing note | — |
+
+The test world asserts:
+
+- node kinds per level;
+- no definition placed after its user;
+- turns in `opened-tx` order;
+- the cut at `max-nodes`;
+- presence skipping;
+- four queries per level.
+
+**Bounds and probes.** Source is ≤ 100 added lines (65 + 30). If `web.clj`'s share grows past 35 lines, the lane
+stops and reports. The proofs S1 must record:
+
+- the query plans;
+- queries per level;
+- timings at N=0/1/2/3 from `[:seon.agent/id "root"]` and from the three tasks' roots;
+- memory;
+- page paint.
+
+**Dependencies:** none. The refs lane may land before or after; its conversions only shrink the interim table.
+
+### Later slices
+
+| Slice | Change | Prerequisites |
+|---|---|---|
+| S2 | task and schema pairs, both faces; the task entry, a data file; pairs and their functions in one commit | S1 |
+| S3 | the opening switches to `(help)` + the walk form; agent and namespace faces become pure; situation AI and the `declared-sources` walk retire | building block S2/S3 (composition, shared floor) and Q2 (`my.*` adapter); the standing root task; `:seon.agent/task` assigned to every agent; unmigrated issue workers keep one ordinary opening acquisition (their `issue.opening/source` call, moved out of the renderer) until T3 (Astra correction 7) |
+| T0 | delete the bootstrap candidates and `ordered-episode` with their tests | none |
+| T2 | evidence-scoped refresh (§4.7) | the effect-producer fix; S3 |
+| T3 | delete `seon.issue.opening` and its require and caller | issue → task migration (requirement 7.11) |
+| R | refs lane conversions delete interim table rows | design-references-as-refs-opus |
+| C | delete per-entity acquisition and the namespace walkers after converting `web.clj:2021-2058`, `render-data` and their tests | S3 |
+| U | delete `:seon.render/units` (§6) | S3, C, building block Q3 |
+
+## 8. Ledger (Astra's comparable spans; estimates, not measured diffs)
+
+| Slice | Source + | Source − | Declarations |
+|---|---:|---:|---:|
+| S1 | 95 | 0 | +12 |
+| S2 | 40 | 0 | +4 |
+| S3 | 52 | 128 | +13 (`:seon.agent/task` 2; no-task, dangling-task and absent-agent errors 11) |
+| T0 | 0 | 602 (502 + 100) | −8 est. |
+| T2 | 60 | 74 | 0 |
+| T3 | 5 | 233 | −1 |
+| C | 10 | 582 (482 + 100) | 0 |
+| U | 0 | 60 | −22 |
+| R | −10 (interim table rows) | 0 | per refs lane |
+| **Total** | **252** | **1,679** | **−2** |
+
+- **Net:** −1,427 source lines if every conditional slice lands, and −677 for S1 + S2 + S3 + T0 + T2.
+- **Tests:** about +150, with the retired bootstrap, episode and history tests credited when they land.
+- **Booked elsewhere:** Q1, Q2, Q3, Q5 and Q6 are the building block's. Q4 moves here.
+
+## 9. Required witnesses
+
+1. **Graph shape.** Node kinds and counts for the three tasks and for the root agent at N=0–3. No definition is placed
+   after its user. Membership cycles do not constrain order. A definition cycle renders once, with a back-reference.
+2. **Chronology.** Turns are placed by `opened-tx`. A shared message renders at its first turn.
+3. **Presence.** Pair-less targets are skipped and counted. The root is always rendered. Viewer overrides change faces
+   only.
+4. **Bounds.** Refusal and the cut report a partial level honestly. Query plans and seeks are recorded.
+5. **Cache.** Hits are counted, not inferred from digests. A publication re-renders only reached changed inputs. The
+   complete context is emitted every time.
+6. **Refresh.** An empty-result read is re-checked after an insertion. `:all` and mixed dependencies are kept. A read
+   through an indirect result or binding is kept. A changed task reselects. An effect call is never re-run.
+7. **Timing.** Parent versus change for `graph`, `units` and `system-plan` at N=0–3, plus a high-degree root
+   (`evaluate`, 107 calls), with memory.
+
+## 10. Open questions (priced; simplest viable first)
+
+1. **The interim value-edge table.**
+   - **A (recommended):** one constant in `walk.clj`, each row deleted by the refs lane; 0 declarations; a named,
+     temporary hand list.
+   - **B:** a new declared property on each attribute, 8 lines across 4 schema files, then deleted again by the refs
+     lane.
+   - **C:** wait for the refs lane before S1; S1 then reaches only ref edges, so the task's functions would be missing
+     from the page.
+2. **Running lanes for root.**
+   - **A:** keep them as the `seon.cluster.status/agents` call.
+   - **B (recommended):** the refs lane adds a lane-task → root-task relation (such as `:seon.task/needs` as a ref);
+     about 2 declaration lines plus writer work in that lane.
+   - **C:** a derived concern; rejected, since it is the `:seon.render/derived` machinery §6 deletes.
+
+## 11. Review dispositions
+
+### Astra round 3 (67a0358ab)
+
+| Correction | Disposition |
+|---|---|
+| 1 Walk implements the declared graph, with real bounds | **Applied.** The final parameterized query families (§4.2) include ordinary reverse refs, see-also, forward task handles and schema references. There is a component rule. `reference-to` is not reused. Bounds pass into `seon.db/q`, with a partial-level cut. The AVET cost claim is withdrawn pending S1's recorded plans |
+| 2 Traversal edges separate from definition order | **Applied.** The definition relation only, reversed; membership edges are traversal only; Tarjan components; `:seon.turn/opened-tx`; transitive must-reads at distance 0 stated; agent-root counts measured in S1 |
+| 3 Real task and schema pairs; pure inputs for both faces | **Applied.** S2 pairs over acquired rows; `schema-form` withdrawn; namespace and agent HTML included in S3; per-kind acquisition; presence and selection separated |
+| 4 Retention keeps all inputs; complete context | **Applied** (§4.5) |
+| 5 Evidence refresh without reconstruction | **Applied.** Membership comes from the newly acquired graph, reacquired after a restart; every dependency must be positively outside; the additional cases are in §9.6 |
+| 6 Gate the opening on the complete graph | **Applied.** S1 changes nothing on the agent path; S2 publishes pairs with their implementation; S3 depends on building block S2/S3 and Q2; configured lookup |
+| 7 Migration, deletion credit, callers | **Applied.** Issue workers keep one ordinary opening acquisition until T3; the episode test is added to T0; C converts `web.clj:2021-2058`, `render-data` and the tests first; root must strike Q4 and S5 from the building block |
+
+### Astra round 2 (595048666)
+
+As dispositioned in round 3:
+
+- fixes 2, 5, 6 and 7 are closed;
+- fix 1's remedy is superseded by captured-evidence refresh (now completed by correction 5);
+- fix 3's taught-tool policy is superseded by the owner's distance model, with its coverage completed by correction 1;
+- fix 4's task walker is superseded by the one walk, with its bounds completed by correction 1;
+- fix 8 is completed by correction 7.
+
+The parallel lane's `render-graph-research-2026-09-25.md` had not landed when this revision was committed. Root
+should reconcile its measurements against §2 when it does.
 
 ## 12. Unresolved risks and out-of-scope findings
 
-This lane writes one file, so root files these. Existing issues were not searched for 1–3.
+This lane writes one file, so root files these. Existing issues were not searched for items 1–3.
 
 1. **Effect calls pass `read-only-evaluation?`** (§0.5). Suggested issue:
    `docs/seon/issues/effect-calls-pass-the-read-only-refresh-test.md`.
@@ -526,9 +603,9 @@ This lane writes one file, so root files these. Existing issues were not searche
    `docs/seon/issues/task-must-read-links-are-not-resolved.md`.
 3. **`latest-evaluations` pulls all history evidence** (§0.4), over 1 s per system turn until T2. Suggested issue:
    `docs/seon/issues/system-plan-pulls-every-retained-read.md`.
-4. **The namespace AI face dumps at distance ≥ 1** (§0.3). This is one-render-path sites 16/17, and it must land
-   before W2.
-5. **The probes used `datahike.api/q` directly** in an inline form. Production goes through `seon.db/q`, whose
-   evidence and decoding cost on these queries is unmeasured.
-6. **Timings are single samples** on a default under concurrent test load. Nothing is installed.
-7. **This design depends on `ca17618c0` being loaded;** default predates it. **RESET NEEDED: no.**
+4. **Renderers read the database** (§0.3): namespace AI and HTML, agent HTML. S3 fixes them.
+5. **`web.clj` is 3,811 lines.** S1 adds about 30. A shrink assignment for that file is outside this lane.
+6. **The probes called `datahike.api/q` directly.** Production goes through `seon.db/q`, whose evidence and decoding
+   cost for these queries is unmeasured. Timings are single samples under test load.
+7. **Loadability is unproven.** No slice has been loaded.
+8. **This design depends on `ca17618c0` being loaded.** Default predates it. **RESET NEEDED: no.**
