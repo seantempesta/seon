@@ -8,6 +8,7 @@
             [seon.render.ns :as render.ns]
             [seon.render.test :as render.test]
             [seon.render.walk :as walk]
+            [seon.schema :as schema]
             [seon.test-support :as support]
             [seon.program :as program]))
 
@@ -151,3 +152,26 @@
        (is (str/includes? page "href=\"/ns/seon.id\"") page)
        (is (not (str/includes? page "seon.id/id"))
            page)))))
+
+(deftest declared-identity-and-producer-lookups-name-their-owners
+  ;; Slices 0a/0b of the one render path: ownership is the identity
+  ;; attribute's declared row schema over a closed key set, and an error's
+  ;; alternatives are its own operation's declared returns.
+  (let [projection (schema/handed-projection)
+        owner #(#'render/entity-owner projection %)
+        ambiguous (#'render/ambiguity 'entity-pairs.fixture :seon.render/ai
+                                      ['entity-pairs.fixture/a 'entity-pairs.fixture/b])]
+    (is (= :seon.agent/agent (owner {:seon.agent/id "root"})) "a partial entity is owned")
+    (is (nil? (owner {:seon.agent/id "root" :seon.render/output :seon.render/ai}))
+        "an envelope carrying a foreign key stays on the floor")
+    (is (nil? (owner {:seon.agent/id "root" :seon.turn/id "t"})) "conflicting identities own nothing")
+    (is (= :seon.error/error (owner {:seon.error/id "e" :seon.error/signature "s"})))
+    (is (nil? (owner {:db/id 1})) ":db/id alone names no owner")
+    (is (= #{:seon.schema/key :seon.fn/sym :seon.ns/name :seon.lint/id :seon.test/sym
+             :seon.fn.file/relative-path}
+           (set program/identity-attributes))
+        "data identity owners do not become program families")
+    (is (= [:seon.render/ambiguous-error] (#'render/error-alternatives projection ambiguous)))
+    (is (nil? (#'render/error-alternatives
+               projection (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
+        "an uncontracted operation names no alternatives")))
