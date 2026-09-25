@@ -101,7 +101,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 | Task ingestion + gate + adoption | green (46 assertions); Astra `5fb38b91f`: ingestion accept after fixes, publication/adoption revise (3 P1s) — lane fix-ingestion-p1s-opus |
 | Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
 | Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
-| REPL S1 (definition authority) | entry-gate 6/0 green; sci.eval-test 3 possibly new reds being checked; Astra review after |
+| REPL S1 (definition authority) | entry-gate 6/0 green; Astra `ef099dccf` REVISE (4 P0s: incomplete observed set, metadata via SCI seam, unique occurrence, restore over the real execution) — lane revising |
 | Turns | a turn never completes (`cluster.turn-test` hang) — lane fix-turn-hang-opus |
 
 ### Designs (authorities; each revised in place)
