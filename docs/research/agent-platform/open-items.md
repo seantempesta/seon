@@ -101,7 +101,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 | Task ingestion + gate + adoption | green (46 assertions); Astra `5fb38b91f`: ingestion accept after fixes, publication/adoption revise (3 P1s) — lane fix-ingestion-p1s-opus |
 | Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
 | Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
-| REPL S1 (definition authority) | entry-gate 6/0 green; Astra `ef099dccf` REVISE (4 P0s: incomplete observed set, metadata via SCI seam, unique occurrence, restore over the real execution) — lane revising |
+| REPL S1 (definition authority) | Astra REVISE `ef099dccf`: P0-A/C `bbbdbd5bd`, P0-B `51dda24e9` (SCI fork e663d9e2 pushed) landed; entry-gate on 6ab6bdc1: 2 fail + 1 error back with the lane; P0-D next |
 | Turns | nested as-of view re-keyed the projection per read (36 s prompts) — fixed `68eb9d310`, but the regression still hangs on default after restart; TOP HARNESS DEFECT: an overdue member blocks every later body until JVM replacement (issue an-exited-overdue-test-member-still-holds-its-test) — lane fix-turn-hang-opus round 2 |
 
 ### Designs (authorities; each revised in place)
@@ -131,6 +131,14 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 - Operational: the clj-kondo dependency cache empties across restarts (refill `(seon.fn.analyzer/analyze-dependencies!)`);
   MCP eval echoes every stderr line; adding reference-code submodules forces "JVM RESTART NEEDED"; `init --changed` runs a
   full refresh; publication takes 25–47 s; the testing skill wrongly says `seon.test/run` does not arm contracts.
+
+### Operating checklist (learned 2026-09-25)
+- Publication reads the working tree: park dirty lane files first (`tmp/orchestrator/parked/<name>-<file>.patch`, one per
+  file), publish, then tell each owner to `git apply` its own patch.
+- A dependency or fork bump (SCI, clj-kondo, datahike gitlinks) needs `(seon.fn.analyzer/analyze-dependencies!)` BEFORE
+  `bin/seon down && bin/seon start`, or startup refuses "clj-kondo holds no analysis of …".
+- An overdue test member blocks every later body until a JVM replacement: avoid running known-hanging tests (turn tests)
+  until their fix lands; restart with `down`/`start` (never reset) to clear it.
 
 ### Where evidence lives
 Ledger `tmp/orchestrator/file-ownership.md` · run queue `tmp/orchestrator/verification-queue-2026-09-24.md` · runner
