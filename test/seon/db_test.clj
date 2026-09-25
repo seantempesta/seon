@@ -720,7 +720,7 @@
                                   (dissoc :seon.db/read-index-patterns))
                              @captured))]
          (test-support/transacted!
-          connection [[:db/add [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "unrelated"]])
+          connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "unrelated"})])
          (is (true? (db/read-evidence-current? @connection evidence))
              "an unchanged result replays equal")
          (test-support/transacted!
@@ -753,7 +753,7 @@
            "the read refuses naming the installed value type")
        (is (empty? @captured) "a refused read leaves no evidence")
        (test-support/transacted!
-        connection [[:db/add [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "moved"]])
+        connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "moved"})])
        (is (false? (db/read-evidence-current? @connection evidence))
            "evidence retained before the check replays as a refusal")
        (is (vector? (db/read-evidence-changes @connection evidence basis)))))))
@@ -1303,8 +1303,7 @@
                  outcome (future
                            (db/transact!
                             connection
-                            [[:db/add [:seon.fn/sym 'seon.db/transact!]
-                              :seon.fn/doc "bounded-write-deref-target"]]))]
+                            [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "bounded-write-deref-target"})]))]
              (test-support/await-event!
               started "the real Datahike writer to enter the blocked transaction")
              (let [refusal
@@ -1840,8 +1839,8 @@
      (let [existing (db/pull (db/db connection) '[*] [:seon.fn/sym (quote seon.id/id)])]
        (is (some? (:db/id existing)) "the canonical fixture carries a complete program row")
        (test-support/transacted! connection
-                                 [{:seon.fn/sym (quote seon.id/id)
-                                   :seon.fn/doc "updated documentation"}])
+                                 [(test-support/revision (db/db connection) [:seon.fn/sym (quote seon.id/id)]
+                                                         {:seon.fn/doc "updated documentation"})])
        (let [updated (db/pull (db/db connection) '[*] [:seon.fn/sym (quote seon.id/id)])]
          (is (= "updated documentation" (:seon.fn/doc updated))
              "a sparse upsert of an existing row is the ruled partial-upsert behaviour")
@@ -1912,12 +1911,8 @@
      (test-support/transacted!
       connection
       [(test-support/namespace-row (db/db connection) 'sample.seed)
-       (assoc (test-support/program-fn-row (db/db connection) 'sample.seed/caller "(defn caller [x] (str x))")
-              :seon.schema.admission/source :agent
-              :seon.fn/source "(defn caller [x] (str x))"
-              :seon.fn/arglists "([x])"
-              :seon.fn/private? false
-              :seon.fn/call-arities #{['clojure.core/str 1]})])
+       (test-support/program-fn-row (db/db connection) 'sample.seed/caller "(defn caller [x] (str x))"
+                                    {:seon.fn/call-arities #{['clojure.core/str 1]}})])
      (let [head (db/db connection)
            content-key (@#'db/arity-content-key head)
            seeded? (cache/has? @@#'db/arity-base-cache content-key)
@@ -1940,12 +1935,8 @@
            caller 'sample.arity/caller
            row (program/with-contract-facts
                 {:seon.program/row
-                 (assoc (test-support/program-fn-row (db/db connection) callee "(defn target [x] x)")
-                        :seon.schema.admission/source :agent
-                        :seon.fn/source "(defn target [x] x)"
-                        :seon.fn/arglists "([x])"
-                        :seon.fn/private? false
-                        :seon.fn/spec "[:=> [:cat :int] :int]")
+                 (test-support/program-fn-row (db/db connection) callee
+                                              "(defn target {:malli/schema [:=> [:cat :int] :int]} [x] x)")
                  :seon.program/compile-options
                  (:seon.schema.projection/compile-options projection)
                  :seon.program/predicate-functions (schema/predicate-functions-in projection)
@@ -1954,13 +1945,10 @@
        (test-support/transacted!
         connection
         [(test-support/namespace-row (db/db connection) 'sample.arity)
-         row
-         (assoc (test-support/program-fn-row (db/db connection) caller "(defn caller [x] (target x))")
-                :seon.schema.admission/source :agent
-                :seon.fn/source "(defn caller [x] (target x))"
-                :seon.fn/arglists "([x])"
-                :seon.fn/private? false
-                :seon.fn/call-arities #{[callee 1]})])
+         ;; The contract facts are part of the final row its digest covers.
+         (test-support/revised-row (db/db connection) row {})
+         (test-support/program-fn-row (db/db connection) caller "(defn caller [x] (target x))"
+                                      {:seon.fn/call-arities #{[callee 1]}})])
        (let [arity (db/q '[:find ?arity . :in $ ?callee
                           :where [?f :seon.fn/sym ?callee]
                           [?f :seon.fn/arities ?arity]] (db/db connection) callee)
@@ -2382,7 +2370,7 @@
        (let [evidence (db/read-evidence @captured)
              scans (atom 0)
              history d/history]
-         (doc! [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "An unrelated attribute changed.")
+         (test-support/transacted! connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "An unrelated attribute changed."})])
          (with-redefs [d/history (fn [database] (swap! scans inc) (history database))]
            (is (true? (db/read-evidence-current? @connection evidence))
                "an unrelated write leaves the read's attribute revision equal"))
@@ -2415,7 +2403,7 @@
                       (with-redefs [seon.db/replay-read
                                     (fn [database request] (swap! replays inc) (replay database request))]
                         (db/read-evidence-current? @connection evidence)))]
-       (test-support/transacted! connection [[:db/add [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "An unrelated attribute changed."]])
+       (test-support/transacted! connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "An unrelated attribute changed."})])
        (is (true? (current?)) "an unrelated commit keeps the pull current")
        (is (zero? @replays) "without replaying it")
        (test-support/transacted! connection [[:db/add [:seon.ns/name 'seon.flow] :seon.ns/doc "Another entity's value changed."]])
@@ -2440,7 +2428,7 @@
        (let [evidence (db/read-evidence @captured)]
          (is (= #{:seon.ns/doc}
                 (d/dependency-plan-attributes (:datahike.read/dependency-plan (first evidence)) 0)))
-         (doc! [:seon.fn/sym 'seon.db/transact!] :seon.fn/doc "An unrelated attribute changed.")
+         (test-support/transacted! connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "An unrelated attribute changed."})])
          (is (true? (db/read-evidence-current? @connection evidence))
              "a commit outside the prefix's attribute keeps the page current")
          (let [on-page (:e (first (:datahike.index-page/datoms (:seon.db/read-result (first @captured)))))]
@@ -2498,9 +2486,8 @@
       (let [digest #(#'db/builder-digest (db/db connection))
             restamp! (fn [function-symbol]
                        (test-support/transacted!
-                        connection {:tx-data [{:seon.fn/sym function-symbol
-                                               :seon.program/definition-digest
-                                               (apply str (repeat 64 (rand-nth "0123456789abcdef")))}]}))
+                        connection [(test-support/revision (db/db connection) [:seon.fn/sym function-symbol]
+                                                           {:seon.fn/doc (str "Restamped " (random-uuid))})]))
             database (db/db connection)
             before (digest)
             projection (#'db/content-projection before database)]
@@ -2525,12 +2512,13 @@
             record (or (:e (first (d/datoms database :aevt :seon.source/commit-id)))
                        (db/q '[:find ?e . :where [?e :seon.cluster/name]] database))
             _ (test-support/transacted!
-               connection {:tx-data [{:seon.fn/sym 'seon.schema/shape-row-in
-                                      :seon.program/definition-digest (apply str (repeat 64 "a"))}]})
+               connection [(test-support/revision database row {:seon.fn/doc "Another builder."})])
             other-program (db/commit-id (db/db connection))
+            ;; Retracting the doc restores the original row, so its digest.
             _ (test-support/transacted!
-               connection {:tx-data [{:seon.fn/sym 'seon.schema/shape-row-in :seon.program/definition-digest original}
-                                     {:db/id record :seon.source/commit-id other-program}]})
+               connection [[:db/retract row :seon.fn/doc "Another builder."]
+                           {:seon.fn/sym 'seon.schema/shape-row-in :seon.program/definition-digest original}
+                           {:db/id record :seon.source/commit-id other-program}])
             retained (db/db connection)]
         (is (not= (#'db/builder-digest database)
                   (#'db/builder-digest (d/commit-as-db retained other-program {:secondary-indices? false})))

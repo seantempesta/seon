@@ -176,9 +176,9 @@
             :seon.program/schema-forms forms}))
         function-row
         (fn [function-symbol spec source arglists]
-          (assoc (merge (test-support/program-fn-row database function-symbol source)
-                        (contract-facts function-symbol spec source arglists))
-                 :seon.fn/spec (pr-str spec)))]
+          (test-support/program-fn-row
+           database function-symbol source
+           (assoc (contract-facts function-symbol spec source arglists) :seon.fn/spec (pr-str spec))))]
     [(test-support/namespace-row database 'sample)
      (program/with-contract-facts
       {:seon.program/row (program/declaration-row
