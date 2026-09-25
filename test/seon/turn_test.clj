@@ -51,17 +51,19 @@
               {:seon.turn/id "attempt-identity-turn"
                :seon.turn/agent [:seon.agent/id "attempt-identity"]
                :seon.turn/opened-tx "datomic.tx"})))
-      (let [model "deepseek-flash"
+      (let [{target :seon.ai/primary settings :seon.ai/settings}
+            (#'turn/provider-targets {:seon.db/db (db/db connection)
+                                      :seon.cluster/name "attempt-identity"
+                                      :seon.agent/id "attempt-identity"})
+            model (:seon.ai/model target)
             observed-at #inst "2026-09-19T00:00:00Z"
             recorded (#'turn/record-attempt!
                       {:seon.db/connection connection}
                       {:seon.turn/id "attempt-identity-turn"
                        :seon.agent/id "attempt-identity"
                        :seon.ai.attempt/ordinal 0
-                       :seon.ai/target
-                       {:seon.ai/endpoint "https://api.deepseek.com/chat/completions"
-                        :seon.ai/model model}
-                       :seon.ai/settings (support/effective-config)}
+                       :seon.ai/target target
+                       :seon.ai/settings settings}
                       observed-at)
             database (db/db connection)
             descriptor (db/pull database [:seon.ai.model/id]
@@ -335,11 +337,10 @@
              _ (checked-transact! connection
                                   [[:db.fn/retractEntity [:seon.cluster.eval/id evaluation-id]]
                                    [:db.fn/retractEntity [:seon.turn/id run-id]]])
-             refusal {
-                      :seon.turn/transition `turn/close-call
-                      :seon.turn/rule :seon.turn/no-such-run
-                      :seon.turn/refused :seon.turn/no-such-run
-                      :seon.error/message "run transition refused: no-such-run"}
+             ;; The refusal the writer throws for a vanished run, from its producer.
+             refusal (try (#'turn/refuse! `turn/close-call :seon.turn/no-such-run
+                                          {:seon.turn/id run-id})
+                          (catch clojure.lang.ExceptionInfo failure (ex-data failure)))
              settlement (#'turn/settle!
                          {:seon.turn.loop/cluster handle
                           :seon.turn.loop/now (java.util.Date.)
@@ -394,7 +395,7 @@
              reported (atom [])
              _ (#'turn/open-turn
                 {:seon.turn.loop/cluster handle
-                 :seon.turn.loop/work {:seon.agent/id "reader"}
+                 :seon.turn.loop/work {:seon.turn.work/situation :open :seon.agent/id "reader"}
                  :seon.turn.loop/now (java.util.Date.)
                  :seon.turn.loop/report (fn [& arguments] (swap! reported conj (vec arguments)))})
              database (db/db connection)
@@ -1759,8 +1760,7 @@
            (with-model-database
              (fn [connection]
                (support/transacted! connection
-                                  (mapv (fn [id] {:seon.agent/id id})
-                                        agent-ids))
+                                  (support/agents-tx @connection (vec agent-ids)))
                (loop [commands commands
                       model {:runs {} :pointers {} :receipts {}}
                       index 0]
@@ -1927,7 +1927,8 @@
          connection
          (error/commit-tx
           (db/db connection)
-          (cond-> {:seon.error/source { :seon.error/message message}
+          (cond-> {:seon.error/source {:seon.error/message message}
+                   :seon.error/declared-schema :seon.error/normalization-error
                    :seon.error/id message :seon.error/at (java.util.Date. millis)
                    :seon.error/process cluster/boot-process-identity
                    :seon.sci.admit/caps (config/result-caps (support/effective-config))
