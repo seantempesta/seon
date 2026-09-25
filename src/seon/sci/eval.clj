@@ -956,10 +956,14 @@
 
 (defn- one-event
   [source namespace-name ctx max-source]
-  (let [events (reader/read
-                (assoc (reader-context ctx namespace-name)
-                       :seon.sci.reader/text source
-                       :seon.config.eval.result/max-source max-source))]
+  (let [events (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                 ;; SCI resolves `::alias/k` and syntax-quote from this
+                 ;; ctx's namespace table (sci/impl/parser.cljc:60-167).
+                 (reader/read
+                  (assoc (reader-context ctx namespace-name)
+                         :seon.sci.reader/ctx ctx
+                         :seon.sci.reader/text source
+                         :seon.config.eval.result/max-source max-source)))]
     (cond
       (map? events)
       (throw (ex-info (:seon.error/message events) events))

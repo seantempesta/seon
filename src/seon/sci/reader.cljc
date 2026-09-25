@@ -104,24 +104,30 @@
         value))))
 
 (defn- parse-options
-  [{::keys [ns aliases refers features tags defer-auto-resolve?]}]
-  {:eof eof
-   :features features
-   :auto-resolve
-   (fn [alias]
-     (if (= :current alias)
-       ns
-       (let [alias-name (if (keyword? alias)
-                          (symbol (name alias))
-                          alias)]
-         (or (get aliases alias-name)
-             (when defer-auto-resolve? alias-name)))))
-   :syntax-quote
-   {:resolve-symbol (syntax-quote-resolver ns aliases refers)}
-   ;; A function, not a map: Edamame consults it for built-ins too.
-   :readers (accepted-reader tags)
-   ;; Always explicit: never inherit SCI's dynamic *read-eval* policy.
-   :read-eval reject-read-eval})
+  "Reader policy for one parse. With the evaluating SCI `ctx`, SCI resolves
+  `::alias/k` and syntax-quote from the namespace table bound as `sci/ns`
+  (sci/impl/parser.cljc:60-167); without one, the caller's supplied aliases
+  and refers are the whole resolution world."
+  [{::keys [ns aliases refers features tags defer-auto-resolve? ctx]}]
+  (cond->
+   {:eof eof
+    :features features
+    ;; A function, not a map: Edamame consults it for built-ins too.
+    :readers (accepted-reader tags)
+    ;; Always explicit: never inherit SCI's dynamic *read-eval* policy.
+    :read-eval reject-read-eval}
+    (nil? ctx)
+    (assoc :auto-resolve
+           (fn [alias]
+             (if (= :current alias)
+               ns
+               (let [alias-name (if (keyword? alias)
+                                  (symbol (name alias))
+                                  alias)]
+                 (or (get aliases alias-name)
+                     (when defer-auto-resolve? alias-name)))))
+           :syntax-quote
+           {:resolve-symbol (syntax-quote-resolver ns aliases refers)})))
 
 (defn- alias-binding
   [local-name target-ns]
@@ -486,7 +492,7 @@
   resumes the same text at a later offset, so every event, form and nested
   form carries the coordinates of `text` itself."
   [text reading-context from]
-  (let [ctx (sci/init {})
+  (let [ctx (or (::ctx reading-context) (sci/init {}))
         source-reader (sci/source-reader text)
         starts (line-starts text)
         text-length (count text)
@@ -749,7 +755,10 @@
           absolute-start (long (or (::failure-start data) offset))
           classification (parse-classification text absolute-start pending)
           absolute-end (recovery-point text absolute-start classification)
-          state-after (or (::reading-state data) state)
+          ;; The failed read's namespace state, over the caller's reading
+          ;; policy (features, tags, deferral, ctx), which a resumed read
+          ;; must keep: ::reading-state carries only ns, aliases and refers.
+          state-after (merge reading-context (or (::reading-state data) state))
           source (subs text absolute-start absolute-end)
           recovered (into recovered partial)
           ;; An unmatched closer is a reader error, as in Clojure
@@ -774,7 +783,12 @@
                    recovered)))))))
 
 (defn read
-  "Read accepted Clojure source into ordered read events or a flat error."
+  "Read accepted Clojure source into ordered read events or a flat error.
+
+  `::ctx` is the evaluating SCI context, with the target namespace bound as
+  `sci/ns` by the caller: SCI then resolves auto-resolved keywords and
+  syntax-quote from that context. Without it, resolution uses only the
+  supplied `::ns`, `::aliases` and `::refers`."
   {:malli/schema
    [:=> [:cat :map]
     [:or
@@ -788,16 +802,19 @@
     features ::features
     tags ::tags
     defer-auto-resolve? ::defer-auto-resolve?
+    ctx ::ctx
     max-source :seon.config.eval.result/max-source}]
   (let [reading-context
-        {::ns (or namespace-name 'user)
-         ::aliases (or aliases {})
-         ::refers (or refers {})
-         ::publics (or publics {})
-         ::features (or features #{:clj})
-         ::tags (or tags {})
-         ::defer-auto-resolve? (boolean defer-auto-resolve?)
-         ::max-source max-source}]
+        (cond->
+         {::ns (or namespace-name 'user)
+          ::aliases (or aliases {})
+          ::refers (or refers {})
+          ::publics (or publics {})
+          ::features (or features #{:clj})
+          ::tags (or tags {})
+          ::defer-auto-resolve? (boolean defer-auto-resolve?)
+          ::max-source max-source}
+          ctx (assoc ::ctx ctx))]
     (cond
       (not (string? text))
       (error-value

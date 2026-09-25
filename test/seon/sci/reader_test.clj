@@ -241,26 +241,88 @@
                        [:seon.error/data :seon.sci.reader/tag])))))))
 
 (deftest explicit-reader-policy-overrides-a-hostile-sci-context
-  (let [original-init sci/init
-        hostile-init
-        (fn [_]
-          (assoc (original-init {})
-                 :readers (fn [_] (fn [_] :hostile-tag-value))
-                 :read-eval true))]
-    (with-redefs [sci/init hostile-init]
-      ;; a hostile ctx cannot make a BUILT-IN tag mean something else:
-      ;; #inst still reads as the default data reader's value, never
-      ;; the hostile :hostile-tag-value
-      (is (inst? (first (mapv :seon.sci.reader/form
-                              (events "#inst \"2020-01-01\"")))))
-      (is (= "#=" (:seon.sci.reader/refused-token (events "#=(+ 20 22)"))))
-      (is (= 'foo/bar (:seon.sci.reader/refused-token (events "#foo/bar {:x 1}"))))
-      (is (= [['inst "2020-01-01"]]
-             (mapv :seon.sci.reader/form
-                   (events
-                    "#inst \"2020-01-01\""
-                    {:seon.sci.reader/tags
-                     {'inst (fn [value] ['inst value])}})))))))
+  ;; The evaluating ctx is an argument, so a hostile one is supplied rather
+  ;; than redefined: SCI merges the reader's explicit policy last
+  ;; (sci/impl/parser.cljc:150-167).
+  (let [hostile (assoc (sci/init {})
+                       :readers (fn [_] (fn [_] :hostile-tag-value))
+                       :read-eval true)
+        in-ctx (fn [text & [context]]
+                 (sci/binding [sci/ns (sci/create-ns 'user)]
+                   (events text (merge {:seon.sci.reader/ctx hostile} context))))]
+    ;; a hostile ctx cannot make a BUILT-IN tag mean something else:
+    ;; #inst still reads as the default data reader's value
+    (is (inst? (first (mapv :seon.sci.reader/form
+                            (in-ctx "#inst \"2020-01-01\"")))))
+    (is (= "#=" (:seon.sci.reader/refused-token (in-ctx "#=(+ 20 22)"))))
+    (is (= 'foo/bar (:seon.sci.reader/refused-token (in-ctx "#foo/bar {:x 1}"))))
+    (is (= [['inst "2020-01-01"]]
+           (mapv :seon.sci.reader/form
+                 (in-ctx "#inst \"2020-01-01\""
+                         {:seon.sci.reader/tags
+                          {'inst (fn [value] ['inst value])}}))))))
+
+(deftest syntax-quote-and-auto-resolution-follow-the-evaluating-context
+  ;; With the evaluating ctx, SCI resolves syntax-quote and `::alias/k` from
+  ;; the namespace table the form will run in: core Vars, classes, imports,
+  ;; excludes, refers, aliases and interns, per namespace.
+  (let [ctx (sci/init {:namespaces {'foo.bar {'x 1 'y 2}}
+                       :classes {'java.util.UUID java.util.UUID}})
+        _ (sci/eval-string*
+           ctx
+           (str "(ns probe.a (:refer-clojure :exclude [inc])"
+                " (:require [foo.bar :as fb :refer [x] :rename {x renamed-x}]"
+                " [clojure.string :refer [join]]) (:import [java.util UUID]))"
+                " (def local 1) (defn inc [v] v)"
+                " (ns probe.b (:require [probe.a :as pa]))"))
+        form-in (fn [namespace-name text]
+                  (let [read-events
+                        (sci/binding [sci/ns (sci/create-ns namespace-name)]
+                          (events text {:seon.sci.reader/ns namespace-name
+                                        :seon.sci.reader/ctx ctx}))]
+                    (is (vector? read-events) text)
+                    (if-let [failure (some :seon.sci.reader/error read-events)]
+                      failure
+                      (:seon.sci.reader/form (first read-events)))))
+        ;; The read form is construction code; its quoted symbols, in order,
+        ;; are the resolution.
+        quoted (fn [form]
+                 (keep #(when (and (seq? %) (= 'quote (first %))) (second %))
+                       (tree-seq seq? seq form)))
+        ;; A renamed refer is left out: SCI's resolver qualifies it into the
+        ;; current namespace, as the replaced resolver also did.
+        syntax-quoted "`(inc dec String UUID join fb/y local if pa/local)"]
+    (is (= '(probe.a/inc clojure.core/dec java.lang.String java.util.UUID
+             clojure.string/join foo.bar/y probe.a/local if pa/local)
+           (quoted (form-in 'probe.a syntax-quoted)))
+        "probe.a: its exclude, refer, import, alias and intern")
+    (is (= '(clojure.core/inc clojure.core/dec java.lang.String probe.b/UUID
+             probe.b/join fb/y probe.b/local if probe.a/local)
+           (quoted (form-in 'probe.b syntax-quoted)))
+        "probe.b: none of probe.a's bindings apply; its own alias does")
+    (is (= :foo.bar/k (form-in 'probe.a "::fb/k")))
+    (is (= :probe.b/k (form-in 'probe.b "::k")))
+    (is (= :probe.a/k (form-in 'probe.b "::pa/k")))
+    (is (= :seon.sci.reader/form
+           (:seon.error/member (form-in 'probe.b "::fb/k")))
+        "an alias the namespace lacks is a reader error, not a guess")
+    (is (= :jvm (form-in 'probe.a "#?(:clj :jvm :cljs :js)")))
+    (testing "the ctx survives recovery after an unreadable span"
+      (let [read-events (sci/binding [sci/ns (sci/create-ns 'probe.b)]
+                          (events "(+ 1\n(list `inc `String)"
+                                  {:seon.sci.reader/ns 'probe.b
+                                   :seon.sci.reader/ctx ctx}))]
+        (is (= [true false] (mapv (comp boolean :seon.sci.reader/error) read-events)))
+        (is (= '(list (quote clojure.core/inc) (quote java.lang.String))
+               (:seon.sci.reader/form (second read-events))))))))
+
+(deftest recovery-keeps-the-callers-reading-policy
+  ;; A resumed read keeps deferral, features and tags, not only ns state.
+  (let [read-events (events "(+ 1\n(f ::zz/k #?(:clj :jvm) #x/t 1)"
+                            {:seon.sci.reader/defer-auto-resolve? true
+                             :seon.sci.reader/tags {'x/t (fn [v] [:t v])}})]
+    (is (= [true false] (mapv (comp boolean :seon.sci.reader/error) read-events)))
+    (is (= '(f :zz/k :jvm [:t 1]) (:seon.sci.reader/form (second read-events))))))
 
 (deftest every-reading-context-member-changes-reading-explicitly
   (testing "reader features"
