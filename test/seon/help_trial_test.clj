@@ -4,7 +4,6 @@
             [clojure.core.async :as async]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
-            [seon.config :as config]
             [seon.context-blocks-fixture :as fixture]
             [seon.db :as db]
             [seon.flow :as flow]
@@ -17,10 +16,8 @@
 (deftest preflight-requires-the-generated-opening-and-unpolluted-fixture
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "trial"
-                    :seon.config/manifest {:seon.config.ai/no-provider true}})
+     (support/seed-cluster! connection "trial" {:seon.config.ai/no-provider true})
      (support/transacted! connection (support/agent-tx @connection "root" 'my.agents.root))
-     (cluster/ensure-cluster-entity! connection "trial" cluster/boot-process-identity)
      (let [ctx (support/fork-cluster-ctx connection)
            environment (support/environment "trial" connection)
            routing (support/attempt-routing connection)]

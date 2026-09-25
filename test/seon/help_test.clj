@@ -7,7 +7,6 @@
             [seon.cluster :as cluster]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.agent :as agent]
-            [seon.config :as config]
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.repl :as repl]
@@ -17,13 +16,12 @@
 (deftest help-is-first-stored-data-and-tracks-its-code-version
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection
-                    :seon.boot/cluster-name "help"})
+     ;; The cluster and its config row through their canonical owner.
+     (support/seed-cluster! connection "help")
      (let [setup (db/transact! connection
-                   (into [[:db/add "cluster" :seon.cluster/name "help"]]
-                         (agent/creation-tx {:seon.agent/id "help"
-                                             :seon.ns/name 'my.agents.help
-                                             :seon.cluster/name "help"})))]
+                   (agent/creation-tx {:seon.agent/id "help"
+                                       :seon.ns/name 'my.agents.help
+                                       :seon.cluster/name "help"}))]
        (is (:db-after setup) (pr-str setup)))
      (let [ctx (support/fork-cluster-ctx connection "help")
            handle (support/cluster-handle
