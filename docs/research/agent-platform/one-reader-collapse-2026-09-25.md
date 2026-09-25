@@ -1,6 +1,6 @@
 ---
 type: research
-status: "design lane design-one-reader-opus; revised in place after Astra REVISE 9b78e96c4 (ten findings); REPL re-checks in §9 pending default's fresh store"
+status: "design lane design-one-reader-opus; revised after Astra REVISE 9b78e96c4 and ACCEPT-AFTER-FIXES 5407f1d65 (five fixes folded); option A (S1-S3) authorized for implementation"
 created: 2026-09-25
 scope: collapse src/seon/sci/reader.cljc onto edamame, SCI and clj-kondo; classify the scattered source readers
 pins: "seon e6066f091 (reader.cljc, reply.clj, sci/eval.clj, turn.clj unchanged since f29fa7634); edamame 63373df6 (local commit on v1.6.42); sci 409888f6; clj-kondo 57252e07; tools.reader 1.6.0 jar"
@@ -33,8 +33,10 @@ would have to change first.
 
 ## 0. Broken first
 
-1. **Syntax-quote qualifies core Vars and classes into the current namespace**, both when agent code runs and in JVM
-   MCP mode.
+1. **Syntax-quote qualifies core Vars and classes into the current namespace** in SCI execution, and in any context-free
+   read that lacks the needed mappings. The JVM MCP entrant supplies host mappings for Vars and classes
+   (`script/seon/dev/mcp.clj:357`), which the hand resolver checks first (`reader.cljc:97`). Misqualification there is
+   therefore **unproven**. JVM compatibility stays a regression requirement, and the bridge is not changed.
    - **Source.** `syntax-quote-resolver` (`reader.cljc:84-105`, installed by `parse-options:106-124`) qualifies every
      bare symbol that is neither aliased nor referred with the current namespace. Special forms are the exception, and
      edamame handles those (`edamame/impl/syntax_quote.cljc:88-103`).
@@ -58,9 +60,11 @@ would have to change first.
 
 All probes ran in default pid 59566 in JVM mode, in the scratch namespace `one-reader-probe` (session `one-reader`),
 which was removed afterwards. None of default's Vars was redefined. clj-kondo ran through `seon.fn.analyzer/analyze`
-with `::sources` under `tmp/one-reader-probe/`, also deleted afterwards. The exact probe forms are in §10. They are
-kept as data in this doc because this lane writes one file. §9 lists the re-checks that turn them into current proof,
-together with the committed script they need.
+with `::sources` under `tmp/one-reader-probe/`, also deleted afterwards. §10 keeps the two helper definitions as run and
+*sketches* of the rest. E3 and E4 invocations, whole result envelopes, per-input comparison outputs and the timing
+harness were **not retained**, so they are unavailable. R1–R5 and the committed measurement script are future evidence,
+not satisfied. R3's equivalence keeps regex flags as well as the pattern text, and compares metadata and positions
+separately. The hot-path landing records comparable armed parent/change timings, allocation and memory.
 
 ## 2. Evidence (reported observations, 2026-09-25 ~21:35Z)
 
@@ -179,10 +183,27 @@ reply/JVM:  text   ─► same loop, no SCI ctx: supplied aliases/refers, hand r
 errors:     edamame ex-data ─► classification ─► error event (evaluation refuses the first)
 ```
 
-The **context-free promise** is written down. A read without an SCI context resolves syntax-quote only from the
-aliases and refers its caller supplies. The JVM MCP caller supplies the host namespace's aliases, Vars and classes.
-Reply planning supplies none and defers unknown aliases. The read is correct for exactly those inputs. No shared
-mutable context is ever created, because per-caller namespace state must not accumulate in one.
+The **context-free promise** is written down. A read without an SCI context keeps today's SCI wrapper
+(`sci/parse-next+string` over a per-read empty context) and today's state-dependent options. Those options are rebuilt
+for every form from the evolving reading state (`reader.cljc:586,658`), so `(ns probe.a)` followed by `::k` resolves
+in `probe.a`. The read resolves syntax-quote only from the aliases and refers its caller supplies. The JVM MCP caller
+supplies the host namespace's aliases, Vars and classes. Reply planning supplies none and defers unknown aliases. The
+read is correct for exactly those inputs.
+
+Replacing that wrapper with direct edamame calls is **deferred**. SCI's defaults (`:all`, `:read-cond :allow`, its
+location keys and predicate, end locations off; `sci/impl/parser.cljc:44`), its top-level symbol metadata (`:171`) and
+its failure wrapping (`:180`) would all have to be reproduced first. No shared mutable context and no mutable resolver
+cell is created.
+
+**Supplied events.** `evaluate` takes `(or (:seon.sci.eval/event request) (one-event …))` (`eval.clj:4203`). Today's
+suppliers are:
+- `evaluate-for-install`, which reads through `one-event` once (`:4452`) and hands that event to `evaluate` (`:4464`);
+- the no-forms error built at `turn.clj:4444`, carried through `:4944`, which must stay an error.
+
+The reply path does not supply events. It carries source, comment and namespace (`reply.clj:214`), and the evaluator
+reads that source. An executable supplied event must already have been read for the valid execution context. A
+planning event is not one merely because it has the same shape. No unconditional reread, provenance registry or cache
+is added.
 
 ## 5. Recovery is heuristic policy, and now says so
 
@@ -192,8 +213,9 @@ inside the unclosed vector, and an unclosed multiline string can contain a colum
 (`reader_test.clj:443-465`) exclude anchors that begin with `{` or `[` and inner forms that are indented. They do not
 cover these cases.
 
-The guarantee we choose is local: **every character belongs to exactly one event, error spans are reported in order,
-and recovery strictly advances.** An agent sees each malformed span as an error at its position, and the forms after it
+The guarantee we choose is local: **emitted spans are ordered, and recovery strictly advances**. Trivia and gaps stay
+recoverable from the original text. They are not partitioned into events: comment-only input yields no events
+(`reader.cljc:606`), and a fence skipped before `::failure-start` leaves a gap before the error event (`:581,595,833,846`). An agent sees each malformed span as an error at its position, and the forms after it
 run only if they read at that anchor. The alternative is to refuse the rest of the text as a single error. It is
 simpler, but it gives up the prose-plus-code replies and the per-span Parinfer repair that `reply.clj` and `turn.clj`
 provide today. The choice is the owner's; §6 D prices it.
@@ -203,9 +225,12 @@ provide today. The choice is the owner's; §6 D prices it.
 
 The bound on input is the `:seon.config.eval.result/max-source` dial; its default value is unverified here. Several
 callers pass `(count source)` as the bound, which makes it vacuous (`turn.clj:1860,2318`; `reply.clj` in its
-one-argument arity). §9 R4 measures scaling on adversarial input: one broken span per line, 1–64 KB. The smallest cost
-fix, once measured, is to build `line-starts` once and resume the same reader instead of re-reading from 0. That adapter
-is now possible because recovery resumes in whole-text coordinates. No new delimiter parser.
+one-argument arity). §9 R4 measures scaling on adversarial input: one broken span per line, 1–64 KB. The reader
+cannot simply be reused. For an EOF failure, edamame has already consumed to the end of the text (`parser.cljc:298`)
+before Seon chooses an earlier anchor, and `advance-to!` only moves forward (`reader.cljc:528`). Sharing the line-start
+index would remove only the repeated index construction. Recovery is **unchanged in A**. Any later optimization names a
+real dependency seam and adds no seek abstraction. The docstring at `reader.cljc:825` ("proven top-level anchors") is
+corrected in S1.
 
 ## 6. Slices and options
 
@@ -215,8 +240,8 @@ is now possible because recovery resumes in whole-text coordinates. No new delim
 |---|---|---|---|
 | **S1** dead outputs | Delete `declaration-occurrence` (45), `nested-executable-declarations` (22), the `::refer-all-targets` bookkeeping (about 6) and their merge and dissoc (about 4). Drop the assertion at `reader_test.clj:764-769` about the deleted output. | reader −77, tests −6 | Every surviving behavior keeps its regression. HEAD must load. |
 | **S2** EOF producer fix | In the maintained edamame fork, `read-number` changes to `(when ch (r/unread rdr ch))` at `parser.cljc:192`, matching `read-token`'s guard at `:108-113`. Commit the fork, bump the gitlink, and prove the loaded classpath uses it. Only then delete the `peek-char` workaround in `read-events`. | edamame +1 −1; reader −5 | `a-number-ending-the-text-keeps-its-source-and-span` stays green. §9 R2 covers EOF numbers, delimiters, multiline/CRLF input and source logging. |
-| **S3** execution reads use the SCI context | `one-event` (`eval.clj:957-1000`) binds `sci/ns` to the target namespace and calls `read` with `:seon.sci.reader/ctx`. `read-events` then calls `sci/parse-next+string` on that context without the `:syntax-quote`/`:auto-resolve` overrides, but keeps `:features #{:clj}`, the EOF sentinel and the tag/`#=` policy. The options are built once per read, not per form. Context-free reads call `edamame.core/parse-next+string` directly with the same normalized options and the kept resolver. The loop is one loop, choosing its parse function by whether a context is present, and the per-read `sci/init {}` disappears. Callers that supply a pre-read event (`eval.clj:4203`, `:4452`) get their event from `one-event` or from reply planning, and their contract says which one. Planning events stay context-free and are read again by `one-event` before execution, which is the current `(or event (one-event …))` flow. | reader about −15 +12; eval +3 | New class regression: `` `(inc String join fb/x) `` read under a context, plus excludes, a renamed refer, an alias and two namespaces. `explicit-reader-policy-overrides-a-hostile-sci-context` stops using `with-redefs` on `sci/init` and passes a hostile context argument (the no-Var-redefinition law). The JVM MCP read is unchanged and keeps its regression. |
-| **Total** | | reader ≈ −85 (919 → ≈ 834) | |
+| **S3** execution reads use the SCI context | `one-event` (`eval.clj:957-1000`) binds `sci/ns` to the target namespace and calls `read` with `:seon.sci.reader/ctx`. `read` threads the context through its explicit reading-context reconstruction (`reader.cljc:867`). With a context, `read-events` calls `sci/parse-next+string` on it without the `:syntax-quote`/`:auto-resolve` overrides, keeping `:features #{:clj}`, the EOF sentinel and the tag/`#=` policy, and it creates no per-read `sci/init`. Context-free reads keep the SCI wrapper and state-dependent options (§4). Supplied events keep their current handoffs (§4). | reader about +8 −2; eval +3 | New class regression: `` `(inc String join fb/x) `` read under a context, plus excludes, a renamed refer, an alias and two namespaces. `explicit-reader-policy-overrides-a-hostile-sci-context` stops using `with-redefs` on `sci/init` and passes a hostile context argument (the no-Var-redefinition law). The JVM MCP read path is untouched in code. Its compatibility stays a regression requirement. Later evidence also covers multi-form namespace and alias planning. |
+| **Total** | | reader ≈ −76 (919 → ≈ 843) | |
 
 The earlier −137 is withdrawn, because S3's old form and S4 were not equivalent.
 
@@ -295,7 +320,7 @@ cross-owner work in turn, agent and eval, and the owner rules on losing pre-run 
 | `sci/eval.clj:1251-1282` `declaration-source-value` | executable source for requested **and** historical committed rows | **Clojure source read as EDN.** The event form covers only the requested side. The committed side needs its stored row's own encoding (for example, the analysis row's declaration value). Keep the comparison's contract, and do not swap in one side's form |
 | `fn/signature.cljc:17-31` | `clojure.core/read` with a hand-written `LispReader$Resolver` | a third source reader. Its alias resolver returns the alias itself (parser-proves 5d). First pass it the **held form**, and keep its binding-versus-arglist comparison |
 | `fn.clj:1453,2553` `kondo.utils/parse-string-all` | a second kondo parse after analysis | one implementation, **not** one parse. Reuse the analyzed tree keyed by the source digest and resolver inputs, not a second cache |
-| `turn.clj:1858,2317,3048,4666`; `reply.clj:351,359`, then the evaluator's read | repeated calls to the one reader over the same source | one implementation, **not** parse-once. Retirement: carry the planned event to evaluation where its reading context is still valid (S3's contract names this), and retire the rereads in `source-key`, `evaluable-source?` and `disposition-rule-error` by keeping the event on the planned source |
+| `turn.clj:1858,2317,3048,4666`; `reply.clj:351,359`, then the evaluator's read | repeated calls to the one reader over the same source | one implementation, **not** parse-once. Retirement is **not** established by A. Reusing a planning form needs valid resolver inputs and source coordinates at the authority (AGENTS.md: validate a pre-read's basis). Until then these rereads are named repeated reads, not parse-once |
 | `script/seon/dev/mcp.clj:347-430` | JVM mode calls `seon.sci.reader/read` with host resolver inputs; SCI mode calls the evaluation entrance | converged. `require-single-clj-form!` was already deleted in 2828bc808; installation is unverified. The earlier `Alias an not found` observation came from reading a whole `(do (require …) ::an/k)` form before evaluating it, which is correct reader behaviour, not a defect |
 
 Nothing reads dangerously in the `#=` sense. The defects are silent misreads of Clojure source through the EDN reader,
@@ -326,7 +351,7 @@ Everything else transforms library output into our shape, or duplicates another 
 - **Measurement script.** The re-checks need a committed script, `test/seon/sci/reader_probe.clj` or `tmp/` per root's
   ruling. This lane is limited to one file, so root assigns that file.
 
-## 10. Probe forms (exact, as run)
+## 10. Retained helper definitions and probe sketches
 
 ```clojure
 (defn rd [t]
