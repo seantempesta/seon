@@ -66,21 +66,19 @@
   (let [command ["git" "-C" (str root) "ls-files" "--stage" "--" "reference-code"]
         child (.start (doto (ProcessBuilder. ^java.util.List command)
                         (.redirectErrorStream true)))
-        output (future (slurp (.getInputStream child)))]
-    (try
-      (when-not (.waitFor child pin-query-bound-ms TimeUnit/MILLISECONDS)
-        (throw (ex-info "Dependency pin query exceeded its execution bound."
-                        {:seon.dev-cache/command command
-                         :seon.dev-cache/bound-ms pin-query-bound-ms})))
-      (let [text (deref output 1000 ::unavailable)]
-        (when (and (zero? (.exitValue child))
-                   (string? text)
-                   (not (str/blank? text)))
-          text))
-      (finally
-        (when (.isAlive child)
-          (.destroyForcibly child)
-          (.waitFor child pin-query-bound-ms TimeUnit/MILLISECONDS))))))
+        output (future (slurp (.getInputStream child)))
+        exited? (.waitFor child pin-query-bound-ms TimeUnit/MILLISECONDS)
+        evidence {:seon.dev-cache/command command :seon.dev-cache/bound-ms pin-query-bound-ms}]
+    (when-not exited?
+      (.destroyForcibly child)
+      (.waitFor child pin-query-bound-ms TimeUnit/MILLISECONDS))
+    ;; The output reader ends at the pipe's close, which follows the exit.
+    (let [text (deref output 1000 ::unfinished)]
+      (cond
+        (.isAlive child) (throw (ex-info "Dependency pin query survived forced termination." evidence))
+        (not exited?) (throw (ex-info "Dependency pin query exceeded its execution bound." evidence))
+        (= ::unfinished text) (throw (ex-info "Dependency pin query output never ended after its exit." evidence))
+        (and (zero? (.exitValue child)) (not (str/blank? text))) text))))
 
 (defn- recorded-dependency-pins
   "The pins `bin/test` recorded into this root at snapshot time, or nothing.
