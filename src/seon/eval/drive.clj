@@ -153,18 +153,19 @@
                 [?receipt :seon.cluster.eval/run ?run]
                 [?receipt :seon.cluster.eval/ordinal ?ordinal]
                 [?receipt :seon.cluster.eval/at ?at]
-                [(get-else $ ?receipt :seon.eval/shown "") ?result]
-                [(get-else $ ?receipt :seon.cluster.eval/error "") ?error]]
+                [(get-else $ ?receipt :seon.eval/shown ::absent) ?result]
+                [(get-else $ ?receipt :seon.cluster.eval/error ::absent) ?error]]
               db run-ids)
          (sort-by (juxt #(inst-ms (nth % 5)) second))
+         ;; An absent shown text or error is no key, never an empty-string sentinel.
          (mapv (fn [[run-id ordinal source result error at]]
-                 {:seon.turn/id run-id
-                  :seon.cluster.eval/ordinal ordinal
-                  :seon.cluster.eval/source source
-                  :seon.eval/shown result
-                  :seon.eval.drive/value (read-result result)
-                  :seon.cluster.eval/error error
-                  :seon.cluster.eval/at at})))
+                 (cond-> {:seon.turn/id run-id
+                          :seon.cluster.eval/ordinal ordinal
+                          :seon.cluster.eval/source source
+                          :seon.cluster.eval/at at}
+                   (not= ::absent result) (assoc :seon.eval/shown result
+                                                 :seon.eval.drive/value (read-result result))
+                   (not= ::absent error) (assoc :seon.cluster.eval/error error)))))
     []))
 
 (defn- completion-values [receipts]

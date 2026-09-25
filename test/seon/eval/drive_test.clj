@@ -42,6 +42,11 @@
                  :seon.cluster.eval/source "42"
                  :seon.cluster.eval/at (java.util.Date.)
                  :seon.eval/shown "42"}])})
+      (let [[receipt :as receipts] (seon.eval.drive/run-receipts @connection ["projection-proof-run"])]
+        (is (= 1 (count receipts)) "a successful receipt satisfies the armed output contract")
+        (is (= [42 "42"] [(:seon.eval.drive/value receipt) (:seon.eval/shown receipt)]))
+        (is (nil? (find receipt :seon.cluster.eval/error))
+            "an absent error is no key, never an empty-string sentinel"))
       (let [database @connection
             full-transcript (ns-resolve 'seon.eval.drive 'full-transcript)
             instance {:seon.boot/cluster-connection connection
