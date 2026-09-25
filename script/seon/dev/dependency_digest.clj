@@ -1,13 +1,10 @@
 (ns seon.dev.dependency-digest
-  "THE ONE dependency-set identity every development cache keys on.
+  "THE ONE dependency-set identity the development class cache keys on.
 
-  `dev_cache.clj` (the development class cache) and `seon.dev.clj-kondo` (the
-  clj-kondo dependency analysis cache) answer the same question — has this
-  checkout's dependency SET changed — so they answer it from the same bytes:
-  `deps.edn` and the `reference-code` submodule pins. The class cache adds
+  `dev_cache.clj` asks whether this checkout's dependency SET changed and
+  answers from `deps.edn` and the `reference-code` submodule pins, adding
   this runtime's identity, because compiled bytecode is only valid under the
-  runtime that produced it; clj-kondo's analysis is not, and keying it on a
-  runtime would repopulate it for every process that reads it.
+  runtime that produced it.
 
   This namespace requires nothing outside `clojure.core`, `clojure.java.io`
   and `clojure.string` so both consumers can reach it: `dev_cache.clj` runs on
@@ -147,34 +144,16 @@
   (digest-bytes! digest (dependency-pins root))
   digest)
 
-(defn dependency-set-digest
-  "The hex digest of `root`'s DECLARED dependency set: `deps.edn` and the
-  submodule pins.
-
-  This is what a consumer keys on when the artifact it caches is independent
-  of the process that produced it — clj-kondo's dependency analysis is written
-  by a native binary and read by every tool, so the JVM that asked for it is
-  not an input. Measured 2026-09-17 on this checkout: 15 ms, against 287 ms
-  for resolving the classpath and hashing every file on it.
-
-  The inputs are the DECLARATIONS, not the resolved artifacts, because a
-  dependency change is authored in `deps.edn` or a submodule pin."
-  [root]
-  (let [digest (digest-declarations! (MessageDigest/getInstance "SHA-256") root)]
-    (apply str (map #(format "%02x" (bit-and 0xff %)) (.digest digest)))))
-
 (def runtime-properties
   "The runtime identity a compiled dependency class is valid under."
   ["java.runtime.version" "java.vendor" "java.vm.name" "os.arch"])
 
 (defn configuration-digest
-  "`dependency-set-digest`'s inputs plus a runtime's identity.
+  "The digest of `root`'s DECLARED dependency set (`deps.edn` and the submodule
+  pins) plus a runtime's identity.
 
-  The development class cache keys on this one: it stores COMPILED bytecode,
-  which is only valid under the runtime that produced it. A consumer whose
-  artifact outlives its producing process keys on `dependency-set-digest`
-  instead — the two are not interchangeable, and a cache keyed on the wrong
-  one is read across a boundary its producer never promised.
+  The development class cache keys on this: it stores COMPILED bytecode,
+  which is only valid under the runtime that produced it.
 
   The one-argument arity digests THIS runtime. The operator runs on babashka
   and launches another JVM, so it supplies that JVM's `runtime-properties`

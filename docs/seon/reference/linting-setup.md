@@ -55,9 +55,9 @@ Source publication has its own clj-kondo analysis in
 local inference is not a sound database-admission proof. Syntax, unresolved
 name or namespace, privacy, and arity failures remain admission errors.
 
-Tests are always explicit. Use `bin/test` for the fresh suite or
-`seon.dev.changed-test/run-changed!` for the retained changed-test selector;
-neither is queued by `bin/lint` or the edit hook.
+Tests are always explicit. Use `bin/test-check` for one test request on a
+running cluster (`seon.test/select` and `seon.test/run`); neither `bin/lint`
+nor the edit hook queues tests.
 
 ## Sources checked
 
@@ -68,4 +68,4 @@ neither is queued by `bin/lint` or the edit hook.
   validation.
 - `src/seon/fn/analyzer.clj` — source-publication analysis policy.
 - `script/seon/dev/markdown.clj` — Markdown validation and safe fixes.
-- `script/seon/dev/changed_test.clj` and `bin/test` — explicit test surfaces.
+- `bin/test-check` and `src/seon/test.clj` — the explicit test request.

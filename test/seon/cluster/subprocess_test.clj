@@ -1,8 +1,7 @@
-(ns seon.dev.changed-test-test
+(ns seon.cluster.subprocess-test
   (:require [babashka.process :as process]
-            [clojure.edn :as edn]
             [clojure.java.io :as io]
-            [clojure.test :refer [deftest is testing]]
+            [clojure.test :refer [deftest is]]
             [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support])
   (:import [java.nio.file FileSystems StandardWatchEventKinds]
@@ -44,32 +43,6 @@
     {:exit (:seon.operator.subprocess/exit result)
      :out (:seon.operator.subprocess/output result)
      :err (:seon.operator.subprocess/error-output result)}))
-
-(deftest changed-paths-are-handed-to-the-one-gate-selector
-  (testing "changed-test decides no test selection of its own: it names the
-            changed paths and `bin/test --changed` derives the tests they
-            reach. A second selector here is exactly the drift this
-            delegation removes."
-    (let [expression
-          (str
-           "(require 'seon.dev.changed-test) "
-           "(let [calls (atom []) run (ns-resolve 'seon.dev.changed-test "
-           "'run-command!) gate (ns-resolve 'seon.dev.changed-test "
-           "'run-gate!)] "
-           "(prn (with-redefs-fn {run (fn [root boundary command environment] "
-           "(swap! calls conj [root boundary command environment]) "
-           "{:seon.dev.changed-test/status :passed})} "
-           "#(do (gate \"/checkout\" "
-           "[\"src/seon/turn.clj\" \"test/seon/fn_test.clj\"]) "
-           "@calls))))")
-          {:keys [exit out err]} (run-babashka expression)]
-      (is (zero? exit) err)
-      (is (= [["/checkout" :gate
-               ["/checkout/bin/test"
-                "--changed" "src/seon/turn.clj"
-                "--changed" "test/seon/fn_test.clj"]
-               {}]]
-             (edn/read-string out))))))
 
 (deftest foreign-process-deadline-reaps-a-late-descendant
   (let [root (io/file "tmp/changed-test" (str (random-uuid)))
@@ -159,31 +132,3 @@
         (run-babashka "(require 'seon.time)")]
     (is (pos? exit))
     (is (re-find #"Could not locate seon/time" err))))
-
-(deftest concurrent-tooling-transition-refuses-busy
-  (let [{:keys [exit out err]}
-        (run-babashka
-         (pr-str
-          '(do
-             (require 'seon.dev.state 'babashka.fs)
-             (let [directory (str (babashka.fs/create-temp-dir {:dir "tmp" :prefix "b1b-tooling-"}))
-                   config {:seon.dev.config/process-dir (str (babashka.fs/absolutize directory))}
-                   acquired (promise) release (promise)
-                   owner (future (seon.dev.state/with-lock config :changed-test 5000
-                                   #(do (deliver acquired true)
-                                        (when (= :timeout (deref release 5000 :timeout))
-                                          (throw (ex-info "Owner release absent" {})))
-                                        :released)))]
-               (try
-                 (when (= :timeout (deref acquired 5000 :timeout))
-                   (throw (ex-info "Owner acquisition absent" {})))
-                 (let [busy (try (seon.dev.state/with-lock config :changed-test 5000 (constantly :wrong))
-                                 (catch clojure.lang.ExceptionInfo e (boolean (:seon.dev.lock/path (ex-data e)))))]
-                   (deliver release true)
-                   (prn [busy (deref owner 5000 :timeout)
-                         (seon.dev.state/with-lock config :changed-test 5000 (constantly :acquired))]))
-                 (finally (deliver release true)
-                          (try (deref owner 5000 :timeout)
-                               (finally (babashka.fs/delete-tree directory)))))))))]
-    (is (zero? exit) err)
-    (is (= [true :released :acquired] (edn/read-string out)))))

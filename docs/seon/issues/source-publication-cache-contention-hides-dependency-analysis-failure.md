@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, operator, tooling]
 ---
@@ -52,3 +52,11 @@ root link. The dependency subprocess's result was again hidden by the
 outer catch. The lane removed only its scratch symlink and let the normal
 operator populate that root's own clj-kondo cache. No shared cache files
 were deleted and no production cache code changed in the publication slice.
+
+## Resolution — 2026-09-25
+
+Resolved by deletion: `script/seon/dev/clj_kondo.clj`, its state file and
+population lock were retired with the legacy changed-test family (lane
+delete-duplicates, `docs/prds/agent-platform/landing/lane-delete-duplicates-2026-09-25.md`).
+Dependency analysis has one owner, `seon.fn.analyzer/analyze-dependencies!`,
+which lints the loaded JVM's classpath; no operator path calls the deleted helper.

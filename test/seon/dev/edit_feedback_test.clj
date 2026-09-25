@@ -384,40 +384,6 @@
           (io/file state ".pending-review.lock")
           state calls source config fake-agy fake-bin directory])))))
 
-(deftest changed-test-analysis-keeps-the-valid-namespace-graph
-  (let [directory (fixture-directory)
-        source-directory (doto (io/file directory "src") .mkdirs)
-        broken (io/file source-directory "broken.clj")
-        valid (io/file source-directory "valid.clj")
-        expression
-        (str "(do (require 'seon.dev.changed-test) "
-             "(prn (select-keys (seon.dev.changed-test/analyze-host "
-             (pr-str (str directory)) ") "
-             "[:seon.dev.changed-test/host-status "
-             ":seon.dev.changed-test/host-graph "
-             ":seon.dev.changed-test/findings])))")]
-    (try
-      (spit broken "(ns broken\n")
-      (spit valid "(ns valid)\n(def value 1)\n")
-      (let [result
-            (run-process
-             {::command ["bb" "--config" (str (io/file repo-root "bb.edn"))
-                         "--deps-root" (str repo-root) "-e" expression]
-              ::directory repo-root})
-            analysis (edn/read-string (str/trim (::stdout result)))]
-        (is (hook-exit-honest? result) (::stderr result))
-        (is (= :available (:seon.dev.changed-test/host-status analysis)))
-        (is (= 'valid
-               (get-in analysis
-                       [:seon.dev.changed-test/host-graph
-                        :seon.dev.changed-test/path->namespace
-                        "src/valid.clj"])))
-        (is (some #(and (= :syntax (:type %))
-                        (str/ends-with? (:filename %) "src/broken.clj"))
-                  (:seon.dev.changed-test/findings analysis))))
-      (finally
-        (delete-files! [broken valid source-directory directory])))))
-
 (def ^:private patch-grammar-probe
   '(do
      (binding [*in* (java.io.StringReader. "{}")

@@ -840,8 +840,8 @@
   - target/test-published-bases, target/test-classpaths: published test bases
     and classpaths of the retired gate launcher (no current producer).
   - .clj-kondo/.cache: the analyzer and lint cache (`seon.fn.analyzer`
-    `cache-directory`, `seon.fn` analysis cache-root, `bin/seon-hook:236`,
-    `script/seon/dev/clj_kondo.clj:36`).
+    `cache-directory`, `seon.fn` analysis cache-root, `bin/seon-hook`
+    `shared-kondo-cache-v1-directory`).
   - .cpcache: tools.deps' computed classpaths."
   ["data/source"
    "target/dev-dependency-classes" "target/dev-dependency-classes.next"

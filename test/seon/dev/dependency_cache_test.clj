@@ -4,7 +4,6 @@
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [dev-cache :as dev-cache]
-            [seon.dev.state :as state]
             [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support])
   (:import [java.util.concurrent TimeUnit]))
@@ -173,7 +172,8 @@
                   reference-file
                   (io/file references-root
                            (str (:seon.operator.process-record/generation record) ".edn"))]
-              (state/write-edn! reference-file record)
+              (io/make-parents reference-file)
+              (spit reference-file (str (pr-str record) "\n"))
               (let [second-file (io/file source-root "cache_probe/second.clj")]
                 (spit second-file
                       "(ns cache-probe.second)\n(def value :second-rebuilt)\n")
