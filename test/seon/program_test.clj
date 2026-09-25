@@ -1297,9 +1297,10 @@
         shapes (program/shapes-in projection)
         declaring (into #{}
                         (keep (fn [[schema-key _definition]]
-                                (when (:seon.program/row-schema
-                                       (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key)))
-                                  schema-key)))
+                                (let [properties (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key))]
+                                  (when (and (:seon.program/row-schema properties)
+                                             (:seon.program/source-attribute properties))
+                                    schema-key))))
                         forms)]
     (is (seq declaring) "declarations were found")
     (is (= (set program/identity-attributes) declaring)
