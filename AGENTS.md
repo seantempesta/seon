@@ -191,9 +191,8 @@ Private experiments remain possible; local green never implies shared acceptance
 - **Keep the whole cause.** Catch only declared cases or resurface class, message, `ex-data`,
   cause chain and Seon frames. Refusals name operation/member, expected shape and offending
   value; missing evidence is typed unknown, never nil/default/message-only success.
-  An error stays a real value (Throwable, `ex-data`, offending value) until an edge: persisting
-  stores that value as facts or a blob, and printing goes through the one render path. Never
-  summarize, stringify or clip an error where it is raised, caught or passed along.
+  An error is an ordinary value and follows the one REPL path like all data: no special
+  summarizing, stringifying or clipping where it is raised, caught or passed along.
 - **Return agent mistakes; store and deliver core faults.** Return declared `:seon.error`
   mistakes to their agent. Commit every other failure with `:seon.error/chain` at its owning
   boundary, then wake the responsible namespace agent or root through the ordinary route;
