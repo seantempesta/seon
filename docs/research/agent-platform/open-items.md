@@ -29,6 +29,23 @@ metadata + task EDN + schemas) co-locates every fact where grep finds it and ind
 handle followable by grep and by one REPL call. Docs, plans and issues move into the codebase as tasks. Six ingredients,
 made capable and reused everywhere: value+schema, fact store, function, evaluation, render, flow.
 
+### The organizing principle (owner 2026-09-25): one happy path is the unified environment and harness
+"It should be our unified env / harness whatever not just a single slice. Keep pushing on making this one happy path the
+main view for everything in the system." Every entrant runs through read → eval → record → print on its branch, and every
+workstream is judged by whether it moves an entrant onto that path or deletes a parallel one. Entrants and their state:
+
+| Entrant | Today | Converges by |
+|---|---|---|
+| Agent turns (turn drive) | on `seon.sci.eval/evaluate`, records via turn settlement | M1 S1 (one definition authority) |
+| MCP SCI mode | evaluates but records nothing (no program or evaluation rows) | M1 S2: submit as an owned agent |
+| MCP JVM mode | separate read/eval, unrecorded | S2 multi-form reader; recorded as root's (ruled 8.6) |
+| Test harness | own runner/recording; bodies partly outside the recorder | tests record through `turn/evaluation-facts` (design §2) |
+| Operator prepl (`bin/seon`) | separate request path | entrant on the same path (unassigned) |
+| Web runtime-eval | invalidation channel, not an evaluator (audit §1.7) | render consumer only |
+| Rendering (MCP + browser) | many printers and windows | one pipeline: selection → floor → two faces |
+| Program change | files edited by shell; publication batched | REPL `defn`/`ns-unmap!` on a branch → merge → write-back |
+| Tasks, errors, config | partly Markdown/EDN, several writers | data on the path: one writer each, reverse lookups |
+
 ### Owner authorizations for this push (2026-09-25, owner away)
 - Root approves slices over the line bound itself; when possible, schedule identification of obsolete code/docs to delete.
 - Task migration: slice 2 (3 records), then batches of hand-checked tasks, each Astra-reviewed.
