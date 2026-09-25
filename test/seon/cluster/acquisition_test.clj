@@ -48,8 +48,8 @@
   (let [row (:seon.program/row (evaluate! handle source))
         connection (:seon.db/connection handle)]
     (when-not row (throw (ex-info "Expected an analyzed declaration." {})))
-    (db/call-with-custody {}
-      #(support/transacted! connection (#'turn/row-tx (db/db connection) {} row))))
+    ;; The fixture writer binds the connection it names.
+    (support/transacted! connection (#'turn/row-tx (db/db connection) {} row)))
   nil)
 
 (defn- with-published-store
