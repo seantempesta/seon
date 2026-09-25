@@ -2015,15 +2015,25 @@
 (defn- arm-first-loads!
   "Load the `namespaces` this JVM has not loaded, then arm exactly the Vars that
   load interned, once, before any member body, against the LOADED program's
-  projection (the context's `:seon.sci.eval/loaded-database`), never the
-  requesting branch's. A branch whose contract for one of their declarations
-  differs from the loaded one refuses by name, before loading anything."
+  projection, never the requesting branch's. The loaded program is the commit
+  `seon.sci.eval/loaded-identity` names now, read from the context's store; the
+  context's snapshot is its acquisition's value and stays behind a later
+  adoption. An identity naming no commit is the booted program the snapshot
+  acquired; an unknown one answers its diagnostic. A branch whose contract for
+  one of their declarations differs from the loaded one refuses by name, before
+  loading anything."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.config/effective :seon.sci.eval/ctx [:set :symbol]]
-                  [:or :nil :seon.instrument/applied :seon.instrument/registration-error :seon.sci.eval/interpretation-error]]}
+                  [:or :nil :seon.instrument/applied :seon.instrument/registration-error
+                   :seon.sci.eval/interpretation-error :seon.test/not-runnable-error]]}
   [database effective ctx namespaces]
   (let [fresh (into (sorted-set) (remove find-ns) namespaces)
         snapshot (when (seq fresh) @(:seon.sci.kernel/program-snapshot ctx))
-        projection (when (seq fresh) (db/carried-projection (:seon.sci.eval/loaded-database snapshot)))
+        loaded-id (when (seq fresh) @sci.eval/loaded-identity)
+        loaded (when (and (seq fresh) (not (:seon.error/at loaded-id)))
+                 (if-let [commit (:seon.source/commit-id loaded-id)]
+                   (source/database (:seon.store/store (env/of ctx)) commit)
+                   (:seon.sci.eval/loaded-database snapshot)))
+        projection (when loaded (db/carried-projection loaded))
         contracts (:seon.schema.projection/function-contracts projection)
         branch-contracts (when (seq fresh) (:seon.schema.projection/function-contracts (db/carried-projection database)))
         changed (first (sort (filter #(and (fresh (symbol (namespace %)))
@@ -2032,6 +2042,7 @@
         evidence-bytes (:seon.config.error/max-evidence-bytes effective)]
     (cond
       (empty? fresh) nil
+      (:seon.error/at loaded-id) loaded-id
       changed
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/program `arm-first-loads!
        {:seon.error/message (str "Cannot interpret " changed ": Host-bound declaration " changed
@@ -2085,7 +2096,7 @@
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db/invalid-read-error
                    :seon.schema/missing-projection-error :seon.instrument/registration-error
-                   :seon.sci.eval/interpretation-error]]}
+                   :seon.sci.eval/interpretation-error :seon.test/not-runnable-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
     namespaces :seon.test/namespaces :as request}]
