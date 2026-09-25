@@ -1,6 +1,6 @@
 ---
 type: design
-status: "Opus first pass, awaiting Astra review"
+status: "Opus first pass revised for the owner output ruling (kondo return tags); awaiting Astra review"
 created: 2026-09-25
 scope: Contracts derived from destructured qualified keys and returned map keys (rows 1.12, 1.13 output half)
 source-pin: 19e9fe5f4
@@ -16,8 +16,12 @@ Lane design-derived-contracts-opus. First-pass design for Astra review; no produ
 `reference-code/malli/src/malli/destructure.cljc:125-162`). The data flow stays as it is:
 source → `:seon.fn/spec` on the row → `contract-facts`/`arity-row` → arity rows with input/output refs →
 projection → arming, call preparation, `reads-key`, reach. The design adds one step to it: when a
-declaration has no `:malli/schema`, its producer fills `:seon.fn/spec` from Malli's derivation of the
-arglist and from a small reading of the body's tail maps. Nothing downstream learns that a contract was derived.
+declaration has no `:malli/schema`, its producer fills `:seon.fn/spec`. Inputs come from Malli's derivation
+of the arglist. Outputs come from clj-kondo's inferred return tag for each arity: the fork already computes
+it (`reference-code/clj-kondo/src/clj_kondo/impl/analyzer.clj:877-899`) but does not yet export it (§2).
+This follows the owner's ruling that there are two output sources, an explicit `:malli/schema` or parsed
+return keys, and one parser per concern: Malli for destructuring, kondo for return keys. Seon has no body
+walker of its own. Nothing downstream learns that a contract was derived.
 
 **Division of ownership.**
 - This document owns requirement rows **1.12** and the output half of **1.13**: the derivation rules; how
@@ -51,6 +55,9 @@ The SCI probes used the disposable branch `derived-contracts-opus`, which was re
 | P8 | The same call with `[:map [:seon.db/db :seon.db/db] …]` | 7.2 ms; `input-refs #{:seon.cluster/name :seon.agent/id :seon.db/db}`, `output-refs #{:seon.ai/primary :seon.ai/settings}`; binding entries stored with `key-keyword` |
 | P9 | Query `:seon.fn/sym` rows vs `:seon.fn/spec` in default | **4,867 function rows, 2,099 with a contract; 2,768 without one.** `seon.turn/provider-targets` has no projection contract. |
 | P10 | `bb` scan of `src/**/*.clj{,c}` with edamame (committed nowhere; `tmp`-class probe) | 3,354 `defn`s; 1,919 carry an attribute-map `:malli/schema`. 196 take only maps with a qualified key in every argument: 155 of those have explicit schemas (808 pprinted schema lines), 41 have none. Tails of those 196: 28 map literal, 19 `assoc`/`merge`/`cond->`, 49 branch forms, 100 other. |
+| P11 | `(clj-kondo.core/run! {:lint [probe.clj] :cache true :cache-dir scratch})` on the fork; read `v1/clj/probe.ret.transit.json` | 15.5 ms. The resolved per-arity `:ret` for 13 probe tails is in the §2.1 table. |
+| P12 | the same run over `/Users/sean/src/seon/src` with `:skip-lint true` | 2,198 ms elapsed (other agents' work was concurrent: the profile names custody/transact). 106 cache files. Real tags for the five §7 functions are in §2.1. |
+| P13 | `bb` classifier over P12's cache files | 1,904 arities with a `:ret`: 163 closed and 5 open qualified maps, 40 unions made only of qualified maps, 29 unqualified maps, 51 empty maps, 303 other unions, 861 scalar or collection keywords. 403 `cond->` forms in `src`. |
 
 What the probes established:
 - Malli already owns input derivation. P1 and P2 tell us which options to pass (below).
@@ -118,7 +125,8 @@ through clj-kondo, the SCI reader and `:arglists`, so v1 does not use it.
 
 **Result for the owner's example.** `(defn f [{:keys [seon.db/db seon.agent/id] :as unit} x] …)` is
 underivable because of `x`. Without `x`, the derived input is `[:cat [:map :seon.db/db :seon.agent/id]]`.
-`:as unit` changes nothing on input; it lets output derivation name the input map (§2).
+`:as unit` changes nothing on input. With fork slice F3 it would let kondo tag `(assoc unit …)` as the
+input's keys plus the new key (§2.4).
 
 **Why not clj-kondo.** Its keyword analysis marks `:keys-destructuring`
 (`reference-code/clj-kondo/src/clj_kondo/impl/analysis.clj:176-186`), and it can report locals
@@ -128,60 +136,154 @@ contract needs. Seon's own parser and Malli's parser both already do.
 
 ---
 
-## 2. Outputs from returned map keys
+## 2. Outputs from returned map keys: clj-kondo's inferred return tag
 
-**Decidable statically** (v1, on the authored, unexpanded source): the body's tail positions.
+**Owner ruling (2026-09-25).** There are two sources for a function's output, and no third:
+- an explicit `:malli/schema`, which names inputs and outputs and wins;
+- otherwise, the return keys parsed by clj-kondo, which is the one output parser.
 
-| Tail | Derived |
+There is no `:seon.fn/returns` key, and Seon does no tail-position walk of its own (the first pass had one).
+
+### 2.1 What the fork infers today (verified)
+
+The fork already infers a return tag for every `defn` arity:
+- `analyze-fn-body` tags the body's last expression (`reference-code/clj-kondo/src/clj_kondo/impl/analyzer.clj:877-892`).
+- If that expression is a call, the tag is the call's `:ret` from `calls-by-id`. If it is a map literal, the
+  tag is `types/map->tag` (`types.clj:349-382`), and the map registers itself as a return (`analyzer.clj:4040-4044`).
+- The tag is stored as the arity's `:ret` (`:895-899`, `extract-arity-info` `:913-930`).
+- It reaches `namespace/reg-var!` inside `:arities` (`analyzer.clj:1956`).
+- It is resolved across namespaces when the cache syncs: `cache/update-defs` → `types/resolve-types` →
+  `resolve-arity` (`cache.clj:146-169`, `types.clj:882-935`). This happens even with no cache directory
+  (`cache.clj:210-215`).
+- `analysis/reg-var!` (`analysis.clj:87-100`) keeps only a fixed attribute list, so **no return tag is exported**.
+
+**Probes.** P11 and P12 ran `clj-kondo.core/run!` in default's JVM on the fork itself (the `deps.edn`
+`:local/root`) and read the resolved arities back from the cache file it wrote. That cache holds the same
+`:ret` values that `update-defs` resolves.
+
+| Tail (P11 probe file) | Resolved `:ret` |
 |---|---|
-| map literal whose keys are all qualified keywords | `[:map k1 k2 …]`, each a reference entry. The value's schema is the key's registered schema, not inferred from the value expression. |
-| `(assoc base k v …)`, literal qualified `k`s | base's map plus required `k`s |
-| `(cond-> base t1 (assoc k v) …)`, every clause an `assoc` with literal qualified keys | base's map plus those keys as optional |
-| `(merge m1 m2 …)`, every `mi` decidable | union of entries; required if required in any |
-| base is the `:as` local of a derived input map | that input map, so "returns its input plus" |
-| `let`/`do`/`when-let`/`if-let` | the last body form |
-| `if`/`cond`/`case`/`when` | each branch. `when` adds `:nil`. Distinct results become `[:or …]`; `throw` branches contribute nothing. |
+| `{:seon.ai/primary 1 :seon.ai/backup "x"}` | `{:type :map :val {:seon.ai/primary {:tag :pos-int} :seon.ai/backup {:tag :string}}}`: closed, every key known |
+| `(assoc {:seon.a/b 1} :seon.a/c "s")` | closed map with both keys (the `assoc` `:fn` spec, `types/clojure/core.clj:132-158`) |
+| `(assoc unit :seon.ai/primary 1)` where `unit` is the `:as` of a destructured argument | `:associative`: **keys lost**, because the argument has no map tag |
+| `(merge {:seon.a/b 1} {:seon.a/c 2})` | `:nilable/map`: **keys lost** (`merge` has only a `:ret`, `core.clj:666-668`) |
+| `(cond-> {:seon.a/b 1} x (assoc :seon.a/c 2))` | **no `:ret`**; the arity is dropped as empty. The `expand-cond->` rewrite (`macroexpand.clj:55-85`) loses it; cause not diagnosed. |
+| `(let [y 1] {:seon.a/b y})` | closed map |
+| `(if x {:seon.a/b 1} {:seon.a/c 2})` | set of the two map tags (a union) |
+| `(when x {:seon.a/b 1})` | `#{:nil <map>}` |
+| `(sorted-map :seon.a/b 1)` | `:sorted-map`: keys lost |
+| `{:seon.a/b {:seon.a/c 1}}` | nested map tags |
+| `(lit x)`, a user `defn` in the same run | **lit's map tag**, resolved through the deferred `{:call …}` (`types.clj:448-476`) |
+| `(:seon.ai/primary (lit x))` | `:pos-int`, via the keyword call on the callee's map (`:kw-calls`) |
+| multi-arity `([x] {…}) ([x y] "s")` | one `:ret` per arity: map / `:string` |
 
-**Undecidable:**
-- any other call (constructors, error helpers, `sorted-map`, `into`);
-- a symbol not bound to a derived input map;
-- a computed or unqualified key;
-- macros other than those listed (user macros and `->`);
-- any branch containing one of the above.
+On real Seon code (P12, the whole-`src` run):
+- **`seon.turn/provider-targets`** → a closed map `{:seon.ai/primary … :seon.ai/backup … :seon.ai/settings …
+  :seon.turn.loop/schedule …}`. Value tags stay deferred `{:call {:resolved-ns seon.ai :name targets
+  :kw-calls [:seon.ai/primary]}}`, so the resolved cache keeps callee names below the top level.
+- **`seon.fn/stored-namespace-context`** → a map with unqualified keys.
+- **`seon.flow/with-submission-filter`** → `:associative`.
+- **`seon.turn/attempt-request`**, **`seon.render.ns/compact-function-value`**, **`seon.render/unknown-stable-evidence`**,
+  **`seon.program/contract-facts`** → no `:ret`. All of them end in `cond->`.
 
-When a tail is undecidable, the refusal names its path, for example `[:if :else]`.
+**Census (P13).** Seon source has 403 `cond->` forms. Of the 1,904 `src` arities that carry a resolved `:ret`:
 
-Most outputs are undecidable. Only 47 of the 196 map-input functions end in a map or `assoc` form, and
-branch tails that return declared errors are always undecidable (P10).
+| Resolved `:ret` | Arities |
+|---|---:|
+| closed map, all keys qualified | 163 |
+| open map, all keys qualified | 5 |
+| union made only of qualified maps (and `:nil`) | 40 |
+| map with unqualified keys | 29 |
+| empty map | 51 |
+| mixed map | 2 |
+| other union | 303 |
+| scalar or collection keyword (`:vector` 269, `:boolean` 155, `:string` 114, `:associative` 62, `:nilable/map` 41, …) | 861 |
 
-**When the output cannot be derived.** The law is "contract every admitted function", and a typed-unknown
-output would admit a function with no output contract. That is a new cross-owner decision, so here are
-three priced options:
+A further 450 arities have `:args` only. So about 208 arities derive a qualified-key output from kondo's
+tag today. More would derive once named callee resolution applies (§2.3); that number is unmeasured.
 
-1. **Simplest viable: a full `:malli/schema` is required.** No new key. Short form reaches at most the
-   ~47 functions with decidable tails; the input shortening is lost everywhere else.
-2. **Recommended: one authored key, `:seon.fn/returns <schema>`, in the attribute map.** Inputs are
-   derived; the output is declared. It covers every derivable-input function (196 today plus new unit-map
-   code). Cost: one metadata key (the registry has no existing `returns` key; searched
-   `resources/seon/schemas`), about 6 lines in `declared-contract`, and one advice rule (§3). The price is
-   a Seon-specific spelling; Malli's own output syntax, `malli.experimental/defn`'s `:-` at
-   `experimental.cljc:21-24`, is not plain Clojure. Multi-arity functions whose arities return different
-   shapes still write a full `:malli/schema`.
-3. **Typed unknown output** (`:seon.fn/output-unknown` diagnostic), admitted only under `:warn` entry and
-   never merged. Cheapest to write, but it contradicts "Contract every admitted function" and "Every check
-   must pass before merge". Rejected unless the owner rules otherwise.
+### 2.2 The smallest fork change (F1)
 
-Under option 2 the preference order is: explicit `:malli/schema`, then derived inputs with
-`:seon.fn/returns`, then derived inputs with a derived output. If none applies, the refusal is the existing
-`missing-contract` (`src/seon/sci/eval.clj:1763`), with its message extended to name the underivable
-argument or tail and to show the short form.
+Export each arity's raw return tag through the var-definition analysis that `seon.fn.analyzer` already reads:
 
----
+- `clj_kondo/core.clj:146-216`: read a new option,
+  `(get-in analysis-cfg [:var-definitions :arity-returns])`, into ctx as `:analyze-arity-returns?`. About 2 lines.
+- `clj_kondo/impl/analysis.clj:87` `reg-var!`: when the flag is set, add
+  `:arity-returns {arity-key tag}` from `(:arities raw-attrs)`. The arity key is a fixed-arity integer or
+  `:varargs`, as in `extract-arity-info`. Each tag goes through `type-utils/strip-positions`
+  (`types/utils.clj:273-286`), and each `{:call …}` is reduced to `:resolved-ns :name :arity :kw-calls`, so
+  the analysis stays serializable (the issue #2165 note at `types.clj:370`). About 10 lines.
+- Export the **raw** tag, not the cache-resolved one. A raw tag keeps a user call as a name,
+  `{:call {:resolved-ns … :name … :arity …}}`, and Seon resolves that name against the callee's declared
+  contract (§2.3). That way an explicit callee contract wins over kondo's structural guess, and a declared
+  error alternative stays a named schema (AGENTS.md "Declare errors as flat data"). The resolved tag would
+  replace names with the callee's structure.
+- One fork test in `test/clj_kondo/analysis_test.clj` covering a map literal, an `if` union and a user call.
+  About 20 lines.
+- Cost is zero when the flag is off. When on, it serializes one small value per arity inside a lint Seon
+  already runs. The added time is unmeasured, and F1 must report it.
+
+The Seon side of F1 is three lines:
+- enable `:arity-returns true` in the analysis config at `src/seon/fn/analyzer.clj:30-39`;
+- add `:arity-returns` to `var-definition`'s key list (`:124-132`);
+- add one optional entry to the analyzer's output contract (`:683`).
+
+### 2.3 Seon's translation, a function of the tag (S3)
+
+`seon.fn/var-row` (`fn.clj:644`) already holds the analyzer entry, so it passes `::analyzer/arity-returns`
+to `declared-contract`. The translation from tag to Malli form is total, and each tag has one rule:
+
+| Tag | Malli |
+|---|---|
+| `{:type :map :val m}` with at least one qualified keyword key | `[:map k …]` over the qualified keys, each a naked reference, required. Unqualified keys derive nothing. `:open` adds nothing, since Malli maps are open. Value tags are ignored: the registered schema owns the value. |
+| map with no qualified key | underivable (`:unqualified-return-keys`) |
+| set (union) | union members are grouped into components by shared keys. Each component collapses into one `[:map]` whose keys present in every member are required and the rest optional. More than one component becomes `[:or …]`, and `:nil` adds a `:nil` alternative. This avoids the 2ⁿ member explosion that `cond->` chains would produce once F2 exists, while keeping a success map and an error map as separate alternatives, since they share no key. |
+| `{:call {:resolved-ns n :name f :arity a}}`, no `:kw-calls` | the callee's output for arity `a`, from its explicit contract in the projection or batch, or from its own derived output (recursive, with a visited set, over the same indexing batch). An uncontracted, underivable or cyclic callee makes this output underivable. |
+| anything else (`:associative`, `:nilable/map`, `:sorted-map`, scalar tags, `{:call …}` with `:kw-calls`, a missing `:ret`) | underivable, and the refusal names the tag |
+
+About 40 lines, including the callee resolution and the component rule.
+
+Scalar tags (`:string`, `:boolean`, `:vector`) could map to Malli types later. That would accrete a
+bounded kondo-to-Malli table; it is not v1, because the ruling covers return keys.
+
+### 2.4 What stays underivable, and what the author writes
+
+Underivable outputs today:
+- tails of `cond->` and `merge`, until F2;
+- `assoc` on a destructured input, until F3;
+- `sorted-map`, `into`, `reduce` and other built-ins whose `:ret` has no keys;
+- keyword access on a call's result;
+- maps with only unqualified keys;
+- calls into dependencies or to uncontracted Seon functions;
+- any union containing one of the above.
+
+**For the owner to rule on:** such a function needs **an explicit `:malli/schema`** (recommended), or its
+output is **unknown-typed**.
+- *Recommended, explicit required.* The entry gate's existing `missing-contract` refusal
+  (`src/seon/sci/eval.clj:1763`) names the underivable tag and its arity, and shows the explicit form.
+  Guarantee: every admitted function is contracted. Cost: the author writes the whole contract, and inputs
+  are not shortened for these functions. Sacrifice: short form only where kondo can see the keys.
+- *Unknown-typed.* This would admit an `:any` output with a typed diagnostic. It contradicts "Contract every
+  admitted function" and "Every check must pass before merge". It could exist only as a `:warn` entry
+  experiment, and `:warn` is not installed (`missing-contract` docstring, `eval.clj:1766-1769`). Not
+  recommended.
+
+**Fork slices that shrink the underivable set**, priced separately and each proven by a fork test:
+- **F2 — keep `cond->` and `merge` tails.**
+  - `cond->`: find why the `expand-cond->` let-rebind loses the tag. That would turn Seon's 403 `cond->`
+    forms, the idiomatic "absence is no key" builder, into unions of maps. Estimate ~15 lines, unproven.
+  - `merge`: a `:fn` spec that merges the maps' `:val` entries, like `assoc`'s. About 10 lines.
+- **F3 — tag a destructured argument's `:as` local as an open map of its destructured keys.** Then
+  `(assoc unit :k v)` returns the input's keys plus `:k`. This extends the binding extraction that
+  `destructured-key-tag` already reads (`types.clj:384-399`). Estimate ~10 lines, unproven.
+
+Nothing here adds a Seon parser. An output kondo cannot see becomes visible only through a fork change
+with its own test.
 
 ## 3. Explicit and derived contracts
 
-- **An explicit `:malli/schema` wins**, and so does an explicit `:seon.fn/returns` for the output. The
-  derivation still runs, but only as a check.
+- **An explicit `:malli/schema` wins**, for inputs and outputs together (owner ruling). The derivation
+  still runs, but only as a check.
 - **Disagreement is advice, not a refusal (v1).** The check reports a destructured qualified key that the
   explicit input neither lists nor reaches through a named schema (`m/deref` + `m/entries`). It also
   reports a derived output key missing from an explicit output.
@@ -216,8 +318,11 @@ argument or tail and to show the short form.
 - The SCI override at `eval.clj:514-516`.
 - The reader-side `function-declaration` (`src/seon/sci/reader.cljc:251`, `:285`, `:302`).
 
-All three call `signature/declared-contract`. The reader-side producer duplicates the indexer; that is an
-out-of-scope finding (§9).
+All three call `signature/declared-contract`. Only the indexer path has the kondo entry, and with it the
+output tag. So the reader-side producer can carry only an explicit contract, and its derived-contract row
+comes from the indexer. Whether a reader-side row without `:seon.fn/spec` reaches the gate before the
+indexer row does is unproven (§8). That producer duplicates the indexer, which is an out-of-scope
+finding (§9).
 
 **One defect blocks installation.** JVM arming selects candidates by Var metadata (`mi/-schema`):
 `armable` (`src/seon/instrument.clj:82-104`), `collect-contracts!` (`:815-825`) and `apply!` (`:906-918`).
@@ -265,7 +370,10 @@ Otherwise derivation would have to emit `[k k]`, which would put an ugly spellin
 
 ## 6. Inline functions and first render
 
-There are three problems, and each has one answer:
+There are three problems, and each has one answer. Inline functions get the kondo output tag the same
+way: the evaluation's analysis is a kondo run over the evaluated source (`seon.fn/source-rows`,
+`eval.clj:489-512`), and an anonymous `fn` is one of its arities. Whether kondo reports that arity through
+the parent var or not at all is 1.11's question, and it is unproven.
 
 1. **The closure's form is the expanded `fn*`** (P4). Derivation never reads runtime metadata. An inline
    `(fn …)` is derived from the **authored evaluation source**, by the same `declared-contract` over the
@@ -296,7 +404,8 @@ There are three problems, and each has one answer:
 
 ## 7. Five real functions in the short form
 
-The contracts below are what the rules in §1–§2 produce. Registry facts come from the default projection.
+Inputs follow §1. Outputs use kondo's real resolved tag for each function (P12). Registry facts come from the
+default projection.
 
 **7.1 `seon.turn/provider-targets`** (`src/seon/turn.clj:3930`; uncontracted today, P9). Source unchanged:
 
@@ -304,104 +413,111 @@ The contracts below are what the rules in §1–§2 produce. Registry facts come
 (defn- provider-targets
   "Resolved provider targets, settings, and finite schedule for one turn."
   [{db :seon.db/db cluster-name :seon.cluster/name agent-id :seon.agent/id}]
-  … {:seon.ai/primary primary :seon.ai/backup backup
-     :seon.ai/settings settings :seon.turn.loop/schedule …})
+  (let [...] {:seon.ai/primary primary :seon.ai/backup backup
+              :seon.ai/settings settings :seon.turn.loop/schedule ...}))
 ```
 
-The derived contract, `[:=> [:cat [:map :seon.db/db :seon.cluster/name :seon.agent/id]] [:map :seon.ai/primary :seon.ai/backup :seon.ai/settings :seon.turn.loop/schedule]]`,
-**refuses** because `:seon.turn.loop/schedule` is unregistered (P5). This function is its producer, so the
-refusal asks for its schema.
+kondo's tag is a closed map of four qualified keys, so the derived contract is
+`[:=> [:cat [:map :seon.db/db :seon.cluster/name :seon.agent/id]] [:map :seon.ai/primary :seon.ai/backup :seon.ai/settings :seon.turn.loop/schedule]]`.
+It **refuses** because `:seon.turn.loop/schedule` is unregistered (P5). This function is the key's
+producer, so the refusal asks for its schema.
 
-The derivation also exposes a real defect. `:seon.ai/backup` resolves to `:seon.ai/target`, which cannot be
-nil, yet the body returns `backup` even when it is nil. That breaks "absence is no key". The fix is
-`(cond-> {…} backup (assoc :seon.ai/backup backup))`, which derives `[:seon.ai/backup {:optional true}]`.
+It also exposes a real defect. `:seon.ai/backup` is `:seon.ai/target`, which does not allow nil, and the
+body returns `backup` even when it is nil. That breaks "absence is no key". The natural fix,
+`(cond-> {…} backup (assoc …))`, makes the output underivable until F2.
 
-**7.2 `seon.render.ns/compact-function-value`** (`src/seon/render/ns.clj:488`; uncontracted today):
+**7.2 `seon.render.ns/compact-function-value`** (`src/seon/render/ns.clj:488`; uncontracted today).
+- Input with `:or {doc nil spec nil}` added: `[:map :seon.fn/sym [:seon.fn/doc {:optional true}] [:seon.fn/spec {:optional true}]]`.
+- Output: the tail is `cond->`, and kondo has **no `:ret`** (P12). So v1 requires an explicit
+  `:malli/schema`.
+- With F2 the tag would be a union of `{:seon.fn/sym}`, `{:seon.fn/sym :seon.fn/spec}`, … . The component
+  rule collapses it to `[:map :seon.fn/sym [:seon.fn/spec {:optional true}] [:seon.fn/doc {:optional true}]]`.
 
-```clojure
-(defn- compact-function-value
-  [{:seon.fn/keys [sym doc spec] :or {doc nil spec nil}}]
-  (cond-> {:seon.fn/sym sym}
-    (not (str/blank? spec)) (assoc :seon.fn/spec spec)
-    (first-doc-line doc) (assoc :seon.fn/doc (first-doc-line doc))))
-```
+**7.3 `seon.turn/attempt-request`** (`src/seon/turn.clj:3912`; uncontracted today).
+- Input, with `:or {value nil failover-from nil delay-ms nil}` added, derives
+  `[:map :seon.ai/target :seon.ai/settings :seon.ai.attempt/ordinal :seon.turn/id :seon.agent/id :seon.turn.loop/attempt-evidence [:seon.error/value {:optional true}] [:seon.ai.attempt/failover-from {:optional true}] [:seon.ai.attempt/delay-ms {:optional true}]]`.
+- That input refuses: `:seon.turn.loop/attempt-evidence` is unregistered.
+- Output: the tail is `(cond-> (merge {…} evidence) …)`, and kondo has no `:ret`. It stays underivable even
+  with F2, because `merge` with a non-literal `evidence` has no keys. So this function needs an explicit
+  `:malli/schema`.
 
-Derived contract:
-`[:=> [:cat [:map :seon.fn/sym [:seon.fn/doc {:optional true}] [:seon.fn/spec {:optional true}]]] [:map :seon.fn/sym [:seon.fn/spec {:optional true}] [:seon.fn/doc {:optional true}]]]`.
-The only authored addition is `:or`.
+**7.4 `seon.render/unknown-stable-evidence`** (`src/seon/render.clj:972`; uncontracted today).
+- The input is already explicit renames. With `:or` on the four conditional keys it derives
+  `[:map :seon.render.unknown/reason [:seon.render.unknown/producer {:optional true}] [:seon.render/output {:optional true}] [:seon.render.call/id {:optional true}] [:seon.error/value {:optional true}]]`.
+- Output: `(cond-> (sorted-map …) …)` has no `:ret`, and even `sorted-map` alone gives `:sorted-map` with no
+  keys. So an explicit `:malli/schema` is required, unless the base is rewritten as a literal and F2 lands.
 
-**7.3 `seon.turn/attempt-request`** (`src/seon/turn.clj:3912`; uncontracted today). Inputs:
-`:keys [:seon.ai/target :seon.ai/settings :seon.ai.attempt/ordinal …]`, with
-`:or {value nil failover-from nil delay-ms nil}` added. They derive
-`[:map :seon.ai/target :seon.ai/settings :seon.ai.attempt/ordinal :seon.turn/id :seon.agent/id :seon.turn.loop/attempt-evidence [:seon.error/value {:optional true}] [:seon.ai.attempt/failover-from {:optional true}] [:seon.ai.attempt/delay-ms {:optional true}]]`.
+**7.5 `seon.fn/stored-namespace-context`** (`src/seon/fn.clj:258`; uncontracted today).
+- Input `{:seon.ns/keys [requires aliases refers imports]}` derives
+  `[:map :seon.ns/requires :seon.ns/aliases :seon.ns/refers :seon.ns/imports]`; all four keys are registered.
+- Output: kondo sees a closed map whose keys are all unqualified (`:requires :aliases …`, P12), so it is
+  underivable. Either an explicit `:malli/schema`, or qualified return keys, which is the better data model.
 
-The input refuses because `:seon.turn.loop/attempt-evidence` is unregistered. The output tail is
-`(cond-> (merge {…} evidence) …)`, and `merge` with a non-literal argument is undecidable in v1. Under
-option 2 the author adds `:seon.fn/returns :seon.ai.attempt/request`, or whichever schema the recorder
-declares. An existing registered name must be verified before writing it.
+A negative example: `seon.flow/with-submission-filter` (`src/seon/flow.clj:476`).
+- Input: `::keys` → `:seon.flow/io-parallelism` and `:seon.flow/io-active-count`, both unregistered, so it
+  refuses by name.
+- Output: `assoc` on its destructured `:as state` gives kondo `:associative` (P12), which is underivable
+  until F3.
+- Even then it would reference the dependency key `:clojure.core.async.flow/input-filter`. Whether Seon
+  registers dependency-owned keys is root's data-modeling decision.
 
-**7.4 `seon.render/unknown-stable-evidence`** (`src/seon/render.clj:972`; uncontracted today). The input is
-already written with explicit renames, so the derived input is
-`[:map :seon.render.unknown/reason [:seon.render.unknown/producer {:optional true}] [:seon.render/output {:optional true}] [:seon.render.call/id {:optional true}] [:seon.error/value {:optional true}]]`.
-This needs `:or` for the four conditional keys.
-
-The output `(cond-> (sorted-map …) …)` is undecidable: `sorted-map` is a call. Two ways out: rewrite the
-base as a literal, which derives
-`[:map :seon.render.unknown/reason [:seon.render.unknown/producer {:optional true}] … [:seon.render.unknown/call {:optional true}]]`,
-or declare `:seon.fn/returns`. The rewrite drops the sorted order, which the caller would need to not depend
-on; that is unverified.
-
-**7.5 `seon.fn/stored-namespace-context`** (`src/seon/fn.clj:258`; uncontracted today). The input
-`{:seon.ns/keys [requires aliases refers imports]}` derives
-`[:map :seon.ns/requires :seon.ns/aliases :seon.ns/refers :seon.ns/imports]`; all four keys are registered.
-
-The output is a map literal with **unqualified** keys (`:requires :aliases …`), so it derives nothing. It
-needs `:seon.fn/returns`, or qualified return keys, which is the better data model.
-
-A negative example: `seon.flow/with-submission-filter` (`src/seon/flow.clj:476`) derives its input from
-`::keys` → `:seon.flow/io-parallelism` and `:seon.flow/io-active-count`. Both are unregistered, so it
-refuses by name. Its output, `assoc` on `:as state` of `::flow/input-filter`, would reference the
-dependency key `:clojure.core.async.flow/input-filter`, which Seon does not register. Declaring
-dependency-owned keys is a data-modeling decision for root, not something to derive.
+For this small sample, the ruling means that without F2 only one of the five derives its output
+(`provider-targets`). All five derive their inputs.
 
 ---
 
 ## 8. Priced slices
 
-Each slice is one loadable change with its regression.
+Each slice is one loadable change with its regression. The fork slices are priced separately: they change
+`reference-code/clj-kondo`, the owner's fork (remote `seantempesta/clj-kondo`); root commits and pushes them.
+
+**Seon slices**
 
 | Slice | Change | Added (est.) | Deletes / enables | Needs |
 |---|---|---:|---|---|
-| S0 | `canonical-map-entry` (`schema_shape.clj:28-36`) accepts Malli naked `k` and `[k props]` entries, preferably by reading `m/children` `[k props schema]` | ~5 | fixes a latent crash (P7); it is a step of cut C4, not a new path | — |
-| S1 | `signature/declared-contract`: `md/parse`, the three normalizations and the underivable refusal; `:seon.fn/returns`; convert the three producers | ~45 | — | S0 |
+| S0 | `canonical-map-entry` (`schema_shape.clj:28-36`) accepts Malli naked `k` and `[k props]` entries, preferably by reading `m/children` `[k props schema]` | ~5 | fixes a latent crash (P7); a step of cut C4, not a new path | — |
+| S1 | `signature/declared-contract`: `md/parse`, the three normalizations and the underivable refusal; convert the three producers | ~35 | — | S0 |
 | S2 | JVM arming selects candidates from projection function-contracts, not Var metadata (`instrument.clj:82-104`, `:815-825`, `:906-918`) | ~8 | removes the Var-metadata authority (~8 lines) | — |
-| S3 | tail-map output derivation (§2 table) | ~45 | shortens up to ~47 functions today | S1 |
+| S3 | read `::analyzer/arity-returns` (3 analyzer lines) and the §2.3 translation: map, union components, named callee resolution | ~43 | — | S1, F1 |
 | S4 | explicit-vs-derived advice + census, then promote to refusal | ~20 + 1 schema | — | S1 |
-| S5 | one scripted sweep: delete explicit input schemas that S1 derives equally; add `:or`/`:seon.fn/returns` to uncontracted map-input functions | net negative | upper bound 808 pprinted schema lines across 155 functions (the input halves are deletable); the 41 uncontracted map-input functions gain contracts at a cost of a few authored words each | S1, S2 |
+| S5 | one scripted sweep: delete explicit schemas whose inputs and outputs S1+S3 derive equally; add `:or` to uncontracted map-input functions | net negative | at most 808 pprinted schema lines across the 155 explicit map-input functions (P10). Only functions whose output also derives lose their whole schema; the count is measured by the sweep. | S1–S3 |
 
-- **S0 + S1 + S2 ≈ 58 added lines** is the minimal viable installation, under the ~100-line bar.
-- **With S3 and S4 it is ≈ 125.** Per duplicate-paths-audit §11 that total needs deletions to justify it,
-  and S5 is the only source. So the order is: S0–S2, then the S5 sweep with measured net lines, then S3
-  only if the sweep shows enough decidable tails to pay for its 45 lines.
+**Fork slices**
+
+| Slice | Change | Added (est.) | Proof |
+|---|---|---:|---|
+| F1 | export raw per-arity return tags: `:var-definitions {:arity-returns true}` (`core.clj`, ~2 lines) and `reg-var!` `:arity-returns` (`analysis.clj:87`, ~10 lines) | ~12 src + ~20 test | a fork `analysis_test` deftest (map literal, `if` union, user call) |
+| F2 | keep `cond->` tails' `:ret` (`expand-cond->`, `macroexpand.clj:55-85`; cause undiagnosed); `merge` `:fn` spec combining `:val` | ~25, unproven | fork type tests; then P13's census rerun |
+| F3 | destructured `:as` local tagged as an open map of its keys (next to `destructured-key-tag`, `types.clj:384-399`) | ~10, unproven | fork type test: `(assoc unit :k v)` keeps the input keys |
+
+- **Minimal viable installation: S0 + S1 + S2 + S3 + F1**, about 91 Seon lines plus the fork's ~12.
+  This is under the ~100-line bar, but not by much.
+- **S4 would take the total to about 111.** Per duplicate-paths-audit §11 it needs the deletions measured in
+  S5 first. S4 runs only after S5.
+- **Order:** S0, S2, S1, F1, S3, S5; then F2, whose payoff P13 can measure, and S4.
 - **Cost profile:**
-  - derivation runs once per changed declaration, keyed by source digest, alongside existing indexing;
+  - derivation runs once per changed declaration, inside indexing that already runs kondo; no per-call work;
   - `md/parse` costs ~0.3 ms per arglist (P1);
-  - compile costs ~0.1 ms (P6);
-  - no per-call work.
+  - Malli compile costs ~0.1 ms (P6);
+  - F1's added lint time is unmeasured, and F1 must report the whole-`src` delta with the flag on and off.
+    P12's 2.2 s is the flag-off baseline, but other work was running concurrently, so it needs a quiet rerun.
 
 **Unproven** (Astra, falsify these):
-1. Call preparation matches a naked reference entry `:seon.db/db` against the supplied-default rows by
-   key and shape fingerprint (`supplied-map-entries`, `call_preparation.clj:864-900`). P8 used `[k k]`
-   entries.
-2. `md/parse` on arglists read with `*reader-resolver*` in CLJS (`signature.cljc:29` reads CLJS without
-   aliases): `::alias/k` in `.cljc` sources.
-3. Explicit rename entries in `md/-keys` (`destructure.cljc:80`) behave identically for symbol-keyed
-   renames under `:syms`.
-4. 1.11's closure → analysed-row join by form position (§6.1).
-5. Whether the face needs a stored "derived" fact (§3).
-6. The census of explicit contracts that S4 would flag.
-7. P10 is an edamame scan, not the program graph: counts are approximate. P9 is the authoritative
-   uncontracted count.
+1. Call preparation matches a naked reference entry `:seon.db/db` against the supplied-default rows by key
+   and shape fingerprint (`supplied-map-entries`, `call_preparation.clj:864-900`). P8 used `[k k]` entries.
+2. The raw export's exact shape. P11 read cache-resolved tags. Raw `{:call …}` tags at `reg-var!` time are
+   inferred from `ret-tag-from-call` (`types.clj:448-476`) and from P12's nested deferred calls. F1's test
+   must pin them down.
+3. Cross-namespace callee resolution happens in one Seon indexing run, because every namespace is linted
+   together. The SCI single-evaluation analysis sees only the evaluated source, so a call into another
+   namespace there resolves only through the projection's contracts.
+4. `md/parse` on arglists read in CLJS without aliases (`signature.cljc:29`): `::alias/k` in `.cljc` sources.
+5. The reader-side row versus the indexer row ordering at the gate (§3).
+6. 1.11's join from closure to analysed row by form position (§6.1).
+7. Whether the face needs a stored "derived" fact (§3).
+8. The census that S4 would flag.
+9. P10 and P13 are scans, not the program graph. P9 is the authoritative uncontracted count.
+10. The cause of the lost `cond->` tag (F2).
 
 ---
 
