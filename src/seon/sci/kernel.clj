@@ -589,6 +589,7 @@
   [{ctx :seon.sci.eval/ctx
     database :seon.db/db
     function-symbol :seon.fn/sym
+    function-value :seon.sci.eval/function
     arguments :seon.sci.eval/args
     time-limit-ms :seon.sci.eval/time-limit-ms
     caps :seon.sci.admit/caps
@@ -602,15 +603,15 @@
        ctx time-limit-ms
        (fn [{:keys [interrupt-fn] record-fn ::record :as armed}]
          (vreset! arm-state armed)
-         (ensure-function! ctx database function-symbol)
+         (when-not function-value (ensure-function! ctx database function-symbol))
          (binding [db/*conn*
                   (get-in ctx
                           [:seon.sci.eval/custody
                            :seon.db/connection])
                   db/*read-evidence-sink*
                   (or read-evidence-sink db/*read-evidence-sink*)]
-          (let [sci-var (sci/resolve ctx function-symbol)]
-            (when-not (sci.utils/var? sci-var)
+          (let [sci-var (if function-value function-value (sci/resolve ctx function-symbol))]
+            (when-not (or function-value (sci.utils/var? sci-var))
               (throw
                (ex-info (str function-symbol " is not an installed SCI Var.")
                         {:seon.error/at (java.util.Date.)
@@ -629,8 +630,11 @@
                   ;; return is preparation refusing — the callee body is
                   ;; never entered and the flat value is the result,
                   ;; admitted like any other.
-                  prepared (call-preparation/hook ctx sci-var
-                                                  (vec arguments))
+                  ;; A function value is an inline agent function: no Var,
+                  ;; so no named call preparation; its arguments are applied.
+                  prepared (if function-value
+                             (vec arguments)
+                             (call-preparation/hook ctx sci-var (vec arguments)))
                   value (if (reduced? prepared)
                           (deref prepared)
                           (apply sci-var prepared))
@@ -652,9 +656,9 @@
                 (record-fn (if (interrupted? throwable) :time :error))
                 (unarmed-record started-at))
               failure (failure-value
-                       {:seon.fn/sym function-symbol
-                        ::time-limit-kind ::time-limit
-                        ::failure-kind ::invocation-failed}
+                       (cond-> {::time-limit-kind ::time-limit
+                                ::failure-kind ::invocation-failed}
+                         function-symbol (assoc :seon.fn/sym function-symbol))
                        throwable record-value)]
           (try
             (admit/admit-value

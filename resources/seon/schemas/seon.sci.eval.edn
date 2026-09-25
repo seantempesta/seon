@@ -138,7 +138,8 @@
                 [:map
                  [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                  [:seon.db/db :seon.db/database-value]
-                 [:seon.fn/sym :seon.fn/sym]
+                 [:seon.fn/sym {:optional true} :seon.fn/sym]
+                 [:seon.sci.eval/function {:optional true} :seon.sci.eval/function]
                  [:seon.sci.eval/args :seon.sci.eval/args]
                  [:seon.sci.eval/time-limit-ms
                   :seon.sci.eval/time-limit-ms]
@@ -148,6 +149,9 @@
                   :seon.db/read-evidence-sink]
                  [:seon.config/on-core-error
                   :seon.config/on-core-error]],
+                :function
+                [:fn {:description "An agent function value (an inline render function) invoked through the same arm and admission as a named Var; the request names it instead of :seon.fn/sym."}
+                 clojure.core/ifn?]
                 :args
                 [:vector
                  [:any
