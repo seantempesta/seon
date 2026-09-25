@@ -189,3 +189,45 @@
         :seon.fn.arity/order ordinal :seon.fn.argument/index index
         :seon.call-preparation/key default-key :seon.call-preparation/schema-key schema-name
         :seon.schema.shape/form (pr-str (schema/canonical-definition (m/form child) predicates))}))))
+
+(deftest every-malli-map-entry-spelling-stores-one-shape
+  ;; Malli's `-parse-entry` (malli/core.cljc:487-535) reads a naked reference
+  ;; `k`, `[k]` and `[k properties]` as the registered `k`. The naked form
+  ;; threw `nth not supported on this type: Keyword`, and `[k]`/`[k properties]`
+  ;; encoded a nil child. Each spelling must encode the same rows as its
+  ;; explicit twin, so call preparation's entry queries see identical facts.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           forms (shape/prepare-forms projection)
+           predicates (schema/predicate-functions-in projection)
+           options (:seon.schema.projection/compile-options projection)
+           row-of #(shape/shape-row (m/schema % options) forms predicates)
+           required [:map [:seon.agent/id :seon.agent/id] [:seon.db/db :seon.db/db]]
+           optional [:map [:seon.agent/id {:optional true} :seon.agent/id]
+                     [:seon.db/db :seon.db/db]]
+           spellings {required [[:map :seon.agent/id :seon.db/db]
+                                [:map [:seon.agent/id] [:seon.db/db]]
+                                [:map :seon.db/db [:seon.agent/id :seon.agent/id]]]
+                      optional [[:map [:seon.agent/id {:optional true}] :seon.db/db]
+                                [:map :seon.db/db [:seon.agent/id {:optional true}]]]
+                      [:map [:sample/unit [:map [:seon.agent/id :seon.agent/id]]]]
+                      [[:map [:sample/unit [:map :seon.agent/id]]]]}]
+       (support/transacted! connection (mapv row-of (keys spellings)))
+       (let [stored (db/db connection)]
+         (doseq [[explicit variants] spellings
+                 :let [row (row-of explicit)
+                       entity (db/q stored '[:find ?e . :in $ ?fingerprint
+                                             :where [?e :seon.schema.shape/fingerprint ?fingerprint]]
+                                    (:seon.schema.shape/fingerprint row))
+                       decoded (shape/database-form stored entity)]
+                 variant variants]
+           (is (= row (row-of variant)) (pr-str variant))
+           (is (= (:seon.schema.shape/fingerprint row)
+                  (:seon.schema.shape/fingerprint (row-of decoded))))
+           (is (= explicit decoded) "the stored shape decodes to the explicit spelling")
+           (doseq [value [{} {:seon.db/db 1} {:seon.agent/id 1 :seon.db/db 1}]]
+             (is (= (m/validate (m/schema variant options) value)
+                    (m/validate (shape/compiled-in stored entity) value))
+                 (pr-str [variant value])))))))))

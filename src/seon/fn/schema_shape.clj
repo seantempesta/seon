@@ -26,10 +26,23 @@
      :seon.schema.shape/properties properties
      :seon.schema.shape/children (if properties (rest tail) tail)}))
 
+;; Malli's `-parse-entry` (malli/core.cljc:487-535) accepts a naked reference
+;; `k`, `[k]`, `[k properties]` (both naming the registered `k` as the child)
+;; and the explicit `[k child]`/`[k properties child]`. Every reader here
+;; takes the explicit triple, so the spellings share one canonical form.
+(defn- entry-parts
+  "`[key properties child]` for one map entry in any Malli spelling."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:tuple :seon.schema/value [:maybe :map] :seon.schema/value]]}
+  [entry]
+  (let [[entry-key a b :as parts] (if (vector? entry) entry [entry])]
+    (case (count parts)
+      1 [entry-key nil entry-key]
+      2 (if (map? a) [entry-key a entry-key] [entry-key nil a])
+      [entry-key a b])))
+
 (defn- canonical-map-entry
   [entry]
-  (let [[entry-key a b] entry
-        [properties child] (if (map? a) [a b] [nil a])
+  (let [[entry-key properties child] (entry-parts entry)
         properties (cond-> properties
                      (false? (:optional properties)) (dissoc :optional))]
     (cond-> [entry-key]
@@ -257,8 +270,7 @@
 (defn- entry-row
   "`[row seen]` for one map entry of a shape."
   [shape-fingerprint order entry seen encode]
-  (let [[entry-key a b] entry
-        [properties child] (if (map? a) [a b] [nil a])
+  (let [[entry-key properties child] (entry-parts entry)
         entry-id (str "seon.schema.shape.entry/" shape-fingerprint "/" order)
         [schema seen] (encode child seen)]
     [(cond->
