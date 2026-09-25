@@ -801,12 +801,20 @@
          rows (seon.fn/source-rows
                database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
-     (revised-row
-      database
-      (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
-          (throw (ex-info "The fixture source did not define the requested declaration."
-                          {:seon.program/identity identity :seon.program/source source})))
-      overrides ns-row))))
+     (let [row (merge (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
+                          (throw (ex-info "The fixture source did not define the requested declaration."
+                                          {:seon.program/identity identity :seon.program/source source})))
+                      overrides)
+           declared (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute declaration-symbol)
+           ;; An upsert onto a stored declaration: the writer digests the final
+           ;; value, the stored row with this one merged as `revision` merges it.
+           final (if declared
+                   (merge-with #(if (set? %1) (into %1 %2) %2)
+                               (@#'seon.db/declaration-value database (db/identity-attributes database) declared)
+                               row)
+                   row)]
+       (assoc row :seon.program/definition-digest
+              (:seon.program/definition-digest (revised-row database final {} ns-row)))))))
 
 (defn program-fn-row
   "A complete indexed declaration, or an explicitly analyzed agent fixture.
