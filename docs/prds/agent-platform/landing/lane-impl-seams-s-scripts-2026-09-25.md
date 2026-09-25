@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: 7 code commits (81f78faa3..35f8c4131); shell and dependency-cache reds classified and fixed, rerun awaits root
+status: 7 code commits (81f78faa3..35f8c4131); shell.jvm-test green 18/0; dependency-cache-test waits for the digest namespace to reload in default
 ---
 # Lane impl-seams-s-scripts-opus: lost-error seams cut S-scripts (2026-09-25)
 
@@ -9,6 +9,16 @@ S-scripts, correction 7 (bootstrap and operator scripts stay on JDK primitives).
 No Seon runtime import was added to a script.
 
 ## Broken or unproved first
+
+- **Run verify-final 002: dependency-cache-test had 7 pass and 3 fail. NOT ADOPTED, not a code defect.**
+  - Default still holds the pre-`35f8c4131` `seon.dev.dependency-digest`. A read-only probe of `pins-unavailable`
+    returns only `at`, `data`, `layer`, `message` and `operation`, which is the old nested shape.
+  - `dev_cache.clj:220-221` loads the digest by path only when it is not yet loaded, and publication does not
+    reload this `script/` namespace. So a committed change there never reaches a running JVM.
+  - The committed code gives the flat refusal under bb (see the entry below).
+  - **Root:** at default's REPL run `(require 'seon.dev.dependency-digest :reload)`, or do `bin/seon down && bin/seon
+    start`, then rerun the test.
+  - Publication gap for root to record: `script/seon/dev/dependency_digest.clj` is not reloaded by adoption.
 
 - **Run 015 at 23:50: shell.jvm-test had 6 fails. All were CAUSED by `fc5ea0890`.** `task-outcomes` and
   `finish-evidence` declared their tasks as `[:vector :map]`, but each task is a `[member task]` pair. The armed
