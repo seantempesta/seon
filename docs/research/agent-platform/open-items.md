@@ -43,9 +43,13 @@ forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by name
 **One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
 dead snapshot fields still owed; wave 3 F2/F5/F6 (projection wrappers, call-with-projection sweep, lazy registry) next.
 
-**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. TRUE BASELINE 2026-09-25 ~01:40Z after a
-full rerun of every red/unknown (batches of 40, then the unknowns in batches of 15): 365 failed, 18 unknown (was 671
-red/unknown, mostly stale). Census #3 of the now-current reds running (census-red-baseline-3).
+**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. TRUE BASELINE 2026-09-25 ~01:40Z: 365 failed,
+18 unknown (all current). Census #3 (aab55ddd3), 14 classes: H1 hand-built rows 58 + agent rows without branch 40 + label-
+branch helper agent-row (turn_test.clj:131) 33; BOUND 43; spies never reached 33; nested refusal fields 27; single-owner 27
+(17 FIX-SRC); retired shapes 25; SCI regressions 23; clean-world data 22; render selection 15; problems compile 12 (rerun);
+sibling worlds 4. The 18 unknowns: two routing-conservation tests whose threads never exit block their requests.
+Lanes (code only): fixture-agent-rows, fix-sci-zero-arg-and-names, fix-src-singles-db-schema,
+fix-src-singles-prompt-web-mcp-config, update-retired-test-shapes.
 
 ## New platform findings (2026-09-25)
 - Small publication 14.6 s: 9.4 s was relinting all 179 callers of zero-argument functions whose arity rows never compared
