@@ -13,6 +13,7 @@
   acquire complete declared components before rendering."
   (:require [clojure.core.async.flow :as-alias flow]
             [clojure.edn :as edn]
+            [clojure.stacktrace :as stacktrace]
             [clojure.string :as str]
             [clojure.test.check.generators :as gen]
             [malli.core :as m]
@@ -100,20 +101,6 @@
     (and (map? source) (instance? Throwable (::flow/ex source))) (::flow/ex source)))
 
 
-
-(defn- root-cause
-  "The deepest Throwable in the cause chain.
-  A different question from `refusal`'s — that one digs out the deepest
-  DATA, this one names the throwable the chain bottoms out in — so it is
-  not a copy of that walk."
-  {:malli/schema [:=> [:cat :seon.error/throwable]
-                  :seon.error/throwable]}
-  [failure]
-  (loop [candidate failure]
-    (if-let [cause (ex-cause candidate)]
-      (recur cause)
-      candidate)))
-
 (defn- message
   "What a reader is told. Never absent, never blank.
   Taken from the ROOT CAUSE, not the outermost wrapper: measured on the
@@ -136,7 +123,7 @@
         (str (:seon.turn/transition source) " was refused by "
              (:seon.turn/rule source) "."))
       (when failure
-        (let [deepest (root-cause failure)]
+        (let [deepest (stacktrace/root-cause failure)]
           (or (not-empty (ex-message deepest))
               (not-empty (ex-message failure))
               (.getName (class deepest)))))
