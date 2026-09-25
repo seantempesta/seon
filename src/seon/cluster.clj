@@ -72,7 +72,7 @@
             [malli.registry :as mr]
             [seon.schema.internal :as internal])
   (:import [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files InvalidPathException LinkOption Paths
+           [java.nio.file CopyOption Files InvalidPathException Paths
             StandardCopyOption]
            [java.util Date]
            [java.util.concurrent Executor]))
@@ -239,20 +239,6 @@
 
 (def ^:dynamic ^:private *boot-progress!*
   (constantly nil))
-
-(defn- boot-phase
-  [instance]
-  (cond
-    (:seon.boot/ready-ms instance) :seon.boot.phase/ready
-    (:seon.render.web/served instance) :seon.boot.phase/web
-    (:seon.flow/graph instance) :seon.boot.phase/agents
-    (:seon.flow/work-launcher instance) :seon.boot.phase/work-launcher
-    (:seon.sci.eval/ctx instance) :seon.boot.phase/program
-    (:seon.boot/config-result instance) :seon.boot.phase/config
-    (contains? instance :seon.boot/recovered-runs) :seon.boot.phase/recovery
-    (:seon.boot/cluster-connection instance) :seon.boot.phase/branch
-    (:seon.store/store instance) :seon.boot.phase/store
-    (:seon.boot/prepl-server instance) :seon.boot.phase/repl))
 
 ;;; ---------------------------------------------------------------------------
 ;;; MCP result projection — installed at the cluster io-prepl boundary.
@@ -814,50 +800,6 @@
   {:malli/schema [:=> [:cat] :seon.boot/executors]}
   []
   (operator.runtime/root-executors))
-
-(def ^:private starting ::starting)
-
-(defn- server-name
-  [cluster-name]
-  (str "seon.cluster/" cluster-name))
-
-(defn- reserve-cluster!
-  [cluster-name]
-  (loop []
-    (let [instances @running-instances]
-      (if (contains? instances cluster-name)
-        (refused! "The cluster already has an instance in this process."
-                  {:seon.boot/cluster-name cluster-name})
-        (when-not (compare-and-set! running-instances
-                                    instances
-                                    (assoc instances cluster-name starting))
-          (recur))))))
-
-(defn- release-reservation!
-  [cluster-name]
-  (swap! running-instances
-         (fn [instances]
-           (if (= starting (get instances cluster-name))
-             (dissoc instances cluster-name)
-             instances))))
-
-(defn- create-directories!
-  [config paths]
-  (doseq [path [(:seon.boot/cluster-dir paths)
-                (:seon.boot/log-dir config)]]
-    (.mkdirs (io/file path))))
-
-(defn- require-cluster-target!
-  [paths]
-  (let [target (.toPath (io/file (:seon.boot/cluster-dir paths)))
-        no-follow (into-array LinkOption [LinkOption/NOFOLLOW_LINKS])]
-    (when (and (Files/exists target no-follow)
-               (not (Files/isDirectory target no-follow)))
-      (refused!
-       "The cluster path exists and is not a cluster directory."
-       {:seon.boot/rule ::non-cluster-target
-        :seon.boot/cluster-dir (str target)})))
-  paths)
 
 (defn- operator-root
   "The process root whose `data/store` this cluster root branches from.
