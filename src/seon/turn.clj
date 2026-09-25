@@ -5183,6 +5183,44 @@
                          :seon.turn.work/situation :resume
                          :seon.cluster.eval/ordinal ordinal))))))))
 
+(defn- episode-exhausted!
+  "Store and deliver the fault of a pass that spent the agent's last episode run.
+
+  The bound (`:seon.config.run/max-episode-runs`) defers every later opening
+  (`opening-deferred?`), so this is the one pass that can say so: its wakes
+  stay unanswered and the terminal event, a reply completing the episode
+  (`seon.run/complete`), never arrived. Agent and run identity are untouched,
+  so a new outside wake resumes the agent. Under `:panic` `seon.fault/fault!`
+  throws to the turn's caller."
+  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id :seon.turn.loop/turn-report] :nil]}
+  [cluster agent-id result]
+  (when-not (= :released (:seon.turn.loop/outcome result))
+    (let [database (db/db (:seon.db/connection cluster))
+          left (turns-left database agent-id)
+          deferred (when (and (int? left) (zero? left))
+                     (deferred-triggers database agent-id))]
+      (when (seq deferred)
+        (let [limit (max-episode-runs database agent-id)
+              diagnostic
+              (seon.error.refusal/diagnostic
+               (Date.) :seon.turn/episode 'seon.turn/turn
+               {:seon.error/message
+                (str "Agent " (pr-str agent-id) " spent its " limit " episode runs; "
+                     (count deferred) " wake(s) stay unanswered because the terminal "
+                     "event, a reply completing the episode (seon.run/complete), never "
+                     "arrived. A new outside wake resumes the agent.")
+                :seon.error/expected 'seon.run/complete
+                :seon.error/offending (mapv :seon.message/id deferred)
+                :seon.error/data (cond-> {:seon.agent/id agent-id
+                                          :seon.config.run/max-episode-runs limit}
+                                   (:seon.turn/id result) (assoc :seon.turn/id (:seon.turn/id result)))})]
+          (fault/fault! (env/of cluster) (ex-info (:seon.error/message diagnostic) diagnostic)
+                        {:seon.error/layer :seon.turn/episode
+                         :seon.error/operation 'seon.turn/turn
+                         :seon.db.process/id (:seon.db.process/id cluster)
+                         :seon.agent/id agent-id}))))
+    nil))
+
 (defn turn
   "Run one turn to its next durable boundary; returns the turn report.
   The sequence is the contract: open → derive prompt → model (`:io`)
@@ -5241,7 +5279,8 @@
                                 :call (call-turn request)
                                 :generate (generate-turn request)
                                 :resume (resume-turn request)
-                                :close (close-turn request))]
+                                :close (close-turn request))
+                       _ (episode-exhausted! cluster agent-id result)]
                    (if (and (= :closed (:seon.turn.loop/outcome result))
                               (not= :generate (:seon.turn.work/situation work))
                               (db/q '[:find ?issue . :in $ ?id :where

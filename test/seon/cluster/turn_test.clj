@@ -419,6 +419,27 @@
                                 (agent-evaluations @(:seon.db/connection cluster)))))
             (is (< elapsed-ms 10000.0) (str "the turn took " elapsed-ms " ms"))))))))
 
+(deftest spending-the-last-episode-run-is-a-loud-core-fault
+  ;; Law (lane fix-turn-hang-2026-09-25, round 5): reaching
+  ;; :seon.config.run/max-episode-runs with a wake unanswered is a stored,
+  ;; delivered core fault naming the missing terminal event, never silence.
+  ;; A refused provider credential closes the one call run with no reply.
+  (with-cluster
+    (fn [cluster]
+      (let [connection (:seon.db/connection cluster)
+            configured (config/apply! {:seon.db/connection connection
+                                       :seon.boot/cluster-name "turn-test"
+                                       :seon.config/manifest {:seon.config.run/max-episode-runs 1}})
+            panic (try (drive-agent! cluster "agent-a" 4) nil
+                       (catch clojure.lang.ExceptionInfo failure failure))]
+        (is (boolean? (:seon.reconcile/converged? configured)) (pr-str configured))
+        (is (some? panic) "the pass that spends the last run throws under :panic")
+        (is (str/includes? (str (ex-message panic)) "seon.run/complete") (ex-message panic))
+        (is (= 'seon.turn/turn (get-in (ex-data panic) [:seon.fault/recorded :seon.error/operation]))
+            (pr-str (ex-data panic)))
+        (is (nil? (turn/next-agent-work @connection (request connection)))
+            "the bound still defers every later opening")))))
+
 (deftest function-install-reads-the-case-count-from-cluster-facts
   (with-cluster
     (fn [cluster]
