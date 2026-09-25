@@ -40,6 +40,11 @@ alter-var-root #'seon.turn/step remain. Owner: harness S5 sweep + S9 loopback/fu
 background-launcher request and base/candidate sibling check not written; attempt writes no evaluation row; a seed that
 redefines its own test runs the old Var (smallest fix: digest-compare refusal, needs a seon.test.seed.edn alternative);
 schema/datahike_parity.edn unchanged since 2026-09-22 (drifts); file-store fixtures borrow the member ctx.
+**Test-shape sweep landed (unverified, 16 commits 1d8e5da9f..10d353039, net −18):** open from it — problems-unavailable
+branch (cluster.clj:674–676) lost its regression (only a readiness redef reached it); seon.maintenance/
+project-cluster-cleanup-result has no producer since cleanup-cluster! was deleted (dead code); problems_test/absent-facts
+still redefs problems/html-report; declaration-row's output refusal names the wrong member. db.clj retention refusal lacks
+:seon.error/at → escapes as outcome-unknown under :panic (lane fix-retention-refusal-opus).
 
 **OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
 (responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
