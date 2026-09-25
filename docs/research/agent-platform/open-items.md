@@ -8,6 +8,12 @@ updated: 2026-09-24
 
 ## Now (rewritten 2026-09-24 ~22:10Z; ledger: tmp/orchestrator/file-ownership.md)
 
+**PLATFORM FAILURE (2026-09-25 ~02:45Z): call preparation dead on default** — a schema edit leaves dependent shape
+fingerprints stale (publication never recomputes them): :seon.env/environment has two fingerprints, both database suppliers
+refuse, custody elision fails ((my.plan/plan) "argument count of 0"); 25 schema rows stale, the base commit carries it into
+every test world (issue a-schema-edit-leaves-dependent-shape-fingerprints-stale.md). Root ruled option 2: publication
+re-derives shapes of every dependent in the changed closure (lane fix-stale-shape-fingerprints), then republish default.
+
 **OWNER RULING 2026-09-25: no budgets anywhere** — render functions render less data; the floor value printer
 (seon.render.value/floor) is the only clipper (AGENTS.md a6b8baaff; memory feedback_no_budgets_only_floor_printer_clips).
 Root added several clipping sites on 09-24/25 (status top-5/300-char, MCP top-10/300-char/bounded-face, problems prose via
