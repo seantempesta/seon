@@ -429,7 +429,7 @@
     (when (qualified-symbol? operation)
       (satisfied-alternatives projection operation value))))
 
-(defn- head-function
+(defn head-function
   "The contracted function a top-level call form names: its head symbol
   resolved in `namespace-name` of `ctx`. Macros, locals, literals and interop
   name no producer, so they answer nil."

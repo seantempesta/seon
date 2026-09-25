@@ -3841,7 +3841,13 @@
               definitions
               (bindings execution-ctx namespace-name before-intern-values
                          source form (built-in-calls))
-              admitted (shown-result value request evaluation-record)]
+              ;; A top-level call's contracted head names the root value's
+              ;; declared returns; any other form supplies no producer.
+              head (some-> (render/request-projection request)
+                           (render/head-function execution-ctx namespace-name form))
+              admitted (shown-result value (cond-> request
+                                             head (assoc :seon.render.call/function head))
+                                     evaluation-record)]
           (success-evaluation
            {:seon.sci.eval/admitted admitted
             :seon.sci.admit/caps caps
