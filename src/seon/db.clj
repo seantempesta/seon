@@ -4174,21 +4174,32 @@
 (defn- declaration-value
   "`entity-id` in `database` as the row that wrote it: a component as its nested
   row, another reference as its target's identity lookup ref, a
-  cardinality-many value as a set. `seon.program/definition-digest` of this
-  value reproduced all 7,022 stored function and test digests (2026-09-25)."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :qualified-keyword] :int] :map]}
-  [database identity-attrs entity-id]
-  (reduce (fn [row {:keys [a v]}]
-            (let [installed (get (dbi/-schema database) a)
-                  v (cond (not= :db.type/ref (:db/valueType installed)) v
-                          (:db/isComponent installed) (declaration-value database identity-attrs v)
-                          :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
-                                          identity-attrs)
-                                    v))]
-              (if (= :db.cardinality/many (:db/cardinality installed))
-                (update row a (fnil conj #{}) v)
-                (assoc row a v))))
-          {} (d/datoms database :eavt entity-id)))
+  cardinality-many value in its declared collection (the writer's own
+  `::normalize-many`: a declared vector, such as ordered seed occurrences, in
+  datom order). `seon.program/definition-digest` of its canonical row
+  reproduced all 7,040 stored function and test digests (2026-09-25)."
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value [:vector :qualified-keyword] :int] :map]
+                  [:=> [:cat :seon.schema/projection :seon.db/database-value
+                        [:vector :qualified-keyword] :int] :map]]}
+  ([database identity-attrs entity-id]
+   (declaration-value (carried-projection database) database identity-attrs entity-id))
+  ([projection database identity-attrs entity-id]
+   (let [plans (write-attribute-plans projection database)
+         many (volatile! #{})
+         row (reduce (fn [row {:keys [a v]}]
+                       (let [installed (get (dbi/-schema database) a)
+                             v (cond (not= :db.type/ref (:db/valueType installed)) v
+                                     (:db/isComponent installed)
+                                     (declaration-value projection database identity-attrs v)
+                                     :else (or (some #(some->> (first (d/datoms database :eavt v %)) :v (vector %))
+                                                     identity-attrs)
+                                               v))]
+                         (if (= :db.cardinality/many (:db/cardinality installed))
+                           (do (vswap! many conj a) (update row a (fnil conj []) v))
+                           (assoc row a v))))
+                     {} (d/datoms database :eavt entity-id))]
+     (reduce (fn [row a] (update row a (or (::normalize-many (get plans a)) set))) row @many))))
 
 (defn- write-digest-error
   "The first function or test row this report changed whose stored definition
@@ -4214,7 +4225,7 @@
         touched (reduce (fn [result {:keys [e a]}] (update result e (fnil conj #{}) a))
                         (sorted-map) (:tx-data report))
         ;; One resolver context per namespace in the report, not per row.
-        context-of (memoize #(@stored-namespace-context (declaration-value database identity-attrs %)))]
+        context-of (memoize #(@stored-namespace-context (declaration-value projection database identity-attrs %)))]
     (some (fn [[entity-id attributes]]
             (when-let [identity-attribute
                        (some (fn [[family owned]]
@@ -4222,7 +4233,7 @@
                                           (first (d/datoms database :eavt entity-id family)))
                                  family))
                              families)]
-              (let [row (declaration-value database identity-attrs entity-id)
+              (let [row (declaration-value projection database identity-attrs entity-id)
                     namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))
                     namespace-entity (some->> namespace-name (d/datoms database :avet :seon.ns/name) first :e)
                     context (some-> namespace-entity context-of)

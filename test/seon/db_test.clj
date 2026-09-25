@@ -2036,6 +2036,23 @@
         (store/release-store! opened)
         (test-support/delete-recursively! root)))))
 
+(deftest ordered-seed-occurrences-keep-the-digest-their-indexer-produced
+  ;; CLASS: the writer read a declared vector of components back as a set, so
+  ;; every indexed seeded test was refused. The declared collection is kept.
+  (test-support/with-database
+   (fn [connection]
+     (let [row (test-support/program-row
+                (db/db connection) '[:seon.test/sym sample.seedorder/seeded]
+                (str "(clojure.test/deftest ^{:seon.test/seed [{:seon.test/skip-reason \"a\"}"
+                     " {:seon.test/skip-reason \"b\"}]} seeded (clojure.test/is true))"))]
+       (is (= [0 1] (mapv :seon.test.seed/ordinal (:seon.test/seed row))))
+       (test-support/transacted!
+        connection [(test-support/namespace-row (db/db connection) 'sample.seedorder) row])
+       (is (= (:seon.program/definition-digest row)
+              (:seon.program/definition-digest
+               (db/pull (db/db connection) [:seon.program/definition-digest]
+                        [:seon.test/sym 'sample.seedorder/seeded]))))))))
+
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
    (fn [connection]
