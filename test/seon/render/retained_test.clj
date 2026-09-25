@@ -79,8 +79,7 @@
           '(defn namespace-ai [value]
              (seon.db/q '[:find ?shown .
                           :where [?evaluation :seon.cluster.eval/id "retained-shown"]
-                                 [?evaluation :seon.eval/shown ?shown]]
-                        (:seon.db/db value)))))
+                                 [?evaluation :seon.eval/shown ?shown]]))))
        (let [a (:seon.db/db (request)) b (:seon.db/db (request))]
          (is (some? (db/carried-projection a)))
          (is (not (identical? a b)))
@@ -122,8 +121,7 @@
            (replace-renderer! connection ctx '(defn namespace-ai [value]
                                 (seon.db/q '[:find ?shown .
                                              :where [?e :seon.cluster.eval/id "retained-shown"]
-                                                    [?e :seon.eval/shown ?shown]]
-                                           (:seon.db/db value)))))
+                                                    [?e :seon.eval/shown ?shown]]))))
          (support/with-database
           (fn [other]
             (seed-shown! other namespace-name "other connection")
@@ -199,8 +197,8 @@
                                    [:seon.fn/sym 'seon.repl/render-ai])]
              (is (string? (:seon.fn/source renderer)))
              (is (:db-after
-                  (db/transact! connection [[:db/add [:seon.fn/sym 'seon.repl/render-ai]
-                                             :seon.fn/source (str (:seon.fn/source renderer) "\n")]])))
+                  (db/transact! connection [(support/revision (db/db connection) [:seon.fn/sym 'seon.repl/render-ai]
+                                                               {:seon.fn/source (str (:seon.fn/source renderer) "\n")})])))
              (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                                 :seon.schema/projection (kernel/context-projection ctx)})
              (reset! calls 0)

@@ -2898,10 +2898,22 @@
                                 (cond-> {::loaded-database (loaded-program source)}
                                   commit-fault!
                                   (assoc :seon.flow/commit-fault! commit-fault!)))
-            acquired (::acquisition generated)]
+            acquired (::acquisition generated)
+            ;; This context's own definitions (its generation's Vars that no
+            ;; program install bound) survive the program change as objects,
+            ;; as `regenerate-agent-context!` carries them for a turn fork.
+            generation (:sci/generation @(:env ctx))
+            installed @(::kernel/installed-functions ctx)
+            own (into [] (keep (fn [[qualified {sci-var :seon.sci.eval/var}]]
+                                 (when-not (contains? installed qualified)
+                                   [(symbol (namespace qualified)) (symbol (name qualified)) sci-var])))
+                      (turn-interns ctx))]
         ;; SCI stamps later definitions with this generation. Installing the
         ;; unforked base loses the provenance that definition-row observes.
         (reset! (:env ctx) @(:env (sci/fork generated)))
+        (when generation (swap! (:env ctx) assoc :sci/generation generation))
+        (doseq [[namespace-name local-name sci-var] own]
+          (sci/add-namespace! ctx namespace-name {local-name sci-var}))
         (reset! (::kernel/installed-functions ctx) @(::kernel/installed-functions generated))
         (advance-context-projection! ctx database (:seon.schema/projection generated))
         (let [recorded (record-refusals-once! ctx database acquired commit-fault!)]

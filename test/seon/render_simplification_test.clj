@@ -358,7 +358,6 @@
                                     :where
                                     [?namespace :seon.ns/name ?name]
                                     [?namespace :seon.ns/doc ?doc]]
-                                  (:seon.db/db value)
                                   (:seon.ns/name value))
                                 ":"
                                 (cache-helper)))]]
@@ -375,10 +374,12 @@
                                  :seon.fn/private? (= 'cache-helper name),
                                  :seon.schema.admission/source :agent}}))
                            definitions)
-                rows (mapv second (seon.fn/analyze-forms (db/db connection) requests))
+                ;; Analyzed facts, then the digest of each FINAL row (the writer's).
+                rows (mapv #(support/revised-row (db/db connection) (second %) {})
+                           (seon.fn/analyze-forms (db/db connection) requests))
                 report (db/transact! connection rows)]
             (is (:db-after report) (pr-str report))
-            (is (some #{[:seon.fn/sym helper]} (:seon.fn/calls (second rows))))
+            (is (some #{helper} (:seon.fn/calls (second rows))))
             (sci/binding
               [sci/ns (sci/create-ns fixture-a)]
               (doseq [definition definitions] (sci/eval-form ctx definition)))))
@@ -534,6 +535,9 @@
            ctx (support/fork-cluster-ctx connection)
            request (render-request database ctx fixture-b
                                    {:seon.ns/name fixture-b})]
+       ;; Acquisition is not invocation: acquire the program the value holds
+       ;; first, so the trap observes only the renderer's invocation.
+       (eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})
        (with-redefs [clojure.core/requiring-resolve
                      (fn [& _]
                        (throw (ex-info "compiled resolver trap" {})))]
@@ -576,9 +580,10 @@
   distance-spends-only-real-ref-hops-and-caps-win
   (support/with-database
     (fn [connection]
-      (db/transact!
+      ;; `:seon.ns/requires` holds namespace symbols; the walk hops by name.
+      (support/transacted!
         connection
-        [[:db/add [:seon.ns/name fixture-a] :seon.ns/requires [:seon.ns/name fixture-b]]])
+        [[:db/add [:seon.ns/name fixture-a] :seon.ns/requires fixture-b]])
       (let [database (db/db connection)
             ctx (support/fork-cluster-ctx connection)
             request {:seon.db/db database,
@@ -677,7 +682,7 @@
                      :where
                      [?namespace :seon.ns/name ?name]
                      [?namespace :seon.ns/doc ?doc]]
-                   (:seon.db/db value) (:seon.ns/name value))))))
+                   (:seon.ns/name value))))))
        (with-redefs [kernel/invoke (fn [invocation]
                                     (swap! invocations inc)
                                     (invoke invocation))]
