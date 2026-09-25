@@ -13,7 +13,10 @@
             [seon.test-support :as support]))
 
 ;; The task handle is derived from its identifying aspect, exactly as ingestion derives it.
-(def ^:private handle (issue/task-handle 'tg.a "walk-graph" :function))
+(def ^:private handle
+  ;; A literal, so the indexer records a row for it (a computed point-free def has none yet: P2-A); the test
+  ;; below proves it is the handle ingestion derives.
+  "96ec3386e99f")
 
 (def ^:private source
   (str "(ns tg.a {:seon/tasks #{\"" handle "\"}} (:require [clojure.test :refer [deftest is]]))\n"
@@ -52,6 +55,9 @@
   [graph eid]
   (let [value (get-in graph [:seon.render.walk/nodes eid :seon.render/value])]
     (or (:seon.fn/sym value) (:seon.test/sym value) (:seon.ns/name value) (:seon.task/id value))))
+
+(deftest the-fixture-handle-is-the-derived-task-handle
+  (is (= (issue/task-handle 'tg.a "walk-graph" :function) handle)))
 
 (deftest the-task-graph-walks-levels-in-definition-order
   (support/with-database
