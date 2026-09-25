@@ -27,6 +27,20 @@
             [seon.test-support :as support]
             [seon.turn :as turn]))
 
+;; `projection-with-schema` admits each form in order onto the fixture's own
+;; carried projection, so a form may name the ones before it; the rows come
+;; from `canonical-schema-rows`, which derives each definition digest.
+(defn- declare-schemas!
+  "Write synthetic schema declarations as canonical rows through the writer."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector [:tuple :qualified-keyword :any]]]
+                  :seon.db/transaction-report]}
+  [connection forms]
+  (let [projection (reduce (fn [current [schema-key definition]]
+                             (schema/projection-with-schema
+                              current schema-key definition {:seon.schema.admission/source :core}))
+                           (db/carried-projection @connection) forms)]
+    (support/transacted! connection (schema/canonical-schema-rows projection (into {} forms)))))
+
 (defn- element-text [node]
   (cond
     (string? node) node
@@ -490,16 +504,13 @@
 
 (deftest blocks-use-the-values-schema-documentation
   (support/with-database
-    {::support/extra-schema
-     [{:seon.schema/key ::title :seon.schema.admission/source :core :seon.schema/form (pr-str [:string {:title "Notebook title"}])}
-      {:seon.schema/key ::notebook
-       :seon.schema.admission/source :core
-       :seon.schema/form
-       (pr-str [:map {:seon.db/attributes true
-                      :title "Notebook"
-                      :description "Notes for this concern."}
-                [::title ::title]])}]}
     (fn [connection]
+      (declare-schemas! connection
+                        [[::title [:string {:title "Notebook title"}]]
+                         [::notebook [:map {:seon.db/attributes true
+                                            :title "Notebook"
+                                            :description "Notes for this concern."}
+                                      [::title ::title]]]])
       (let [database @connection
             projection (schema/projection-from-database database)
             metadata (#'web/block-metadata projection database
@@ -520,16 +531,12 @@
 
 (deftest every-declared-attribute-has-an-ordered-pair-even-when-absent
   (support/with-database
-   {::support/extra-schema
-    [{:seon.schema/key ::name :seon.schema.admission/source :core :seon.schema/form ":string"}
-     {:seon.schema/key ::notes :seon.schema.admission/source :core :seon.schema/form ":string"}
-     {:seon.schema/key ::record
-      :seon.schema.admission/source :core
-      :seon.schema/form
-      (pr-str [:map {:seon.db/attributes true}
-               [::name ::name]
-               [::notes {:optional true} ::notes]])}]}
    (fn [connection]
+     (declare-schemas! connection
+                       [[::name :string] [::notes :string]
+                        [::record [:map {:seon.db/attributes true}
+                                   [::name ::name]
+                                   [::notes {:optional true} ::notes]]]])
      (let [database @connection
            projection (schema/projection-from-database database)
            declared (#'web/declared-entity-units projection database {::name "Example"})
@@ -551,14 +558,12 @@
    {::support/extra-schema
     [{:db/ident ::left :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
-     {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
-     {:seon.schema/key ::declared-concerns
-      :seon.schema.admission/source :core
-      :seon.schema/form
-      (pr-str [:map {:seon.db/attributes true
-                     :seon.render/units [::_left ::_right]}
-               [:seon.agent/id :seon.agent/id]])}]}
+     {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}]}
    (fn [connection]
+     (declare-schemas! connection
+                       [[::declared-concerns [:map {:seon.db/attributes true :seon.program/partition :seon.data
+                                                    :seon.render/units [::_left ::_right]}
+                                              [:seon.agent/id :seon.agent/id]]]])
      (support/transacted! connection
                           (into (support/agent-tx @connection "relationships")
                             [{::left [:seon.agent/id "relationships"]}
@@ -594,7 +599,9 @@
            caps (config/result-caps effective)
            ctx (support/fork-cluster-ctx connection)
            fault (error/normalize
-                  {:seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/reverse-declarations-receive-the-actual-relationship-value :seon.render/refused-member :seon.render/output
+                  {:seon.schema/projection (db/carried-projection @connection)
+                   :seon.error/declared-schema :seon.render/request-error
+                   :seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/reverse-declarations-receive-the-actual-relationship-value :seon.render/refused-member :seon.render/output
                                        :seon.error/message "A declared fault card."}
                    :seon.error/id "reverse-render-fixture"
                    :seon.error/at (java.util.Date.)
@@ -680,11 +687,8 @@
 
 (deftest block-reference-headers-link-identities-and-omit-unidentified-entities
   (support/with-database
-   {::support/extra-schema
-    [{:seon.schema/key ::identity-alias
-      :seon.schema.admission/source :core
-      :seon.schema/form ":seon.agent/id"}]}
    (fn [connection]
+     (declare-schemas! connection [[::identity-alias :seon.agent/id]])
      (let [installed (db/transact!
                       connection
                       [(schema.datahike/malli->datahike-attr-in
@@ -1041,7 +1045,9 @@
        ;; units the outline lists — the same function, not a second assembly.
        (let [acquired (render/acquire-context! request)
              profile (render/request-profile request)
-             settings (#'prompt/effective-ai-settings (:seon.db/db request) "outline-probe")
+             settings (#'prompt/effective-ai-settings (:seon.db/db request)
+                                                      (#'prompt/request-cluster-name request)
+                                                      "outline-probe")
              selection (prompt/select (vec (:seon.render.history/entries acquired))
                                       (:seon.config.ai/prompt-token-budget settings)
                                       (prompt/model-calibration
