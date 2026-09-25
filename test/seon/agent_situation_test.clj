@@ -10,6 +10,9 @@
 
 (defn- seed-situation!
   [connection]
+  ;; The fixture's own cluster and dial; the test world's cluster row carries
+  ;; boot's shipped configuration instead.
+  (support/seed-cluster! connection "situation" {:seon.config.run/max-episode-runs 2})
   (support/transacted!
           connection
           (into [{:seon.ns/name 'my.turn}
@@ -37,7 +40,7 @@
                 :seon.agent/unread-message-count 1
                 :seon.agent/open-run-ref
                 [:seon.turn/id "situation-run"]
-                :seon.turn/turns-remaining 0
+                :seon.turn/turns-remaining 2
                 :seon.agent/protocol-namespaces
                 ['my.message 'my.turn]}
                situation))

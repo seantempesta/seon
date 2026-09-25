@@ -144,10 +144,13 @@
                               [[:db/add [:seon.ns/name 'example.owned] :seon.ns/steward
                                 [:seon.agent/id "owner"]]])
       (let [value (found connection)
-            html (pr-str (problems/html-report value))]
+            html (pr-str (problems/html-report value))
+            ;; The test world also carries default's agent namespace rows
+            ;; without their agents (S2c); judge the fixture's own names.
+            own #{'example.unowned 'example.assigned 'example.owned}]
         (is (= [{:seon.ns/name 'example.assigned}
                 {:seon.ns/name 'example.unowned}]
-               (:seon.problems/unowned-namespaces value))
+               (filterv (comp own :seon.ns/name) (:seon.problems/unowned-namespaces value)))
             "an assigned namespace nobody stewards is still unstewarded")
         (is (= "owner" (agent/steward-of @connection 'example.owned)))
         (is (nil? (agent/steward-of @connection 'example.assigned)))

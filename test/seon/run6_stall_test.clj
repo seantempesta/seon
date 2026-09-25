@@ -19,9 +19,10 @@
 (deftest an-open-session-provider-refusal-is-the-first-problem
   (support/with-database
    (fn [connection]
-     (config/apply! {:seon.db/connection connection :seon.boot/cluster-name "run6-stall"
-                    :seon.config/manifest {:seon.config.ai/no-provider true
-                                           :seon.config.run/max-episode-runs 3}})
+     ;; The fixture's own cluster, so its agent reads this dial rather than
+     ;; the test world's shipped cluster row.
+     (support/seed-cluster! connection "run6-stall" {:seon.config.ai/no-provider true
+                                                     :seon.config.run/max-episode-runs 3})
      (is (:db-after
           (transact! connection
                      (support/agent-tx @connection "run6-stall" 'my.agents.run6-stall))))
@@ -40,7 +41,9 @@
                                               :seon.turn/opened-tx "datomic.tx"
                                               :seon.turn.work/situation :call})
                               (assoc (error/normalize
-                                      {:seon.error/source {
+                                      {:seon.schema/projection (db/carried-projection @connection)
+                                       :seon.error/declared-schema :seon.ai/unparseable-body-error
+                                       :seon.error/source {
     :seon.ai/unreadable-response-member "body"
     :seon.error/at #inst "2026-09-15T14:46:11Z"
     :seon.error/layer :seon.ai/completion
@@ -92,7 +95,7 @@
                                      :my.plan.item/completed-tx "datomic.tx"]])))
        (is (not (str/includes? (:header (snapshot)) "stalled:")))
        (is (:db-after (db/transact! connection
-                                   [[:db/retract [:my.plan.item/id "run6-step"]
+                                   [[:db.fn/retractAttribute [:my.plan.item/id "run6-step"]
                                      :my.plan.item/completed-tx]
                                     [:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply ""]
                                     [:db/add [:seon.turn/id "run6-refusal"] :seon.turn/reply-size 0]])))
