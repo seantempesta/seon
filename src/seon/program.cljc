@@ -1026,10 +1026,13 @@
       :seon.fn.arity/min (long (:min info))
       :seon.fn.arity/input-schema
       (schema-shape/shape-row (:input info) schema-forms predicate-functions)
-      :seon.fn.arity/arguments arguments
       :seon.fn.arity/argument-count (long (count arguments))
       :seon.fn.arity/return-schema
       (schema-shape/shape-row (:output info) schema-forms predicate-functions)}
+      ;; Absence is no key: storage keeps no empty component set, so an empty
+      ;; vector here differed from every stored zero-argument arity and made
+      ;; each republished one a signature change that relinted all callers.
+      (seq arguments) (assoc :seon.fn.arity/arguments arguments)
       (contains? info :max) (assoc :seon.fn.arity/max (long (:max info)))
       (:guard info)
       (assoc :seon.fn.arity/guard-schema

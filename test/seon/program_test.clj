@@ -387,6 +387,16 @@
                    row)]
     ((ns-resolve 'seon.turn 'row-tx) database options analyzed)))
 
+(deftest zero-argument-arity-states-no-empty-argument-set
+  ;; Storage keeps no empty component set. A derived `[]` differed from every
+  ;; stored zero-argument arity, so each republication of `seon.db/db` looked
+  ;; like a signature change and relinted its 180 caller files (9.4 s).
+  (let [facts (source-contract (quote seon.probe/answer) [:=> [:cat] :int] {}
+                               "(defn answer [] 1)" '([]))
+        arity (get-in facts [:seon.fn/arities 0])]
+    (is (= 0 (:seon.fn.arity/argument-count arity)))
+    (is (not (contains? arity :seon.fn.arity/arguments)))))
+
 (deftest empty-composite-schema-shapes-remain-canonical-and-queryable
   (let [forms
         {:seon.db/connection :map
