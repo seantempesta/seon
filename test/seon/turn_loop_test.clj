@@ -603,13 +603,9 @@
           :seon.config.error/recurrence-limit 3
           :seon.sci.admit/caps (config/result-caps config/defaults)})
          @connection now agent-id nil process nil nil
-         {
-    :seon.turn.loop/phase-failed true
-    :seon.error/at (java.util.Date.)
-    :seon.error/layer :seon.turn/phase
-    :seon.error/operation 'seon.turn/phase
-          :seon.error/message "injected prompt failure"
-          :seon.error/data {:seon.turn.loop/phase :prompt}})
+         ;; The phase-failed value, with its declared schema, from its producer.
+         ((private-loop-fn 'phase)
+          #(throw (ex-info "injected prompt failure" {:seon.turn.loop/phase :prompt}))))
         before (set (db/q '[:find [?id ...] :where [?m :seon.message/id ?id]] @connection))]
     (test-support/transacted! connection (:seon.db/tx-data prepared))
     (into [] (keep (fn [[id recipient]] (when-not (before id) recipient)))
