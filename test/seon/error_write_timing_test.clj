@@ -46,6 +46,9 @@
          (let [before (db/basis-t (db/db connection))
                refusal (write worker tx)]
            (is (re-find #"Started issue tests" (:seon.error/message refusal "")) (pr-str refusal))
+           ;; A returned write refusal, never an unknown outcome.
+           (is (:seon.db/transaction-refused refusal) (pr-str refusal))
+           (is (not (:seon.db/transaction-outcome-unknown refusal)) (pr-str refusal))
            (is (= before (db/basis-t (db/db connection))))))
        (is (:db-after (write creator [[:db/retract issue :seon.issue/agent worker]])))
        (is (nil? (:db-after (write worker [[:db/retract issue :seon.issue/tests a]]))))

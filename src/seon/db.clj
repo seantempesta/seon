@@ -4314,9 +4314,15 @@
                rules)))))
 
 (defn- retention-check
-  {:malli/schema [:=> [:cat :map :map [:or :nil :int]] [:vector :seon.schema/value]]}
+  "The first retained membership this write would break, as a returned write
+   refusal; nil accepts. It returns rather than throws: Datahike's report
+   validator rejects on any returned value (`validate-report`,
+   datahike/db/transaction.cljc:1224-1234) and `transact-call` returns that
+   `:datahike/validation-refusal`, whereas a throw becomes an unknown outcome."
+  {:malli/schema [:=> [:cat :map :map [:or :nil :int]] [:or :nil :seon.error/base]]}
   [before after actor]
-  (doseq [key (set/union (set (keys before)) (set (keys after)))]
+  (some
+   (fn [key]
     (let [prior (get before key) current (get after key)
           creator (or (:seon.db/creator prior) (:seon.db/creator current))
           authorized? (and actor creator (= actor creator))
@@ -4339,26 +4345,30 @@
                 (and active? (not authorized?) (or (seq removed) (seq erased) changed-assignment?))
                 (and (:seon.db/creator prior) changed-authority?)
                 (and (:seon.db/active? prior) (not authorized?) changed-authority?))
-        (throw (ex-info
-                "Started issue tests and their authority must be preserved; only the creator may remove tests."
-                {:seon.error/message
-                 (str "Cannot retract " (pr-str (first key)) " of "
-                      (pr-str (or (:seon.db/entity prior) (:seon.db/entity current)))
-                      "; tests " (pr-str (mapv #(get-in prior [:seon.db/value-identities %])
-                                               (set/union removed erased))) ".")
-                 :seon.error/data
-                 {:seon.db/attribute (first key)
-                  :seon.db/entity (or (:seon.db/entity prior) (:seon.db/entity current))
-                  :seon.db/removed-values (set/union removed erased)
-                  :seon.db/user actor :seon.db/creator creator}})))))
-  [])
+        (diagnostic
+         {::transaction-refused true
+          :seon.error/message
+          (str "Started issue tests and their authority must be preserved; only the creator may remove tests. "
+               "Cannot retract " (pr-str (first key)) " of "
+               (pr-str (or (:seon.db/entity prior) (:seon.db/entity current)))
+               "; tests " (pr-str (mapv #(get-in prior [:seon.db/value-identities %])
+                                        (set/union removed erased))) ".")
+          :seon.error/layer :database-write
+          :seon.error/operation 'seon.db/transact!
+          :seon.error/member (first key)
+          :seon.error/data
+          {:seon.db/attribute (first key)
+           :seon.db/entity (or (:seon.db/entity prior) (:seon.db/entity current))
+           :seon.db/removed-values (set/union removed erased)
+           :seon.db/user actor :seon.db/creator creator}}))))
+   (set/union (set (keys before)) (set (keys after)))))
 
 (defn- retention-report-check
   "Check touched owners and owners of touched retained targets in the final report.
    Reverse AVET seeks include an identity-only target retraction; transaction
    functions and reference sweeps are already expanded by this authority."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
-                       [:sequential :int]] :nil]}
+                       [:sequential :int]] [:or :nil :seon.error/base]]}
   [projection report affected]
   (let [before (:db-before report)
         after (:db-after report)
@@ -4379,8 +4389,7 @@
         user (get-in report [:tx-meta :seon.db/user])
         actor (when user (db.utils/entid before user))]
     (retention-check (retention-snapshot before rules entities)
-                     (retention-snapshot after rules entities) actor)
-    nil))
+                     (retention-snapshot after rules entities) actor)))
 
 (defn- write-observation
   "Carry the actual refused request and immutable pre-write basis as data.
