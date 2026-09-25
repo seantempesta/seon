@@ -142,41 +142,29 @@
     (is (= large (get-in decoded [:seon.dev.mcp/events 0 :val])))
     (is (not (str/includes? encoded "truncated by MCP bridge")))))
 
-(deftest multiple-form-refusals-name-the-second-form-position
-  (let [code "(+ 1 2)\n(+ 3 4)"
-        direct-result ((bridge-var 'execute-clj-eval)
-                       {:code code :cluster "fixture"})
-        [rpc-response]
-        (rpc-responses
-         [{:jsonrpc "2.0" :id 1 :method "tools/call"
-           :params {:name "eval_clj" :arguments {:code code}}}])
-        results [direct-result (:result rpc-response)]]
-    (doseq [result results
-            :let [data (result-data result)]]
-      (is (true? (:isError result)))
-      (is (= "multiple-forms" (:seon.dev.mcp/failure data)))
-      (is (= 2 (:seon.dev.mcp/line data)))
-      (is (= 1 (:seon.dev.mcp/column data)))
-      (is (= "(+ 3 4)" (:seon.dev.mcp/preview data)))
-      (is (str/includes? (:seon.dev.mcp/error data) "line 2, column 1"))
-      (is (str/includes? (:seon.dev.mcp/error data) "(+ 3 4)"))
-      (is (str/includes? (:seon.dev.mcp/error data) "(do ...)")))))
-
-(deftest reader-position-does-not-depend-on-form-metadata
-  (let [result ((bridge-var 'execute-clj-eval)
-                {:code "(+ 1 2)\r\n  {:a 1}" :cluster "fixture"})
-        data (result-data result)]
-    (is (= "multiple-forms" (:seon.dev.mcp/failure data)))
-    (is (= 2 (:seon.dev.mcp/line data)))
-    (is (= 3 (:seon.dev.mcp/column data)))
-    (is (= "{:a 1}" (:seon.dev.mcp/preview data)))))
-
-(deftest invalid-forms-retain-the-reader-error
-  (let [result ((bridge-var 'execute-clj-eval)
-                {:code "(+ 1 2" :cluster "fixture"})
-        data (result-data result)]
-    (is (= "invalid-form" (:seon.dev.mcp/failure data)))
-    (is (str/includes? (:seon.dev.mcp/reader-error data) "EOF while reading"))))
+(deftest jvm-mode-reads-through-the-one-reader
+  ;; The bridge holds no reader: the JVM form reads with `seon.sci.reader/read`
+  ;; in the target namespace and throws the reader's own refusal.
+  (let [namespace-symbol (symbol (str "mcp.reader-" (random-uuid)))
+        original (ns-name *ns*)
+        run (fn [source]
+              (try (eval (read-string ((bridge-var 'jvm-evaluation-form) source namespace-symbol true)))
+                   (catch Throwable thrown
+                     (let [cause (or (ex-cause thrown) thrown)]
+                       [(ex-message cause) (ex-data cause)]))))]
+    (try
+      (is (= ["Evaluation accepts exactly one form; the second form starts at line 2, column 3. Wrap sequences in `(do ...)`."
+              {:seon.sci.reader/line 2 :seon.sci.reader/column 3 :seon.sci.reader/source "{:a 1}"}]
+             (run "(+ 1 2)\r\n  {:a 1}")))
+      (is (= :seon.sci.reader/form (:seon.error/member (second (run "(+ 1 2")))))
+      (is (= "Your reply had no form; only comments/prose. Send a form." (first (run "  ;; only"))))
+      (is (= [(keyword (str namespace-symbol) "k") '(clojure.core/map java.lang.String)]
+             (run "[::k `(map String)]"))
+          "auto-resolved keywords and syntax-quote resolve in the target namespace")
+      (is (= :invalid-form (:seon.dev.mcp/failure (ex-data (try ((bridge-var 'source!) 1)
+                                                                 (catch clojure.lang.ExceptionInfo e e)))))
+          "a non-string never crosses")
+      (finally (in-ns original) (when (find-ns namespace-symbol) (remove-ns namespace-symbol))))))
 
 (defn- write-advertisement!
   "Advertise `value` the way a cluster does: data/clusters/<dir>/prepl.edn."
@@ -364,7 +352,7 @@
 (deftest namespace-coordinate-shapes-both-evaluation-modes
   (let [namespace-symbol 'mcp.chosen.namespace
         original-namespace (ns-name *ns*)
-        evaluation ((bridge-var 'require-single-clj-form!)
+        evaluation ((bridge-var 'source!)
                     "(do (def answer 41) [(inc answer) (ns-name *ns*)])")
         jvm-form ((bridge-var 'remote-evaluation-form)
                   evaluation "jvm" "fixture" namespace-symbol)
@@ -659,7 +647,7 @@
         original (ns-name *ns*)
         source "(do (defn ^{:probe/x 1} f \"doc\" [x] x) (:probe/x (meta #'f)))"
         form ((bridge-var 'remote-evaluation-form)
-              ((bridge-var 'require-single-clj-form!) source) "jvm" "fixture" namespace-symbol)]
+              ((bridge-var 'source!) source) "jvm" "fixture" namespace-symbol)]
     (try
       (is (= 1 (eval (read-string form))))
       (finally (in-ns original) (remove-ns namespace-symbol))))

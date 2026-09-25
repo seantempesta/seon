@@ -4,8 +4,7 @@
             [clojure.edn :as edn]
             [clojure.java.io :as io]
             [clojure.string :as str])
-  (:import [clojure.lang LineNumberingPushbackReader]
-           [java.io BufferedReader PushbackReader]
+  (:import [java.io BufferedReader PushbackReader]
            [java.net InetSocketAddress Socket SocketTimeoutException]))
 
 ;; This process is deliberately below the application. It asks the fresh
@@ -24,7 +23,6 @@
 
 (def default-timeout-ms 30000)
 (def connect-timeout-ms 5000)
-(def max-form-preview-chars 60)
 (def server-info {:name "seon" :version "0.4.0"})
 
 ;; [root cluster session-id] -> one stateful io-prepl socket and its endpoint.
@@ -246,89 +244,13 @@
       :else
       (open-clj-session! root cluster session-id endpoint))))
 
-(defn- reader-whitespace?
-  [character]
-  (or (= (int \,) character)
-      (Character/isWhitespace (char character))))
-
-(defn- skip-comment!
-  [^LineNumberingPushbackReader reader]
-  (loop []
-    (let [character (.read reader)]
-      (when-not (or (= -1 character) (= (int \newline) character))
-        (recur)))))
-
-(defn- next-form-position!
-  [^LineNumberingPushbackReader reader]
-  (loop []
-    (let [character (.read reader)]
-      (cond
-        (= -1 character)
-        nil
-
-        (reader-whitespace? character)
-        (recur)
-
-        (= (int \;) character)
-        (do (skip-comment! reader) (recur))
-
-        :else
-        (do
-          (.unread reader character)
-          {:seon.dev.mcp/line (.getLineNumber reader)
-           :seon.dev.mcp/column (.getColumnNumber reader)})))))
-
-(defn- form-preview
-  [source]
-  (let [normalized (-> source str/trim (str/replace #"\s+" " "))]
-    (if (<= (count normalized) max-form-preview-chars)
-      normalized
-      (str (subs normalized 0 (dec max-form-preview-chars)) "…"))))
-
-(defn- require-single-clj-form!
+(defn- source!
+  ;; The one reader owns forms and their refusals; the bridge carries text.
   [code]
   (when-not (string? code)
     (throw (ex-info "CLJ evaluation requires a string form."
                     {:seon.dev.mcp/failure :invalid-form})))
-  (try
-    (let [eof (Object.)
-          reader (LineNumberingPushbackReader.
-                  (java.io.StringReader. code))]
-      (binding [*read-eval* false]
-        (let [first-form (read {:eof eof :read-cond :allow} reader)]
-          (when (identical? eof first-form)
-            (throw (ex-info "CLJ evaluation requires one form."
-                            {:seon.dev.mcp/failure :empty-form})))
-          (when-let [{line :seon.dev.mcp/line
-                      column :seon.dev.mcp/column
-                      :as position}
-                     (next-form-position! reader)]
-            (.captureString reader)
-            (let [second-form (read {:eof eof :read-cond :allow} reader)
-                  preview (form-preview (.getString reader))]
-              (when-not (identical? eof second-form)
-                (throw
-                 (ex-info
-                  (str "CLJ evaluation accepts exactly one form; the second "
-                       "form starts at line " line ", column " column ": "
-                       preview ". Wrap sequences in `(do ...)`.")
-                  (assoc position
-                         :seon.dev.mcp/failure :multiple-forms
-                         :seon.dev.mcp/preview preview))))))
-          {:seon.dev.mcp/source code
-           :seon.dev.mcp/form first-form})))
-    (catch clojure.lang.ExceptionInfo exception
-      (if (:seon.dev.mcp/failure (ex-data exception))
-        (throw exception)
-        (throw (ex-info "CLJ evaluation form is unreadable."
-                        {:seon.dev.mcp/failure :invalid-form
-                         :seon.dev.mcp/reader-error (ex-message exception)}
-                        exception))))
-    (catch Throwable throwable
-      (throw (ex-info "CLJ evaluation form is unreadable."
-                      {:seon.dev.mcp/failure :invalid-form
-                       :seon.dev.mcp/reader-error (ex-message throwable)}
-                      throwable)))))
+  {:seon.dev.mcp/source code})
 
 (defn- collect-prepl-response!
   [{:keys [socket reader]} timeout-ms]
@@ -423,19 +345,37 @@
     mode))
 
 (defn- jvm-evaluation-form
-  ;; The caller's SOURCE crosses, read in the target namespace: re-printing the
-  ;; read form dropped reader metadata (`^{:malli/schema ...}` on a defn name).
+  ;; The caller's SOURCE crosses and the one reader (`seon.sci.reader/read`)
+  ;; reads it in the target namespace with that namespace's aliases, Vars,
+  ;; classes and data readers; a reader refusal is thrown as the reader's own.
   [source namespace-symbol read-only?]
   (pr-str
-   (list 'do
-         (list (list 'requiring-resolve
-                     (list 'quote
-                           'seon.cluster/project-next-prepl-value!))
-               {:seon.dev.mcp/read-only? read-only?})
-         (list 'in-ns (list 'quote namespace-symbol))
-         (list 'clojure.core/refer (list 'quote 'clojure.core))
-         (list 'clojure.core/eval
-               (list 'clojure.core/read-string {:read-cond :allow} source)))))
+   `(do
+      ((requiring-resolve 'seon.cluster/project-next-prepl-value!) {:seon.dev.mcp/read-only? ~read-only?})
+      (in-ns '~namespace-symbol)
+      (clojure.core/refer 'clojure.core)
+      (let [n# *ns*
+            events# ((requiring-resolve 'seon.sci.reader/read)
+                     {:seon.sci.reader/text ~source
+                      :seon.sci.reader/ns '~namespace-symbol
+                      :seon.sci.reader/aliases (into {} (map (fn [[a# t#]] [a# (ns-name t#)])) (ns-aliases n#))
+                      :seon.sci.reader/refers (into {} (keep (fn [[s# v#]] (cond (var? v#) [s# (symbol v#)]
+                                                                                 (class? v#) [s# (symbol (.getName ^Class v#))])))
+                                                    (ns-map n#))
+                      :seon.sci.reader/tags *data-readers*
+                      :seon.config.eval.result/max-source ~(count source)})
+            failure# (if (map? events#) events# (some :seon.sci.reader/error events#))
+            second# (second events#)]
+        (cond
+          failure# (throw (ex-info (:seon.error/message failure#) failure#))
+          (= 1 (count events#)) (eval (:seon.sci.reader/form (first events#)))
+          :else (throw (ex-info (if second#
+                                  (str "Evaluation accepts exactly one form; the second form starts at line "
+                                       (:seon.sci.reader/line second#) ", column " (:seon.sci.reader/column second#)
+                                       ". Wrap sequences in `(do ...)`.")
+                                  "Your reply had no form; only comments/prose. Send a form.")
+                                (select-keys second# [:seon.sci.reader/line :seon.sci.reader/column
+                                                      :seon.sci.reader/source]))))))))
 
 (defn- sci-evaluation-form
   {:malli/schema [:function
@@ -630,7 +570,7 @@
         key [root cluster session-id]
         validation (try
                      {:seon.dev.mcp/evaluation
-                      (require-single-clj-form! code)
+                      (source! code)
                       :seon.dev.mcp/namespace-symbol
                       (namespace-symbol! (:namespace request))
                       :seon.dev.mcp/mode
