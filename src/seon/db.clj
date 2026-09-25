@@ -1434,10 +1434,15 @@
   evidence."
   {:malli/schema [:=> [:cat :seon.db/database-value :symbol] [:set :symbol]]}
   [database root]
-  (call-reach (fn [function]
-                (when-let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
-                  (map :v (d/datoms database :eavt entity :seon.fn/calls))))
-              root))
+  ;; A store that has not yet installed the function family (genesis, first
+  ;; population) holds no rows: every symbol is a leaf, never an index read of
+  ;; an attribute Datahike does not know.
+  (if-not (get (dbi/-schema database) :seon.fn/sym)
+    #{root}
+    (call-reach (fn [function]
+                  (when-let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
+                    (map :v (d/datoms database :eavt entity :seon.fn/calls))))
+                root)))
 
 (defn- builder-digest
   "The projection builder's identity in `database`: the digest of the
@@ -1446,9 +1451,10 @@
   [database]
   (id/digest 64 [(into (sorted-map)
                        (keep (fn [function]
+                               (when (get (dbi/-schema database) :seon.fn/sym)
                                (when-let [entity (:e (first (d/datoms database :avet :seon.fn/sym function)))]
                                  (some->> (first (d/datoms database :eavt entity :seon.program/definition-digest))
-                                          :v (vector function)))))
+                                          :v (vector function))))))
                        (stored-call-reach database 'seon.schema/load-projection))]))
 
 (defn- loaded-builder
