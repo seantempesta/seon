@@ -61,7 +61,9 @@
        (admit! handle
                (str "(clojure.test/deftest overlay-candidate-runs"
                     " (clojure.test/is (= 2 (overlay-caller)))"
-                    " (clojure.test/is (nil? (get-in (seon.db/db) [:schema " sentinel "])))"
+                    ;; The candidate's attributes belong in its world (root
+                    ;; ruling); its branch's operational datum does not.
+                    " (clojure.test/is (nil? (seon.db/q '[:find ?v . :where [_ " sentinel " ?v]] (seon.db/db))))"
                     " (clojure.test/is (empty? (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] (seon.db/db))))"
                     " (clojure.test/is (nil? (seon.db/q '[:find ?e . :in $ ?s :where [?e :seon.test/sym ?s]]"
                     " (seon.db/db) '" victim "))))"))
