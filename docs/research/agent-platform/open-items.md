@@ -36,6 +36,10 @@ one render path; route events through the floor.
 law violation that leaks across members when a test never exits (StackOverflow x11 came from one). agent_test's
 evaluator redef removed (2519a9ae0); its ai/complete, prompt, async/close!, next-agent-work, turn, next-entry redefs and
 alter-var-root #'seon.turn/step remain. Owner: harness S5 sweep + S9 loopback/function provider (injection seams).
+**Harness S4 landed (unverified):** S4a db7f1c919, S4b 15daddb0a, S4c 71f45f476. Open: §2c timeout/"wait" case,
+background-launcher request and base/candidate sibling check not written; attempt writes no evaluation row; a seed that
+redefines its own test runs the old Var (smallest fix: digest-compare refusal, needs a seon.test.seed.edn alternative);
+schema/datahike_parity.edn unchanged since 2026-09-22 (drifts); file-store fixtures borrow the member ctx.
 
 **OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
 (responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
