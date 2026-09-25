@@ -102,7 +102,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 | Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
 | Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
 | REPL S1 (definition authority) | entry-gate 6/0 green; Astra `ef099dccf` REVISE (4 P0s: incomplete observed set, metadata via SCI seam, unique occurrence, restore over the real execution) — lane revising |
-| Turns | a turn never completes (`cluster.turn-test` hang) — lane fix-turn-hang-opus |
+| Turns | nested as-of view re-keyed the projection per read (36 s prompts) — fixed `68eb9d310`, but the regression still hangs on default after restart; TOP HARNESS DEFECT: an overdue member blocks every later body until JVM replacement (issue an-exited-overdue-test-member-still-holds-its-test) — lane fix-turn-hang-opus round 2 |
 
 ### Designs (authorities; each revised in place)
 | Design | Latest | Review verdict |
