@@ -12,20 +12,21 @@
             [seon.schema :as schema]
             [seon.test-support :as support]))
 
-(def ^:private handle "7a5c0d1e2f30")
+;; The task handle is derived from its identifying aspect, exactly as ingestion derives it.
+(def ^:private handle (issue/task-handle 'tg.a "walk-graph" :function))
 
 (def ^:private source
-  (str "(ns tg.a {:seon/tasks #{\"7a5c0d1e2f30\"}} (:require [clojure.test :refer [deftest is]]))\n"
+  (str "(ns tg.a {:seon/tasks #{\"" handle "\"}} (:require [clojure.test :refer [deftest is]]))\n"
        "(defn c [v] v)\n"
        "(defn b [v] (c v))\n"
-       "(defn a {:seon/tasks #{\"7a5c0d1e2f30\"}} [v] (b v))\n"
+       "(defn a {:seon/tasks #{\"" handle "\"}} [v] (b v))\n"
        "(declare q)\n"
-       "(defn p {:seon/tasks #{\"7a5c0d1e2f30\"}} [v] (if (pos? v) (q (dec v)) v))\n"
+       "(defn p {:seon/tasks #{\"" handle "\"}} [v] (if (pos? v) (q (dec v)) v))\n"
        "(defn q [v] (p v))\n"
-       "(deftest ^{:seon/tasks #{\"7a5c0d1e2f30\"}} proves (is (= 1 (a 1))))\n"))
+       "(deftest ^{:seon/tasks #{\"" handle "\"}} proves (is (= 1 (a 1))))\n"))
 
 (def ^:private task
-  (str "[#:seon.task{:id \"7a5c0d1e2f30\" :name \"walk-graph\" :kind :function"
+  (str "[#:seon.task{:id \"" handle "\" :name \"walk-graph\" :kind :function"
        " :intent \"Prove the graph walk.\" :must-read #{tg.a/c}}]"))
 
 (defn- world!
