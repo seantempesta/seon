@@ -112,6 +112,13 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 | Test harness hold | overdue member's late exit records the exit only (`1197a35ac`); regressions green 12/0 + 3/0 |
 | Turns | local-provider turn settles (5/0) but 6.05 s > 5 s bound; batched turn hangs (lane round 4) |
 
+### Queued slices (root-ruled, waiting on a held file)
+- R5 grader half: settlement writes optional `:seon.turn/result` beside the disposition; `drive/read-result` (13) goes — needs turn.clj after fix-turn-hang round 6.
+- R4 status: one render pair for the runtime observation; `bin/seon status` and MCP print through it; −88/+40 — needs script/seon/operator.clj, after delete-mcp-bridge R7.
+- fn/reaches? → `db/call-reach` (−16) and runner.clj:839-849 closure → `db/call-reach` — fn.clj after impl-shape-mirror-malli; runner.clj free.
+- Library audit D6 (instrument.clj), D7 fn half — after impl-shape-mirror-malli.
+- Concurrency: long-tier suites (independence 137 s pool, streams, publication-concurrency) run with --include-long at a quiet window; concurrency-test "Agent creation refused" error unassigned.
+
 ### Designs (authorities; each revised in place)
 | Design | Latest | Review verdict |
 |---|---|---|
