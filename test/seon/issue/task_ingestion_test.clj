@@ -126,12 +126,40 @@
     (test-support/with-database
      (fn [connection]
        (admit! connection (rows-of subject-source))
-       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection "d" (.getPath root) nil)))))
+       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection "d" (.getPath root))))))
            "an annotation whose task is absent at the destination refuses with its holders")
        (with-root (assoc checkout task-path (task-text "Prove ingestion." ""))
          (fn [root]
-           (is (:seon.task/changed? (publish-tasks! connection "d" (.getPath root) nil)) "coherent task and annotation admission")
-           (is (= {:seon.task/changed? false} (publish-tasks! connection "d" (.getPath root) [task-path])) "repeat is a no-op")
+           (is (:seon.task/changed? (publish-tasks! connection "d" (.getPath root))) "coherent task and annotation admission")
+           (is (= {:seon.task/changed? false} (publish-tasks! connection "d" (.getPath root))) "repeat is a no-op")
            (io/delete-file (io/file root task-path))
-           (is (= [handle] (dangling #(publish-tasks! connection "d" (.getPath root) [task-path])))
+           (is (= [handle] (dangling #(publish-tasks! connection "d" (.getPath root))))
                "a removed task file retracts its task, leaving its annotations dangling")))))))
+
+(deftest a-source-only-publication-admits-the-unchanged-task-file-its-annotations-name
+  ;; Class regression (lane fix-task-gate-publication 2026-09-25): a publication
+  ;; whose changed paths hold no task file, over a destination that recorded the
+  ;; task file's digest but never admitted its tasks, refused its own annotations
+  ;; as dangling. The gate reads the tasks of the same published source.
+  (test-support/with-database
+   (fn [connection]
+     (admit! connection (rows-of subject-source))
+     (with-root (assoc (issue/task-files "." nil) task-path (task-text "Prove ingestion." ""))
+       (fn [root]
+         (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection "d" (.getPath root))))
+         (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection)))))))))
+
+(deftest adoption-carries-published-tasks-as-data
+  (test-support/with-database
+   (fn [connection]
+     (let [absent @connection
+           _ (ingest! connection (task-text "Prove ingestion." ""))
+           published @connection
+           adopt! #(test-support/transacted! connection (issue/adopt-tasks-call % #{handle}))]
+       (is (= [[:db.fn/call #'issue/adopt-tasks-tx [] #{handle}]] (issue/adopt-tasks-call absent #{handle})))
+       (adopt! absent)
+       (is (nil? (:seon.task/id (db/pull @connection [:seon.task/id] [:seon.task/id handle]))) "absent at the source retracts")
+       (adopt! published)
+       (is (= "Prove ingestion." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))
+       (is (empty? (issue/adopt-tasks-tx @connection [(db/pull published '[*] [:seon.task/id handle])] #{handle}))
+           "an equal task adopts nothing")))))

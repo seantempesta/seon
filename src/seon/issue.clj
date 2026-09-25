@@ -594,34 +594,27 @@
           entries)))
 
 (defn- stored-tasks
-  "The stored tasks of `namespaces`, indexed once by handle."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.task/ns]]
+  "The stored tasks whose `attribute` (`:seon.task/ns` or `:seon.task/id`) is one of `values`, indexed once by handle."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:enum :seon.task/ns :seon.task/id] [:set [:or :seon.task/ns :seon.task/handle]]]
                   [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
-  [database namespaces]
-  (let [rows (db/q database '[:find [(pull ?e [*]) ...] :in $ [?ns ...] :where [?e :seon.task/ns ?ns]] (vec namespaces))]
+  [database attribute values]
+  (let [rows (db/q database '[:find [(pull ?e [*]) ...] :in $ ?a [?v ...] :where [?e ?a ?v]] attribute (vec values))]
     (or (read-error rows) (into {} (map (juxt :seon.task/id identity)) rows))))
 
 (defn task-basis
   "The declarations stored now for the files' namespaces: the basis a caller reads with its proposal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files] [:or :seon.task/basis :seon.db/invalid-read-error]]}
   [database files]
-  (let [stored (stored-tasks database (set (map file-namespace (keys files))))]
+  (let [stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
     (or (read-error stored) (update-vals stored #(declaration (db/carried-projection database) %)))))
 
-(defn tasks-tx
-  "The writer's delta from stored tasks to the declared `files`, by handle. A touched
-  task whose current declaration differs from the caller's `basis` refuses with base,
-  current and proposed (7.16); unchanged input is empty; a removed entry retracts."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
-  [database files basis]
-  (let [projection (db/carried-projection database)
-        proposed (into [] (mapcat (fn [[path text]] (file-declarations projection path text))) files)
-        by-id (into {} (map (juxt :seon.task/id identity)) proposed)
-        stored (stored-tasks database (set (map file-namespace (keys files))))
-        owned (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))]
-    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (when-let [id (some (fn [[id n]] (when (< 1 n) id)) (frequencies (map :seon.task/id proposed)))]
-      (functions/task-refused! 'seon.issue/tasks-tx :duplicate-id (:seon.task/ns (by-id id)) id {}))
+(defn- task-delta
+  "The writer's delta from `stored` to `by-id` tasks, by handle; a handle whose stored
+  declaration differs from the caller's `basis` refuses with base, current and proposed."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:map-of :seon.task/handle :map] [:map-of :seon.task/handle :map]
+                       :seon.task/basis] [:vector :seon.schema/value]]}
+  [projection stored by-id basis]
+  (let [owned (set (keys (m/entries (m/deref (mr/schema (:seon.schema.projection/registry projection) :seon.task/declaration)))))]
     (into []
           (mapcat (fn [id]
                     (let [current (declaration projection (stored id)) wanted (declaration projection (by-id id))]
@@ -635,6 +628,40 @@
                         current (replacement-tx (stored id) (by-id id) owned)
                         :else [(by-id id)]))))
           (sort (into (set (keys stored)) (keys by-id))))))
+
+(defn tasks-tx
+  "The writer's delta from stored tasks to the declared `files`, by handle. A touched
+  task whose current declaration differs from the caller's `basis` refuses with base,
+  current and proposed (7.16); unchanged input is empty; a removed entry retracts."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
+  [database files basis]
+  (let [projection (db/carried-projection database)
+        proposed (into [] (mapcat (fn [[path text]] (file-declarations projection path text))) files)
+        by-id (into {} (map (juxt :seon.task/id identity)) proposed)
+        stored (stored-tasks database :seon.task/ns (set (map file-namespace (keys files))))]
+    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (when-let [id (some (fn [[id n]] (when (< 1 n) id)) (frequencies (map :seon.task/id proposed)))]
+      (functions/task-refused! 'seon.issue/tasks-tx :duplicate-id (:seon.task/ns (by-id id)) id {}))
+    (task-delta projection stored by-id basis)))
+
+(defn adopt-tasks-tx
+  "Reconcile the selected `handles` into a development database from the `rows` the
+  exact published source holds for them: tasks are data the publication admitted, so
+  the writer's current value is the basis, and a handle absent from `rows` retracts."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle]] [:vector :seon.schema/value]]}
+  [database rows handles]
+  (let [stored (stored-tasks database :seon.task/id handles)
+        projection (db/carried-projection database)]
+    (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (task-delta projection stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) rows)
+                (update-vals stored #(declaration projection %)))))
+
+(defn adopt-tasks-call
+  "Transaction data adopting the selected task handles from `source`, the published database."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.task/handle]] [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
+  [source handles]
+  (let [rows (stored-tasks source :seon.task/id handles)]
+    (or (read-error rows) [[:db.fn/call #'adopt-tasks-tx (vec (vals rows)) handles]])))
 
 (defn index-tasks!
   "Reconcile task files through the writer against the declarations the caller read

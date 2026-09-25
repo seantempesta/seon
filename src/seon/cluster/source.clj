@@ -523,17 +523,19 @@
      {:seon.source/digest source-digest})))
 
 (defn- index-tasks!
-  "Reconcile task files (all, or the changed task `paths`) through the task writer,
+  "Reconcile every task file of the published `directory` through the task writer,
   then refuse any dangling handle, an annotation naming no admitted task, with its
-  holders before the head advances (spec 7.5, 7.13)."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string [:maybe [:vector :string]]]
+  holders before the head advances (spec 7.5, 7.13). Every file, not the changed
+  ones: a recorded task-file digest does not prove its tasks were admitted (a
+  publication before ingestion recorded it), and the whole set reconciles in ~2 ms."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string]
                   [:maybe :seon.task/report]]}
-  [connection source-digest directory paths]
+  [connection source-digest directory]
   (when (get (:schema (db/db connection)) :seon.task/id)
     (let [report (require-committed!
                   ((requiring-resolve 'seon.issue/index-tasks!)
                    {:seon.db/connection connection
-                    :seon.task/files ((requiring-resolve 'seon.issue/task-files) directory paths)})
+                    :seon.task/files ((requiring-resolve 'seon.issue/task-files) directory nil)})
                   :seon.task/index-refused "Task indexing was refused." {:seon.source/digest source-digest})
           findings (require-committed! ((requiring-resolve 'seon.issue/task-findings) (db/db connection))
                                        :seon.task/findings-refused "Task findings could not be read." {})]
@@ -577,8 +579,6 @@
                     (not= requested-commit (:seon.source/commit-id published)))
         note-paths (when (and published changed-paths)
                      (filterv (requiring-resolve 'seon.issue/note-path?) changed-paths))
-        task-paths (when (and published changed-paths)
-                     (filterv (requiring-resolve 'seon.issue/task-path?) changed-paths))
         committed (when published
                     (d/commit-as-db (:seon.store/connection-object store)
                                     (:seon.source/commit-id published)))
@@ -656,7 +656,7 @@
                   _ (when (or (nil? note-paths) (seq note-paths))
                       (progress! "publication issue indexing"))
                   issues (index-issues! connection source-digest (or directory (fs/source-directory)) note-paths)
-                  tasks (index-tasks! connection source-digest (or directory (fs/source-directory)) task-paths)
+                  tasks (index-tasks! connection source-digest (or directory (fs/source-directory)))
                   _ (progress! "publication source identity")]
             (require-committed! population-result ::source-population-refused
                                 "The source population was refused." {})
