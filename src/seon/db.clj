@@ -4159,15 +4159,20 @@
 
 (defn- write-deletion-error
   [before database affected identity-attrs]
-  (let [removed
+  ;; An identity whose attribute this transaction retired no longer resolves
+  ;; as a lookup ref (Datahike refuses one on a non-unique attribute,
+  ;; `datahike/db/utils.cljc:124`); its entity's identity is removed.
+  (let [surviving (set (identity-attributes database))
+        removed
         (into []
               (keep (fn [entity-id]
                       (let [identities
                             (into {}
                                   (keep (fn [datom]
                                           (when (and (identity-attrs (:a datom))
-                                                     (not (db.utils/entid database
-                                                                          [(:a datom) (:v datom)])))
+                                                     (or (not (surviving (:a datom)))
+                                                         (not (db.utils/entid database
+                                                                              [(:a datom) (:v datom)]))))
                                             [(:a datom) (:v datom)])))
                                   (d/datoms before :eavt entity-id))]
                         (when (seq identities) identities))))

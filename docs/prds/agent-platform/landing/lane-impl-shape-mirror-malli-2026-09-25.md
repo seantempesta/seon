@@ -176,3 +176,35 @@ Committed: this note (f2adbfa00), then the source, schema, test and doc slice (s
   projection, which is DB-faithful, and not through the context's projection.
 - A `lane-shape-cp-scratch/contract-arities` entry stays in default's current projection cache holder until
   that projection is replaced.
+
+## Adoption fix (after 0bd3a38b4 refused on default's live store)
+
+**Symptom.** `bin/seon init --dev default --changed …` refused with "Lookup ref attribute should be marked as
+:db/unique: [:seon.schema.shape.child/id …]" (`tmp/adopt-4.txt`).
+
+**Producer, found at the REPL on default's live value.**
+- The population transaction (`seon.cluster/declaration-changes` → `attribute-change-tx` →
+  `attribute-retraction`) already retires by entity id: `[:db/retract e a v]` or `[:db/retractEntity child]`
+  for each datom, then `[:db/retractEntity attribute]`. It is 89,573 operations and 94,253 datoms, and
+  `d/with` accepts it.
+- The lookup ref comes from the writer's final check, `seon.db/write-deletion-error` (db.clj:4160). For every
+  identity datom of an affected entity in `db-before`, it calls `db.utils/entid` on `[a v]` in `db-after`.
+  A retired attribute is not unique there, so Datahike throws (`datahike/db/utils.cljc:124`).
+- Reproduced by calling `write-deletion-error` on that report.
+
+**Fix (db.clj, 6 lines).** An identity whose attribute is no longer an identity in `db-after` counts as
+removed, and it is never resolved as a lookup ref. `removed-definition-error` then checks referrers only for
+`:seon.fn/sym`, `:seon.ns/name`, `:seon.schema/key` and `:db/ident`, so retired shape identities carry no
+obligations.
+
+**Proof.**
+- The whole `write-report-error` body was evaluated in `seon.db` with the fixed function as a local binding;
+  no Var was redefined. On default's real retirement report it returns nil, meaning admitted, in 5.08 s.
+  Of that, `write-owned-values-error` takes 4.1 s over the 94,253 retracted datoms. It is a one-time
+  retirement, and the cost is proportional to the changed datoms.
+- The new regression `test/seon/db/schema_retirement_test.clj` retires a unique attribute that has a row, on
+  a branch of the test's live database. The old validator throws exactly this error; the fixed body
+  admits it in 28 ms.
+- Not proven: the later publication steps (schema-row and program-row republication) through
+  `seon.db/transact!`. My raw `d/with` cannot stand in for them because it skips seon.db's value encoding.
+  Root's adoption run is the proof for those steps.
