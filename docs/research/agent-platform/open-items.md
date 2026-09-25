@@ -98,9 +98,9 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 ### Component status (definition of done: REPL-proven, green on default, Astra-reviewed, measured)
 | Component | State |
 |---|---|
-| Task ingestion + gate + adoption | green (`seon.issue.task-ingestion-test` 46 assertions, 874 ms); Astra reviewed + fixed; DONE pending the diff re-check of the fix commits |
+| Task ingestion + gate + adoption | green (46 assertions); Astra `5fb38b91f`: ingestion accept after fixes, publication/adoption revise (3 P1s) — lane fix-ingestion-p1s-opus |
 | Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
-| Derived S0 (shape codec) | green (`seon.fn.schema-shape-test` 8/0, 5.6 s); Astra diff review pending |
+| Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
 | REPL S1 (definition authority) | entry-gate 6/0 green; sci.eval-test 3 possibly new reds being checked; Astra review after |
 | Turns | a turn never completes (`cluster.turn-test` hang) — lane fix-turn-hang-opus |
 
