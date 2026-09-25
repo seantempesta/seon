@@ -444,8 +444,7 @@
                       projection :seon.ns/ns selector)]
          (is (= 'seon.schema/pulled-selector-refusal (:seon.error/operation refused)))
          (is (= {:seon.ns/steward 2}
-                (get-in refused
-                        [:seon.error/offending]))))))))
+                (:seon.schema/refused-value refused))))))))
 
 (defn- refusal
   [thunk]
@@ -975,18 +974,11 @@
       (is (instance? clojure.lang.ExceptionInfo mismatch))
       (is (= 'seon.schema/render-contract-refusal!
              (:seon.error/operation mismatch-data)))
-      (is (= shape
-             (get-in mismatch-data
-                     [:seon.error/expected])))
-      (is (= shape
-             (get-in mismatch-data
-                     [:seon.error/data :seon.error/member])))
+      (is (= shape (:seon.schema/expected-value mismatch-data)))
       (is (= 'seon.schema/render-contract-refusal!
              (get-in mismatch-data
                      [:seon.error/operation])))
-      (is (= renderer
-             (get-in mismatch-data
-                     [:seon.error/offending])))
+      (is (= renderer (:seon.schema/refused-value mismatch-data)))
       (is (= other
              (get-in mismatch-data
                      [:seon.error/data :seon.fn/input]))))
@@ -1174,6 +1166,7 @@
                       (set (map :seon.schema/key
                                 (schema/matching-shapes-in projection value))))]
         (is (contains? (matches {:seon.ns/name 'probe.alias
+                                 :seon.program/definition-digest (apply str (repeat 64 "0"))
                                  :seon.schema.admission/source :agent
                                  :seon.ns/aliases
                                  #{{:seon.ns.alias/local 'set
@@ -1292,7 +1285,8 @@
                                            (failure-of
                                             #(#'call-preparation/argument-validators
                                               database
-                                              {:seon.schema/projection bare}
+                                              (assoc @#'call-preparation/empty-snapshot
+                                                     :seon.schema/projection bare)
                                               function-symbol))]
                                   [function-symbol message])))
                         with-slots)))))))))
@@ -1500,10 +1494,8 @@
                           (ex-data failure)))]
        (is (not= ::no-refusal outcome)
            "a poisoned database value may not answer as a projection")
-       (is (= :seon.schema/database-value
-              (:seon.error/member (:seon.error/data outcome))))
-       (is (= poisoned
-              (:seon.error/offending outcome)))
+       (is (= :seon.schema/database-value (:seon.error/member outcome)))
+       (is (= poisoned (:seon.schema/refused-value outcome)))
        (is (seq (:seon.schema.projection/forms
                  (schema/projection-from-database @connection)))
            "a real database still derives a populated projection")))))

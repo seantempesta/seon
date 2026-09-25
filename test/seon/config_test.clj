@@ -375,23 +375,22 @@
                (config/compile-manifest {:seon.boot/cluster-name "default"
                                          :seon.config/manifest (config/development-manifest)}))))))
 
-(deftest apply-converts-a-flat-reconcile-error-to-a-refusal
+(deftest apply-surfaces-a-refused-reconcile-as-its-flat-rule-error
+  ;; A real refusal inside the reconcile transaction: the desired row names a
+  ;; function with no program row. The writer returns that flat error verbatim.
   (test-support/with-database
     (fn [connection]
-      (let [flat-error {:seon.error/at (java.util.Date.)
-                        :seon.error/layer :seon.db/write
-                        :seon.error/operation 'seon.db/transact!
-                        :seon.error/message "injected config refusal"}
-            result
-            (with-redefs [reconcile/plan (fn [& _] [{}])
-                          db/transact! (fn [& _] flat-error)]
-              (test-support/refusal-data
-               #(config/apply-compiled!
-                 connection
-                 (config/compile-manifest {:seon.boot/cluster-name "default"}))))]
-        (is (= :seon.config/desired-row (:seon.config/error-key result)))
-        (is (= :seon.config/reconcile-refused (:seon.config/rule result)))
-        (is (= flat-error (get-in result [:seon.error/data :seon.config/reconcile-result])))))))
+      (let [dial :seon.config.web/search-result-projection
+            missing 'seon.config-test/no-such-projection
+            compiled (assoc-in (config/compile-manifest {:seon.boot/cluster-name "default"})
+                               [:seon.config/desired-row dial] missing)
+            result (test-support/refusal-data
+                    #(config/apply-compiled! connection compiled))]
+        (is (= ::config/missing-function (::config/rule result)))
+        (is (= dial (:seon.config/error-key result)))
+        (is (= [[dial missing]] (:seon.error/offending result)))
+        (is (not= missing (get (config/effective (db/db connection) "default") dial))
+            "the refused reconcile committed nothing")))))
 
 (deftest cluster-scoped-config-refuses-an-omitted-cluster
   (test-support/with-database
@@ -555,8 +554,7 @@
              (:seon.instrument/fn data)))
       (is (= #{[:seon.config/environment
                 :seon.config.flow.compute/queue-depth]}
-             (set (get-in data [:seon.error/data
-                                :seon.instrument/problem-paths])))))))
+             (set (:seon.instrument/problem-paths data)))))))
 
 (deftest unreadable-manifest-refuses-by-name
   (let [data
@@ -663,8 +661,7 @@
             :seon.error/expected-key :seon.config.eval.result/max-bytes
             :seon.error/message "Value-admission caps require every declared configuration bound."
             :seon.error/offending refusal
-            :seon.error/data {:seon.config/key :seon.config.eval.result/max-bytes
-                              :seon.config/configuration-refusal refusal}}
+            :seon.config/key :seon.config.eval.result/max-bytes}
            result))))
 
 (deftest two-clusters-on-one-jvm-have-no-config-bleed
@@ -702,8 +699,8 @@
                       :seon.error/expected-key :seon.config.eval.result/max-bytes
                       :seon.error/message "Value-admission caps require every declared configuration bound."
                       :seon.error/offending refusal
-                      :seon.error/data {:seon.config/key :seon.config.eval.result/max-bytes
-                                        :seon.config/missing-effective (:seon.config/missing-effective refusal)}}
+                      :seon.config/key :seon.config.eval.result/max-bytes
+                      :seon.config/missing-effective (:seon.config/missing-effective refusal)}
                      caps-refusal))
               (is (string? (:seon.error/message refusal))))))))))
 

@@ -311,15 +311,13 @@
          (into (test-support/agent-tx @connection "root")
                (task-transaction collect-task collect-handler)))
         (testing "an uncollected root is the typed unknown, never absence"
-          ;; The refusal retains the producer observation in
-          ;; `:seon.error/data`; the top level carries the observed root and base evidence.
+          ;; A flat refusal: the observed root and the refused member are top-level.
           (let [answer (maintenance/last-collection @connection collected-root)]
             (is (= collected-root (:seon.maintenance/uncollected-root answer)))
             (is (= collected-root
                    (get-in answer [:seon.error/offending])))
             (is (= :seon.operator/managed-root
-                   (get-in answer [:seon.error/data
-                                   :seon.error/member])))))
+                   (:seon.error/member answer)))))
         (test-support/transacted!
          connection
          (receipt collect-task collect-handler "collect/1" at-1

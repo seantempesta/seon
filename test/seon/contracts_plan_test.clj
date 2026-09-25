@@ -61,7 +61,7 @@
     (doseq [fragment ["my.note/add! refused request at [:my.note/about]"
                       "an entity id or a lookup ref" "[:my.note/id" "Fix:" "largest-customer-original"]]
       (is (str/includes? shown fragment) shown))
-    (is (= 1 (count (get-in refusal [:seon.error/data :seon.error/problems]))))))
+    (is (= 1 (count (:seon.error/problems refusal))))))
 
 (defn- unresolved-symbol-shows-the-correction-without-the-evidence-map
   {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx :seon.schema/value] :boolean]}

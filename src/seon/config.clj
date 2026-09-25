@@ -115,21 +115,16 @@
         (or (some reported-missing result-cap-attributes)
             (some #(when-not (contains? effective %) %)
                   result-cap-attributes))
-        cluster-less-refusal (when (and missing
-                                       (not (:seon.config/missing-effective effective)))
-                               effective)]
+        cluster-name (:seon.config/missing-effective effective)]
+    ;; `:seon.error/offending` already carries a cluster-less refusal whole.
     (if missing
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.config/read 'seon.config/result-caps
-       {:seon.config/error-key missing
-        :seon.error/expected-key missing
-        :seon.error/message "Value-admission caps require every declared configuration bound."
-        :seon.error/offending effective
-        :seon.error/data (cond-> {::key missing}
-         (:seon.config/missing-effective effective)
-         (assoc :seon.config/missing-effective
-                (:seon.config/missing-effective effective))
-         cluster-less-refusal
-         (assoc ::configuration-refusal cluster-less-refusal))})
+       (cond-> {:seon.config/error-key missing
+                :seon.error/expected-key missing
+                :seon.error/message "Value-admission caps require every declared configuration bound."
+                :seon.error/offending effective
+                ::key missing}
+         cluster-name (assoc :seon.config/missing-effective cluster-name)))
       (select-keys effective result-cap-attributes))))
 
 ;;; Every function below asks the declaration population one question per
@@ -175,7 +170,10 @@
 (defn- refuse!
   {:malli/schema [:=> [:cat :seon.config/rule-error [:maybe :seon.error/throwable]] :nil]}
   [observation cause]
-  (throw (ex-info (:seon.error/message observation) observation cause)))
+  ;; The error owner's constructor derives the whole cause chain and frame.
+  (let [observation (seon.error.refusal/diagnostic
+                     (cond-> observation cause (assoc :seon.error/throwable cause)))]
+    (throw (ex-info (:seon.error/message observation) observation cause))))
 
 (defn- read-edn-map
   [path]
@@ -201,7 +199,7 @@
          :seon.config/rule ::manifest-unreadable
          :seon.error/expected-key :seon.config/path
          :seon.error/offending path
-         :seon.error/data {::path path}
+         ::path path
          :seon.error/expected "exactly one readable EDN map"}
        error))))
 
@@ -220,7 +218,7 @@
          :seon.config/rule ::initialization-not-allowed
          :seon.error/expected-key initialization-key
          :seon.error/offending layer
-         :seon.error/data {::key initialization-key}
+         ::key initialization-key
          :seon.error/expected "an overlay containing only configuration dials"}
        nil))
     (doseq [[config-key value] declared]
@@ -235,8 +233,8 @@
          :seon.config/rule ::invalid-value
          :seon.error/expected-key config-key
          :seon.error/offending value
-         :seon.error/data {::key config-key
-          ::explanation ((schema/projection-explainer projection config-key) value)}
+         ::key config-key
+         :seon.error/data {::explanation ((schema/projection-explainer projection config-key) value)}
          :seon.error/expected "values satisfying their declared configuration schemas"}
        nil)))
     declared))
@@ -268,7 +266,6 @@
          :seon.config/rule ::invalid-initialization-row
          :seon.error/expected-key :seon.config/initialization
          :seon.error/offending row
-         :seon.error/data {}
          :seon.error/expected "an initialization entity map"}
        nil))
        (doseq [[attribute value] row]
@@ -283,7 +280,7 @@
          :seon.config/rule ::invalid-initialization-attribute
          :seon.error/expected-key :seon.config/initialization
          :seon.error/offending attribute
-         :seon.error/data {::key attribute}
+         ::key attribute
          :seon.error/expected "qualified attribute keys"}
        nil)
 
@@ -297,7 +294,7 @@
          :seon.config/rule ::unknown-initialization-attribute
          :seon.error/expected-key attribute
          :seon.error/offending value
-         :seon.error/data {::key attribute}
+         ::key attribute
          :seon.error/expected "declared database attributes"}
        nil)
 
@@ -311,8 +308,8 @@
          :seon.config/rule ::invalid-initialization-value
          :seon.error/expected-key attribute
          :seon.error/offending value
-         :seon.error/data {::key attribute
-                     ::explanation
+         ::key attribute
+         :seon.error/data {::explanation
                      ((schema/projection-explainer projection attribute) value)}
          :seon.error/expected "values satisfying their declared attribute schemas"}
        nil)))
@@ -407,8 +404,8 @@
          :seon.config/rule ::invalid-value
          :seon.error/expected-key config-key
          :seon.error/offending decision
-         :seon.error/data {::key config-key
-          ::explanation ((schema/projection-explainer projection config-key) decision)}
+         ::key config-key
+         :seon.error/data {::explanation ((schema/projection-explainer projection config-key) decision)}
          :seon.error/expected "values satisfying their declared configuration schemas"}
        nil)))
     decisions))
@@ -499,7 +496,7 @@
          :seon.config/rule ::required-absent
          :seon.error/expected-key config-key
          :seon.error/offending decision
-         :seon.error/data {::key config-key}
+         ::key config-key
          :seon.error/expected "a value for each required configuration key"}
        nil)))
     (let [effective
@@ -543,7 +540,7 @@
          :seon.config/rule ::required-absent
          :seon.error/expected-key :seon.boot/cluster-name
          :seon.error/offending request
-         :seon.error/data {::key :seon.boot/cluster-name}
+         ::key :seon.boot/cluster-name
          :seon.error/expected "a value for each required configuration key"}
        nil))
     (let [document (default-document)
