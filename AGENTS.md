@@ -120,6 +120,16 @@ at start vs end) and pushes back, never a lock. A **reload** uses
 program; selected development clusters adopt explicitly. Every program function is
 callable: prompt visibility grants no execution permission; consumer domains stay downstream.
 
+**The one REPL path** is read → eval → record → print, from the agent's side of the prompt.
+Every entrant uses it: product agents, outside agents through MCP, and tests through the
+harness; none builds a second evaluator, printer or result store. A form is parsed once and
+evaluated once; its results and facts are stored and queryable. Everything before the print is
+a real value under its Malli schema, live in the runtime, a database fact or a blob, never a
+string built to be clipped. Printing happens only at the edge, by the declared renderer or the
+floor. Agents change the program in REPL terms: `defn` inside the target namespace or by its
+fully qualified name, and `my.program/ns-unmap!` / `my.program/remove-ns!` to delete; files are
+the write-back of accepted rows, not the working medium.
+
 **Merge** admits program rows onto an intermediate branch. Keep conflicts there for
 repair; same-identity conflicts become root tasks. Test the combined program: contracts,
 task tests and every current test reaching changed functions must pass; missing coverage
