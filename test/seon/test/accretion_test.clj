@@ -9,8 +9,7 @@
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as sci.eval]
             [seon.test-support :as test-support]
-            [seon.test.accretion :as accretion]
-            [seon.program :as program]))
+            [seon.test.accretion :as accretion]))
 
 (defn- admit!
   [connection rows]
@@ -158,15 +157,7 @@
     (fn [connection]
       (admit!
        connection
-       [{:seon.agent/id "candidate-author"
-         :seon.agent/namespace
-         (program/declaration-row
-          (db/carried-projection @connection)
-          {:seon.ns/name 'fixture.candidate
-           :seon.ns/source
-           (str "(ns fixture.candidate "
-                "(:require [clojure.test :refer [deftest is]]))")}
-          :all :agent)}])
+       (test-support/agent-tx @connection "candidate-author" 'fixture.candidate))
       (let [source (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)\n"
                         "(clojure.test/deftest green-test (clojure.test/is (= 2 (target 1))))\n"
                         "(clojure.test/deftest red-test (clojure.test/is (= 3 (target 1))))")]
@@ -245,15 +236,7 @@
     (fn [connection]
       (admit!
        connection
-       [{:seon.agent/id "custody-author"
-         :seon.agent/namespace
-         (program/declaration-row
-          (db/carried-projection @connection)
-          {:seon.ns/name 'fixture.custody
-           :seon.ns/source
-           (str "(ns fixture.custody "
-                "(:require [clojure.test :refer [deftest is]]))")}
-          :all :agent)}])
+       (test-support/agent-tx @connection "custody-author" 'fixture.custody))
       (admit! connection
               [(test-support/program-row
                 @connection [:seon.test/sym 'fixture.custody/reads-its-own-cluster]
@@ -292,9 +275,7 @@
     (fn [connection]
       (admit!
        connection
-       [{:seon.agent/id "auto-check-author"
-         :seon.agent/namespace
-         (test-support/namespace-row @connection 'fixture.auto-check)}])
+       (test-support/agent-tx @connection "auto-check-author" 'fixture.auto-check))
       (admit! connection
               [(test-support/program-fn-row @connection 'fixture.auto-check/capability
                                             "(defn capability [] nil)"
