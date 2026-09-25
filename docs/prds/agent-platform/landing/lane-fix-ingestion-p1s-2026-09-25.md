@@ -1,7 +1,7 @@
 ---
 type: landing
 lane: fix-ingestion-p1s-opus
-status: committed-unverified
+status: revised-after-root-run
 date: 2026-09-25
 authority: docs/research/agent-platform/s0-and-ingestion-fixes-diff-review-2026-09-25.md (5fb38b91f) P1-1..P1-3; spec 7.13, 7.15, 7.16
 ---
@@ -13,6 +13,36 @@ committed but **not yet run**: under the LOAD RULE this lane ran no test request
 into default. Root runs the commands below.
 
 ## Broken or unresolved first
+## Root run on 6ab6bdc1 (tmp/orchestrator/verify-6ab6bdc1-results.txt.d/002-004) and diagnosis
+
+- **`seon.cluster.merge-test`, both members red. The cause is in another lane's file, not in
+  `accept-merge!`.**
+  - Both members error at their first fixture write (`merge_test.clj:30`, `write!`), before any
+    `prepare-merge!` or `accept-merge!` runs.
+  - `test-support/program-row` (67580898d, DIGEST-NS) now digests with a synthetic
+    `namespace-row`, even when that namespace is already stored with a different row.
+  - REPL, read-only on default: `program-row` gives `a3a83cb2…` for `merge-callee`. The writer's
+    `definition-digest-of` with the stored `seon.cluster.merge-test` row gives `aa1c73ca…`. These
+    are exactly the refusal's offending and expected digests.
+  - The owner is `test/seon/test_support.clj` and its DIGEST-NS lane, which this lane does not own.
+    **Not fixed here; root routes it.** The dangling gate is not implicated by this evidence. It
+    will be exercised once the fixture writes again.
+- **`seon.cluster.source-test/a-merge-naming-…` errored the same way.**
+  - The test now writes its own namespace `scratch.merge-tasks` in its first transaction.
+  - REPL: `program-row` digests equal the writer's, for both the same-transaction and the later
+    write. The annotated row carries `:seon.task/tasks #{…}`.
+- **Adoption regression: 4 fails, a test defect.**
+  - The source connection's ingests ran inside the inner `with-database` fixture, which holds the
+    destination's custody. `seon.db/transact!` refused them as foreign, and `ingest!` returned the
+    refusal without the test checking it.
+  - REPL: `adopt-tasks-call` over a `d/with` source that adds `043df611d179` produces the four-task
+    call, with no retractions.
+  - Each source edit now runs under `db/call-with-custody` for the source and asserts
+    `:seon.task/changed?`.
+  - The "writes nothing" check now compares task state, not `basis-t`. A refused write may record
+    its observation.
+  - Commit `b5c7d2765`.
+
 
 - **Unverified.** No test ran. The new files lint clean with clj-kondo. The namespaces were not
   loaded into default, because loading would redefine default's Vars. Every behaviour below was
