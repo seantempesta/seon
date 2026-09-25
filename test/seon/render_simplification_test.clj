@@ -257,11 +257,11 @@
                (nth (:seon.render.selection/stages decision) 2)]
            (is (= matching (:seon.render.selection/selected decision)))
            (is (= [:explicit-value :explicit-request :namespace
-                   :schema :floor]
+                   :declared :schema :floor]
                   (mapv :seon.render.selection.stage/name
                         (:seon.render.selection/stages decision))))
            (is (= [:no-match :no-match :selected
-                   :not-consulted :not-consulted]
+                   :not-consulted :not-consulted :not-consulted]
                   (stage-statuses decision)))
            (is (= [{:seon.render.selection.candidate/producer cross-arity
                     :seon.render.selection.candidate/status :rejected
@@ -301,7 +301,7 @@
               (:seon.render.selection.stage/value explicit-stage)))
        (is (nil? (:seon.render.selection.stage/candidates explicit-stage)))
        (is (= [:selected :not-consulted :not-consulted
-               :not-consulted :not-consulted]
+               :not-consulted :not-consulted :not-consulted]
               (stage-statuses decision)))))))
 
 (deftest missing-render-profile-remains-a-flat-error
@@ -342,7 +342,7 @@
                       :seon.render/selection])]
          (is (= 'seon.render.value/render-ai
                 (:seon.render.selection/selected decision)))
-         (is (= [:no-match :no-match :no-match :no-match :selected]
+         (is (= [:no-match :no-match :no-match :no-match :no-match :selected]
                 (stage-statuses decision))))))))
 
 (deftest
@@ -610,7 +610,7 @@
        (is (seq (:seon.render/candidates result)))
        (is (seq (:seon.render/candidates (:seon.render.selection/selected decision))))
        (is (= [:no-match :no-match :ambiguous
-               :not-consulted :not-consulted]
+               :not-consulted :not-consulted :not-consulted]
               (stage-statuses decision)))
        (is (= expected
               (set (:seon.render/candidates (:seon.error/data result)))))
