@@ -749,31 +749,59 @@
   [database agent-ids]
   (into [] (mapcat #(agent-tx database %)) agent-ids))
 
+(defn- namespace-context
+  "The resolver context the writer digests a row of `namespace-name` with:
+   its stored namespace in `database`, read as `seon.fn` reads it, else none."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:maybe :seon.ns/name]] :map]}
+  [database namespace-name]
+  (@#'seon.fn/stored-namespace-context
+   (when (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]] database namespace-name)
+     (db/pull database '[:seon.ns/requires {:seon.ns/aliases [*]} {:seon.ns/imports [*]} {:seon.ns/refers [*]}]
+              [:seon.ns/name namespace-name]))))
+
+(defn revised-row
+  "`row` with `overrides` merged, digested from that FINAL row through
+   `program/definition-digest` with its namespace's context in `database`,
+   the digest `seon.db/write-digest-error` reproduces. Never assoc onto a row."
+  {:malli/schema [:=> [:cat :seon.db/database-value :map :map] :map]}
+  [database row overrides]
+  (let [row (merge row overrides)
+        namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))]
+    (assoc row :seon.program/definition-digest
+           (program/definition-digest row (namespace-context database namespace-name)))))
+
 (defn program-row
-  "Analyze an explicit synthetic declaration through the production source path."
-  [database identity source]
-  (let [projection (db/carried-projection database)
-        [attribute declaration-symbol] identity
-        rows (seon.fn/source-rows
-              database (program/shapes-in projection)
-              (namespace-row database (symbol (namespace declaration-symbol)))
-              source (set (keys (:seon.schema.projection/forms projection))))]
-    (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
-        (throw (ex-info "The fixture source did not define the requested declaration."
-                        {:seon.program/identity identity :seon.program/source source})))))
+  "Analyze an explicit synthetic declaration through the production source path,
+   then `revised-row` with `overrides`."
+  ([database identity source] (program-row database identity source {}))
+  ([database identity source overrides]
+   (let [projection (db/carried-projection database)
+         [attribute declaration-symbol] identity
+         rows (seon.fn/source-rows
+               database (program/shapes-in projection)
+               (namespace-row database (symbol (namespace declaration-symbol)))
+               source (set (keys (:seon.schema.projection/forms projection))))]
+     (revised-row
+      database
+      (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
+          (throw (ex-info "The fixture source did not define the requested declaration."
+                          {:seon.program/identity identity :seon.program/source source})))
+      overrides))))
 
 (defn program-fn-row
   "A complete indexed declaration, or an explicitly analyzed agent fixture.
    The one-argument form returns the canonical source artifact's actual row.
    Synthetic definitions require the database so the production analyzer owns
-   their resolver context and producing digest."
+   their resolver context and producing digest; `overrides` are digested in."
   ([function-symbol]
    (or (some #(when (= function-symbol (:seon.fn/sym %)) %)
              (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts @source-manifest)))
        (throw (ex-info "A synthetic fixture definition requires its database and source."
                        {:seon.fn/sym function-symbol}))))
   ([database function-symbol source]
-   (program-row database [:seon.fn/sym function-symbol] source)))
+   (program-row database [:seon.fn/sym function-symbol] source {}))
+  ([database function-symbol source overrides]
+   (program-row database [:seon.fn/sym function-symbol] source overrides)))
 
 (defn apply-config!
   "Set one cluster's config dials through the production path.
