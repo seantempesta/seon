@@ -223,3 +223,37 @@
                                                    :seon.render/ai data)
                             "shown as data")
              "and the AI face's emitter renders that data, never a pre-printed string"))))))
+
+(deftest the-viewing-agents-own-renderer-beats-the-schema-default
+  ;; Per face the first match wins (owner, 2026-09-25): the value's own face,
+  ;; then a contract-fitting render function in the VIEWING agent's
+  ;; namespace, then the schema's declared pair, then the floor.
+  (support/with-database
+   (fn [connection]
+     (support/transacted! connection (support/agent-tx @connection "viewer" 'my.agents.viewer))
+     (support/transacted!
+      connection
+      [(support/program-fn-row
+        (db/db connection) 'my.agents.viewer/agent-view
+        "(defn agent-view {:malli/schema [:=> [:cat [:map [:seon.agent/id :seon.agent/id]]] :seon.render/ai]} [unit] \"viewer's view\")")])
+     (let [database (db/db connection)
+           ctx (support/fork-cluster-ctx connection)
+           selected (fn [viewer value output]
+                      (:seon.render.selection/selected
+                       (render/selection
+                        (cond-> {:seon.db/db database :seon.sci.eval/ctx ctx :seon.render/value value
+                                 :seon.render/output output
+                                 :seon.render/profile (render/agent-render-profile config/defaults)
+                                 :seon.sci.admit/caps (config/result-caps config/defaults)
+                                 :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic}
+                          viewer (assoc :seon.agent/id viewer)))))
+           agent-value {:seon.agent/id "someone"}]
+       (is (= 'seon.cluster.agent/render-identity-ai (selected nil agent-value :seon.render/ai))
+           "with no viewing agent the schema default renders")
+       (is (= 'my.agents.viewer/agent-view (selected "viewer" agent-value :seon.render/ai))
+           "the viewing agent's own contract-fitting renderer beats the schema default")
+       (is (= 'seon.cluster.agent/render-identity-html (selected "viewer" agent-value :seon.render/html))
+           "only for the face it returns")
+       (is (= 'seon.error/render-ai
+              (selected "viewer" (assoc agent-value :seon.render/ai 'seon.error/render-ai) :seon.render/ai))
+           "and the value's own face beats both")))))
