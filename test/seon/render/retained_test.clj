@@ -13,14 +13,17 @@
 
 (defn- seed-shown! [connection namespace-name shown]
   (let [report (db/transact! connection
-                 [{:seon.ns/name namespace-name :seon.ns/doc "Retained renderer fixture"}
-                  {:seon.agent/id "retained" :seon.agent/namespace [:seon.ns/name namespace-name]}
-                  {:seon.turn/id "retained-turn" :seon.turn/agent [:seon.agent/id "retained"]
+                 (into
+                 [{:seon.ns/name namespace-name :seon.ns/doc "Retained renderer fixture"}]
+                 (concat
+                 ;; The agent through its canonical creation writer.
+                 (support/agent-tx (db/db connection) "retained" namespace-name)
+                 [{:seon.turn/id "retained-turn" :seon.turn/agent [:seon.agent/id "retained"]
                    :seon.turn/opened-tx "datomic.tx"}
                   {:seon.cluster.eval/id "retained-shown"
                    :seon.cluster.eval/run [:seon.turn/id "retained-turn"]
                    :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
-                   :seon.eval/shown shown}])]
+                   :seon.eval/shown shown}])))]
     (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message])))))
 
 (defn- declare-subject!

@@ -255,6 +255,10 @@
            [:=> [:cat argument-schema] :int]
            [:=> [:cat :string :string] :seon.render/ai]]
           matching [:=> [:cat argument-schema] :seon.render/ai]})]
+    ;; The first question compiles each arity once into the projection's
+    ;; holder; every later question must reuse it.
+    (schema/function-matching-outputs-in projection matching [{:seon.render/value 7}])
+    (schema/function-matching-outputs-in projection cross-arity [{:seon.render/value 7}])
     (with-redefs [m/function-schema
                   (fn [& _] (throw (ex-info "unexpected recompilation" {})))
                   m/validator
