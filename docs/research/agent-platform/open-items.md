@@ -23,6 +23,14 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**OWNER DIRECTION 2026-09-25 (errors, rendering):** an error is a declared schema plus a key attachable to any value;
+identity exists to store at least one copy, link it, and find/notify the agent to fix it (error ids are fine). The six
+schemas reusing ANOTHER entity's identity attribute as a member (seon.message.edn:156, seon.context.edn:79,
+seon.sci.eval.edn:200, seon.test.runner.edn:73/:75, turn compaction-agent-id) should use refs, not the identity attr.
+Inline render override restored (aa91ecb34, 82c63dbfb, design §1 a54278422). Inline render FUNCTIONS and how render
+inputs (database) are supplied: owner deferred the question — do not proceed until asked. HTML face = our Hiccup; a cut
+is an expandable node fetching its path (same fetch as MCP get_value).
+
 **CENSUS D (a34e5d800) routed 2026-09-25:** 169 red = 33 new verified + 6 probable + 130 prior classes; 17 of census c fixed.
 Lanes: fix-harness-fallout (R0 arm-first-loads refused 13 commands; S4a custody → option B, keep S4a; S4c clean world; seed
 attr; overlay read the working tree; lazy install), fix-agent-test-leak (ai/complete with-redefs leaked into ai-test ×13),
