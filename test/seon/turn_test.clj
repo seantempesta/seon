@@ -25,6 +25,7 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [seon.error :as error]
+            [seon.fault :as fault]
             [seon.fn :as seon.fn]
             [seon.schema]
             [seon.program :as program]))
@@ -233,6 +234,46 @@
               (mapv #(get-in % [:seon.db/read-request :seon.db/query-request :query])
                     (evidence reading)))
            "a form's one query is its one read")))))
+
+(deftest a-refused-batch-whose-restoration-fails-answers-the-stored-restoration-error
+  ;; `restore-evaluations!` discarded each restoration's answer, so a refused
+  ;; settlement reported only its refusal (Astra e19adf392 finding 5).
+  (support/with-database
+   (fn [connection]
+     (support/seed-cluster! connection "restoration-proof")
+     (let [caps (config/result-caps (support/effective-config))
+           outcomes (atom [])
+           ctx (assoc (sci/init {})
+                      :seon.sci.kernel/program-snapshot
+                      (atom {:seon.sci.eval/loaded-database (db/db connection)
+                             :seon.flow/commit-fault!
+                             (fn [observation]
+                               (let [outcome (fault/record! connection "restoration-proof"
+                                                            "restoration-test" caps observation)]
+                                 (swap! outcomes conj outcome)
+                                 outcome))}))
+           ;; The one restoration producer, planning a restoration that throws.
+           restore (fn [_ refused]
+                     (#'sci.eval/restore-or-unavailable!
+                      ctx (db/db connection) #(throw (ex-info "planning broke" {})) refused))
+           refusal {:seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.turn/settlement
+                    :seon.error/operation 'seon.turn/settle-batch!
+                    :seon.error/message "The batch was refused."}
+           unrun (sci.eval/unrun-evaluation
+                  {:seon.sci.admit/value refusal :seon.cluster.eval/ns [:seon.ns/name 'user]})
+           answered (#'turn/restore-evaluations!
+                     [{:seon.sci.eval/evaluation (assoc unrun :seon.sci.eval/restore restore)}
+                      {:seon.sci.eval/evaluation unrun}]
+                     refusal)]
+       (is (= :restore-failed (:seon.sci.eval/unavailable answered)))
+       (is (= ["Restoring a refused program change threw." "The batch was refused."]
+              (mapv :seon.error/message (:seon.error/chain answered)))
+           "the chain is the restoration's failure, then the refusal it was restoring")
+       (is (= [:seon.flow/committed] (mapv second @outcomes))
+           "the restoration error is stored and delivered once")
+       (is (nil? (#'turn/restore-evaluations! [{:seon.sci.eval/evaluation unrun}] refusal))
+           "a batch with nothing to restore answers nothing")))))
 
 (deftest a-refused-generated-form-records-its-refusal
   (testing "an appended form whose evaluation is refused never stays bare"

@@ -4858,16 +4858,23 @@
              :seon.cluster.reply/sources sources}) :seon.agent/id agent-id :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.db/db database}))))
 
 (defn- restore-evaluations!
-  "Settlement refused the batch, so none of its program changes was admitted:
-  restore each evaluation's change through its own `:seon.sci.eval/restore`,
-  last form first."
-  {:malli/schema [:=> [:cat [:sequential [:map [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]]
-                  :nil]}
-  [evaluated]
-  (doseq [{evaluation :seon.sci.eval/evaluation} (rseq (vec evaluated))
-          :let [restore! (:seon.sci.eval/restore evaluation)]
-          :when restore!]
-    (restore!)))
+  "Settlement refused the batch with `refusal`, so none of its program changes
+  was admitted: restore each evaluation's change through its own
+  `:seon.sci.eval/restore`, last form first. Answers the first restoration
+  that could not run, whose chain is its failure then `refusal` (the context's
+  recorder has stored and delivered it), else nil; the caller answers it in
+  the refusal's place."
+  {:malli/schema [:=> [:cat [:sequential [:map [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]
+                       :seon.error/value]
+                  [:maybe :seon.sci.eval/execution-unavailable-error]]}
+  [evaluated refusal]
+  (let [refused (ex-info (:seon.error/message refusal) refusal)]
+    (reduce (fn [unavailable {evaluation :seon.sci.eval/evaluation}]
+              (let [restored (when-let [restore! (:seon.sci.eval/restore evaluation)]
+                               (restore! nil refused))]
+                (or unavailable restored)))
+            nil
+            (rseq (vec evaluated)))))
 
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
@@ -4965,13 +4972,14 @@
             ;; carries the ordinal through `refusal-terminal-data`, which
             ;; records the refusal as this evaluation's shown text and
             ;; error before closing.
-            (when (vector? evaluated) (restore-evaluations! evaluated))
             (settle! {:seon.turn.loop/cluster cluster
                       :seon.turn.loop/now now
                       :seon.agent/id agent-id
                       :seon.turn/id run-id
                       :seon.cluster.eval/ordinal first-ordinal
-                      :seon.error/value analyzed})
+                      :seon.error/value (or (when (vector? evaluated)
+                                              (restore-evaluations! evaluated analyzed))
+                                            analyzed)})
             (report :error (count evaluated)))
           (let [evaluated
                 (reduce
@@ -5012,8 +5020,8 @@
                 prepared (:prepared settlement)
                 last-prepared (peek prepared)]
             (if-let [refusal (:refused-outcome settlement)]
-              (do (restore-evaluations! gated)
-                  (report :error (count gated) refusal))
+              (report :error (count gated)
+                      (or (restore-evaluations! gated refusal) refusal))
               (let [installations
                     (into []
                           (keep
