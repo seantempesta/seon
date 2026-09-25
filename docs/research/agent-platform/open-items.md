@@ -23,6 +23,14 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**CENSUS D (a34e5d800) routed 2026-09-25:** 169 red = 33 new verified + 6 probable + 130 prior classes; 17 of census c fixed.
+Lanes: fix-harness-fallout (R0 arm-first-loads refused 13 commands; S4a custody → option B, keep S4a; S4c clean world; seed
+attr; overlay read the working tree; lazy install), fix-agent-test-leak (ai/complete with-redefs leaked into ai-test ×13),
+fix-test-rows-d, fix-config-flat (config errors not flat, 9 sites; schema_test triage). Remaining: BOUND 26 (7 over 10 s:
+64.5/55.6/45.8 s; 44 cluster.turn-test members no outcome at 120 s), RENDER 11 + ERRREC 7 → render-dispatch after its
+rerun. REPEAT: clj-kondo dependency cache was empty AGAIN after the restart (3 fn-test reds) — find why the cache does not
+survive a JVM restart. Writer picks entity schemas by required identity attrs (db.clj:3162), never :seon.program/row-schema.
+
 **OWNER RULING 2026-09-25 (output faces):** two faces from one shell-order selection: `:seon.render/ai` = pretty-printed and
 clipped (the saved text the AI sees; optimize later); HTML = explorable, unclipped, each cut a lazy expander fetching the next
 selection at path+offset (Clerk/orchard style); the debug view shows both side by side so the user has the same or better
