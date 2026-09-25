@@ -100,7 +100,7 @@
                 {:optional true}
                 :seon.render/selection-candidate-reason]],
               :selection-stage-name
-              [:enum :explicit-value :declared :floor],
+              [:enum :explicit-value :namespace :declared :floor],
               :selection-stage-status
               [:enum :selected :no-match :ambiguous :not-consulted],
               :selection-stage
@@ -121,7 +121,7 @@
               :selection
               [:map
                [:seon.render.selection/stages
-                [:vector {:min 3 :max 3} :seon.render/selection-stage]]
+                [:vector {:min 4 :max 4} :seon.render/selection-stage]]
                [:seon.render.selection/selected
                 [:or :qualified-symbol :seon.render/rendered
                  :seon.render/ambiguous-error :seon.render/request-error :seon.config/error

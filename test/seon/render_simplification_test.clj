@@ -310,7 +310,7 @@
                       :seon.render/selection])]
          (is (= 'seon.render.value/render-ai
                 (:seon.render.selection/selected decision)))
-         (is (= [:no-match :no-match :selected]
+         (is (= [:no-match :no-match :no-match :selected]
                 (stage-statuses decision))))))))
 
 (deftest

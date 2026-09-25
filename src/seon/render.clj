@@ -528,7 +528,7 @@
       (seq declared) (ambiguity nil output declared))))
 
 (def ^:private selection-stage-order
-  [:explicit-value :declared :floor])
+  [:explicit-value :namespace :declared :floor])
 
 (defn- selection-candidate
   [producer]
@@ -600,6 +600,47 @@
     :else ((if (= :seon.render/html output) render.value/render-html render.value/render-ai)
            (assoc (render-argument request) :seon.render/value rendered))))
 
+(defn- viewing-namespace
+  "The namespace of the agent the value is rendered for: the request's own
+  :seon.render/namespace, else the rendering agent's assigned namespace."
+  {:malli/schema [:=> [:cat :map] [:maybe :symbol]]}
+  [request]
+  (or (:seon.render/namespace request)
+      (when-let [agent-id (:seon.agent/id request)]
+        (some-> (:seon.db/db request)
+                (db/pull [{:seon.agent/namespace [:seon.ns/name]}] [:seon.agent/id agent-id])
+                (get-in [:seon.agent/namespace :seon.ns/name])))))
+
+(defn- namespace-stage
+  "The viewing agent's own render functions (owner, 2026-09-25): a public
+  function of its namespace whose contract accepts this render argument and
+  returns OUTPUT's face. Candidates are sorted; more than one is refused."
+  [request projection output]
+  (let [namespace-name (viewing-namespace request)
+        output-schema (case output :seon.render/html :seon.render/hiccup output)
+        argument (producer-argument request)
+        evidence (if-not (and namespace-name (:seon.sci.eval/ctx request))
+                   []
+                   (into [] (comp (filter #(= namespace-name (symbol (namespace %)))) (distinct)
+                                  (map (fn [candidate]
+                                         (if (or (schema/function-accepts-and-returns-in?
+                                                  projection candidate [argument] output-schema)
+                                                 (and (= :seon.render/ai output)
+                                                      (source-producer? projection candidate [argument])))
+                                           (selection-candidate candidate)
+                                           {:seon.render.selection.candidate/producer candidate
+                                            :seon.render.selection.candidate/status :rejected
+                                            :seon.render.selection.candidate/reason :no-same-arity-match}))))
+                         (sort-by str (sci.kernel/public-functions-in (:seon.sci.eval/ctx request) namespace-name))))
+        compatible (into [] (comp (filter #(= :compatible (:seon.render.selection.candidate/status %)))
+                                  (map :seon.render.selection.candidate/producer))
+                         evidence)]
+    (case (count compatible)
+      0 {:seon.render.selection/stage (selection-stage :namespace :no-match evidence)}
+      1 (selected-stage (selection-stage :namespace :selected evidence) (first compatible))
+      (let [selection-error (ambiguity namespace-name output compatible)]
+        (selected-stage (selection-stage :namespace :ambiguous evidence selection-error) selection-error)))))
+
 (defn- declared-stage
   [request projection value output]
   (let [producers (declared-producers projection request value output)
@@ -615,6 +656,8 @@
   [stage-name request projection value output]
   (case stage-name
     :explicit-value (explicit-value-stage request output)
+    :namespace (if projection (namespace-stage request projection output)
+                   {:seon.render.selection/stage (selection-stage :namespace :no-match)})
     :declared (declared-stage request projection value output)
     :floor (let [selected (floor-producer request output)]
              (selected-stage
