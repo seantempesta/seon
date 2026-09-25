@@ -144,3 +144,40 @@ Diagnosed from the code; not yet proved at the REPL.
   the watcher's commit lands first, and the main commit is refused as immutable instead.
 - The fix is test.clj/runner.clj work that needs root's grant, plus a choice between
   options in the reply.
+
+## The hold fix (option A, commit 1197a35ac; test.clj and runner.clj granted for this fix)
+
+- **The cause, proved on real rows.** `(seon.test.runner/complete-members db completion)`
+  for run `268374a45931`'s member threw `:seon.test.run/immutable` when given the watcher's
+  "exited after its request bound" result. The late exit was never recorded because of
+  that refusal.
+- **The fix.**
+  - `runner/exit-tx` adds only `terminated-tx`, and only when the member's result is
+    recorded and its exit is not. I checked it on real rows with a scratch copy and
+    `d/with`:
+    - held member: one datom;
+    - member already exited: nothing;
+    - member with no result yet: nothing;
+    - a second call: nothing.
+  - `runner/record-exit!` commits `exit-tx` and returns a refusal instead of throwing.
+  - The watcher now records the exit through `record-exit!`. If it sees the exit before
+    the result exists, it writes nothing, and the main path records the exit after it
+    commits the unfinished result.
+  - A refused exit write, or a cleanup failure when the watcher releases the branch late,
+    is recorded as a fault through `seon.fault/record!`, which stores and delivers it.
+- **Size.** +72 −31 across test.clj, runner.clj and one_request_test.clj. clj-kondo reports
+  0 errors, and the warnings are the ones HEAD already has.
+- **Regression.** `an-unexited-member-is-never-started-again-until-its-exit-is-recorded`
+  now records the exit through `record-exit!`, and the next request runs the test.
+- **Not proved:** the new code has not run in default. It needs publication and one JVM
+  restart, which also clears the held members of earlier runs.
+- **File outside the grant:** `test/seon/test/one_request_test.clj`. The ledger listed it
+  as free.
+
+Root runs (after publishing 1197a35ac and restarting):
+```
+bin/test-check default --test seon.test.one-request-test/an-unexited-member-is-never-started-again-until-its-exit-is-recorded
+bin/test-check default --test seon.test.one-request-test/a-body-outliving-its-bound-is-released-only-after-it-exits
+bin/test-check default --test seon.cluster.turn-test/a-turn-through-a-local-provider-settles-and-exits-within-its-bound
+bin/test-check default --test seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts
+```
