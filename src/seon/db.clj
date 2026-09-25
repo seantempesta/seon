@@ -4362,13 +4362,12 @@
                                 form (:v (first (d/datoms database :eavt entity :seon.schema/form)))]
                             (when (and schema-key form) [schema-key form]))))
                   written)))))
-     ;; Arity admission depends on declarations, their owned children, shared
-     ;; shapes and supplied defaults. The owning-value walk already found
+     ;; Arity admission depends on declarations, their owned children and
+     ;; supplied defaults. The owning-value walk already found
      ;; every changed root on both sides, including swept/deleted children.
      ;; An error, message or other ordinary fact cannot change call arities.
      (when (some @changed-identity-attributes
-                 [:seon.fn/sym :seon.test/sym :seon.schema/key
-                  :seon.schema.shape/fingerprint :seon.call-preparation/key])
+                 [:seon.fn/sym :seon.test/sym :seon.schema/key :seon.call-preparation/key])
        (let [comparison (report-arity-comparison report)
              result (arity-verdict database projection report comparison)
              mismatches (:seon.fn/arity-mismatches result)]

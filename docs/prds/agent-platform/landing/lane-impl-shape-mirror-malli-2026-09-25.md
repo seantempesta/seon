@@ -2,9 +2,8 @@
 type: landing
 lane: impl-shape-mirror-malli-opus
 created: 2026-09-25
-status: stopped at the +120 added-line condition. The source cut is complete and proven at the REPL; it is parked as a patch, not committed. Tests are not converted.
+status: landed as one loadable slice after root approved the overage (net −784 source) and ruled on optional entries. Tests are converted but not run (LOAD RULE); root runs the list below.
 source-pin: 431a9b4ee
-patch: tmp/impl-shape-mirror-malli/option-b.patch (applies cleanly to 431a9b4ee; `git apply` it, then `git rm` the four deleted files it lists)
 ---
 
 # C4 option B: schema-shape mirror replaced by Malli (stopped before integration)
@@ -18,7 +17,17 @@ matches supplied defaults by declared schema name, and deletes the codec, its ro
 
 ## Broken or blocking, first
 
-1. **I stopped at the added-line condition.** `git diff --numstat` counts 282 added and 1,066 deleted source
+0. **Landed after approval.** Root ruled on 2026-09-25 (a) and (b):
+   (a) An optional map entry whose supplier is unavailable stays absent: the call runs without the key.
+   Required entries still refuse by name. `prepare` returns an `absent` sentinel from `value-for` for a
+   slot marked `:seon.call-preparation/optional? true`. `plan-for` marks those slots, and the value is
+   declared in `seon.call-preparation.edn` on `:slot`. The regression is
+   `an-unavailable-optional-entry-stays-absent-and-a-required-one-refuses`.
+   (b) The `:seon.error/expected-shape` identity change is accepted (item 4).
+   The contract index's internal keys are `::argument-schema`, `::map-entries`, `::arity-arguments` and
+   `::arity-output`. The first draft's `::schema` and `::entries` collided with the declared
+   `:seon.call-preparation/schema` and `/entries`.
+1. **(Historical) I stopped at the added-line condition.** `git diff --numstat` counts 282 added and 1,066 deleted source
    lines. 190 of the added lines appear nowhere in the old files (non-blank, non-comment). About 60 are new
    mechanism (`argument-facts`, `arity-facts`, `contract-arities` in call_preparation.clj). The rest are
    rewrites of deleted queries into functions, plus `typed-key-facts` and `key-kind` moved into program.cljc
@@ -30,13 +39,12 @@ matches supplied defaults by declared schema name, and deletes the codec, its ro
    functions whose `:seon.render/unit` argument declares an optional `:seon.db/db`. Five plans also gain
    entries: `seon.cluster.message/render-inbox-html`, `seon.error/commit-tx`, `seon.error/recording`,
    `seon.error/render-faults-html` and `seon.turn/gate-function-install`.
-   **Risk:** `prepare` refuses the whole call when a supplier is unavailable, and it does this for optional
-   entries too. That is the existing inline semantics. An SCI call to `seon.error/commit-tx` from an
-   environment with no agent id would now be refused instead of passing through without the key. This needs
-   an owner ruling: should an unavailable supplier for an optional entry leave the entry absent? That fix is
-   about 5 lines in `prepare`.
-3. **Callers outside my files still reference the deleted attributes.** They must change in the same
-   integration:
+   The risk that `prepare` refused whole calls for optional entries is resolved by ruling (a).
+3. **Converted in the same commit, under root's grant.** Remaining: the stale comment at `src/seon/db.clj:4203`
+   (outside the grant), and the ignored `:seon.program/schema-forms` key still passed at
+   `src/seon/sci/eval.clj:3556` and `test/seon/db_test.clj:1960`. The census bound in `program_test`
+   `program-partition-selects…` was lowered from ≥12 to ≥9 because the three shape attributes left the
+   census. The original list follows:
    - `test/seon/sci/eval_test.clj:761` and `:1263-1271`, which read `return-schema` and `:seon.schema/shape`.
      Another lane holds `test/seon/sci/*`.
    - `test/seon/schema_audit_test.clj:25`, which checks `guard-schema`. It should read `(:guard (m/-function-info …))`.
@@ -137,9 +145,10 @@ fn.arity,schema}.edn`, the deleted `seon.schema.shape{,.entry,.child}.edn`,
 
 - Source: +282 / −1,066 physical lines (net −784); 190 lines are new text.
 - Schema resources: +5 / −158.
-- Tests: not yet converted. The estimate is about −600 across the deletions listed under Broken 3.
+- Tests: two files deleted (`fn/schema_shape_test.clj`, `fn/shape_dependents_test.clj`) and ten converted.
+  The regression was added.
 
-Committed: this note only.
+Committed: this note (f2adbfa00), then the source, schema, test and doc slice (see git log).
 
 ## Root runs (after integration and test conversion)
 
@@ -155,6 +164,7 @@ Committed: this note only.
 - `bin/test-check default --ns seon.sci.eval-test`
 - `bin/test-check default --ns seon.error-test`
 - `bin/test-check default --ns seon.db-test`
+- `bin/test-check default --ns seon.render-test` (the 90 render functions now receive `:seon.db/db` when it is omitted)
 
 ## Verification limits
 

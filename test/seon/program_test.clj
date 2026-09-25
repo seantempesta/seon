@@ -19,7 +19,6 @@
             [malli.registry :as mr]
             [seon.db :as db]
             [seon.turn :as turn]
-            [seon.fn.schema-shape :as schema-shape]
             [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -372,10 +371,6 @@
   [row]
   (assoc row :seon.program/definition-digest (program/definition-digest row)))
 
-(defn- nested-maps
-  [value]
-  (filter map? (tree-seq coll? seq value)))
-
 (defn- analyzed-row-tx
   "Runtime settlement receives the analyzer's completed row, as production does."
   [database options row]
@@ -396,43 +391,6 @@
         arity (get-in facts [:seon.fn/arities 0])]
     (is (= 0 (:seon.fn.arity/argument-count arity)))
     (is (not (contains? arity :seon.fn.arity/arguments)))))
-
-(deftest empty-composite-schema-shapes-remain-canonical-and-queryable
-  (let [forms
-        {:seon.db/connection :map
-         :seon.reconcile/desired [:vector [:map]]
-         :seon.reconcile/process [:string {:min 1}]
-         :seon.reconcile/adopt-identities [:set [:vector :any]]
-         :seon.reconcile/request
-         [:map
-          [:seon.reconcile/desired :seon.reconcile/desired]
-          [:seon.reconcile/process :seon.reconcile/process]
-          [:seon.reconcile/adopt-identities
-           {:optional true}
-           :seon.reconcile/adopt-identities]]}
-        spec
-        [:=> [:cat :seon.db/connection :seon.reconcile/request] :boolean]
-        facts
-        (source-contract
-         (quote seon.reconcile/reconcile!) spec forms
-         "(defn reconcile! [connection request] nil)"
-         '([connection request]))
-        request-shape
-        (get-in facts [:seon.fn/arities 0 :seon.fn.arity/arguments 1
-                       :seon.fn.argument/schema])
-        desired-shape
-        (schema-shape/shape-row (m/schema (:seon.reconcile/desired forms)))
-        element-shape
-        (get-in desired-shape [:seon.schema.shape/children 0
-                               :seon.schema.shape.child/schema])]
-    (is (= :seon.reconcile/request (schema-shape/row-form request-shape)))
-    (is (= ":seon.reconcile/request" (:seon.schema.shape/form request-shape)))
-    (is (nil? (:seon.schema.shape/entries request-shape)))
-    (is (= [:vector :map] (schema-shape/row-form desired-shape)))
-    (is (= "[:vector]" (:seon.schema.shape/form desired-shape)))
-    (is (= :map (schema-shape/row-form element-shape)))
-    (is (= ":map" (:seon.schema.shape/form element-shape)))
-    (is (nil? (:seon.schema.shape/entries element-shape)))))
 
 (deftest positional-and-map-entry-contracts-have-distinct-addresses
   (test-support/with-database
@@ -481,8 +439,7 @@
                                   [(test-support/namespace-row (db/db connection) 'sample)
                                    schema-row positional mapped])
         (let [positional-address
-              (db/q '[:find ?index ?binding-shape ?value-fingerprint
-                      ?return-fingerprint
+              (db/q '[:find ?index ?binding-shape
                       :in $ ?function-symbol
                       :where
                       [?function :seon.fn/sym ?function-symbol]
@@ -490,17 +447,10 @@
                       [?arity :seon.fn.arity/arguments ?argument]
                       [?argument :seon.fn.argument/index ?index]
                       [?argument :seon.fn.argument/binding ?binding]
-                      [?binding :seon.fn.binding/shape ?binding-shape]
-                      [?argument :seon.fn.argument/schema ?value-shape]
-                      [?value-shape :seon.schema.shape/fingerprint
-                       ?value-fingerprint]
-                      [?arity :seon.fn.arity/return-schema ?return-shape]
-                      [?return-shape :seon.schema.shape/fingerprint
-                       ?return-fingerprint]]
+                      [?binding :seon.fn.binding/shape ?binding-shape]]
                     @connection (quote sample/positional))
               map-address
-              (db/q '[:find ?index ?binding-shape ?key ?value-fingerprint
-                      ?return-fingerprint
+              (db/q '[:find ?index ?binding-shape ?key
                       :in $ ?function-symbol
                       :where
                       [?function :seon.fn/sym ?function-symbol]
@@ -510,64 +460,12 @@
                       [?argument :seon.fn.argument/binding ?binding]
                       [?binding :seon.fn.binding/shape ?binding-shape]
                       [?binding :seon.fn.binding/entries ?binding-entry]
-                      [?binding-entry :seon.schema.map-entry/key-keyword ?key]
-                      [?argument :seon.fn.argument/schema ?map-shape]
-                      [?map-shape :seon.schema.shape/entries ?shape-entry]
-                      [?shape-entry :seon.schema.map-entry/key-keyword ?key]
-                      [?shape-entry :seon.schema.shape.entry/schema ?value-shape]
-                      [?value-shape :seon.schema.shape/fingerprint
-                       ?value-fingerprint]
-                      [?arity :seon.fn.arity/return-schema ?return-shape]
-                      [?return-shape :seon.schema.shape/fingerprint
-                       ?return-fingerprint]]
+                      [?binding-entry :seon.schema.map-entry/key-keyword ?key]]
                     @connection (quote sample/mapped))]
           (is (= 1 (count positional-address)))
           (is (= 1 (count map-address)))
-          (let [[pos-index pos-binding value-fingerprint pos-return]
-                (first positional-address)
-                [map-index map-binding map-key map-value-fingerprint map-return]
-                (first map-address)]
-            (is (= [0 :symbol] [pos-index pos-binding]))
-            (is (= [0 :map :sample/ambient]
-                   [map-index map-binding map-key]))
-            (is (= value-fingerprint map-value-fingerprint
-                   pos-return map-return))
-            (is (not= [pos-index nil value-fingerprint]
-                      [map-index map-key map-value-fingerprint]))))))))
-
-(deftest regex-rest-tail-is-complete-and-element-is-only-derived-when-proven
-  (let [repeated
-        (source-contract (quote sample/repeated)
-                         [:=> [:cat :int [:* :string]] :keyword]
-                         {} "(defn repeated [x & xs] [x xs])" '([x & xs]))
-        composed
-        (source-contract
-         (quote sample/composed)
-         [:=> [:cat [:alt [:cat] [:cat :int]]] :keyword]
-         {} "(defn composed [& xs] xs)" '([& xs]))
-        repeated-rest (second (get-in repeated [:seon.fn/arities 0
-                                                :seon.fn.arity/arguments]))
-        composed-rest (first (get-in composed [:seon.fn/arities 0
-                                               :seon.fn.arity/arguments]))]
-    (is (= [:* :string]
-           (schema-shape/row-form (:seon.fn.argument/rest-tail-schema repeated-rest))))
-    (is (= "[:*]"
-           (get-in repeated-rest
-                   [:seon.fn.argument/rest-tail-schema
-                    :seon.schema.shape/form])))
-    (is (= :string
-           (schema-shape/row-form (:seon.fn.argument/rest-element-schema repeated-rest))))
-    (is (= ":string"
-           (get-in repeated-rest
-                   [:seon.fn.argument/rest-element-schema
-                    :seon.schema.shape/form])))
-    (is (= [:alt :cat [:cat :int]]
-           (schema-shape/row-form (:seon.fn.argument/rest-tail-schema composed-rest))))
-    (is (= "[:alt]"
-           (get-in composed-rest
-                   [:seon.fn.argument/rest-tail-schema
-                    :seon.schema.shape/form])))
-    (is (nil? (:seon.fn.argument/rest-element-schema composed-rest)))))
+          (is (= [0 :symbol] (first positional-address)))
+          (is (= [0 :map :sample/ambient] (first map-address))))))))
 
 (deftest source-contract-join-refuses-disagreement-and-records-overrides
   (let [spec [:=> [:cat :int] :int]
@@ -650,13 +548,7 @@
                              (if (:seon.fn.arity/max arity)
                                [:fixed (:seon.fn.arity/min arity)]
                                [:variadic (:seon.fn.arity/min arity)])))
-                      arities)
-                shapes
-                (mapcat (fn [arity]
-                          (cons (:seon.fn.arity/return-schema arity)
-                                (map :seon.fn.argument/schema
-                                     (:seon.fn.arity/arguments arity))))
-                        arities)]
+                      arities)]
             (and (= (set (map :join-key descriptors)) actual-keys)
                  (every?
                   (fn [arity]
@@ -665,14 +557,7 @@
                          (= (range (:seon.fn.arity/argument-count arity))
                             (map :seon.fn.argument/index
                                  (:seon.fn.arity/arguments arity)))))
-                  arities)
-                 (every?
-                  (fn [shape]
-                    (= (:seon.schema.shape/fingerprint shape)
-                       (:seon.schema.shape/fingerprint
-                        (schema-shape/shape-row
-                         (m/schema (schema-shape/row-form shape))))))
-                  shapes))))
+                  arities))))
          :seed 202608050012)]
     (test-support/assert-check! result)))
 
@@ -687,13 +572,7 @@
                [:repeat {:min 0 :max 1} :sample/value]]
           [:enum :sample/enum-value :other]]]
         facts (parsed-contract (quote sample/complete) spec forms)
-        arities (:seon.fn/arities facts)
-        nodes (nested-maps facts)
-        map-of-node (first (filter #(= :map-of
-                                      (:seon.schema.shape/type %))
-                                   nodes))
-        enum-node (first (filter #(= :enum (:seon.schema.shape/type %))
-                                 nodes))]
+        arities (:seon.fn/arities facts)]
     (testing "one compiled contract yields Malli's exact ordered arities"
       (is (= [{:seon.fn.arity/order 0
                :seon.fn.arity/arity "1"
@@ -709,10 +588,6 @@
                                   :seon.fn.arity/min
                                   :seon.fn.arity/max])
                    arities))))
-    (testing "canonical shapes preserve map-of and enum semantics"
-      (is (= :map-of (first (schema-shape/row-form map-of-node))))
-      (is (= [:enum :sample/enum-value :other]
-             (schema-shape/row-form enum-node))))
     (testing "role refs come only from RefSchema observations"
       (is (= #{:sample/key :sample/value}
              (:seon.fn.arity/input-refs (first arities))))
@@ -731,13 +606,11 @@
               [:cat :local/value]
               :sample/value]
         facts (parsed-contract (quote sample/local-registry) spec forms)
-        arity (first (:seon.fn/arities facts))
-        input-shape (:seon.fn.arity/input-schema arity)]
+        arity (first (:seon.fn/arities facts))]
     (is (= #{:sample/value}
            (:seon.fn.arity/input-refs arity)))
     (is (= #{:sample/value}
-           (:seon.fn.arity/output-refs arity)))
-    (is (= :cat (first (schema-shape/row-form input-shape))))))
+           (:seon.fn.arity/output-refs arity)))))
 
 (deftest function-contract-redefinition-replaces-component-facts-exactly
   (test-support/with-database
@@ -768,9 +641,7 @@
               (db/pull @connection
                        '[* {:seon.fn/arities
                             [* {:seon.fn.arity/arguments
-                                [* {:seon.fn.argument/binding [:db/id]}
-                                 {:seon.fn.argument/schema [:db/id]}]}
-                             {:seon.fn.arity/return-schema [:db/id]}]}]
+                                [* {:seon.fn.argument/binding [:db/id]}]}]}]
                               [:seon.fn/sym function-symbol])
               old-components
               (into #{}
@@ -783,15 +654,6 @@
                                                 [:seon.fn.argument/binding
                                                  :db/id])]))
                              (:seon.fn.arity/arguments arity))))
-                    (:seon.fn/arities current))
-              old-shapes
-              (into #{}
-                    (mapcat
-                     (fn [arity]
-                       (cons (get-in arity
-                                     [:seon.fn.arity/return-schema :db/id])
-                             (map #(get-in % [:seon.fn.argument/schema :db/id])
-                                  (:seon.fn.arity/arguments arity)))))
                     (:seon.fn/arities current))]
           (test-support/transacted! connection
                                   (program/exact-replacement-tx current new-row))
@@ -802,29 +664,17 @@
                           [:seon.fn.arity/order :seon.fn.arity/min
                            :seon.fn.arity/max
                            {:seon.fn.arity/arguments
-                            [:seon.fn.argument/index
-                             {:seon.fn.argument/schema
-                              [:seon.schema.shape/fingerprint]}]}
-                           {:seon.fn.arity/return-schema
-                            [:seon.schema.shape/fingerprint]}]}]
+                            [:seon.fn.argument/index]}]}]
                         [:seon.fn/sym function-symbol])]
             (is (= (pr-str new-spec) (:seon.fn/spec redefined)))
             (is (= [{:seon.fn.arity/order 0
                      :seon.fn.arity/min 1
                      :seon.fn.arity/max 1
                      :seon.fn.arity/arguments
-                     [{:seon.fn.argument/index 0
-                       :seon.fn.argument/schema
-                       {:seon.schema.shape/fingerprint
-                        (schema-shape/fingerprint :string)}}]
-                     :seon.fn.arity/return-schema
-                     {:seon.schema.shape/fingerprint
-                      (schema-shape/fingerprint :string)}}]
+                     [{:seon.fn.argument/index 0}]}]
                    (:seon.fn/arities redefined)))
             (is (every? #(empty? (db/datoms @connection :eavt %))
-                        old-components))
-            (is (every? #(seq (db/datoms @connection :eavt %)) old-shapes)
-                "shared content-addressed shapes survive arity replacement")))))))
+                        old-components))))))))
 
 (deftest runtime-deletion-refuses-surviving-callers-without-changing-the-definition
   (test-support/with-database
@@ -1330,8 +1180,7 @@
                               :seon.lint/id :seon.fn.arity/order
                               :seon.fn.argument/order :seon.fn.binding/form
                               :seon.ns.alias/local :seon.ns.import/local
-                              :seon.ns.refer/local :seon.schema.shape/fingerprint
-                              :seon.schema.shape.child/id :seon.schema.shape.entry/id}
+                              :seon.ns.refer/local}
           installed (set (db/q '[:find [?a ...] :where [_ ?a]] database))
           census-attributes (set/intersection census-attributes installed)
           expected (set (db/q '[:find ?a (count ?e) :in $ [?a ...] :where [?e ?a]]
@@ -1339,7 +1188,7 @@
           selected (set (db/q '[:find ?a (count ?e) :in $ [?a ...] [?e ...]
                                :where [?e ?a]] database census-attributes rows))]
       (is (seq rows))
-      (is (>= (count expected) 12) "The canonical census contains roots and components")
+      (is (>= (count expected) 9) "The canonical census contains roots and components")
       (is (= expected selected) "The single program query retains the complete schema census")
       (is (every? attributes #{:seon.fn/sym :seon.ns.alias/local
                               :seon.schema.map-entry/key-edn

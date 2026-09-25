@@ -1,9 +1,6 @@
 (ns seon.fn.publication-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
-            [malli.core :as m]
-            [seon.fn.schema-shape :as shape]
-            [seon.schema :as schema]
             [seon.fn :as functions]
             [seon.db :as db]
             [seon.fn.analyzer :as analyzer]
@@ -20,21 +17,13 @@
 (deftest literal-constructor-keys-are-not-declared-function-attributes
   (support/with-database
    (fn [connection]
-     (let [projection (db/carried-projection (db/db connection))
-           forms (shape/prepare-forms projection)
-           predicates (schema/predicate-functions-in projection)
-           options (:seon.schema.projection/compile-options projection)]
+     (let [projection (db/carried-projection (db/db connection))]
        (is (= {:seon.render/ai #{'example/render}}
               (#'functions/declared-function-targets
                projection [{:not 'example/render :maybe 'example/render
                             :and 'example/render :or 'example/render
                             :seon.render/ai 'example/render}]
-               #{'example/render})))
-       (doseq [authored [[:not :string] [:maybe :string]
-                         [:and :string [:not [:= ""]]] [:or :string :int]]]
-         (let [row (shape/shape-row (m/schema authored options) forms predicates)]
-           (is (= (pr-str [(first authored)]) (:seon.schema.shape/form row)))
-           (is (= authored (shape/row-form row)))))))))
+               #{'example/render})))))))
 
 (deftest ^{:seon.test/long "Two real indexed publications and datom comparisons, including first canonical fixture acquisition; measured 51.3 seconds in the isolated fast snapshot."
            :seon.test/long-ms 60000}
@@ -138,23 +127,13 @@
                             :seon.fn/previous-manifest before :seon.fn/changed-paths #{path}
                             :seon.source/previous-database prior})
                    database (db/db connection)
-                   projection (db/carried-projection database)
-                   options (:seon.schema.projection/compile-options projection)
-                   arity (first (:seon.fn/arities
-                                 (db/pull database '[{:seon.fn/arities [*]}]
-                                          [:seon.fn/sym 'pub.shapes/f])))]
+                   projection (db/carried-projection database)]
                (is (boolean? (:seon.reconcile/converged? result)) (pr-str result))
                (is (.contains ^String (:seon.fn/source
                                        (db/pull database '[:seon.fn/source]
                                                 [:seon.fn/sym 'pub.shapes/f]))
                               "{:not x :maybe options :and x :or options}"))
-               (doseq [[attribute authored]
-                       [[:seon.fn.arity/input-schema
-                         [:cat :seon.eval.drive/nonblank-string :seon.print/options]]
-                        [:seon.fn.arity/return-schema [:or :string :map]]]]
-                 (let [entity (:db/id (get arity attribute))]
-                   (is (int? entity))
-                   (is (= authored (shape/database-form database entity)))
-                   (is (= (m/form (m/schema authored options))
-                          (m/form (shape/compiled-in database entity)))))))))
+               (is (= [:=> [:cat :seon.eval.drive/nonblank-string :seon.print/options] [:or :string :map]]
+                      (get (:seon.schema.projection/function-contracts projection) 'pub.shapes/f))
+                   "the published contract is the authored one"))))
          (finally (support/delete-recursively! root)))))))

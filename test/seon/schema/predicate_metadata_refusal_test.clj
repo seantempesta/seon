@@ -4,7 +4,6 @@
             [malli.registry :as mr]
             [seon.config :as config]
             [seon.error :as error]
-            [seon.fn.schema-shape :as shape]
             [seon.instrument :as instrument]
             [seon.schema :as schema]
             [seon.schema.internal :as internal]
@@ -28,11 +27,9 @@
            explanations (:seon.instrument/explanations refusal)
            item (first (:seon.instrument.explanations/items explanations))
            actual (:seon.instrument.explanation/actual item)
-           forms (:seon.schema.projection/forms projection)
            fingerprint (fn [form]
-                         (:seon.schema.shape/fingerprint
-                          (shape/normalized-form (m/schema form options)
-                                                 forms predicates)))]
+                         (#'instrument/expected-shape projection
+                          (m/schema (schema/compilable-form form predicates) options)))]
        (is (not (contains? (:seon.schema.projection/function-contracts projection)
                            operation)))
        (is (nil? (mr/schema registry operation)))
