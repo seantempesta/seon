@@ -659,7 +659,9 @@
                     :seon.render/profile (render/agent-render-profile effective)
                     :seon.render/captured-calls (atom {})
                     :seon.render/captured-invocations (atom {})}
-           entity {:seon.agent/id "identity-blocks"}
+           ;; The stored agent entity: `:seon.agent/agent` requires its branch.
+           entity (select-keys (db/pull database '[*] [:seon.agent/id "identity-blocks"])
+                               [:seon.agent/id :seon.agent/branch])
            declared (#'web/declared-entity-units projection database entity)
            html (#'web/debug-found-values-html
                  projection request
@@ -698,10 +700,15 @@
            written (db/transact! connection
                                  (into (support/agent-tx @connection "reference-agent")
                                    [{::identity-alias "aliased-reference"}
+                                    ;; An identity-less entity exists only as a
+                                    ;; component of its one owner (the writer
+                                    ;; refuses an unowned one).
                                     {:db/id "plan"
-                                     :my.plan/agent [:seon.agent/id "reference-agent"]}
-                                    {:db/id "unidentified"
-                                     :my.plan/objective "No identity"}]))
+                                     :my.plan/agent [:seon.agent/id "reference-agent"]
+                                     :my.plan/constraint-observation
+                                     {:db/id "unidentified"
+                                      :seon.error.evidence/attribute :my.plan/objective
+                                      :seon.error.evidence/value "No identity"}}]))
            _ (is (:db-after written) (pr-str written))
            database @connection
            projection (schema/projection-from-database database)
