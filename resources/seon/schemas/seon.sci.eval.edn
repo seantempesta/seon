@@ -150,7 +150,9 @@
                  [:seon.config/on-core-error
                   :seon.config/on-core-error]],
                 :function
-                [:fn {:description "An agent function value (an inline render function) invoked through the same arm and admission as a named Var; the request names it instead of :seon.fn/sym."}
+                [:fn {:description "An agent function value (an inline render function) invoked through the same arm and admission as a named Var; the request names it instead of :seon.fn/sym."
+                      :error/message "must be an agent function value"
+                      :gen/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
                  clojure.core/ifn?]
                 :args
                 [:vector
