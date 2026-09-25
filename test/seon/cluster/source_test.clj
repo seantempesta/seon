@@ -314,14 +314,17 @@
   (let [target (test-support/execution-handle nil)
         held-store (:seon.store/store target)
         h-conn (:seon.db/connection target)
-        sym #(symbol "seon.cluster.source-test" %)
+        ;; A namespace this test writes itself: test-support/program-row digests with the
+        ;; fixture namespace row, which must be the one stored (67580898d).
+        sym #(symbol "scratch.merge-tasks" %)
         row #(test-support/program-row (db/db %1) [%2 (sym %3)] %4)
         write! #(test-support/transacted! %1 (vec %2))
-        handle (issue/task-handle 'seon.cluster.source-test "merge-task" :function)
+        handle (issue/task-handle 'scratch.merge-tasks "merge-task" :function)
         issue-id (str "merge-task-test-" (id/id))
         c (keyword (str "merge-task-test-c-" (id/id)))
-        _ (write! h-conn [(row h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked [] 1)")])
-        _ (write! h-conn [(row h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (seon.cluster.source-test/merge-tasked))))")
+        _ (write! h-conn [(test-support/namespace-row (db/db h-conn) 'scratch.merge-tasks)
+                          (row h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked [] 1)")])
+        _ (write! h-conn [(row h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (scratch.merge-tasks/merge-tasked))))")
                           {:seon.issue/id issue-id :seon.issue/title "Tasked" :seon.issue/status :open
                            :seon.issue/severity :cleanup :seon.issue/problem "Replace the tasked function."
                            :seon.issue/tests #{[:seon.test/sym (sym "merge-tasked-check")]}}])
@@ -343,7 +346,7 @@
         (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
         (testing "a task admitted on the destination survives a refused merge, then the merge lands"
           (is (:seon.task/changed? (issue/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
-                                                         :seon.task/files {"resources/seon/tasks/seon.cluster.source-test.edn"
+                                                         :seon.task/files {"resources/seon/tasks/scratch.merge-tasks.edn"
                                                                            "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
           (is (= :transaction/stale-basis (get-in (source/accept-merge! target held-store proposal) [:seon.error/data :error])))
           (is (= "Merge." (intent)))

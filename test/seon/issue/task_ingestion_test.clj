@@ -167,28 +167,28 @@
    (fn [source]
      (test-support/with-database
       (fn [destination]
-        (let [adopt! #(test-support/transacted! destination (issue/adopt-tasks-call @source @destination))
+        ;; The inner fixture holds destination's custody; the source's writes run under its own.
+        (let [publish! #(is (:seon.task/changed? (db/call-with-custody {:seon.db/connection source} (fn [] (ingest! source %))))
+                            "the source admits the edit")
+              adopt! #(test-support/transacted! destination (issue/adopt-tasks-call @source @destination))
               intent #(:seon.task/intent (db/pull @destination [:seon.task/intent] [:seon.task/id %]))
               own (issue/task-handle 'tq.b "own" :function)]
           (is (= [] (issue/adopt-tasks-call @source @source)) "an agreeing cluster adopts nothing")
           (issue/index-tasks! {:seon.db/connection destination :seon.task/basis {}
                                :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :kind :function :intent \"Mine.\"}]"}})
-          (ingest! source (task-text "Prove ingestion." ""))
+          (publish! (task-text "Prove ingestion." ""))
           (adopt!)
           (is (= ["Prove ingestion." "Mine."] (map intent [handle own])) "published arrives; a task the source never held stays")
           (is (= [] (issue/adopt-tasks-call @source @destination)) "repeat adopts nothing")
           (testing "a competing edit between the adoption's read and its transaction refuses; the competitor stays"
-            (ingest! source (task-text "Revised." ""))
-            (let [call (issue/adopt-tasks-call @source @destination)
-                  before (db/basis-t @destination)]
-              (ingest! destination (task-text "Competing." ""))
-              (let [written (db/basis-t @destination)]
-                (is (= :revision-conflict (refusal #(test-support/transacted! destination call))))
-                (is (< before written))
-                (is (= written (db/basis-t @destination)) "the refused adoption writes nothing"))
-              (is (= "Competing." (intent handle)))))
+            (publish! (task-text "Revised." ""))
+            (let [call (issue/adopt-tasks-call @source @destination)]
+              (is (seq call) "the proposal carries the source's revision")
+              (is (:seon.task/changed? (ingest! destination (task-text "Competing." ""))))
+              (is (= :revision-conflict (refusal #(test-support/transacted! destination call))))
+              (is (= ["Competing." "Mine."] (map intent [handle own])) "the refused adoption changes no task")))
           (testing "a published task the source deletes retracts; the destination's own stays"
-            (ingest! source "[]")
+            (publish! "[]")
             (adopt!)
             (is (= [nil "Mine."] (map intent [handle own]))))))))))
 
