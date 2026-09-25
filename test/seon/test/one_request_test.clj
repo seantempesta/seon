@@ -198,12 +198,25 @@
                        :seon.test.run/provenance provenance
                        :seon.test.run/terminated? terminated?}))]
        (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
-       (is (not (:seon.error/at (record! false))) "the unfinished member is recorded without its exit")
-       (let [held (request)]
-         (is (= [test-symbol] (:seon.test/pending held)) (sut/tally held))
-         (is (= 0 (:seon.test/executed-count held)) "the same test never starts beside a live body")
-         (is (false? (:seon.test/passed? held))))
-       (is (not (:seon.error/at (record! true))) "the watcher records the observed exit")
+       (let [run-id (:seon.test.run/id provenance)
+             exit! #(runner/record-exit! connection run-id test-symbol)
+             exit-tx #(:seon.test.member/terminated-tx
+                       (first (#'runner/execution-members (db/db connection) run-id [test-symbol])))]
+         (is (not (:seon.error/at (exit!))) "an exit seen before the result exists is not a refusal")
+         (is (nil? (exit-tx)) "and writes nothing: the result's own write carries its exit")
+         (is (not (:seon.error/at (record! false))) "the unfinished member is recorded without its exit")
+         (let [held (request)]
+           (is (= [test-symbol] (:seon.test/pending held)) (sut/tally held))
+           (is (= 0 (:seon.test/executed-count held)) "the same test never starts beside a live body")
+           (is (false? (:seon.test/passed? held))))
+         ;; The watcher's write is the exit only, never a re-sent outcome
+         ;; (a changed outcome was refused as immutable and held the test).
+         (let [written (exit!)]
+           (is (not (:seon.error/at written)) (pr-str written)))
+         (let [recorded (exit-tx)]
+           (is (some? recorded) "the observed exit is recorded")
+           (is (not (:seon.error/at (exit!))))
+           (is (= recorded (exit-tx)) "a second observation changes nothing")))
        (let [after (request)]
          (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
          (is (true? (:seon.test/passed? after))))))))

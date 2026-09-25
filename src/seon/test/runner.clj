@@ -1712,6 +1712,28 @@
                            results)]
         (or (first (filter :seon.error/at recorded)) recorded)))))
 
+(defn exit-tx
+  "Record at the writer that `test-symbol`'s body in `run-id` has exited.
+
+  Only a member whose result is recorded and whose exit is not gains
+  `:seon.test.member/terminated-tx`; its outcome is never touched. Otherwise
+  this writes nothing: a result not yet recorded carries its exit itself."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test.run/id :seon.test/sym]
+                  :seon.store/transaction-data]}
+  [database run-id test-symbol]
+  (let [member (first (execution-members database run-id [test-symbol]))]
+    (if (and (:seon.test.member/completed-tx member)
+             (not (:seon.test.member/terminated-tx member)))
+      [[:db/add (:db/id member) :seon.test.member/terminated-tx "datomic.tx"]]
+      [])))
+
+(defn record-exit!
+  "Commit [[exit-tx]] on `connection`; a refusal is returned, never thrown."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.test.run/id :seon.test/sym]
+                  [:or :seon.db/transaction-report :seon.db/transaction-refused-error]]}
+  [connection run-id test-symbol]
+  (db/transact! connection [[:db.fn/call #'exit-tx run-id test-symbol]]))
+
 (defn record-interrupted!
   "Give every admitted member of `completion`'s run that has no outcome a
   terminal error naming `failure`, the throwable that ended its request.

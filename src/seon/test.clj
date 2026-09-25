@@ -5,6 +5,7 @@
             [clojure.java.io :as io]
             [clojure.string :as str]
             [sci.core :as sci]
+            [clojure.core.async.flow :as-alias flow]
             [seon.config :as config]
             [seon.cluster.process :as cluster.process]
             [seon.cluster.registry :as registry]
@@ -13,6 +14,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.error.refusal]
+            [seon.fault :as fault]
             [seon.fn :as functions]
             [seon.id :as id]
             [seon.instrument :as instrument]
@@ -1849,10 +1851,10 @@
   the branch is released and unlinked only after that thread has been observed
   to exit. Every cleanup is attempted even when setup or another cleanup
   fails, and each failure's cause chain reaches the member's recorded result.
-  A body still live at the bound keeps its branch; `settle!` records its
-  termination (and any cleanup failure) once the watcher observes its exit."
+  A body still live at the bound keeps its branch; once the watcher observes
+  its exit and releases the branch, `exited!` gets any cleanup failure."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :map :seon.test/sym [:int {:min 1}]
-                       [:=> [:cat :seon.test.runner/captured-result] :nil] :boolean]
+                       [:=> [:cat [:maybe :seon.error/throwable]] :nil] :boolean]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
                    [:seon.test/timings
                     [:map [:seon.agent/branch :seon.agent/branch]
@@ -1860,7 +1862,7 @@
                      [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
                      [:seon.test.timing/run-ms :seon.test.timing/run-ms]
                      [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
-  [request-handle since test-symbol remaining-ms settle! effect-attempt?]
+  [request-handle since test-symbol remaining-ms exited! effect-attempt?]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
@@ -1869,12 +1871,6 @@
         acquired (elapsed started)
         release-ms (volatile! 0.0)
         cleanup-failure (volatile! nil)
-        failed (fn [message]
-                 {:seon.test/sym test-symbol
-                  :seon.test.member/began? false :seon.test.member/ended? false
-                  :seon.test.run/terminated? true
-                  :seon.test/pass-count 0 :seon.test/fail-count 0 :seon.test/error-count 1
-                  :seon.test/failure-message message})
         with-cleanup-failure
         (fn [result]
           (if-let [failure @cleanup-failure]
@@ -1932,11 +1928,7 @@
                          :seon.test/member child :seon.test/effect-attempt? effect-attempt?}
                         (fn [watched?]
                           (release! watched?)
-                          (when watched?
-                            (settle! (with-cleanup-failure
-                                      (assoc (failed (str "Test " test-symbol
-                                                          " exited after its request bound."))
-                                             :seon.test.run/terminated? true))))
+                          (when watched? (exited! @cleanup-failure))
                           nil))))
             executed (- (elapsed started) @resolved)
             explanation (profile/explain-slow profile-mark)
@@ -2233,12 +2225,21 @@
                                (if (vector? reach) (set reach) (throw (ex-info "Effect reach is unreadable." reach))))
                 run-batch
                 (fn [outcome batch-provenance members]
-                  (let [settle! (fn [result]
-                                  ;; A later observation of termination adds its
-                                  ;; transaction without changing the recorded outcome.
-                                  (runner/commit-results!
-                                   recording (recording-completion batch-provenance [result] true))
-                                  nil)]
+                  (let [run-id (:seon.test.run/id batch-provenance)
+                        ;; No caller reads a watcher's thread: each failure there is a
+                        ;; stored, delivered core fault (`seon.fault/record!`, total).
+                        fault! #(fault/record! recording cluster
+                                               (cluster.process/id (cluster.process/current-identity))
+                                               (config/result-caps effective)
+                                               {:seon.error/source {::flow/ex %}
+                                                :seon.error/declared-schema :seon.flow/exception-error})
+                        ;; The exit only: the recorded outcome is never re-sent.
+                        record-exit! (fn [test-symbol cleanup-failure]
+                                       (let [written (runner/record-exit! recording run-id test-symbol)]
+                                         (when (:seon.error/at written)
+                                           (fault! (ex-info (:seon.error/message written) written)))
+                                         (some-> cleanup-failure fault!)
+                                         nil))]
                     ;; A throw leaves no admitted member open: each unrecorded
                     ;; member is recorded red with the throwable, which is rethrown.
                     (try
@@ -2246,8 +2247,10 @@
                       (if-let [test-symbol (first remaining)]
                         (if-not (pos? (remaining-ms))
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
-                          (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle since test-symbol (remaining-ms) settle!
+                          (let [exited (volatile! false)
+                                {result :seon.test/result timings :seon.test/timings}
+                                (member-result request-handle since test-symbol (remaining-ms)
+                                               #(do (vreset! exited true) (record-exit! test-symbol %))
                                (contains? effect-reach test-symbol))]
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
@@ -2270,8 +2273,11 @@
                               (assoc outcome :seon.test/recording-refusal committed
                                              ::stopped (vec (next remaining)) ::stop-cause :recording-refused)
                               (not (:seon.test.run/terminated? result))
-                              (assoc outcome :seon.test/unfinished [result]
-                                             ::stopped (vec (next remaining)) ::stop-cause :member-unfinished)
+                              (do ;; A watcher that saw the exit before this result
+                                  ;; existed wrote nothing; this write records it.
+                                  (when @exited (record-exit! test-symbol nil))
+                                  (assoc outcome :seon.test/unfinished [result]
+                                                 ::stopped (vec (next remaining)) ::stop-cause :member-unfinished))
                               (and (platform? test-symbol) (not (green? result)))
                               (assoc outcome ::stopped (vec (next remaining)) ::stop-cause :platform-red)
                               :else (recur (next remaining) outcome))))))
