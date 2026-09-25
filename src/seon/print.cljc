@@ -1068,66 +1068,6 @@
 
     :else cut))
 
-(declare enrich-node)
-
-(defn- enrich-entry
-  [entry profile path]
-  (if (vector? entry)
-    (mapv (fn [index child]
-            (enrich-node child profile (conj path index)))
-          (range)
-          entry)
-    (elision-node profile path 0 1 nil :subtree nil)))
-
-(defn- enrich-node
-  [node profile path]
-  (case (::face node)
-    (::vector ::list ::set)
-    (assoc node ::items
-           (mapv (fn [index child]
-                   (if (= ::elided (::face child))
-                     (let [total (when (empty? path)
-                                   (:seon.render.data/total profile))]
-                       (elision-node profile path index
-                                     (if total (- total index) 1)
-                                     total :children nil))
-                     (enrich-node child profile (conj path index))))
-                 (range)
-                 (::items node)))
-
-    (::map ::record)
-    (assoc node ::entries
-           (mapv (fn [index entry]
-                   (if (= ::elided (::face entry))
-                     (let [total (when (empty? path)
-                                   (:seon.render.data/total profile))]
-                       (elision-node profile path index
-                                     (if total (- total index) 1)
-                                     total :children nil))
-                     (enrich-entry entry profile (conj path index))))
-                 (range)
-                 (::entries node)))
-
-    ::throwable
-    (update node ::value enrich-node profile (conj path ::throwable))
-
-    ::truncated-string
-    ;; Admission already kept the characters that fit; handing them on as the
-    ;; cut's prefix is the difference between "here is the start and what is
-    ;; missing" and a bare count of a value the reader never saw.
-    (let [kept (count (::value node))]
-      (elision-node (assoc profile ::bound-by (::bound-by node))
-                    path kept (max 1 (- (long (::length node)) kept))
-                    (::length node) :characters
-                    (when (pos? kept) (::value node))))
-
-    ::elided
-    (if (::omitted node)
-      node
-      (elision-node profile path 0 1 nil :subtree nil))
-
-    node))
-
 (declare fit-node)
 
 (defn- fit-entry
