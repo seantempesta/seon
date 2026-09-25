@@ -132,68 +132,52 @@
   [connection tx-data]
   (test-support/transacted! connection tx-data))
 
+(defn- install-owner!
+  "Declare `owner` an :io capability for `handler` through the production
+   analyzer (`test-support/program-fn-row`), exactly as its defn would."
+  [connection owner handler request-schema]
+  (transact-fixture!
+   connection
+   [(test-support/program-fn-row
+     (db/db connection) owner
+     (pr-str (list 'defn (symbol (name owner))
+                   {:malli/schema [:=> [:cat request-schema] [:or :map :seon.error/value]]
+                    :seon.workload :io
+                    :seon.effect/capability handler}
+                   '[request] 'request)))]))
+
 (defn- install-arm-probe!
   [connection]
-  (let [handler-meta (meta #'arm-probe-handler)]
-    (transact-fixture!
-     connection
-     [{:seon.schema/key :seon.effect-test/arm-probe-request
-       :seon.schema.admission/source :core
-       :seon.schema/form
-       (pr-str [:map
-                [:seon.effect-test/iterations :int]
-                [:seon.effect-test/gated? {:optional true} :boolean]])}
-      {:seon.fn/sym 'seon.effect-test/arm-probe-owner
-       :seon.schema.admission/source :core
-       :seon.fn/ns [:seon.ns/name 'seon.effect-test]
-       :seon.fn/spec
-       (pr-str [:=> [:cat :seon.effect-test/arm-probe-request]
-                [:or :map :seon.error/value]])
-       :seon.fn/workload :io
-       :seon.effect/capability
-       (symbol (str (ns-name (:ns handler-meta)))
-               (str (:name handler-meta)))}])))
+  (install-owner! connection 'seon.effect-test/arm-probe-owner
+                  (symbol #'arm-probe-handler)
+                  [:map [:seon.effect-test/iterations :int]
+                   [:seon.effect-test/gated? {:optional true} :boolean]]))
 
 (defn- install-capability!
   [connection]
-  (let [handler-meta (meta #'test-handler)]
-    (transact-fixture!
-     connection
-     [{:seon.schema/key :seon.effect-test/request
-       :seon.schema.admission/source :core
-       :seon.schema/form
-       (pr-str [:map [:seon.effect-test/value :int]])}
-      {:seon.fn/sym 'seon.effect-test/capability-owner
-       :seon.schema.admission/source :core
-       :seon.fn/ns [:seon.ns/name 'seon.effect-test]
-       :seon.fn/spec
-       (pr-str [:=> [:cat :seon.effect-test/request]
-                [:or :map :seon.error/value]])
-       :seon.fn/workload :io
-       :seon.effect/capability
-       (symbol (str (ns-name (:ns handler-meta)))
-               (str (:name handler-meta)))}])))
+  (install-owner! connection 'seon.effect-test/capability-owner
+                  (symbol #'test-handler)
+                  [:map [:seon.effect-test/value :int]]))
 
 (deftest capability-fixtures-install-complete-program-declarations
   (test-support/with-database
     (fn [connection]
-      (doseq [[install! owner request-schema]
+      (doseq [[install! owner handler]
               [[install-capability! 'seon.effect-test/capability-owner
-                :seon.effect-test/request]
+                'seon.effect-test/test-handler]
                [install-arm-probe! 'seon.effect-test/arm-probe-owner
-                :seon.effect-test/arm-probe-request]]]
+                'seon.effect-test/arm-probe-handler]]]
         (is (some? (:db-after (install! connection))))
         (let [declaration (db/pull (db/db connection)
-                                   '[:seon.schema.admission/source
+                                   '[:seon.fn/workload
                                      :seon.effect/capability
+                                     :seon.program/definition-digest
                                      {:seon.fn/ns [:seon.ns/name]}]
                                    [:seon.fn/sym owner])]
-          (is (= :core (:seon.schema.admission/source declaration)))
+          (is (string? (:seon.program/definition-digest declaration)))
+          (is (= :io (:seon.fn/workload declaration)))
           (is (= 'seon.effect-test (get-in declaration [:seon.fn/ns :seon.ns/name])))
-          (is (symbol? (:seon.effect/capability declaration))))
-        (is (= :core (:seon.schema.admission/source
-                      (db/pull (db/db connection) [:seon.schema.admission/source]
-                               [:seon.schema/key request-schema]))))))))
+          (is (= handler (:seon.effect/capability declaration))))))))
 
 (defn- cluster-config
   "Compile the desired config row, including its declaration provenance."
@@ -309,9 +293,10 @@
   ;; end it.
   (test-support/with-database
     (fn [connection]
+      (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"
-                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/agent [:seon.agent/id "effect-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
       (install-arm-probe! connection)
       (let [ctx @probe-ctx]
@@ -597,7 +582,7 @@
       (fn [connection]
         (transact-fixture! connection (into (test-support/agent-tx @connection "effect-agent")
                                         [{:seon.turn/id "effect-run"
-                                   :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                   :seon.turn/agent [:seon.agent/id "effect-agent"]
                                    :seon.turn/opened-tx "datomic.tx"}]))
         (install-arm-probe! connection)
         (let [result
@@ -620,7 +605,7 @@
                                         [(cluster-config 60000)
                                   
                                     {:seon.turn/id "effect-run"
-                                   :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                   :seon.turn/agent [:seon.agent/id "effect-agent"]
                                    :seon.turn/opened-tx "datomic.tx"}]))
         (install-arm-probe! connection)
         (let [basis (db/basis-t (db/db connection))]
@@ -658,9 +643,10 @@
   (test-support/with-database
     (fn [connection]
       (reset! handler-calls [])
+      (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"
-                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/agent [:seon.agent/id "effect-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
       (let [first-result
@@ -695,9 +681,10 @@
   (test-support/with-database
     (fn [connection]
       (reset! handler-calls [])
+      (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                      {:seon.turn/id "effect-run"
-                                      :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                      :seon.turn/agent [:seon.agent/id "effect-agent"]
                                       :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
       (let [refusal (binding [effect/*request-context* (dissoc (request-context connection) :seon.sci.eval/ctx)]
@@ -721,10 +708,11 @@
 (deftest settlement-records-only-successful-handler-result-attributes
   (test-support/with-database
    (fn [connection]
+     (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
      (transact-fixture! connection
        [(cluster-config 600000)
         {:seon.turn/id "effect-run"
-         :seon.turn/agent {:seon.agent/id "effect-agent"}
+         :seon.turn/agent [:seon.agent/id "effect-agent"]
          :seon.turn/opened-tx "datomic.tx"}])
      (install-capability! connection)
      (let [context (request-context connection)]
@@ -797,9 +785,10 @@
 (deftest interrupted-handlers-mark-the-open-receipt-without-a-result
   (test-support/with-database
     (fn [connection]
+      (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"
-                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/agent [:seon.agent/id "effect-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
       (with-redefs-fn
@@ -822,9 +811,10 @@
 (deftest guarded-sci-evaluation-supplies-the-effect-identity-context
   (test-support/with-database
     (fn [connection]
+      (transact-fixture! connection (test-support/agent-tx @connection "effect-agent"))
       (transact-fixture! connection [(cluster-config 600000)
                                 {:seon.turn/id "effect-run"
-                                 :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                 :seon.turn/agent [:seon.agent/id "effect-agent"]
                                  :seon.turn/opened-tx "datomic.tx"}])
       (install-capability! connection)
       (transact-fixture!
