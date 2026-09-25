@@ -712,7 +712,7 @@
          (= fact (:seon.error/fact notice))
          (= [:seon.error/id (:seon.error/id fact)]
             (:seon.error/evidence notice))
-         (qualified-symbol? (:seon.render/ai notice))
+         (not (contains? notice :seon.render/ai))
          (and (string? human) (not (str/blank? human))))))
     :seed 202607280901)
    "structured error projections"))
@@ -732,7 +732,8 @@
     (is (= "[\"not a fact\"]" (:seon.instrument/args fact)))
     (let [notice (error/notice {:seon.error/fact fact})
           prose (error/ai-prose notice)]
-      (is (= 'seon.error/instrumentation-prose (:seon.render/ai notice)))
+      (is (= (error/instrumentation-prose notice) (error/notice-prose notice))
+          "a contract arm's notice renders through instrumentation-prose")
       (is (not (str/blank? prose))))))
 
 (deftest the-flat-value-projects-from-the-fact

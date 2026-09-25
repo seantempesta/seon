@@ -161,8 +161,9 @@
                            @(:seon.agent/routing instance)))))
         (testing "the unit joins live ping data to the immutable facts"
           (is (some? built))
-          (is (= `oversight/ai-story (:seon.render/ai built)))
-          (is (= `oversight/html-table (:seon.render/html built)))
+          (is (= 'seon.oversight/fleet-value (:seon.render.call/function built))
+              "the unit names its producer; :seon.oversight/fleet declares the pair")
+          (is (not-any? #(contains? built %) [:seon.render/ai :seon.render/html]))
           (is (= ["root"]
                  (mapv :seon.agent/id
                        (:seon.oversight/agents value))))

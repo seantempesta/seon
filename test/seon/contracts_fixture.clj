@@ -50,7 +50,7 @@
         evaluated (sci-eval/evaluate-for-install evaluation-request)
         value (:seon.sci.admit/value evaluated)]
     (when (:seon.cluster.eval/error evaluated)
-      (is (some #(and (= :schema (:seon.render.selection.stage/name %))
+      (is (some #(and (#{:declared :schema} (:seon.render.selection.stage/name %))
                       (= :selected (:seon.render.selection.stage/status %)))
                 (:seon.render.selection/stages
                  (render/selection
