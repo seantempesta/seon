@@ -20,13 +20,14 @@
                                       (fn [_] nil)))
               (finally (remove-ns (ns-name owned)))))))))
 
-(defn- reasons [database] (set (db/q '[:find [?r ...] :where [_ :seon.test/skip-reason ?r]] database)))
+;; An installed string attribute of no identity: a seed entity needs no entity schema.
+(defn- reasons [database] (set (db/q '[:find [?r ...] :where [_ :seon.test/fixture-observation ?r]] database)))
 
 (deftest seeds-prepare-the-member-world-in-order-before-the-body
   (let [seen (atom nil)
-        result (run-seeded [{:seon.test/skip-reason "seed-0"}
+        result (run-seeded [{:seon.test/fixture-observation "seed-0"}
                             (fn [{database :seon.db/db}]
-                              {:seon.test.seed/tx-data [{:seon.test/skip-reason (str "saw " (count (filter #{"seed-0"} (reasons database))))}]})]
+                              {:seon.test.seed/tx-data [{:seon.test/fixture-observation (str "saw " (count (filter #{"seed-0"} (reasons database))))}]})]
                            #(let [{database :seon.db/db commit :seon.source/commit-id} sut/*member*]
                               (reset! seen [(reasons database) (= commit (db/commit-id database))])))]
     (is (zero? (:seon.test/error-count result)) (:seon.test/failure-message result))
@@ -35,7 +36,7 @@
 
 (deftest a-host-body-and-its-held-handle-read-the-prepared-member
   (let [seen (atom nil)
-        result (run-seeded [{:seon.test/skip-reason "custody"}]
+        result (run-seeded [{:seon.test/fixture-observation "custody"}]
                            #(let [head (db/db)]
                               (reset! seen [(reasons head) (db/commit-id head)
                                             (:seon.source/commit-id (support/execution-handle db/*conn*))])))
@@ -45,8 +46,8 @@
     (is (= head held) "the handle held for that connection is the prepared one, so fixtures branch with the seeds")))
 
 (deftest a-refused-seed-prevents-body-entry
-  (doseq [[seeds rule] [[[{:seon.test/skip-reason 42}] "Seed entry 0"]
-                        [[{:seon.test/skip-reason "ok"} (fn [_] {:seon.test.seed/tx-data "nope"})] "Seed entry 1"]]
+  (doseq [[seeds rule] [[[{:seon.test/fixture-observation 42}] "Seed entry 0"]
+                        [[{:seon.test/fixture-observation "ok"} (fn [_] {:seon.test.seed/tx-data "nope"})] "Seed entry 1"]]
           :let [entered (atom false) result (run-seeded seeds #(reset! entered true))]]
     (is (false? @entered) rule)
     (is (str/includes? (str (:seon.test/failure-message result)) rule))))
