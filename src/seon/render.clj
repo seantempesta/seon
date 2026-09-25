@@ -1328,13 +1328,20 @@
 
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/request-error]}
   [unit]
-  (let [observation
+  (let [value (:seon.render/value unit)
+        observation
         (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/source-provenance-error
          {:seon.error/message "Default AI source requires an entity identity or stored evaluation result reference."
          :seon.error/fix "Supply the expected member and repeat the requested operation."
          :seon.render/refused-member :seon.render.value/root
+         :seon.error/member :seon.render.value/root
          :seon.error/expected :seon.render.walk/lookup
-         :seon.error/offending unit})]
+         ;; The anonymous value itself; a host object is named by its class,
+         ;; never printed as an #object.
+         :seon.error/offending (if (or (nil? value) (coll? value) (string? value) (number? value)
+                                       (keyword? value) (symbol? value) (boolean? value))
+                                 value
+                                 (.getName (class value)))})]
     observation))
 
 (defn render-form
