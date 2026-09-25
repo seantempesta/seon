@@ -39,17 +39,47 @@
                  (is (= 1 2) "first claim")
                  (is (= :a :b) "second claim"))))))
     (try
+      ;; The probe is a HOST test: `resolve-test` runs a `:core` row's compiled
+      ;; Var (the one interned above, whose body follows `mode`), while an
+      ;; `:agent` row runs its interpreted source, which never changes mode.
       (let [database (db/db connection)
             tx (db/transact! connection
                  [(support/namespace-row database namespace-name)
                   (support/program-row database [:seon.test/sym test-symbol]
                                        "(deftest probe (is (= 1 2)) (is (= :a :b)))"
-                                       {:seon.fn/file [:seon.fn.file/relative-path path]})])]
+                                       {:seon.fn/file [:seon.fn.file/relative-path path]
+                                        :seon.schema.admission/source :core})])]
         (is (:db-after tx) (pr-str tx))
         (when (:seon.db.write.attempt/request-id tx)
           (throw (ex-info "The failure fixture transaction was refused." tx))))
       (check test-symbol test-var mode)
       (finally (remove-ns namespace-name)))))
+
+(defn- redeclare-probe!
+  "Declare `forms` in the probe's namespace and the probe as the host test
+  `test-form`, from one analyzed source, replacing each stored row exactly."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.test/sym :string [:* :string]]
+                  :seon.db/transaction-report]}
+  [connection test-symbol test-form & forms]
+  (let [database (db/db connection)
+        namespace-name (symbol (namespace test-symbol))
+        source (str/join "\n" (concat [(pr-str (list 'ns namespace-name))] forms [test-form]))
+        path (get-in (db/pull database '[{:seon.fn/file [:seon.fn.file/relative-path]}]
+                              [:seon.test/sym test-symbol])
+                     [:seon.fn/file :seon.fn.file/relative-path])
+        replacement (fn [declaration overrides]
+                      (let [row (support/program-row database declaration source overrides)]
+                        (if-let [stored (db/pull database '[*] declaration)]
+                          (program/exact-replacement-tx stored row)
+                          [row])))]
+    (support/transacted!
+     connection
+     (into (replacement [:seon.test/sym test-symbol]
+                        {:seon.fn/file [:seon.fn.file/relative-path path]
+                         :seon.schema.admission/source :core})
+           (mapcat #(replacement [:seon.fn/sym (symbol (str namespace-name)
+                                                       (str (second (read-string %))))] {}))
+           forms))))
 
 (defn- run-probe [connection test-var]
   (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
@@ -137,12 +167,15 @@
   (support/with-database
     (fn [connection]
       (with-probe connection
-        (fn [s _ _]
-          (let [ctx (support/fork-cluster-ctx connection)
-                ns-name (symbol (namespace (symbol s)))
-                source (str "(ns " ns-name " (:require [clojure.test :refer [deftest is]])) "
-                            "(deftest probe (is (= 1 2))) #'probe")
-                v (sci/eval-string* ctx source)
+        (fn [s v _]
+          ;; The agent's own row: its member interprets this source in SCI.
+          (let [database (db/db connection)
+                source (str "(ns " (namespace s) " (:require [clojure.test :refer [deftest is]]))\n"
+                            "(deftest probe (is (= 1 2)))")
+                _ (support/transacted! connection
+                    (program/exact-replacement-tx
+                     (db/pull database '[*] [:seon.test/sym s])
+                     (support/program-row database [:seon.test/sym s] source)))
                 result (run-probe connection v)
                 failure (first (:seon.test/failures result))]
             (is (= 1 (:seon.test/fail-count result)) (pr-str result))
@@ -181,10 +214,11 @@
           (let [red (run-probe connection v)
                 namespace-name (symbol (namespace (symbol s)))
                 reached (symbol (str namespace-name) "reached")
-                tx (db/transact! connection
-                     [(support/program-fn-row (db/db connection) reached "(defn reached [] :changed)")
-                      (support/revision (db/db connection) [:seon.test/sym s]
-                                        {:seon.test/reach #{[:seon.fn/sym reached]}})])
+                ;; The test now calls `reached`: reach derives from the row's
+                ;; analyzed calls, so `reached` is a changed dependency.
+                tx (redeclare-probe! connection s
+                                     "(deftest probe (reached) (is (= 1 2)) (is (= :a :b)))"
+                                     "(defn reached [] :changed)")
                 database (db/db connection)
                 changed (sut/changed-since-green database s)
                 unit {:seon.db/db database
@@ -199,12 +233,12 @@
             (is (:db-after tx) (pr-str tx))
             (is (= 2 (:seon.test/fail-count red)) (pr-str red))
             (is (= 2 (count sites)) (pr-str sites))
-            (is (= [reached] (mapv :seon.fn/sym changed)) (pr-str changed))
+            (is (= [reached] changed) (pr-str changed))
             (is (= (str "Test " s ": fail") (first (str/split-lines (second summary))))
                 (pr-str summary))
             (is (every? (fn [[path line]] (str/includes? (second summary) (str path ":" line))) sites)
                 (pr-str summary))
-            (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) s) changed-form)
+            (is (= (list 'seon.test/changed-since-green (list 'seon.db/db) (list 'quote s)) changed-form)
                 (pr-str changed-form))
             (is (= sites (set (keep (fn [[_ attributes]]
                                       (when-let [path (:data-file attributes)]
@@ -266,6 +300,17 @@
     (is (nil? (find at-12 :seon.test.failure/file))
         "only declared report attributes are stored")))
 
+(defn- stored-reach
+  "The reach symbols recorded on `test-symbol`'s row within its own namespace.
+  `:seon.test/reach` holds edge symbols (host ones like `clojure.core/defn`
+  included), never refs to declaration rows."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.test/sym] [:set :qualified-symbol]]}
+  [database test-symbol]
+  (into #{} (filter #(= (namespace test-symbol) (namespace %)))
+        (db/q '[:find [?s ...] :in $ ?test
+                :where [?t :seon.test/sym ?test] [?t :seon.test/reach ?s]]
+              database test-symbol)))
+
 (defn- synthetic-source
   "One synthetic namespace's source: its `ns` form followed by `forms`."
   {:malli/schema [:=> [:cat :seon.ns/name [:sequential :string]] :string]}
@@ -324,38 +369,35 @@
               captured (completion tested s 1)]
           (is (:db-after (redeclare! connection [:seon.test/sym s] "(deftest check (b))")))
           (is (vector? (runner/commit-results! connection captured)))
-          (is (= #{a} (set (db/q '[:find [?s ...] :in $ ?test
-                                  :where [?t :seon.test/sym ?test]
-                                         [?t :seon.test/reach ?f]
-                                         [?f :seon.fn/sym ?s]] (db/db connection) s))))
+          (is (= #{a} (stored-reach (db/db connection) s)))
           (is (= (get (runner/reach-digests tested [s]) s)
                  (:seon.test/reach-digest (db/pull (db/db connection)
                                            [:seon.test/reach-digest] [:seon.test/sym s]))))
           (is (vector? (runner/commit-results! connection (completion (db/db connection) s 0))))
-          (is (= #{b} (set (db/q '[:find [?s ...] :in $ ?test
-                                  :where [?t :seon.test/sym ?test]
-                                         [?t :seon.test/reach ?f]
-                                         [?f :seon.fn/sym ?s]] (db/db connection) s)))))))))
+          (is (= #{b} (stored-reach (db/db connection) s))))))))
 
 (deftest what-made-it-red-names-changed-functions
+  ;; `changed-since-green` reads the member records of an admitted run, so each
+  ;; green here is a real nested run of the host probe.
   (support/with-database
     (fn [connection]
-      (let [s 'changed.facts/check a 'changed.facts/a b 'changed.facts/b]
-        (is (:db-after (declare! connection [[:seon.fn/sym a] [:seon.fn/sym b] [:seon.test/sym s]]
-                                 "(defn a {:malli/schema [:=> [:cat] :int]} [] 1)"
-                                 "(defn b [] 2)" "(deftest check (a))")))
-        (runner/commit-results! connection (completion (db/db connection) s 1))
-        (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
-        (runner/commit-results! connection (completion (db/db connection) s 0))
-        (redeclare! connection [:seon.fn/sym a] "(defn a {:malli/schema [:=> [:cat] :int]} [] 3)")
-        (runner/commit-results! connection (completion (db/db connection) s 0))
-        (is (= [] (sut/changed-since-green (db/db connection) s))
-            "the later green is recognized even when its zero counts are unchanged")
-        (redeclare! connection [:seon.fn/sym a] "(defn a [] 3)")
-        (redeclare! connection [:seon.fn/sym b] "(defn b [] 4)")
-        (runner/commit-results! connection (completion (db/db connection) s 1))
-        (is (= [a] (mapv :seon.fn/sym (sut/changed-since-green (db/db connection) s)))
-            "spec retraction counts; a changed function outside the tested closure does not")))))
+      (with-probe connection
+        (fn [s v mode]
+          (let [a (symbol (namespace s) "a")
+                calls-a "(deftest probe (a))"]
+            (reset! mode :green)
+            (redeclare-probe! connection s calls-a
+                              "(defn a {:malli/schema [:=> [:cat] :int]} [] 1)" "(defn b [] 2)")
+            (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
+            (is (= 1 (:seon.test/pass-count (run-probe connection v))))
+            (redeclare-probe! connection s calls-a "(defn a {:malli/schema [:=> [:cat] :int]} [] 3)")
+            (is (= [a] (sut/changed-since-green (db/db connection) s)))
+            (is (= 1 (:seon.test/pass-count (run-probe connection v))))
+            (is (= [] (sut/changed-since-green (db/db connection) s))
+                "the later green is recognized even when its counts are unchanged")
+            (redeclare-probe! connection s calls-a "(defn a [] 3)" "(defn b [] 4)")
+            (is (= [a] (sut/changed-since-green (db/db connection) s))
+                "spec retraction counts; a changed function outside the tested closure does not")))))))
 
 (deftest recorded-run-names-its-addressable-destination
   (support/with-database
@@ -402,7 +444,7 @@
 (defn- reported-path-schema []
   (seon.schema.datahike/malli->datahike-schema-in (seon.schema/handed-projection) [:seon.test.failure/reported-file]))
 
-(deftest recording-mints-an-absent-identity-instead-of-rejecting-the-completion
+(deftest recording-keeps-an-absent-reach-member-as-its-symbol
   (testing "reach evidence that outlived a declaration is recorded, never refused"
     (support/with-database
       {:seon.test-support/extra-schema (reported-path-schema)}
@@ -421,29 +463,17 @@
                     (assoc :seon.test/reach-digests
                            {s (get (runner/reach-digests database [s]) s)}
                            :seon.test/reaches
-                           {s [[:seon.fn/sym present] [:seon.fn/sym deleted]]}))
+                           {s #{present deleted}}))
                 result (runner/commit-results! connection captured)
                 recorded (db/db connection)]
             (is (vector? result) (pr-str result))
             (is (= 1 (:seon.test/fail-count (first result)))
                 "the rest of the completion commits")
             (is (= #{present deleted}
-                   (set (db/q '[:find [?sym ...] :in $ ?test
-                                :where [?t :seon.test/sym ?test]
-                                       [?t :seon.test/reach ?f]
-                                       [?f :seon.fn/sym ?sym]] recorded s)))
-                "both members are recorded, the absent one through a minted identity")
-            (is (= {:seon.fn/sym deleted}
-                   (dissoc (db/pull recorded '[*] [:seon.fn/sym deleted])
-                           :db/id :seon.fn/ns :seon.schema.admission/source))
-                "the minted row is a tombstone: the identity and nothing else")
-            (is (= 'absent.facts
-                   (get-in (db/pull recorded '[{:seon.fn/ns [:seon.ns/name]}]
-                                    [:seon.fn/sym deleted])
-                           [:seon.fn/ns :seon.ns/name])))
-            (is (nil? (:seon.fn/source (db/pull recorded '[:seon.fn/source]
-                                                [:seon.fn/sym deleted])))
-                "minting never fabricates a definition")))))))
+                   (stored-reach recorded s))
+                "both members are recorded as the edge symbols reach holds")
+            (is (nil? (db/pull recorded [:db/id] [:seon.fn/sym deleted]))
+                "recording an absent member creates no declaration row")))))))
 
 (defn- record-tx-data
   "Commit one completion through the writer and return its emitted datoms."
@@ -526,20 +556,14 @@
                           :seon.test/reach-digests
                           (runner/reach-digests tested [s])
                           :seon.test/reaches
-                          {s (mapv #(vector :seon.fn/sym %) members)}
+                          {s (set members)}
                           :seon.test.runner/results
                           [{:seon.test/sym s :seon.test/pass-count 1
                             :seon.test/fail-count 0 :seon.test/error-count 0}]})]
           (is (seq (record-tx-data connection (captured [s a b]))))
-          (let [datoms (record-tx-data connection (captured [s a]))
-                dropped (:db/id (db/pull (db/db connection) [:db/id]
-                                         [:seon.fn/sym b]))]
+          (let [datoms (record-tx-data connection (captured [s a]))]
             (is (= [:seon.test/reach] (distinct (map :a datoms))) (pr-str datoms))
             (is (= 1 (count datoms)) (pr-str datoms))
             (is (false? (:added (first datoms))) (pr-str datoms))
-            (is (= dropped (:v (first datoms))) (pr-str datoms)))
-          (is (= #{s a} (set (db/q '[:find [?s ...] :in $ ?test
-                                     :where [?t :seon.test/sym ?test]
-                                            [?t :seon.test/reach ?f]
-                                            [?f :seon.fn/sym ?s]]
-                                   (db/db connection) s)))))))))
+            (is (= b (:v (first datoms))) (pr-str datoms)))
+          (is (= #{s a} (stored-reach (db/db connection) s))))))))
