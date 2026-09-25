@@ -184,3 +184,42 @@
       (is (= ['seon.error/render-ai]
              (declared (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
           "an uncontracted operation composes the base pair"))))
+
+(deftest an-inline-face-overrides-the-schema-default-for-just-that-face
+  ;; A value's own :seon.render/ai or :seon.render/html is the highest
+  ;; priority (owner, 2026-09-25): a renderer symbol or the rendered data
+  ;; itself, each face independent of the other and of the schema default.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           ctx (support/fork-cluster-ctx connection)
+           agent-value {:seon.agent/id "inline-face"}
+           selected (fn [value output]
+                      (:seon.render.selection/selected
+                       (render/selection
+                        {:seon.db/db database :seon.sci.eval/ctx ctx :seon.render/value value
+                         :seon.render/output output
+                         :seon.render/profile (render/agent-render-profile config/defaults)
+                         :seon.sci.admit/caps (config/result-caps config/defaults)
+                         :seon.sci.eval/time-limit-ms 5000 :seon.config/on-core-error :panic})))
+           faces (fn [value] [(selected value :seon.render/ai) (selected value :seon.render/html)])
+           ai-default 'seon.cluster.agent/render-identity-ai
+           html-default 'seon.cluster.agent/render-identity-html]
+       (is (= [ai-default html-default] (faces agent-value)) "the schema default for both faces")
+       (is (= ['seon.error/render-ai html-default]
+              (faces (assoc agent-value :seon.render/ai 'seon.error/render-ai)))
+           "an inline AI renderer overrides only the AI face")
+       (is (= [ai-default 'seon.error/render-html]
+              (faces (assoc agent-value :seon.render/html 'seon.error/render-html)))
+           "an inline HTML renderer overrides only the HTML face")
+       (is (= ['seon.error/render-ai 'seon.error/render-html]
+              (faces (assoc agent-value :seon.render/ai 'seon.error/render-ai
+                            :seon.render/html 'seon.error/render-html)))
+           "both faces can be overridden")
+       (let [data {:inline/summary "shown as data"}]
+         (is (= [data html-default] (faces (assoc agent-value :seon.render/ai data)))
+             "rendered data in place of a symbol is the AI face's selection")
+         (is (str/includes? (#'render/inline-rendered {:seon.db/db database :seon.render/profile (render/agent-render-profile config/defaults)}
+                                                   :seon.render/ai data)
+                            "shown as data")
+             "and the AI face's emitter renders that data, never a pre-printed string"))))))
