@@ -39,17 +39,12 @@
                  (is (= 1 2) "first claim")
                  (is (= :a :b) "second claim"))))))
     (try
-      (let [projection (db/carried-projection (db/db connection))
+      (let [database (db/db connection)
             tx (db/transact! connection
-                 [(program/declaration-row
-                   projection {:seon.ns/name namespace-name
-                               :seon.ns/source (pr-str (list 'ns namespace-name))}
-                   :all :core)
-                  (program/declaration-row
-                   projection {:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name namespace-name]
-                               :seon.fn/file [:seon.fn.file/relative-path path]
-                               :seon.test/source "(deftest probe (is (= 1 2)) (is (= :a :b)))"}
-                   :all :core)])]
+                 [(support/namespace-row database namespace-name)
+                  (support/program-row database [:seon.test/sym test-symbol]
+                                       "(deftest probe (is (= 1 2)) (is (= :a :b)))"
+                                       {:seon.fn/file [:seon.fn.file/relative-path path]})])]
         (is (:db-after tx) (pr-str tx))
         (when (:seon.db.write.attempt/request-id tx)
           (throw (ex-info "The failure fixture transaction was refused." tx))))
@@ -187,13 +182,9 @@
                 namespace-name (symbol (namespace (symbol s)))
                 reached (symbol (str namespace-name) "reached")
                 tx (db/transact! connection
-                     [(program/declaration-row
-                       (db/carried-projection (db/db connection))
-                       {:seon.fn/sym reached :seon.fn/ns [:seon.ns/name namespace-name]
-                        :seon.fn/source "(defn reached [] :changed)"}
-                       :all :core)
-                      {:seon.test/sym s :seon.schema.admission/source :core
-                       :seon.test/reach [[:seon.fn/sym reached]]}])
+                     [(support/program-fn-row (db/db connection) reached "(defn reached [] :changed)")
+                      (support/revision (db/db connection) [:seon.test/sym s]
+                                        {:seon.test/reach #{[:seon.fn/sym reached]}})])
                 database (db/db connection)
                 changed (sut/changed-since-green database s)
                 unit {:seon.db/db database

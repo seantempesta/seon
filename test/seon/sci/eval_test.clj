@@ -195,10 +195,10 @@
            ;; Analyzed, so the override carries its own definition digest: a
            ;; source assoc'd onto the canonical row keeps the old one, and the
            ;; program then reads the override as unchanged.
-           admitted (assoc (test-support/program-fn-row
-                            before 'seon.id/valid?
-                            "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)")
-                           :seon.schema.admission/source :agent)]
+           admitted (test-support/program-fn-row
+                     before 'seon.id/valid?
+                     "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)"
+                     {:seon.schema.admission/source :agent})]
        (test-support/transacted! connection [admitted])
        (let [after (db/db connection)
              regenerated (eval/base-ctx after)
@@ -266,10 +266,10 @@
      (test-support/transacted!
       connection
       ;; Analyzed, so the stored definition digest is the override's own.
-      [(assoc (test-support/program-fn-row
-               (db/db connection) 'seon.id/valid?
-               "(defn valid? [length id] (s3.missing/function length id))")
-              :seon.schema.admission/source :agent)])
+      [(test-support/program-fn-row
+        (db/db connection) 'seon.id/valid?
+        "(defn valid? [length id] (s3.missing/function length id))"
+        {:seon.schema.admission/source :agent})])
      (let [ctx (eval/base-ctx (db/db connection))
            results (get-in ctx [:seon.sci.eval/acquisition :seon.sci.eval/load-results])]
        (is (some #(and (= 'seon.id/valid? (:seon.fn/sym %))

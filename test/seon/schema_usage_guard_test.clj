@@ -229,10 +229,10 @@
             (test-support/transacted!
              connection
              [(test-support/namespace-row @connection 'seon.schema-usage-guard)
-              (assoc (test-support/program-fn-row
-                      (db/db connection) 'seon.schema-usage-guard/accept
-                      "(defn accept [value] value)")
-                     :seon.fn/spec (pr-str [:=> [:cat base-key] :int]))])
+              (test-support/program-fn-row
+               (db/db connection) 'seon.schema-usage-guard/accept
+               "(defn accept [value] value)"
+               {:seon.fn/spec (pr-str [:=> [:cat base-key] :int])})])
             ;; The fn contract this row declares is what BLOCKS the deletion
             ;; below. It has to be in the projection the writer compiles, not
             ;; only in the datoms.

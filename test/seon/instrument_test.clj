@@ -401,10 +401,9 @@
    (fn [connection]
      (test-support/seed-cluster! connection "sci-fork-recorder")
      (test-support/transacted!
-      connection [(assoc (test-support/program-fn-row 'seon.id/valid?)
-                         :seon.schema.admission/source :agent
-                         :seon.fn/source
-                         "(defn valid? [length id] true)")])
+      connection [(test-support/revision (db/db connection) [:seon.fn/sym 'seon.id/valid?]
+                                         {:seon.schema.admission/source :agent
+                                          :seon.fn/source "(defn valid? [length id] true)"})])
      (let [committed (db/pull (db/db connection) '[*] [:seon.fn/sym 'seon.id/valid?])
             _ (is (= "(defn valid? [length id] true)" (:seon.fn/source committed))
                   (pr-str (select-keys committed [:seon.error/operation :seon.error/message])))

@@ -22,7 +22,7 @@
       (reset! observed {})
       (support/transacted!
        connection
-       [[:db/add [:seon.fn/sym 'seon.id/id] :seon.fn/doc "A changed declaration."]])
+       [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/id] {:seon.fn/doc "A changed declaration."})])
       (let [tested (db/db connection)
             basis (db/basis-t tested)
             digest (runner/program-digest tested)]
@@ -35,7 +35,7 @@
         (is (false? (::result-write @observed)) "a result write is no program write")
         (support/transacted!
          connection
-         [[:db/add [:seon.fn/sym 'seon.id/digest] :seon.fn/doc "Another changed declaration."]
+         [(support/revision (db/db connection) [:seon.fn/sym 'seon.id/digest] {:seon.fn/doc "Another changed declaration."})
           [:db.fn/call #'observe-program-write ::program-write basis]])
         (is (true? (::program-write @observed))
             "a program write earlier in the same transaction is seen")

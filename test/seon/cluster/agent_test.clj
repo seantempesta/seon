@@ -1308,8 +1308,8 @@
                                    (agent-row connection "fault-a")
                                    (agent-row connection "fault-b")])
         (test-support/transacted! connection
-                                  [[:db/add [:seon.fn/sym subject] :seon.program/definition-digest
-                                    (id/digest 64 ["core-fault" (str subject)])]])
+                                  [(test-support/revision @connection [:seon.fn/sym subject]
+                                                          {:seon.fn/doc "A changed host-bound row."})])
         (try
           (let [first-agent (arm-one! connection ctx routing "core-fault" "fault-a")
                 second-agent (arm-one! connection ctx routing "core-fault" "fault-b")]

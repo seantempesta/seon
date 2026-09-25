@@ -441,10 +441,10 @@
              ctx (eval/cluster-ctx before connection
                                    (eval/projection-state before (db/carried-projection before))
                                    {:seon.sci.eval/loaded-connection connection})
+             ;; A digested change, so each row differs from its compiled Var.
              _ (support/transacted! connection
                  (mapv (fn [sym]
-                         [:db/add [:seon.fn/sym sym] :seon.program/definition-digest
-                          (id/digest 64 ["caller-namespace-names" (str sym)])])
+                         (support/revision before [:seon.fn/sym sym] {:seon.fn/doc (str "Changed " sym)}))
                        changed))
              acquired (measured #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))]
          (is (= (zipmap changed (repeat :interpreted))

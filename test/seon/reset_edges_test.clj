@@ -97,7 +97,8 @@
        (is (= target (:seon.fn/sym (first rows))))
        (is (= 64 (count (:seon.program/analyzed-source-digest (first rows)))))
        (is (nil? (:seon.fn/file (first rows))))
-       (support/transacted! connection rows)
+       ;; The writer digests with the installed namespace's resolver context.
+       (support/transacted! connection (mapv #(support/revised-row database % {}) rows))
        (support/transacted! connection
                             [{:seon.test/sym test-name :seon.test/reach #{target}}])
        (support/transacted! connection [[:db/retractEntity [:seon.fn/sym target]]])
@@ -305,7 +306,7 @@
                                            java.nio.charset.StandardCharsets/UTF_8)])]
        (is (not= source (:seon.fn/source captured)) "resolver declarations are part of the input")
        (is (= expected (:seon.program/analyzed-source-digest (first rows))))
-       (support/transacted! connection rows)
+       (support/transacted! connection (mapv #(support/revised-row database % {}) rows))
        (let [next-captured (analyze (db/db connection))]
          (is (not= (:seon.fn/source captured) (:seon.fn/source next-captured)))
          (is (not= expected (id/sha-256 [(.getBytes ^String (:seon.fn/source next-captured)
