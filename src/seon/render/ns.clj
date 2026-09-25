@@ -10,6 +10,7 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.cluster.agent :as agent]
+            [seon.issue :as issue]
             [seon.repl :as repl]
             [seon.render.block :as block]
             [seon.render.route :as route]))
@@ -728,6 +729,93 @@
   {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/form]}
   [unit]
   (list 'doc (:seon.schema/key unit)))
+
+;;; ---------------------------------------------------------------------------
+;;; Graph nodes: one entity each. Distance 0 names it; distance 1 and beyond
+;;; show its content, with its neighbours as names (the walk renders those).
+;;; ---------------------------------------------------------------------------
+
+(defn- node-distance
+  {:malli/schema [:=> [:cat :seon.render/unit] [:int {:min 0}]]}
+  [unit]
+  (max 0 (long (get unit :seon.render/distance 1))))
+
+(defn- names
+  {:malli/schema [:=> [:cat [:maybe [:or [:set :symbol] [:sequential :symbol]]]] :string]}
+  [symbols]
+  (if (seq symbols) (str/join " " (sort-by str symbols)) "none"))
+
+(defn- comment-lines
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [label text]
+  (let [indent (apply str (repeat (count label) \space))]
+    (str/join "\n" (map-indexed #(str ";; " (if (zero? %1) label indent) %2) (str/split-lines text)))))
+
+(defn task-ai
+  "Render one task: intent, done-when proofs, subjects and must-reads.
+
+  Neighbours are names; the last form is the call that expands the edges."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
+  [unit]
+  (let [{:seon.task/keys [id kind intent must-read] task-name :seon.task/name task-ns :seon.task/ns}
+        (or (:seon.render/value unit) unit)
+        header (str ";; Task " id " \"" task-name "\": a " (name kind) " task in " task-ns)
+        edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) id))]
+    (cond
+      (nil? edges) header
+      (read-refusal? edges) edges
+      :else (str header "\n" (comment-lines "Intent: " intent)
+                 "\n;; Done when these proofs pass: " (names (:seon.task/proofs edges))
+                 "\n;; Subjects: " (names (:seon.task/subjects edges))
+                 "\n;; Must read: " (names must-read)
+                 "\n" (repl/source-text (list 'seon.issue/task-edges (list 'seon.db/db) id))))))
+
+(defn task-html
+  "Render one task as a card: intent, proofs, subjects, must-reads, evidence."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  [unit]
+  (let [{:seon.task/keys [id kind intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
+        (or (:seon.render/value unit) unit)
+        edges (when (pos? (node-distance unit)) (issue/task-edges (:seon.db/db unit) id))
+        row (fn [label items]
+              [:div [:dt label] [:dd (if (seq items) (into [:ul] (map #(vector :li [:code (str %)])) (sort-by str items)) "None")]])]
+    (if (read-refusal? edges)
+      edges
+      [:article {:class "seon-family-entry seon-task-entry"}
+       [:header [:p {:class "seon-kicker"} (str "Task · " (name kind) " · " task-ns)] [:h3 task-name " " [:code id]]]
+       [:p {:class "seon-task-intent"} intent]
+       (when edges
+         [:dl (row "Done when these proofs pass" (:seon.task/proofs edges)) (row "Subjects" (:seon.task/subjects edges))
+          (row "Must read" must-read) (row "Evidence" evidence)])])))
+
+(defn- schema-parts
+  "A schema row's key, its stored form read as data, and the form's description."
+  {:malli/schema [:=> [:cat :seon.render/unit] [:tuple :qualified-keyword [:or [:vector :any] :keyword :symbol] [:maybe :string]]]}
+  [unit]
+  (let [{schema-key :seon.schema/key text :seon.schema/form} (or (:seon.render/value unit) unit)
+        form (edn/read-string text)]
+    [schema-key form (when (and (vector? form) (map? (second form))) (:description (second form)))]))
+
+(defn schema-ai
+  "Render one schema as its `register!` form, headed by its doc line."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
+  [unit]
+  (let [[schema-key form doc] (schema-parts unit)
+        header (str ";; Schema " schema-key (some->> (first-doc-line doc) (str " — ")))]
+    (if (zero? (node-distance unit))
+      header
+      (str header "\n" (repl/source-text (list 'seon.schema/register! schema-key form))))))
+
+(defn schema-html
+  "Render one schema: its key, its doc and its declaring form."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
+  [unit]
+  (let [[schema-key form doc] (schema-parts unit)]
+    [:article {:class "seon-family-entry seon-schema-entry"}
+     [:header [:p {:class "seon-kicker"} "Schema"] [:h3 [:code (str schema-key)]]]
+     (when doc [:p doc])
+     (when (pos? (node-distance unit))
+       [:pre [:code (repl/source-text (list 'seon.schema/register! schema-key form))]])]))
 
 (defn render-ai
   "Render a namespace as valid, distance-sensitive Clojure."

@@ -20,7 +20,8 @@
                [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
                [:seon.task/evidence {:optional true} :seon.task/evidence]]
  :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
- :task [:map {:seon.db/attributes true :seon.program/partition :seon.data}
+ :task [:map {:seon.db/attributes true :seon.program/partition :seon.data
+              :seon.render/ai seon.render.ns/task-ai :seon.render/html seon.render.ns/task-html}
         [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
         [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
         [:seon.task/evidence {:optional true} :seon.task/evidence]]

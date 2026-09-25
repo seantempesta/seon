@@ -15,6 +15,7 @@
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
+            [seon.issue :as issue]
             [seon.program :as program]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
@@ -487,3 +488,36 @@
     (is (str/includes? (hiccup/->string html) "<code>str</code> → <code>clojure.string</code>"))
     (is (not (str/includes? (hiccup/->string html)
                             "[clojure.string :as str]")))))
+
+(deftest task-and-schema-rows-render-as-graph-nodes
+  ;; Class regression: a task and a schema are graph nodes with their own pair.
+  ;; Distance 0 names the node; distance 1 shows its content with neighbours as names.
+  (support/with-database
+   (fn [connection]
+     (let [handle (issue/task-handle 'tn.a "render-node" :function)
+           entry (str "[#:seon.task{:id \"" handle "\" :name \"render-node\" :kind :function"
+                      " :intent \"Render one node.\\nThen stop.\" :must-read #{tn.a/f}}]")
+           indexed (issue/index-tasks! {:seon.db/connection connection :seon.task/files {"resources/seon/tasks/tn.a.edn" entry}})
+           database @connection
+           unit (fn [lookup distance]
+                  (let [value (db/pull database '[*] lookup)]
+                    (assoc value :seon.db/db database :seon.render/value value :seon.render/distance distance)))
+           forms (fn [source] (read-string (str "[" source "]")))]
+       (is (:seon.task/changed? indexed) (pr-str indexed))
+       (testing "a task at distance 0 is its one header line"
+         (is (= (str ";; Task " handle " \"render-node\": a function task in tn.a")
+                (sut/task-ai (unit [:seon.task/id handle] 0)))))
+       (testing "a task at distance 1 shows its intent, derived done-when and names, then the expansion call"
+         (let [source (sut/task-ai (unit [:seon.task/id handle] 1))]
+           (is (str/includes? source ";; Intent: Render one node.\n;;         Then stop."))
+           (is (str/includes? source ";; Done when these proofs pass: none"))
+           (is (str/includes? source ";; Must read: tn.a/f"))
+           (is (= [(list 'seon.issue/task-edges (list 'seon.db/db) handle)] (forms source)))
+           (is (hiccup/hiccup? (sut/task-html (unit [:seon.task/id handle] 1))))))
+       (testing "a schema renders as the register! form of its stored definition"
+         (let [source (sut/schema-ai (unit [:seon.schema/key :seon.task/intent] 1))]
+           (is (= [(list 'seon.schema/register! :seon.task/intent [:string {:min 1}])] (forms source)))
+           (is (= ";; Schema :seon.task/intent" (sut/schema-ai (unit [:seon.schema/key :seon.task/intent] 0))))))
+       (testing "a described schema's header carries its doc line"
+         (is (str/starts-with? (sut/schema-ai (unit [:seon.schema/key :seon.task/ns] 0))
+                               ";; Schema :seon.task/ns — The owning namespace")))))))
