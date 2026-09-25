@@ -60,11 +60,11 @@ function consumers (`:seon.schema.projection/reverse-function-dependencies`).
     has) and drops their stale shapes;
   - `desired-rows` selects packaged forms by the closure, and appends the stored
     dependents for re-derivation by `add-contract-facts`.
-  - +38/−2.
+  - +33/−2.
 - test/seon/fn/shape_dependents_test.clj (new):
   `a-schema-edit-re-derives-its-dependents-shapes`. It asserts that a leaf edit
   re-derives the dependent schema row, a supplier and a consumer, all with one
-  environment fingerprint. +48.
+  environment fingerprint. +49.
 
 ## Root runs
 
