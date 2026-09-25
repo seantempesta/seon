@@ -206,7 +206,7 @@
 (deftest every-capture-outcome-is-read-and-none-is-lost
   (let [task (shell-private 'virtual-task)
         finish (fn [reaped? & bodies]
-                 (try ((shell-private 'finish-evidence) nil
+                 (try ((shell-private 'task-outcomes)
                        (mapv vector [:seon.shell.jvm/stdout :seon.shell.jvm/stderr :seon.shell.jvm/stdin]
                              (map #(task "seon-shell-test-" %) bodies))
                        {:seon.config.eval/time-limit-ms 50} reaped?)
@@ -220,9 +220,10 @@
                (map (comp :seon.await/config-attribute ex-data) (.getSuppressed ^Throwable thrown))))))
     (testing "two timeouts at one deadline: the first carries the later one"
       (let [timeout (finish false never never (constantly nil))]
-        (is (= :seon.shell.jvm/stderr (-> timeout :seon.error/data first :seon.await/requested-member)))))
+        (is (= :seon.shell.jvm/stderr (-> timeout :seon.error/data :seon.shell.jvm/later-timeouts first :seon.await/requested-member)))))
     (testing "only a closed stdin pipe after reaping is an expected end of input"
       (is (instance? java.io.IOException (finish false (constantly nil) (constantly nil) pipe)))
+      (is (= [nil nil nil] (finish true (constantly nil) (constantly nil) pipe)))
       (is (= "blob failed" (ex-message (finish true (constantly nil) (constantly nil)
                                                #(throw (ex-info "blob failed" {})))))))))
 

@@ -321,20 +321,17 @@
       (cond-> (assoc base :my.shell.output/blob content-digest)
         (string? decoded) (assoc :my.shell.output/preview decoded)))))
 
-(defn- finish-evidence
+(defn- task-outcomes
   "Every capture task's outcome, each read against one evaluation deadline so
   none is left unread: the first failure thrown with every later one
   suppressed, else the first timeout carrying the later ones, else the
-  evidence. After reaping, a closed stdin pipe (the JDK's two messages, no
+  outcomes. After reaping, a closed stdin pipe (the JDK's two messages, no
   subclass) is the expected end of input; no other failure is."
-  {:malli/schema [:=> [:cat :seon.db/connection [:vector :map] :map :boolean]
-                  [:or [:map [:my.shell/stdout :my.shell.output/value]
-                             [:my.shell/stderr :my.shell.output/value]
-                             [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]
-                   :seon.await/timeout-error]]}
-  [connection tasks effective reaped?]
+  {:malli/schema [:=> [:cat [:vector :map] :map :boolean]
+                  [:or [:vector [:or :nil :seon.blob/staged-write]] :seon.await/timeout-error]]}
+  [tasks effective reaped?]
   (let [deadline (+ (System/nanoTime) (* 1000000 (long (:seon.config.eval/time-limit-ms effective))))
-        [stdout stderr :as outcomes]
+        outcomes
         (mapv (fn [[member task]]
                 (try (task-result task effective member deadline)
                      (catch java.io.IOException pipe
@@ -349,11 +346,24 @@
         (.addSuppressed ^Throwable primary failure))
       (throw primary))
     (cond
-      (and timeout timeouts) (assoc timeout :seon.error/data (vec timeouts))
+      (and timeout timeouts) (assoc timeout :seon.error/data {::later-timeouts (vec timeouts)})
       timeout timeout
-      :else {:my.shell/stdout (output-descriptor connection stdout effective)
-             :my.shell/stderr (output-descriptor connection stderr effective)
-             :seon.blob/staged-writes [stdout stderr]})))
+      :else outcomes)))
+
+(defn- finish-evidence
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector :map] :map :boolean]
+                  [:or [:map [:my.shell/stdout :my.shell.output/value]
+                             [:my.shell/stderr :my.shell.output/value]
+                             [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]
+                   :seon.await/timeout-error]]}
+  [connection tasks effective reaped?]
+  (let [outcomes (task-outcomes tasks effective reaped?)]
+    (if (:seon.await/elapsed-ms outcomes)
+      outcomes
+      (let [[stdout stderr] outcomes]
+        {:my.shell/stdout (output-descriptor connection stdout effective)
+         :my.shell/stderr (output-descriptor connection stderr effective)
+         :seon.blob/staged-writes [stdout stderr]}))))
 
 (defn- execute
   [projection request effective cwd]
