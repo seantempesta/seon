@@ -683,7 +683,11 @@
         (when-let [[_ seeds] (find metadata :seon.test/seed)] (not= [] seeds))
         (assoc :seon.test/seed
                (seed-occurrences projection (get namespace-contexts namespace-name) qualified
-                                 (:seon.test/seed metadata))))
+                                 (:seon.test/seed metadata)))
+        ;; Metadata keywords carry no `:from-var`; seed attributes are reach's schema edges.
+        (some qualified-keyword? (tree-seq coll? seq (:seon.test/seed metadata)))
+        (update :seon.fn/keywords (fnil into (sorted-set))
+                (filter qualified-keyword? (tree-seq coll? seq (:seon.test/seed metadata)))))
 
             (function-definition? entry)
       (cond-> {:seon.fn/sym qualified

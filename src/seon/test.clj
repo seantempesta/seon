@@ -120,6 +120,42 @@
   member body; an agent (SCI) body reaches its branch through custody instead."
   nil)
 
+(defn- apply-seeds!
+  "Apply the test Var's ordered `:seon.test/seed` to the member's connection.
+  Maps are tx-data; a function maps the previous entry's database to `:seon.test.seed/value`
+  (manifest via `config/apply!`, tx-data via the checked writer). The first refusal stops
+  entry; else the member moves to the prepared commit canonical fixtures branch from."
+  {:malli/schema [:=> [:cat [:maybe :seon.agent/execution-handle] :seon.test/sym :seon.test/var]
+                  [:or [:maybe :seon.agent/execution-handle] :seon.test.seed/preparation-error]]}
+  [member test-symbol test-var]
+  (let [refusal (fn [kind ordinal message offending]
+                  (cond-> {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/seed :seon.error/operation `apply-seeds!
+                           :seon.error/message message :seon.error/expected :seon.test.seed/value :seon.error/offending offending
+                           :seon.test.seed/preparation kind :seon.test/error-test-symbol test-symbol} ordinal (assoc :seon.test.seed/ordinal ordinal)))
+        connection (:seon.db/connection member) seeds (vec (:seon.test/seed (meta test-var)))]
+    (cond
+      (empty? seeds) member
+      (nil? member) (refusal :no-member nil (str test-symbol " declares seeds but runs without a member.") seeds)
+      :else
+      (reduce-kv
+       (fn [member ordinal entry]
+         (let [value (cond (map? entry) {:seon.test.seed/tx-data [entry]}
+                           (vector? entry) {:seon.test.seed/tx-data entry}
+                           :else (entry {:seon.db/db (:seon.db/db member)}))
+               refuse #(reduced (refusal %1 ordinal (str "Seed entry " ordinal " of " test-symbol " could not prepare its world: " %2) %3))
+               {manifest :seon.config/manifest tx-data :seon.test.seed/tx-data} value
+               applied (delay (when manifest (config/apply! {:seon.db/connection connection :seon.config/manifest manifest
+                                                             :seon.boot/cluster-name (:seon.cluster/name member)})))
+               written (delay (when (seq tx-data) (db/transact! connection tx-data)))]
+           (cond
+             (schema/explain-candidate-value (:seon.schema/projection member) :seon.test.seed/value value)
+             (refuse :invalid-value "it does not return :seon.test.seed/value." value)
+             (:seon.error/at @applied) (refuse :write-refused (:seon.error/message @applied) @applied)
+             (:seon.error/at @written) (refuse :write-refused (:seon.error/message @written) @written)
+             :else (let [database (db/db connection)]
+                     (assoc member :seon.db/db database :seon.source/commit-id (db/commit-id database))))))
+       member seeds))))
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
@@ -150,9 +186,14 @@
                   (bound-fn []
                     (sci.eval/call-detecting-program-change
                      loaded `bounded-result since
-                     #(let [test-var (resolve!)]
-                        (if (:seon.error/at test-var)
-                          test-var
+                     #(let [test-var (resolve!)
+                            ;; Seeds prepare under the body's program-change detection.
+                            member (if (:seon.error/at test-var) member
+                                       (apply-seeds! member test-symbol test-var))]
+                        (cond
+                          (:seon.error/at test-var) test-var
+                          (:seon.error/at member) member
+                          :else
                           (with-test-loader
                            (fn [] (if (var? test-var)
                               ;; A host body runs unarmed, with no inherited cluster
