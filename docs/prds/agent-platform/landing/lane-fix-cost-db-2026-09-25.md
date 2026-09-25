@@ -208,6 +208,33 @@ Repeat these probes after adoption:
   `bin/test-check default --test seon.read-evidence-test/another-recipients-message-keeps-junipers-inbox-current`
   and `bin/test-check default --test seon.db-test/the-stable-walk-costs-less-than-encoding-the-read-result`.
 
+## Round 3: what the diagnostic named (verify-2055 003.txt)
+
+- **The stale reads at line 47 are stale before any write.** Line 47 checks the same database value
+  the evaluation read, before the test transacts anything. The stale entries are of two kinds:
+  - whole-database reads (`:datahike.read/attributes :all`) on the test branch
+    (`:agent-349afc98eb61`, `:agent-8455c556a22e`), which carry no `:seon.db/read-request`, so no
+    replay can prove them current;
+  - reads on the foreign connection `:cluster-default`, among them `(pull [*] [:seon.fn/sym
+    my.agents.root/largest])` and the program-wide `?sym ?digest` query. These are the host
+    cluster's program reads, and the test branch's value cannot prove them current.
+- **d46bbae77 does not change which reads are stale.** `read-evidence-changes` skips current reads
+  first, through the same `read-evidence-current?`, and that function is unchanged.
+- **For a stale read with no attribute set, the witness semantics are unchanged.** Before
+  d46bbae77, such a read got the pattern `{}`, and `index-pattern-change` answered it with
+  `(d/datoms since-history :eavt)`, the first datom of *any* change after the basis. On default
+  that witness was `[575 :db/cardinality …]`. After d46bbae77 it is the first transaction's
+  `:db/txInstant`. Both are "anything changed since the basis". Matching patterns against a
+  once-built since view, or against the tx-data between the bases, gives the same answer for `{}`,
+  because the read retained no pattern to narrow it. So line 59 would fail with the old code too,
+  once line 47 is false.
+- **Owner of the defect.** The fault lies with the producer that captures these reads into the
+  form's evidence. The candidates are the sink scope around `evaluate` and its shown result
+  (ca17618c0, `src/seon/sci/eval.clj`) and the whole-database evidence that
+  `append-database-evidence!` records (`src/seon/db.clj`, near line 501) with plan `:all`. The
+  foreign-connection reads would also need to be refused, or recorded with their own connection's
+  currency. No db.clj edit was made: the witness is correct for the evidence it is handed.
+
 ## Verification limits
 
 - The lane ran no tests, per the load rule.
