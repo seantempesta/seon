@@ -95,12 +95,16 @@
        (is (seq (:functions directory)))
        (is (str/starts-with? (db/render-transaction-ai report)
                              "Wrote 5 facts on 2 entities:"))
-       (doseq [[raw render-pair] [[report db/render-transaction-ai]
-                                 [directory repl/render-directory-ai]
-                                 [step plan/render-item-ai]
-                                 [whole-plan plan/format-plan-ai]]]
+       ;; Each value names its producer (design §1 rule 2): its declared
+       ;; return names the pair.
+       (doseq [[raw render-pair producer] [[report db/render-transaction-ai 'seon.db/transact!]
+                                          [directory repl/render-directory-ai 'seon.sci.eval/directory-value]
+                                          [step plan/render-item-ai 'seon.plan/item]
+                                          [whole-plan plan/format-plan-ai 'seon.plan/plan]]]
          (is (= (render-pair raw)
-                (render/render-ai (assoc request :seon.render/value raw)))))))))
+                (render/render-ai (assoc request :seon.render/value raw
+                                         :seon.render.call/function producer)))
+             (str producer)))))))
 
 (deftest explicit-structural-results-retain-attributes-through-real-evaluation
   (support/with-database
@@ -392,7 +396,12 @@
       (schema/canonical-schema-rows projection forms))}
    (fn [connection]
      (let [failure {:my.message/no-recipient true
-                    :seon.error/message "A recipient is required."}
+                    :seon.error/message "A recipient is required."
+                    ;; An error names its operation; an uncontracted one
+                    ;; composes the error base pair (design §1 rule 1).
+                    :seon.error/at (java.util.Date.)
+                    :seon.error/layer :seon.render.value-test/fixture
+                    :seon.error/operation 'seon.render.value-test/no-such-operation}
            request (render-request connection failure)
            projection (schema/projection-from-database (db/db connection))]
        (is (some? (mr/schema (:seon.schema.projection/registry projection)
