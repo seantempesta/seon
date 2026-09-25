@@ -4205,8 +4205,11 @@
   (let [database (:db-after report)
         shapes (schema/projection-cache-value projection ::program-shapes
                                               #(@program-shapes-in projection))
-        families (into {} (map (fn [family]
-                                 [family (set (:seon.program/owned-attributes (get shapes family)))]))
+        ;; Only the families this store installed: Datahike refuses a datom
+        ;; read naming an attribute its schema lacks (a raw blob branch).
+        families (into {} (keep (fn [family]
+                                  (when (get (dbi/-schema database) family)
+                                    [family (set (:seon.program/owned-attributes (get shapes family)))])))
                        [:seon.fn/sym :seon.test/sym])
         touched (reduce (fn [result {:keys [e a]}] (update result e (fnil conj #{}) a))
                         (sorted-map) (:tx-data report))

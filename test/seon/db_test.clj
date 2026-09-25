@@ -15,6 +15,7 @@
             [malli.instrument :as mi]
             [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
+            [seon.cluster.store :as store]
             [seon.config :as config]
             [seon.turn :as turn]
             [seon.db :as db]
@@ -2016,6 +2017,24 @@
               (:seon.error/member
                (db/transact! connection [[:db/add [:seon.test/sym test-symbol] :seon.test/long "An owned attribute."]])))
            "an owned attribute is still checked")))))
+
+(deftest a-store-without-program-schema-admits-its-writes
+  ;; CLASS: the digest check read `:seon.fn/sym` on every write, and Datahike
+  ;; refuses a datom read naming an attribute its schema lacks. Only a family
+  ;; the store installed is checked.
+  (let [root (java.io.File. "tmp" (str "db-test-schemaless-" (random-uuid)))
+        opened (store/open-store! {:seon.store/dir (str root "/store")})]
+    (try
+      (let [connection (:seon.store/connection-object opened)]
+        (test-support/transacted! connection [{:db/ident :seon.config.eval.result/blob-threshold
+                                               :db/valueType :db.type/long
+                                               :db/cardinality :db.cardinality/one}])
+        (test-support/transacted! connection [{:seon.config.eval.result/blob-threshold 4096}])
+        (is (= [4096] (d/q '[:find [?v ...] :where [_ :seon.config.eval.result/blob-threshold ?v]]
+                           @connection))))
+      (finally
+        (store/release-store! opened)
+        (test-support/delete-recursively! root)))))
 
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
