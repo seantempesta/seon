@@ -23,6 +23,11 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**FINDING 2026-09-25 (derived-contracts lane):** 2,768 of 4,867 loaded function rows in default carry no contract, against
+"contract every admitted function"; three separate producers of :seon.fn/spec. Owner ruled: an underivable output
+refuses at the entry gate with the tag named, so derived contracts (inputs from destructured qualified keys, outputs from
+the clj-kondo fork's exported return tag, F1) are how that count shrinks without longer authoring.
+
 **OWNER DIRECTION 2026-09-25 (errors, rendering):** an error is a declared schema plus a key attachable to any value;
 identity exists to store at least one copy, link it, and find/notify the agent to fix it (error ids are fine). The six
 schemas reusing ANOTHER entity's identity attribute as a member (seon.message.edn:156, seon.context.edn:79,
