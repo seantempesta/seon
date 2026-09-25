@@ -23,9 +23,9 @@
               
                 (support/program-fn-row (db/db connection) 'entity-pairs.fixture/function
                                         "(defn function [] true)")
-                (assoc (support/program-row (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
-                                            "(clojure.test/deftest test (clojure.test/is true))")
-                       :seon.fn/calls #{'entity-pairs.fixture/function})
+                (support/program-row (db/db connection) [:seon.test/sym 'entity-pairs.fixture/test]
+                                     "(clojure.test/deftest test (clojure.test/is true))"
+                                     {:seon.fn/calls #{'entity-pairs.fixture/function}})
                 {:seon.issue/id "entity-pairs-issue"
                  :seon.issue/title "Render linked entities"
                  :seon.issue/problem "Verify the entity pairs"

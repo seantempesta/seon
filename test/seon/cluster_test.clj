@@ -413,9 +413,8 @@
       (let [digest #(#'cluster/analyzer-digest (db/db connection))
             restamp! (fn [function-symbol]
                        (test-support/transacted!
-                        connection {:tx-data [{:seon.fn/sym function-symbol
-                                               :seon.program/definition-digest
-                                               (apply str (repeat 64 (rand-nth "0123456789abcdef")))}]}))
+                        connection [(test-support/revision (db/db connection) [:seon.fn/sym function-symbol]
+                                                           {:seon.fn/doc (str "Restamped " (random-uuid))})]))
             before (digest)]
         (is (= before (digest)) "an unchanged analyzer reanalyzes nothing")
         (restamp! `cluster/serve!)

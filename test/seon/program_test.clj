@@ -460,16 +460,16 @@
              :sample/ambient]
             row
             (fn [function-symbol source arglists spec]
-              (merge (test-support/program-fn-row (db/db connection) function-symbol source)
-                     {:seon.fn/sym function-symbol
-                      :seon.fn/ns [:seon.ns/name 'sample]
-                      :seon.schema.admission/source :agent
-                      :seon.fn/source source
-                      :seon.fn/arglists (pr-str arglists)
-                      :seon.fn/private? false
-                      :seon.fn/spec (pr-str spec)}
-                     (source-contract function-symbol spec forms source
-                                      arglists)))
+              (test-support/program-fn-row (db/db connection) function-symbol source
+                     (merge {:seon.fn/sym function-symbol
+                             :seon.fn/ns [:seon.ns/name 'sample]
+                             :seon.schema.admission/source :agent
+                             :seon.fn/source source
+                             :seon.fn/arglists (pr-str arglists)
+                             :seon.fn/private? false
+                             :seon.fn/spec (pr-str spec)}
+                            (source-contract function-symbol spec forms source
+                                             arglists))))
             positional
             (row (quote sample/positional) "(defn positional [ambient] ambient)"
                  '([ambient]) positional-spec)
@@ -739,21 +739,21 @@
                       [:=> [:cat :int :int] :int]]
             new-spec [:=> [:cat :string] :string]
             old-row
-            (merge (test-support/program-fn-row (db/db connection) function-symbol
-                       "(defn provenance-redefined ([x] x) ([x y] x))")
-                   {:seon.fn/sym function-symbol
-                    :seon.schema.admission/source :agent
-                    :seon.fn/ns [:seon.ns/name 'seon.program]
-                    :seon.fn/spec (pr-str old-spec)}
-                   (parsed-contract function-symbol old-spec {}))
+            (test-support/program-fn-row (db/db connection) function-symbol
+                       "(defn provenance-redefined ([x] x) ([x y] x))"
+                   (merge {:seon.fn/sym function-symbol
+                           :seon.schema.admission/source :agent
+                           :seon.fn/ns [:seon.ns/name 'seon.program]
+                           :seon.fn/spec (pr-str old-spec)}
+                          (parsed-contract function-symbol old-spec {})))
             new-row
-            (merge (test-support/program-fn-row (db/db connection) function-symbol
-                       "(defn provenance-redefined [x] x)")
-                   {:seon.fn/sym function-symbol
-                    :seon.schema.admission/source :agent
-                    :seon.fn/ns [:seon.ns/name 'seon.program]
-                    :seon.fn/spec (pr-str new-spec)}
-                   (parsed-contract function-symbol new-spec {}))]
+            (test-support/program-fn-row (db/db connection) function-symbol
+                       "(defn provenance-redefined [x] x)"
+                   (merge {:seon.fn/sym function-symbol
+                           :seon.schema.admission/source :agent
+                           :seon.fn/ns [:seon.ns/name 'seon.program]
+                           :seon.fn/spec (pr-str new-spec)}
+                          (parsed-contract function-symbol new-spec {})))]
         (test-support/transacted! connection [old-row])
         (let [current
               (db/pull @connection
@@ -841,7 +841,7 @@
       (test-support/transacted! connection [(test-support/namespace-row (db/db connection) 'sample)])
       (let [function-symbol 'sample/idempotent
             source "(defn idempotent {:malli/schema [:=> [:cat :int] :int]} [x] x)"
-            row (merge (test-support/program-fn-row (db/db connection) function-symbol source)
+            row (test-support/program-fn-row (db/db connection) function-symbol source
                        (parsed-contract function-symbol [:=> [:cat :int] :int] {}))
             row-tx (ns-resolve 'seon.turn 'row-tx)]
         (test-support/transacted! connection (row-tx (db/db connection) {} row))

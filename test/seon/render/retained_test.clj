@@ -35,8 +35,9 @@
 
 (defn- replace-renderer! [connection ctx form]
   (let [report (db/transact! connection
-                 [[:db/add [:seon.fn/sym 'seon.render-simplification.fixture-a/namespace-ai]
-                   :seon.fn/source (pr-str form)]])]
+                 [(support/revision (db/db connection)
+                                    [:seon.fn/sym 'seon.render-simplification.fixture-a/namespace-ai]
+                                    {:seon.fn/source (pr-str form)})])]
     (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message]))))
   (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                      :seon.schema/projection (kernel/context-projection ctx)})
