@@ -147,6 +147,18 @@
   [left right]
   (str left right))
 
+(defn- arm-prefix-contract!
+  "Arm this suite's `prefix-contract` as adoption does. The suite's namespace
+  loads after boot arming, so nothing else arms its Vars; the fixture restores
+  the root afterwards."
+  []
+  (let [result (instrument/apply!
+                {:seon.config/on-core-error :panic
+                 :seon.schema/projection (schema/handed-projection)
+                 :seon.instrument/changed-identities
+                 #{[:seon.fn/sym 'seon.instrument-test/prefix-contract]}})]
+    (is (= 1 (:seon.instrument/registered result)) (pr-str result))))
+
 (defn- many-invalid-values
   []
   (vec (repeat 200 "not an integer")))
@@ -594,6 +606,7 @@
   (let [observed {:seon.error/at #inst "2026-09-19T00:00:00Z"
                   :seon.error/layer :seon.db/custody
                   :seon.error/operation 'seon.db/db}
+        _ (arm-prefix-contract!)
         refusal (test-support/refusal-data #(prefix-contract observed))]
     (is ((schema/projection-validator (schema/handed-projection)
                                      :seon.instrument/contract-error) refusal))
@@ -1430,6 +1443,7 @@
                                  :seon.instrument.explanations/count] 0)))))))
 
 (deftest the-caller-frame-is-part-of-the-refusal-sentence
+  (arm-prefix-contract!)
   (let [refusal (test-support/refusal-data #(prefix-contract "wrong"))
         caller (:seon.instrument/caller refusal)]
     (is (string? caller))
@@ -1440,6 +1454,7 @@
 (deftest host-diagnostics-use-the-loaded-vars-arglists
   (test-support/with-database
    (fn [connection]
+     (arm-prefix-contract!)
      (test-support/transacted!
       connection
       [(test-support/program-fn-row
