@@ -1,6 +1,6 @@
 ---
 type: landing
-status: current
+status: closed
 created: 2026-09-24
 scope: One render path slices 0a–1c landed (declared selection, child identity carriage), plus error.clj census fixes
 ---
@@ -12,6 +12,52 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/seon/render_source_test.clj`, `test/seon/render/transcript_run_test.clj`, `test/seon/render/retained_test.clj`,
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
+
+## Hand-off (lane closed 2026-09-25; `37dc81892` value_test updates landed)
+
+Next lane: the SCI-redefinition reds and the web-debug nil database.
+
+1. **Fixture renderers run the compiled root, not the test's SCI redefinition.**
+   Members: `seon.render-simplification-test/generic-renderer-receives-the-acquired-entity-id` (:805),
+   `renderer-invocation-is-sci-only-and-live-var-backed` (:539/:545), `shared-invocation-cache-reuses-identical-entity-inputs-across-call-ids`
+   (:691/:714), `unchanged-retained-call-skips-discovery-and-invocation` (:402/:454),
+   `seon.render.retained-test/equal-committed-database-skips-read-replay` (:117/:131),
+   `adoption-of-an-unrelated-namespace-re-renders-zero-evaluations` (:174/:196/:211).
+   Hypothesis: `install-function-from-database!` (src/seon/sci/eval.clj:767-787) binds the compiled JVM root at the
+   first `ensure-function!` (src/seon/sci/kernel.clj `invoke`) when the loaded program holds the row unchanged; the
+   tests redefine `namespace-ai` in SCI (`sci/eval-form` under `(sci/create-ns fixture-a)`) BEFORE the first render,
+   so the first install replaces it. 9f82663e1 was meant to keep a context's private definition; check whether
+   `sci/create-ns` in the tests creates a fresh namespace object the survival check does not see, and whether the
+   render path reaches `ensure-function!` through a different ctx (render request `:seon.sci.eval/ctx` vs the
+   environment-scoped ctx `invoke-selected` now builds with `env/carry-state`, src/seon/render.clj invoke-selected).
+   Files: src/seon/sci/eval.clj, src/seon/sci/kernel.clj, src/seon/render.clj (invoke-selected),
+   test/seon/render_simplification_test.clj, test/seon/render/retained_test.clj.
+2. **A render unit reaches `kernel/invoke` with `:seon.db/db nil`.**
+   Member: `seon.render.web-debug-test/saved-history-preserves-shown-text-with-numeric-lookups` (:406; the shown
+   history's `:seon.cluster.eval/ns` is a `:seon.render.value/projection-failed` error:
+   "seon.sci.kernel/invoke refused argument 0 at [:seon.db/db] … got nil"). Also check
+   `the-outline-toggle-serves-the-exact-stored-shown-text` (:1021) and `the-agent-page-shows-a-comment-as-thinking…` (:478).
+   Hypothesis: since b195ae037 `:seon.render/unit` declares `[:seon.db/db {:optional true} :seon.db/database-value]`,
+   so an explicit nil is now refused (call preparation keeps a present key: call_preparation.clj `prepare`,
+   `(contains? target entry-key)`). Some caller builds a unit with `(assoc … :seon.db/db (:seon.db/db x))` where x
+   has none, or a merged value carries `:seon.db/db nil` (`producer-argument`, src/seon/render.clj). Candidates:
+   src/seon/render/transcript.clj (history emission, :1867 `repl/entity-emission (assoc row :seon.db/db database)`),
+   src/seon/repl.clj entity renderers, src/seon/render/value.clj `project-node` unit. Trace one failing member with
+   the nil's producer; fix the producer to omit the key.
+3. Also open (unattributed): web-debug agent-identity (:674, settings/runtime units missing), block-reference-headers
+   (:726, `referenced-identities` src/seon/render/web.clj:1159 returns [] for an alias identity), web-test
+   session-acquisition-failure (:2371, nil text body → 500), render-simplification distance (:601).
+
+Released paths (whole row): src/seon/render.clj, src/seon/render/ (walk.clj, web.clj, transcript.clj, value.clj),
+src/seon/program.cljc, src/seon/oversight.clj, src/seon/run.clj, src/seon/bootstrap.clj, src/seon/error.clj,
+src/seon/cluster.clj (mcp-project), src/my/turn.clj, resources/seon/schemas/*.edn (this row's declarations,
+my.turn.edn), the renderer contracts in src/seon/repl.clj, src/seon/plan.clj, src/seon/cluster/message.clj,
+test/seon/program_test.clj, test/seon/cluster_test.clj, test/seon/contracts_fixture.clj, test/seon/error_test.clj,
+test/seon/oversight_test.clj, test/my/turn_test.clj, test/seon/render_simplification_test.clj,
+test/seon/render_source_test.clj, test/seon/render/transcript_run_test.clj, test/seon/render/retained_test.clj,
+test/seon/render/entity_pairs_test.clj, test/seon/render/web_test.clj, test/seon/render/page_settings_test.clj,
+test/seon/render/value_test.clj, test/seon/sci/eval_test.clj (:2221), test/seon/render_simplification/fixture_*.clj,
+this landing. Scratch kept for root: tmp/render-dispatch-opus/pair-census.clj (and the sweep/analysis scripts).
 
 ## Thirteenth follow-up: census e (red-baseline-census-2026-09-25e.md)
 
