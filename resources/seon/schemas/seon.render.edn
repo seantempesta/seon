@@ -100,8 +100,7 @@
                 {:optional true}
                 :seon.render/selection-candidate-reason]],
               :selection-stage-name
-              [:enum :explicit-value :explicit-request :namespace :declared :schema
-               :floor],
+              [:enum :declared :floor],
               :selection-stage-status
               [:enum :selected :no-match :ambiguous :not-consulted],
               :selection-stage
@@ -110,9 +109,6 @@
                 :seon.render/selection-stage-name]
                [:seon.render.selection.stage/status
                 :seon.render/selection-stage-status]
-               [:seon.render.selection.stage/value
-                {:optional true}
-                :seon.render/rendered]
                [:seon.render.selection.stage/candidates
                 {:optional true}
                 [:vector :seon.render/selection-candidate]]

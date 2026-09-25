@@ -30,7 +30,9 @@
                                            :seon.sci.admit/caps (config/result-caps (support/effective-config))
                                            :seon.sci.eval/time-limit-ms 10000
                                            :seon.config/on-core-error :panic
-                                           :seon.render/value component :seon.render/output output})]
+                                           :seon.render/value component :seon.render/output output
+                                           ;; A component renders as its attribute's value.
+                                           :seon.render.walk/attribute :seon.agent/settings})]
            (is (= expected (:seon.render.selection/selected decision)) (pr-str decision))))))))
 
 (defn- example-forms

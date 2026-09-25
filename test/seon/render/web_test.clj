@@ -689,18 +689,15 @@ handle))}}
           {:seon.render/selection
            {:seon.render.selection/selected selected
             :seon.render.selection/stages
-            [{:seon.render.selection.stage/name :namespace
+            [{:seon.render.selection.stage/name :declared
               :seon.render.selection.stage/status :selected
               :seon.render.selection.stage/candidates
               [(candidate selected :compatible)]}
-             {:seon.render.selection.stage/name :schema
+             {:seon.render.selection.stage/name :floor
               :seon.render.selection.stage/status :not-consulted
               :seon.render.selection.stage/candidates
               [(candidate alternative :compatible)
-               (candidate 'my.render/rejected :rejected)]}
-             {:seon.render.selection.stage/name :floor
-              :seon.render.selection.stage/status :not-consulted
-              :seon.render.selection.stage/candidates []}]}
+               (candidate 'my.render/rejected :rejected)]}]}
            :seon.render/previews {selected selected-output}
            :seon.render/entries {}})
         experiments
@@ -744,7 +741,7 @@ handle))}}
         inspection
         {:seon.render.selection/selected selected
          :seon.render.selection/stages
-         [{:seon.render.selection.stage/name :namespace
+         [{:seon.render.selection.stage/name :declared
            :seon.render.selection.stage/status :selected
            :seon.render.selection.stage/candidates
            [{:seon.render.selection.candidate/producer selected
@@ -792,7 +789,7 @@ handle))}}
         {:seon.render/selection
          {:seon.render.selection/selected selected
           :seon.render.selection/stages
-          [{:seon.render.selection.stage/name :namespace
+          [{:seon.render.selection.stage/name :declared
             :seon.render.selection.stage/status :selected
             :seon.render.selection.stage/candidates
             [{:seon.render.selection.candidate/producer selected

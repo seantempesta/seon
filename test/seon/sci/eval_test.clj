@@ -33,6 +33,7 @@
             [sci.addons.future :as sci.future]
             [sci.core :as sci]
             [seon.render :as render]
+            [seon.render-simplification-test :as simplification]
             [seon.render.walk :as render.walk]
             [seon.render.web :as render.web]
             [seon.schema :as schema]
@@ -2193,32 +2194,28 @@
   a-selected-render-inherits-the-live-arm-or-owns-one-when-unarmed
   (test-support/with-database
     (fn [connection]
+      ;; Two contracted renderer rows, each named by a declared subject's pair.
+      (test-support/transacted!
+       connection
+       [(test-support/program-fn-row
+         (db/db connection) 'seon.sci.eval-test/probe-render
+         "(defn probe-render {:malli/schema [:=> [:cat :map] :string]} [unit] (str \"rendered:\" (:probe/label unit)))")
+        (test-support/program-fn-row
+         (db/db connection) 'seon.sci.eval-test/probe-render-spin
+         "(defn probe-render-spin {:malli/schema [:=> [:cat :map] :string]} [unit] (loop [i 0] (recur (inc i))))")])
+      (simplification/declare-subject! connection 'seon.sci.eval-test/probe-subject
+                                       {:seon.render/ai 'seon.sci.eval-test/probe-render})
+      (simplification/declare-subject! connection 'seon.sci.eval-test/spin-subject
+                                       {:seon.render/ai 'seon.sci.eval-test/probe-render-spin})
       (let [database (db/db connection)
             ctx (eval/cluster-ctx database connection)
             wrapped-ctx (env/carry-state ctx (env/environment-state (env/of ctx)))
             _ (is (not (identical? ctx wrapped-ctx)))
             _ (is (identical? (:env ctx) (:env wrapped-ctx)))
-            _ (is
-                (ok?
-                  (run-in
-                    ctx
-                    (str
-                      "(defn ^{:malli/schema [:=> [:cat :map] :string]} probe-render [unit]"
-                      " (str \"rendered:\""
-                      "      (:seon.render/value unit)))")
-                    2000)))
-            _ (is
-                (ok?
-                  (run-in
-                    ctx
-                    (str "(defn ^{:malli/schema [:=> [:cat :map] :string]} probe-render-spin [unit]" " (loop [i 0] (recur (inc i))))")
-                    2000)))
-            _ (kernel/mark-installed! ctx 'user/probe-render)
-            _ (kernel/mark-installed! ctx 'user/probe-render-spin)
             request {:seon.db/db database,
                      :seon.sci.eval/ctx ctx,
-                     :seon.render/value "value",
-                     :seon.render/ai 'user/probe-render,
+                     :seon.render/value {:probe/label "value"},
+                     :seon.render.call/function 'seon.sci.eval-test/probe-subject,
                      :seon.sci.admit/caps caps,
                      :seon.sci.eval/time-limit-ms 5000,
                      :seon.config/on-core-error :record}
@@ -2231,8 +2228,8 @@
                                 (render/render-ai
                                   (assoc
                                     request
-                                    :seon.render/ai
-                                    'user/probe-render-spin
+                                    :seon.render.call/function
+                                    'seon.sci.eval-test/spin-subject
                                     :seon.sci.eval/time-limit-ms
                                     600000))
                                 (finally (stop!)))))
