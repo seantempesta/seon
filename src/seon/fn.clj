@@ -258,10 +258,19 @@
            (program/definition-digest row))))
 
 (defn- function-definition?
+  "Whether a clj-kondo var definition is a program declaration: a function or
+  multimethod, or a value def (`def`/`defonce`, directly or through a macro
+  linted as one), literal or computed. A computed or point-free def has no
+  arglists; its initializer's calls and references are its edges. `declare`
+  and the class-bound names of `deftype`/`defrecord`/`defprotocol` intern no
+  body of their own and stay out."
+  {:malli/schema [:=> [:cat :map] :boolean]}
   [entry]
-  (or (::analyzer/literal-def? entry)
-      (seq (::analyzer/arglist-strs entry))
-      (= 'clojure.core/defmulti (::analyzer/defined-by->lint-as entry))))
+  (boolean
+   (or (::analyzer/literal-def? entry)
+       (seq (::analyzer/arglist-strs entry))
+       (#{'clojure.core/defmulti 'clojure.core/def 'clojure.core/defonce}
+        (::analyzer/defined-by->lint-as entry)))))
 
 (defn stored-namespace-context
   [{:seon.ns/keys [requires aliases refers imports]}]
