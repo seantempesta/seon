@@ -62,6 +62,14 @@ and [script/dev roots audit](../../../research/agent-platform/script-dev-roots-a
 - Deleted: `script/seon/schema_split.clj` **141** (whole file). Callers: none executable at HEAD
   (`rg` over src, script, test, bin, hidden config; only its own `-main`).
 
+- Equivalence evidence: at HEAD the splitter can no longer read the current resources. BB
+  `(#'seon.schema-split/merge-files (#'seon.schema-split/split-files "resources/seon/schemas"))` throws
+  "Schema key namespace is not safe as a verbatim filename: :inst" (it predates the unqualified-key
+  resource). The survivor on default (JVM, read-only) reads the same directory:
+  `(seon.schema.edn/packaged-forms)` → 3,461 keys, 1 unqualified, 1.6 ms. The CLI was dead and broken;
+  nothing replaces it.
+- Sizes: script −141, no additions.
+
 ## Slice 3: namespace unreachable omission helpers (§11 R8)
 
 - Survivor: the floor printer, the one clipper (owner 2026-09-25). `seon.render.ns` renderers already
