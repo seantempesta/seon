@@ -2,27 +2,39 @@
 type: landing
 status: current
 created: 2026-09-24
-scope: One render path slices 0a and 0b landed; slice 1 stopped with a smaller cut
+scope: One render path slices 0a, 0b, 1a and part of 1b landed; 1b remainder and 1c wait on two rulings
 ---
-# Lane render-dispatch-opus: one render path slices 0a, 0b (1 stopped) — 2026-09-24
+# Lane render-dispatch-opus: one render path 0a, 0b, 1a, 1b (part) — 2026-09-24
 
-Design: `docs/research/agent-platform/one-render-path-design-2026-09-25.md` §1, §6 rows 0a/0b/1.
+Design: `docs/research/agent-platform/one-render-path-design-2026-09-25.md` §1, §6. Root ruling (follow-up): slice 1 split
+into 1a/1b/1c; the ledger row was widened to error.clj, render/transcript.clj, program_test.clj, render/walk.clj,
+render/web.clj and the six namespace-stage tests: `test/seon/render_simplification_test.clj`,
+`test/seon/render_source_test.clj`, `test/seon/render/transcript_run_test.clj`, `test/seon/render/retained_test.clj`,
+`test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
+(`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
 ## Broken or unproven first
 
-- **Expected RED from 0a: `seon.program-test/program-identity-attributes-are-exactly-the-declared-row-schemas`**
-  (`test/seon/program_test.clj:1294-1307`). The test says every attribute declaring `:seon.program/row-schema` is a program
-  family. The design now declares that property on every identity attribute, so the test's `declaring` set is 45, not 6.
-  The fix is one line at `:1300`: also require `:seon.program/source-attribute`, the rule `seon.program/source-family?` uses.
-  I do not own that file, so its owner or root needs to make that edit.
-- **Slice 1 stopped before writing.** Its atomic sweep crosses files outside this row and exceeds 100 added lines (see below).
-- **Nothing is adopted or tested yet.** Hook publication is paused. No namespace was reloaded into default, and no test request ran
-  (LOAD RULE). The 39 schema declarations still need publication and adoption. Until then the installed projection lacks them.
-- **Observable accretion in schema.clj, which I do not own.** `selector-target-schema` (`schema.clj:3366-3379`) reads
-  `:seon.program/row-schema` from the sub-selector's identity attributes. After adoption, a nested selector such as
-  `{:ref [:seon.agent/id …]}` now derives its pulled form against `:seon.agent/agent`. Before, it had no target, and a
-  wildcard nested selector refused with `:seon.schema/unknown-pull-target`. I believe this is correct, but it is unproven.
-  Root should run the schema tests below.
+- **Expected REDs in files outside this row** (one-line fixes each; owners or root):
+  - `test/seon/contracts_fixture.clj:53` asserts the `:schema` stage selects a refusal's renderer. After 1a the `:declared`
+    stage selects it first when the refusal's operation is contracted. Fix: accept `#{:declared :schema}`.
+  - `test/seon/error_test.clj:715` asserts `(qualified-symbol? (:seon.render/ai notice))`, and `:735` asserts the notice names
+    `instrumentation-prose`. After 1b the notice carries no renderer; `:seon.error/notice` declares `seon.error/notice-prose`.
+    Fix: drop `:715`; at `:735` assert `(= (error/instrumentation-prose notice) (error/notice-prose notice))`.
+  - `test/seon/oversight_test.clj:164-165` assert the unit's explicit `:seon.render/ai`/`:seon.render/html`. After 1b the
+    unit carries `:seon.render.call/function seon.oversight/fleet-value`. Fix: assert that key.
+- **1b remainder and 1c are stopped** on two genuinely new decisions (options below). 1c cannot delete the namespace stage
+  before the namespace-page ruling, nor the schema stage before transcript's subject is converted (converting it while
+  structural matching lives would let any map holding `:seon.turn/id` + `:seon.agent/id` select the prefix renderer).
+- **Nothing is adopted or tested.** LOAD RULE: no reload into default, no test request. All schema declarations await
+  publication and adoption.
+- **schema.clj:3366 nested-selector targets need a root schema-test run.** `selector-target-schema` (`schema.clj:3366-3379`)
+  reads `:seon.program/row-schema` from a sub-selector's identity attributes; after 0a a nested `{:ref [:seon.agent/id …]}`
+  derives against `:seon.agent/agent`, where a wildcard nested selector previously refused `:seon.schema/unknown-pull-target`.
+- **Base pair side effect (1a).** `:seon.error/base` now declares `seon.error/render-ai`/`render-html` (root ruling). Until the
+  schema stage is deleted, structural matching also sees base; an error map whose specific schema does not match now renders
+  through `seon.error/render-ai` instead of the value floor, and a specific schema tying base on specificity would be an
+  ambiguity. Unproven either way; root's render tests below cover it.
 - RESET NEEDED: no.
 
 ## Commits
@@ -32,9 +44,13 @@ Design: `docs/research/agent-platform/one-render-path-design-2026-09-25.md` §1,
 | `9b4a7522f` | 0a | `src/seon/program.cljc`, `src/seon/render.clj`, 36 `resources/seon/schemas/*.edn` | +92 / −48; 39 EDN lines edited in place, net +44 |
 | `05dc32444` | 0b | `src/seon/render.clj` | +62 / −0 |
 | `1b7c0493c` | regression | `test/seon/render/entity_pairs_test.clj` | +27 / −0 |
+| `3784764c1` | 0 | `test/seon/program_test.clj` (family = row schema + source attribute) | +4 / −3 |
+| `8ebb23736` | 1a | `src/seon/render.clj`, `seon.error.edn` (base pair), `seon.render.call.edn` (`:seon.render.call/function`), `seon.render.edn` (`:declared` stage name) | +46 / −6 |
+| `3fce22c5e` | 1a | `test/seon/render_simplification_test.clj` (stage vectors include `:declared`) | +5 / −5 |
+| `2e42564f5` | 1b | `src/seon/oversight.clj`, `src/seon/error.clj`, `seon.oversight.edn`, `seon.error.edn` | +29 / −21 |
+| `959f14142` | 1b | `src/seon/sci/eval.clj` (shown-result carriage), `src/seon/render.clj` (`head-function` public) | +8 / −2 |
 
-Net: **+133 source/declaration/test lines, 0 deleted**. Dispatch is unchanged, and the new private functions are not called yet
-(clj-kondo reports them as unused private vars until slice 1).
+Net: **+225 / −37 = +188 lines** across the eight code/test commits; nothing is deleted yet (1c deletes ~260).
 
 ## What landed
 
@@ -53,6 +69,18 @@ Net: **+133 source/declaration/test lines, 0 deleted**. Dispatch is unchanged, a
   - `error-alternatives` reads the value's own `:seon.error/operation`.
   - `head-function` resolves a top-level call's head with `sci/find-ns`, `sci/binding [sci/ns …]`, `sci/resolve` and
     `sci/var->symbol` to a contracted Var that is not a macro.
+
+- **1a.** `declared-producers` (render.clj): an error's own operation's satisfied alternatives, else the root call's
+  `:seon.render.call/function` returns (only when the node is `identical?` to the request's root value), else the entity
+  owner; pairs are read through `internal/entity-properties`, so `[:and :seon.error/base [:map …]]` finds its own pair or
+  the base pair. The `:declared` stage runs before `:schema` in `selection`; nested `declared-producer` asks it first. No
+  match falls through; nothing is removed.
+- **1b (part).** `oversight/unit` supplies `:seon.render.call/function seon.oversight/fleet-value`; `:seon.oversight/fleet`
+  and `:seon.oversight/unavailable` declare `ai-story`/`html-table`, whose input became `:seon.render/unit` (the old
+  `:seon.oversight/unit` input made publication refuse the pair: probed). `error/notice` stops stamping `:seon.render/ai`;
+  `:seon.error/notice` declares new `seon.error/notice-prose`, which makes notice's former arm choice. The successful
+  evaluation in `sci/eval.clj` resolves its form's head and carries it into `shown-result`; `prepare` hands that unit to
+  `project-node` with the root value, so no `render/value.clj` edit was needed (not "after floor lane").
 
 ## Evidence
 
@@ -99,31 +127,46 @@ in total, uncached. Results:
 - The non-generic error producers reachable only through operation lookup are `seon.error/index-refusal-prose` (12),
   `mcp-prose` (5), `render-faults-ai` (2) and `seon.background/render-ai` (3).
 
+**1a/1b probes** (scratch namespaces, projection overlays without the shared cache holder):
+- `declared-producers`: live root agent → `[seon.cluster.agent/render-identity-ai]` (html `render-identity-html`), the same as
+  today's `schema-producers`; ambiguity error → `[seon.error/render-ai]`, same as today; envelope, attribute-scoped request,
+  no projection and uncontracted error → `[]`. 7 lookups 3.7–5.2 ms uncached.
+- Overlaying `:seon.error/base` with its pair and `:seon.render.call/function` publishes (94 ms). The fleet pair publishes
+  once `ai-story`/`html-table` take `:seon.render/unit`; then fleet → `ai-story`/`html-table`, unavailable → `ai-story`,
+  and a nested fleet (not the root) → `[]`.
+
 **Not measured.** Hot-path render timing, because dispatch is unchanged, and allocation.
 
-## Slice 1: stopped, with the smaller cut
+## Stopped: 1b remainder and 1c need two rulings
 
-These removals break callers outside this row that the design does not name:
-- **Explicit-value stage**: `src/seon/error.clj:722` stamps `:seon.render/ai` with `instrumentation-prose`/`ai-prose` on every
-  fault presentation value.
-- **Explicit-request stage**: `src/seon/render/transcript.clj:2126` supplies `render-captured-prefix`.
-- **Namespace stage**:
-  - Tests `test/seon/render_simplification_test.clj`, `render_source_test.clj`, `render/transcript_run_test.clj`,
-    `render/retained_test.clj`, `test/my/turn_test.clj` and `schema/datahike_parity.edn`.
-  - `:seon.render/form` output through `bootstrap.clj:324`.
-- **Carrying the head Var into `shown-result`**: it reaches selection only through `render.value/prepare` → `project-node`
-  (`render/value.clj:470-476`). render-floor-opus owns that file. Only a root-identity check inside `project-node` would avoid
-  editing it.
+**Decision 1: namespace-owned pages.** `walk.clj:774`, `bootstrap.clj:324` and `web.clj:1463` pass `:seon.render/namespace`
+so a namespace can render its own `:seon.ns/ns` row (`my.turn/namespace-unit` = `[:seon.ns/name [:= my.turn]]` with
+`my.turn/render-namespace-ai` → `seon.run/render-namespace-ai`, plus `my.turn/usage-form` for `:seon.render/form`). Under
+rule 3 that row is owned by `:seon.ns/ns`, whose pair would capture it.
+1. **Simplest (recommended): delete namespace-specific pages.** `my.turn`'s page renders through the `:seon.ns/ns` pair; its
+   lifecycle prose moves to the namespace docstring; delete `render-namespace-ai` (run.clj, my/turn.clj), the three fixtures
+   and their tests with the namespace stage. Guarantee: one ns page renderer. Cost ~−120 lines. Sacrifice: the curated
+   my.turn page and usage form.
+2. **The ns pair delegates by declaration.** The `:seon.ns/ns` renderer looks up a function the namespace declares on its
+   row (a new optional attribute, e.g. `:seon.ns/page`), resolved and contract-checked. Cost ~+40/−100. Sacrifice: a
+   renderer symbol stored as data, which the design disallows.
+3. **Keep the namespace stage for `:seon.ns/ns` rows only.** Cost ~+5/−80. Sacrifice: a second selection path survives.
 
-About 17 test files also supply explicit producers. The atomic conversion plus deletion is well over 100 added lines across
-at least six owners. Proposed smaller cut, for review before writing:
-- **1a** (`render.clj`, `sci/eval.clj` shown-result, `cluster.clj` mcp-project; about 45 lines added): add one `:declared` stage
-  before `:schema` that applies error → head function → entity owner. Declare `seon.error/render-ai`/`render-html` on
-  `:seon.error/base` as the base pair in the same commit. Carry `:seon.render.call/function`, checked against the root value by
-  `identical?` in `project-node`. Nothing is removed, so no pair is lost.
-- **1b** (error.clj, transcript.clj, oversight, run/my.turn owners): declare pairs in place of explicit stamps and requests.
-- **1c** (render.clj plus the six test files): delete the explicit/namespace/schema stages, specificity, pulled/transacted
-  matching and `cost-shape-key`'s matching. Keep `matching-shapes-in` for diagnostics.
+**Decision 2: MCP head Var (`cluster.clj` mcp-project).** MCP JVM-mode `prepare` carries no `:seon.sci.eval/ctx` or database
+(`cluster.clj:466-471`), so `project-node` never runs (`render/value.clj:470`): no declared renderer applies to any MCP value
+today, and a head Var would change nothing. The form also never reaches `mcp-project`, and a JVM-mode head is a JVM Var, not
+an SCI one.
+1. **Simplest (recommended): MCP JVM mode stays floor-only**; the design line for MCP is removed; MCP SCI mode already goes
+   through `shown-result`. Cost 0. Sacrifice: JVM-mode results never use declared pairs.
+2. Give MCP's `prepare` the cluster ctx and database, and resolve the JVM form's head with `clojure.core/resolve`, passing the
+   form from `mcp-valf`. Cost ~+20 in cluster.clj plus the MCP bridge caller (script/seon/dev/mcp.clj, not in this row).
+   Sacrifice: SCI producers run on every MCP JVM read (time-limited, but new cost and failure surface).
+3. Only the ctx/database half: nested errors and entities get declared pairs in MCP; no head Var. Cost ~+6.
+
+**Ready once ruled (1c, estimated ≤100 added):** transcript.clj:2126 gets a contracted `prefix-subject` producer and
+declared pair in place of its explicit request (lands with the schema-stage deletion); delete the explicit-value,
+explicit-request, namespace (per ruling) and schema stages, specificity ranking, pulled/transacted matching and
+`cost-shape-key`'s matching; keep `matching-shapes-in` for diagnostics; update the six tests.
 
 ## Out of scope, recorded elsewhere
 
@@ -133,14 +176,19 @@ at least six owners. Proposed smaller cut, for review before writing:
 - MCP results were clipped at 32 children (`:seon.render.profile/max-children`), for example a 48-row census. That is design
   audit site 2/13, owned by render-floor-opus.
 
-## Root runs (serially, after adopting the three commits)
+## Root runs (serially, after adopting the commits)
 
-1. `bin/test-check default --ns seon.render.entity-pairs-test` (new regression plus existing pair walks)
-2. `bin/test-check default --ns seon.program-test` (expect the one RED above until `:1300` is fixed)
+1. `bin/test-check default --ns seon.render.entity-pairs-test`
+2. `bin/test-check default --ns seon.program-test`
 3. `bin/test-check default --test seon.fn-test/the-indexer-emits-no-attribute-the-program-row-schema-drops`
-4. `bin/test-check default --ns seon.schema-test` (pulled-selector target accretion)
-5. `bin/test-check default --ns seon.schema.datahike-test` (stored schema projection of the new property)
-6. `bin/test-check default --ns seon.render-simplification-test` (dispatch unchanged)
-7. `bin/test-check default --changed seon.program/shapes-in` and `bin/test-check default --changed seon.program/declaration-families`
+4. `bin/test-check default --ns seon.schema-test` (schema.clj:3366 nested-selector targets)
+5. `bin/test-check default --ns seon.schema.datahike-test`
+6. `bin/test-check default --ns seon.render-simplification-test`
+7. `bin/test-check default --ns seon.oversight-test` (expect `:164-165` RED until fixed)
+8. `bin/test-check default --ns seon.error-test` (expect `:715`, `:735` RED until fixed)
+9. `bin/test-check default --ns seon.render.web-test`
+10. `bin/test-check default --ns seon.sci.eval-test` (shown-result head carriage)
+11. `bin/test-check default --changed seon.program/shapes-in`, `--changed seon.program/declaration-families`,
+    `--changed seon.render/selection`, `--changed seon.error/notice`, `--changed seon.oversight/unit`
 
-Released paths: all paths in this lane's ledger row (no further edits pending).
+Held paths: this lane's row stays held for 1b remainder/1c after the two rulings.
