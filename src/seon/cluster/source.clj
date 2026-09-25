@@ -21,6 +21,7 @@
             [seon.id :as id]
             [seon.program :as program]
             [seon.test.cache :as test.cache]
+            [hasch.core :as hasch]
             [seon.schema :as schema]
             [seon.schema.datahike :as schema.datahike]
             [seon.schema.edn :as schema.edn])
@@ -881,3 +882,138 @@
           :else (db/transact! (:seon.db/connection source)
                               {:tx-data tx :datahike/expected-basis-t basis :parents (conj merged e-id)})))
       (finally (d/release-materialized-db tested)))))
+
+;;; ---------------------------------------------------------------------------
+;;; Write-back: an accepted merge's replacements, back into their one file
+;;; ---------------------------------------------------------------------------
+
+(defn- write-back-refusal
+  "`write-back!`'s declared refusal: its reason, message and evidence."
+  {:malli/schema [:=> [:cat :seon.source/write-back-refused :string :map] :seon.source/write-back-error]}
+  [reason message members]
+  (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/write-back 'seon.cluster.source/write-back!
+   (merge {:seon.error/message message :seon.source/write-back-refused reason} members)))
+
+(defn- sha-256
+  "The file digest publication records (`:seon.fn.file/digest`)."
+  {:malli/schema [:=> [:cat :seon.source/file-bytes] :string]}
+  [file]
+  (hasch/hash->str (hasch/sha256 file)))
+
+(defn- spliced
+  "`file` with each `[span source]` replacement's UTF-8 bytes in its byte span."
+  {:malli/schema [:=> [:cat :seon.source/file-bytes [:vector [:tuple [:tuple :int :int] :string]]]
+                  :seon.source/file-bytes]}
+  [file replacements]
+  (let [out (java.io.ByteArrayOutputStream.)
+        end (reduce (fn [from [[start stop] source]]
+                      (.write out ^bytes file (int from) (int (- start from)))
+                      (.writeBytes out (.getBytes ^String source "UTF-8"))
+                      stop)
+                    0 (sort-by ffirst replacements))]
+    (.write out ^bytes file (int end) (int (- (alength ^bytes file) end)))
+    (.toByteArray out)))
+
+(defn- declaration-digests
+  "Definition digest by identity of each declaration in `rows`."
+  {:malli/schema [:=> [:cat [:sequential [:maybe :map]]] [:map-of :seon.program/identity :string]]}
+  [rows]
+  (into {} (keep #(when-let [definition (:seon.program/definition-digest %)] [(program/row-identity %) definition])) rows))
+
+(defn- file-digests
+  "The declarations `database` records in the file at `path`, by identity."
+  {:malli/schema [:=> [:cat :seon.db/database-value :string] [:map-of :seon.program/identity :string]]}
+  [database path]
+  (declaration-digests
+   (db/q '[:find [(pull ?e [:seon.fn/sym :seon.test/sym :seon.ns/name :seon.program/definition-digest]) ...]
+           :in $ ?path :where [?file :seon.fn.file/relative-path ?path] [?e :seon.fn/file ?file]]
+         database path)))
+
+(defn- install!
+  "Install proven `candidate` bytes at `file`: a sibling write, then an atomic rename."
+  {:malli/schema [:=> [:cat :string :seon.source/file-bytes] :nil]}
+  [path candidate]
+  (let [file (io/file path)
+        staged (java.io.File/createTempFile ".write-back-" ".clj" (.getParentFile file))]
+    (try
+      (Files/write (.toPath staged) ^bytes candidate (make-array java.nio.file.OpenOption 0))
+      (Files/move (.toPath staged) (.toPath file)
+                  (into-array java.nio.file.CopyOption [java.nio.file.StandardCopyOption/ATOMIC_MOVE
+                                                        java.nio.file.StandardCopyOption/REPLACE_EXISTING]))
+      nil
+      (finally (Files/deleteIfExists (.toPath staged))))))
+
+(defn write-back!
+  "Write the function and test replacements of `accepted` (`accept-merge!`'s
+  report on `connection`) into their one source file under `root`: each
+  declaration's recorded byte span takes its accepted source.
+
+  Proven before installation. Refuses by reason unless the branch head is still
+  the accepted commit; every replaced declaration's before-state names one file
+  and a span holding its source; the file's bytes are the ones its declarations
+  were analyzed from; and the ordinary analyzer (`seon.fn/analyze-rows` over the
+  candidate text) reindexes the candidate to the accepted digests with every
+  other declaration of the file unchanged. The disk bytes are checked again,
+  then the candidate is installed by an atomic rename. Publishing the changed
+  path stays with the publication owner."
+  {:malli/schema [:=> [:cat :seon.source/write-back-request]
+                  [:or :seon.source/written :seon.source/write-back-error]]}
+  [{connection :seon.db/connection report :seon.source/accepted root :seon.fn/root}]
+  (let [before (:db-before report) after (:db-after report)
+        changed (program/changed-identities before after {:seon.program/max-datoms 10000})
+        replaced (when (set? changed) (vec (sort-by str changed)))
+        base-rows (when replaced
+                (db/pull-many before [:seon.fn/form-span :seon.fn/source :seon.test/source
+                                      {:seon.fn/file [:seon.fn.file/relative-path :seon.fn.file/relative-root
+                                                      :seon.fn.file/digest]}]
+                              replaced))
+        accepted (when replaced
+                   (db/pull-many after [:seon.fn/sym :seon.test/sym :seon.program/definition-digest
+                                        :seon.fn/source :seon.test/source] replaced))
+        source-of #(or (:seon.fn/source %) (:seon.test/source %))
+        files (into #{} (map :seon.fn/file) base-rows)
+        {path :seon.fn.file/relative-path base-digest :seon.fn.file/digest
+         relative-root :seon.fn.file/relative-root} (first files)
+        file (io/file root (str path))
+        base-bytes (when (and (= 1 (count files)) path (.isFile file)) (Files/readAllBytes (.toPath file)))
+        spans (mapv :seon.fn/form-span base-rows)
+        span-text (fn [[start stop]] (String. (java.util.Arrays/copyOfRange ^bytes base-bytes (int start) (int stop)) "UTF-8"))
+        refuse (fn [reason message evidence]
+                 (write-back-refusal reason message (cond-> evidence path (assoc :seon.source/path path))))]
+    (cond
+      (not (set? changed)) changed
+      (not= (db/commit-id (db/db connection)) (db/commit-id after))
+      (refuse :head-moved "The branch head moved after the accepted merge." {:seon.error/offending (db/commit-id after)})
+      (empty? replaced) (refuse :no-replacement "The accepted merge replaced no declaration." {})
+      (or (not= 1 (count files)) (nil? path) (some nil? spans) (some (comp nil? source-of) accepted))
+      (refuse :one-file "Each replacement needs its source, and its before-state one file and span."
+              {:seon.error/offending replaced})
+      (nil? base-bytes) (refuse :file-absent "The replaced declarations' file is absent under the root." {})
+      (not= base-digest (sha-256 base-bytes))
+      (refuse :file-changed "The file changed after its declarations were analyzed." {:seon.error/offending base-digest})
+      (not= (mapv span-text spans) (mapv source-of base-rows))
+      (refuse :span-mismatch "A recorded span no longer holds its declaration's source." {})
+      :else
+      (let [candidate (spliced base-bytes (mapv #(vector %1 (source-of %2)) spans accepted))
+            reindexed (declaration-digests
+                       (fn/analyze-rows {:seon.fn/root (str root) :seon.fn/roots [relative-root]
+                                         :seon.fn/changed-paths #{path}
+                                         :seon.fn.analyzer/sources {(.getCanonicalPath file)
+                                                                    (String. ^bytes candidate "UTF-8")}}))
+            expected (merge (file-digests before path) (declaration-digests accepted))
+            differing (vec (sort-by str (filter #(not= (get expected %) (get reindexed %))
+                                                (into (set (keys expected)) (keys reindexed)))))]
+        (cond
+          (seq differing)
+          (refuse :not-equivalent "The reindexed candidate does not declare exactly the accepted program."
+                  {:seon.error/offending differing})
+          (not= base-digest (sha-256 (Files/readAllBytes (.toPath file))))
+          (refuse :file-changed "The file changed while the candidate was proven." {:seon.error/offending base-digest})
+          :else
+          (try
+            (install! (.getPath file) candidate)
+            {:seon.source/changed-paths [path]
+             :seon.source/written {:seon.source/path path :seon.source/base-digest base-digest
+                                   :seon.source/candidate-digest (sha-256 candidate) :seon.source/replaced replaced}}
+            (catch Exception failure
+              (refuse :install-failed "The proven candidate could not be installed." {:seon.error/throwable failure}))))))))

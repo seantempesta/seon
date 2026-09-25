@@ -97,6 +97,32 @@
                 [:seon.source/expected-commit-id :seon.source/expected-commit-id]
                 [:seon.source/commit-id :seon.source/commit-id]]],
               :publish-result [:or :seon.source/published :seon.source/publication-error],
+              :file-bytes [:fn {:error/message "must be a byte array"} clojure.core/bytes?],
+              :accepted [:and {:description "The transaction report of the accepted merge whose replacements are written back."} :seon.db/transaction-report],
+              :write-back-request
+              [:map
+               [:seon.db/connection :seon.db/connection]
+               [:seon.source/accepted :seon.source/accepted]
+               [:seon.fn/root :seon.fn/root]],
+              :write-back-refused
+              [:enum {:description "Why a write-back installed nothing."}
+               :head-moved :no-replacement :one-file :file-absent :file-changed :span-mismatch :not-equivalent :install-failed],
+              :write-back-error
+              [:and :seon.error/base
+               [:map [:seon.source/write-back-refused :seon.source/write-back-refused]
+                [:seon.source/path {:optional true} :seon.source/path]]],
+              :base-digest [:string {:min 1 :description "The file digest the replaced declarations were analyzed from."}],
+              :candidate-digest [:string {:min 1 :description "The digest of the installed, proven candidate bytes."}],
+              :replaced [:vector {:description "The declarations a write-back replaced, by identity."} :seon.program/identity],
+              :written
+              [:map
+               [:seon.source/changed-paths :seon.source/changed-paths]
+               [:seon.source/written
+                [:map
+                 [:seon.source/path :seon.source/path]
+                 [:seon.source/base-digest :seon.source/base-digest]
+                 [:seon.source/candidate-digest :seon.source/candidate-digest]
+                 [:seon.source/replaced :seon.source/replaced]]]],
               :refresh-result [:or [:and :seon.source/published :seon.source/adoption-result]
                                :seon.source/publication-error],
               :published
