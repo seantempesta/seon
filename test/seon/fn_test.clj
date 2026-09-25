@@ -43,9 +43,12 @@
 (defn- transact-fixture! [connection rows]
   (test-support/transacted! connection rows))
 
-(defn- analyzed-test-row [database test-symbol]
-  (test-support/program-row database [:seon.test/sym test-symbol]
-                            (str "(clojure.test/deftest " (name test-symbol) " (clojure.test/is true))")))
+(defn- analyzed-test-row
+  ([database test-symbol] (analyzed-test-row database test-symbol {}))
+  ([database test-symbol overrides]
+   (test-support/program-row database [:seon.test/sym test-symbol]
+                             (str "(clojure.test/deftest " (name test-symbol) " (clojure.test/is true))")
+                             overrides)))
 
 (deftest analyze-form-refuses-an-unresolvable-namespace-reference
   (test-support/with-database
@@ -1138,8 +1141,13 @@
                          ;; Declaration rows refer to their file row, so the file rows
                          ;; are admitted with them exactly as publication admits them.
                          (into (mapv #(dissoc % :seon.fn/keywords :seon.fn/calls)
-                                     (filter #(or (:seon.fn.file/relative-path %) (:seon.ns/name %)
-                                                  (:seon.fn/sym %) (:seon.test/sym %))
+                                     (filter #(and (or (:seon.fn.file/relative-path %) (:seon.ns/name %)
+                                                       (:seon.fn/sym %) (:seon.test/sym %))
+                                                   ;; The stub `seon.error` only resolves the alias; the
+                                                   ;; installed namespace and its rows stay as they are.
+                                                   (not= "seon/error.clj" (:seon.fn.file/relative-path %))
+                                                   (not= 'seon.error (:seon.ns/name %))
+                                                   (not= "seon.error" (some-> (:seon.fn/sym %) namespace)))
                                              rows))
                                (mapcat (fn [row]
                                          (map (fn [used]
@@ -1197,12 +1205,11 @@
       (let [namespace-ref [:seon.ns/name 'sample.reach]
             function-row
             (fn [function-symbol calls]
-              (cond-> (test-support/program-fn-row (db/db connection) function-symbol (str "(defn " (name (symbol function-symbol)) " [] nil)"))
-                (seq calls) (assoc :seon.fn/calls calls)))
+              (test-support/program-fn-row (db/db connection) function-symbol (str "(defn " (name (symbol function-symbol)) " [] nil)")
+                                           (cond-> {} (seq calls) (assoc :seon.fn/calls calls))))
             test-row
             (fn [test-symbol references]
-              (merge (analyzed-test-row (db/db connection) test-symbol)
-                     references))]
+              (analyzed-test-row (db/db connection) test-symbol references))]
         (test-support/transacted!
                      connection
                      [(test-support/namespace-row @connection 'sample.reach)
@@ -1328,10 +1335,10 @@
          (quote sample.gates/b)]
         [:db/add [:seon.fn/sym (quote sample.gates/b)] :seon.fn/calls
          (quote sample.gates/a)]
-        (merge (analyzed-test-row (db/db connection) (quote sample.gates/direct)) {:seon.fn/calls #{(quote sample.gates/a)}})
-        (merge (analyzed-test-row (db/db connection) (quote sample.gates/subject)) {:seon.test/subject (quote sample.gates/b)})
-        (merge (analyzed-test-row (db/db connection) (quote sample.gates/pending)) {:seon.test/subject (quote sample.gates/a)})
-        (merge (analyzed-test-row (db/db connection) (quote sample.gates/future)) {:seon.test/subject (quote sample.gates/new)})])
+        (analyzed-test-row (db/db connection) (quote sample.gates/direct) {:seon.fn/calls #{(quote sample.gates/a)}})
+        (analyzed-test-row (db/db connection) (quote sample.gates/subject) {:seon.test/subject (quote sample.gates/b)})
+        (analyzed-test-row (db/db connection) (quote sample.gates/pending) {:seon.test/subject (quote sample.gates/a)})
+        (analyzed-test-row (db/db connection) (quote sample.gates/future) {:seon.test/subject (quote sample.gates/new)})])
       (let [database (db/db connection)
             queries (atom [])
             scan-counts (atom [])
@@ -1420,10 +1427,10 @@
              [(quote sample.shape/none) (quote sample.shape/one) (quote sample.shape/many)]))
       (transact-fixture!
        connection
-       [(merge (analyzed-test-row (db/db connection) (quote sample.shape/only-test)) {:seon.fn/calls #{(quote sample.shape/one)}})
-        (merge (analyzed-test-row (db/db connection) (quote sample.shape/edge-test)) {:seon.fn/calls #{(quote sample.shape/many)}})
-        (merge (analyzed-test-row (db/db connection) (quote sample.shape/subject-test)) {:seon.test/subject (quote sample.shape/many)})
-        (merge (analyzed-test-row (db/db connection) (quote sample.shape/pending-test)) {:seon.test/subject (quote sample.shape/many)})])
+       [(analyzed-test-row (db/db connection) (quote sample.shape/only-test) {:seon.fn/calls #{(quote sample.shape/one)}})
+        (analyzed-test-row (db/db connection) (quote sample.shape/edge-test) {:seon.fn/calls #{(quote sample.shape/many)}})
+        (analyzed-test-row (db/db connection) (quote sample.shape/subject-test) {:seon.test/subject (quote sample.shape/many)})
+        (analyzed-test-row (db/db connection) (quote sample.shape/pending-test) {:seon.test/subject (quote sample.shape/many)})])
       (let [database (db/db connection)
             test-sym? (schema/projection-validator
                        (db/carried-projection database) :seon.test/sym)
@@ -1481,8 +1488,8 @@
       (let [namespace-ref [:seon.ns/name 'sample.output]
             function-row
             (fn [function-symbol facts]
-              (merge (test-support/program-fn-row (db/db connection) function-symbol (str "(defn " (name (symbol function-symbol)) " [] nil)"))
-                     facts))]
+              (test-support/program-fn-row (db/db connection) function-symbol (str "(defn " (name (symbol function-symbol)) " [] nil)")
+                                           facts))]
         (transact-fixture!
          connection
          [(test-support/namespace-row @connection 'sample.output)
@@ -2222,11 +2229,8 @@
           {:seon.ns/name 'seon.db}])
         (transact-fixture!
          connection
-         [{:seon.fn/sym (quote seon.db/transact!)
-           :seon.fn/ns [:seon.ns/name 'seon.db]
-           :seon.fn/arglists "([request])"
-           :seon.fn/private? false
-           :seon.schema.admission/source :core}
+         [(test-support/revision @connection [:seon.fn/sym (quote seon.db/transact!)]
+                                 {:seon.fn/arglists "([request])"})
           (test-support/program-fn-row (db/db connection) (quote sample.attributes/helper) "(defn helper [value] value)")])
         (let [[_ admitted]
               (first (seon.fn/analyze-forms
@@ -2246,11 +2250,7 @@
    (fn [connection]
      (let [caller 'sample.prepared/inbox
            source "(defn inbox [] (my.message/inbox))"
-           row (assoc (test-support/program-fn-row (db/db connection) caller source)
-                      :seon.schema.admission/source :agent
-                      :seon.fn/source source
-                      :seon.fn/arglists "([])"
-                      :seon.fn/private? false)
+           row (test-support/program-fn-row (db/db connection) caller source)
            _ (test-support/transacted! connection [(test-support/namespace-row @connection 'sample.prepared)])
            analyzed (seon.fn/analyze-forms
                      (db/db connection)
@@ -2303,7 +2303,7 @@
           (transact-fixture!
            connection
            [(test-support/namespace-row @connection 'sample.mismatch)
-            (merge (test-support/program-fn-row (db/db connection) caller "(defn caller [] nil)") {:seon.fn/call-arities #{[callee admitted]}})])
+            (test-support/program-fn-row (db/db connection) caller "(defn caller [] nil)" {:seon.fn/call-arities #{[callee admitted]}})])
           (let [basis (:max-tx @connection)
                 refusal (db/transact!
                          connection
@@ -2867,11 +2867,11 @@
                 (pr-str (select-keys report [:seon.error/message
                                              :seon.error/message]))))
           (let [bad (symbol ":clj-kondo/unknown-namespace" "visitFile")
-                row (assoc (test-support/program-fn-row
-                            (db/db connection)
-                            'sample.readable-edges/refused
-                            "(defn refused [] true)")
-                           :seon.fn/calls #{bad})
+                row (test-support/program-fn-row
+                     (db/db connection)
+                     'sample.readable-edges/refused
+                     "(defn refused [] true)"
+                     {:seon.fn/calls #{bad}})
                 refusal (db/transact! connection [row])]
             (is (string? (:seon.db.write.attempt/request-id refusal))
                 (pr-str refusal))
