@@ -1,6 +1,6 @@
 ---
 type: landing
-status: diagnosed-stopped (fix owner outside this lane's paths)
+status: landed-unverified (root ruled option 1; src/seon/test.clj granted)
 lane: fix-late-load-arming (Opus 5.5)
 created: 2026-09-25
 source: docs/prds/agent-platform/landing/lane-fix-instrument-f2-regressions-2026-09-25.md item 3
@@ -8,14 +8,39 @@ source: docs/prds/agent-platform/landing/lane-fix-instrument-f2-regressions-2026
 
 # Late-loaded namespaces run unarmed (2026-09-25)
 
-## Broken first
+## Broken or unproven first
 
-- **Not fixed.** The owner of the missing arming is the lazy test-namespace load in `seon.test/resolve-test`
-  (`src/seon/test.clj:1364`). It is not `src/seon/instrument.clj`. The other candidate owner is boot's program
-  selection (`src/seon/cluster.clj:2412-2419`), and `src/seon/cluster.clj` is held by status-counts-followups.
-  `instrument/apply!` already has the seam that is needed: `:seon.instrument/changed-identities` arms exactly
-  the Vars it is given (`src/seon/instrument.clj:900-920`). So instrument.clj needs no change.
-- No code edited, no test run (LOAD RULE). **RESET NEEDED: no.**
+- **No test was run** (LOAD RULE). The arming branch of `arm-first-loads!` was not exercised on default,
+  because exercising it arms default's Vars. Root's runs below are the proof.
+- **Already-loaded, unarmed test namespaces stay unarmed.** On default today that includes
+  `seon.instrument-test`. The fix arms only the namespaces a request loads for the first time. An adoption of a
+  changed namespace or a restart covers the rest. So `arm-prefix-contract!` in `test/seon/instrument_test.clj`
+  stays for now.
+- Profiling cells armed on this path carry no definition digest. Adoption's `definition-digests` is private in
+  `cluster.clj`, which is held.
+- The wrapper compiles against the request database's carried projection. That is default's database for a
+  default request. For a candidate-branch request it is the candidate's projection.
+- **RESET NEEDED: no.**
+
+## Fix (root ruling: option 1)
+
+`seon.test/arm-first-loads!` (`src/seon/test.clj`) is called in `run` after exclusions and before the reach
+read. So it runs once per request and never inside a member body.
+
+- It keeps the runnable `:core` test symbols whose namespace `find-ns` does not find, and requires those
+  namespaces.
+- It then makes one `instrument/apply!` call with `:seon.instrument/changed-identities` set to exactly those
+  namespaces' interns, and nothing else.
+- The call passes adoption's inputs: `:seon.config/on-core-error`, caps and max evidence bytes from the
+  request's `effective`, the carried projection under `schema/call-with-projection`, and the context's
+  `commit-fault!` (the same expression as `cluster.clj:2654`).
+- A registration error is returned as the request's answer. `run`'s output schema adds
+  `:seon.instrument/registration-error`.
+- Cost when nothing is freshly loaded: 543 loaded-namespace members took 0.50 ms, and an unknown symbol 0.45 ms
+  (one pull). Measured with a scratch-namespace copy (`lane-late-load`, removed afterwards).
+- Net: src +33/−1 (docstring and contract included). New regression `test/seon/test/first_load_arming_test.clj`
+  (+19). It is a namespace that no boot or adoption loads, and its body asserts its own contracted Var is armed
+  and that an invalid input refuses with `:seon.instrument/check :input`.
 
 ## Evidence (read-only JVM probes on default, 2026-09-25)
 
@@ -56,58 +81,19 @@ Armed means the root carries `:malli.instrument/original`. Contracted means `:ma
    not load a test namespace that a request names.
 4. **A REPL `require` does not arm.** That path is outside adoption by design.
 
-## Fix options (root rules; recommendation marked)
+## Root runs
 
-1. **The test request loads and arms before any member body (recommended).**
-   - What: in `seon.test/run` (test.clj), after selection and before members start, require each selected
-     `:core` member namespace that `find-ns` does not find. Then call `instrument/apply!` once with
-     `:seon.instrument/changed-identities` set to those namespaces' interns. Pass the request's `effective`
-     policy (test.clj:1960), the default cluster's carried projection and the context's `commit-fault!`, the
-     same inputs adoption passes at cluster.clj:2652-2668.
-   - Guarantee: a lazily loaded namespace is armed once, outside any body, against the adopted projection. Each
-     later request finds it loaded and pays nothing.
-   - Cost: about 15-20 lines in test.clj. The first load pays one arm call, proportional to that namespace's
-     interns.
-   - Sacrifice: `resolve-test`'s `requiring-resolve` stays as a lookup, and a class loader other than the base
-     loader (archive snapshots) has to go through the same step.
-2. **Boot loads every program namespace, `test/` included.**
-   - What: drop the `src/` filter at cluster.clj:2419. Adoption then reloads and re-arms test namespaces like
-     any other.
-   - Guarantee: "loaded namespaces derive from files" holds with no lazy path. The ruling in ed62a3e06 is
-     reversed.
-   - Cost: 1 line, but boot gains about 301 namespace loads, with time and memory not yet measured. A load-time
-     side effect in any test namespace would run at boot.
-   - Sacrifice: ten-second start is at risk. This needs a measured clock row first.
-3. **`resolve-test` arms right after its own first `require`.**
-   - What: about 10 lines in test.clj.
-   - Rejected. It changes JVM-global roots from a member's body thread. The wrapper would capture the member
-     branch's projection and install it for the whole JVM, which breaks "one wrapper per adoption"
-     (instrument.clj:790) and "no reload may run under an evaluation".
+1. Publish and adopt `src/seon/test.clj` and the new test file.
+2. Before running anything else, check that `(find-ns 'seon.test.first-load-arming-test)` is nil.
+3. `bin/test-check default --ns seon.test.first-load-arming-test`. Expect green. Before the fix, `identity-int`
+   returns the string.
+4. `bin/test-check default --ns seon.instrument-test` shows the change caused no regression there.
+5. Repeat the census probe from the evidence section. Expect `seon.test.first-load-arming-test` to show 1 of 1
+   armed.
 
-Ownership needed: option 1 needs `src/seon/test.clj` (the ledger shows it free) plus its regression file.
-Option 2 needs `src/seon/cluster.clj` (held).
-
-## Regression for root (lands with the chosen fix)
-
-Use a test namespace that no boot path loads, with one contracted function, for example a
-`test/seon/instrument/late_load_fixture.clj`.
-
-- The regression runs one `seon.test/run` `:named` request for a test in that namespace.
-- It asserts that, after the request, the fixture's contracted Var root carries `:malli.instrument/original`,
-  and that calling it with an invalid argument throws `:malli.core/invalid-input` instead of returning.
-
-## Root runs (after the fix lands)
-
-- `bin/test-check default --ns seon.instrument-test`. `prefix-contract` should be armed without
-  `arm-prefix-contract!`, and that helper can be retired in the same slice.
-- `bin/test-check default --test <regression symbol>`.
-- Repeat the census probe above. Expected: armed Vars in `-test` namespaces equal their contracted count for
-  every loaded test namespace.
-
-## Out of scope finding
+## Out of scope finding (root records script/dev arming separately)
 
 `script/` and `dev/` namespaces, such as `seon.operator` with 27 contracted Vars, are never armed, because no
 boot or adoption selection includes them. `docs/seon/issues/` was not searched for an existing issue, and none
 was filed from this lane. Root should decide whether those namespaces are program at all.
 
-Net: code +0/−0; this note only.

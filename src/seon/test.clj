@@ -14,6 +14,7 @@
             [seon.env :as env]
             [seon.fn :as functions]
             [seon.id :as id]
+            [seon.instrument :as instrument]
             [seon.program :as program]
             [seon.profile :as profile]
             [seon.schema :as schema]
@@ -1918,6 +1919,35 @@
        (zero? (:seon.test/fail-count result 0))
        (zero? (:seon.test/error-count result 0))))
 
+(defn- arm-first-loads!
+  "Load the host test namespaces `symbols` name that this JVM has not loaded, then
+  arm exactly their contracted Vars once, with the policy adoption passes; before
+  any member body, so no body loads an unarmed namespace (test.clj `resolve-test`)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.config/effective :seon.sci.eval/ctx [:vector :seon.test/sym]]
+                  [:or :nil :seon.instrument/applied :seon.instrument/registration-error]]}
+  [database effective ctx symbols]
+  (let [fresh (into (sorted-set)
+                    (comp (remove (comp find-ns symbol namespace))
+                          (filter #(= :core (:seon.schema.admission/source
+                                             (db/pull database [:seon.schema.admission/source] [:seon.test/sym %]))))
+                          (map (comp symbol namespace)))
+                    symbols)]
+    (when (seq fresh)
+      (run! require fresh)
+      (let [projection (db/carried-projection database)
+            commit-fault! (:seon.flow/commit-fault! @(:seon.sci.kernel/program-snapshot ctx))
+            evidence-bytes (:seon.config.error/max-evidence-bytes effective)]
+        (schema/call-with-projection
+         projection
+         #(instrument/apply!
+           (cond-> {:seon.config/on-core-error (:seon.config/on-core-error effective)
+                    :seon.sci.admit/caps (config/result-caps effective)
+                    :seon.schema/projection projection
+                    :seon.instrument/changed-identities
+                    (into #{} (for [n fresh s (keys (ns-interns n))] [:seon.fn/sym (symbol (str n) (str s))]))}
+             evidence-bytes (assoc :seon.config.error/max-evidence-bytes evidence-bytes)
+             commit-fault! (assoc :seon.flow/commit-fault! commit-fault!))))))))
+
 (defn run
   "Answer one test request on the execution value it names.
 
@@ -1948,7 +1978,7 @@
                   [:or :seon.test/run-result :seon.test/selection-error :seon.test/unknown-error
                    :seon.test/admission-error :seon.test.run/unavailable-error
                    :seon.config/error :seon.db.write/error :seon.db/invalid-read-error
-                   :seon.schema/missing-projection-error]]}
+                   :seon.schema/missing-projection-error :seon.instrument/registration-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
     namespaces :seon.test/namespaces :as request}]
@@ -1993,6 +2023,8 @@
                                                 (concat (:seon.test/destructive-excluded exclusions)
                                                         (:seon.test/deferred exclusions))))]
                          (vec (remove excluded selected))))
+            armed (when (seq runnable)
+                    (arm-first-loads! database effective (:seon.sci.eval/ctx execution) runnable))
             ;; One reach read over every runnable member: each member's
             ;; recording then reads the index (68 members 1,086 ms, against
             ;; 317 ms for each member read alone, 2026-09-23).
@@ -2017,6 +2049,7 @@
           (:seon.error/at selection) selection
           (:seon.error/at exclusions) exclusions
           (:seon.error/at reach) reach
+          (:seon.error/at armed) armed
           :else
           (let [platform? (fn [test-symbol]
                             (some #(and (= test-symbol (:seon.test.member/symbol %))
