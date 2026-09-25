@@ -15,6 +15,14 @@ default converged: seon.call-preparation-test 127/0 (was 80/21/13), supplier coh
 shapes whose own schema row is correct (finding them needs a hand list of shape-pointing attributes — not done).
 Hub schema edit re-derives ~1,500 rows in 3 s, 2.4 s in seon.test.accretion/generatable? (unassigned).
 
+**CHECKPOINT RUN 2026-09-25 (74 commands, 562 members): ~70 red; 28/74 commands green.** Stored counts (MCP): 301 failed,
+26 unknown (was 365/18). Census lane census-checkpoint-reds → red-baseline-census-2026-09-25c.md. PUBLICATION ORDER
+DEFECT seen: `init --changed` of S2b-b paths read render 0a's schema resources (new :seon.program/row-schema on
+:seon.error.occurrence/id) from disk while the loaded program.cljc was pre-0a → panic "A program identity attribute
+declares no source attribute". A --changed request ran full_source_refresh! (reads every schema resource). Fix: publish
+0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
+cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
+
 **OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
 (responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
 (snippets of every branch of deep large values); nothing else clips. Clipping audit c6e75e57c (21 sites). Design
