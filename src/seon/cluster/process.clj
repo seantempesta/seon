@@ -49,7 +49,7 @@
 (defn- handle-start-instant
   "The start instant of `handle`; nil only when that process is no longer alive.
   A live process whose instant the platform withholds refuses as unknown."
-  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?] :symbol]
+  {:malli/schema [:=> [:cat [:fn 'seon.cluster.process/process-handle?] :symbol]
                   [:or :nil :seon.boot/start-instant]]}
   [^java.lang.ProcessHandle handle operation]
   (let [start (.startInstant (.info handle))]
@@ -101,7 +101,7 @@
 (defn matching-process-handle
   "The live handle whose generation is exactly `record`'s, or nil. The record
   must carry its start instant: an unknown generation can match no process."
-  {:malli/schema [:=> [:cat :seon.cluster.process/identity] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
+  {:malli/schema [:=> [:cat :seon.cluster.process/identity] [:or :nil [:fn 'seon.cluster.process/process-handle?]]]}
   [record]
   (let [optional (java.lang.ProcessHandle/of
                   (long (:seon.boot/pid record)))]
@@ -132,13 +132,13 @@
 
 (defn- subprocess-identity
   "`handle`'s identity, or nil when it has already exited."
-  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:or :nil :seon.cluster.process/identity]]}
+  {:malli/schema [:=> [:cat [:fn 'seon.cluster.process/process-handle?]] [:or :nil :seon.cluster.process/identity]]}
   [^java.lang.ProcessHandle handle]
   (when-let [start (handle-start-instant handle `subprocess-identity)]
     {:seon.boot/pid (.pid handle) :seon.boot/start-instant start}))
 
 (defn- same-subprocess-handle
-  {:malli/schema [:=> [:cat :seon.cluster.process/identity] [:or :nil [:fn seon.cluster.process/process-handle?]]]}
+  {:malli/schema [:=> [:cat :seon.cluster.process/identity] [:or :nil [:fn 'seon.cluster.process/process-handle?]]]}
   [{:seon.boot/keys [pid] :as process-identity}]
   (let [candidate (matching-process-handle process-identity)]
     (when (and candidate (= pid (.pid ^java.lang.ProcessHandle candidate)))
@@ -148,7 +148,7 @@
   "The `(pid, start-instant)` identities of `root` and its current descendants.
   A member that exited during the walk is absent. An exited root has no
   descendants: capture while it is alive."
-  {:malli/schema [:=> [:cat [:fn seon.cluster.process/process-handle?]] [:vector :seon.cluster.process/identity]]}
+  {:malli/schema [:=> [:cat [:fn 'seon.cluster.process/process-handle?]] [:vector :seon.cluster.process/identity]]}
   [^java.lang.ProcessHandle root]
   (with-open [descendant-stream (.descendants root)]
     (into (if-let [root-identity (subprocess-identity root)] [root-identity] [])
@@ -162,7 +162,7 @@
   Returns the captured identities still alive after `cleanup-ms`: empty only
   when every exit was observed. A survivor (a member this JVM may not signal,
   or one blocked in the kernel) is the caller's to keep owning, never ended."
-  {:malli/schema [:=> [:cat [:map [:proc [:fn seon.cluster.process/process?]]] [:vector :seon.cluster.process/identity] [:int {:min 0}] [:int {:min 0}]] [:vector :seon.cluster.process/identity]]}
+  {:malli/schema [:=> [:cat [:map [:proc [:fn 'seon.cluster.process/process?]]] [:vector :seon.cluster.process/identity] [:int {:min 0}] [:int {:min 0}]] [:vector :seon.cluster.process/identity]]}
   [process-record launch-identities grace-ms cleanup-ms]
   (let [^Process child (:proc process-record)
         identities (vec (distinct (concat launch-identities
@@ -211,7 +211,7 @@
                  [:seon.operator.subprocess/merge-error? {:optional true} :boolean]
                  [:seon.operator.subprocess/output-file {:optional true} :string]
                  [:seon.operator.subprocess/event-silence-ms {:optional true} [:int {:min 1}]]
-                 [:seon.operator.subprocess/progress {:optional true} [:fn seon.cluster.process/progress-atom?]]
+                 [:seon.operator.subprocess/progress {:optional true} [:fn 'seon.cluster.process/progress-atom?]]
                  [:seon.operator.subprocess/observe-output! {:optional true} [:=> [:cat :string] :seon.schema/value]]]]
      [:map [:seon.operator.subprocess/argv [:vector :string]]
       [:seon.operator.subprocess/exit :int]
@@ -301,8 +301,8 @@
                 (identical? timeout-value error-output) :stderr
                 :else nil)]
     (if phase
-      (let [reaped? (terminate-subprocess! process-record identities
-                                            subprocess-grace-ms subprocess-cleanup-ms)
+      (let [survivors (terminate-subprocess! process-record identities
+                                              subprocess-grace-ms subprocess-cleanup-ms)
             ;; A root that exited before its launch capture has no recorded instant.
             root-start (some #(when (= (.pid child) (:seon.boot/pid %)) (:seon.boot/start-instant %))
                              identities)]
@@ -318,7 +318,7 @@
                     :seon.operator.subprocess/deadline-ms deadline-ms
                     :seon.operator.subprocess/phase phase
                     :seon.operator.subprocess/pid (.pid child)
-                    :seon.operator.subprocess/reaped? reaped?}
+                    :seon.operator.subprocess/reaped? (empty? survivors)}
              root-start (assoc :seon.operator.subprocess/start-instant root-start))))))
       {:seon.operator.subprocess/argv argv
        :seon.operator.subprocess/exit (.exitValue child)

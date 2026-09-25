@@ -100,4 +100,7 @@ not be built." with a chain ending in "A durable Malli definition contains an
 unnamed callable", instead of a refusal naming the missing deadline.
 `seon.cluster.subprocess-test/foreign-process-refuses-an-undeclared-deadline-before-launch`
 asserts the wanted refusal and stays red until the predicates are quoted.
+Fixed there 2026-09-25: all seven `[:fn seon.cluster.process/...]` slots are quoted symbols; the edited
+contracts pass `seon.schema/canonical-definition` (the loaded ones refuse), and the quoted predicates
+validate correctly under Malli (`atom` true, `1` false; `ProcessHandle` true, `:x` false).
 

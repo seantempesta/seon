@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 tags: [issue, operator, process]
 ---
@@ -21,3 +21,10 @@ same assertion stands in `test/seon/dev/publication_test.clj:34`.
 
 Fix at the owner: `:reaped? (empty? survivors)` and name the survivors under
 their own key, so callers keep owning them (the commit's intent).
+
+## Resolution — 2026-09-25
+
+`run-process!` now reports `:reaped? (empty? survivors)` (lane delete-duplicates round 3). REPL: the edited
+namespace, loaded in a scratch namespace on default, answers a 200 ms deadline over `/bin/sleep 5` with
+`{:phase :process-exit :reaped? true}` in 207 ms; Babashka's `seon.cluster.process` gives the same.
+

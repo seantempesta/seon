@@ -140,6 +140,12 @@ probe writes landed and then every read on the branch refused), and the `pull` b
 
 Sizes of the follow-up: src +16/−34; tests +58/−111.
 
+Round 3 (granted `src/seon/cluster/process.clj`): `run-process!` sets `:reaped? (empty? survivors)`, and all seven
+unquoted `[:fn seon.cluster.process/...]` contract predicates (two in `run-process!`/`terminate-subprocess!`,
+five `process-handle?` slots) are quoted symbols, the form `seon.schema/canonical-definition` accepts. Proof as
+recorded in the two issue notes; `test/seon/dev/publication_test.clj:34`'s `(true? reaped?)` is correct again
+without change. Sizes: src +8/−8.
+
 ## Totals
 
 | Slice | Commit | Deleted | Added | Net |
