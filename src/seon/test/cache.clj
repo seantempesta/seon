@@ -3,10 +3,10 @@
   program's evidence depends on and their content digests."
   (:require [babashka.process :as process]
             [clojure.edn :as edn]
+            [hasch.core :as hasch]
             [clojure.java.io :as io]
             [clojure.string :as str])
   (:import [java.io File]
-           [java.security MessageDigest]
            [java.nio.file Files]))
 
 (def graph-roots
@@ -17,12 +17,6 @@
   "Bound for Git's local file inventory, matching the existing issue-history
   Git read allowance. Expiry refuses selection rather than omitting inputs."
   30000)
-
-(defn- sha-256
-  {:malli/schema [:=> [:cat :seon.blob/octet-array] :string]}
-  [^bytes source-bytes]
-  (let [digest (.digest (MessageDigest/getInstance "SHA-256") source-bytes)]
-    (apply str (map #(format "%02x" (bit-and 0xff %)) digest))))
 
 (defn input-paths
   "Git's input paths, or the exact inventory carried by an exported snapshot."
@@ -62,7 +56,7 @@
       (filter #(.isFile ^File %))
       (map (fn [^File file]
              [(str/replace (str (.relativize (.toPath root-file) (.toPath file))) File/separator "/")
-              (sha-256 (Files/readAllBytes (.toPath file)))])))
+              (hasch/hash->str (hasch/sha256 (Files/readAllBytes (.toPath file))))])))
      (input-paths (.getPath root-file)))))
 
 (defn changed-inputs
@@ -201,7 +195,7 @@
                           tokens (vec (enumeration-seq
                                        (java.util.StringTokenizer. (subs line 0 tab))))]
                       [(subs line (inc tab))
-                       (sha-256 (.getBytes ^String (second tokens) "UTF-8"))]))))
+                       (hasch/hash->str (hasch/sha256 (.getBytes ^String (second tokens) "UTF-8")))]))))
           (str/split-lines text))))
 
 (defn toolchain-dependencies
@@ -216,7 +210,7 @@
                 (keep (fn [path]
                         (let [file (io/file root path)]
                           (when (.isFile file)
-                            [path (sha-256 (Files/readAllBytes (.toPath file)))])))))
+                            [path (hasch/hash->str (hasch/sha256 (Files/readAllBytes (.toPath file))))])))))
           (input-paths root))))
 
 (defn input-digests
@@ -241,7 +235,7 @@
   "Digest an already selected, sorted external-input inventory."
   {:malli/schema [:=> [:cat [:map-of :string :string]] :seon.source/digest]}
   [inputs]
-  (sha-256 (.getBytes (pr-str (into (sorted-map) inputs)) "UTF-8")))
+  (hasch/hash->str (hasch/sha256 (.getBytes (pr-str (into (sorted-map) inputs)) "UTF-8"))))
 
 (defn test-input-digest
   "Digest the sorted inventory of gate inputs without indexed declarations,
