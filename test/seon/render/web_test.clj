@@ -648,8 +648,8 @@ handle))}}
            declared (web-private 'declared-entity-units)
            entity (db/pull database '[*]
                            [:seon.agent/id "unit-owner"])]
-       (is (= [:seon.agent/id :seon.agent/plan
-               :seon.agent/namespace :seon.agent/settings
+       (is (= [:seon.agent/id :seon.agent/branch :seon.agent/archived-tx
+               :seon.agent/namespace :seon.agent/plan :seon.agent/settings
                :seon.agent/runtime
                :seon.message/inbound-content]
               (declared projection database entity))

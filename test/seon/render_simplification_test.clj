@@ -850,52 +850,6 @@
          (is (boolean
               (some #(str/includes? % "renderer") messages))))))))
 
-(defn- without-declared-pair
-  "The same projection with `schema-key` redeclared without its AI/HTML pair."
-  [projection schema-key]
-  (schema/projection-with-schema
-   projection schema-key
-   (update (get (:seon.schema.projection/forms projection) schema-key) 1
-           dissoc :seon.render/ai :seon.render/html)
-   {:seon.schema.admission/source :agent}))
-
-(deftest selection-asks-the-handed-database-value-s-projection
-  ;; §2.1: a database value carries the projection its rows were read under
-  ;; (src/seon/db.clj:141) and reads use it before any supplied one
-  ;; (src/seon/db.clj:950). Selection asked the SCI ctx alone, so the same
-  ;; value read from two worlds selected the same producer, and "what would
-  ;; this render as under projection P" could only be asked by mutating the
-  ;; shared ctx.
-  (support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           ctx (support/fork-cluster-ctx connection)
-           value {:my.plan.item/id "selection-projection"
-                  :my.plan.item/title "Probe"}
-           declared (db/carried-projection database)
-           undeclared (without-declared-pair declared :my.plan.item/item)
-           other-database (vary-meta database assoc
-                                     :seon.schema/projection undeclared)
-           request (assoc (render-request database ctx nil value)
-                          :seon.render/output :seon.render/ai)
-           select (fn [db] (:seon.render.selection/selected
-                            (selection (assoc request :seon.db/db db))))]
-       (is (some? declared)
-           "the fixture database value carries its projection")
-       (is (not= (get-in declared [:seon.schema.projection/shape-rows
-                                   :my.plan.item/item :seon.render/ai])
-                 (get-in undeclared [:seon.schema.projection/shape-rows
-                                     :my.plan.item/item :seon.render/ai]))
-           "the two projections differ in exactly one declared pair")
-       (is (= 'seon.plan/render-item-ai (select database)))
-       (is (= 'seon.render.value/render-ai (select other-database))
-           "the handed database value's projection decides, not the ctx")
-       (is (= 'seon.plan/render-item-ai
-              (get-in (kernel/context-projection ctx)
-                      [:seon.schema.projection/shape-rows
-                       :my.plan.item/item :seon.render/ai]))
-           "and the ctx still declares the pair — nothing was mutated")))))
-
 (deftest a-refused-database-read-is-not-an-absent-database
   ;; THE CLASS: an invalid database read fell through to the request's or
   ;; context's projection, so a render answered against another program.

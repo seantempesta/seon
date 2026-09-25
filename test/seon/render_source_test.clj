@@ -296,9 +296,9 @@
                           [?schema :seon.schema/key ?key]]
                         database function-symbol)))]
        (is (= "(+ 1 1)" (authored-source {})))
-       (is (contains? (output-refs "seon.render-source-test/authored-source")
+       (is (contains? (output-refs 'seon.render-source-test/authored-source)
                       :seon.render/source))
-       (is (not (contains? (output-refs "seon.render.transcript/render-run-ai")
+       (is (not (contains? (output-refs 'seon.render.transcript/render-run-ai)
                            :seon.render/source)))
        (with-redefs [agent/submit-source! (fn [& _] (throw (ex-info "preview submitted" {})))
                      eval/evaluate (fn [request] (swap! evaluations inc) (original-evaluate request))]
