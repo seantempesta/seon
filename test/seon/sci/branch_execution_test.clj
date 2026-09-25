@@ -434,9 +434,9 @@
      (db/call-with-custody {:seon.db/connection connection}
       (fn []
        ;; exact! calls effect/request!, an alias my.edit makes with a
-       ;; top-level require outside its ns form; publication-base! calls
-       ;; clojure.core/spit, which SCI's core lacks.
-       (let [changed '[my.edit/exact! seon.cluster/publication-base!]
+       ;; top-level require outside its ns form; write-edn-atomically! calls
+       ;; clojure.core/spit, which SCI's core lacks, through imported classes.
+       (let [changed '[my.edit/exact! seon.fs/write-edn-atomically!]
              before (db/db connection)
              ctx (eval/cluster-ctx before connection
                                    (eval/projection-state before (db/carried-projection before))

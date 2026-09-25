@@ -35,7 +35,6 @@
             [datahike.schema]
             [seon.bootstrap :as bootstrap]
             [seon.cluster.source :as source]
-            [seon.cluster.export :as export]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
             [clojure.string :as str]
@@ -71,9 +70,7 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [seon.schema.internal :as internal])
-  (:import [java.nio.charset StandardCharsets]
-           [java.nio.file CopyOption Files InvalidPathException Paths
-            StandardCopyOption]
+  (:import [java.nio.file InvalidPathException Paths]
            [java.util Date]
            [java.util.concurrent Executor]))
 
@@ -1885,42 +1882,6 @@
          currentness)))
     currentness))
 
-(defn source-artifact-file
-  "The per-store artifact that describes the published source commit."
-  {:malli/schema [:=> [:cat :seon.boot/root] :string]}
-  [root]
-  (str (io/file root "build" "current-src.edn")))
-
-(defn- write-source-artifact!
-  [root artifact]
-  (let [target (.toPath (io/file (source-artifact-file root)))
-        directory (.getParent target)]
-    (Files/createDirectories directory
-                             (make-array java.nio.file.attribute.FileAttribute 0))
-    (let [temporary (Files/createTempFile
-                     directory "current-src-" ".edn"
-                     (make-array java.nio.file.attribute.FileAttribute 0))]
-      (try
-        (Files/writeString temporary (str (pr-str artifact) "\n")
-                           StandardCharsets/UTF_8
-                           (make-array java.nio.file.OpenOption 0))
-        (Files/move temporary target
-                    (into-array CopyOption
-                                [StandardCopyOption/ATOMIC_MOVE
-                                 StandardCopyOption/REPLACE_EXISTING]))
-        (finally
-          (Files/deleteIfExists temporary))))
-    artifact))
-
-(defn- source-artifact
-  [published manifest snapshot]
-  {:seon.source/digest (:seon.source/digest published)
-   :seon.source/commit-id (:seon.source/commit-id published)
-   :seon.source/test-input-digest (:seon.source/test-input-digest snapshot)
-   :seon.source/test-input-digests (:seon.source/test-input-digests snapshot)
-   :seon.source/relative-file-digests (:seon.source/relative-file-digests snapshot)
-   :seon.fn/manifest manifest})
-
 (defn- current-publication
   [store expected-digest]
   (when-let [{branch :seon.source/branch commit-id :seon.source/commit-id}
@@ -2947,76 +2908,6 @@
                 result))))
          (finally
            (release-root-store! store-dir))))))
-
-(defn publication-base!
-  "Export the common publication and its exact manifest for isolated workers."
-  {:malli/schema [:=> [:cat :seon.boot/root :string :string] :string]}
-  [root directory destination]
-      (let [store-dir (:seon.boot/store-dir (resolve-bootstrap {:seon.boot/root root}))
-            held (acquire-root-store! store-dir)]
-        (try
-          ;; An export names a complete checkout, not an empty edit request.
-          ;; Include stored paths so files removed from that checkout retract.
-          (let [paths (set (test.cache/input-paths directory))
-                published (source/current held)
-                database (when published (source/database held (:seon.source/commit-id published)))
-                paths (try
-                        (if database
-                          (let [stored (db/q '[:find [?path ...]
-                                               :where [_ :seon.fn.file/relative-path ?path]] database)]
-                            (when (:seon.error/at stored)
-                              (refused! "The exported publication's input paths could not be read." stored))
-                            (into paths stored))
-                          paths)
-                        (finally (when database (d/release-materialized-db database))))]
-            (let [result (refresh-source! root (vec (sort paths)) nil directory)]
-              (when (:seon.error/at result)
-                (throw (ex-info (:seon.error/message result) result)))
-              ;; Export, manifest and provenance all name this refresh's own
-              ;; commit, never a reread of the mutable head.
-              (let [published (select-keys result [:seon.source/branch :seon.source/commit-id])
-                database (source/database held (:seon.source/commit-id published))
-                digest (db/q database '[:find ?digest . :where [_ :seon.source/digest ?digest]])
-                input-digest (db/q database '[:find ?digest .
-                                              :where [_ :seon.source/test-input-digest ?digest]])]
-            (try
-              (when (map? digest)
-                (refused! "The exported publication digest could not be read." digest))
-              (when (map? input-digest)
-                (refused! "The exported publication input digest could not be read." input-digest))
-              (when-not input-digest
-                (refused! "The exported publication has no input digest." :seon.error/absent))
-              (report-source-progress! "publication export")
-              (export/export! {:seon.store/store held
-                               :seon.export/parent-dir (str (io/file destination "data"))})
-              ;; The export copies the live store; a publication that moved
-              ;; the head meanwhile makes the copy disagree with this manifest.
-              (let [head (:seon.source/commit-id (source/current held))]
-                (when-not (= head (:seon.source/commit-id published))
-                  (refused! "The source head moved during publication export."
-                            {:seon.source/branch source/current-branch
-                             :seon.source/expected-commit-id (:seon.source/commit-id published)
-                             :seon.source/commit-id head})))
-              (let [manifest (seon.fn/database-manifest database directory
-                                                        (:seon.fn/roots (publication-roots)) nil)
-                    input-digests (test.cache/external-input-digests
-                                   directory (test.cache/input-digests directory))
-                    inputs (into {} (db/q '[:find ?path ?digest
-                                            :where [?file :seon.fn.file/relative-path ?path]
-                                                   [?file :seon.fn.file/digest ?digest]] database))]
-                (write-source-artifact! destination
-                  (source-artifact (assoc published :seon.source/digest digest) manifest
-                                   {:seon.source/test-input-digest input-digest
-                                    :seon.source/test-input-digests input-digests
-                                    :seon.source/relative-file-digests inputs}))
-                (spit (io/file destination "manifest.edn") (pr-str manifest)))
-              (spit (io/file destination "provenance.edn")
-                    (pr-str {:seon.test.run/program-digest digest
-                             :seon.test.run/basis-t (db/basis-t database)
-                             :seon.test.run/branch source/current-branch}))
-              destination
-              (finally (d/release-materialized-db database))))))
-          (finally (release-root-store! store-dir)))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Recovery — the pass that runs before anything resumes
