@@ -1419,6 +1419,9 @@
 (def ^:private release-context!
   (delay (requiring-resolve 'seon.cluster.agent/release-context!)))
 
+(def ^:private routing
+  (delay (requiring-resolve 'seon.cluster.agent/routing)))
+
 (def ^:private seed-cluster-facts!
   (delay (requiring-resolve 'seon.cluster/seed-cluster-facts!)))
 
@@ -1522,6 +1525,22 @@
             :seon.error/operation (:seon.error/operation refusal)
             :seon.error/offending (value/bounded-text (:seon.error/offending refusal) 400)}))
 
+(defn- open-world!
+  "Open `branch` with the schema projection its value derives, from `candidate`'s."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.store/branch :seon.db/database-value]
+                  :seon.db/connection]}
+  [store branch candidate]
+  (let [connection (store/open-branch! store branch)]
+    (try
+      (db/carry-connection-projection-state!
+       connection (sci.eval/projection-state
+                   (db/db connection)
+                   (schema/projection-from-database (db/db connection) (db/carried-projection candidate))))
+      connection
+      (catch Throwable failure
+        (try (store/release-branch! connection) (catch Throwable cleanup (.addSuppressed failure cleanup)))
+        (throw failure)))))
+
 (defn- prepare-checkpoint!
   "Write boot's cluster facts, then the source record, onto the checkpoint
   branch this caller created. A refusal retires it and throws."
@@ -1530,12 +1549,8 @@
                        :seon.db/database-value]
                   :nil]}
   [store branch cluster effective process base candidate]
-  (let [connection (store/open-branch! store branch)]
+  (let [connection (open-world! store branch candidate)]
     (try
-      (db/carry-connection-projection-state!
-       connection (sci.eval/projection-state
-                   (db/db connection)
-                   (schema/projection-from-database (db/db connection) (db/carried-projection candidate))))
       (db/call-with-custody
        {:seon.db/connection connection}
        #(do (@seed-cluster-facts! connection cluster
@@ -1599,16 +1614,28 @@
                  (throw (ex-info "Another request is preparing this test world; retry once it completes."
                                  {:seon.error/expected :seon.test/prepared-checkpoint
                                   :seon.error/offending branch})))
-        handle (@acquire-context! execution nil {:seon.agent/isolate? true
-                                                 :seon.cluster.registry/from head})
-        connection (:seon.db/connection handle)
+        ;; The request branch holds the overlay and roots its commit for the
+        ;; members, which fork the execution's context and acquire their own
+        ;; program: acquiring one here too measured ~0.5 s of nothing.
+        request-branch (keyword (str "agent-" (id/id)))
+        _ (when-not (:seon.cluster/created? (registry/branch! {:seon.store/store store :seon.store/branch request-branch
+                                                              :seon.cluster.registry/from head}))
+            (throw (ex-info "The request branch already exists." {:seon.error/offending request-branch})))
+        release! (fn [^Throwable failure steps]
+                   (doseq [cleanup! steps]
+                     (try (cleanup!) (catch Throwable cleanup (.addSuppressed failure cleanup))))
+                   failure)
+        retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch request-branch})
+        connection (try (open-world! store request-branch candidate)
+                        (catch Throwable failure (throw (release! failure [retire!]))))
         report (when (seq overlay)
                  (try (db/call-with-custody {:seon.db/connection connection}
                                             #(db/transact! connection overlay))
-                      (catch Throwable failure (@release-context! handle) (throw failure))))]
+                      (catch Throwable failure
+                        (throw (release! failure [#(store/release-branch! connection) retire!])))))]
     (when (and report (not (:db-after report)))
-      (@release-context! handle)
-      (throw (world-refusal (str "program overlay (" (count overlay) " entries)") report)))
+      (throw (release! (world-refusal (str "program overlay (" (count overlay) " entries)") report)
+                       [#(store/release-branch! connection) retire!])))
     (doseq [other (registry/roster store)
             :when (and (not= other branch) (str/starts-with? (name other) prefix))]
       ;; Datahike refuses a connected branch. A request between reading an old
@@ -1618,10 +1645,21 @@
            (catch clojure.lang.ExceptionInfo refusal
              (when-not (= ::registry/cluster-connected (::registry/refused (ex-data refusal)))
                (throw refusal)))))
-    (if report
-      (let [database (db/db connection)]
-        (assoc handle :seon.db/db database :seon.source/commit-id (db/commit-id database)))
-      handle)))
+    (let [database (db/db connection)
+          ctx (or (:seon.sci.eval/base-ctx execution) (:my.program/base-ctx execution)
+                  (:seon.sci.eval/ctx execution))]
+      ;; The execution's value with this request's own world: fresh context
+      ;; state and routing, so member entries and graphs stay the request's.
+      (assoc execution
+             :seon.agent/context-state (atom {}) :seon.agent/routing (@routing)
+             :seon.sci.eval/base-ctx ctx :seon.sci.eval/ctx ctx
+             :seon.env/environment (or (env/of execution) (env/of ctx))
+             :seon.db/connection connection :seon.db/db database
+             :seon.source/commit-id (db/commit-id database)
+             :seon.schema/projection (db/carried-projection database)
+             :seon.agent/branch request-branch :seon.agent/mode :isolated
+             :seon.agent/owns-connection? true :seon.agent/owns-branch? true
+             :seon.store/store store))))
 
 (defn- request-refusal
   "Name one refused request member with the value it carried."

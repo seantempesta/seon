@@ -3726,6 +3726,10 @@
   ;; whose unchanged datoms are the index's own objects.
   (cache/lru-cache-factory {} :threshold 4))
 
+(defonce ^:private arity-commit-cache
+  ;; Commit id -> the same derived base; small keys, so it retains more.
+  (cache/lru-cache-factory {} :threshold 16))
+
 (defn- arity-base
   "The arity gate's whole-program input for a value, memoized by the datoms it
   reads: edges, bounds, the comparison, and the edges indexed by caller and
@@ -3745,20 +3749,22 @@
     ;; `:db-after`, `datahike/writer.cljc:118`, whose context is speculative,
     ;; `datahike/db.cljc:444`), so no commit id can name it; its datoms can. Datom equality compares e, a
     ;; and v (`datahike/datom.cljc:106`), which is all the gate reads.
-    ;; A committed value is named by its commit id (Datahike derives it from
-    ;; content), so the first write on a fresh branch of a shared commit hits
-    ;; without reading its ~78,000 arity datoms (114 ms) to build the key.
-    @(cache/lookup-or-miss
-      arity-base-cache
-      (let [{:datahike.cache/keys [committed? commit-id]} (:cache-context database)]
-        (if (and committed? commit-id)
-          [::arity-commit commit-id]
-          [::arity-content (mapv (fn [attribute]
-                                   [attribute (if (get (dbi/-schema database) attribute)
-                                                (vec (d/datoms database :aevt attribute))
-                                                [])])
-                                 arity-attributes)]))
-      (fn [_] (delay (derive))))))
+    ;; Keyed by content; a committed value is also named by its commit id
+    ;; (Datahike derives it from content), so a later write on a fresh branch
+    ;; of a seen commit hits without reading its ~78,000 arity datoms (114 ms)
+    ;; to build the content key, and a new commit of seen content still hits.
+    (let [by-content #(deref (cache/lookup-or-miss
+                              arity-base-cache
+                              [::arity-content (mapv (fn [attribute]
+                                                       [attribute (if (get (dbi/-schema database) attribute)
+                                                                    (vec (d/datoms database :aevt attribute))
+                                                                    [])])
+                                                     arity-attributes)]
+                              (fn [_] (delay (derive)))))
+          {:datahike.cache/keys [committed? commit-id]} (:cache-context database)]
+      (if (and committed? commit-id)
+        @(cache/lookup-or-miss arity-commit-cache commit-id (fn [_] (delay (by-content))))
+        (by-content)))))
 
 (defn- report-arity-comparison
   "The arity comparison of a report's final value from its `:db-before`'s
