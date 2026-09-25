@@ -218,12 +218,14 @@ Private experiments remain possible; local green never implies shared acceptance
   from latest evidence before a turn; append changed reads, never replay writes/effects or
   rewrite history. Compaction clears evaluations and regenerates the opening. Archive
   agents; preserve task/agent identity on loud, resumable budget exhaustion.
-- **Render ordinary values totally.** Use one AI/HTML pair per entity schema, scalars in
-  its block, components/declared queries in theirs. A value's own `:seon.render/ai` or
-  `:seon.render/html` key overrides that default for its face (a renderer symbol, an inline
-  function admitted like any agent function, or the rendered data itself), so any REPL result
-  can carry its presentation. A render function receives one unit; the database and other
-  render inputs are supplied when its declared input keys ask for them. Default to the attribute-map printer;
+- **Render ordinary values totally.** Per face, the first match wins: the value's own
+  `:seon.render/ai` or `:seon.render/html` key (the master override: a renderer symbol, an inline
+  function, or rendered data); a render function whose contract fits the value, defined in the
+  viewing agent's namespace (that agent's own defaults); the schema's declared pair (the shipped
+  default); the floor. A render function is known by its face role; its output may be any spec'd
+  shape, rendered in turn. Before calling it, read its contract: inputs it declares but the caller
+  omits (the database, the unit) are supplied as defaults by declared schema name, as for every
+  function, and caller arguments always win. Components/declared queries render in their own blocks;
   failed rendering gives a diagnostic. Compose error base and satisfied schema renderers.
   An attribute request stays an attribute request; report ugly output and estimate tokens.
 - **Apply presentation limits once.** One render path: a value's declared render function renders less, else the floor value
