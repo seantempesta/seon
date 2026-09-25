@@ -762,14 +762,17 @@
                  (:seon.program/definition-digest committed)))))))
   nil)
 
-(declare install-declared-classes!)
+(declare install-declared-classes! install-jvm-root! overridden-row?)
 
 (defn- install-function-from-database!
-  "Install one selected function from the acquired database snapshot."
+  "Install one selected function from the acquired database snapshot. A definition
+  the loaded program holds unchanged binds its compiled Var, exactly as acquisition
+  binds a loaded namespace's; only an overridden or affected row interprets source."
   [ctx db function-symbol]
   (let [{source ::function-source
          namespace-name ::function-namespace}
-        (kernel/program-function ctx function-symbol)]
+        (kernel/program-function ctx function-symbol)
+        {interpreted ::interpreted loaded ::loaded-database} @(::kernel/program-snapshot ctx)]
     (when-not source
       (throw
        (ex-info "Selected function is missing from the acquired SCI program snapshot."
@@ -779,6 +782,9 @@
                   ::missing-function-row function-symbol
                   :seon.fn/sym function-symbol
                   :seon.error/expected :seon.sci.eval/acquired-function}))))
+    (when-not (and (not (contains? interpreted function-symbol))
+                   (not (overridden-row? loaded (db/pull db '[*] [:seon.fn/sym function-symbol])))
+                   (install-jvm-root! ctx function-symbol))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
@@ -790,7 +796,7 @@
           (sci/eval-form ctx (:seon.sci.reader/form event)))
         (install-function-contract!
          ctx (db/pull db '[*] [:seon.fn/sym function-symbol])
-         (context-projection ctx) db)))
+         (context-projection ctx) db))))
     (kernel/mark-installed! ctx function-symbol)
     function-symbol))
 
@@ -3610,6 +3616,8 @@
                           ;; cached delay turns that one refusal into every
                           ;; later failure in the JVM.
                           :seon.sci.eval/projection-state projection-state
+                          ;; The capability handler resolves in this ctx.
+                          :seon.sci.eval/ctx evaluation-ctx
                           :seon.effect/counter (atom -1)})}
       (let [failure-result
              (fn [throwable]

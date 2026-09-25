@@ -49,7 +49,8 @@
                  :seon.effect/missing-effect-id]]],
               :result-validator
               [:fn
-               #:gen{:schema [:=> [:cat :seon.schema/value] :boolean]}
+               {:gen/schema [:=> [:cat :seon.schema/value] :boolean]
+                :error/message "must be a compiled result validator function"}
                clojure.core/ifn?],
               :request-owner :qualified-symbol,
               :program
@@ -130,7 +131,10 @@
                 :seon.sci.eval/projection-state]
                [:seon.flow/work-launcher
                 {:optional true}
-                :seon.flow/work-launcher]],
+                :seon.flow/work-launcher]
+               [:seon.sci.eval/ctx
+                {:description "The requesting evaluation's SCI ctx; the declared capability handler resolves in it."}
+                :seon.sci.eval/ctx]],
               :notify [:and #:seon.db{:index true} :seon.db/ref],
               :interrupted-error
               [:and

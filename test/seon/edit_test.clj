@@ -277,6 +277,7 @@
    ;; Handed explicitly, exactly as `seon.sci.eval` hands it.
    :seon.sci.eval/projection-state
    (atom {:seon.schema/projection (db/carried-projection (db/db connection))})
+   :seon.sci.eval/ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
    :seon.effect/counter (atom -1)})
 
 (defn- seed-write-back-cluster!

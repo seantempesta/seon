@@ -6,7 +6,8 @@
   committed before the protected JVM handler runs on the process-root `:io`
   executor; terminal data is bounded and committed once. Recovery interrupts
   an open receipt and never dispatches it again."
-  (:require [malli.core :as m]
+  (:require [clojure.edn :as edn]
+            [malli.core :as m]
             [malli.util :as mu]
             [sci.core :as sci]
             [sci.impl.utils :as sci.utils]
@@ -545,11 +546,28 @@
   (delay (requiring-resolve 'seon.error/declared-output-validators)))
 
 (defn- handler-refusal-validators
-  "Validators for the loaded two-argument handler's declared errors."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value]
+  "Validators for the two-argument handler's declared errors, compiled from its
+  admitted row's contract (`spec-edn`), never from a JVM Var's metadata."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :string]]
                   [:vector :seon.effect/result-validator]]}
-  [projection handler-var]
-  (mapv second (@error-output-validators projection (:malli/schema (meta handler-var)) 2)))
+  [projection spec-edn]
+  (if spec-edn
+    (mapv second (@error-output-validators projection (edn/read-string spec-edn) 2))
+    []))
+
+(defn- context-handler
+  "The declared handler as the requesting evaluation's SCI ctx holds it, installed
+  through the ctx's own program installer exactly as a named invocation is; a
+  failed installation is the returned `:seon.error/data`."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :qualified-symbol]
+                  [:or [:map [:seon.effect/handler [:fn clojure.core/ifn?]]] [:map [:seon.error/data :map]]]]}
+  [ctx database handler-symbol]
+  (try (kernel/ensure-function! ctx database handler-symbol)
+       (if-let [handler (some-> (sci/resolve ctx handler-symbol) deref)]
+         {:seon.effect/handler handler}
+         {:seon.error/data {:seon.fn/sym handler-symbol}})
+       (catch clojure.lang.ExceptionInfo failure
+         {:seon.error/data (assoc (ex-data failure) :seon.fn/sym handler-symbol)})))
 
 (defn- settle-value!
   ([connection dials effect-id opened-at threshold raw-value refusal-validators]
@@ -703,13 +721,17 @@
   {:seon.fn/invokes #{:seon.effect/capability}
    :malli/schema [:=> [:cat :seon.schema/value :seon.schema/value :seon.effect/execution-options] :seon.effect/request-result]}
   [owner request execution]
-  (let [owner-sym (owner-symbol owner)]
+  (let [owner-sym (owner-symbol owner)
+        ;; The handler resolves in the requesting evaluation's ctx, so a context
+        ;; without one names that member rather than falling back to the JVM.
+        missing (cond (nil? *request-context*) :seon.turn/id
+                      (nil? (:seon.sci.eval/ctx *request-context*)) :seon.sci.eval/ctx)]
      (cond
-       (nil? *request-context*)
+       missing
        (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
         {:seon.error/message "Invoke the capability from a current evaluation."
         :seon.error/offending request
-        :seon.effect/missing-context-member :seon.turn/id
+        :seon.effect/missing-context-member missing
         :seon.error/expected "a current evaluation context"})
 
        (nil? owner-sym)
@@ -737,8 +759,9 @@
                        :seon.effect/capability]
                       [:seon.fn/sym owner-sym])
              handler-symbol (:seon.effect/capability owner-row)
-             handler-var (some-> handler-symbol requiring-resolve)
-             handler (some-> handler-var deref)
+             resolved (when handler-symbol
+                        (context-handler (:seon.sci.eval/ctx *request-context*) database handler-symbol))
+             handler (:seon.effect/handler resolved)
              effective
              (config/effective
               database (:seon.boot/cluster-name *request-context*))
@@ -759,11 +782,12 @@
 
            (nil? handler)
            (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
-            {:seon.error/message "Load the declared capability handler before dispatch."
+            (cond-> {:seon.error/message "Load the declared capability handler before dispatch."
         :seon.error/offending handler-symbol
         :seon.effect/unavailable-handler-symbol handler-symbol
         :seon.error/member :seon.effect/capability
-        :seon.error/expected "a loaded capability handler"})
+        :seon.error/expected "a loaded capability handler"}
+              (:seon.error/data resolved) (assoc :seon.error/data (:seon.error/data resolved))))
 
            (not (accepts-request? database owner-sym request))
            (seon.error.refusal/diagnostic (Date.) :seon.effect/execution 'seon.effect/request*
@@ -783,7 +807,7 @@
                   (or (db/carried-projection database)
                       (:seon.schema/projection dials)
                       (:seon.schema/projection (env/of dials)))
-                  handler-var)]
+                  (:seon.fn/spec (db/pull database [:seon.fn/spec] [:seon.fn/sym handler-symbol])))]
              ;; A REQUEST ADMISSION THAT KEPT NOTHING IS A REFUSAL, NOT A
              ;; DISPATCH. The retired `:seon.sci.admit/capped?` key answers
              ;; nil now, so this branch stopped firing and an oversized

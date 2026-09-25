@@ -223,6 +223,7 @@
     :seon.sci.eval/projection-state
     (atom {:seon.schema/projection
            (db/carried-projection (db/db connection))})
+    :seon.sci.eval/ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
     :seon.effect/counter (atom -1)}))
 
 (deftest background-settlement-carries-its-connection-across-a-thread-hop
@@ -689,6 +690,23 @@
                                    {:seon.effect-test/value 7}))]
             (is (= (:seon.effect/id receipt) (:seon.effect/recorded-effect-id second-result)))
             (is (= 1 (count @handler-calls)))))))))
+
+(deftest a-request-context-without-its-evaluation-ctx-refuses-by-name
+  (test-support/with-database
+    (fn [connection]
+      (reset! handler-calls [])
+      (transact-fixture! connection [(cluster-config 600000)
+                                     {:seon.turn/id "effect-run"
+                                      :seon.turn/agent {:seon.agent/id "effect-agent"}
+                                      :seon.turn/opened-tx "datomic.tx"}])
+      (install-capability! connection)
+      (let [refusal (binding [effect/*request-context* (dissoc (request-context connection) :seon.sci.eval/ctx)]
+                      (effect/request! #'capability-owner {:seon.effect-test/value 7}))]
+        (is (= :seon.sci.eval/ctx (:seon.effect/missing-context-member refusal)) (pr-str refusal))
+        (is (empty? @handler-calls) "nothing dispatched")
+        (is (nil? (db/pull (db/db connection) [:db/id]
+                           [:seon.effect/id (id/digest 12 [:seon.effect/id "effect-run" 3 0])]))
+            "no receipt opened")))))
 
 (deftest handler-errors-come-only-from-the-handler-contract
   (test-support/with-database
