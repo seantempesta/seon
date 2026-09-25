@@ -527,78 +527,86 @@
                                                       (or (:db-after result) database)))}
                result (assoc :seon.db/transaction-report result))))))
 
-;;; TASKS (spec 7.1-7.9): data from resources/seon/tasks/<owning-ns>.edn; subjects
-;;; and proofs are the `:seon.task/tasks` values program rows carry.
+;;; TASKS (spec 7.1-7.16): declarations from resources/seon/tasks/<ns>.edn; subjects
+;;; and proofs are the `:seon.task/tasks` handles program rows carry.
 
-(defn- task-component
-  "The id namespace, `<owning-ns>.task`, that a task file's path names."
-  {:malli/schema [:=> [:cat :string] :string]}
+(defn task-handle
+  "The task handle of an identifying aspect: seon.id/id over [ns name kind] (3b.6)."
+  {:malli/schema [:=> [:cat :seon.task/ns :seon.task/name :seon.task/kind] :seon.task/handle]}
+  [ns name kind]
+  (id/id [ns name kind]))
+
+(defn task-path?
+  "Whether a repository-relative path names a task file."
+  {:malli/schema [:=> [:cat :string] :boolean]}
   [path]
-  (str (str/replace-first (.getName (io/file path)) ".edn" "") ".task"))
+  (let [file (io/file path)]
+    (and (= "resources/seon/tasks" (.getParent file)) (str/ends-with? (.getName file) ".edn"))))
 
-(defn task-entries
-  "Read one task file as data (edamame, never evaluated); refuse an invalid, misplaced or duplicate entry."
-  {:malli/schema [:=> [:cat :seon.db/database-value :string :string] :seon.task/file]}
-  [database path text]
-  (let [entries (edamame/parse-string text)
-        component (task-component path)
-        refuse! #(functions/task-refused! %1 (symbol component) %2)
-        ids (map :seon.task/id entries)]
-    (some->> (m/explain (mr/schema (:seon.schema.projection/registry (db/carried-projection database)) :seon.task/file) entries)
-             me/humanize (refuse! :invalid-entry))
-    (some->> (seq (remove #(= component (namespace %)) ids)) vec (refuse! :misplaced-id))
-    (some->> (seq (keep (fn [[id n]] (when (< 1 n) id)) (frequencies ids))) vec (refuse! :duplicate-id))
-    entries))
+(defn- file-namespace
+  "The owning namespace a task file's name states."
+  {:malli/schema [:=> [:cat :string] :seon.task/ns]}
+  [path]
+  (symbol (str/replace-first (.getName (io/file path)) ".edn" "")))
 
-(defn tasks-tx
-  "The delta from stored tasks to the files, by id: empty when unchanged; a removed entry retracts its task."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :string :string]] [:vector :seon.schema/value]]}
+(defn task-files
+  "Task file texts under `directory`: every file, or the changed `paths`; a deleted file is \"[]\"."
+  {:malli/schema [:=> [:cat :string [:maybe [:sequential :string]]] :seon.task/files]}
+  [directory paths]
+  (into (sorted-map)
+        (map (fn [path] (let [file (io/file directory path)] [path (if (.isFile file) (slurp file) "[]")])))
+        (filter task-path? (or paths (map #(str "resources/seon/tasks/" (.getName %))
+                                          (.listFiles (io/file directory "resources/seon/tasks")))))))
+
+(defn- read-error
+  "The owner's declared read or write refusal, when `result` is one."
+  {:malli/schema [:=> [:cat :seon.schema/value] [:maybe :seon.error/base]]}
+  [result]
+  (when (and (map? result) (:seon.error/at result)) result))
+
+(defn- declaration
+  "A stored or proposed task's `:seon.task/declaration`: its declared members, sets as sets."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:maybe :map]] [:maybe :seon.task/declaration]]}
+  [projection task]
+  (when task
+    (update-vals (select-keys task (map first (m/children (m/deref (mr/schema (:seon.schema.projection/registry projection)
+                                                                              :seon.task/declaration)))))
+                 #(if (sequential? %) (set %) %))))
+
+(defn- file-declarations
+  "Read one task file with edamame's all-forms reader (nothing evaluated), require one
+  vector of valid entries with empty sets absent, and verify each supplied handle."
+  {:malli/schema [:=> [:cat :seon.schema/projection :string :string] [:vector :seon.task/task]]}
+  [projection path text]
+  (let [ns (file-namespace path)
+        refuse! #(functions/task-refused! 'seon.issue/file-declarations %1 ns %2 %3)
+        forms (try (edamame/parse-string-all text)
+                   (catch clojure.lang.ExceptionInfo failure (refuse! :unreadable-file text {:seon.error/throwable failure})))
+        _ (when-not (task-path? path) (refuse! :misplaced-file path {}))
+        _ (when-not (and (= 1 (count forms)) (vector? (first forms))) (refuse! :not-one-vector forms {}))
+        entries (mapv #(if (map? %) (into {} (remove (fn [[_ v]] (and (coll? v) (empty? v)))) %) %) (first forms))]
+    (when-let [explanation (m/explain (mr/schema (:seon.schema.projection/registry projection) :seon.task/file) entries)]
+      (refuse! :invalid-entry (first forms) {:seon.task/explanation (me/humanize explanation)}))
+    (mapv (fn [{:seon.task/keys [id name kind] :as entry}]
+            (let [handle (task-handle ns name kind)]
+              (when (and id (not= id handle)) (refuse! :handle-mismatch entry {:seon.error/expected handle}))
+              (assoc entry :seon.task/id handle :seon.task/ns ns)))
+          entries)))
+
+(defn- stored-tasks
+  "The stored tasks of `namespaces`, indexed once by handle."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:set :seon.task/ns]]
+                  [:or [:map-of :seon.task/handle :map] :seon.db/invalid-read-error]]}
+  [database namespaces]
+  (let [rows (db/q database '[:find [(pull ?e [*]) ...] :in $ [?ns ...] :where [?e :seon.task/ns ?ns]] (vec namespaces))]
+    (or (read-error rows) (into {} (map (juxt :seon.task/id identity)) rows))))
+
+(defn task-basis
+  "The declarations stored now for the files' namespaces: the basis a caller reads with its proposal."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files] [:or :seon.task/basis :seon.db/invalid-read-error]]}
   [database files]
-  (let [desired (into {} (comp (mapcat #(apply task-entries database %)) (map (juxt :seon.task/id identity))) files)
-        stored (filter #((set (map task-component (keys files))) (namespace (:seon.task/id %)))
-                       (db/q database '[:find [(pull ?e [*]) ...] :where [?e :seon.task/id]]))]
-    (into (vec (for [task stored :when (not (desired (:seon.task/id task)))] [:db/retractEntity (:db/id task)]))
-          (mapcat (fn [[id entry]]
-                    (if-let [current (first (filter #(= id (:seon.task/id %)) stored))]
-                      (replacement-tx current entry #{:seon.task/intent :seon.task/must-read :seon.task/evidence})
-                      [entry])))
-          desired)))
-
-(defn index-tasks!
-  "Reconcile task files through the writer; an unchanged set writes nothing."
-  {:malli/schema [:=> [:cat [:map [:seon.db/connection :seon.db/connection] [:seon.task/files [:map-of :string :string]]]]
-                  [:or :map :seon.db/error-result]]}
-  [{connection :seon.db/connection files :seon.task/files}]
-  (cond-> {} (seq (tasks-tx (db/db connection) files))
-    (assoc :seon.db/transaction-report (db/transact! connection [[:db.fn/call #'tasks-tx files]]))))
-
-(defn task-edges
-  "A task's subjects, proofs (deftests), and the definitions and tasks whose must-read names a subject."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/id]
-                  [:map [:subjects [:set :symbol]] [:proofs [:set :symbol]] [:must-read-referrers [:set :seon.schema/value]]]]}
-  [database task-id]
-  (let [holders (db/q database '[:find ?s ?proof :in $ ?t :where [?e :seon.task/tasks ?t]
-                                 (or (and [?e :seon.test/sym ?s] [(ground true) ?proof])
-                                     (and (or [?e :seon.fn/sym ?s] [?e :seon.ns/name ?s]) [(ground false) ?proof]))] task-id)
-        subjects (set (keep (fn [[s proof]] (when-not proof s)) holders))]
-    {:subjects subjects :proofs (set (keep (fn [[s proof]] (when proof s)) holders))
-     :must-read-referrers
-     (set (db/q database '[:find [?h ...] :in $ [?target ...]
-                           :where (or (and [?e :seon.fn/must-read ?target] (or [?e :seon.fn/sym ?h] [?e :seon.test/sym ?h]))
-                                      (and [?e :seon.task/must-read ?target] [?e :seon.task/id ?h]))] (vec subjects)))}))
-
-(defn open-tasks
-  "The task ids a definition still lists; listing is openness (spec 7.2, 7.6)."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:tuple :qualified-keyword :symbol]] [:set :seon.task/id]]}
-  [database program-identity]
-  (set (:seon.task/tasks (db/pull database [:seon.task/tasks] program-identity))))
-
-(defn task-findings
-  "`:dangling` ids in code with no task entity (the gate's refusal) and `:triage` tasks with no subject or proof."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:map [:dangling [:set :keyword]] [:triage [:set :keyword]]]]}
-  [database]
-  {:dangling (set (db/q database '[:find [?t ...] :where [_ :seon.task/tasks ?t] (not [_ :seon.task/id ?t])]))
-   :triage (set (db/q database '[:find [?t ...] :where [_ :seon.task/id ?t] (not [_ :seon.task/tasks ?t])]))})
+  (let [stored (stored-tasks database (set (map file-namespace (keys files))))]
+    (or (read-error stored) (update-vals stored #(declaration (db/carried-projection database) %)))))
 
 (def ^:private generated-prose
   "Attributes a detector proposes once. A human's or a worker's edit survives
