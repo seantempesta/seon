@@ -653,19 +653,27 @@
                                :seon.source/commit-id (:seon.source/commit-id base)}))
               (finally (cluster/release-root-store! dir))))
           (let [dev (:seon.operator/development-cluster request)
-                published (cluster/refresh-source! cluster-root
-                                                    (get request :seon.source/changed-paths []) dev)]
+                changed (get request :seon.source/changed-paths [])
+                published (cluster/refresh-source! cluster-root changed dev)
+                ;; Cost follows changed inputs: an edit publication re-applies
+                ;; config only when it changed a config document.
+                config-changed? (or (empty? changed)
+                                    (some (set changed)
+                                          (map #(.getCanonicalPath (io/file (fs/source-directory) %))
+                                               [config/default-manifest-path
+                                                config/development-manifest-path])))]
             ;; A stale-head refusal carries the winner's commit id; it is
             ;; returned whole, never narrowed into the success shape.
             (if (:seon.error/at published)
               published
               (cond-> (select-keys published [:seon.source/commit-id])
+                dev (assoc :seon.boot/cluster-name dev)
                 ;; A selected development cluster runs under the development overlay.
-                dev (assoc :seon.boot/cluster-name dev
-                           :seon.reconcile/result
-                           (config/apply! {:seon.db/connection (connection dev)
-                                           :seon.boot/cluster-name dev
-                                           :seon.config/manifest (config/development-manifest)}))))))
+                (and dev config-changed?)
+                (assoc :seon.reconcile/result
+                       (config/apply! {:seon.db/connection (connection dev)
+                                       :seon.boot/cluster-name dev
+                                       :seon.config/manifest (config/development-manifest)}))))))
         (refuse! "Unknown operator command." request)))
     (catch Throwable cause
       ;; A request this boundary refused is its declared case; every other
