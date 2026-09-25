@@ -192,6 +192,21 @@
             (adopt!)
             (is (= [nil "Mine."] (map intent [handle own]))))))))))
 
+(deftest a-merged-program-dangles-by-holder-against-the-destinations-admitted-tasks
+  ;; P1-3: the candidate's rows for the merged identities, every other holder's
+  ;; from the destination, against the destination's tasks.
+  (test-support/with-database
+   (fn [connection]
+     (let [head @connection
+           merged #{[:seon.fn/sym 'tq.a/f] [:seon.test/sym 'tq.a/proves]}]
+       (admit! connection (rows-of subject-source))
+       (is (= {handle '#{tq.a/f tq.a/proves}} (issue/candidate-dangling @connection head merged)))
+       (is (not (contains? (issue/candidate-dangling @connection head #{}) handle)) "unmerged holders are the destination's")
+       (is (= {handle '#{tq.a tq.a/g}} (select-keys (issue/candidate-dangling head @connection merged) [handle]))
+           "a merged row without the annotation drops its edge; the unmerged holders keep theirs")
+       (ingest! connection (task-text "Prove ingestion." ""))
+       (is (= {} (select-keys (issue/candidate-dangling @connection @connection merged) [handle])))))))
+
 (deftest the-checkouts-migrated-records-ingest-by-aspect-and-repeat-as-a-no-op
   ;; Slice 2 (spec 7.12, 7.15): the checkout's own task files are the migrated
   ;; records. Each handle is its aspect's; an entry moved to another namespace's

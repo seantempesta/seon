@@ -750,6 +750,25 @@
     (or (read-error dangling) (read-error triage)
         {:seon.task/dangling (update-vals (group-by first dangling) #(set (map second %)))
          :seon.task/triage (set triage)})))
+
+(defn candidate-dangling
+  "The `:seon.task/dangling` handles, by holder, of the program `destination` would
+  hold after taking `candidate`'s rows for `identities`: those holders' task edges
+  from `candidate`, every other holder's from `destination`, against the tasks
+  admitted on `destination`. Task rows never ride the merge (7.13)."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value :seon.program/identity-set]
+                  [:or :seon.task/dangling :seon.db/invalid-read-error]]}
+  [candidate destination identities]
+  (let [edges #(if (contains? (:schema %) :seon.task/tasks)
+                 (db/q '[:find ?t ?a ?h :in $ [?a ...] :where [?e :seon.task/tasks ?t] [?e ?a ?h]]
+                       % [:seon.fn/sym :seon.test/sym :seon.ns/name])
+                 #{})
+        mine (edges candidate) theirs (edges destination) admitted (task-handles destination false)
+        touched? (fn [[_ attribute holder]] (contains? identities [attribute holder]))]
+    (or (some read-error [mine theirs admitted])
+        (update-vals (group-by first (remove (comp admitted first) (concat (filter touched? mine) (remove touched? theirs))))
+                     #(set (map (fn [[_ _ holder]] holder) %))))))
+
 (def ^:private generated-prose
   "Attributes a detector proposes once. A human's or a worker's edit survives
   every later run: the generator writes them only when the issue holds none."

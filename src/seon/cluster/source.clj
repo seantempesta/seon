@@ -830,7 +830,8 @@
   `source`: the named run on S complete, every member green, every replaced
   function reached by one, and S's program unwritten since. The writer
   refuses a moved head (expected basis-t) before any datom lands; the merge
-  commit's parents add the candidate and S's head."
+  commit's parents add the candidate and S's head. A task handle the merged
+  program names with no task admitted on the head refuses, by handle and holder."
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                         [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]]
@@ -858,7 +859,9 @@
             uncovered (when (set? delta)
                         (for [[a f] delta :when (= :seon.fn/sym a)
                               :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f))
-            tx (when (seq delta) (replacement tested head delta))]
+            tx (when (seq delta) (replacement tested head delta))
+            ;; Decided on `head`; the write's expected basis-t refuses a moved head.
+            dangling (when (set? delta) ((requiring-resolve 'seon.issue/candidate-dangling) tested head delta))]
         (cond
           (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
           (refuse "The named run was not recorded on the tested branch." run)
@@ -871,6 +874,8 @@
           (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
           (:seon.error/at tx) tx
           (empty? tx) (refuse "The destination already holds the tested rows." (vec delta))
+          (:seon.error/at dangling) dangling
+          (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
           :else (db/transact! (:seon.db/connection source)
                               {:tx-data tx :datahike/expected-basis-t basis :parents (conj merged e-id)})))
       (finally (d/release-materialized-db tested)))))

@@ -1,14 +1,17 @@
 (ns seon.cluster.source-test
   (:require [clojure.java.io :as io]
             [clojure.string :as str]
-            [clojure.test :refer [deftest is]]
+            [clojure.test :refer [deftest is testing]]
             [datahike.api :as d]
             [seon.cluster :as cluster]
+            [seon.cluster.agent :as cluster.agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.source :as source]
             [seon.cluster.store :as store]
             [seon.db :as db]
             [seon.fn :as fn]
+            [seon.id :as id]
+            [seon.issue :as issue]
             [seon.schema.datahike]
             [sci.core :as sci]
             [seon.sci.eval :as sci.eval]
@@ -302,3 +305,51 @@
     (is (= {:seon.test.cache/changed ["src/a.clj" "src/new.clj"]
             :seon.test.cache/removed ["src/b.clj"]}
            (seon.test.cache/changed-inputs before after)))))
+
+(deftest ^{:seon.test/long "Two prepares, each one nested seon.test/run on a new candidate commit (the save gate's cost, lane-nsa-slice4-2026-09-23.md)."
+           :seon.test/long-ms 120000}
+  a-merge-naming-a-task-the-destination-lacks-refuses-and-an-admitted-task-survives-a-refused-merge
+  ;; P1-3 (review 5fb38b91f, spec 7.13): task rows never ride the merge, so the
+  ;; destination's admitted tasks decide the merged program's task edges.
+  (let [target (test-support/execution-handle nil)
+        held-store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        sym #(symbol "seon.cluster.source-test" %)
+        row #(test-support/program-row (db/db %1) [%2 (sym %3)] %4)
+        write! #(test-support/transacted! %1 (vec %2))
+        handle (issue/task-handle 'seon.cluster.source-test "merge-task" :function)
+        issue-id (str "merge-task-test-" (id/id))
+        c (keyword (str "merge-task-test-c-" (id/id)))
+        _ (write! h-conn [(row h-conn :seon.fn/sym "merge-tasked" "(defn merge-tasked [] 1)")])
+        _ (write! h-conn [(row h-conn :seon.test/sym "merge-tasked-check" "(clojure.test/deftest merge-tasked-check (clojure.test/is (pos? (seon.cluster.source-test/merge-tasked))))")
+                          {:seon.issue/id issue-id :seon.issue/title "Tasked" :seon.issue/status :open
+                           :seon.issue/severity :cleanup :seon.issue/problem "Replace the tasked function."
+                           :seon.issue/tests #{[:seon.test/sym (sym "merge-tasked-check")]}}])
+        _ (registry/branch! {:seon.store/store held-store :seon.store/branch c
+                             :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+        candidate (cluster.agent/acquire-context! target nil {:seon.agent/branch c})
+        c-conn (:seon.db/connection candidate)
+        made (volatile! [])
+        prepare #(let [p (source/prepare-merge! target held-store c issue-id)]
+                   (some->> (:seon.source/candidate p) (vswap! made conj)) p)
+        intent #(:seon.task/intent (db/pull (db/db h-conn) [:seon.task/intent] [:seon.task/id handle]))]
+    (try
+      (write! c-conn [(row c-conn :seon.fn/sym "merge-tasked" (str "(defn merge-tasked {:seon/tasks #{\"" handle "\"}} [] 2)"))])
+      (let [proposal (prepare)
+            before (db/commit-id (db/db h-conn))
+            refused (source/accept-merge! target held-store proposal)]
+        (is (true? (:seon.test/passed? proposal)) (:seon.source/tally proposal))
+        (is (= {handle #{(sym "merge-tasked")}} (:seon.error/offending refused)) (pr-str refused))
+        (is (= before (db/commit-id (db/db h-conn))) "the refused merge writes nothing")
+        (testing "a task admitted on the destination survives a refused merge, then the merge lands"
+          (is (:seon.task/changed? (issue/index-tasks! {:seon.db/connection h-conn :seon.task/basis {}
+                                                         :seon.task/files {"resources/seon/tasks/seon.cluster.source-test.edn"
+                                                                           "[#:seon.task{:name \"merge-task\" :kind :function :intent \"Merge.\"}]"}})))
+          (is (= :transaction/stale-basis (get-in (source/accept-merge! target held-store proposal) [:seon.error/data :error])))
+          (is (= "Merge." (intent)))
+          (is (:db-after (source/accept-merge! target held-store (prepare))))
+          (is (= #{handle} (issue/open-tasks (db/db h-conn) [:seon.fn/sym (sym "merge-tasked")])))
+          (is (= "Merge." (intent)))))
+      (finally
+        (cluster.agent/release-context! candidate)
+        (doseq [b (conj @made c)] (registry/retire-branch! {:seon.store/store held-store :seon.store/branch b}))))))
