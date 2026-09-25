@@ -16,6 +16,7 @@
             [datahike.api :as d]
             [seon.cluster.message :as my.message]
             [seon.run :as my.turn]
+            [seon.agent]
             [seon.ai :as ai]
             [seon.flow :as seon.flow]
             [seon.render.web :as web]
@@ -427,12 +428,19 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            configured (config/apply! {:seon.db/connection connection
-                                       :seon.boot/cluster-name "turn-test"
-                                       :seon.config/manifest {:seon.config.run/max-episode-runs 1}})
+            ;; The agent's own bound: a manifest apply would replace the
+            ;; fixture's whole manifest, provider dials included.
+            configured (seon.agent/settings! {:seon.config.run/max-episode-runs 1}
+                                             connection "agent-a")
+            ;; The fault is stored through the handle's environment, which
+            ;; holds this fixture's connection as production's does.
+            cluster (assoc cluster :seon.env/environment
+                           (test-support/environment "turn-test" connection))
             panic (try (drive-agent! cluster "agent-a" 4) nil
                        (catch clojure.lang.ExceptionInfo failure failure))]
-        (is (boolean? (:seon.reconcile/converged? configured)) (pr-str configured))
+        (is (= 1 (:seon.config.run/max-episode-runs configured)) (pr-str configured))
+        (is (true? (get-in (ex-data panic) [:seon.fault/recorded :seon.fault/committed?]))
+            "the fault is stored before the panic")
         (is (some? panic) "the pass that spends the last run throws under :panic")
         (is (str/includes? (str (ex-message panic)) "seon.run/complete") (ex-message panic))
         (is (= 'seon.turn/turn (get-in (ex-data panic) [:seon.fault/recorded :seon.error/operation]))
@@ -2719,8 +2727,11 @@
             (drive! cluster 12)
             (is (= 1 (count @ledger)) "one provider request, no refused re-open")))
         (let [database @connection
-              function-symbol 'my.agents.agent-a/extract-id
-              test-symbol 'my.agents.agent-a/extract-id-test
+              ;; Built, not quoted: a quoted symbol is a static reference, so
+              ;; the gate of the agent's own defn would select THIS test and
+              ;; run it nested inside its fixture (install refused).
+              function-symbol (symbol "my.agents.agent-a" "extract-id")
+              test-symbol (symbol "my.agents.agent-a" "extract-id-test")
               function-row
               (db/pull database
                        '[:seon.fn/sym :seon.fn/spec
