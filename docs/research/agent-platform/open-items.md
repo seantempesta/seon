@@ -23,6 +23,13 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**OWNER RULINGS 2026-09-25 (later):** shell-order floor adopted (research 717e01bbb); floor split into SELECTION (ours) and
+EMISSION (library where it fits: fipp/puget evaluated); Opus writes first-pass designs, Astra reviews + audits (AGENTS.md
+87f718819). Opus lane design-floor-shell-order-opus writing §3/§6. Adopted-HEAD run (133 commands, 874 members): 169
+unique red, 47/133 commands green → census d lane. DEFECT: adding reference-code submodules (not deps) made init refuse
+"JVM RESTART NEEDED: loaded dependencies changed" — the dependency check counts every reference-code gitlink, not the
+classpath's; restart cost 30 s. Default at 6ab68445 (render 1c adopted).
+
 **OWNER RULING 2026-09-25: floor allocator REDESIGN as one folded cut (slices 2+3+5)** around one bounded descriptor per
 reached value, after three review rounds (2d9f3641a, 59649109e, 9f839573e: net +203 lines, static JVM-exhaustion paths
 still open). Attempt parked as tmp/render-floor-opus/slice2c-worktree-reference.patch. Astra rewrites design §3/§6 in place
