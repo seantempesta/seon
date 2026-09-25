@@ -1,242 +1,193 @@
 ---
 type: research
-status: REVISE; revision-4 design review; no installation proof
+status: ACCEPT-AFTER-FIXES; revision-5 design review; no installation proof
 created: 2026-09-25
-reviewed-design: dc4f71d67fb78f1a258662a64c04fbb5fde19ba5
+reviewed-design: 60e060b52b39466e086d2cec42e0927e8c861a43
 source-pin: 19a29c683
-scope: composable REPL stages, agent custody, MCP retirement, shared record and print, cost, Q1-Q3
+scope: seven prior findings, composition and settlement, owner rulings, MCP retirement and milestone dependencies
 ---
 
-# One REPL language: revision 4 review
+# One REPL language: revision 5 review
 
-**Verdict: REVISE.** Keep MCP SCI and JVM evaluations on the agent's run, with reader and
-evaluator supplied as values. Revision 4 makes that important correction, but does not yet
-deliver its claimed single composition: it explicitly postpones reading once, gives tests a
-separate composition, and retains MCP-specific printing and retrieval. The estimated
-5 ms → 150 ms increase is a performance question to investigate, not an accepted price of
-recording. These are design corrections before implementation, not evidence of installed defects
-in a change that has not been implemented.
+**Verdict: ACCEPT-AFTER-FIXES**, with the three numbered corrections below made before the
+corresponding implementation slices. Revision 5 establishes the right composition: the existing
+`evaluate-sources` loop accepts stage values, reads once, returns native evaluations through a
+shared finalizer, and leaves persistence and execution ownership with the existing lifecycle
+owners. Tests now enter that composition. MCP SCI and JVM calls use root's run under explicit
+custody. No second driver or result owner is justified.
 
-The existing owners are source submission, the agent's Flow proc, evaluation, settlement and
-rendering. The smallest approach is to make their existing composition accept stage values and
-use it from each entrant; retain transport and lifecycle differences around that composition.
-Do not add a second runner to solve the test case or an MCP-only exception to solve cost.
+The remaining problems are localized: settlement can still change an already printed value;
+the fault-window summary differs from its named owner's revised contract; and the reduced
+retrieval milestone has inconsistent retirement accounting. These do not require reopening the
+architecture, Q1/Q2, or the owner's three rulings.
 
 ## Evidence and authority
 
-`D` below means `docs/research/agent-platform/one-repl-language-2026-09-25.md` at
-**dc4f71d67** (revision 4, 936 lines). AGENTS.md citations use that same revision. Other source
-citations are pinned to **19a29c683**, the design's source pin, unless explicitly named. Short source paths expand under `src/seon/`;
-`mcp.clj` means `script/seon/dev/mcp.clj`. This distinction matters in the shared moving checkout.
+`D` means `docs/research/agent-platform/one-repl-language-2026-09-25.md` at **60e060b52**
+(revision 5, 982 lines). Each `D:<line>` below is a file-and-line citation into that file.
+`L` means `docs/research/agent-platform/lost-error-seams-design-2026-09-25.md`, and `R` means
+`docs/research/agent-platform/one-render-path-design-2026-09-25.md`, both read at **60e060b52**.
+AGENTS.md citations use **60e060b52**. Source citations use **19a29c683**, the design's source
+pin; short source paths expand under `src/seon/`, and `mcp.clj` means
+`script/seon/dev/mcp.clj`. All source reads were pinned, independent of concurrent checkout edits.
 
-Read the complete revision and AGENTS.md. The controlling laws are `AGENTS.md:130–145`:
-core composes functions/stage values; MCP, tests and web are views of the agent; each form is
-parsed and evaluated once through the same pipeline. Performance requirements are
-`AGENTS.md:283–293`, including investigation of regressions over 20% or 50 ms. Applied the REPL
-and data-oriented Clojure skills. Their historical MCP descriptions are not installation proof
-for this proposed change. Earlier reviews remain available in Git at **7117f211f** and
-**48e2882e1**; this file now reviews revision 4 rather than carrying earlier verdicts forward.
+Read revision 5 and the prior review end to end, together with AGENTS.md and the relevant
+fault-window and continuation contracts. Applied the data-oriented Clojure skill. The controlling
+laws are the common composition (`AGENTS.md:130–146`), writer authority (`:163–165`), native
+errors and visible storage failure (`:199–216`), actual exit (`:221–227`), common rendering
+(`:234–250`), and measured regression bounds (`:281–290`). The user's rulings are authoritative:
+errors reference the world; renderers read the stable database; faults appear as errors in MCP
+replies.
 
-Source inspection covered the named submission/Flow, evaluation/finalization, MCP
-projection/retrieval, test request and refresh seams. Dependency evidence: Clojure
-**3bc2b3e91fdff462620d84bbdfd40379d9c562e5**, `clojure/main.clj:414–446`, really does compose
-read/eval/print functions; Malli **befcd302a8e626a67d84b80aabee0cd1b38dadb6**,
-`malli/core.cljc:3131–3153`, instruments a function against the supplied schema. Neither seam
-establishes the stronger claims identified below. No dependency modification is needed.
+Dependency inspection confirms Clojure's stage-function composition at
+`reference-code/clojure/src/clj/clojure/main.clj:414–446`, gitlink
+**3bc2b3e91fdff462620d84bbdfd40379d9c562e5**. Malli's `m/-instrument` checks the supplied
+function schema at `reference-code/malli/src/malli/core.cljc:3131–3152`, gitlink
+**befcd302a8e626a67d84b80aabee0cd1b38dadb6**; it does not infer stage compatibility.
+The existing first-party seams are `turn/evaluate-sources` (`turn.clj:4681–4697`), the test
+recording writer (`test.clj:2061–2087`), source submission (`agent.clj:635–723`), and terminal
+settlement (`turn.clj:3793–3863`). These are source facts, not proof of installed behavior.
 
-No runtime probe, test, submission, provider call, adoption, publication, stop or reset was run.
-The design's reported default faults and measurements are historical observations, not
-reproduced here. Foreign lane health was not a dependency of this review.
+The previous seven-finding verdict remains in Git at **5f7558427**. This file replaces that
+review in place; it does not append a second design or carry the old verdict forward.
 
-## What is accepted
+## Disposition of the seven prior findings
 
-- **Both MCP modes use the agent's run.** D:349–370 correctly routes SCI and JVM through
-  `evaluate-source!` → `submit-source!` → the agent's Flow proc → shared evaluation/settlement.
-  The reader/evaluator choices differ; there must be no direct evaluator shortcut in the bridge.
-  `agent.clj:635–723` confirms the existing submission owner, and `:525–560` the proc owner.
-- **JVM evaluation is a stage, not a second recorder.** D:261–279 and D:304–307 correctly
-  reject using `record-evaluated-call` as a JVM-only recording route. Returning an evaluation
-  value to settlement is the right seam. Full error storage/delivery remains an implementation
-  proof, not something calling `kernel/failure-value` alone proves.
-- **Move printing out of the evaluator.** D:319–329 correctly requires the final result and
-  verbatim stored shown bytes. The current candidate acceptance changes the value after evaluation
-  (`sci/eval.clj:4487–4489`), so rendering earlier is genuinely wrong.
-- **Use the existing execution owner.** Listen before submit, correlate/recheck by run id,
-  retain ownership on timeout, and retire only owned agents. `agent.clj:1280–1305` explicitly
-  distinguishes executor exit from a stop request. No bridge busy registry is warranted.
+| Prior finding | Revision-5 disposition |
+|---|---|
+| 1. Read once cannot be deferred | **Addressed in design.** D:179–188 and D:244–264 make raw segmentation distinct from semantic reading, read after preceding namespace effects, pass the event, and retain malformed trailing source. P2 precedes P3/P4 (D:910–911). The offset entry and invocation-count proof remain implementation obligations, explicitly unverified at D:975–978. |
+| 2. Tests need the same composition | **Addressed in design.** D:153–157 and D:434–458 name the common callable, adapt the member's call form and captured native report, and persist through the test request's existing writer before unlinking. A run transaction per member is unnecessary; shared finalization and facts are necessary. C1's deletion remains conditional. |
+| 3. The 150 ms cost is unproven | **Addressed in design, not measured.** D:504–527 withdraws the assumed price, requires comparable parent/change stage timings, allocation and retained memory, and blocks M1 on incremental refresh of a task-bearing root. Neither 250 ms nor one second replaces the regression bound. |
+| 4. Final refusals and print ordering | **Partly addressed; correction 1 below remains.** D:189–202 and D:344–352 include installation and disposition replacements and preserve render-read evidence. They still promise a final print before a later writer can refuse or change the result. |
+| 5. MCP-only behavior and retrieval | **Substantially addressed; corrections 2 and 3 below remain.** P5 moves status rendering and branch errors to their owners; P7 uses common continuation; A/B are labelled partial; Q3(b)'s false guarantee is withdrawn. Fault observation and reduced-milestone sequencing need reconciliation. |
+| 6. Arming does not prove stage compatibility | **Addressed in design.** D:204–213 requires named stage contracts, resolution in the execution program, submission refusal for incompatible symbols, the complete evaluator request, and output validation. It adds neither structural function subtyping nor a second registry. Actual schemas and armed negative proofs remain prerequisites. |
+| 7. Root/session custody and continuation | **Addressed as an explicit gated design.** D:401–427 separates continuation by stage, gives explicit namespace precedence, retains custody until exit, keeps settings with the agent, and makes P-RB the first P3 proof. Failure of that probe blocks branch SCI pending a priced writer; it does not authorize a bridge-owned agent. |
 
-## Required revisions
+## Required fixes
 
-### 1. Reading once cannot be an independent, deferred slice
+### 1. Make terminal settlement and printing a coherent, honest order
 
-**Location:** D:160–163, D:222–234, D:654 and D:843.
+**Locations:** D:190–202, D:344–348 and P1 at D:895.
 
-P3 first parses all code at submission, then its evaluator parses each source again. D explicitly
-admits that `(require '[x :as a])` followed by `::a/k` can be read before the alias exists, yet
-says no slice depends on S0. The JVM variant compounds this: submission uses the agent's reader
-bindings while the evaluator uses host namespace mappings. A later correct read cannot recover
-code rejected or interpreted incorrectly at submission. This violates the explicit parse-once
-law and changes code semantics; it is not just duplicate work.
+Step 5 has already printed when step 7 discovers a settlement refusal. Printing that refusal
+through the same function is still another invocation; saying “same call” does not put it before
+the original print. Nor does the existing owner promise one transaction attempt: `settle!`
+commits prepared data, then takes one bounded refusal branch if it fails
+(`turn.clj:3840–3863`); batch settlement does likewise (`:3622–3633`, `:3779–3788`).
 
-**Smallest fix:** make S0 a prerequisite of P3/P4's complete code path. Preserve raw source at
-submission; in the existing ordered evaluation loop, obtain the next reader event using the
-namespace/aliases left by the preceding evaluation and pass that event to the selected evaluator.
-Keep prose segmentation distinct from semantic reading. SCI already accepts a supplied event
-(`sci/eval.clj:4448–4461`); use that seam. Specify refusal and source preservation for malformed
-trailing input. Price the call-site change before claiming M1 compliance. The future proof must
-count reads/effects and cover namespace changes, aliases, reader conditionals and regexes.
+P1 also omits two surviving printers: `refusal-terminal-data` uses `pr-str` at
+`turn.clj:3704`, and `settle-batch-refusal!` at `:3753`. The latter is already named as F10 in
+L:693. An ordinary success can change after the proposed loop finalizer too:
+`evaluation-terminal-data` adds `:my.turn/delivered-to` and re-admits the changed disposition at
+`turn.clj:3466–3485`. Its saved text must correspond to that final value.
 
-### 2. P6 shares builders, but does not establish the same composition
+**Smallest fix:** extend the existing shared finalization/print seam to terminal-data preparation
+and the bounded refusal branch, explicitly retiring both `pr-str` sites. Move the disposition
+completion before its successful print. State the guarantee as one saved/returned rendering of
+the committed terminal value: if a write refuses after speculative bytes were prepared, discard
+those bytes, render the distinct native refusal through the same owner, and persist it through
+the existing refusal branch. Count attempted renders and transaction attempts honestly; do not
+claim literally one invocation on that path. Never rerun the source or render inside a transaction
+function to manufacture that guarantee. If refusal storage fails, panic visibly under
+AGENTS.md:213–216; do not promise a durable answer that storage could not produce.
 
-**Location:** D:144, D:174–183, D:398–417, D:838 and D:855.
+Add these existing terminal paths to P1's scope, estimate and future proof: a writer-time
+refusal publishes no speculative success, a completed disposition's value and text agree, a
+batch refusal uses ordinary selection, and failed refusal storage remains a core failure.
+Coordinate F10's retirement once with its owner. This is correction of the existing pipeline,
+not a new recorder or retry loop.
 
-The design identifies the pipeline with an agent run, then says a test member is not a run and
-has its own driver assembling receipts. Sharing `evaluation-facts` is necessary, but does not
-show that tests enter the same read/evaluate/record/print composition. The proposed stage
-contracts also do not fit the test stages: a text/namespace reader returning source maps is not
-`resolve-test` returning a Var; a capture report is not automatically an evaluation.
+### 2. Use the fault owner's actual window and saved-text contract
 
-**Smallest fix:** identify the single callable composition inside the existing agent path and
-show the test adapter entering it with its isolated custody and body stage. Keep batching,
-selection, retention and exit ownership with `seon.test/run`; do not require one wake and run
-transaction per member merely to reuse functions. State the native input/result adaptation and
-shared finalization/recording call explicitly. If the law is instead implemented by a run per
-member, measure and fix that owner rather than rejecting it with the unverified 147 ms estimate.
-Until this is specified, option C cannot claim “one path for tests.”
+**Locations:** D:329, D:395–399, P3m at D:898, and dependencies at D:910–914.
 
-### 3. The 150 ms cost is unproven and potentially symptomatic
+D describes `:seon.cluster.eval/fault-basis`, “previous basis, this basis,” and transcript
+“recorded fault-basis pairs” (D:484). Its named authority now specifies a different, necessary
+contract: L:561–589 captures the cluster database **before** settlement, saves the observation's
+exact shown text, and records one `:seon.cluster.eval/fault-window` component with cluster
+identity/commit and distinct lower/upper bases. Only committed settlement advances the cursor.
+The window belongs to the last form of a multi-form batch. First, compacted and changed-lineage
+windows are unknown.
 
-**Location:** D:410–413, D:463–476 and D:926–927.
+This is not just a key rename. Occurrence count and last-at are no-history attributes
+(L:568–571), so basis pairs alone cannot reconstruct the original observation later. Also the
+agent's branch basis and the cluster fault basis are different worlds. The stable database
+ruling means each computation receives its appropriate immutable value; it does not make those
+bases interchangeable. L:617–619 requires the observation to share the reply's presentation
+budget. L:642–645 and L:774 make the fault cut depend on render slice 2(i), which D's dependency
+list omits while B says it need not wait on the render plan (D:924–925).
 
-`agent.clj:647–653` says carrying projection state changed an earlier source-turn measurement
-from 728 to 147 ms. It provides no stage breakdown, sample set, current workload or memory
-measurement. It does not establish that run transaction + wake + settlement intrinsically cost
-147 ms. D also mixes evaluation duration and round-trip measurements. The claimed change is
-approximately **30× / +145 ms**, exceeding both regression thresholds in AGENTS.md. Being below
-250 ms, or below one second, does not waive them.
+**Smallest fix:** replace the obsolete fault-basis summary with an exact reference to L §M's
+`fault-window`, saved bytes, cluster-world input, committed-cursor rule, lineage unknowns and
+last-form batch rule. Preserve one query owner and one render budget. Carry L's render slice
+2(i) prerequisite into P3m and M1; distinguish it from the continuation entrance that only P7
+needs. Reconcile the schema and deletion estimates once across the two plans.
 
-There are known places to investigate: projection acquisition, profile/config derivation,
-transaction work and refresh. `turn.clj:4704–4710` describes an old per-form profile cost that
-was already moved outside the loop; it is not a current per-turn measurement. The proposed JVM
-mark walks every loaded namespace (`cluster.clj:253–275`), so its cost follows JVM size, not only
-the changed input. The 3.3 s refresh is reported evidence elsewhere, not measured here.
+Keep the owner's outcome rule: new, undelivered or unknown faults make the response an error;
+MCP merely encodes that result as `isError`. Use L:626–640's proof obligations, especially a
+resolved-in-window fault, a later recurrence leaving old shown text unchanged, and a failed
+settlement not advancing the lower bound. This accepts the ruling without recreating the bridge
+window or a history renderer that recomputes it.
 
-**Smallest fix:** replace “every MCP call pays it” with an unverified hypothesis and a required
-parent/change measurement of the same finite request. Separately report acquisition, read,
-evaluate, record/transactions, print, completion, allocation and retained memory, including warm
-repeats and a multi-form request. Attribute and remove redundant work at its owner. Price necessary
-new durability separately from avoidable overhead; any deliberate remaining cost needs a root
-ruling, not acceptance by this review. Keep the sub-250 ms aspiration without presenting it as a
-pass criterion that supersedes the regression law.
+### 3. Reconcile the reduced retrieval milestone with P4/P7 retirement
 
-D:474–476's alternatives are also insufficient: a root without an issue hides the dependency,
-and skipping required refresh for externally submitted runs changes semantics. Fix incremental
-refresh at its owner or declare the milestone blocked on that cut. Exercise the task-bearing root
-case; `turn.clj:5295–5305` confirms that close can perform more work after settlement.
+**Locations:** D:473–502, P4/P7 at D:899–901, options at D:920–922 and Q3(a) at D:938.
 
-### 4. “Print once” must cover final refusals and specify record/print ordering
+P4 deletes `project-next-prepl-value!` and the artifact producer. The current `execute-get-value`
+still calls that mark (`mcp.clj:765–769`). D:473–474 correctly requires converting every caller
+in the deleting slice, but its table assigns the whole retrieval retirement to P7 while Q3(a)
+books the same 137 lines in P4. A/B exclude P7 and their totals exclude those 137 lines, yet
+promise the reduced unavailable-cut behavior. The branch of the plan that supplies that behavior
+and handles the existing tool must be explicit before landing P4.
 
-**Location:** D:166–172, D:319–325 and D:834.
+**Smallest fix:** make P4's row conditional on Q3. For the reduced option, retire the old tool and
+its callers in P4 and put the unavailable-cut response at the ordinary render owner; update A/B's
+counts. For the full option, require P7's owner entrance before removing its old producer/callers.
+If compatibility for old blobs is deliberately retained temporarily, identify that limited
+adapter, remove its deleted mark call in P4, and count only what actually retires there. Do not
+credit a deletion again in P7. The owner still chooses Q3; this review recommends shared
+continuation for C and explicit retirement for the reduced milestone.
 
-Moving the three named render sites is incomplete. After installation gating,
-`evaluate-sources` may replace the result with a disposition refusal
-(`turn.clj:4772–4789`); `unrun-evaluation` prints it using `pr-str`
-(`sci/eval.clj:3856–3862`). That leaves another pre-edge printer. Also D's numbered arrows say
-record then print, while D:31 and P1 render before settlement. Existing `evaluation-facts`
-consumes shown text (`turn.clj:126–128`), so the physical ordering needs an explicit explanation.
+R:467–475 still describes MCP artifact production, whereas D deletes it. State explicitly that
+P7 imports the common continuation entrance, not that retired producer: live SCI backing can
+expand, missing JVM backing answers unavailable, and nothing replays. Reconcile that producer
+assumption with the render owner before integration. No new durable result store is required
+for the accepted reduced scope.
 
-**Smallest fix:** route ordinary results, installation refusals and unrun/disposition failures
-through the same finalization point after all result replacements. Constructors return native
-evaluation values. Keep form-local render reads attached to that evaluation. Specify when the
-semantic record is formed, when its final value is printed, and when exact shown bytes become
-durable; do not silently add a second recording transaction or emit a success that later failed
-to settle. Separate record construction from durable shown-text persistence if that is the
-intended composition. Extend P1's proof and price to the surviving refusal producer.
+## Owner rulings and implementation gates
 
-### 5. MCP-only behavior survives, and Q3(b) does not preserve retrieval
+**Errors reference the world — accepted.** D:312–317 applies references to evaluator, stage,
+submission, timeout and fault values. Preserve class, message, chain and declared scalar details;
+replace world objects with their identities rather than summarizing their causes. D:958 should
+be read as applicable references, not a demand to invent a run/evaluation id before admission or
+a blob digest where no blob exists. Absence stays absence.
 
-**Location:** D:393–395, D:437–458, D:853–858 and D:879–885.
+**Renderers read the stable database — accepted.** D:349–352 supplies the form's immutable
+value by declared schema name, honors caller arguments and keeps render reads in the form's
+evidence. Correction 2 separately supplies the cluster value for a fault observation. No ambient
+head lookup or copied database in an error is authorized.
 
-The retirement list explicitly leaves `runtime_status`'s printer, bridge-created branch errors
-and the MCP artifact retrieval path. Thus “transport and stage choice, nothing else” is false
-for the completed milestone. Reusing the general blob tier does not create a second physical
-database, but the MCP-specific artifact production/windowing policy is still a second result path.
+**Faults in MCP replies — accepted, with correction 2.** Root's run remains the owner; an empty
+success cannot replace a core fault. Delivery, persistence and `isError` must agree. The explicitly
+chosen, bounded, unrecorded host diagnostic entrance remains an availability exception
+(D:363–366, D:460–465), never automatic fallback.
 
-More concretely, `mcp-project` creates and stores the artifact (`cluster.clj:444–479`). P4 deletes
-it. Keeping `get_value` then preserves only access to old surviving blobs, not retrieval of new
-oversized results. Its current bridge caller also invokes `project-next-prepl-value!`
-(`mcp.clj:765–769`), which P4 deletes. Q3(b)'s “no loss of today's retrieval” is therefore false.
-
-**Smallest fix:** resolve Q3 before booking the deletions: route retrieval through the shared
-cut owner, or explicitly retire the tool and return an honest unavailable-cut value for results
-without retained backing. A requery must retrieve a held result; it must not replay an effectful
-origin. Remove every caller of the deleted projection mark. Move status presentation through
-ordinary render selection and branch refusals to their registry producer. Reprice these retirements,
-and distinguish legitimate transport/session discovery from semantic MCP-only machinery. If
-those cuts are deferred, label A/B partial migrations and withdraw the full compliance claim.
-
-### 6. An armed Var's own contract does not prove stage compatibility
-
-**Location:** D:174–180 and D:901.
-
-Malli `m/-instrument` validates against the supplied function schema
-(`reference-code/malli/src/malli/core.cljc:3131–3153`); it does not prove that an arbitrary
-registered Var has the reader/evaluator contract the pipeline expects. A function with a different
-or broader result contract can be perfectly armed and still return the wrong stage value.
-The stated default evaluator contract is also abbreviated: `evaluate-for-install` requires
-`:seon.test.accretion/candidate-context-request` as well (`sci/eval.clj:4442–4445`).
-
-**Smallest fix:** declare the actual stage boundary inputs/results and validate them through the
-existing schema/arming owner. Resolve the supplied symbol in the execution's program context and
-refuse missing/incompatible declared stages before submission where decidable; validate returned
-owning values at the shared boundary. Do not invent structural function-subtyping machinery or a
-second stage registry. Price required schemas/callers, including the test adaptation in finding 2.
-
-### 7. Root and session custody need explicit continuation and admission rules
-
-**Location:** D:351–360, D:378–390 and D:928–934.
-
-Using root for both modes makes its prior ending namespace shared state. A JVM-created namespace
-may not be a database namespace or exist in SCI. Yet submission resolves `starting-ns` with a
-schema-backed pull (`agent.clj:665–677`). “Previous run's recorded ending namespace” alone is not
-a valid cross-evaluator continuation rule. Branch sessions have another incomplete seam: the
-design has not identified the writer creating the assigned agent, while `arm!` explicitly requires
-a committed agent (`agent.clj:1060–1062`). A session string is identity, not evidence that a branch's
-inherited agent row is armed or owned by this caller.
-
-**Smallest fix:** specify mode-appropriate namespace continuation from recorded evaluations,
-with explicit request namespace winning and incompatible/missing contexts refusing by name.
-Name the existing agent writer and timeout-result reader, their contracts and failure cleanup;
-price only any actual missing seam. Keep settings and ownership with the agent owner. Do not
-silently set permanent root `no-provider` merely to make one submission safe. Retain the existing
-JVM-with-branch refusal (`mcp.clj:579–583`), and never release branch custody after a failed exit.
-These are prerequisites for the proposed adapter, not permission to build bridge state owners.
-
-## Q1–Q3 recommendations
-
-| Question | Review recommendation | Guarantee, cost and constraint |
-|---|---|---|
-| **Q1: JVM placement** | **(a), root's Flow run.** Already consistent with the stated ruling; do not reopen it as three equally acceptable architectures. | Shared custody, recording, printing and actual-exit owner. The host evaluator is the differing stage. Price after findings 1/3/4/6/7. A stuck host call holds root; explicit host diagnostics remain separate recovery access. Option (b) changes the stated identity ruling; (c) resurrects the second driver and is rejected under the present laws. |
-| **Q2: branchless SCI** | **(b), root's run**, for the orchestrator acting as root. | Retires mutation of the shared SCI base and uses root's private context and ordinary gate. Shares root's busy state and continuation rules. Enforce actual root custody; no anonymous caller is inferred to be a different agent. (a) is a viable narrower product constraint, not required by the composition law; (c) adds agent lifecycle without necessity for the stated root use case. |
-| **Q3: retrieval** | **(c) for the full one-path milestone; (a) only for an explicitly reduced milestone. Reject (b)'s guarantee as written.** | The shared cut entrance preserves retrieval without an MCP result owner. Its cost is unpriced and must be traced before implementation. Deletion is smaller but sacrifices retrieval where no common retained result exists; report that honestly and never replay effects. Retaining an obsolete reader after deleting its producer does not preserve the capability. |
-
-The diagnostic host prepl is a deliberate availability exception, not a model for ordinary
-MCP evaluations. D:422–425 correctly forbids timeout fallback. Keep its exceptional unrecorded
-status explicit in the response and outside “every MCP call is a run” claims. Protocol encoding
-of already bounded response data is not another semantic printer; arbitrary diagnostic host
-values still need an explicit bounded presentation contract rather than unlimited `pr-str`.
+Q1 is root's Flow run; Q2 is root custody for branchless SCI. Neither is reopened. P-RB, stage
+schema compilation, current positive test evidence, adoption/arming, incremental refresh and
+parent/change performance remain unproved implementation gates. Conditional acceptance of the
+design supplies none of those proofs and grants no production edit or integration permission.
 
 ## Landing and verification limits
 
-This review changes **only this file**. Production source/test delta: **0 / 0**. No tests or
-runtime actions were run, and default was neither stopped nor reset. Runtime timing, allocation,
-retained memory, installed adoption/arming and browser paint are **unmeasured**. This is a design
-verdict, not a performance pass or installed-health approval. The unrelated
-`reference-code/http-kit` state and concurrent edits to `src/seon/shell/jvm.clj` and
-`test/seon/shell/jvm_test.clj` were preserved. No lane was contacted and no worktree was created.
+Only **this review file** changes. Production source/test delta: **0 / 0**. No test, runtime probe,
+submission, provider call, adoption, publication, stop or reset was run. Default was untouched.
+Runtime timing, allocation, retained memory and installed behavior are **unmeasured**. The
+historical observations in D are not reproduced or treated as health evidence.
 
-Document validation is limited to the pinned source citations, whitespace/diff checks and the
-single-file commit scope. The pre-commit hook was inspected: this documentation-only change does
-not invoke tests. Commit uses explicit `git add` followed by `git commit --only --` for this path;
-the resulting hash is reported with delivery. The path is released on completion. No source
-implementation, push, merge or issue-index change is authorized by this review.
+Foreign edits were preserved and were not a dependency of this review. No lane was contacted,
+no worktree or alternate JVM was created, and no issue index was edited. The pre-commit hook was
+read; it checks identity and staged skills, and this review-only commit invokes no tests.
+Document verification is pinned citation inspection, whitespace/diff checks and exact commit
+scope. Commit uses explicit `git add`, then `git commit --only --` for this path, with the requested
+co-author trailer. The resulting hash and document delta are reported at delivery; this path is
+released on completion.
