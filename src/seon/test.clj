@@ -795,7 +795,9 @@
                                  (and (not (excluded? entry))
                                       (or (= :agent (one entity :seon.schema.admission/source))
                                           (= "test" (one (one entity :seon.fn/file) :seon.fn.file/relative-root))
-                                          (named? entry))
+                                          (named? entry)
+                                          ;; A test the request names as changed, from any root.
+                                          (and (= :incremental policy) (requested-changed (first entry))))
                                       (or include-long? (identities (first entry))
                                           (not (one entity :seon.test/long)))
                                       ;; A named request's changed identities
