@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed 44e7ad4b0 76d644bd2 b95676d59; tests owed to root
+status: landed 44e7ad4b0 76d644bd2 b95676d59 e62d8489c 88099feb0 08a9d70e1; tests owed to root
 lane: fix-unbounded-capture-opus
 created: 2026-09-25
 ---
@@ -153,15 +153,70 @@ committed HEAD.
 - The test-runner assertion text that produced the 895 MB ctx blob was already fixed by
   `aa00e58fc` (Sep 24 17:39), after that blob was written (12:41).
 
+## Round 3: the three remaining producers
+
+- **`e62d8489c` `error/prepare-result`.** The blob is now the value's admitted artifact: the record
+  that `read-artifact` and `artifact-value` read, the same one `get_value` stores. It is written
+  under the storage bound, with world objects as references.
+  - Deleted: the unbounded HTML-face `render.value/prepare` call in the recording path (1 line),
+    which rendered and stored a second, larger copy of the offending value.
+  - Caps come from the request (`prepare` passes them), otherwise from the SCI context's
+    environment, otherwise a named refusal.
+  - `error_result_test` changed its retired assumption (blob equals complete HTML text) to: the blob
+    reads back as an artifact whose value is the original value.
+- **`88099feb0` `kernel.clj:679`.** A failure that could not be admitted is offended by its
+  classifying base (at, layer, operation, message); the failure is no longer carried whole. The
+  admission Throwable is still kept.
+- **`08a9d70e1` `render.clj:167`.** `request-profile` offends with the request's sorted key names,
+  the shape the same function already used three lines above; it no longer carries the request.
+- **`render.clj:1098` is not changed, on purpose.** The admission it reaches (`kernel.clj:642`)
+  hands the projection, so a world inside a render result is now a reference: the class is closed
+  there. What stays unbounded is the render function's own output (hiccup or text), which by
+  ruling is never clipped. Its cost follows the output the function already built, about 65 B
+  allocated per byte after the leaf fix. Bounding it by the 8 MiB storage bound would make large
+  pages go missing rather than bound their presentation.
+
+## Producer sweep: one-line conversions (files outside this lane's grant; not edited)
+
+They share one shape: a refusal about a missing or ill-shaped member offends with the whole
+request. The conversion is `:seon.error/offending <request>` → `:seon.error/offending (vec (sort (keys <request>)))`
+when a member is absent, or → `(get <request> <member>)` when a present member is wrong. The world
+itself becomes the existing reference (the database by `:seon.error/basis`, the run by its ref).
+Since `76d644bd2`, any world object these still carry admits as a reference, so each remaining copy
+is bounded by the request's own plain data. Deletions: each site deletes one whole-request copy
+(one line each, about 40 lines in total).
+
+| site | function | conversion |
+|---|---|---|
+| my/program.clj:34 | read-result | `(ex-message failure)` is already in the message; offending → the requested fact keys |
+| config.clj:347 | admit-initialization | offending → `(type population)` plus the first non-map entry |
+| config.clj:542 | compile-manifest | offending → the missing configuration keys (set difference) |
+| ai.clj:1181 | truncation | offending → the snapshot's terminal-event fields and byte count; the stream stays in its blob |
+| issue.clj:846,854 | detector-rows | offending → the detector symbol |
+| issue.clj:1336-1430 (7 sites) | create-tx / assign | offending → `(select-keys request [:seon.issue/id :seon.agent/id <member>])` |
+| issue.clj:1541 | add-tx | offending → the author agent id |
+| env.clj:90,106 | environment-state / replace | offending → `(type environment)`; an environment is now a reference anyway |
+| env.clj:212,229,303 | absent-member-error | offending → the missing member key; the supplied value is a reference |
+| env.clj:422 | carry-state | offending → `(type state)` |
+| effect.clj:690 | background-time-limit | offending → the supplied limit value only |
+| effect.clj:717,779,806 | request* | offending → `(vec (sort (keys request)))` plus `:seon.effect/id` |
+| context.clj:70 | selection-refusal | offending → `(select-keys request [:seon.agent/id :seon.turn/id])` |
+| db.clj:2475 | missing-pull-selector-error | offending → `(vec (sort (keys request)))` |
+| db.clj:4686 | missing-transaction-data-error | offending → `(vec (sort (keys transaction)))` |
+| shell/jvm.clj:447 | foreground failure | offending → the argv plus exit/terminal event; stdout/stderr are already blobs |
+| edit.clj:348-480 (6 sites) | form / replace | offending → the selector plus the file path |
+| edit.clj:124-281 (4 sites, `source`) | source checks | offending → the path plus the source digest, never the source text |
+| render/transcript.clj:791 | missing-selected-run | offending → `(select-keys unit [:seon.turn/id :seon.agent/id])` |
+| render/transcript.clj:1049 | runtime-owner | offending → the component's `:seon.runtime/agent` value |
+| cluster/process.clj:237,245 | run-process! | offending → `(select-keys request [:argv :deadline-ms])` |
+| test/runner.clj:1518 | record-latest-tx | offending → the changed provenance keys (a diff), not the run |
+| render/web.clj:653 | sources | offending → the source identities (paths or digests) |
+
 ## Remaining producers (the edge now references their world, but each still copies its request)
 
 - The `request`/`unit` offending sites listed above; the owners are named by file.
-- `seon.error/prepare-result` (`error.clj:~466`) renders the offending value as complete HTML and
-  stores it as a second blob beside `:seon.error/data-content`. The fix is to store once and
-  reference that one digest. Owner: this lane, next round.
-- `render.clj:1098` still admits every render result unbounded.
-- `kernel.clj:679` still offends with the whole unadmittable failure. It is left as is because it is
-  the only faithful evidence.
+- Round 3 closed `prepare-result`, `kernel.clj:679` and `render.clj:167`. `render.clj:1098` is
+  left unchanged, with the reason given above.
 
 ## Original design (round 1)
 
@@ -216,6 +271,15 @@ Regressions to add with it (root runs; each has a declared bound):
 6. `bin/test-check default --ns seon.schema-test`: the projector refactor and the new declarations.
 7. Publication of the three schema resources: a canonical projection builds with the new
    identity-only keys.
+8. `bin/test-check default --ns seon.error-result-test`: the artifact blob.
+9. `bin/test-check default --ns seon.render-test`: the request-profile offending shape.
+
+Scratch namespaces `scratch.fuc-admit` and `scratch.fuc` were removed from default with
+`remove-ns`. Core predicates keep no global state (`schema.clj:1299`), so nothing else remains.
+
+Seen in passing, not investigated: default reported the branch error "recording writer refused"
+(`seon.db/transact!`, branch `agent-83890fd28bcc`, signature `0e5427a1…`) at 22:3xZ. It is not
+attributed to this lane.
 
 ## Commits
 
