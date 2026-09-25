@@ -1,6 +1,6 @@
 ---
 type: design
-status: revised design (Opus, revision 5): Astra's revision-4 review (5f7558427, REVISE, seven findings and Q1-Q3) integrated in place, with the owner's rulings of 20:50Z (faults as errors in MCP replies) and 23:00Z (renderers read the stable db value; errors reference the world); builds on the composition law (AGENTS.md 14ccb65f0, ba41af0c0, 5dba6a14c) and the landings of S1, R3, R7 and the read-sink fix; no production code
+status: revised design (Opus, revision 5, amended with the three corrections of Astra's ACCEPT-AFTER-FIXES review ff0615479: settlement printing, the fault-window contract, retrieval retirement; Q3 ruled (c); implementation authorized in slice order): Astra's revision-4 review (5f7558427, REVISE, seven findings and Q1-Q3) integrated in place, with the owner's rulings of 20:50Z (faults as errors in MCP replies) and 23:00Z (renderers read the stable db value; errors reference the world); builds on the composition law (AGENTS.md 14ccb65f0, ba41af0c0, 5dba6a14c) and the landings of S1, R3, R7 and the read-sink fix; no production code
 created: 2026-09-25
 revised: 2026-09-25
 lane: design-one-repl-language-opus → revise-one-repl-opus → revise2-one-repl-opus → design-one-pipeline-opus
@@ -44,8 +44,8 @@ as a value, with a default. No new loop, recorder, printer or store is added.
 `mcp-effective` and the ThreadLocal marks, `src/seon/cluster.clj:244-534`), the JVM error summary
 (`exception-summary` family, `:334-367`), the dead `mcp-io-prepl` (`:535-553`), the bridge's two evaluation forms,
 its error window and window bases, its re-decoding of shown text and its status printer
-(`script/seon/dev/mcp.clj:37-38`, `:280-303`, `:347-431`, `:511-563`; `cluster.clj:633-658`): about 570 source lines
-against about 295 added over P1-P5, and 137 more with retrieval (P7). Until P7 and P6 land the milestone is a partial
+(`script/seon/dev/mcp.clj:37-38`, `:280-303`, `:347-431`, `:511-563`; `cluster.clj:633-658`): about 590 source lines
+against about 310 added over P1-P5, and about 134 more with retrieval (P7, Q3 (c) as ruled). Until P7 and P6 land the milestone is a partial
 migration (§2.9).
 
 ## 0. Broken things first
@@ -187,19 +187,29 @@ The request, with registered keys except the three marked new:
    takes `:seon.sci.eval/event`, `eval.clj:4448-4461`), so `one-event` does not read again. A reader failure refuses
    that form; the refusal keeps the unread remainder of the source verbatim, and later forms do not run.
 3. **evaluate** (the stage's `evaluate`). Answers a native `:seon.sci.eval/evaluation`, with no shown text.
-4. **finalize**. Every replacement of the result happens here and only here: install acceptance and refusal
-   (`accept-candidate!` `eval.clj:4465`, `refuse-install` `:4491`), and the disposition refusal
-   (`disposition-rule-error` and `unrun-evaluation`, `turn.clj:4772-4789`, `eval.clj:3828`). Each constructor answers a
-   native evaluation value; none prints.
-5. **print**, once, of the final value (§2.5). The form's read sink still covers it, so render reads stay the form's.
+4. **finalize**. Every replacement of the result happens before the print: install acceptance and refusal
+   (`accept-candidate!` `eval.clj:4465`, `refuse-install` `:4491`), the disposition refusal
+   (`disposition-rule-error` and `unrun-evaluation`, `turn.clj:4772-4789`, `eval.clj:3828`), **and the disposition's
+   completion**, which today adds `:my.turn/delivered-to` and re-admits the value inside terminal-data preparation
+   (`evaluation-terminal-data`, `turn.clj:3466-3485`). That completion moves ahead of the print, so the saved text
+   shows the value that is committed. Each constructor answers a native evaluation value; none prints.
+5. **print** the final value (§2.5). The form's read sink still covers it, so render reads stay the form's. The bytes
+   are **speculative** until step 7 commits them.
 6. **record construction**. `evaluation-facts` (`turn.clj:104`) builds the facts, including the shown bytes it
    consumes (`:126-128`). Nothing is written yet.
-7. **persist**, by the lifecycle owner, in its one transaction (settlement for a run). Only after that commit does
-   any entrant receive the result. A settlement refusal is itself the final value: it is printed by the same call,
-   persisted as the refusal, and the earlier shown bytes are never stored or returned.
+7. **persist**, by the lifecycle owner (settlement for a run), through its existing branches: `settle!` commits the
+   prepared data, and on a writer-time refusal takes its one bounded refusal branch (`turn.clj:3840-3863`; the batch
+   form at `:3622-3633`, `:3779-3788`). Only after a commit does any entrant receive a result.
 
-So print precedes record **construction**, because the shown bytes are part of the record, and follows every
-replacement of the value. There is still one print and one recording transaction per evaluation batch.
+**The guarantee is one saved and returned rendering of the committed terminal value**, not one render call. If the
+writer refuses, the speculative success bytes are discarded, never stored or returned; the refusal is a distinct
+native value, rendered through the same print owner, and persisted by the existing refusal branch. That path
+therefore renders twice and attempts two transactions, and the proofs count both honestly. The refusal branch's own
+printers, `refusal-terminal-data`'s `pr-str` (`turn.clj:3704`) and `settle-batch-refusal!`'s (`:3753`, lost-error F10),
+retire into the same owner, coordinated once with F10's owner. Nothing re-runs the source or renders inside a
+transaction function. If storing the refusal fails, that is a core failure and panics visibly under
+`:seon.config/on-core-error :panic` (AGENTS.md "Panic visibly"); no durable answer is promised that storage did not
+produce.
 
 **Stage values are qualified symbols of program functions, checked by declared schema name.** A symbol survives the
 run's durability where a function object would not. Each stage has a registered function schema:
@@ -326,7 +336,7 @@ a request map or a connection.
 | Raw source, evaluation facts, program rows | source and provenance kept apart from declarations; only the program partition merges |
 | Live result objects, private state | existing SCI-context handles (`result/e…`); never serialized; after restart, typed unknown; a JVM result has no handle |
 | Error occurrences, result and report blobs | existing staging, publication and retention owners; core faults also get cluster visibility and delivery |
-| The fault observation of each settled evaluation | lost-error design §M: `:seon.cluster.eval/fault-basis` recorded by settlement, the window `(previous basis, this basis]` over the cluster database, typed `:seon.error/window-unknown` for a first or compacted evaluation, and `:seon.cluster.eval/outcome` (P3m) |
+| The fault observation of each settled evaluation | lost-error design §M, as revised there (its M2-M6): computed once **before** settlement from the captured **cluster** database value (not the agent's branch value); its exact shown text saved with the reply's units; one `:seon.cluster.eval/fault-window` component referencing the cluster identity and commit and the distinct lower and upper bases; only a committed settlement advances the lower bound; the window belongs to a batch's last form; first, compacted and changed-lineage windows are `:seon.error/window-unknown`; history renders the saved text and never recomputes (count and last-at keep no history) (P3m) |
 | Host prepl (operator commands, `mode "host"`) | nothing, by the ruled diagnostic exception; the reply says `:seon.dev.mcp/recorded? false` |
 
 **`record-evaluated-call` is not a JVM recorder.** JVM evaluations are runs, so settlement records them, and the
@@ -342,9 +352,10 @@ Selection per face, first match wins (11.1; AGENTS.md "Render ordinary values to
 contract-fitting render function in the **viewing** agent's namespace; the schema's declared pair; the floor.
 
 - **One finalization point (P1).** The print stage is called once by `evaluate-sources` on the value step 4 of §2.0
-  finalized. It replaces four printers: `evaluate`'s failure and success renders (`eval.clj:4141`, `:4380`),
-  `refuse-install`'s (`:4500`) and `unrun-evaluation`'s `pr-str` (`:3856-3862`), which today shows a disposition
-  refusal outside the render path. The evaluator carries print's inputs as data: the admitted value, its record and a
+  finalized. It replaces six printers: `evaluate`'s failure and success renders (`eval.clj:4141`, `:4380`),
+  `refuse-install`'s (`:4500`), `unrun-evaluation`'s `pr-str` (`:3856-3862`), which today shows a disposition
+  refusal outside the render path, and the settlement refusal branch's two `pr-str`s (`turn.clj:3704`, `:3753`),
+  which render a writer-time refusal through the same owner (§2.0, step 7). The evaluator carries print's inputs as data: the admitted value, its record and a
   top-level call's declared returns (`:seon.render.call/function`, computed today at `eval.clj:4376-4377`).
 - **Renderers may read the stable database value** (owner ruling 23:00Z). The print stage supplies the form's
   database value (the request's `:seon.db/db`) by declared schema name to any renderer whose contract declares it,
@@ -392,11 +403,13 @@ Each `eval_clj` call is one agent run. The bridge decides only custody, the segm
    `run-receipts` (`turn.clj:1720`) and `current-run` (`:332`), which P3 makes public with their contracts. The
    outcome is `:seon.cluster.eval/outcome` (lost-error §M4), which the bridge encodes as `isError`.
 
-**Faults are errors in the reply** (owner ruling 20:50Z). The fault observation of lost-error design §M is recorded
-at settlement and rendered as an ordinary unit through the one render path; the outcome is `:error` when the
-evaluation failed or the window holds a new, undelivered or unknown fault. A core fault raised during the call
-answers as the call's error value, never as an empty success. The bridge's window machinery retires in the same cut
-(P3m). The bridge never classifies or formats a fault.
+**Faults are errors in the reply** (owner ruling 20:50Z). The fault observation is lost-error design §M's, exactly
+(§2.4's row): one query owner, `occurred-since` changed in place to return every signature touched in the window
+with its resolution as data; the observation is one unit of the reply, sharing the reply's one presentation budget
+and the render owner's continuation; the outcome is `:error` when the evaluation failed or the observation holds a
+new, undelivered or unknown fault, and MCP only encodes it as `isError`. A core fault raised during the call answers
+as the call's error value, never as an empty success. The bridge's window machinery retires in the same cut (P3m).
+The bridge never classifies or formats a fault.
 
 **Namespace continuation is per evaluation stage.** The explicit request namespace wins. Otherwise the starting
 namespace is the ending namespace of this agent's latest evaluation **of the same stage** on this branch (the
@@ -475,13 +488,13 @@ including every caller of `project-next-prepl-value!` (`mcp.clj:108`, `:354`, `:
 
 | Deleted | Where | Lines | Slice | Replaced by |
 |---|---|---:|---|---|
-| four pre-edge printers become one | `eval.clj:4141`, `:4380`, `:4500`, `:3856-3862` | ≈ 20 | P1 | the finalization point |
+| six pre-edge printers become one owner | `eval.clj:4141`, `:4380`, `:4500`, `:3856-3862`; `turn.clj:3704`, `:3753` | ≈ 26 | P1 | the finalization point and the refusal branch through the same owner |
 | the per-form second read; the JVM count copy | loop, `mcp.clj:367-378` | ≈ 25 (traced in P2) | P2 | one read per form |
 | `decoded-projection-event`, `shown-event` | `mcp.clj:280-303` | 24 | P3 | stored shown bytes |
 | `sci-evaluation-form`, `remote-evaluation-form` | `mcp.clj:380-431` | 52 | P3 | one `evaluate-source!` form |
 | `execute-clj-eval`, reduced to transport | `mcp.clj:564-662` | ≈ 54 of 99 | P3, P4 | — |
 | `window-bases`, `max-window-errors`, `window-form`, `branch-errors!`, the extra text block | `mcp.clj:37-38`, `:511-563` | 55 | P3m | the fault observation |
-| `transcript.clj`'s recomputed windows | `render/transcript.clj:346-402` | ≈ 30 (+12) | P3m | recorded fault-basis pairs |
+| `transcript.clj`'s recomputed windows | `render/transcript.clj:346-402` | ≈ 45 (+10), lost-error §M7's count | P3m | the saved observation text plus its `fault-window` |
 | `jvm-evaluation-form` (its reader mapping moves) | `mcp.clj:347-379` | 24 | P4 | the JVM stage |
 | `mcp-projection`, `project-next-prepl-value!`, `consume-mcp-projection!` | `cluster.clj:244-246`, `:277-304` | 31 | P4 | nothing |
 | `nil-deref?`, `first-seon-frame`, `exception-summary` (R6) | `cluster.clj:334-367` | 34 | P4 | `kernel/failure-value` and error storage |
@@ -489,17 +502,28 @@ including every caller of `project-next-prepl-value!` (`mcp.clj:108`, `:354`, `:
 | projection lookup | `prepl.clj:26-27` | 2 | P4 | — |
 | `bounded-face`, `bounded-summary` | `cluster.clj:633-658` | 26 | P5 | ordinary render selection |
 | the bridge's `refuse#` maps | `mcp.clj:442-482` | ≈ 8 | P5 | registry-declared errors |
-| **Total, P1-P5** | | **≈ 572** | | |
-| `get_value` and its artifact store: `hex-digit?`, `digest!`, `path!`, `execute-get-value`; `mcp-get-value`; `mcp-effective` | `mcp.clj:728-782`; `cluster.clj:555-611`, `:309-333` | 137 | P7 (Q3) | the one continuation entrance, or an honest unavailable cut |
+| **Total, P1-P5** | | **≈ 593** | | |
+| `get_value`'s old-artifact adapter: `hex-digit?`, `digest!`, `path!`, `execute-get-value`; `mcp-get-value`; `mcp-effective` | `mcp.clj:728-782`; `cluster.clj:555-611`, `:309-333` | ≈ 134 (137 less the mark call P4 removes) | P7 | the one continuation entrance |
 | `record-evaluated-tx`, `record-evaluated-call` and helpers | `turn.clj:1454-1585` | ≈ 130 | root's call | `virtual-turn!` in fixtures |
 | R10, C1 (conditional) | runner, test, eval | 137 | P6 | §2.7 |
 
 **Moved, not deleted:** `identity-hash-map?`, `loaded-code-mark`, `loaded-code-changed?` (`cluster.clj:247-276`) into
 the JVM stage, and the JVM reader mapping (`mcp.clj:357-364`) into `read-context`.
 
-**Compliance.** "MCP is transport, custody and stage choice" is true only after P1-P5 and P7. B without P7 is a
-**partial migration**: it deletes `mcp-project`, the artifact's producer, so an oversized value produced after P4 has
-no retrievable remainder until P7; the reply then says so with a typed unavailable cut, never a replay.
+**Compliance and Q3.** The owner chose Q3 (c): retrieval through the one continuation entrance. "MCP is transport,
+custody and stage choice" is true only after P1-P5 and P7. Between P4 and P7 the milestone is a **partial
+migration**, and says so:
+
+- P4 deletes `mcp-project`, the artifact producer, and removes the deleted mark call from `execute-get-value`
+  (`mcp.clj:765-769`). `get_value` then remains a **limited adapter over artifacts written before P4**, labelled so in
+  its tool description; nothing new is written to it.
+- A value produced after P4 that exceeds the print budget answers the render owner's typed unavailable cut, never a
+  replay of its origin.
+- P7 imports the render plan's continuation entrance, not the retired producer: live SCI backing (the evaluation's
+  `result/e…` handle) expands; a JVM result, which has no handle, answers unavailable; nothing replays. The render
+  plan's §3g still describes MCP artifact production (`one-render-path-design-2026-09-25.md:467-475`); that
+  assumption is reconciled with the render owner before P7 integrates.
+- P7 then deletes the limited adapter, and only P7 books those lines.
 
 ### 2.10 What each stage costs: hypotheses to measure, not prices
 
@@ -892,13 +916,13 @@ renders whole (5.8).
 | # | Slice | Owner files | Added | Deleted | Net | Proof root runs |
 |---|---|---|---:|---:|---:|---|
 | **S1** | landed: one definition authority | — | — | — | +59 measured | its landings |
-| **P1** | one finalization point: all result replacements, then one print; constructors answer native values; the evaluator carries the head function as data; the form's sink covers print; the database value supplied to renderers by schema name | `src/seon/sci/eval.clj`, `src/seon/turn.clj` | +30 | −20 | +10 | a refused install, a disposition refusal and a success each show once; `unrun-evaluation` prints nothing; render reads stay in the form's evidence; preview and refresh comparisons still hold |
+| **P1** | one finalization point: all result replacements including the disposition's completion, then one print; constructors answer native values; the refusal branch renders through the same owner (the `pr-str`s at `turn.clj:3704`, `:3753` retire, with F10's owner); the evaluator carries the head function as data; the form's sink covers print; the database value supplied to renderers by schema name | `src/seon/sci/eval.clj`, `src/seon/turn.clj` | +40 | −26 | +14 | a refused install, a disposition refusal and a success each save one rendering; a writer-time refusal publishes no speculative success; a completed disposition's value and text agree; a batch refusal uses ordinary selection; failed refusal storage is a core failure; `unrun-evaluation` prints nothing; render reads stay in the form's evidence; preview and refresh comparisons hold |
 | **P2** | read once: segments keep raw source; the loop reads the next form with the stage's reader context and passes the event; the reader's next-event-from-offset entry if missing; remainder kept on refusal; stage keys and their three function schemas; the submission-time stage check | `src/seon/turn.clj`, `src/seon/cluster/reply.clj`, `src/seon/sci/reader.cljc`, `src/seon/cluster/agent.clj` (check only), the turn and eval schemas | +55 | −25 (traced) | +30 | the §2.2 proofs; an incompatible stage symbol refuses before any run |
 | **P3** | MCP SCI is root's run: `evaluate-source!`; P-RB, then root armed on a branch by the session; continuation per stage; `run-receipts`/`current-run` public; retirement without releasing live custody | `src/seon/cluster/agent.clj`, `src/seon/turn.clj` (two contracts), `script/seon/dev/mcp.clj` | +65 | −130 (shown decoding 24, SCI forms 52, `execute-clj-eval` ≈ 54) | −65 | M1's SCI proofs; the §2.10 measurement with a task-bearing root |
-| **P3m** | the fault observation (lost-error design §M, folded here as its "pipeline that owns MCP reply assembly"): fault-basis at settlement, cluster window, window-unknown, outcome, `isError` | the settlement writer, `seon.cluster.eval` schema, `src/seon/error.clj` (`occurred-since`), `render/transcript.clj`, `mcp.clj` | +40 | −85 (window 55, transcript ≈ 30) | −45 | lost-error §M's class regression rows |
-| **P4** | MCP JVM mode is root's run with the JVM stage; `mode "host"` with a bounded `valf`; the MCP projection, error summary, marks and dead prepl deleted | new `src/seon/repl/jvm.clj`, `src/seon/turn.clj` (refresh exclusion), `src/seon/cluster.clj`, `mcp.clj`, `resources/seon/operator/prepl.clj`, `script/seon/operator.clj`, the eval schema, `test/seon/cluster/mcp_test.clj`, `test/seon/mcp_test.clj`, `test/seon/render/web_context_test.clj` | +80 | −278 (R6 34, projection/valf/io-prepl 187, marks 31, JVM form 24, lookups 2) | −198 | M1's JVM proofs; `bin/seon status`, `start` and `config apply` read their replies; a large host value is bounded in `mode "host"` |
+| **P3m** | the fault observation, exactly lost-error design §M (folded here as its "pipeline that owns MCP reply assembly"): the cluster value captured before settlement, saved shown text, the `fault-window` component, the committed-cursor and last-form rules, lineage unknowns, `occurred-since` in place, one budget, outcome and `isError` | the settlement writer, `seon.cluster.eval` schema (+1 attribute and component, +1 error schema, counted once across both plans), `src/seon/error.clj`, `render/transcript.clj`, `mcp.clj` | +45 | −100 (window 55, transcript ≈ 45) | −55 | lost-error §M's class regression rows, including a fault resolved inside the window, a later recurrence leaving earlier saved text unchanged, and a failed settlement not advancing the lower bound |
+| **P4** | MCP JVM mode is root's run with the JVM stage; `mode "host"` with a bounded `valf`; the MCP projection, error summary, marks and dead prepl deleted; `get_value` reduced to the labelled old-artifact adapter (its mark call removed) | new `src/seon/repl/jvm.clj`, `src/seon/turn.clj` (refresh exclusion), `src/seon/cluster.clj`, `mcp.clj`, `resources/seon/operator/prepl.clj`, `script/seon/operator.clj`, the eval schema, `test/seon/cluster/mcp_test.clj`, `test/seon/mcp_test.clj`, `test/seon/render/web_context_test.clj` | +80 | −278 (R6 34, projection/valf/io-prepl 187, marks 31, JVM form 24, lookups 2) | −198 | M1's JVM proofs; `bin/seon status`, `start` and `config apply` read their replies; a large host value is bounded in `mode "host"` |
 | **P5** | `runtime_status` renders its observation through selection; `branch` refusals are registry-declared errors | `src/seon/cluster.clj`, `src/seon/cluster/registry.clj`, `mcp.clj` | +25 | −34 | −9 | status and branch answers unchanged in content, rendered by their declared renderers |
-| **P7** | retrieval through the one continuation entrance (Q3 (c)): `get_value` validates wire input and calls the render owner's `units` with the evaluation's source reference; a result with no retained backing answers the typed unavailable cut | `mcp.clj`, `src/seon/cluster.clj` | +20 | −137 | −117 | a live SCI result expands beyond the budget; a JVM result answers unavailable; nothing replays |
+| **P7** | retrieval through the one continuation entrance (Q3 (c), owner's choice): `get_value` validates wire input and calls the render owner's `units` with the evaluation's source reference; a result with no retained backing answers the typed unavailable cut; the old-artifact adapter deleted | `mcp.clj`, `src/seon/cluster.clj` | +20 | −134 | −114 | a live SCI result expands beyond the budget; a JVM result answers unavailable; nothing replays |
 | **S5** | write-back of one file (§3.3) | `src/seon/cluster/source.clj` | +75 | 0 | +75 | the M1 write-back proofs |
 | **P6** | tests enter the composition: `capture-evaluate`, recording through `evaluation-facts` and the recording writer, native report printed once, candidate gate as one request | `src/seon/test.clj`, `src/seon/test/runner.clj`, `src/seon/sci/eval.clj`, the test schema | +90 | −137 (R10 50, C1 87, conditional) | −47 | a member leaves one evaluation on the retaining branch, read once; failure keeps native operands; the candidate gate records a whole run |
 | **S4** | deletion's removal member (§3.2) | `src/seon/sci/eval.clj`, `src/seon/sci/reader.cljc`, `src/my/program.clj` | +30 | ≈ −50 | −20 | the §3.2 proofs |
@@ -908,7 +932,9 @@ renders whole (5.8).
 | later | qualified definitions; R8; R9b; the completed-run recorder (≈ −130, root's call); a product-agent writer if P-RB fails (≈ +25); the planner's silent drops | — | unpriced | — | — | — |
 
 **Dependencies.** P2 needs P1's finalization point (the loop owns both). P3 and P4 need P2 and the task-context
-design's incremental refresh (§2.10). P3m follows lost-error P2 (delivery evidence) and R4, as that design orders.
+design's incremental refresh (§2.10). P3m follows lost-error P2 (delivery evidence) and R4, and needs **render slice 2(i)** (one render path for the
+reply's units, lost-error §M's order), as that design orders; that is a different render cut from the continuation
+entrance, which only P7 needs. M1 therefore waits on render slice 2(i) through P3m.
 P7 needs the render plan's continuation entrance (`one-render-path-design-2026-09-25.md` §3g), which is not installed
 at this pin (`seon.render/units` with a source reference does not exist): its +20 is the adapter only, and the
 entrance itself is the render plan's unpriced cut.
@@ -917,12 +943,13 @@ entrance itself is the render plan's unpriced cut.
 
 | Option | Slices | Guarantee | Added / deleted / net | Sacrifice |
 |---|---|---|---|---|
-| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 + P5 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +295 / −572 / **−277** | no retrieval beyond the budget for results produced after P4 (typed unavailable); nothing lands in files |
-| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +370 / −572 / **−202** | as A; tests outside the composition until P6 |
-| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +480 / −846 / **−366** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −279) |
+| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 + P5 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +310 / −593 / **−283** | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
+| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +385 / −593 / **−208** | as A; tests outside the composition until P6 |
+| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +495 / −864 / **−369** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −282) |
 
-B is recommended because it lands the owner's MCP law and the dogfood path without waiting on the render plan; it
-is honestly labelled partial until P7 and P6 land. All three wait on the refresh cut.
+B is recommended as the first dogfood milestone: it lands the owner's MCP law and the dogfood path without waiting
+for the continuation entrance, and it is labelled partial until P7 and P6 land. All three wait on the refresh cut and,
+through P3m, on render slice 2(i).
 
 **Owner questions, with the review's recommendations applied.**
 
@@ -931,7 +958,8 @@ is honestly labelled partial until P7 and P6 land. All three wait on the refresh
   withdrawn: (b) changes the identity ruling, (c) resurrects a second driver.
 - **Q2, SCI without a branch:** **(b), root's run**, recommended by both; enforced as root custody, never inferred
   for an anonymous caller. (a), refusing branchless SCI, stays available as a narrower product constraint.
-- **Q3, retrieval beyond the print budget — the one open choice:**
+- **Q3, retrieval beyond the print budget: ruled (c)** by the owner, taking the recommendation. The table is kept as
+  the record of the choice:
 
 | Option | Guarantee | Cost | Sacrifice |
 |---|---|---|---|
