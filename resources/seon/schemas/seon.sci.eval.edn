@@ -328,6 +328,12 @@
  {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
   :seon.schema.admission/reason "A held Var root, Var, namespace map or context state is restored by identity, never traversed.",
   :gen/elements [nil true 0 "" :k [] {} #{}]}]
+:capture
+[:map {:description "One held observation of a context's program state, shared by admission and restoration."}
+ [:seon.sci.eval/namespaces :seon.sci.eval/namespaces]
+ [:seon.sci.eval/owned :seon.sci.eval/interns]
+ [:seon.sci.eval/states [:vector [:map [:seon.sci.eval/state :seon.sci.eval/context-state]
+                                [:seon.sci.eval/held :seon.sci.eval/held-value]]]]]
 :context-state [:fn {:error/message "must be the atom holding one piece of context state"} seon.sci.eval/context-state?]
 :restoration-step
 [:or {:description "One step restoring a refused program change: a Var's root and metadata; a namespace-map path set to its held value or removed; or a piece of context state reset to its held value."}
@@ -351,9 +357,11 @@
   [:seon.sci.eval/state :seon.sci.eval/context-state]
   [:seon.sci.eval/held :seon.sci.eval/held-value]]]
 :restore
-[:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars. Answers nil, or the unavailable refusal when the restoration could not run."}
+[:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars; with the failure being restored, that failure is the unavailable refusal's cause. Answers nil, or the unavailable refusal when the restoration could not run."}
  [:=> [:cat] [:maybe :seon.sci.eval/execution-unavailable-error]]
- [:=> [:cat [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.sci.eval/execution-unavailable-error]]]
+ [:=> [:cat [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.sci.eval/execution-unavailable-error]]
+ [:=> [:cat [:maybe [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.error/throwable]]
+  [:maybe :seon.sci.eval/execution-unavailable-error]]]
 :current-db :seon.db/database-value
 :reader-row :map
 :namespace-row :map

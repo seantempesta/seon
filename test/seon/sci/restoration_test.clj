@@ -52,6 +52,39 @@
          (is (= :input (:seon.instrument/check (value "(base-f \"a\")")))
              "the prior contract is still armed"))))))
 
+(deftest acceptance-that-throws-after-transfer-restores-the-recipient
+  ;; Astra e19adf392 finding 4: the recipient's restoration is captured before
+  ;; the transfer, and a throw before installation completes applies it.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           value #(:seon.sci.admit/value (sci.eval/evaluate (request ctx connection %)))
+           contract "{:malli/schema [:=> [:cat :int] :int]}"]
+       (value (str "(defn base-f \"D.\" " contract " [x] (inc x))"))
+       (value (str "(defn caller \"D.\" " contract " [x] (base-f x))"))
+       (let [held (get-in @(:env ctx) [:namespaces 'scratch.restoration 'base-f])
+             snapshot @(:seon.sci.kernel/program-snapshot ctx)
+             installed @(:seon.sci.kernel/installed-functions ctx)
+             candidate (sci.eval/evaluate-for-install
+                        (request ctx connection
+                                 (str "(defn base-f \"D.\" " contract " [x] (* 100 x))")))
+             ;; An unreadable contract throws inside installation, after the
+             ;; candidate's root was transferred.
+             unreadable (-> candidate
+                            (dissoc :seon.test.accretion/candidate-ctx)
+                            (assoc-in [:seon.program/row :seon.fn/spec] "[:=> [:cat"))
+             thrown (try (sci.eval/accept-candidate!
+                          {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
+                           :seon.sci.eval/evaluation unreadable})
+                         nil
+                         (catch Throwable failure failure))]
+         (is (some? thrown) "the failed acceptance throws its cause")
+         (is (identical? held (get-in @(:env ctx) [:namespaces 'scratch.restoration 'base-f])))
+         (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
+         (is (= installed @(:seon.sci.kernel/installed-functions ctx)))
+         (is (= 2 (value "(caller 1)")) "the affected caller runs the prior definition")
+         (is (= :input (:seon.instrument/check (value "(base-f \"a\")")))))))))
+
 (deftest a-var-redefined-then-removed-gets-its-captured-root-back
   (let [ctx (assoc (sci/fork (sci/init {}))
                    :seon.sci.kernel/program-snapshot (atom {}))
@@ -77,18 +110,27 @@
                              (fn [observation]
                                (swap! delivered conj (:seon.error/declared-schema observation))
                                [observation :seon.flow/committed])}))
-           restore #(#'sci.eval/restore-or-unavailable! ctx %1 %2)]
+           restore #(#'sci.eval/restore-or-unavailable! ctx %1 %2 nil)]
        (is (nil? (restore acquired (constantly []))) "nothing to restore changes nothing")
        (is (nil? (restore nil (constantly []))))
        (is (empty? @delivered))
        (let [planning (restore acquired #(throw (ex-info "planning broke" {})))]
          (is (= :restore-failed (:seon.sci.eval/unavailable planning)))
          (is (seq (:seon.error/chain planning)) "the whole cause is kept"))
+       (let [both (#'sci.eval/restore-or-unavailable!
+                   ctx acquired #(throw (ex-info "planning broke" {}))
+                   (ex-info "refused" {:seon.error/member :malli/schema}))]
+         (is (= ["Restoring a refused program change threw." "refused"]
+                (mapv :seon.error/message (:seon.error/chain both)))
+             "the restoration's failure and the refusal it was restoring are one chain")
+         (is (= ["planning broke"]
+                (mapv :seon.error/message
+                      (get-in both [:seon.error/chain 0 :seon.error/data :seon.error/chain])))))
        (is (= :program-reacquired
               (:seon.sci.eval/unavailable (restore nil (constantly [{:seon.sci.eval/path '[user x]}])))))
        (is (= :program-reacquired
               (get-in @(:env ctx) [:seon.sci.eval/unavailable-execution :seon.sci.eval/unavailable]))
            "the execution names its unavailability for every later form")
-       (is (= [:seon.sci.eval/execution-unavailable-error :seon.sci.eval/execution-unavailable-error]
+       (is (= (repeat 3 :seon.sci.eval/execution-unavailable-error)
               @delivered)
            "each fault is delivered through the context's recorder")))))
