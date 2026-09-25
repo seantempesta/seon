@@ -497,9 +497,15 @@
     (cond
       (or (nil? projection) (not (map? value)) (attribute-scoped? request)) []
       (and (:seon.error/at value) (qualified-symbol? (:seon.error/operation value)))
-      ;; Compose the satisfied alternative's pair, else the error base pair.
-      (let [found (pairs (error-alternatives projection value))]
-        (if (seq found) found (pairs [:seon.error/base])))
+      ;; The satisfied alternative's pair; a contracted operation none of whose
+      ;; alternatives the error satisfies is a contract finding shown with the
+      ;; base renderer; an uncontracted operation composes the base pair.
+      (let [alternatives (error-alternatives projection value)
+            found (pairs alternatives)]
+        (cond (seq found) found
+              (and alternatives (empty? alternatives) (#{:seon.render/ai :seon.render/html} output))
+              [(if (= :seon.render/ai output) 'seon.error/render-undeclared-ai 'seon.error/render-undeclared-html)]
+              :else (pairs [:seon.error/base])))
       (and function (identical? value (render-value request)))
       (pairs (satisfied-alternatives projection function value))
       :else (pairs (or (some-> (entity-owner projection value) vector)

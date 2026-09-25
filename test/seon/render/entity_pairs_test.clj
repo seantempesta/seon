@@ -174,4 +174,12 @@
     (is (= [:seon.render/ambiguous-error] (#'render/error-alternatives projection ambiguous)))
     (is (nil? (#'render/error-alternatives
                projection (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
-        "an uncontracted operation names no alternatives")))
+        "an uncontracted operation names no alternatives")
+    (let [declared #(#'render/declared-producers projection {} % :seon.render/ai)]
+      (is (= ['seon.error/render-ai] (declared ambiguous)) "the satisfied alternative's pair")
+      (is (= ['seon.error/render-undeclared-ai]
+             (declared (dissoc ambiguous :seon.render/candidates :seon.error/data)))
+          "a contracted operation's unmatched error is a loud contract finding")
+      (is (= ['seon.error/render-ai]
+             (declared (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
+          "an uncontracted operation composes the base pair"))))
