@@ -426,9 +426,15 @@
                                 :seon.boot/advertisement advertisement
                                 :seon.boot/prepl-server listener
                                 :seon.boot/executors (cluster/root-executors)})
+            ;; The cluster the launcher opened this JVM for (it supplies the
+            ;; listener) is its development cluster: the development overlay
+            ;; lies under any `--config` manifest.
+            manifest (merge (when (:seon.boot/prepl-server request) (config/development-manifest))
+                            (:seon.config/manifest request))
             compiled (config/compile-manifest
-                      (assoc (select-keys request [:seon.config/manifest :seon.config/environment])
-                             :seon.boot/cluster-name name))]
+                      (cond-> (assoc (select-keys request [:seon.config/environment])
+                                     :seon.boot/cluster-name name)
+                        manifest (assoc :seon.config/manifest manifest)))]
         (.mkdirs (io/file (:seon.boot/log-dir config)))
         (cluster/warn-low-space! (str (io/file (:seon.boot/store-dir config) "../.."))
                                 (:seon.config/effective compiled))
@@ -651,7 +657,12 @@
             (if (:seon.error/at published)
               published
               (cond-> (select-keys published [:seon.source/commit-id])
-                dev (assoc :seon.boot/cluster-name dev)))))
+                ;; A selected development cluster runs under the development overlay.
+                dev (assoc :seon.boot/cluster-name dev
+                           :seon.reconcile/result
+                           (config/apply! {:seon.db/connection (connection dev)
+                                           :seon.boot/cluster-name dev
+                                           :seon.config/manifest (config/development-manifest)}))))))
         (refuse! "Unknown operator command." request)))
     (catch Throwable cause
       ;; A request this boundary refused is its declared case; every other

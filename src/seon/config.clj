@@ -435,6 +435,17 @@
   (validate-layer (schema/declaration-projection (schema.edn/packaged-forms))
                   (read-edn-map path)))
 
+(def development-manifest-path
+  "The development cluster's sparse overlay, relative to the JVM's source directory.
+  Boot applies it to the cluster the JVM was launched for; tests never read it."
+  "config/development.edn")
+
+(defn development-manifest
+  "Read the development cluster's sparse overlay."
+  {:malli/schema [:=> [:cat] :seon.config/manifest]}
+  []
+  (read-manifest development-manifest-path))
+
 (defn- resolve-smart-decision
   [config-key decision]
   (if (and (= config-key :seon.config.flow.compute/concurrency)

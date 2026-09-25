@@ -1,3 +1,12 @@
-{; Proposed 2026-09-22, lane a2-storage-retention; orchestrator ratifies.
+{; The development cluster's sparse overlay. Boot applies it to the cluster its
+ ; JVM was launched for (`seon.cluster.boot/start!`) and `init --dev NAME`
+ ; re-applies it to NAME; test worlds compile only the shipped defaults.
+ ;
+ ; Owner 2026-09-24: no paid agent calls while agent context is garbage —
+ ; virtual no-op turns, no provider request or tokens. Remove this entry (or pass
+ ; `:seon.config.ai/no-provider :seon.config/absent` with --config) for a
+ ; deliberate provider verification.
+ :seon.config.ai/no-provider true
+ ; Proposed 2026-09-22, lane a2-storage-retention; orchestrator ratifies.
  ; Current branch heads survive; superseded commit/index ancestry is collectible.
  :seon.config.db/snapshot-window-ms 0}

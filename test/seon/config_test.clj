@@ -364,6 +364,17 @@
         (.delete packaged-file)
         (.delete directory)))))
 
+(deftest no-provider-is-a-development-overlay-decision-never-a-shipped-default
+  ;; Test worlds compile the shipped document, so they reach provider stand-ins;
+  ;; the development cluster boots under config/development.edn and runs no-provider.
+  (is (nil? (find (:seon.config/effective
+                   (config/compile-manifest {:seon.boot/cluster-name "default"}))
+                  :seon.config.ai/no-provider)))
+  (is (true? (:seon.config.ai/no-provider
+              (:seon.config/effective
+               (config/compile-manifest {:seon.boot/cluster-name "default"
+                                         :seon.config/manifest (config/development-manifest)}))))))
+
 (deftest apply-converts-a-flat-reconcile-error-to-a-refusal
   (test-support/with-database
     (fn [connection]
