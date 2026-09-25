@@ -56,8 +56,9 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 ### Platform state (2026-09-26 ~02:00Z)
 - Default: pid 39484, fresh store since the 22:05Z nuke (old store 124 GB, ≥8.76 GB of world copies), ready 33 s from zero,
   no-provider true, adopted at 6ab70139 (+ later commits pending adoption). Store 3.5 GB — watch it.
-- Boot from zero works again after two fixes (dependency cache refilled from the shell; call reach on a store without
-  functions 58e341cf3); the in-boot refill is in flight (fix-boot-dependency-analysis).
+- Boot from zero works again: boot fills a missing clj-kondo dependency analysis itself (71f14d1d4; ~26 s one-time, only on an
+  empty cache, root-authorized under owner delegation; ordinary boots pay a 6.4 ms check); call reach on a store without
+  functions fixed 58e341cf3. Open: `boot/stop!` marks running-instances with a bare Object that projection readers refuse (issue filed).
 - Adoption blockers met today, each fixed: `[:= {}]` read as properties (db51da2e7); reload refuses a retargeted alias (root
   ns-unaliased; issue filed); deleted paths in `--changed` (pass existing paths only); schema retirement against old row
   schemas (A/B two-step); attribute written before its schema (config re-land installs first).
