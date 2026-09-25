@@ -181,3 +181,39 @@ bin/test-check default --test seon.test.one-request-test/a-body-outliving-its-bo
 bin/test-check default --test seon.cluster.turn-test/a-turn-through-a-local-provider-settles-and-exits-within-its-bound
 bin/test-check default --test seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts
 ```
+
+## Round 4 (pid 23282, commit 6ab6c29c): the batched turn loops, it does not deadlock
+
+- **One member-handle fixture drive of the batched source.** This was the local provider
+  and a manual pass loop capped at 4 passes. Each tuple is (pass, outcome, forms run, time,
+  provider requests so far):
+
+  | pass | outcome | forms run | time | provider requests |
+  |---|---|---|---|---|
+  | `:open` | `:released` | 0 | 1669 ms | 0 |
+  | `:call` | `:error` | 8 | 16195 ms | 1 |
+  | `:open` | `:released` | 0 | 5789 ms | 1 |
+  | `:call` | `:error` | 8 | 16024 ms | 2 |
+
+  Every call pass evaluates all 8 forms, ends `:error`, and the agent re-opens and calls
+  again. `drive!` allows 12 passes, and 6 × ~22 s is over the 115 s bound.
+- **Root's dumps show one body, not two.** "ForkJoinPool-1-worker-3" is the carrier *of*
+  virtual thread #554 ("Carrying virtual thread #554"). The two dumps caught the same body
+  at different moments: once in `settle!` → `transact!`, once in the open's
+  `declared-sources` render. No second body is running, and the writer is not stuck.
+  Transaction waits took 43 of 366 samples.
+- **`db/identity-attributes` is not the cost.** It took 0.12 ms per call, measured over
+  20 calls (2486 attributes, 56 identity attributes).
+- **Where the time goes.** Samples were taken every 100 ms over 36.6 s, 366 in all:
+
+  | samples | ~time | path | what it does |
+  |---|---|---|---|
+  | 80 | 8 s | `turn/evaluate-sources` (turn.clj:4762) → `db/read-evidence` → `read-result-digest` → `stable-value` / `schema/canonical-data-string` | digests every captured read result, whatever its size |
+  | 62 | 6 s | `test.accretion/auto-check` → `candidate-capabilities` → `effect/capabilities` (effect.clj:161) | recursive reach query over the whole call graph, once per `defn` |
+  | 45 | 4.5 s | `turn/system-plan` (turn.clj:1976) → `db/read-evidence-changes` → `index-pattern-change` | scans since-views of the branch |
+  | 32 | 3 s | `db/declares-program?` (db.clj:1398) inside `carried-projection`, from `render/project-node*` | per-node projection key |
+  | 43 | 4 s | `turn/settle!` and `system-turn` `transact!` | writer latency |
+
+- **Not yet known:** why the call pass ends `:error` after all 8 forms run. The next probe
+  captures the call pass's whole report and error facts. It needs root's live-reproduction
+  window.
