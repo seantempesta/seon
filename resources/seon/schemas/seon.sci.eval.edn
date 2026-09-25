@@ -335,9 +335,18 @@
   [:seon.sci.eval/var :seon.sci.eval/sci-var]
   [:seon.sci.eval/root :seon.sci.eval/held-value]
   [:seon.sci.eval/metadata :map]]
- [:map {:closed true}
-  [:seon.sci.eval/path [:vector {:min 1 :max 2} :symbol]]
-  [:seon.sci.eval/prior {:optional true} :seon.sci.eval/held-value]]
+ [:map {:closed true :description "A Var that had no root before the form: unbound again, its metadata restored."}
+  [:seon.sci.eval/var :seon.sci.eval/sci-var]
+  [:seon.sci.eval/unbound [:= true]]
+  [:seon.sci.eval/metadata :map]]
+ [:map {:closed true :description "An intern put back to its held Var."}
+  [:seon.sci.eval/path [:tuple :symbol :symbol]]
+  [:seon.sci.eval/prior :seon.sci.eval/sci-var]]
+ [:map {:closed true :description "An intern the form created, removed."}
+  [:seon.sci.eval/path [:tuple :symbol :symbol]]]
+ [:map {:closed true :description "A namespace the form removed, put back to its held map."}
+  [:seon.sci.eval/path [:tuple :symbol]]
+  [:seon.sci.eval/prior :map]]
  [:map {:closed true}
   [:seon.sci.eval/state :seon.sci.eval/context-state]
   [:seon.sci.eval/held :seon.sci.eval/held-value]]]

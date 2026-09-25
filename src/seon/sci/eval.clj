@@ -505,23 +505,33 @@
                        [qualified (assoc entry ::prior-program? prior-program?)])))
                  after)))
 
-(defn- source-position
-  "The `[line column]` where `text` starts inside `source`, read at `start`."
-  {:malli/schema [:=> [:cat :string :seon.sci.eval/position :string]
-                  [:maybe :seon.sci.eval/position]]}
-  [source [line column] text]
-  (when-let [offset (str/index-of source text)]
-    (let [before (subs source 0 offset)
-          newline (str/last-index-of before "\n")]
-      [(+ line (count (filter #{\newline} before)))
-       (if newline (- offset newline) (+ column offset))])))
+(defn- source-offset
+  "The UTF-8 byte offset within `source`, read at `start`, of the reader
+  position `[line column]`: the unit of an analyzed row's `:seon.fn/form-span`.
+  Nil when the position is absent or lies outside `source`."
+  {:malli/schema [:=> [:cat :string :seon.sci.eval/position
+                       [:tuple [:maybe :int] [:maybe :int]]]
+                  [:maybe :int]]}
+  [source [start-line start-column] [line column]]
+  (when (and (int? line) (int? column) (<= start-line line))
+    (let [line-start (reduce (fn [offset _]
+                               (if-let [newline (str/index-of source "\n" offset)]
+                                 (inc newline)
+                                 (reduced nil)))
+                             0 (range (- line start-line)))
+          offset (when line-start
+                   (+ line-start (- column (if (= line start-line) start-column 1))))]
+      (when (and offset (<= 0 offset (count source)))
+        (alength (.getBytes (subs source 0 offset) java.nio.charset.StandardCharsets/UTF_8))))))
 
 (defn- program-change
   "Classify this form's definitions against its analyzed rows by provenance.
-  SCI gives a defined Var the `:line`/`:column` of the declaration that ran;
-  a definition is matched only when exactly one analyzed row names it and
-  that row's source starts there. Otherwise it is unindexed: an `eval` or
-  macro expansion, a second occurrence overwriting the analyzed one, or a
+  SCI gives a defined Var the `:line`/`:column` of the declaration that ran
+  and marks a root written after it `:sci/rebound`; a definition is matched
+  only when exactly one analyzed row names it, its root was not rebound, and
+  the analyzer's `:seon.fn/form-span` for that row starts at the Var's
+  position. Otherwise it is unindexed: an `eval` or macro expansion, a
+  second occurrence or root write overwriting the analyzed one, or a
   function replaced by data. Repeated occurrences of one name are repeated
   declarations. A Var no row names is a helper of a host-bound declaration
   (record or type) only when it was defined at that declaration's position.
@@ -530,21 +540,24 @@
                        [:vector :map] :string :seon.sci.eval/position]
                   :seon.sci.eval/program-change]}
   [definitions analyzed source start]
-  (let [position #(when-let [text (or (:seon.fn/source %) (:seon.test/source %))]
-                    (source-position source start text))
+  (let [position (comp first :seon.fn/form-span)
         identity-of #(or (:seon.fn/sym %) (:seon.test/sym %))
         by-name (group-by identity-of analyzed)
         host-positions (into #{} (comp (filter :seon.fn/host-bound?) (keep position)) analyzed)
         classify
         (fn [[qualified {sci-var :seon.sci.eval/var :as entry}]]
           (let [occurrences (get by-name qualified)
-                defined-at (some-> (meta sci-var) ((juxt :line :column)))]
+                defined-at (source-offset source start ((juxt :line :column) (meta sci-var)))]
             (cond
               (and (::prior-program? entry) (not (program-value? entry))) {::unmatched qualified}
               (< 1 (count occurrences)) {::repeated (repeat (count occurrences) qualified)}
-              (and (= 1 (count occurrences)) (= defined-at (position (first occurrences))))
+              ;; A root written after the definition (alter-var-root, intern,
+              ;; with-redefs) no longer comes from it: SCI marks it rebound.
+              (:sci/rebound (meta sci-var)) {::unmatched qualified}
+              (and (= 1 (count occurrences)) defined-at
+                   (= defined-at (position (first occurrences))))
               {::row (first occurrences) ::var sci-var}
-              (and (empty? occurrences) (contains? host-positions defined-at)) {}
+              (and (empty? occurrences) defined-at (contains? host-positions defined-at)) {}
               :else {::unmatched qualified})))
         classified (map classify definitions)
         matched (keep #(when (::row %) %) classified)]
@@ -586,6 +599,16 @@
                    (not (find after-map intern-name)))]
     [namespace-name intern-name prior]))
 
+(defn- var-step
+  "The step putting `sci-var` back to its captured root, or unbinding it when
+  it had none, with its captured metadata."
+  {:malli/schema [:=> [:cat :seon.sci.eval/sci-var :seon.sci.eval/held-value :map]
+                  :seon.sci.eval/restoration-step]}
+  [sci-var value metadata]
+  (if (identical? absent-intern value)
+    {::var sci-var ::unbound true ::metadata metadata}
+    {::var sci-var ::root value ::metadata metadata}))
+
 (defn- program-restoration
   "The steps that put this form's program change back: each changed Var's
   prior root and metadata (Var identity kept, so interpreted callers stay
@@ -613,9 +636,8 @@
                                (identical? metadata after-metadata)))
                      (restore? qualified))]
       (cond
-        (and (identical? prior sci-var) (find before qualified)
-             (not (identical? absent-intern value)))
-        {::var sci-var ::root value ::metadata metadata}
+        (and (identical? prior sci-var) (find before qualified))
+        (var-step sci-var value metadata)
         (some? prior) {::path path ::prior prior}
         :else {::path path})))
    (mapcat
@@ -629,8 +651,8 @@
             ;; A Var this generation owned was redefined in place before its
             ;; removal: the held Var carries the new root, so put back the
             ;; captured one as well.
-            (and (identical? owned prior) (not (identical? absent-intern value)))
-            (conj {::var prior ::root value ::metadata metadata})))))
+            (identical? owned prior)
+            (conj (var-step prior value metadata))))))
     (removed-interns before-namespaces after-namespaces))))
 
 (defn- apply-restoration!
@@ -640,7 +662,9 @@
   (doseq [{sci-var ::var path ::path state ::state :as step} steps]
     (cond
       state (reset! state (::held step))
-      sci-var (do (sci.vars/bindRoot sci-var (::root step))
+      sci-var (do (if (::unbound step)
+                    (sci.vars/unbind sci-var)
+                    (sci.vars/bindRoot sci-var (::root step)))
                   (reset-meta! sci-var (::metadata step)))
       (find step ::prior) (swap! (:env ctx) assoc-in (into [:namespaces] path) (::prior step))
       :else (swap! (:env ctx) update-in [:namespaces (first path)] dissoc (second path)))))
@@ -724,7 +748,8 @@
    {:seon.error/message
     (str "This form changed " (str/join ", " (sort-by str members))
          ", which its analysis declares no definition for at the place it ran: an eval, a "
-         "macro expansion, a second definition of the name, a nested unmap, a point-free "
+         "macro expansion, a second definition of the name, a root written after its "
+         "definition (alter-var-root, intern), a nested unmap, a point-free "
          "def such as (def f (comp ...)), or a function replaced by a value. Define it with "
          "its own defn, or remove it first with a top-level ns-unmap.")
     :seon.error/member :seon.program/row
@@ -785,7 +810,8 @@
                              namespace-row)
         metadata (meta sci-var)
         qualified (or (:seon.fn/sym analysed-row) (:seon.test/sym analysed-row))
-        row (cond-> (assoc analysed-row ::evaluated? true)
+        ;; The form-span locates the row in this form's source only.
+        row (cond-> (assoc (dissoc analysed-row :seon.fn/form-span) ::evaluated? true)
               (:malli/schema metadata)
               (assoc :seon.fn/spec
                      (pr-str (accretion/data-contract! (:malli/schema metadata))))

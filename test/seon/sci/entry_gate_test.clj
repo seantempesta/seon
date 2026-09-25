@@ -197,3 +197,44 @@
          ((:seon.sci.eval/restore admitted))
          (is (= 2 (value "(kept 1)"))
              "a settlement refusal restores the admitted change through its evaluation"))))))
+
+(deftest ^{:seon/tasks #{"132fee0467c8"}} a-definition-is-the-root-its-analyzed-declaration-ran
+  ;; Astra e19adf392 findings 1 and 3: provenance is the analyzer's exact span
+  ;; plus SCI's rebound mark, never a text search; a refused change to an
+  ;; unbound Var leaves it unbound.
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           value #(:seon.sci.admit/value (evaluate-in ctx %))
+           absent? #(= 'absent (value (str "(if (resolve '" % ") 'present 'absent)")))
+           contract "{:malli/schema [:=> [:cat :int] :int]}"
+           declaration (str "(defn echoed \"D.\" " contract " [x] x)")]
+       (is (= '#{scratch.entry-gate/rewritten}
+              (:seon.sci.eval/unindexed
+               (value (str "(do\n  (defn rewritten \"Identity.\" " contract " [x] x)\n"
+                           "  (alter-var-root #'rewritten (constantly inc)))"))))
+           "a root written after the definition is not the analyzed body")
+       (is (absent? "rewritten"))
+       (let [admitted (evaluate-in ctx (str "(do\n  ;" declaration "\n  " declaration ")"))
+             row (:seon.program/row admitted)]
+         (is (= 'scratch.entry-gate/echoed (:seon.fn/sym row))
+             (str "a comment holding the same bytes is not the declaration: "
+                  (pr-str (:seon.sci.admit/value admitted))))
+         (is (= declaration (:seon.fn/source row)))
+         (is (not (contains? row :seon.fn/form-span))
+             "the span locates the row within this form only")
+         (is (= 1 (value "(echoed 1)"))))
+       (is (= 'scratch.entry-gate/later
+              (get-in (evaluate-in ctx (str "(do (def note \"é😀\")\n"
+                                            "  (defn later \"😀\" " contract " [x] x))"))
+                      [:seon.program/row :seon.fn/sym]))
+           "positions after multibyte characters and lines match their analyzed bytes")
+       (value "(declare pending)")
+       (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration
+                             (value "(defn pending \"Missing contract.\" [x] x)"))))
+       (is (false? (value "(bound? #'pending)"))
+           "a refused definition of an unbound Var leaves it unbound")
+       (is (:seon.error/message
+            (value "(do (defn pending \"M.\" [x] x) (ns-unmap 'scratch.entry-gate 'pending) (defn bare \"No contract.\" [x] x))")))
+       (is (= [true false] (value "[(some? (resolve 'pending)) (bound? #'pending)]"))
+           "a refused redefinition-then-unmap puts the unbound Var back unbound")))))

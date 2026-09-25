@@ -1464,7 +1464,9 @@
 
   The supplied namespace is the caller's current resolver context, including
   uncommitted aliases. Prelude declarations resolve calls but never become
-  submitted rows. A submitted form has no file coordinates."
+  submitted rows. A submitted form has no file; each row's
+  `:seon.fn/form-span` is the analyzer's exact byte span within `source`,
+  transient provenance a caller drops before storing the row."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.program/shapes
          :seon.ns/ns
@@ -1481,6 +1483,9 @@
                     :form-source source
                     :seon.fn/namespace-row namespace-row}])
         [first-row last-row] (first spans)
+        context (text-context text)
+        ;; The submitted form starts its own line after the prelude.
+        base (nth (::byte-line-starts context) (dec first-row))
         functions (into (first-party-function-symbols analysis)
                         (map :seon.fn/sym) function-rows)
         submitted (source-analysis analysis first-row last-row)
@@ -1488,7 +1493,7 @@
                        (schema/projection-from-database database))
         rows (analysis-rows-by-file
               submitted
-              functions {"<stdin>" (text-context text)}
+              functions {"<stdin>" context}
               (program-targets database
                                (population-targets
                                 (db/carried-projection database)
@@ -1503,11 +1508,15 @@
            ;; analysis `ns` form widened by interpreter refers.
            (map #(assoc % :seon.program/definition-digest
                         (db/definition-digest-of projection % namespace-row)))
-           (map #(program/declaration-row
-                  (db/carried-projection database)
-                  (program/canonical-row
-                   row-shapes (dissoc % :seon.fn/file :seon.fn/form-span))
-                  :all :agent)))
+           (map (fn [row]
+                  (cond-> (program/declaration-row
+                           (db/carried-projection database)
+                           (program/canonical-row
+                            row-shapes (dissoc row :seon.fn/file :seon.fn/form-span))
+                           :all :agent)
+                    (:seon.fn/form-span row)
+                    (assoc :seon.fn/form-span
+                           (mapv #(- % base) (:seon.fn/form-span row)))))))
           (get rows "<stdin>"))))
 
 (defn- lint-rows
