@@ -1432,6 +1432,63 @@
                   (assoc :seon.boot/cluster-name (valid-name (or (first positionals) "default")))))
             (fail! "Unknown command." request)))))))
 
+(def status-top
+  "How many whole entries of each unbounded status family the terminal shows."
+  5)
+
+(defn- top [entries select-entry]
+  (cond-> {:seon.operator/count (count entries)
+           :seon.operator/top (mapv select-entry (take status-top entries))}
+    (< status-top (count entries)) (assoc :seon.operator/omitted (- (count entries) status-top))))
+
+(defn- short-message
+  "The message when it is at most 300 characters, else its length by name."
+  [value]
+  (let [message (:seon.error/message value)]
+    (if (and (string? message) (< 300 (count message)))
+      {:seon.operator/message-chars (count message)}
+      (select-keys value [:seon.error/message]))))
+
+(defn- cluster-summary [observation]
+  (let [faults (:seon.dev.mcp/open-faults observation)
+        procs (for [row (get-in observation [:seon.dev.mcp/flow :seon.oversight/agents])
+                    proc (:seon.oversight/procs row)] proc)
+        failures (fn [value] (when value (merge (select-keys value [:seon.error/operation :seon.error/layer])
+                                                 (short-message value))))]
+    (cond-> (select-keys observation [:seon.dev.mcp/cluster :seon.dev.mcp/health :seon.dev.mcp/problem-counts])
+      (:seon.dev.mcp/readiness observation)
+      (assoc :seon.dev.mcp/readiness (select-keys (:seon.dev.mcp/readiness observation)
+                                                  [:seon.boot/missing-layers :seon.boot/ready-ms :seon.render.web/url]))
+      (seq faults)
+      (assoc :seon.dev.mcp/open-faults
+             (top faults #(merge (select-keys % [:seon.error/operation :seon.problems/occurrences
+                                                 :seon.error/exception-class :seon.error.occurrence/last-at])
+                                 (short-message %))))
+      (map? (:seon.dev.mcp/flow observation))
+      (assoc :seon.dev.mcp/flow {:seon.operator/procs (count procs)
+                                 :seon.operator/unanswered (count (remove #(= :reply (:seon.oversight/ping %)) procs))})
+      (seq (:seon.dev.mcp/replaced-roots observation))
+      (assoc :seon.dev.mcp/replaced-roots (let [roots (:seon.dev.mcp/replaced-roots observation)]
+                                            (if (map? roots) roots (top roots clojure.core/identity))))
+      (:seon.dev.mcp/problems-unavailable observation)
+      (assoc :seon.dev.mcp/problems-unavailable (failures (:seon.dev.mcp/problems-unavailable observation)))
+      (:seon.dev.mcp/program-unavailable observation)
+      (assoc :seon.dev.mcp/program-unavailable (failures (:seon.dev.mcp/program-unavailable observation)))
+      (:seon.dev.mcp/profile observation)
+      (assoc :seon.profile/over-second-lines
+             (get-in observation [:seon.dev.mcp/profile :seon.profile/over-second-lines])))))
+
+(defn status-summary
+  "The terminal face of a status response: counts and the top whole entries
+  of each cluster's unbounded families. The whole value is MCP runtime_status."
+  [result]
+  (if (:seon.operator/clusters result)
+    (-> (select-keys result [:seon.boot/pid :seon.boot/start-instant :seon.operator/source-root
+                             :seon.operator/hook-publication :seon.operator/hook-publication-reason])
+        (assoc :seon.operator/clusters (mapv cluster-summary (:seon.operator/clusters result))
+               :seon.operator/requery "Whole value: MCP runtime_status, or bin/seon status --verbose."))
+    result))
+
 (defn -main [& args]
   (try
     (let [request (parse-argv args)
@@ -1447,6 +1504,8 @@
           (when-not (.waitFor child (operator-silence-backstop-ms {}) TimeUnit/MILLISECONDS)
             (.destroyForcibly child) (fail! "OS opener did not exit." result))
           (when-not (zero? (.exitValue child)) (fail! "OS opener failed." result)))
+        (and (= :status (:seon.operator/command request)) (not (:seon.operator/verbose? request)))
+        (prn (status-summary result))
         :else (prn result))
       (when (= :off (:seon.operator/hook-publication result))
         (binding [*out* *err*]

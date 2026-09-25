@@ -35,3 +35,25 @@
         (is (nil? (:seon.operator/reader-error (ex-data thrown))))
         (is (map? (get-in (ex-data thrown) [:seon.error/offending :val]))))
       (finally (server/stop-server server-name)))))
+
+(deftest status-prints-a-bounded-summary-of-500-failed-tests
+  ;; `bin/seon status` printed 1.5 MB; the terminal face keeps counts and the
+  ;; top whole entries, and names where the whole value is.
+  (let [faults (vec (for [i (range 500)]
+                      {:seon.error/signature (str "sig-" i) :seon.error/operation 'seon.test/run
+                       :seon.problems/occurrences i :seon.error/message (apply str (repeat 3000 "x"))}))
+        observation {:seon.dev.mcp/cluster "default" :seon.dev.mcp/health :faulted
+                     :seon.dev.mcp/problem-counts {:seon.problems/failed-tests 500}
+                     :seon.dev.mcp/open-faults faults
+                     :seon.dev.mcp/problems-unavailable
+                     {:seon.error/operation 'seon.problems/problems
+                      :seon.error/message (apply str (repeat 1500000 "y"))}}
+        summary (operator/status-summary {:seon.boot/pid 1 :seon.operator/clusters [observation]})
+        [cluster] (:seon.operator/clusters summary)]
+    (is (< (count (pr-str summary)) 4096) "the printed summary stays under 4 KB")
+    (is (= {:seon.problems/failed-tests 500} (:seon.dev.mcp/problem-counts cluster)))
+    (is (= 500 (get-in cluster [:seon.dev.mcp/open-faults :seon.operator/count])))
+    (is (= 495 (get-in cluster [:seon.dev.mcp/open-faults :seon.operator/omitted])))
+    (is (= 3000 (get-in cluster [:seon.dev.mcp/open-faults :seon.operator/top 0 :seon.operator/message-chars])))
+    (is (= 1500000 (get-in cluster [:seon.dev.mcp/problems-unavailable :seon.operator/message-chars])))
+    (is (clojure.string/includes? (:seon.operator/requery summary) "runtime_status"))))
