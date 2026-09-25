@@ -1,7 +1,7 @@
 ---
 type: issue
 status: open
-severity: critical
+severity: correctness
 created: 2026-09-25
 tags: [issue, config, provider, paid-calls, tests]
 ---
@@ -14,7 +14,9 @@ shipped DeepSeek endpoint; `DEEPSEEK_API_KEY` is set in the JVM, and the probe m
 run of `seon.cluster.turn-test/spending-the-last-episode-run-is-a-loud-core-fault` (tmp/orchestrator/verify-2055.out.d/017.txt)
 very likely made paid calls too. Default itself stays `:seon.config.ai/no-provider true`.
 
-**Law broken:** standing owner rule — no paid agent calls; default and development run no-provider (config layers: schema
+**Owner 2026-09-25:** the calls are cheap and acceptable; fix because a test world silently resolving a provider is wrong, not as an emergency.
+
+**Rule:** standing owner rule — no paid agent calls; default and development run no-provider (config layers: schema
 default → ordered overlays, `config/development.edn` carries `no-provider true` → environment → cluster facts → per-agent).
 
 **Owner fix required:** an apply must layer onto the overlays, never replace them; a partial manifest changes only its keys.
