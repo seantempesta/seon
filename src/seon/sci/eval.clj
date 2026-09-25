@@ -976,15 +976,28 @@
       (= 1 (count events))
       (first events)
 
-      (empty? events)
-      (throw (ex-info "Your reply had no form; only comments/prose. Send a form."
-                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/reader 'seon.sci.eval/one-event
-                       {::reader-event-count 0})))
-
       :else
-      (throw (ex-info "Evaluation requires exactly one reader event."
-                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.eval/reader 'seon.sci.eval/one-event
-                       {::reader-event-count (count events)}))))))
+      ;; The refused member is the source; the offending value is the source
+      ;; itself when empty, else the second form's, whose reader position
+      ;; the message names.
+      (let [{:seon.sci.reader/keys [line column] :as second-event} (second events)
+            message (if second-event
+                      (str "Evaluation accepts exactly one form; the second form starts at line "
+                           line ", column " column ". Wrap sequences in `(do ...)`.")
+                      "Your reply had no form; only comments/prose. Send a form.")]
+        (throw (ex-info message
+                        (seon.error.refusal/diagnostic
+                         (java.util.Date.) :seon.sci.eval/reader 'seon.sci.eval/one-event
+                         (cond-> {:seon.error/message message
+                                  ::reader-event-count (count events)
+                                  :seon.error/member :seon.cluster.eval/source
+                                  :seon.error/expected ::one-reader-event
+                                  :seon.error/offending (get second-event :seon.sci.reader/source source)}
+                           second-event
+                           (assoc :seon.error/fix "Wrap sequences in `(do ...)`."
+                                  :seon.error/data (select-keys second-event [:seon.sci.reader/line
+                                                                             :seon.sci.reader/column
+                                                                             :seon.sci.reader/source]))))))))))
 
 (defn bind-result!
   "Bind one evaluation's value in the fork under its own handle.

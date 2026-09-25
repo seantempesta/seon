@@ -7,6 +7,8 @@
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
             [sci.core :as sci]
+            [seon.config :as config]
+            [seon.sci.eval :as eval]
             [seon.sci.reader :as reader]
             [seon.schema :as schema]
             [seon.test-support :as support]))
@@ -166,6 +168,31 @@
              (get-in
               (events "😀" {:seon.config.eval.result/max-source 1})
               [:seon.error/data :seon.sci.reader/length]))))))
+
+(deftest a-number-ending-the-text-keeps-its-source-and-span
+  ;; tools.reader steps the column back on unreading EOF's nil after a number.
+  (doseq [[text sources] {"1" ["1"] "1 2" ["1" "2"] "1\n2" ["1" "2"]
+                          ":k 1" [":k" "1"] "\"s\" -1.5" ["\"s\"" "-1.5"]}]
+    (let [read-events (events text)]
+      (is (= sources (mapv :seon.sci.reader/source read-events)) text)
+      (is (not-any? :seon.sci.reader/error read-events) text)
+      (is (= text (apply str (event-slices text read-events))) text))))
+
+(deftest evaluation-refuses-a-second-form-by-its-position
+  (doseq [[text line column offending] [["(+ 1 2) (+ 3 4)" 1 9 "(+ 3 4)"] ["1 2" 1 3 "2"]
+                                        ["1\n2" 2 1 "2"] [" ;; prose only" nil nil " ;; prose only"]]]
+    (let [refusal (:seon.sci.admit/value
+                   (eval/evaluate {:seon.schema/projection (schema/handed-projection)
+                                   :seon.cluster.eval/source text
+                                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                                   :seon.sci.eval/time-limit-ms 2000
+                                   :seon.config/on-core-error :panic}))]
+      (is (schema/valid-candidate-value? (schema/handed-projection)
+                                         :seon.sci.eval/reader-event-count-error refusal) text)
+      (is (= [:seon.cluster.eval/source offending]
+             [(:seon.error/member refusal) (:seon.error/offending refusal)]) text)
+      (is (= [line column] (mapv (:seon.error/data refusal {}) [:seon.sci.reader/line :seon.sci.reader/column])) text)
+      (when line (is (str/includes? (:seon.error/message refusal) "(do ...)") text)))))
 
 (deftest original-source-spans-preserve-crlf-and-utf16
   (let [text "; 😀 note\r\n(+ 1 2)\r\n\"😀\"\r\n"
