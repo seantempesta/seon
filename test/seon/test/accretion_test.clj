@@ -128,47 +128,47 @@
       (admit!
        connection
        [(test-support/namespace-row @connection 'fixture.gate)
-        {:seon.fn/sym "fixture.gate/target"
+        {:seon.fn/sym 'fixture.gate/target
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.gate]
          :seon.fn/source "(defn target [] 1)"
          :seon.fn/arglists "([])" :seon.fn/private? false}
-        {:seon.fn/sym "fixture.gate/caller"
+        {:seon.fn/sym 'fixture.gate/caller
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.gate]
          :seon.fn/source "(defn caller [] (target))"
          :seon.fn/arglists "([])" :seon.fn/private? false
-         :seon.fn/calls #{[:seon.fn/sym "fixture.gate/target"]}}])
+         :seon.fn/calls #{'fixture.gate/target}}])
       (admit!
        connection
-       [{:seon.test/sym "fixture.gate/direct-test"
+       [{:seon.test/sym 'fixture.gate/direct-test
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.gate]
          :seon.test/source "(deftest direct-test)"
-         :seon.fn/calls #{[:seon.fn/sym "fixture.gate/target"]}}
-        {:seon.test/sym "fixture.gate/caller-test"
+         :seon.fn/calls #{'fixture.gate/target}}
+        {:seon.test/sym 'fixture.gate/caller-test
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.gate]
          :seon.test/source "(deftest caller-test)"
-         :seon.fn/calls #{[:seon.fn/sym "fixture.gate/caller"]}}
-        {:seon.test/sym "fixture.gate/subject-test"
+         :seon.fn/calls #{'fixture.gate/caller}}
+        {:seon.test/sym 'fixture.gate/subject-test
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.gate]
          :seon.test/source "(deftest subject-test)"
-         :seon.test/subject [:seon.fn/sym "fixture.gate/target"]}
-        {:seon.test/sym "fixture.gate/pending-test"
+         :seon.test/subject 'fixture.gate/target}
+        {:seon.test/sym 'fixture.gate/pending-test
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.gate]
          :seon.test/source "(deftest pending-test)"
-         :seon.test/pending-subject "fixture.gate/future"}])
-      (is (= ["fixture.gate/caller-test"
-              "fixture.gate/direct-test"
-              "fixture.gate/subject-test"]
-             (seon.fn/gate-set @connection "fixture.gate/target")))
-      (is (= ["fixture.gate/pending-test"]
-             (seon.fn/gate-set @connection "fixture.gate/future")))
-      (is (= (seon.fn/gate-set @connection "fixture.gate/target")
-             (seon.fn/tests-reaching @connection "fixture.gate/target"))))))
+         :seon.test/subject 'fixture.gate/future}])
+      (is (= ['fixture.gate/caller-test
+              'fixture.gate/direct-test
+              'fixture.gate/subject-test]
+             (seon.fn/gate-set @connection 'fixture.gate/target)))
+      (is (= ['fixture.gate/pending-test]
+             (seon.fn/gate-set @connection 'fixture.gate/future)))
+      (is (= (seon.fn/gate-set @connection 'fixture.gate/target)
+             (seon.fn/tests-reaching @connection 'fixture.gate/target))))))
 
 (deftest candidate-tests-run-on-a-copy-on-write-turn-fork
   (test-support/with-database
@@ -184,7 +184,7 @@
            (str "(ns fixture.candidate "
                 "(:require [clojure.test :refer [deftest is]]))")}
           :all :agent)}
-        {:seon.fn/sym "fixture.candidate/target"
+        {:seon.fn/sym 'fixture.candidate/target
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.candidate]
          :seon.fn/source
@@ -193,13 +193,13 @@
          :seon.fn/arglists "([x])"
          :seon.fn/private? false
          :seon.fn/spec "[:=> [:cat :int] :int]"}
-        {:seon.test/sym "fixture.candidate/green-test"
+        {:seon.test/sym 'fixture.candidate/green-test
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.candidate]
          :seon.test/source
          (str "(clojure.test/deftest green-test "
               "(clojure.test/is (= 2 (target 1))))")}
-        {:seon.test/sym "fixture.candidate/red-test"
+        {:seon.test/sym 'fixture.candidate/red-test
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.candidate]
          :seon.test/source
@@ -232,8 +232,8 @@
               (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                    "target [x] (inc x))")
               :seon.test.accretion/gate-set
-              ["fixture.candidate/green-test"
-               "fixture.candidate/red-test"]
+              ['fixture.candidate/green-test
+               'fixture.candidate/red-test]
               :seon.sci.eval/time-limit-ms 2000
               :seon.sci.admit/caps
               (config/result-caps config/defaults)
@@ -249,8 +249,8 @@
                   parent ['fixture.candidate/target]))))
              java.nio.charset.StandardCharsets/UTF_8)]
         (testing "the candidate function and every gate test run"
-          (is (= ["fixture.candidate/green-test"
-                  "fixture.candidate/red-test"]
+          (is (= ['fixture.candidate/green-test
+                  'fixture.candidate/red-test]
                  (mapv :seon.test/sym results)))
           (is (= [0 1] (mapv :seon.test/fail-count results)))
           (is (= 2
@@ -285,7 +285,7 @@
            (str "(ns fixture.custody "
                 "(:require [clojure.test :refer [deftest is]]))")}
           :all :agent)}
-        {:seon.test/sym "fixture.custody/reads-its-own-cluster"
+        {:seon.test/sym 'fixture.custody/reads-its-own-cluster
          :seon.schema.admission/source :agent
          :seon.test/ns [:seon.ns/name 'fixture.custody]
          :seon.test/source
@@ -302,12 +302,12 @@
               (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
                    "target [x] x)")
               :seon.test.accretion/gate-set
-              ["fixture.custody/reads-its-own-cluster"]
+              ['fixture.custody/reads-its-own-cluster]
               :seon.sci.eval/time-limit-ms 2000
               :seon.sci.admit/caps (config/result-caps config/defaults)
               :seon.config/on-core-error :panic})
             gate (first (:seon.test.accretion/results result))]
-        (is (= "fixture.custody/reads-its-own-cluster"
+        (is (= 'fixture.custody/reads-its-own-cluster
                (:seon.test/sym gate))
             (pr-str result))
         (is (= 1 (:seon.test/pass-count gate))
@@ -326,7 +326,7 @@
        [{:seon.agent/id "auto-check-author"
          :seon.agent/namespace
          (test-support/namespace-row @connection 'fixture.auto-check)}
-        {:seon.fn/sym "fixture.auto-check/capability"
+        {:seon.fn/sym 'fixture.auto-check/capability
          :seon.schema.admission/source :agent
          :seon.fn/ns [:seon.ns/name 'fixture.auto-check]
          :seon.effect/capability 'fixture.auto-check/handler}])
@@ -385,8 +385,7 @@
               (:seon.test.accretion/candidate-ctx bad)
               (assoc bad-row
                      :seon.fn/calls
-                     #{[:seon.fn/sym
-                        "fixture.auto-check/capability"]})))]
+                     #{'fixture.auto-check/capability})))]
         (testing "the same seed reproduces the shrunk failure"
           (is (= :failed (:seon.test.accretion/status first-failure))
               (pr-str first-failure))
@@ -410,7 +409,7 @@
                  (:seon.test.accretion/status effectful-check)))
           (is (= 0
                  (:seon.test.accretion/executed-count effectful-check)))
-          (is (= #{"fixture.auto-check/capability"}
+          (is (= #{'fixture.auto-check/capability}
                  (:seon.test.accretion/capabilities effectful-check))))))))
 
 (deftest ^{:seon.test/long "Constructs a generator for every packaged schema (3,350): 2.5 s at the REPL, 7.4 s under a request on a scratch cluster at 0e53eb8b1."
