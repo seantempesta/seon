@@ -88,8 +88,16 @@ These are review measurements (2.7-ms census, prepl 6 ms; ownership prepl 7 ms),
    entity field; this is a closed-key ownership check, not a claim of complete validation. `:db/id` alone names no owner.
    Never search all schemas containing the attribute. Adding this property does not turn runtime rows into program rows.
 
-Order: the error's own operation, then a known direct-call return, then eligible entity ownership, else floor. A declared report result may legitimately contain an entity identity; rule 3 must not capture that report envelope.
-Existing explicitly supplied declared shapes remain valid producer evidence, not arbitrary renderer symbols in data.
+**Inline faces come first (owner, 2026-09-25; AGENTS.md a54b689ff, f3a14238e).** Selection is `:explicit-value`, then
+`:declared` (the schema default), then `:floor`. A map's own `:seon.render/ai` or `:seon.render/html` overrides the
+default for that face only; a value may override one face or both. The face value is a renderer symbol, rendered data
+(which reaches its face's emitter as data at the display edge, never a pre-printed string), or an inline function: an
+ordinary agent function through the same SCI entrance, admission and instrumentation, receiving the one merged unit with
+the database and other render inputs only when its declared input keys ask for them. Face keys are render data, not
+entity attributes, so they do not void rule 3's ownership.
+Within `:declared`, order: the error's own operation, then a known direct-call return, then eligible entity ownership,
+then the attribute's named schema, else floor. A declared report result may legitimately contain an entity identity; rule 3
+must not capture that report envelope.
 For attribute/child identity, look up the registered attribute key and its named `:vector`/`:set`/`:maybe` element
 reference in the registry; no Malli path propagation. Anonymous nested schemas convey no new named identity.
 An attribute request stays about that value, never its parent. Missing declared pair means floor, not a wider search.
