@@ -192,9 +192,13 @@
            _ (is (identical? @#'seon.id/valid? @(sci/resolve initial 'seon.id/valid?)))
            _ (is (nil? (sci/resolve initial 'seon.sci.eval/absent-intern))
                  "a private sentinel is not a callable program declaration")
-           admitted (assoc original :seon.schema.admission/source :agent
-                           :seon.fn/source
-                           "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)")]
+           ;; Analyzed, so the override carries its own definition digest: a
+           ;; source assoc'd onto the canonical row keeps the old one, and the
+           ;; program then reads the override as unchanged.
+           admitted (assoc (test-support/program-fn-row
+                            before 'seon.id/valid?
+                            "(defn valid? {:malli/schema [:=> [:cat [:int {:min 1}] :string] :boolean]} [length id] true)")
+                           :seon.schema.admission/source :agent)]
        (test-support/transacted! connection [admitted])
        (let [after (db/db connection)
              regenerated (eval/base-ctx after)
@@ -261,10 +265,11 @@
    (fn [connection]
      (test-support/transacted!
       connection
-      [(assoc (test-support/program-fn-row 'seon.id/valid?)
-              :seon.schema.admission/source :agent
-              :seon.fn/source
-              "(defn valid? [length id] (s3.missing/function length id))")])
+      ;; Analyzed, so the stored definition digest is the override's own.
+      [(assoc (test-support/program-fn-row
+               (db/db connection) 'seon.id/valid?
+               "(defn valid? [length id] (s3.missing/function length id))")
+              :seon.schema.admission/source :agent)])
      (let [ctx (eval/base-ctx (db/db connection))
            results (get-in ctx [:seon.sci.eval/acquisition :seon.sci.eval/load-results])]
        (is (some #(and (= 'seon.id/valid? (:seon.fn/sym %))
@@ -2438,3 +2443,19 @@
         (doseq [evaluation [failed ordinary]]
           (is (nil? ((schema/projection-explainer projection :seon.sci.eval/evaluation)
                      evaluation))))))))
+
+(deftest a-context-definition-survives-its-symbols-first-install
+  ;; Root ruling 2026-09-25: an unchanged row binds its compiled root at the
+  ;; first install only where the context defined nothing for that symbol.
+  (test-support/with-database
+   (fn [connection]
+     (let [ctx (test-support/fork-cluster-ctx connection)
+           function (first (remove @(::kernel/installed-functions ctx)
+                                   (sort (keys (:functions @(::kernel/program-snapshot ctx))))))
+           namespace-name (symbol (namespace function))]
+       (is (some? function) "the subject: a program symbol this context has not installed")
+       (sci/binding [sci/ns (sci/create-ns namespace-name)]
+         (sci/eval-form ctx (list 'def (symbol (name function)) ::private-definition)))
+       (kernel/ensure-function! ctx (db/db connection) function)
+       (is (= ::private-definition @(sci/resolve ctx function))
+           "the first install keeps the context's own definition")))))

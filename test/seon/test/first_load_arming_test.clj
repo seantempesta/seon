@@ -36,3 +36,24 @@
                     (db/db connection) (test-support/effective-config) ctx #{fixture})]
        (is (= function (:seon.sci.eval/refused-function refusal)) (pr-str refusal))
        (is (nil? (find-ns fixture)) "the refusal loads, and so arms, nothing")))))
+
+(deftest a-stale-acquisition-snapshot-does-not-decide-a-first-load
+  ;; The comparison reads the program `seon.sci.eval/loaded-identity` names, never
+  ;; the ctx's acquisition snapshot, which stays behind a later adoption.
+  (test-support/with-database
+   (fn [connection]
+     (let [fixture 'seon.test.first-load-branch-fixture
+           function 'seon.test.first-load-branch-fixture/identity-int
+           ctx (:seon.sci.eval/ctx (test-support/execution-handle connection))
+           _ (test-support/transacted!
+              connection
+              [(test-support/program-fn-row
+                (db/db connection) function
+                "(defn identity-int {:malli/schema [:=> [:cat :string] :string]} [value] value)")])
+           changed (db/db connection)
+           stale (assoc ctx :seon.sci.kernel/program-snapshot
+                        (atom (assoc @(:seon.sci.kernel/program-snapshot ctx)
+                                     :seon.sci.eval/loaded-database changed)))
+           refusal (#'seon.test/arm-first-loads! changed (test-support/effective-config) stale #{fixture})]
+       (is (= function (:seon.sci.eval/refused-function refusal)) (pr-str refusal))
+       (is (nil? (find-ns fixture)) "a snapshot agreeing with the branch neither loads nor arms")))))
