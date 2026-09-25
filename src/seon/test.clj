@@ -1408,6 +1408,21 @@
      []
      (stale-in database (vec (sort (distinct test-symbols)))))))
 
+(defn- resolve-loaded
+  "The host Var of `test-symbol`, loading its namespace when the JVM lacks it.
+
+  `requiring-resolve` loads nothing for a namespace still in `*loaded-libs*`
+  after it was removed (or failed after its `ns` form), so the test would
+  resolve to nil. An absent namespace is loaded with `:reload`, as
+  `seon.sci.eval/host-namespace!` does for the process classpath; this runs
+  under the test loader, which that owner does not consult. Nothing loaded
+  exists to be replaced."
+  {:malli/schema [:=> [:cat :qualified-symbol] [:maybe :seon.test/var]]}
+  [test-symbol]
+  (let [namespace-name (symbol (namespace test-symbol))]
+    (when-not (find-ns namespace-name) (require namespace-name :reload))
+    (requiring-resolve test-symbol)))
+
 (defn resolve-test
   "Resolve an admitted test in the host or acquired SCI program by provenance."
   {:malli/schema [:=> [:cat :seon.test/resolution-request]
@@ -1461,7 +1476,7 @@
                         projection
                         #(if (= :agent admission)
                            (sci/resolve ctx test-symbol)
-                           (with-test-loader loader (fn [] (requiring-resolve test-symbol)))))]
+                           (with-test-loader loader (fn [] (resolve-loaded test-symbol)))))]
           (if (and (runner/var-reference? test-var) (ifn? (:test (meta test-var))))
             test-var
             {:seon.error/at (java.util.Date.) :seon.error/layer :seon.test/resolution
