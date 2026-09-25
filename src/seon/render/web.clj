@@ -71,6 +71,7 @@
             [seon.render.transcript :as transcript]
             [seon.render.value :as value]
             [seon.render.walk :as render.walk]
+            [seon.ai.tokens :as tokens]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [malli.registry :as mr]
@@ -3283,13 +3284,30 @@
                                   (:seon.sci.admit/caps service)
                                   (dissoc service :seon.turn/id)))))}))
 
+(defn- graph-node-label
+  "A node's summary line: graph position, owning schema, and what names it —
+  its identity value, else the component attribute reaching it, else its id."
+  {:malli/schema [:=> [:cat [:set :qualified-keyword] :int :int :seon.render.walk/node] :seon.render/hiccup]}
+  [identities position id {schema-key ::render.walk/node-schema value :seon.render/value reached ::render.walk/attribute}]
+  (let [[attribute named] (some #(find value %) (sort identities))]
+    [:span {:class "seon-graph-label"}
+     [:span {:class "seon-graph-position" :title "graph order: definitions before uses, turns by time"} (str "#" position)]
+     [:span {:class "seon-graph-kind"} (if schema-key (subs (str schema-key) 1) "unowned")]
+     (cond (:db/id named) [:span {:class "seon-graph-via"} (str attribute " → e" (:db/id named))]
+           attribute [:span {:class "seon-graph-identity" :title (str attribute)} (str named)]
+           reached [:span {:class "seon-graph-via"} (str "via " reached)])
+     [:span {:class "seon-graph-eid"} (str "e" id)]]))
+
 (defn- graph-debug-html
-  "The agent's linked graph at N (0-3) for the owner: each node's AI and HTML
-  faces side by side in graph order, then the skipped targets and any cut."
+  "The agent's linked graph at N (0-3) for the owner: nodes grouped by level
+  (graph order within each, its position shown), each node's AI face beside its
+  HTML face, then the skipped targets and any cut. Every face goes through
+  `render/render-call`; the floor printer is the only clipper."
   {:malli/schema [:=> [:cat :seon.render.web/service :seon.agent/id :string] :seon.render/hiccup]}
   [service agent-id n-text]
   (let [n (-> (or (parse-long n-text) 3) (max 0) (min 3))
-        request {:seon.db/db (db/db (:seon.store/connection-object service)) :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
+        database (db/db (:seon.store/connection-object service))
+        request {:seon.db/db database :seon.db/connection (:seon.store/connection-object service) :seon.sci.eval/ctx (:seon.sci.eval/ctx service)
                  :seon.sci.admit/caps (:seon.sci.admit/caps service) :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms service)
                  :seon.config/on-core-error (:seon.config/on-core-error service) :seon.agent/id agent-id}
         graph (render.walk/graph (assoc request :seon.render.walk/lookup [:seon.agent/id agent-id] :seon.render/distance n))
@@ -3297,23 +3315,58 @@
                (let [call #(render/render-call (cond-> (assoc request :seon.render/value %1 :seon.render/output %2 :seon.render/distance distance
                                                               :seon.render.call/id [::graph %3 %2 id distance])
                                                  (and reached (= :value %3)) (assoc :seon.render.data/path [reached])))
-                     shown (call value output :value)
-                     shown (if (or (string? shown) (vector? shown)) shown (call shown :seon.render/html :failure))]
-                 (cond (string? shown) [:pre {:style "white-space:pre-wrap;overflow-wrap:anywhere"} shown] (vector? shown) shown :else [:pre "Renderer unavailable."])))]
-    [:section {:class "seon-debug seon-graph"}
-     (into [:nav {:class "seon-agent-routes"}]
-           (comp (map #(vector :a {:href (route/path ::route/agent-debug {:id agent-id} {:n (str %)})} (str "N=" %))) (interpose " ")) (range 4))
-     (if-not (::render.walk/nodes graph)
+                     shown (call value output :value)]
+                 (if (or (string? shown) (vector? shown)) shown (call shown :seon.render/html :failure))))
+        nodes (::render.walk/nodes graph)
+        order (::render.walk/graph-order graph)
+        levels (group-by #(get-in nodes [% ::render.walk/node-level]) order)
+        skipped (::render.walk/skipped graph {})
+        cuts (::render.walk/cuts graph)
+        positions (zipmap order (range 1 (inc (count order))))
+        identities (set (db/identity-attributes database))
+        toggle #(vector :button {:type "button" :class "seon-graph-toggle"
+                                 (keyword "data-on:click") (str "document.querySelectorAll('.seon-graph-node').forEach(d => d.open = " %1 ")")} %2)]
+    [:section {:class "seon-graph-page"}
+     [:header {:class "seon-graph-head"}
+      [:h1 (str "Context graph · " agent-id)]
+      (into [:nav {:class "seon-graph-distance" :aria-label "distance N"}]
+            (map #(vector :a (cond-> {:href (route/path ::route/agent-debug {:id agent-id} {:n (str %)})} (= % n) (assoc :aria-current "page")) (str "N=" %)))
+            (range 4))
+      (when nodes
+        [:p {:class "seon-graph-counts"}
+         (str (count order) (if (= 1 (count order)) " node (" " nodes (") (str/join ", " (map #(str "level " % ": " (count (levels %))) (sort (keys levels))))
+              ") · " (reduce + (vals skipped)) " skipped · " (count cuts) (if (= 1 (count cuts)) " cut" " cuts")
+              " · " (count (::render.walk/back-references graph)) " back-references")])
+      [:p {:class "seon-graph-legend"}
+       "AI face: the text the model reads. HTML face: what a human explores. #k is the node's place in graph order (definitions before uses, turns by time)."
+       " " (toggle "true" "open all") " " (toggle "false" "close all")]]
+     (if-not nodes
        (face :graph graph 0 :seon.render/html)
-       (into [:table {:class "seon-graph-nodes" :style "width:100%;table-layout:fixed"} [:tr [:th {:style "width:14%"} "node"] [:th "AI face"] [:th "HTML face"]]]
-             (for [id (::render.walk/graph-order graph)
-                   :let [{level ::render.walk/node-level schema-key ::render.walk/node-schema value :seon.render/value reached ::render.walk/attribute}
-                         (get-in graph [::render.walk/nodes id])
-                         distance (max 0 (- n level))]]
-               [:tr [:td [:code (str schema-key)] (str " " id " · level " level)]
-                [:td (face id value distance :seon.render/ai reached)] [:td (face id value distance :seon.render/html reached)]])))
-     [:h3 "Skipped targets (their owning schema declares no render pair)"] (face :skipped (::render.walk/skipped graph {}) 1 :seon.render/html)
-     (when-let [cuts (::render.walk/cuts graph)] [:div [:h3 "Cut"] (face :cuts cuts 1 :seon.render/html)])]))
+       (for [level (sort (keys levels))]
+         (into [:section {:class "seon-graph-level"}
+                [:h2 (str "Level " level) [:span (str (count (levels level)) (if (= 1 (count (levels level))) " node · " " nodes · ")
+                                                      (str/join ", " (map (fn [[k c]] (str c " " (if k (subs (str k) 1) "unowned")))
+                                                                          (frequencies (map #(get-in nodes [% ::render.walk/node-schema]) (levels level))))))]]]
+               (for [id (levels level)
+                     :let [{value :seon.render/value reached ::render.walk/attribute :as node} (nodes id)
+                           distance (max 0 (- n level))
+                           ai (face id value distance :seon.render/ai reached)]]
+                 [:details (cond-> {:class "seon-graph-node" :data-node id} (<= level 1) (assoc :open true))
+                  [:summary (graph-node-label identities (positions id) id node)
+                   (when (string? ai) [:span {:class "seon-graph-size"} (str (count ai) " chars · ~" (tokens/estimate ai) " tokens")])]
+                  [:div {:class "seon-graph-faces"}
+                   [:div {:class "seon-graph-face seon-graph-ai"} [:h3 "AI face"] (if (string? ai) [:pre ai] ai)]
+                   [:div {:class "seon-graph-face seon-graph-html"} [:h3 "HTML face"]
+                    (let [html (face id value distance :seon.render/html reached)] (if (string? html) [:pre html] html))]]]))))
+     [:section {:class "seon-graph-level seon-graph-skipped"}
+      [:h2 "Skipped" [:span "reached, not shown: the owning schema declares no render pair"]]
+      (if (seq skipped)
+        (into [:table [:tr [:th "owning schema"] [:th "targets"]]]
+              (map (fn [[k c]] [:tr [:td [:code (str k)]] [:td c]])) (sort-by (comp - val) skipped))
+        [:p "None."])]
+     [:section {:class "seon-graph-level seon-graph-cuts"}
+      [:h2 "Cuts" [:span "where a bound stopped the walk"]]
+      (if cuts (face :cuts cuts 1 :seon.render/html) [:p "None: every reached target within N is shown or counted above."])]]))
 
 (defn- debug-response
   [{connection :seon.store/connection-object
@@ -3347,6 +3400,7 @@
 
     (and agent-id (get (query-params request) "n"))
     {:status 200 :headers {"content-type" "text/html; charset=utf-8"} :body (shell {:seon.agent/id agent-id ::session? true
+     :seon.render.web/feed-url (route/path ::route/feed {:id agent-id})
      :seon.render/page [(graph-debug-html service agent-id (get (query-params request) "n"))]})}
 
     (and agent-id (not (get (query-params request) "subject")))
