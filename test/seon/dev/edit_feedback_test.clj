@@ -103,6 +103,24 @@
       (finally
         (delete-files! [source config directory])))))
 
+(deftest a-hook-failure-reaches-the-agent-context
+  ;; it once went to stderr on exit 0, which no harness shows the agent
+  (let [result
+        (run-process
+         {::command [(str (io/file repo-root "bin/seon-hook"))]
+          ::directory repo-root
+          ::environment {"SEON_HOOK_CONFIG"
+                         (str (io/file repo-root "tmp" (str "absent-" (random-uuid))))}
+          ::input
+          (json/generate-string
+           {:hook_event_name "PostToolUse"
+            :tool_name "Edit"
+            :tool_input {:file_path (str (io/file repo-root "tmp" "absent.clj"))}})})
+        response (json/parse-string (str/trim (::stdout result)) true)]
+    (is (zero? (::exit result)) (::stderr result))
+    (is (str/includes? (get-in response [:hookSpecificOutput :additionalContext])
+                       "HOOK ERROR"))))
+
 (deftest pre-edit-exact-reconstruction-uses-structural-edit-refusals
   (let [directory (fixture-directory)
         config (io/file directory "hook.edn")

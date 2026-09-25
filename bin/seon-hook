@@ -1983,7 +1983,14 @@
             (log! "ERROR" message (pr-str chain) (str/replace stack "\n" " | "))
             (binding [*out* *err*]
               (println "HOOK ERROR:" message))
-            (output! {:continue true})))))))
+            ;; stderr on exit 0 reaches no agent; the context field does
+            (output! {:continue true
+                      :hookSpecificOutput
+                      {:hookEventName event-name
+                       :additionalContext
+                       (str "HOOK ERROR — this " event-name " check of "
+                            (str/join ", " (map display-path file-paths))
+                            " did not run: " message)}})))))))
 
 (cond
   (= "--review-worker" (first *command-line-args*))
