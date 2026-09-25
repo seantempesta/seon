@@ -13,6 +13,31 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Third follow-up (blockers ruled: my.turn page deleted, vehicles rewritten, child identity required)
+
+Commits: `12b1fdb21` cluster_test flow key (class 12, second member); `5a07f31e3` my.turn namespace page deleted
+(`:my.turn/namespace-unit`, both `render-namespace-ai`; `usage-form` serves only `:my.turn/usage-unit`; the opening no
+longer renders my.turn's row as `(dir 'my.turn)` + walkthrough); `6d84e265e` + `dea66e2aa` fixture renderers reached by a
+declared subject (`seon.render-simplification-test/declare-subject!`: a schema row whose pair names the renderers and a
+contracted producer returning it, both through `support/transacted!`/`program-fn-row`; retained reuse counts `selection`
+calls; live-Var and raw-Hiccup on the pair; declared ambiguity); `409fcf269` namespace stage deleted (walk keeps its
+owner for renderer-failure); `375a56048` census c class 10 (issue
+`docs/seon/issues/error-recording-drops-declared-distinguishing-members.md`, confirmed): `recording`'s value now also
+carries the members its declared schema adds to `:seon.error/base` (probed: the phase-failed value validates
+`:seon.turn.loop/phase-failed-error` with them, not without); `105926712` attribute-element identity in render.clj
+(component schema, named ref/`:maybe`, entity attribute, collection element), inert until the floor carries the node path.
+
+**bounded-text follow-up: no readable order-independent canonical form exists.** `seon.id/printed` (`id.clj:29-38`) is
+fixed-binding `pr-str`, and its own docstring (`id.clj:40-45`) says equal maps printed in different entry order differ.
+`seon.schema/canonical-data-string` (`schema.clj:835-896`) is order-independent but a framed digest encoding
+(`k10::a/b…`), not text an agent reads. hasch 0.4.100 (deps.edn:44) produces hashes, not text. Stored field text stays
+`admit/canonical-edn`; signatures never read it.
+
+**Waiting:** the value.clj carriage (one line at `render/value.clj:470`: hand `project-node` the node's
+`:seon.render.data/path`) waits for render-floor-opus's slice-2 commit; 1c (explicit-value, explicit-request and schema
+stages, specificity and pulled/transacted matching deleted; errors compose the base pair when no alternative is
+satisfied; transcript's prefix subject; test updates) is drafted in the tree and lands after it.
+
 ## Second follow-up (root rulings: namespace pages deleted, MCP JVM floor-only, eval.clj transferred)
 
 - **`3d460e2eb` error.clj `bounded-text`** stores fault-field text as `admit/canonical-edn` of the admitted value, not
