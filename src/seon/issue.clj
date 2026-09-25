@@ -653,42 +653,52 @@
 
 (defn adopt-tasks-tx
   "Reconcile the selected `handles` into a development database from the `rows` the
-  exact published source holds for them: tasks are data the publication admitted, so
-  the writer's current value is the basis, and a handle absent from `rows` retracts."
-  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle]] [:vector :seon.schema/value]]}
-  [database rows handles]
-  (let [stored (stored-tasks database :seon.task/id handles)
-        projection (db/carried-projection database)]
+  exact published source holds for them, against the `basis` the adoption read at
+  the destination: a competing edit since refuses (7.16); a handle absent from
+  `rows` retracts."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map] [:set :seon.task/handle] :seon.task/basis]
+                  [:vector :seon.schema/value]]}
+  [database rows handles basis]
+  (let [stored (stored-tasks database :seon.task/id handles)]
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
-    (task-delta projection stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) rows)
-                (update-vals stored #(declaration projection %)))))
+    (task-delta (db/carried-projection database) stored (into {} (map (juxt :seon.task/id #(dissoc % :db/id))) rows) basis)))
 
 (defn- task-handles
-  "Every stored task handle; none when the database declares no tasks."
-  {:malli/schema [:=> [:cat :seon.db/database-value] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
-  [database]
+  "Every stored task handle, or with `retracted?` every handle `database`'s history
+  retracted; none when the database declares no tasks."
+  {:malli/schema [:=> [:cat :seon.db/database-value :boolean] [:or [:set :seon.task/handle] :seon.db/invalid-read-error]]}
+  [database retracted?]
   (if (contains? (:schema database) :seon.task/id)
-    (let [handles (db/q database '[:find [?h ...] :where [_ :seon.task/id ?h]])]
+    (let [handles (if retracted?
+                    (let [history (db/history database)]
+                      (or (read-error history) (db/q '[:find [?h ...] :where [_ :seon.task/id ?h _ false]] history)))
+                    (db/q database '[:find [?h ...] :where [_ :seon.task/id ?h]]))]
       (or (read-error handles) (set handles)))
     #{}))
 
 (defn adopt-tasks-call
   "Transaction data reconciling `destination`'s tasks to every task `source`, the
   published database, holds: the whole set, since an adopted commit never proved its
-  tasks admitted (a cluster adopted before tasks were adopted). Empty when they agree."
+  tasks admitted. A held task the source's history retracted was published and is
+  deleted; one the source never held is the destination's own and stays. The basis
+  is `destination`, the value this call read. Empty when they agree."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
                   [:or :seon.db/tx-data :seon.db/invalid-read-error]]}
   [source destination]
-  (let [published (task-handles source) held (task-handles destination)
-        handles (when-not (or (read-error published) (read-error held)) (into published held))
-        rows (when handles (stored-tasks source :seon.task/id handles))]
-    (or (read-error published) (read-error held) (read-error rows)
-        (let [rows (vec (vals rows))]
-          (if (empty? (adopt-tasks-tx destination rows handles)) [] [[:db.fn/call #'adopt-tasks-tx rows handles]])))))
+  (let [published (task-handles source false) retracted (task-handles source true) held (task-handles destination false)
+        failure (some read-error [published retracted held])
+        handles (when-not failure (into published (filter retracted) held))
+        rows (when handles (stored-tasks source :seon.task/id handles))
+        basis (when handles (stored-tasks destination :seon.task/id handles))]
+    (or failure (read-error rows) (read-error basis)
+        (let [rows (vec (vals rows))
+              basis (update-vals basis #(declaration (db/carried-projection destination) %))]
+          (if (empty? (adopt-tasks-tx destination rows handles basis)) [] [[:db.fn/call #'adopt-tasks-tx rows handles basis]])))))
 
 (defn index-tasks!
   "Reconcile task files through the writer against the declarations the caller read
-  (`:seon.task/basis`, else read now); an unchanged set writes nothing. Refusals return."
+  (`:seon.task/basis`); an unchanged set writes nothing. Refusals return. Without a
+  basis it reads one now, which guards only writes after this call, not a stale file."
   {:malli/schema [:=> [:cat :seon.task/request]
                   [:or :seon.task/report :seon.task/refused-error :seon.task/conflict-error
                    :seon.db/invalid-read-error :seon.db/transaction-refused-error]]}

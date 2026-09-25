@@ -137,14 +137,14 @@
     (test-support/with-database
      (fn [connection]
        (admit! connection (rows-of subject-source))
-       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection digest (.getPath root))))))
+       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection digest (.getPath root) nil)))))
            "an annotation whose task is absent at the destination refuses with its holders")
        (with-root (assoc checkout task-path (task-text "Prove ingestion." ""))
          (fn [root]
-           (is (:seon.task/changed? (publish-tasks! connection digest (.getPath root))) "coherent task and annotation admission")
-           (is (= {:seon.task/changed? false} (publish-tasks! connection digest (.getPath root))) "repeat is a no-op")
+           (is (:seon.task/changed? (publish-tasks! connection digest (.getPath root) nil)) "coherent task and annotation admission")
+           (is (= {:seon.task/changed? false} (publish-tasks! connection digest (.getPath root) nil)) "repeat is a no-op")
            (io/delete-file (io/file root task-path))
-           (is (= [handle] (dangling #(publish-tasks! connection digest (.getPath root))))
+           (is (= [handle] (dangling #(publish-tasks! connection digest (.getPath root) nil)))
                "a removed task file retracts its task, leaving its annotations dangling")))))))
 
 (deftest a-source-only-publication-admits-the-unchanged-task-file-its-annotations-name
@@ -157,22 +157,40 @@
      (admit! connection (rows-of subject-source))
      (with-root (assoc (issue/task-files "." nil) task-path (task-text "Prove ingestion." ""))
        (fn [root]
-         (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection digest (.getPath root))))
+         (is (:seon.task/changed? (#'seon.cluster.source/index-tasks! connection digest (.getPath root) nil)))
          (is (not-any? #(contains? % handle) (vals (issue/task-findings @connection)))))))))
 
-(deftest adoption-carries-published-tasks-as-data
+(deftest adoption-carries-published-tasks-keeps-the-destinations-own-and-refuses-a-competing-edit
+  ;; P1-2 (review 5fb38b91f): the adoption compares against the destination value
+  ;; it read, and only the source's history makes a missing task a deletion.
   (test-support/with-database
-   (fn [connection]
-     (let [absent @connection
-           _ (ingest! connection (task-text "Prove ingestion." ""))
-           published @connection
-           adopt! #(test-support/transacted! connection (issue/adopt-tasks-call % @connection))]
-       (is (= [] (issue/adopt-tasks-call published published)) "an agreeing cluster adopts nothing")
-       (adopt! absent)
-       (is (nil? (:seon.task/id (db/pull @connection [:seon.task/id] [:seon.task/id handle]))) "absent at the source retracts")
-       (is (= [] (issue/adopt-tasks-call absent @connection)))
-       (adopt! published)
-       (is (= "Prove ingestion." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))))))
+   (fn [source]
+     (test-support/with-database
+      (fn [destination]
+        (let [adopt! #(test-support/transacted! destination (issue/adopt-tasks-call @source @destination))
+              intent #(:seon.task/intent (db/pull @destination [:seon.task/intent] [:seon.task/id %]))
+              own (issue/task-handle 'tq.b "own" :function)]
+          (is (= [] (issue/adopt-tasks-call @source @source)) "an agreeing cluster adopts nothing")
+          (issue/index-tasks! {:seon.db/connection destination :seon.task/basis {}
+                               :seon.task/files {"resources/seon/tasks/tq.b.edn" "[#:seon.task{:name \"own\" :kind :function :intent \"Mine.\"}]"}})
+          (ingest! source (task-text "Prove ingestion." ""))
+          (adopt!)
+          (is (= ["Prove ingestion." "Mine."] (map intent [handle own])) "published arrives; a task the source never held stays")
+          (is (= [] (issue/adopt-tasks-call @source @destination)) "repeat adopts nothing")
+          (testing "a competing edit between the adoption's read and its transaction refuses; the competitor stays"
+            (ingest! source (task-text "Revised." ""))
+            (let [call (issue/adopt-tasks-call @source @destination)
+                  before (db/basis-t @destination)]
+              (ingest! destination (task-text "Competing." ""))
+              (let [written (db/basis-t @destination)]
+                (is (= :revision-conflict (refusal #(test-support/transacted! destination call))))
+                (is (< before written))
+                (is (= written (db/basis-t @destination)) "the refused adoption writes nothing"))
+              (is (= "Competing." (intent handle)))))
+          (testing "a published task the source deletes retracts; the destination's own stays"
+            (ingest! source "[]")
+            (adopt!)
+            (is (= [nil "Mine."] (map intent [handle own]))))))))))
 
 (deftest the-checkouts-migrated-records-ingest-by-aspect-and-repeat-as-a-no-op
   ;; Slice 2 (spec 7.12, 7.15): the checkout's own task files are the migrated

@@ -528,19 +528,22 @@
   holders before the head advances (spec 7.5, 7.13). Every file, and every stored
   task's file (a deleted file reads \"[]\"), not the changed ones: a recorded
   task-file digest does not prove its tasks were admitted (a publication before
-  ingestion recorded it), and the whole set reconciles in ~2 ms."
-  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string]
+  ingestion recorded it), and the whole set reconciles in ~2 ms. The basis is the
+  `previous` published value the request derived from (the head guard fences it);
+  a first publication, forked from none, reads its private scratch."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string [:maybe :seon.db/database-value]]
                   [:maybe :seon.task/report]]}
-  [connection source-digest directory]
+  [connection source-digest directory previous]
   (when (get (:schema (db/db connection)) :seon.task/id)
     (let [task-files (requiring-resolve 'seon.issue/task-files)
           stored (require-committed! (db/q '[:find [?ns ...] :where [_ :seon.task/ns ?ns]] (db/db connection))
                                      :seon.task/findings-refused "Stored task namespaces could not be read." {})
+          files (merge (task-files directory (mapv #(str "resources/seon/tasks/" % ".edn") stored)) (task-files directory nil))
+          basis (require-committed! ((requiring-resolve 'seon.issue/task-basis) (or previous (db/db connection)) files)
+                                    :seon.task/findings-refused "The task basis could not be read." {})
           report (require-committed!
                   ((requiring-resolve 'seon.issue/index-tasks!)
-                   {:seon.db/connection connection
-                    :seon.task/files (merge (task-files directory (mapv #(str "resources/seon/tasks/" % ".edn") stored))
-                                            (task-files directory nil))})
+                   {:seon.db/connection connection :seon.task/files files :seon.task/basis basis})
                   :seon.task/index-refused "Task indexing was refused." {:seon.source/digest source-digest})
           findings (require-committed! ((requiring-resolve 'seon.issue/task-findings) (db/db connection))
                                        :seon.task/findings-refused "Task findings could not be read." {})]
@@ -661,7 +664,7 @@
                   _ (when (or (nil? note-paths) (seq note-paths))
                       (progress! "publication issue indexing"))
                   issues (index-issues! connection source-digest (or directory (fs/source-directory)) note-paths)
-                  tasks (index-tasks! connection source-digest (or directory (fs/source-directory)))
+                  tasks (index-tasks! connection source-digest (or directory (fs/source-directory)) previous-database)
                   _ (progress! "publication source identity")]
             (require-committed! population-result ::source-population-refused
                                 "The source population was refused." {})
