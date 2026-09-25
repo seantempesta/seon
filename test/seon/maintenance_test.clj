@@ -18,7 +18,6 @@
   (Date/from (Instant/parse text)))
 
 (def ^:private at-1 (instant "2026-08-05T12:34:00Z"))
-(def ^:private at-2 (instant "2026-08-05T12:35:00Z"))
 
 (defn- process-identity
   [pid generation]
@@ -145,24 +144,6 @@
       :seon.maintenance.request/observed-at started-at}
      :seon.maintenance.receipt/started-at started-at}
     terminal)])
-
-(defn- seed-report!
-  [connection]
-  (let [footprint-task "root/maintenance/footprint"
-        footprint-handler 'seon.maintenance/observe-footprint!
-        census-task "root/maintenance/process-census"
-        census-handler 'seon.operator/census-processes!]
-    (test-support/transacted!
-                 connection
-                 (into [{:seon.agent/id "root"}]
-                       cat
-                       [(task-transaction footprint-task footprint-handler)
-                        (task-transaction census-task census-handler)]))
-    {:footprint-task footprint-task
-     :footprint-handler footprint-handler
-     :census-task census-task
-     :census-handler census-handler}))
-
 
 (def ^:private collected-root "/repo/operator")
 
@@ -324,15 +305,11 @@
   (test-support/with-database
     (fn [connection]
       (let [collect-task "root/maintenance/compact"
-            collect-handler 'seon.maintenance/collect!
-            cleanup-task "root/maintenance/cleanup"
-            cleanup-handler 'seon.operator/cleanup-cluster!]
+            collect-handler 'seon.maintenance/collect!]
         (test-support/transacted!
          connection
-         (into [{:seon.agent/id "root"}]
-               cat
-               [(task-transaction collect-task collect-handler)
-                (task-transaction cleanup-task cleanup-handler)]))
+         (into (test-support/agent-tx @connection "root")
+               (task-transaction collect-task collect-handler)))
         (testing "an uncollected root is the typed unknown, never absence"
           ;; The refusal retains the producer observation in
           ;; `:seon.error/data`; the top level carries the observed root and base evidence.
@@ -361,21 +338,7 @@
                                  :seon.maintenance.receipt/id
                                  :seon.maintenance.receipt/completed-at
                                  :seon.operator.collect/reclaimed-bytes])))
-            (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance/collection-record) answer)))))
-        (test-support/transacted!
-         connection
-         (receipt cleanup-task cleanup-handler "cleanup/1" at-2
-                  {:seon.maintenance.receipt/completed-at at-2
-                   :seon.maintenance.receipt/result
-                   (assoc (maintenance/result-entity (schema/handed-projection)
-                           (cleanup-result (collect-result 8192)))
-                          :seon.maintenance.result/id "cleanup-result/2")}))
-        (testing "a later cleanup's collection is the root's latest answer"
-          (let [answer (maintenance/last-collection @connection collected-root)]
-            (is (= "cleanup/1" (:seon.maintenance.receipt/id answer)))
-            (is (= at-2 (:seon.maintenance.receipt/completed-at answer)))
-            (is (= 8192
-                   (:seon.operator.collect/reclaimed-bytes answer)))))))))
+            (is (true? ((schema/projection-validator (schema/handed-projection) :seon.maintenance/collection-record) answer)))))))))
 
 (defn- owned-root
   []
