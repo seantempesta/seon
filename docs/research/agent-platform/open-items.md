@@ -14,11 +14,11 @@ refuse, custody elision fails ((my.plan/plan) "argument count of 0"); 25 schema 
 every test world (issue a-schema-edit-leaves-dependent-shape-fingerprints-stale.md). Root ruled option 2: publication
 re-derives shapes of every dependent in the changed closure (lane fix-stale-shape-fingerprints), then republish default.
 
-**OWNER RULING 2026-09-25: no budgets anywhere** — render functions render less data; the floor value printer
-(seon.render.value/floor) is the only clipper (AGENTS.md a6b8baaff; memory feedback_no_budgets_only_floor_printer_clips).
-Root added several clipping sites on 09-24/25 (status top-5/300-char, MCP top-10/300-char/bounded-face, problems prose via
-budget, test-world 400-char summaries, runner report-value text); audit-clipping-sites lists every site → CONVERT/DELETE
-lanes follow. MCP value-window lane redirected: no budget dial.
+**OWNER RULING 2026-09-25: no budgets anywhere; ONE render path** — a value is rendered by its schema's declared render
+function (responsible: renders less), else by the floor printer (the only clipper; clips intelligently with its own fixed
+rules). Clipping audit c6e75e57c: 21 sites (9 DELETE, 6 CONVERT; a budget still lives inside the floor: print/fit's
+token-budget loop). Design lane design-one-render-path-astra writing one-render-path-design-2026-09-25.md (dispatch,
+render-fn contract, floor rules, data vs text, deletions, prompt-token-budget question, slices); conversion waits for it.
 
 **RESUME (2026-09-25 ~02:30Z).** Tests 2,154; 365 failed + 18 unknown (current, after a full rerun). Running, code only:
 fixture-agent-rows (73), fix-sci-zero-arg-and-names (23), fix-src-singles-db-schema, update-retired-test-shapes (52),
