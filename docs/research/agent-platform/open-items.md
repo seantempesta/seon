@@ -43,12 +43,15 @@ forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by name
 **One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
 dead snapshot fields still owed; wave 3 F2/F5/F6 (projection wrappers, call-with-projection sweep, lazy registry) next.
 
-**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Red census #2 (dd6d1a2ac): of 671
-failed+unknown, 473 are STALE (recorded before their class's fix; only 8 ran on the current program) — root is rerunning all
-671 in batches of 40 (tmp/orchestrator/rerun-results-2026-09-25.txt; est. 200–230 clear). Live classes: hand-built fixtures
-73 (harness S5), retired shapes 23, nil refusal payload 13, rule assertions 10, cache counters 8, render selection 7.
-Candidate regressions: instrument-test 12 fail / 4 error after F2 (lane fix-instrument-f2-regressions); one-request reuse +
-hold (lane fix-one-request-reuse-and-hold).
+**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Baseline rerun (2026-09-25, 14 of 17
+batches ran, 412 tests executed): failed 537 → 298, unknown 134 → 158 (the 3 last batches, ~120 tests, never ran — see
+blocker below). Remaining live classes per census #2: hand-built fixtures 73 (harness S5), retired shapes 23, nil payload
+13, rule assertions 10, cache counters 8, render selection 7.
+**Platform failure (00:50Z):** default reached a state where every read refused "The JVM's loaded source commit is
+unavailable." — MCP, test-check, status and even adoption; recovered only by restart (boot now 30 s, was 9 s). Hypothesis:
+a program-change test drives the REAL JVM-global loaded identity to unknown and F3's builder key then refuses every
+projection read. Lane fix-unknown-identity-blocks-reads (tests use an injected identity; unknown identity never blocks
+reads/status/adoption).
 
 ## New platform findings (2026-09-25)
 
