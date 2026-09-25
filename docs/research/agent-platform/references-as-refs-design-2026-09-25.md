@@ -1,6 +1,6 @@
 ---
 type: design
-status: "Opus revision 2: Astra REVISE 93b519229 (nine findings) folded in place; P10 run on fresh default; awaiting Astra re-review; no source edited"
+status: "Opus revision 3: Astra REVISE 93b519229 folded; root rulings Q1-Q3 and the reversed Q4 (no face fact: face derives from the output schema) folded; §0 findings filed as issues; ready for Astra re-review; no source edited"
 created: 2026-09-25
 scope: Which program relations become Datahike refs with a named target, produced at the one analysis producer (var-row and its siblings), validated at the final writer and followed by the render walk; which stay values and why; which relations are live deletion obligations; the render index
 source-pin: HEAD 757964097; Datahike 4157916b; Malli befcd302a. REPL P1-P9 on default pid 59566 (old store), P10-P14 on fresh default pid 39484
@@ -54,6 +54,11 @@ review: references-as-refs-design-review-2026-09-25.md (93b519229)
     `[[shipped-calibration]]`.
   - Namespace docstrings hold 4 more links, which were not resolved.
   - Nothing ingests these links today, so the rot is invisible.
+  - Filed as `docs/seon/issues/docstring-links-name-deleted-functions.md`. `src/seon/schema.clj` is held by a running
+    lane, so the lane did not edit it; S1 repairs it in the same cut that lands the refusal.
+  - `shipped-calibration` exists as a Var, a computed `def` (`src/seon/ai/tokens.cljc:62`), but the fresh store has
+    no row for it, while its 10 siblings have rows. Filed as
+    `docs/seon/issues/a-computed-def-in-seon-ai-tokens-has-no-program-row.md`.
 - **A tempid that names nothing is admitted silently** (P6). `{:db/id "a" … :probe/calls #{"nobody"}}` stored a ref to
   an entity with 0 datoms. Datahike checks only the value's type (`db/transaction.cljc:34-53`).
 - **56 first-party callee names have no row** (P3, old store). Examples are `def` aliases
@@ -64,7 +69,8 @@ review: references-as-refs-design-review-2026-09-25.md (93b519229)
     overflows.
   - P12: the fresh store has 1,951 schemas that reference others, with 0 cycles and 0 self-references, so nothing
     fires today.
-  - S2 must refuse a cycle by name (§3b).
+  - S2 must refuse a cycle by name (§3b). Filed as `docs/seon/issues/schema-dependency-ordering-overflows-on-a-cycle.md`,
+    since `schema.clj` is held.
 
 ## 1. Inventory: attributes that name another entity
 
@@ -101,7 +107,7 @@ removed:
 | `:seon.issue/functions` … `issues` | issue (data) | ref | installed | `:seon.issue/cites` | ref | the issue's own required/optional and retention rules; not program obligations |
 | `:seon.issue/files` → `:seon.issue.citation/file` | issue → owned citation → file | two refs | installed | the `cites` target sits on the outer edge today | refs | component and ref |
 | `:seon.agent/task` (proposed by task-context) | agent (data) | optional ref | — | — | ref | sweep |
-| `:seon.error/operation`, `:seon.instrument/fn`, `:seon.eval/renderer` | error, instrument, eval (data) | symbol, indexed | 133 / 133 / 11 (old) | guide §3: the observed identity must survive deletion | value (observations) | observation. Live error relations are open (§7 Q3) |
+| `:seon.error/operation`, `:seon.instrument/fn`, `:seon.eval/renderer` | error, instrument, eval (data) | symbol, indexed | 133 / 133 / 11 (old) | guide §3: the observed identity must survive deletion | value (observations) | observation; never blocks deletion (ruling Q3). An occurrence's live data relations are refs |
 
 About 60 error-member attributes only report an offending name inside a refusal, for example
 `:seon.call-preparation/unresolved-symbol`. They stay values without `reference-to`.
@@ -333,27 +339,53 @@ Witnesses, each a regression in the deletion class:
 
 ### 3e. Docstring links: grammar at the producer
 
-Grammar (owner question Q2):
-- `[[name]]` or `[[ns/name]]` inside a function or namespace docstring is a link.
-- `name` is one symbol token. It resolves through the holder's namespace, with aliases applied as `seed-symbol`
-  does (`fn.clj:487`).
-- Anything else inside double brackets (whitespace, a vector literal such as `[[a b]]`, a keyword) is prose, not a
-  link.
+**Root ruling Q2:** docstring markdown is read by a markdown library's parse tree, never by a Seon production regex.
 
-| Docstring text | Link |
+**The parser.**
+- The library is `io.github.nextjournal/markdown` 0.7.213. Its JVM implementation is commonmark-java 0.24.0
+  (`nextjournal/markdown/impl.clj:8-12` imports `org.commonmark.*`).
+- It is in `~/.m2`, and `reference-code/clerk/deps.edn:10`, `babashka/deps.edn:56` and `clay/deps.edn:12` use it.
+  It is **not** on Seon's classpath (`deps.edn` has no markdown dependency), so S1 adds it to `deps.edn` and vendors
+  the source under `reference-code/` per the vendoring rule.
+- `nextjournal.markdown/parse` takes `{:text-tokenizers [nextjournal.markdown.impl.utils/internal-link-tokenizer]}`.
+  That tokenizer ships with the library and emits `{:type :internal-link :text "…"}` nodes.
+- Text tokenizers run only on `:text` leaf nodes (`impl/utils.cljc:232-269`). Code spans and code blocks are
+  separate node types, so a `[[x]]` inside backticks or an indented example is never a link.
+
+**Measured** in a disposable clojure process with the library from `~/.m2`, not the shared JVM:
+- This sample docstring:
+
+  ```text
+  … [[snapshot-state]] / [[restore-state!]]. See [[db/q]] and `(fn [[a b]] a)`.
+
+      (let [[x] y] x)
+
+  Also [[a b]] and [[:seon.db/db]].
+  ```
+
+  yielded exactly the five link texts `snapshot-state`, `restore-state!`, `db/q`, `a b` and `:seon.db/db`. The code
+  span and the indented block produced nothing. The first parse took 11.7 ms.
+- Warm, over 1,858 `defn` docstrings from `src/seon`, it took **58.4 ms in total (31 µs per docstring)** and found
+  34 links.
+- A full reindex therefore adds about 80 ms for 2,582 docstrings. A one-file publication adds microseconds. S1 records
+  both in its clock row.
+
+**Resolution at the producer** happens in `var-row` and `namespace-row`, over each `:internal-link` node's text:
+
+| Link text | Result |
 |---|---|
-| `see [[build-projection]]` in `seon.schema` | `seon.schema/build-projection` |
-| `[[db/q]]` with `seon.db :as db` | `seon.db/q` |
-| `[[snapshot-state]]` (no such function) | refuse: `:dangling-doc-link`, holder `seon.schema/restore!`, value `snapshot-state` |
-| `(fn [[a b]] …)` in an example | not a link (whitespace) |
-| `[[:seon.db/db]]` | not a link in this grammar |
+| `build-projection` in `seon.schema` | `seon.schema/build-projection` (unqualified names resolve in the holder's namespace) |
+| `db/q` with `seon.db :as db` | `seon.db/q`, through `seed-symbol` (`fn.clj:487`) |
+| `snapshot-state` (no such Var or row) | refuse `:dangling-doc-link`: holder `seon.schema/restore!`, text `snapshot-state` |
+| `a b`, `:seon.db/db`, any text that is not one qualified or unqualified symbol | refuse `:malformed-doc-link`: holder and text. Write prose outside `[[ ]]`, or code in backticks |
+| `[[a b]]` inside backticks or a code block | not a link: the parser never tokenizes code |
 
-- Resolved links join `:seon.fn/see-also` values. The canonical head keeps the docstring bytes, and the digest
-  already covers the docstring.
-- Extraction is a scan of the docstring string that kondo returns (`::analyzer/doc`). The existing prose tokenizer,
-  `seon.issue/words` (`issue.clj:44-61`), treats brackets as separators, so it cannot see link boundaries.
-- The options are Q2's. No reader-side parser is added. The three dangling links today (§0) are the first
-  refusals, and the lane that lands S1 repairs them in the same cut.
+- The text reads as a symbol through edamame, the existing reader, and must print back to the same text.
+- Resolved links join `:seon.fn/see-also` values, with `reference-to #{:seon.fn/sym :seon.test/sym}`. The canonical
+  head keeps the docstring bytes, and the digest already covers the docstring.
+- The renderers never parse markdown links again.
+- The three dangling links today (§0) are S1's first refusals. The cut that lands S1 repairs `restore!`, once
+  `schema.clj` is free. It resolves `shipped-calibration` through the row-producer issue.
 
 ## 4. The render index
 
@@ -364,21 +396,40 @@ Grammar (owner question Q2):
      `my.program/render-referrers` (`src/my/program.clj:228`; 17.7 ms in parser T15).
    - P8, old store, on the stored codec attribute: 334 rows over 50 renderers in 0.54 ms cold.
 2. **The viewing namespace's render functions.**
-   - **No face-role fact is installed.** `:seon.fn/projection-boundary` (`fn.clj:810`) marks output-sink analysis;
-     it does not mark a render role.
-   - AGENTS.md says a render function "is known by its face role; its output may be any spec'd shape, rendered in
-     turn". The role therefore cannot be inferred from the return schema.
-   - **Prerequisite (Q4):** an authored metadata key, `{:seon.render/face :seon.render/ai}`, which `var-row` ingests
-     as `:seon.fn/render-face` (`[:enum :seon.render/ai :seon.render/html :seon.render/form]`). It gets a stage-1
-     refusal for any other value.
-   - The candidates are the role facts of the viewing namespace's program rows, plus the private SCI definitions the
-     agent's context holds. Each is keyed by what it reads: row definition digests for program rows, and the agent
-     context's private-definition set for private definitions. Never by projection identity.
-   - The existing contract and default-supply owner (`function-accepts-and-returns-in?` and call preparation) then
-     matches the value. Visibility, ambiguity and first-match stay exactly as in `namespace-stage`
-     (`render.clj:618-646`).
-   - P8's 1.31 ms (108 arities over 84 functions) measures the **old output-reference query only**. It is not
-     evidence for this index.
+   - **There is no face fact** (root ruling, reversing Q4 on the owner's objection). A render function's face is
+     where it is attached: the `:seon.render/ai` or `:seon.render/html` key on a value or on a schema pair.
+     Otherwise it comes from its declared **output** schema:
+     - text output is the AI face;
+     - `:seon.render/hiccup` output is the HTML face.
+   - That is the rule `namespace-stage` already applies per value, through `function-accepts-and-returns-in?` with
+     the face's output schema (`render.clj:622-646`). The index precomputes the same rule once.
+   - **The derivation** is a fold over the projection's compiled function contracts
+     (`:seon.schema.projection/function-contracts`, the map `render.clj:430` reads).
+     - For each `:=>` arity output, the fold walks `:or`/`:maybe` alternatives and derefs refs.
+     - A ref to `:seon.render/hiccup` gives `:seon.render/html`. A schema whose Malli type is `:string` gives
+       `:seon.render/ai`. `:seon.render/source` derefs to `[:string {:min 1}]`.
+     - Declared error alternatives contribute no face.
+   - **P15 (fresh default):** over 2,167 contracts, the fold took **17.8 ms** and found:
+     - 217 AI-face functions;
+     - 76 HTML-face functions;
+     - 8 with both faces, where arities or `:or` alternatives differ.
+
+     All 42 declared HTML pair renderers return `:seon.render/hiccup`. Of the 51 AI pair renderers, 27 declare
+     `:string`, which is a Malli built-in and not a registered key, so `output-refs` cannot see them. That is why the
+     index reads compiled contracts, not the arity refs.
+   - The AI face is broad. 217 functions return text, among them `seon.ai/attempt-ai` and
+     `seon.instrument/expected-shape`. That matches today's semantics: `namespace-stage` treats any public function of
+     the viewing namespace whose contract accepts the value and returns text as a candidate, and refuses ambiguity.
+     The index narrows only which functions are checked, not which may render.
+   - **Keys.**
+     - The face map is keyed by projection identity, because the contracts come from the projection.
+     - The namespace candidate set is the viewing namespace's program rows plus the agent's private SCI definitions.
+       It is keyed by what it reads: the namespace rows' definition digests, and the agent context's
+       private-definition set.
+   - The existing contract and default-supply owner (`function-accepts-and-returns-in?` and call preparation) matches
+     the value. Visibility, ambiguity and first-match stay exactly as in `namespace-stage` (`render.clj:618-646`).
+   - P8's 1.31 ms (108 arities over 84 functions) measured the old output-reference query only. It is superseded by
+     P15.
 3. **The floor** needs no index.
 
 The walk's structure then holds the pair map (by projection) and, per namespace, the candidate map (by row digests
@@ -426,12 +477,12 @@ of three publications covers S2 and S3 together:
 | Slice | Change | Deletions | Added (est.) |
 |---|---|---|---|
 | **S0: declare targets; derive obligations** | `:seon.db/reference-to` with descriptor validation (§2a); `references-in`; declarations on the §1a attributes; `removed-definition-error` reads `references-in` + `shapes-in` (§2b); rename `:seon.fn/reference-to`; `citation/file` gains its direct target; `citation-attributes` refuses duplicates (§2c) | the hand obligation list (−20), `declared-reference-rules` rule 2 and `test.clj` branch (−12), the walk's interim constant (−10) | +40 (descriptor validation 12, `references-in` 12, derived obligation 10, citation refusal 6) |
-| **S1: one producer emits every link** | the link step inside `var-row`/`namespace-row`/`task-links`: tasks, must-read and see-also (installed), docstring `[[x]]` (§3e), stage schemas; the three dangling doc links repaired | the file row's misfiled ns-level references (parser T4) | +25 |
-| **S2+S3 retypes (P-a, P-b, P-c)** | contract and schema keys and schema render pairs become refs; the candidate-world encoding (§3b); the schema cycle refusal; the final check of §3c; W1–W10 | `write-render-target-error` (−39) after W-form; the walk's contract family (−12); the six retired attribute declarations | +70 (final-check selection 25, existence 10, repair evidence 15, candidate tempid encoding 10, cycle refusal 5, pair refs 5) |
-| **S4: face role** (prerequisite for the §4 index, Q4) | `:seon.render/face` metadata → `:seon.fn/render-face`; `namespace-stage` retrieves role candidates | the per-value scan over all publics | +20 |
+| **S1: one producer emits every link** | the link step inside `var-row`/`namespace-row`/`task-links`: tasks, must-read and see-also (installed), docstring links from the nextjournal/markdown parse tree (§3e; `deps.edn` dependency and `reference-code/` vendoring), stage schemas; the dangling doc links repaired | the file row's misfiled ns-level references (parser T4) | +30 |
+| **S2+S3 retypes (P-a, P-b, P-c)** | contract and schema keys and schema render pairs become refs; the candidate-world encoding (§3b); the schema cycle refusal; the final check of §3c; W1–W10; the §4 render index (the pair map, and the face map derived from compiled output contracts) used by `namespace-stage` | `write-render-target-error` (−39) after W-form; the walk's contract family (−12); `namespace-stage`'s per-value enumeration of every public (−8); the six retired attribute declarations | +80 (final-check selection 25, existence 10, repair evidence 15, candidate tempid encoding 10, cycle refusal 5, pair refs 5, face map 10) |
 
-Totals: about +155 added and about −95 deleted, before review. S2+S3 is the one slice near the 100-line presumption.
-Its additions are the final writer check, which the review requires for any ref. The alternative is option 1 below.
+Totals: about +150 added and about −103 deleted, before review, plus one dependency (nextjournal/markdown, which
+brings commonmark-java). No face-fact slice remains. S2+S3 is the one slice near the 100-line presumption. Its
+additions are the final writer check, which the review requires for any ref. The alternative is option 1 below.
 
 **Risks.**
 - The writer path is hot. S2+S3 need a clock row, parent against change, for a full reindex and a one-file
@@ -440,17 +491,19 @@ Its additions are the final writer check, which the review requires for any ref.
   will go red.
 - The candidate tempid encoding is new at the writer. W9 guards the trap.
 - Recursive schemas become a named refusal.
+- A new dependency: nextjournal/markdown 0.7.213 and commonmark-java 0.24.0 join the classpath, and
+  `analyze-dependencies!` must lint them once.
 
 **Priced options**, simplest first:
-1. **Values everywhere, targets declared (S0 + S1).** About 3 hours.
+1. **Values everywhere, targets declared (S0 + S1).** About 3.5 hours.
    - Guarantee: one descriptor drives navigation, derived obligations and the walk; links are ingested and
      validated at the one producer; stale docstring links refuse.
    - Sacrifice: no native pull through contract keys; a missing contract or schema target is refused by Malli and
      the producer, but not by the writer.
-2. **Recommended: option 1 plus the S2+S3 retypes and S4.** About 8 hours across three adoptions.
+2. **Recommended: option 1 plus the S2+S3 retypes with the render index.** About 7.5 hours across three adoptions.
    - Guarantee: contract keys, schema uses and render pairs are refs, proven by W1–W10 and portable through
-     `published-index-rows`; the render index follows face roles.
-   - Sacrifice: the final-check machinery (+70) and three adoptions.
+     `published-index-rows`; the render index derives faces from stored contracts, with no new fact.
+   - Sacrifice: the final-check machinery (+80) and three adoptions.
 3. **Refs for every relation, with dependency rows from kondo's cache.** Days.
    - It reinstates ruling 47 and refuses 56 current first-party names.
    - It cannot express authored links to paths and external Vars.
@@ -468,30 +521,21 @@ Rows that depend on an open question are marked open.
 | 1.14 canonical authoring | links read from the canonical head; the digest covers them | S1 |
 | 1.15 every stage specified | §2a stage table; refusals at the producer and the writer | S0+S1; W1–W10 for refs |
 | 5a.2–5a.3 hop content and addresses | the walk follows `references-in`; the named target selects the pair | S0 |
-| 5a.6 must-read/see-also ingestion | installed in `task-links`; docstring links added | S1, **open on Q2** |
+| 5a.6 must-read/see-also ingestion | installed in `task-links`; docstring links from the markdown parse tree | S1 (Q2 ruled) |
 | 7.2, 7.3, 7.5, 7.13 tasks | values with `reference-to #{:seon.task/id}`; destination-gate dangling check | S0 (declaration only) |
 | 7.9, 7.9b ingestion | the one link step | S1 |
-| 11.1, 11.2 per-face selection, face role | the §4 index | **open on Q4** |
-| 12.2 error members as refs | historical observations stay values; live error relations undecided | **open on Q3** |
+| 11.1, 11.2 per-face selection; a render function's face | the §4 index: the attachment key, else derived from the declared output schema; no face fact | S2+S3 (Q4 ruled) |
+| 12.2 error members | an error member naming a function stays a symbol value and never blocks deletion (errors are data); an occurrence's live data relations are refs; row 12.2 reconciled in `language-requirements-2026-09-24.md` | closed by ruling Q3 |
 
-### Questions for root and the owner
+### Root rulings (2026-09-25)
 
-1. **Q1: the property name.** `:seon.db/reference-to`, direct target only (recommended), or a widened
-   `:seon.fn/reference-to`. Astra ruled the latter carries reach meaning.
-2. **Q2: docstring link extraction.**
-   - (a) A bracket-aware mode for `seon.issue/words`, moved to a shared owner, about 10 lines (recommended; one prose
-     tokenizer, no regex).
-   - (b) A production regex, which needs owner permission.
-   - (c) Links only in `:seon/see-also` metadata.
-
-   The grammar and its examples are in §3e.
-3. **Q3: error members.** Row 12.2 says an error member naming another entity is a ref. The guide says an observed
-   identity survives deletion.
-   - Proposal: an occurrence's observation (`:seon.error/operation`, `:seon.instrument/fn`) stays a value.
-   - Relations to live entities (an occurrence → its agent, already a ref: `:seon.error.occurrence/agent`) are refs.
-   - Row 12.2 stays open until the owner rules. This design does not amend it.
-4. **Q4: the face role.** The authored key `:seon.render/face`, stored as `:seon.fn/render-face` (recommended), or a
-   convention the owner prefers. The §4 namespace index waits on it.
+1. **Q1:** `:seon.db/reference-to`, direct target only.
+2. **Q2:** docstring links come from a markdown library's parse tree, never a production regex. They resolve through
+   `seed-symbol`. The chosen library is nextjournal/markdown on commonmark-java (§3e).
+3. **Q3:** an error member naming a function stays a symbol value. Errors are data, never program, so they do not
+   block deletion. Row 12.2 was reconciled to say so.
+4. **Q4 (reversed on the owner's objection):** there is no face fact. The face is the attachment key where one is
+   attached, and is otherwise derived from the declared output schema (§4). AGENTS.md was corrected by root.
 
 ## 8. Probe log (JVM mode, read-only or `datahike.api/with`)
 
@@ -511,3 +555,6 @@ Rows that depend on an open question are marked open.
 | P12 | fresh | cycles in schema references | 1,951 holders, 0 cycles, 0 self-references |
 | P13 | fresh | docstring `[[x]]` links resolving in the holder namespace | 44 fn-doc links, 41 resolve (dangling: `snapshot-state`, `restore-state!`, `shipped-calibration`); 4 ns-doc links |
 | P14 | fresh | `declared-reference-rules` rule 2 edges; `reference-to` declarations | 0 edges; one declaration (`:seon.schedule.task/function`, 3 holders) |
+| P15 | fresh | face fold over the projection's 2,167 compiled contracts; outputs of declared pair renderers | 17.8 ms; 217 AI, 76 HTML, 8 both; HTML pair renderers 42/42 `:seon.render/hiccup`; AI pair renderers 27/51 declare `:string` (no output ref) |
+| P16 | disposable clojure process, `~/.m2` | nextjournal/markdown 0.7.213 `internal-link-tokenizer` on a sample and on 1,858 `src/seon` docstrings | code spans and blocks excluded; 58.4 ms warm total, 31 µs per docstring, 34 links |
+| P17 | fresh | rows for `seon.ai.tokens` defs | `shipped-calibration` has no row; its 5 checked siblings do (issue filed) |

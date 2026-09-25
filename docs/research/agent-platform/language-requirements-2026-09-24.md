@@ -183,7 +183,7 @@ explode and the metadata larger than the actual function… tasks and references
 | # | Requirement | Source | Status |
 |---|---|---|---|
 | 12.1 | Everything before the print is a real value under its Malli schema: live in the runtime, a database fact, or a blob; printing and persisting are the only edges | O | law |
-| 12.2 | An error is an ordinary value on that path: no error-specific summarizing, stringifying or clipping; identity exists to store at least one copy, link it and notify the agent to fix it; an error is a flat named error schema over `:seon.error/base` that can accompany any value (no error-kind stamp); error members referring to another entity use refs, never that entity's identity attribute | O | law; six schemas to fix |
+| 12.2 | An error is an ordinary value on that path: no error-specific summarizing, stringifying or clipping; identity exists to store at least one copy, link it and notify the agent to fix it; an error is a flat named error schema over `:seon.error/base` that can accompany any value (no error-kind stamp); an error member naming a function stays a symbol value (`:seon.error/operation`, `:seon.instrument/fn`): errors are data, never program, so they observe the name and never block its deletion; a relation to a live data entity (the occurrence's agent, `:seon.error.occurrence/agent`) is a ref (root ruling 2026-09-25, references-as-refs design §7 Q3) | O, root | law; six schemas to fix |
 
 ## 13. Configuration layers (owner 2026-09-25)
 
