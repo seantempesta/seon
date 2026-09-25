@@ -384,9 +384,9 @@
         by-file (group-by :filename findings)]
     (is (= (set (keys historical-sources)) (set (keys by-file))))
     (testing "an anonymous predicate is refused where the indexer stores it"
-      ;; `schema/canonical-definition`'s armed return contract refuses a form
-      ;; that is not EDN-readable Malli before any compile is attempted.
-      (is (every? #(str/includes? (:message %) "EDN-readable Malli form")
+      ;; `schema/canonical-definition` refuses an unnamed callable by name
+      ;; before any compile is attempted.
+      (is (every? #(str/includes? (:message %) "contracts are data")
                   (concat (get by-file "test/seon/cluster/release_context_test.clj")
                           (get by-file "src/seon/db.clj")))))
     (testing "an incomplete form names the Malli refusal"
