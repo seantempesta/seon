@@ -217,3 +217,65 @@ bin/test-check default --test seon.cluster.turn-test/a-batched-turn-commits-only
 - **Not yet known:** why the call pass ends `:error` after all 8 forms run. The next probe
   captures the call pass's whole report and error facts. It needs root's live-reproduction
   window.
+
+## Round 5: three slices, one commit each
+
+1. **2391d0b94, `seon.fn/runtime-analysis-batch`: one namespace form per run of
+   consecutive requests in one namespace.**
+   - I proved the change at the REPL on default's database with a scratch copy of the
+     loop:
+     - the pair `(require '[seon.schema :as schema])` then `(schema/register! …)`
+       resolves to `seon.schema/register!`, and host-bound is `#{}`;
+     - a `user → seon.id → user` batch keeps each form in its own namespace, with exact
+       spans.
+   - The installed `analyze-forms` still throws "no analysis of schema" on that pair.
+   - Regression: `an-alias-an-earlier-form-requires-resolves-in-later-forms-of-the-batch`
+     (fn_test).
+   - Limit: a batch that returns to a namespace starts that namespace again from its
+     stored row, which the old code also did.
+2. **51c66001c and 48bf1ef10: the no-analysis refusal is a core fault.**
+   - fn.clj gives the refusal its own schema, `:seon.fn/dependency-analysis-missing-error`,
+     declared in seon.fn.edn:
+     - its distinguishing members are `:seon.fn/dependency-analysis-missing` and
+       `:seon.fn/unresolved-targets`;
+     - the ex-data's metadata carries `:seon.error/declared-schema`;
+     - it still has `:seon.fn/index-refused`, so publication handles it as before.
+   - I compiled the schema at the REPL: it accepts the refusal, refuses the refusal
+     without its targets, and the refusal still satisfies `:seon.fn/index-refused-error`.
+   - In turn.clj, `analyze-submitted` replaces the pass's phase-wrapped `analyze-forms`.
+     It decides by that declared schema and calls `seon.fault/fault!` with the handle's
+     environment, which carries the connection, cluster name and caps (checked at the
+     REPL). Under `:panic` the fault throws to the turn's caller. Every other failure is
+     still returned as the pass's flat refusal.
+   - `:unindexed-change` and `:multiple-declarations` (sci/eval.clj) are unchanged: they
+     are still returned to the agent.
+   - No regression for this slice yet. It needs a world where the checkout's clj-kondo
+     cache lacks a dependency the agent's code calls. fn_test's
+     `a-dependency-macro-sci-cannot-expand-is-host-bound` builds one with its own cache
+     root, but `analyze-forms` reads the checkout's shared cache, so a turn cannot reach
+     that world without new machinery.
+3. **d43189a33, turn.clj `episode-exhausted!`: spending the last episode run while a wake
+   is unanswered is a core fault.**
+   - The fault is stored and delivered, and names the missing terminal event
+     (`seon.run/complete`).
+   - Agent and run identity are untouched, so a new outside wake resumes the agent.
+   - Cost: 1.6 ms for `turns-left` on each pass that is not released, plus 2.3 ms for
+     `deferred-triggers`, paid only at the bound.
+   - Regression: `spending-the-last-episode-run-is-a-loud-core-fault`.
+   - Limit: turn_test's fixture environment has no connection, so there the fault panics
+     without being stored. In production the environment carries one.
+
+Root runs (after publishing 2391d0b94, 51c66001c, 48bf1ef10 and d43189a33; turn.clj must
+be republished from its committed file):
+```
+bin/test-check default --test seon.fn-test/an-alias-an-earlier-form-requires-resolves-in-later-forms-of-the-batch
+bin/test-check default --test seon.fn-test/a-dependency-macro-sci-cannot-expand-is-host-bound
+bin/test-check default --test seon.cluster.turn-test/a-batched-turn-commits-only-queryable-definition-facts
+bin/test-check default --test seon.cluster.turn-test/spending-the-last-episode-run-is-a-loud-core-fault
+bin/test-check default --test seon.cluster.turn-test/a-turn-through-a-local-provider-settles-and-exits-within-its-bound
+bin/test-check default --ns seon.turn-work-test      # deferral tests drive next-agent-work only; confirm no pass now panics
+bin/test-check default --test seon.run6-stall-test/an-open-session-provider-refusal-is-the-first-problem
+```
+Tests that drive `turn/turn` to a small cap may now panic by law: my/agent_test (cap 4),
+issue_settlement_test (cap 2) and config_application_test (caps 4 and 6). Those reds are
+the new law working; the fix is for each test to expect the fault.
