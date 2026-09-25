@@ -205,8 +205,9 @@ Private experiments remain possible; local green never implies shared acceptance
   its block, components/declared queries in theirs. Default to the attribute-map printer;
   failed rendering gives a diagnostic. Compose error base and satisfied schema renderers.
   An attribute request stays an attribute request; report ugly output and estimate tokens.
-- **Apply presentation limits once.** Only AI render functions/value renderer clip; save
-  their exact text, select whole prompt units, never clip HTML or historical units again.
+- **Apply presentation limits once.** No budgets anywhere: render functions render less data,
+  and the floor value printer is the only thing that clips (owner 2026-09-25). Save their exact
+  text, select whole prompt units, never clip HTML or historical units again.
   Keep query-work bounds and deadlines separate; elisions name bound, count, path and requery,
   with floor hits counted. Derive missing profiles at entry or refuse explicitly.
 
