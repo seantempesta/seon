@@ -219,7 +219,9 @@ Private experiments remain possible; local green never implies shared acceptance
   rewrite history. Compaction clears evaluations and regenerates the opening. Archive
   agents; preserve task/agent identity on loud, resumable budget exhaustion.
 - **Render ordinary values totally.** Use one AI/HTML pair per entity schema, scalars in
-  its block, components/declared queries in theirs. Default to the attribute-map printer;
+  its block, components/declared queries in theirs. A value's own `:seon.render/ai` or
+  `:seon.render/html` key overrides that default for its face (a renderer symbol or the rendered
+  data itself), so any REPL result can carry its presentation. Default to the attribute-map printer;
   failed rendering gives a diagnostic. Compose error base and satisfied schema renderers.
   An attribute request stays an attribute request; report ugly output and estimate tokens.
 - **Apply presentation limits once.** One render path: a value's declared render function renders less, else the floor value
