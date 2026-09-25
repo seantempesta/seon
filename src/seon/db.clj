@@ -1036,13 +1036,15 @@
     (some #(when (or (nil? value) (= (val value) (:v %))) %)
           (apply d/datoms changes index components))))
 
-(declare read-evidence-current? datom->data)
+(declare read-evidence-current? datom->data schema-database)
 
 (defn read-evidence-changes
   "Return one changed datom witnessing each retained index pattern.
   Witnesses use the same matching operation as cache validity. Broad read
   plans contribute an attribute-scoped witness; they do not acquire an
-  entity or value constraint that their reader did not retain."
+  entity or value constraint that their reader did not retain. A read with
+  no attribute set (`:all`) is witnessed by the first transaction after its
+  basis: that transaction's `:db/txInstant` datom, found by one seek."
   {:malli/schema [:=> [:cat :seon.db/database-value
                        [:vector :seon.db/read-evidence] :seon.db/basis-t]
                   [:or :seon.db/datoms :seon.db/error-result]]}
@@ -1059,12 +1061,20 @@
                               (:datahike.query.dependency/sources plan))
                  attributes (:datahike.query.source/attributes source)
                  patterns (or (:seon.db/read-index-patterns source)
-                              (if (set? attributes)
-                                (mapv #(hash-map :seon.db/pattern-attribute %) attributes)
-                                [{}]))
-                 changes (d/since (d/history database)
-                                  (or (:seon.db/read-basis-t source) basis))]
-             (keep #(index-pattern-change changes %) patterns))))
+                              (when (set? attributes)
+                                (mapv #(hash-map :seon.db/pattern-attribute %) attributes)))
+                 since (or (:seon.db/read-basis-t source) basis)
+                 changes (d/since (d/history database) since)]
+             (if patterns
+               (keep #(index-pattern-change changes %) patterns)
+               ;; The since view materializes a whole index before filtering it
+               ;; (`datahike/db.cljc:173-191`): an unconstrained pattern cost
+               ;; 1400 ms and 2.4 GB per stale read on default. The first
+               ;; transaction after the basis is a changed datom of its own.
+               (when-let [next-tx (first (d/seek-datoms (schema-database database) :aevt
+                                                        :db/txInstant (inc (long since))))]
+                 (when (= :db/txInstant (:a next-tx))
+                   (take 1 (d/datoms changes :eavt (:e next-tx) :db/txInstant))))))))
          retained)))))
 
 (defn- changed-read-attributes

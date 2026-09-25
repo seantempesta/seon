@@ -2467,6 +2467,42 @@
            (str "50 cached reads took " hits " ms; 50 first declaration datoms took "
                 declaration-reads " ms"))))))
 
+;; Class: a read with no attribute set is witnessed by one seek. Its `{}`
+;; pattern scanned the whole since-history index per stale read (1400 ms and
+;; 2.4 GB each on default; 27 s for one 480-read evaluation).
+(deftest an-unnarrowed-reads-witness-is-the-first-transaction-after-its-basis
+  (test-support/with-database
+   (fn [connection]
+     (let [captured (atom [])
+           flow (:db/id (db/pull @connection [:db/id] [:seon.ns/name 'seon.flow]))
+           basis (db/basis-t @connection)
+           _ (binding [db/*read-evidence-sink* captured]
+               (db/q '[:find [?a ...] :in $ ?e :where [?e ?a _]] @connection flow))
+           ;; The retained patterns and replay inputs removed as data: what
+           ;; remains is the stale `:all` read the index cannot narrow.
+           unnarrowed (mapv (fn [evidence]
+                              (-> evidence
+                                  (dissoc :seon.db/read-request :seon.db/read-result-digest)
+                                  (update-in [:datahike.read/dependency-plan :datahike.query.dependency/sources]
+                                             (fn [sources] (mapv #(dissoc % :seon.db/read-index-patterns) sources)))))
+                            (db/read-evidence @captured))
+           report (test-support/transacted!
+                   connection
+                   (into (test-support/agent-tx @connection "db-test-recipient")
+                         [{:seon.message/id "unnarrowed-witness"
+                           :seon.message/to [:seon.agent/id "db-test-recipient"]
+                           :seon.message/content "unrelated"}]))
+           transaction (:tx (first (:tx-data report)))
+           started (System/nanoTime)
+           changes (db/read-evidence-changes @connection unnarrowed basis)
+           elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+       (is (= :all (get-in unnarrowed [0 :datahike.read/dependency-plan :datahike.query.dependency/sources
+                                       0 :datahike.query.source/attributes])))
+       (is (false? (db/read-evidence-current? @connection unnarrowed)))
+       (is (= [[transaction :db/txInstant transaction]] (mapv (juxt :e :a :tx) changes))
+           (pr-str changes))
+       (is (< elapsed-ms 100.0) (str "the witness took " elapsed-ms " ms"))))))
+
 (deftest equal-revisions-prove-a-read-current-without-scanning-history
   (test-support/with-database
    (fn [connection]
