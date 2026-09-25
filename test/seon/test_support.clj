@@ -794,8 +794,10 @@
          ;; The writer digests with the namespace row the transaction leaves
          ;; stored: the stored row when the namespace exists, else the one the
          ;; fixture writes beside it.
-         ns-row (or (db/pull database '[*] [:seon.ns/name namespace-name])
-                    (namespace-row database namespace-name))
+         stored (db/q '[:find ?e . :in $ ?n :where [?e :seon.ns/name ?n]] database namespace-name)
+         ns-row (if stored
+                  (@#'seon.db/declaration-value database (db/identity-attributes database) stored)
+                  (namespace-row database namespace-name))
          rows (seon.fn/source-rows
                database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
