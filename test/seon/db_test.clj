@@ -834,7 +834,8 @@
 (deftest wildcard-pull-digests-cover-empty-large-and-canonical-results
   (test-support/with-database
    (fn [connection]
-     (let [digest @(ns-resolve 'seon.db 'read-result-digest)]
+     (let [digest (comp @(ns-resolve 'seon.db 'read-result-digest)
+                        @(ns-resolve 'seon.db 'stable-value))]
        (is (= (digest {:b #{3 2} :a 1})
               (digest {:a 1 :b #{2 3}}))
            "canonical map and set ordering does not alter the digest"))
@@ -891,27 +892,41 @@
            "an unbounded read cannot enter semantic replay")))))
 
 (deftest semantic-replay-declines-opaque-and-lazy-values-without-realizing
-  (let [stabilize @(ns-resolve 'seon.db 'stable-read-result)
-        request {:seon.db/read-operation :q
-                 :seon.db/query-request
-                 {:query '[:find ?value . :in $ ?value]
-                  :args []
-                  :max-work 10
-                  :max-results 10
-                  :max-result-weight 10}}
+  (let [stabilize @(ns-resolve 'seon.db 'stable-value)
         source-touched? (atom false)
         dangerous (lazy-seq (reset! source-touched? true) [1])]
     (is (= [true [1 #uuid "00000000-0000-0000-0000-000000000000"]]
-           (stabilize request
-                      (list 1
+           (stabilize (list 1
                             #uuid "00000000-0000-0000-0000-000000000000")))
         "a finite counted EDN sequence remains eligible")
-    (is (= [false nil] (stabilize request (Object.)))
+    (is (= [false nil] (stabilize (Object.)))
         "an opaque object is not semantic replay evidence")
-    (is (= [false nil] (stabilize request dangerous))
+    (is (= [false nil] (stabilize dangerous))
         "an uncounted sequence is not semantic replay evidence")
     (is (false? @source-touched?)
         "declining a lazy value never touches its source")))
+
+;; Class: a read result's replay walk costs a fraction of digesting it. Each
+;; node once paid three `satisfies?` misses (`db?`), 98% of the walk and ~6x
+;; the canonical encoding over one form's 468 namespace-row pulls.
+(deftest the-stable-walk-costs-less-than-encoding-the-read-result
+  (test-support/with-database
+   (fn [connection]
+     (let [stabilize @(ns-resolve 'seon.db 'stable-value)
+           result (vec (for [n (range 2000)]
+                         (into {:db/id n} (map (fn [k] [(keyword "seon.db-test" (str "k" k)) (str n "-" k)]))
+                               (range 10))))
+           median-ms (fn [f] (nth (sort (repeatedly 5 #(let [started (System/nanoTime)]
+                                                         (f)
+                                                         (/ (- (System/nanoTime) started) 1e6))))
+                                  2))
+           walk (median-ms #(stabilize result))
+           encoding (median-ms #(schema/canonical-data-string result))]
+       (is (= [true result] (stabilize result)))
+       (is (< walk encoding)
+           (str "the walk took " walk " ms; encoding the same value took " encoding " ms"))
+       (is (= [false nil] (stabilize [{:db @connection}])) "a database value declines")
+       (is (= [false nil] (stabilize {:connection connection})) "a connection declines")))))
 
 (deftest component-expanded-pull-evidence-detects-a-child-only-change
   (with-codec-database

@@ -522,9 +522,12 @@
   [result]
   (letfn [(stable [value]
             (cond
-              (or (db.utils/db? value)
-                  (connector/connection? value)
-                  (record? value))
+              ;; Every Datahike value is a record (`datahike/db.cljc:307-685`)
+              ;; and a connection is none of the shapes below, so both fall
+              ;; out without `db?`: its three `satisfies?` misses per node
+              ;; were 98% of this walk (677 of 689 ms over one form's 468
+              ;; namespace-row pulls, lane-fix-cost-db-2026-09-25).
+              (record? value)
               [false nil]
 
               (map? value)
@@ -565,24 +568,18 @@
               :else [false nil]))]
     (stable result)))
 
-(defn- stable-read-result
-  [request result]
-  (if (bounded-read-request? request)
-    (stable-value result)
-    [false nil]))
-
 (defn- read-result-digest
-  [result]
-  (let [[stable? value] (stable-value result)]
-    (when stable?
-      (try
-        (schema/sha-256
-         [(.getBytes ^String (schema/canonical-data-string value) "UTF-8")])
-        (catch clojure.lang.ExceptionInfo cause
-          (if (= :seon.schema/noncanonical-projection-data
-                 (:seon.schema/error (ex-data cause)))
-            nil
-            (throw cause)))))))
+  "The digest of one `stable-value` answer, computed once per read by its caller."
+  [[stable? value]]
+  (when stable?
+    (try
+      (schema/sha-256
+       [(.getBytes ^String (schema/canonical-data-string value) "UTF-8")])
+      (catch clojure.lang.ExceptionInfo cause
+        (if (= :seon.schema/noncanonical-projection-data
+               (:seon.schema/error (ex-data cause)))
+          nil
+          (throw cause))))))
 
 (declare pull-index-patterns)
 
@@ -911,15 +908,14 @@
                source-position :seon.db/source-argument-position
                plan :datahike.read/dependency-plan
                :as entry}]
-           (let [[replayable? stable-result]
+           (let [request (:seon.db/read-request entry)
+                 stable (when (and request (find entry :seon.db/read-result))
+                          (stable-value (:seon.db/read-result entry)))
+                 [replayable? stable-result]
                  (when (and (:seon.db/retain-read-results? options)
-                            (find entry :seon.db/read-result))
-                   (stable-read-result (:seon.db/read-request entry)
-                                       (:seon.db/read-result entry)))
-                 result-digest
-                 (when (and (:seon.db/read-request entry)
-                            (find entry :seon.db/read-result))
-                   (read-result-digest (:seon.db/read-result entry)))]
+                            (bounded-read-request? request))
+                   stable)
+                 result-digest (when stable (read-result-digest stable))]
            (cond->
             {:seon.db/source-argument-position source-position
              :datahike.read/dependency-plan
@@ -1162,19 +1158,16 @@
                (when (and (find evidence :seon.db/read-request)
                           (or (find evidence :seon.db/read-result)
                               (find evidence :seon.db/read-result-digest)))
-                 (let [replayed
-                       (replay-read database (:seon.db/read-request evidence))
+                 (let [request (:seon.db/read-request evidence)
+                       stable (stable-value (replay-read database request))
                        [replayable? result]
-                       (stable-read-result
-                        (:seon.db/read-request evidence)
-                        replayed)]
+                       (if (bounded-read-request? request) stable [false nil])]
                    (or (and (find evidence :seon.db/read-result)
                             replayable?
                             (= (:seon.db/read-result evidence) result))
                        (when-let [expected
                                   (:seon.db/read-result-digest evidence)]
-                         (when-let [actual
-                                    (read-result-digest replayed)]
+                         (when-let [actual (read-result-digest stable)]
                            (= expected actual)))))))))))
      retained)))
 
