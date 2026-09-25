@@ -1596,6 +1596,41 @@
 
 
 (deftest
+ acquisition-records-its-refusals-on-the-acquired-branch-under-foreign-custody
+ ;; Custody review 2026-09-25 finding 1: the refusal recording owns its
+ ;; branch's custody, so acquiring under another branch's custody (agent
+ ;; acquisition or a lazy invocation) records on the acquired branch.
+ (test-support/with-database
+  (fn
+   [foreign]
+   (test-support/with-database
+    (fn
+     [connection]
+     (test-support/transacted!
+      connection
+      [(test-support/namespace-row (db/db connection) 'acquire.custody)])
+     (test-support/transacted!
+      connection
+      [(test-support/program-fn-row
+        (db/db connection) 'acquire.custody/bad
+        "(defn ^{:malli/schema [:=> [:cat :int] :int]} bad [x] (missing-dependency x))")])
+     (let [ctx (assoc (eval/build-base-ctx (seon.schema/handed-projection))
+                      :seon.sci.eval/custody #:seon.db{:connection connection})
+           acquired (db/call-with-custody
+                     {:seon.db/connection foreign}
+                     #(eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)}))
+           occurrence '[:find ?error .
+                        :where [?error :seon.error/occurrences ?occurrence]
+                        [?occurrence :seon.sci.eval/row-member acquire.custody/bad]]]
+       (is (true? (:seon.sci.eval/acquisition-refusals-recorded? acquired))
+           (pr-str (:seon.sci.eval/acquisition-recording-error acquired)))
+       (is (int? (db/q occurrence (db/db connection)))
+           "the refusal is a fact of the acquired branch")
+       (is (nil? (db/q occurrence (db/db foreign)))
+           "and never of the caller's branch")))))))
+
+
+(deftest
  agent-contracts-apply-on-acquire-and-cold-recovery
  (test-support/with-database
   (fn
