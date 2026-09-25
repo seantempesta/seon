@@ -526,6 +526,44 @@
                 (str/index-of rendered (str first-producer))
                 (str/index-of rendered (str second-producer))))))))))
 
+(deftest overlapping-declared-returns-refuse-loudly-and-deterministically
+  (support/with-database
+   (fn [connection]
+     (let [first-ai 'seon.render-simplification.fixture-ambiguous/first-ai
+           second-ai 'seon.render-simplification.fixture-ambiguous/second-ai
+           producer 'seon.render-simplification.fixture-ambiguous/subject]
+       ;; Two declared return alternatives the same value satisfies, naming
+       ;; different renderers: selection names both rather than choosing.
+       (support/transacted!
+        connection
+        (vec (for [[schema-key renderer] [[:seon.render-simplification.fixture-ambiguous/first first-ai]
+                                          [:seon.render-simplification.fixture-ambiguous/second second-ai]]]
+               {:seon.schema/key schema-key :seon.schema.admission/source :core
+                :seon.schema/form (pr-str [:map {:seon.render/ai renderer}
+                                           [:seon.ns/name :seon.ns/name]])})))
+       (support/transacted!
+        connection
+        [(support/program-fn-row
+          (db/db connection) producer
+          (str "(defn subject {:malli/schema [:=> [:cat] [:or "
+               ":seon.render-simplification.fixture-ambiguous/first "
+               ":seon.render-simplification.fixture-ambiguous/second]]} [] {})"))])
+       (let [database (db/db connection)
+             ctx (support/fork-cluster-ctx connection)
+             request (render-request database ctx fixture-ambiguous
+                                     {:seon.ns/name fixture-ambiguous})
+             result (render-ai request)
+             decision (selection (assoc request :seon.render/output :seon.render/ai))
+             expected #{(str first-ai) (str second-ai)}]
+         (is (seq (:seon.render/candidates result)) (pr-str result))
+         (is (seq (:seon.render/candidates (:seon.render.selection/selected decision))))
+         (is (= :ambiguous
+                (some #(when (= :declared (:seon.render.selection.stage/name %))
+                         (:seon.render.selection.stage/status %))
+                      (:seon.render.selection/stages decision))))
+         (is (= expected (set (map str (:seon.render/candidates (:seon.error/data result))))))
+         (is (= (sort expected) (map str (:seon.render/candidates (:seon.error/data result))))))))))
+
 (deftest renderer-invocation-is-sci-only-and-live-var-backed
   (support/with-database
    (fn [connection]
