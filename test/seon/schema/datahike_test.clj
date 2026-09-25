@@ -290,6 +290,17 @@
     (is (contains? attributes :seon.config/dial))
     (is (not (contains? attributes :gen/schema)))))
 
+(deftest a-schema-absent-from-the-projection-refuses-by-name
+  ;; CLASS: ambiguous nil. `mr/schema` answers nil for an undeclared key, and
+  ;; Malli then refused an anonymous `{:schema nil}`; the refusal names the key.
+  (let [projection (schema/build-projection {::present [:map {:seon.config/dial true}]
+                                             :seon.config/dial :boolean})
+        refusal (try (schema.datahike/storable-properties-in projection ::absent)
+                     (catch clojure.lang.ExceptionInfo e (ex-data e)))]
+    (is (= ::absent (:seon.schema/missing-reference refusal)))
+    (is (= {:seon.config/dial true}
+           (schema.datahike/storable-properties-in projection ::present)))))
+
 (deftest compiled-storage-navigation-reuses-retained-roots
   (support/with-database
    (fn [_connection]

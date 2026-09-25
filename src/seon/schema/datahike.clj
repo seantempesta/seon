@@ -260,14 +260,25 @@
      (declared-storable? projection attr))))
 
 (defn storable-properties-in
-  "Namespaced properties whose own declarations are database-storable."
+  "Namespaced properties whose own declarations are database-storable.
+
+   A key absent from the projection refuses by name: `mr/schema` answers nil
+   for it, which Malli then reported as an anonymous invalid nil schema."
   {:malli/schema [:=> [:cat :map :keyword] :map]}
   [projection schema-key]
-  (into {}
-        (filter (fn [[property _]]
-                  (storable-attribute-in? projection property)))
-        (into {} (filter (fn [[k v]] (and (qualified-keyword? k) (some? v))))
-              (m/properties (mr/schema (:seon.schema.projection/registry projection) schema-key)))))
+  (let [compiled (mr/schema (:seon.schema.projection/registry projection) schema-key)]
+    (when-not compiled
+      (throw (ex-info (str "Missing schema declaration " schema-key
+                           ": the supplied projection does not declare it.")
+                      {:seon.schema/invalid-schema schema-key
+                       :seon.schema/key schema-key
+                       :seon.schema/missing-reference schema-key
+                       :seon.schema/missing-reference-namespace (namespace schema-key)})))
+    (into {}
+          (filter (fn [[property v]]
+                    (and (qualified-keyword? property) (some? v)
+                         (storable-attribute-in? projection property))))
+          (m/properties compiled))))
 
 (defn database-attributes-core-in
   "Entity members and independently persisted attributes, without metadata properties."
