@@ -2,28 +2,36 @@
 type: requirements
 status: living — rewritten in place as experiments teach us; not an append log
 created: 2026-09-24
-scope: what the decoration language (code metadata + EDN task files) must satisfy, from the owner's rulings and every dogfood run
+scope: what the decoration language (code metadata + EDN task files) and the one REPL path must satisfy, from the owner's rulings and every dogfood run; revised in place 2026-09-25 so docs/seon/issues and plans can move into the codebase as tasks
 ---
 
 # Requirements for the language that describes Seon to itself
 
 Each requirement names its source (O = owner ruling, R = a dogfood/experiment run, A = review/audit).
-"Met" means met by v0 in experiment (`decoration-language-v0-2026-09-24.md`,
-`resources/seon/tasks/`), not installed.
+"Met" means met by v0 in experiment (`decoration-language-v0-2026-09-24.md`), not installed.
+The v0 task files are not on this branch; `resources/seon/tasks/` is created by the ingestion slice (7.9).
+Designs this spec is implemented by: `one-repl-language-2026-09-25.md` (the path, co-location, config),
+`one-render-path-design-2026-09-25.md` (selection, floor), `function-face-and-canonical-authoring-2026-09-25.md`
+(function face, canonical authoring, derived contracts) and `query-render-building-block-2026-09-25.md`.
 
 ## 1. It is data, in Clojure, that agents already know how to write
 
 | # | Requirement | Source | v0 |
 |---|---|---|---|
 | 1.1 | Everything stored is a value in Datahike with a unique fully qualified name; symbols are symbols, keywords keywords, never strings | O | met |
-| 1.2 | Code carries what is true of code (intent, contracts, links); EDN carries what is not code yet (tasks, target data model, proofs) | O | met |
+| 1.2 | **Each fact lives with its owner, where grep finds it and the indexer parses it once:** what is true of a function (intent, contract, links, task ids) is in its `defn`; what is true of a data shape (keys, default render pair, a dial's default and reason) is on its Malli schema; a task's own data (id, intent, needs, must-read) is task EDN; what differs by deployment is a sparse overlay file; initialization data (providers, models) stays with its data owner. Nothing is written twice (owner 2026-09-25) | O | revised |
 | 1.3 | Plain Clojure only: `ns`/`defn`/`deftest` + metadata; no custom `ns` clauses (`clojure.core/ns` refuses them by spec — measured) | O, R | met |
 | 1.4 | No mini-language inside strings; prose is never parsed | O | met |
 | 1.5 | Links written the way a REPL resolves them: syntax quote in code, bare fully qualified symbols in EDN data, `'sym` inside requirement code | O, R | met |
 | 1.6 | Task files are read by the Clojure reader without evaluation (edamame, quote on): `clojure.edn` silently misreads `'sym` as one symbol named `'sym` | R | met |
 | 1.7 | Elegant and intuitive, not merely sufficient: the fewest authored keys; everything derivable is derived | O | v0.1: authored = id, intent, subjects, [schemas], [done-when]; 76 → 47 lines for the same eight tasks |
-| 1.9 | **Every reference is a handle followable both ways from limited context:** an id (task, function, schema, error, test) appears literally where it is defined, in a file its namespace names, so `rg <id>` finds the definition and every referrer; and the same id is one REPL call away (`(task :x.task/y)`, `(source 'f)`, `(callers 'f)`), which returns its explicitly linked graph neighbours. Rendered context shows ids plus the call that expands them, never the expansion by default | O 2026-09-25 | proposed |
 | 1.8 | Keys read as English: `:seon.task/done-when`, `:seon.task/intent` (a feature is not a problem) | O, R | met |
+| 1.9 | **Every reference is a handle followable both ways from limited context:** an id (task, function, schema, error, test) appears literally where it is defined, in a file its namespace names, so `rg <id>` finds the definition and every referrer; and the same id is one REPL call away (`(task :x.task/y)`, `(source 'f)`, `(callers 'f)`), which returns its explicitly linked graph neighbours. Rendered context shows ids plus the call that expands them, never the expansion by default | O 2026-09-25 | proposed |
+| 1.10 | **The REPL is the authoring path:** agents change the program by evaluating forms: `defn` inside the target namespace or by its fully qualified name (the entrance admits `(defn other.ns/f …)`, which plain SCI/Clojure refuse today); `my.program/ns-unmap!` / `remove-ns!` delete (one deletion authority, nested native `ns-unmap` included); files are the gated write-back of accepted rows, never the working medium (owner 2026-09-25; AGENTS.md "The one REPL path") | O | open: one-repl R-slices |
+| 1.11 | **One system for every function:** an anonymous `(fn …)` gets a generated unique name (as Clojure's `fn__N`), may carry the same metadata and contract, and is analysed and recorded exactly like a `defn`, as a function row owned by its evaluation (data, never program: it never merges or writes back) | O 2026-09-25 | implementing |
+| 1.12 | **A contract may be derived from destructured fully qualified keys:** `(fn [{:keys [seon.db/db seon.render/value]}] …)` both binds the locals and declares the input map from those keys' registered schemas; positional `:cat` contracts remain; how a derived contract meets an explicit `:malli/schema`, optional keys and the output contract are settled by the function-face design | O 2026-09-25 | designing |
+| 1.13 | **Contract-declared inputs are defaults, for every function:** an input a contract declares (map key or positional schema, e.g. `:seon.db/db`) that the caller omits is supplied by declared schema name through the one call-preparation seam; caller arguments always win | O 2026-09-25 | partly installed (`3785970b9`) |
+| 1.14 | **Canonical authoring:** what an agent writes is stored in one canonical form (inline subschemas equal to a named schema become that name; normalized metadata), identical in files (for grep agents) and in rendered context (for REPL agents), and shown back as feedback; semantics and digests are checked equal | O 2026-09-25 | designing |
 
 ## 2. Tasks are the one unit of work
 
@@ -68,7 +76,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 3b.3 | Decisions are components: accept / revise / reject / obsolete / supersede, with by, reason, the inputs reviewed and the exact deliverables selected (root's cherry-pick) | A | open |
 | 3b.4 | Attempts carry base commit, task digest, test-run identities, deliveries (commit + digest) and an actual exit; three agents on one task = three attempts; resume keeps the attempt | A | attempts as values only |
 | 3b.5 | "Same cause" is a relation distinct from "must precede" (`needs`) | A | open |
-| 3b.6 | Task identity type: qualified keyword (authored, readable) vs string from seon.id (Astra) — owner decision | O, A | open |
+| 3b.6 | Task identity: a readable qualified keyword stored under an identity attribute (`:seon.task/id`), not a `:db/ident` (Datahike reserves idents for attributes); generated tasks derive their keyword from producer + subject (2.5) | O 2026-09-25 | ruled |
 
 ## 4. The writer refuses badly written tasks (constraints, not advice)
 
@@ -89,11 +97,11 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 5.1 | Never a namespace or require dump: context is pulled by how things reference each other | O | met |
 | 5.2 | Every form in a brief is callable by the agent in its own SCI context, and shows its current value | R | met |
 | 5.3 | Must-reads are always included (task, fn and ns level); they point at our wrappers, which know the registry and the lessons | O, R | met |
-| 5.4 | Source reads as source; values render through their schema's AI renderer; no escaped-string walls | R | met |
-| 5.5 | The same brief value renders for the agent (AI) and for the owner's debug page (HTML): one path | O | not yet |
+| 5.4 | Source reads as source; values render by the per-face selection of 11.1 (value key, viewing agent's namespace function, schema default, floor); no escaped-string walls | R, O | revised |
+| 5.5 | The same brief value renders for the agent (AI) and for the owner's debug page (HTML): one pipeline, two consumers (11.3) | O | law (AGENTS.md); not yet installed |
 | 5.6 | Contradictions are surfaced, not hidden (a docstring that teaches a no-op function; a schema description its form does not enforce) | R, A | not yet |
 | 5.7 | Intent is the only authored prose; everything else in the brief is derived | O | met |
-| 5.8 | What the agent must change is shown whole; only must-reads are clipped (a 14-line clip hid the exact call a deletion must remove) | R | met |
+| 5.8 | What the agent must change is shown whole: the subject's source renders through its source renderer, whose job is the whole source; everything else is clipped only by the floor, whose cuts name path, count and the call that retrieves the rest (a 14-line clip hid the exact call a deletion must remove) | R, O | revised |
 | 5.9 | A deletion or rename brief carries each affected definition's current callers | R | met |
 | 5.10 | Briefs stay focused: measured 410–4,078 characters across 12 task kinds, generated in 3.4 ms | R | met |
 | 5.11 | The plan is a rendered view of the task data (no hand-written plan); it must be readable on the owner's phone | O | met: plan artifact rendered from task data |
@@ -104,9 +112,9 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 |---|---|---|---|
 | 5a.1 | Seeds = the symbols, schema keys and `[attr value]` entities the task's proofs (and must-reads) reference; the author controls relevance by writing proofs | O | prototyped |
 | 5a.2 | Hop 1 is CONTENT: a seed function's doc + contract + source once; a seed key's schema form; a seed entity's AI render; a missing symbol is "you create this" | O, R | prototyped |
-| 5a.3 | Hop 2 is ADDRESSES only: callers, first-party callees, contract keys, reaching tests — names the agent fetches with one REPL call (`(source f)`, `(callers 'f)`) | O, R | prototyped |
+| 5a.3 | Hop 2 is ADDRESSES only (1.9): callers, first-party callees, contract keys, reaching tests, render referrers (the schemas a function renders), open task ids, the config documents a test world reads, and for design tasks prior-art references — names the agent fetches with one REPL call (`(source f)`, `(callers 'f)`, `(task :id)`) or one grep | O, R | prototyped; new edges open |
 | 5a.4 | Taught vocabulary is never expanded: functions a help topic teaches (`:seon.help/about`) are tools, not subjects. Without this rule `seon.db/q` in a proof dragged in 410 callers and 12 schemas (27.8 KB); with it the faults task's context is 7.7 KB in 0.3 ms (live root prompt: 680 KB) | R | measured |
-| 5a.5 | DATA GAP: a function's contract is stored only as a string (`:seon.fn/spec`); its schema keys are not an edge (`:seon.fn/keywords` of `faults-form` lacks `:seon.render/unit`). Store contract keys as `keyword*` at the analyzer (no string parsing at readers) | R | open |
+| 5a.5 | ~~Contract keys are stored only as a string~~ CORRECTED (Astra 7117f211f): `program/contract-facts` compiles contracts and `arity-row` stores input/output/guard refs (`program.cljc:1007–1081`); `my.program/reads-key` queries them. Query that relation; add no keyword edge | A | corrected |
 | 5a.6 | DATA GAP: `:seon/must-read` / `:seon/see-also` metadata is not ingested (no attribute) | R | open |
 | 5a.7 | ~~DATA GAP: tests have no call edges~~ CORRECTED (Astra review 82d87392b): 29,375 `:seon.fn/calls` edges on 2,106 test rows exist (`fn.clj:602,641`); the probe looked under the wrong identity. `:seon.test/reach` is execution evidence, not the call relation | A | corrected |
 
@@ -151,7 +159,32 @@ explode and the metadata larger than the actual function… tasks and references
 | 7.8 | **Runtime tasks** (detectors, errors, users, agents) are database writes through `seon.task/create!`; they may name subjects explicitly because no code lists them yet | O, A | proposed |
 | 7.9 | **Ingestion:** the analyzer stores `:seon/tasks` and `:seon/must-read`/`:seon/see-also` references as symbol/keyword edges (today it drops them); task EDN reconciles by id into the same task schema | O | open |
 | 7.9b | **Test seeds are edges too:** a deftest's `:seon.test/seed` entries — literal tx data, a qualified seed-fn symbol, or an inline `(fn [input] ...)` (owner 2026-09-24: all three; literal data taught first; bodies stay out of EDN task files) — are ingested as edges (a symbol as its own edge; literal data and inline fns through the test's own analysis and definition digest), so a task's context walk follows task → test → seed fn (doc, contract, source) → the schema keys it writes (`:seon.fn/writes`, already stored) → their forms; the seed's tx-data is validated against those schemas at admission, so the context shows data of known shape (owner 2026-09-24) | O | open: part of the ingestion slice |
+| 7.11 | **Issues and plans move into the codebase as tasks:** each `docs/seon/issues/*.md` becomes a task entry (id from its slug, intent from its summary, `must-read` to its evidence file) in its owning namespace's task EDN; its subjects gain the id in their `:seon/tasks`; its proof is the regression that names it; the markdown body stays as linked evidence, never parsed. The ranked issue index and plan READMEs become rendered views of task data (2.1, 5.11). Long designs, research and skills stay Markdown, linked by symbol and pinned `file:line` | O 2026-09-25 | proposed: first slice after 7.9 |
+| 7.12 | Defects listed in "Defects the runs exposed" below are the first tasks migrated | O | proposed |
 | 7.10 | **Context:** `(task :id)` shows the entity with its subjects and proofs; a function's context lists the open tasks that reference it, so work on one function surfaces its other known problems | O | proposed |
+
+## 11. Rendering is one pipeline (owner 2026-09-25; AGENTS.md "Render ordinary values totally", "Apply presentation limits once")
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 11.1 | Per face, first match wins: the value's own `:seon.render/ai`/`:seon.render/html` key (master override: a renderer symbol, an inline function, or rendered data); a contract-fitting render function in the viewing agent's namespace (that agent's own defaults); the schema's declared pair (shipped default); the floor | O | installed at top level (`aa91ecb34`, `634d8aaa2`); nested open |
+| 11.2 | A render function is known by its face role; its output may be any spec'd shape, rendered in turn; its contract says what it needs (1.13) | O | partly |
+| 11.3 | Printing is rendering: AI agents through MCP and humans through the browser share one selection, node tree and cut retrieval; only the final face differs (AI: pretty-printed, clipped, saved text; HTML: our Hiccup, explorable, each cut an expander fetching its path) | O | designing (floor redesign) |
+| 11.4 | Only the floor clips, with one budget spread across the value's shape; nothing is realized, hashed or printed before it is affordable | O | designing |
+
+## 12. Values stay values until an edge (owner 2026-09-25)
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 12.1 | Everything before the print is a real value under its Malli schema: live in the runtime, a database fact, or a blob; printing and persisting are the only edges | O | law |
+| 12.2 | An error is an ordinary value on that path: no error-specific summarizing, stringifying or clipping; identity exists to store at least one copy, link it and notify the agent to fix it; an error schema is a key attachable to any value; error members referring to another entity use refs, never that entity's identity attribute | O | law; six schemas to fix |
+
+## 13. Configuration layers (owner 2026-09-25)
+
+| # | Requirement | Source | Status |
+|---|---|---|---|
+| 13.1 | A dial's default and its reason live on its schema (`:seon.config/default`); `config/default.edn` is retired; initialization data moves to its own file | O | ruled; slice in one-repl design |
+| 13.2 | Layers, least to most specific: schema default → ordered, composable deployment overlays (`config/development.edn`, …) → cluster facts → per-agent settings; `config apply` composes overlays in order (today it keeps one); every reader reads its own cluster's layer, never an arbitrary row | O | ruled; defects open |
 
 ## 8. Errors are recorded on the branch where they happen (owner 2026-09-24: "all errors then just get logged to the database in the right branches and we don't have to worry about routing them")
 
@@ -162,7 +195,7 @@ explode and the metadata larger than the actual function… tasks and references
 | 8.3 | Each evaluation response carries the open errors on its branch that occurred after the previous evaluation's stored basis | lane launched |
 | 8.4 | Core faults (not agent mistakes) are also recorded on the cluster branch with their origin branch, so status, root, stewards and `faults --wait` see platform bugs hit inside attempts, and unlinking a branch never drops an open core fault. Owner 2026-09-24: a core fault does NOT wake root's paid LLM turn until root's context can act on one (a config dial, default off); it stays recorded and visible in status, the MCP error window and the faults feed | lane launched |
 | 8.5 | Errors are data, never program: they never merge; an agent's mistakes go with its branch | met by the partition |
-| 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults | lane launched |
+| 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults. **OPEN (owner):** conflicts with 1.10/the one REPL path, under which MCP is an entrant that records every evaluation; root recommends recording JVM-mode evaluations as root's, floor-rendered, without custody | open |
 | 8.7 | The per-session `:seon.dev.mcp/new-faults` cursor (`e868e5ec5`) is deleted, replaced by 8.3 | lane launched |
 
 ## 10. Contracts and isolation stance (owner 2026-09-24)
@@ -182,8 +215,9 @@ explode and the metadata larger than the actual function… tasks and references
 | 9.2 | The fix is at the producers, not in contract spellings: no invented "nothing" schema; core contracts keep `:nil`/`[:maybe]` where nil truly means nothing | ruled; census running (`ambiguous-nil-producers-2026-09-24.md`) |
 | 9.3 | Catch sites either handle a declared case or resurface the whole cause (existing law); a catch that returns nil/default is a defect | law; census running |
 | 9.4 | A lookup distinguishes "no such row" (nothing) from "could not read" (declared error) | census running |
+| 9.5 | **OPEN (owner):** the floor never realizes a lazy value, so an unrealized result shows as not-yet-realized — a declared presentation, never something that reads as nil | open |
 
- the runs exposed (each is itself a task)
+## 6. Defects the runs exposed (each becomes a task at migration, 7.12)
 
 - Two definition authorities: REPL forms are recognized by a hand matcher (`src/seon/sci/reader.cljc:245,323`) that sees only a top-level `clojure.core/defn`, so `(do (defn …))`, `(let [..] (defn …))`, `(def f (fn …))` and defn-expanding macros bypass the entry gate and arming. Owner-directed fix: observe what an evaluation defined (evaluate in a `sci/fork`, diff namespace maps, gate/arm the created Vars from their metadata, adopt or discard the fork); clj-kondo stays the one analyzer for rows and edges. Limit: a call inside the defining form runs before the check.
 
