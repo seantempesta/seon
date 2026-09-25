@@ -43,11 +43,12 @@ forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by name
 **One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
 dead snapshot fields still owed; wave 3 F2/F5/F6 (projection wrappers, call-with-projection sweep, lazy registry) next.
 
-**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Latest checkpoint (~22:40Z): 15 of 18
-focused regressions green (detection, F3–F6, F8, agent.clj lock replacements, S2a, fs locks); 3 red with test-side causes,
-back to lanes. Kondo dependency fill now required before publication of src/ (15.3 s once; AGENTS.md corrected f8caae1a4).
-Open: agent-submitted (stdin) forms run kondo with the cache disabled, so after F7 they cannot resolve dependency macros
-(refuse instead) — needs the cache on that path.
+**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. Red census #2 (dd6d1a2ac): of 671
+failed+unknown, 473 are STALE (recorded before their class's fix; only 8 ran on the current program) — root is rerunning all
+671 in batches of 40 (tmp/orchestrator/rerun-results-2026-09-25.txt; est. 200–230 clear). Live classes: hand-built fixtures
+73 (harness S5), retired shapes 23, nil refusal payload 13, rule assertions 10, cache counters 8, render selection 7.
+Candidate regressions: instrument-test 12 fail / 4 error after F2 (lane fix-instrument-f2-regressions); one-request reuse +
+hold (lane fix-one-request-reuse-and-hold).
 
 ## Recurring classes — root causes, not symptoms (owner 2026-09-24: "step back and find root causes")
 
