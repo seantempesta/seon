@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (e9e8176e9, b16c62792, slice 3 commit); tests owed to root
+status: landed (e9e8176e9, b16c62792, 67dc5acb8); tests owed to root
 lane: delete-duplicates-opus
 created: 2026-09-25
 ---
@@ -95,7 +95,7 @@ and [script/dev roots audit](../../../research/agent-platform/script-dev-roots-a
 |---|---|---:|---:|---:|
 | 1 changed-test family | e9e8176e9 | script/bin 698, tests 133, docs 5 | 18, 4, 13 | −680 src/script, −129 test |
 | 2 schema-split CLI | b16c62792 | script 141 | 0 | −141 |
-| 3 ns omission helpers | see git log | src 62 | 17 | −45 |
+| 3 ns omission helpers | 67dc5acb8 | src 62 | 17 | −45 |
 
 Source/script net **−866**; tests net **−129**.
 
