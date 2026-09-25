@@ -99,7 +99,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 ### Component status (definition of done: REPL-proven, green on default, Astra-reviewed, measured)
 | Component | State |
 |---|---|
-| Task ingestion + gate + adoption | ingestion-test green 67/0 on 6ab6bf57; merge gate custody class fixed `c1e40b7e8` (prepare, gate test run, acquisition refusals under the acquired branch's custody); merge/source runs pending; Astra diff review of P1 fixes pending |
+| Task ingestion + gate + adoption | ingestion-test green 67/0 on 6ab6bf57; merge gate custody class fixed `c1e40b7e8` (prepare, gate test run, acquisition refusals under the acquired branch's custody); green on 6ab6c29c: merge-test 16/0 (35 s, long tier), source-test 21/0 (3 platform-only members await root's platform tier); Astra review running (review-custody-ingestion) |
 | Task slice 2 (2 records) | landed `0a332e8fc`/`842e86f4f`; tests pending |
 | Derived S0 (shape codec) | **DONE**: green 8/0, Astra accept `5fb38b91f` |
 | REPL S1 (definition authority) | P0-A..D + P1-A..C landed (`bbbdbd5bd` `51dda24e9` `a9c74ad46` `6dfe778e4`); green on default: entry-gate 66/0, restoration 16/0, reader 292/0, reply 124/0; armed cost P1-D: contracted defn 16.3 ms (parent 22.4), `(+ 1 2)` 1.5 ms; eval-test 4 reds new vs pre-S1 (1 was root's helper, fixed `8e731ac68`) — re-running; Astra re-review of the revision NEXT |
@@ -127,6 +127,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 - `:int`→`:string` schema change throws ClassCastException in `seon.db/transact-call`; `seon.effect/request!` writes the
   wrong branch inside a nested test run; SCI undeclared-attribute write returns no read error (`lane-fix-test-rows-e`).
 - QUESTION (data integrity): upserting a re-analyzed function row onto a stored declaration keeps the OLD `:seon.fn/doc`, `:seon.fn/calls`, `:seon.fn/arities`, `:seon.fn/form-span`, `:seon.fn/file` the new definition lacks (REPL 18:55Z on seon.id/valid?); the writer digests that merged value. Verify every production redefinition path retracts absent owned attributes; a stale call edge or doc is a false fact.
+- SLOW START: `bin/seon start` ready in 11.1 s at 18:50Z (pid 23282) against the ten-second start law; 4.8 s at 18:43Z — find what grew (dependency-classes cache miss both times).
 - UGLY/UNBOUNDED: `bin/seon status` printed 1.1 MB after a restart, one full error map per never-started test in `:seon.problems/failed-tests-unknown` (18:43Z); problems must render through the one render path with counts, not raw maps.
 - PRE-S1 RED: evaluate-sources-test `ordered-evaluation-retains-one-explicit-basis-without-publication` :204 expects `:seon.turn/recorded-content-conflict` (red since 09-24, rerun-results-2026-09-25.txt:49); owner = turn settlement, unassigned.
 - HANG SOURCE: `seon.error/prepare-result` renders a contract error's offending value as full HTML with no bound (stuck deep in `seon.render.hiccup/hiccup?` on a huge value) — violates the one render path; it must go through the floor (lane-fix-turn-hang landing).
