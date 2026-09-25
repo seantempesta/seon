@@ -3963,12 +3963,12 @@
   ((identity-only-projector projection) value))
 
 (defn projection-value?
-  "True for a built schema projection: a map holding its registry and fingerprint."
+  "True for a schema projection: a map holding its registry and declaration forms."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
   [value]
   (and (map? value)
        (contains? value :seon.schema.projection/registry)
-       (contains? value :seon.schema.projection/fingerprint)))
+       (contains? value :seon.schema.projection/forms)))
 
 (register-core-predicate! 'seon.schema/projection-value? projection-value?)
 
@@ -3977,8 +3977,13 @@
   registry, forms and indexes are megabytes derived from the database."
   {:malli/schema [:=> [:cat :seon.schema/projection-reference] :map]}
   [projection]
-  (select-keys projection [:seon.schema.projection/fingerprint
-                           :seon.schema.projection/fingerprint-version]))
+  ;; A declaration projection carries no stored fingerprint; its content
+  ;; fingerprint is derived once and kept on the projection's own holder.
+  {:seon.schema.projection/fingerprint
+   (or (:seon.schema.projection/fingerprint projection)
+       (projection-cache-value projection ::fingerprint
+                               #(projection-fingerprint-from-data projection)))
+   :seon.schema.projection/fingerprint-version projection-fingerprint-version})
 
 (defn identity-only-projection
   "Project a registered reference value using the active schema registry."

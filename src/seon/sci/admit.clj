@@ -233,7 +233,7 @@
   for every leaf, which made admission allocate ~350 B per emitted byte. The
   fast path needs only the ambient defaults scalars print under."
   ^String [node]
-  (if-some [prefix (and (== 2 (count node))
+  (if-let [prefix (and (== 2 (count node))
                         *print-readably* (not *print-meta*) (not *print-dup*)
                         (scalar-leaf-prefix (::print/face node)))]
     (let [writer (java.io.StringWriter.)]

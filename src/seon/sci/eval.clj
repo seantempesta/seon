@@ -3676,7 +3676,9 @@
                                  :seon.schema/projection (render/request-projection request)
                                  :seon.db/connection connection
                                  :seon.render/profile profile}
-                          ctx (assoc :seon.sci.eval/ctx ctx))))
+                          ctx (assoc :seon.sci.eval/ctx ctx)
+                          (:seon.sci.admit/caps request)
+                          (assoc :seon.sci.admit/caps (:seon.sci.admit/caps request)))))
                 value)
         function-name (when (and (map? value) (contains? value :seon.instrument/check))
                         (:seon.instrument/fn value))
