@@ -318,9 +318,16 @@
            agent-id "generated-agent"
            run-id "bootstrap:generated-agent"
            message-id "generated-trigger"
-           provider-calls (atom 0)
-           refusal {:seon.cluster.prompt/budget-exceeded 1 :seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/invocation :seon.error/operation 'seon.cluster.prompt/prompt
-                    :seon.error/message "The generated opening did not fit."}
+           ;; A declared :seon.cluster.prompt/error: the prompt owner's `refused`
+           ;; arm names the agent and its derivation observation. A bare
+           ;; diagnostic is not a prompt return, so the turn must not see one.
+           message "The generated opening could not be derived."
+           refusal {:seon.error/at (java.util.Date.) :seon.error/layer :seon.cluster.prompt/invocation :seon.error/operation 'seon.cluster.prompt/prompt
+                    :seon.error/message message
+                    :seon.cluster.prompt/error-agent-id agent-id
+                    :seon.cluster.prompt/derivation-observation
+                    {:seon.error.evidence/attribute :seon.error/message
+                     :seon.error.evidence/value message}}
            cluster (test-support/cluster-handle
                    {:seon.db/connection connection
                     :seon.cluster/name cluster-name
@@ -349,10 +356,7 @@
                     connection
                     (turn/open-tx {:seon.turn/id run-id :seon.turn/agent [:seon.agent/id agent-id] :seon.turn/trigger [:seon.message/id message-id] :seon.turn/opened-tx "datomic.tx"}))
 
-       (with-redefs [prompt/prompt (fn [_database _request] refusal)
-                     ai/complete (fn [_projection _request]
-                                   (swap! provider-calls inc)
-                                   {:seon.ai/text "(identity :unexpected)"})]
+       (with-redefs [prompt/prompt (fn [_database _request] refusal)]
          (let [report
                (turn/turn
                 {:seon.turn.loop/cluster cluster
@@ -367,8 +371,8 @@
                      @connection run-id)]
            (is (= :error (:seon.turn.loop/outcome report)))
            (is (inst? (test-support/turn-closed-at @connection run-id)))
-           (is (= 0 @provider-calls))
-           (is (= (:seon.cluster.prompt/budget-exceeded refusal) (:seon.cluster.prompt/budget-exceeded capture)))
+           (is (empty? (settings-attempts @connection))
+               "no model attempt row: the provider boundary was never crossed")
            (is (= (:seon.error/message refusal)
                   (:seon.error/message capture)))
            (is (int? (:seon.context.capture/basis-t capture)))
@@ -671,8 +675,10 @@
         committed-test-attributes
         (fn [definition]
           (let [projection (schema/build-projection
+                            ;; `committed-attributes` reads its fixed entity
+                            ;; list, so the definition stands in for one of them.
                             (assoc (:seon.schema.projection/forms (schema/handed-projection))
-                                   :seon.test/test definition))]
+                                   :seon.turn/turn definition))]
             (into #{}
                   (filter #(= "seon.test" (namespace %)))
                   (turn/committed-attributes projection))))]
@@ -777,7 +783,11 @@
           (is (= {:seon.eval.drive/outcome :undisposed
                   :seon.eval.drive/run-ids [run-id]}
                  terminal)
-              "the episode verdict names the missing disposition")
+              ;; nil means not idle or not undisposed: name the work that
+              ;; keeps the agent busy, so the red says which one.
+              (str "the episode verdict names the missing disposition; next work "
+                   (pr-str (turn/next-agent-work @connection {:seon.agent/id agent-id
+                                                              :seon.db.process/id process}))))
           ;; The undisposed-turn notice is dissolved (decision 8b of
           ;; docs/prds/steward-platform/plan/owner-decisions-2026-09-17.md,
           ;; ruled by T2 of program-facts-are-the-runtime-prd-2026-09-17.md).

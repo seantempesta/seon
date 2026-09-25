@@ -247,8 +247,10 @@
         ;; of signal read as health — no query can say what happened to it.
         (is (string? (:seon.eval/shown settled)) (pr-str settled))
         (is (string? (:seon.cluster.eval/error settled)) (pr-str settled))
+        ;; Errors carry no kind name (9bf22ecd9); the declared message is
+        ;; what the shown refusal says.
         (is (str/includes? (str (:seon.eval/shown settled))
-                           "generated-read-depends-on-turns")
+                           "A generated context read depends on the agent's own turn-taking.")
             (pr-str settled))
         (is (some? (:seon.turn/closed-tx
                     (db/pull (db/db connection) [:seon.turn/closed-tx]
