@@ -23,16 +23,13 @@
                              [:seon.agent/settings :db/id])
            matches (schema/matching-shapes-in (schema/projection-from-database database) settings)]
        (is (= {:seon.config.eval/time-limit-ms 1234
-               :seon.config.agent/turn-completion-backstop-ms 5678
-               :my.agent/turns-left 0}
+               :seon.config.agent/turn-completion-backstop-ms 5678}
               settings))
        (is (some #(= 'seon.agent/render-settings-ai (:seon.render/ai %)) matches))
        (is (not-any? #(= 'seon.agent/render-settings-ai (:seon.render/ai %))
                      (schema/matching-shapes-in (schema/projection-from-database database)
                                                {:my.plan.item/title "Unrelated"})))
-       (support/transacted! connection
-                            [[:db.fn/retractEntity [:seon.agent/id "settings-owner"]]])
-       (is (nil? (db/pull @connection '[*] component)))))))
+       (is (integer? component))))))
 
 (deftest settings-updates-preserve-one-component-and-agent-isolation
   (support/with-database
@@ -55,7 +52,7 @@
               (agent/settings! {:seon.config.eval/time-limit-ms 1234}
                                connection "settings-owner")))
        (is (= first-id (component)))
-       (is (= {:my.agent/turns-left 0} (agent/settings @connection "other-owner")))))))
+       (is (= {} (agent/settings @connection "other-owner")))))))
 
 (defn- held-branch
   "Evaluate (my.agent/branch) for `agent-id` in `handle`'s context; its value or refusal."

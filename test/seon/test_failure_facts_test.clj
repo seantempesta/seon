@@ -39,12 +39,17 @@
                  (is (= 1 2) "first claim")
                  (is (= :a :b) "second claim"))))))
     (try
-      (let [tx (db/transact! connection
-                 [{:seon.ns/name namespace-name}
-                  {:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name namespace-name]
-                   :seon.schema.admission/source :core
-                   :seon.fn/file [:seon.fn.file/relative-path path]
-                   :seon.test/source "(deftest probe (is (= 1 2)) (is (= :a :b)))"}])]
+      (let [projection (db/carried-projection (db/db connection))
+            tx (db/transact! connection
+                 [(program/declaration-row
+                   projection {:seon.ns/name namespace-name
+                               :seon.ns/source (pr-str (list 'ns namespace-name))}
+                   :all :core)
+                  (program/declaration-row
+                   projection {:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name namespace-name]
+                               :seon.fn/file [:seon.fn.file/relative-path path]
+                               :seon.test/source "(deftest probe (is (= 1 2)) (is (= :a :b)))"}
+                   :all :core)])]
         (is (:db-after tx) (pr-str tx))
         (when (:seon.db.write.attempt/request-id tx)
           (throw (ex-info "The failure fixture transaction was refused." tx))))
@@ -182,9 +187,11 @@
                 namespace-name (symbol (namespace (symbol s)))
                 reached (symbol (str namespace-name) "reached")
                 tx (db/transact! connection
-                     [{:seon.fn/sym reached :seon.schema.admission/source :core
-                       :seon.fn/ns [:seon.ns/name namespace-name]
-                       :seon.fn/source "(defn reached [] :changed)"}
+                     [(program/declaration-row
+                       (db/carried-projection (db/db connection))
+                       {:seon.fn/sym reached :seon.fn/ns [:seon.ns/name namespace-name]
+                        :seon.fn/source "(defn reached [] :changed)"}
+                       :all :core)
                       {:seon.test/sym s :seon.schema.admission/source :core
                        :seon.test/reach [[:seon.fn/sym reached]]}])
                 database (db/db connection)
@@ -268,22 +275,45 @@
     (is (nil? (find at-12 :seon.test.failure/file))
         "only declared report attributes are stored")))
 
-(defn- transact! [connection rows]
-  (support/transacted! connection
-           (mapv (fn [row]
-                   (cond-> row
-                     (and (map? row) (:seon.fn/sym row))
-                     (assoc :seon.fn/ns [:seon.ns/name 'seon.id] :seon.schema.admission/source :core)
-                     (and (map? row) (:seon.test/sym row))
-                     (assoc :seon.schema.admission/source :core))) rows)))
+(defn- synthetic-source
+  "One synthetic namespace's source: its `ns` form followed by `forms`."
+  {:malli/schema [:=> [:cat :seon.ns/name [:sequential :string]] :string]}
+  [namespace-name forms]
+  (str/join "\n" (cons (pr-str (list 'ns namespace-name '(:require [clojure.test :refer [deftest]])))
+                        forms)))
+
+(defn- declare!
+  "Declare the named members of one synthetic namespace, and that namespace,
+  through the production analyzer, so the writer receives canonical rows."
+  {:malli/schema [:=> [:cat :seon.db/connection [:vector [:tuple :keyword :qualified-symbol]]
+                       [:* :string]]
+                  :seon.db/transaction-report]}
+  [connection identities & forms]
+  (let [database (db/db connection)
+        namespace-name (symbol (namespace (second (first identities))))
+        source (synthetic-source namespace-name forms)]
+    (support/transacted! connection
+      (into [(support/namespace-row database namespace-name)]
+            (map #(support/program-row database % source))
+            identities))))
+
+(defn- redeclare!
+  "Replace one declaration exactly with its row analyzed from `form`."
+  {:malli/schema [:=> [:cat :seon.db/connection [:tuple :keyword :qualified-symbol] :string]
+                  :seon.db/transaction-report]}
+  [connection declaration form]
+  (let [database (db/db connection)
+        source (synthetic-source (symbol (namespace (second declaration))) [form])]
+    (support/transacted! connection
+      (program/exact-replacement-tx (db/pull database '[*] declaration)
+                                    (support/program-row database declaration source)))))
 
 (deftest publication-replaces-cardinality-many-tuples
   (support/with-database
     (fn [connection]
       (let [s 'reach.facts/tuple-owner]
-        (is (:db-after (transact! connection
-                        [{:seon.fn/sym s :seon.fn/call-arities
-                          #{['clojure.core/inc 1] ['clojure.core/+ 2] ['clojure.core/str 1]}}])))
+        (is (:db-after (declare! connection [[:seon.fn/sym s]]
+                                 "(defn tuple-owner [x] (str (inc x) (+ x x)))")))
         (let [current (db/pull (db/db connection) '[*] [:seon.fn/sym s])]
           (is (:db-after (db/transact! connection
                           (program/exact-replacement-tx current
@@ -297,15 +327,11 @@
     (fn [connection]
       (let [s 'reach.facts/check
             a 'reach.facts/a b 'reach.facts/b]
-        (is (:db-after (transact! connection
-                        [{:db/id "a" :seon.fn/sym a}
-                         {:db/id "b" :seon.fn/sym b}
-                         {:seon.test/sym s :seon.fn/calls [a]}])))
+        (is (:db-after (declare! connection [[:seon.fn/sym a] [:seon.fn/sym b] [:seon.test/sym s]]
+                                 "(defn a [] 1)" "(defn b [] 2)" "(deftest check (a))")))
         (let [tested (db/db connection)
               captured (completion tested s 1)]
-          (is (:db-after (db/transact! connection
-                          [[:db.fn/retractAttribute [:seon.test/sym s] :seon.fn/calls]
-                           [:db/add [:seon.test/sym s] :seon.fn/calls b]])))
+          (is (:db-after (redeclare! connection [:seon.test/sym s] "(deftest check (b))")))
           (is (vector? (runner/commit-results! connection captured)))
           (is (= #{a} (set (db/q '[:find [?s ...] :in $ ?test
                                   :where [?t :seon.test/sym ?test]
@@ -324,20 +350,18 @@
   (support/with-database
     (fn [connection]
       (let [s 'changed.facts/check a 'changed.facts/a b 'changed.facts/b]
-        (is (:db-after (transact! connection
-                        [{:db/id "a" :seon.fn/sym a :seon.fn/source "old"
-                          :seon.fn/spec "[:=> [:cat] :int]"}
-                         {:db/id "b" :seon.fn/sym b :seon.fn/source "old"}
-                         {:seon.test/sym s :seon.fn/calls [a]}])))
+        (is (:db-after (declare! connection [[:seon.fn/sym a] [:seon.fn/sym b] [:seon.test/sym s]]
+                                 "(defn a {:malli/schema [:=> [:cat] :int]} [] 1)"
+                                 "(defn b [] 2)" "(deftest check (a))")))
         (runner/commit-results! connection (completion (db/db connection) s 1))
         (is (string? (:seon.test/unknown (sut/changed-since-green (db/db connection) s))))
         (runner/commit-results! connection (completion (db/db connection) s 0))
-        (support/transacted! connection [[:db/add [:seon.fn/sym a] :seon.fn/source "intermediate"]])
+        (redeclare! connection [:seon.fn/sym a] "(defn a {:malli/schema [:=> [:cat] :int]} [] 3)")
         (runner/commit-results! connection (completion (db/db connection) s 0))
         (is (= [] (sut/changed-since-green (db/db connection) s))
             "the later green is recognized even when its zero counts are unchanged")
-        (support/transacted! connection [[:db.fn/retractAttribute [:seon.fn/sym a] :seon.fn/spec]
-                                        [:db/add [:seon.fn/sym b] :seon.fn/source "unrelated"]])
+        (redeclare! connection [:seon.fn/sym a] "(defn a [] 3)")
+        (redeclare! connection [:seon.fn/sym b] "(defn b [] 4)")
         (runner/commit-results! connection (completion (db/db connection) s 1))
         (is (= [a] (mapv :seon.fn/sym (sut/changed-since-green (db/db connection) s)))
             "spec retraction counts; a changed function outside the tested closure does not")))))
@@ -345,7 +369,8 @@
 (deftest recorded-run-names-its-addressable-destination
   (support/with-database
     (fn [connection]
-      (let [database (db/db connection)
+      (let [_ (declare! connection [[:seon.test/sym 'branch.facts/check]] "(deftest check)")
+            database (db/db connection)
             captured (assoc-in (completion database 'branch.facts/check 0)
                               [:seon.test.run/provenance :seon.test.run/branch]
                               :building-source-retired)
@@ -364,7 +389,7 @@
   (support/with-database
     (fn [connection]
       (let [s 'namespace.completion/check
-            _ (is (:db-after (transact! connection [{:seon.test/sym s}])))
+            _ (is (:db-after (declare! connection [[:seon.test/sym s]] "(deftest check)")))
             database (db/db connection)
             digest (get (runner/reach-digests database [s]) s)
             captured (-> (completion database s 0)
@@ -394,8 +419,8 @@
         (let [s 'absent.facts/check
               present 'absent.facts/present
               deleted 'absent.facts/deleted]
-          (is (:db-after (transact! connection [{:seon.fn/sym present}
-                                                {:seon.test/sym s}])))
+          (is (:db-after (declare! connection [[:seon.fn/sym present] [:seon.test/sym s]]
+                                   "(defn present [] 1)" "(deftest check)")))
           (let [database (db/db connection)
                 _ (is (nil? (db/pull database [:db/id] [:seon.fn/sym deleted]))
                       "the recording database genuinely has no row for the named symbol")
@@ -448,11 +473,10 @@
       (let [s 'delta.facts/check t 'delta.facts/other
             a 'delta.facts/a b 'delta.facts/b
             assertion-id (id/id [s "first claim" 0] 64)]
-        (is (:db-after (transact! connection
-                        [{:db/id "a" :seon.fn/sym a}
-                         {:db/id "b" :seon.fn/sym b}
-                         {:seon.test/sym s :seon.fn/calls [a b]}
-                         {:seon.test/sym t :seon.fn/calls [a]}])))
+        (is (:db-after (declare! connection [[:seon.fn/sym a] [:seon.fn/sym b]
+                                             [:seon.test/sym s] [:seon.test/sym t]]
+                                 "(defn a [] 1)" "(defn b [] 2)"
+                                 "(deftest check (a) (b))" "(deftest other (a))")))
         (let [tested (db/db connection)
               run (runner/provenance tested)
               ;; No :seon.db/db — `commit-results!` resolves the tested value
@@ -500,10 +524,8 @@
   (support/with-database
     (fn [connection]
       (let [s 'member.facts/check a 'member.facts/a b 'member.facts/b]
-        (is (:db-after (transact! connection
-                        [{:db/id "a" :seon.fn/sym a}
-                         {:db/id "b" :seon.fn/sym b}
-                         {:seon.test/sym s :seon.fn/calls [a b]}])))
+        (is (:db-after (declare! connection [[:seon.fn/sym a] [:seon.fn/sym b] [:seon.test/sym s]]
+                                 "(defn a [] 1)" "(defn b [] 2)" "(deftest check (a) (b))")))
         (let [tested (db/db connection)
               run (runner/provenance tested)
               captured (fn [members]
