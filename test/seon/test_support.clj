@@ -229,7 +229,10 @@
    [:=> [:cat :seon.db/connection :seon.store/transaction]
     :seon.db/transaction-report]}
   [connection tx-data]
-  (let [report (db/transact! connection tx-data)]
+  ;; A fixture writes the connection it names as that world's own work, even
+  ;; inside another fixture's custody (a nested `with-database`).
+  (let [report (db/call-with-custody {:seon.db/connection connection}
+                                     #(db/transact! connection tx-data))]
     (when-not (and (map? report)
                    (some? (:db-after report)))
       (throw
@@ -786,9 +789,10 @@
    the cluster's whole overlay, not an addition to an earlier one."
   [connection cluster-name manifest]
   (checked-fixture-result
-   (config/apply! {:seon.db/connection connection
-                   :seon.boot/cluster-name cluster-name
-                   :seon.config/manifest manifest})))
+   (db/call-with-custody {:seon.db/connection connection}
+                         #(config/apply! {:seon.db/connection connection
+                                          :seon.boot/cluster-name cluster-name
+                                          :seon.config/manifest manifest}))))
 
 (defn seed-cluster!
   "Seed one complete cluster/config path for tests that create agents.
@@ -801,8 +805,9 @@
   ([connection cluster-name manifest]
    (apply-config! connection cluster-name manifest)
    (checked-fixture-result
-    (cluster/ensure-cluster-entity!
-     connection cluster-name cluster/boot-process-identity))
+    (db/call-with-custody {:seon.db/connection connection}
+                          #(cluster/ensure-cluster-entity!
+                            connection cluster-name cluster/boot-process-identity)))
    nil))
 
 (defn preserving-instrumentation-state

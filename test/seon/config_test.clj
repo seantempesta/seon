@@ -669,16 +669,9 @@
     (fn [alpha]
       (test-support/with-database
         (fn [beta]
-          (config/apply!
-           {:seon.db/connection alpha
-            :seon.config/manifest
-            {:seon.config.flow.compute/queue-depth 11}
-            :seon.boot/cluster-name "alpha"})
-          (config/apply!
-           {:seon.db/connection beta
-            :seon.config/manifest
-            {:seon.config.flow.compute/queue-depth 22}
-            :seon.boot/cluster-name "beta"})
+          ;; The outer world is written under its own custody, not the inner one's.
+          (test-support/apply-config! alpha "alpha" {:seon.config.flow.compute/queue-depth 11})
+          (test-support/apply-config! beta "beta" {:seon.config.flow.compute/queue-depth 22})
           (is (= 11
                  (:seon.config.flow.compute/queue-depth
                   (config/effective @alpha "alpha"))))
