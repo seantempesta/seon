@@ -13,6 +13,41 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Eighth follow-up: recorded actuals (seon.test.runner/latest-results, read-only)
+
+Fixed: `51af4a328` a top-level `:seon.render.walk/attribute` request selects that attribute's pair again (1c had
+dropped it with the schema stage; recorded actual: page-settings got `render-value/render-ai` for
+`seon.agent/render-settings-ai`). `bf0ae8fbe` web-test declared-unit order (recorded actual adds `:seon.agent/branch`
+`:archived-tx`), render-source-test symbol `:seon.fn/sym` reads (string read refused, attribute is `:db.type/symbol`),
+and the vary-meta projection test deleted (`seon.db/carried-projection` derives from rows; no stamp).
+
+**Fixture renderers run the compiled root, not the test's SCI redefinition** (render-simplification generic-renderer
+`"A:…"` for `"7919:…"`, live-Var `"B:"` for `"B2:"`, shared-invocation `"A:…"` without `":two"`; retained :117/:131 and
+adoption counts 0). Evidence: `install-function-from-database!` (`src/seon/sci/eval.clj:767-787`) binds the compiled Var
+for "a definition the loaded program holds unchanged", once per context, at the first `ensure-function!`. My vehicle
+change made these fixtures' first install happen at the first render, after the test's `sci/eval-form` redefinition,
+so the compiled root replaces it. Owner of that file is fix-harness-fallout-opus; question for root: is a context's
+private SCI redefinition of a program function supposed to survive its first install? If yes, eval.clj:785 should skip
+the JVM root when the context already holds a private definition; if no, these tests change their vehicle to a row
+source change (`replace-renderer!`), which retained-test already uses and which also fails (:117, :131), so the probe
+is needed first.
+
+**Database identity nested under an unregistered key** (nested-values :482: the floor prints the identity map; expected
+"basis transaction"). The floor's identity projection (`render/value.clj:448-455`,
+`schema/identity-only-projection-in`, schema.clj:4031-4042) calls `seon.db/database-value-identity`, whose declared
+return `:seon.db/database-value-identity` pairs `render-database-identity-ai`. Rule 2 for that node: value.clj passes the
+projection function as `:seon.render.call/function` with the projected value (about 4 lines in value.clj plus the
+function symbol in the descriptor). Needs value.clj (released) and a ruling that a floor-invoked projection is producer
+evidence.
+
+Others from the actuals, not this lane's commits: render-source preview reuse (:108/:125, authored-source :776/:777/:781:
+the second presentation re-evaluates; needs the invocation-cache evidence diff), render-source :210/:212 (the anonymous
+`(Object.)` source refusal now lacks `:seon.render.value/root` and prints `#object`), render-call's "expected nil, got a
+map" at web.clj:1444, web coalesce :1790/:1794 (6 vs < 6), next-turn :2447 (a retraction write refused), distance :601
+(walk at distance 1 omits the required namespace). turn-loop :777 terminal `nil` and :630 `[[] [] [] [] [] []]` are
+recorded; escalation needs `(:seon.error/agent fact)`, `escalation-present` and `opening` from `commit-call`
+(error.clj:1443-1455) in that fixture.
+
 ## Seventh follow-up: rerun (tmp/orchestrator/verify-render-fix-results-2026-09-25.txt, 58 reds)
 
 Fixed: `7ea24ee67` (the analyze-forms refusal: the retained-call regression's fn rows used string `:seon.fn/sym`; probed,
