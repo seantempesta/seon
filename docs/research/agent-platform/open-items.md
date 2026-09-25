@@ -23,6 +23,10 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**OWNER RULING 2026-09-25 (output faces):** two faces from one shell-order selection: `:seon.render/ai` = pretty-printed and
+clipped (the saved text the AI sees; optimize later); HTML = explorable, unclipped, each cut a lazy expander fetching the next
+selection at path+offset (Clerk/orchard style); the debug view shows both side by side so the user has the same or better
+context than the AI. In the Opus floor design brief.
 **OWNER RULINGS 2026-09-25 (later):** shell-order floor adopted (research 717e01bbb); floor split into SELECTION (ours) and
 EMISSION (library where it fits: fipp/puget evaluated); Opus writes first-pass designs, Astra reviews + audits (AGENTS.md
 87f718819). Opus lane design-floor-shell-order-opus writing §3/§6. Adopted-HEAD run (133 commands, 874 members): 169
