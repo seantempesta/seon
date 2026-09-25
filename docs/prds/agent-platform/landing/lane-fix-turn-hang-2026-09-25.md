@@ -107,3 +107,40 @@ turn.clj: only `call-turn`'s prompt call site changed (root parked it once, and 
 re-applied it from `tmp/orchestrator/parked/digestns-1217-src_seon_turn.clj.patch` before
 committing). Released paths: src/seon/turn.clj, test/seon/cluster/turn_test.clj, the two
 issues and this landing note.
+
+## Follow-up: the regression hung on root's pid 16604
+
+The regression passed later in a clean JVM. The hang was on a JVM running mixed code, not on the fix.
+
+- **pid 16604 (booted 18:22:37Z).** Thread 385 was live, busy in
+  `open-turn` → `system-turn` → `evaluate-sources` → `seon.sci.eval/shown-result` →
+  `seon.error/prepare-result`. That frame renders a contract error's offending value as
+  HTML with no bound, and the thread was recursing through `seon.render.hiccup/hiccup?`
+  (JSON thread dump `tmp/fix-turn-hang-opus/threads2.json`). The same JVM logged
+  "JVM RESTART NEEDED: loaded dependencies changed (reference-code/sci)" when 51dda24e9
+  bumped SCI, so it was running mixed code.
+- **pid 18152, after the restart.**
+  - `seon.turn/call-turn` loads at the file's line 4265, and 68eb9d310 is an ancestor of HEAD.
+  - I ran each of the seven system forms of the open separately through
+    `seon.turn/evaluate-sources` on a member-handle fixture, with and without the provider
+    config. Each form returned no contract error, in 4-1238 ms.
+  - `clojure.test/test-vars` on the regression passed, with empty output, in 7003 ms, under
+    concurrent root test load.
+- **Still open:** `error/prepare-result` renders the complete HTML of any offending value
+  with no bound, so one huge offending value can keep a thread busy indefinitely. That
+  belongs to error.clj or its render owner, not to this lane.
+
+## The overdue-member hold (harness, src/seon/test.clj, not yet granted)
+
+Diagnosed from the code; not yet proved at the REPL.
+
+- On a late exit, `member-result`'s watcher (test.clj:1933) calls `settle!` with a *new*
+  failure, "exited after its request bound". `runner/commit-results!` (runner.clj:1405)
+  then sees an already-completed member whose report ids differ from the recorded ones
+  ("did not exit within …"). It refuses with `:seon.test.run/immutable`.
+- That refusal is thrown on the watcher's bare virtual thread, where nothing reads it. So
+  `terminated-tx` is never written, and `admit-run` holds the test until the JVM is replaced.
+- There is also a race. If the body exits before the main path commits the overdue result,
+  the watcher's commit lands first, and the main commit is refused as immutable instead.
+- The fix is test.clj/runner.clj work that needs root's grant, plus a choice between
+  options in the reply.

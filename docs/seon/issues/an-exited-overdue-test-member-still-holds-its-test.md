@@ -28,6 +28,13 @@ Observed on default (pid 35446, started 2026-09-25T14:24:44Z) by lane fix-turn-h
   `executed 0 … pending (not started)`. The result names no reason and no holding run.
   `seon.test/run` returned `:seon.test/pending [<member>]` with no key saying why.
 
+Probable producer (read from code 2026-09-25, not yet reproduced):
+- The watcher settles a *different* failure, "exited after its request bound".
+- `runner/commit-results!` (runner.clj:1405) refuses a completed member whose report ids
+  changed, with `:seon.test.run/immutable`. That refusal is thrown on the bare watcher
+  thread, so `terminated-tx` is never written.
+- The same code path races the main commit when the body exits just after the bound.
+
 Two defects:
 
 1. The watcher (`bounded-result` `watch-exit!` → `release!` → `settle!`, test.clj:1933)
