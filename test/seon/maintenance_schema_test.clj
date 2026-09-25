@@ -96,20 +96,20 @@
             observed-at (instant "2026-08-05T02:00:01Z")]
         (test-support/transacted!
                      connection
-                     (into (test-support/agent-tx @connection "maintenance-schema-test/root")
+                     (into (test-support/agent-tx @connection "maintenance-schema-test-root")
                        [(test-support/program-fn-row handler)
                         {:seon.schedule/id schedule-id
                          :seon.schedule/expression "0 2 * * *"
                          :seon.schedule/zone-id "UTC"}
                         {:seon.schedule.task/id task-id
                          :seon.schedule.task/owner
-                         [:seon.agent/id "maintenance-schema-test/root"]
+                         [:seon.agent/id "maintenance-schema-test-root"]
                          :seon.schedule.task/function [:seon.fn/sym handler]
                          :seon.schedule.task/schedule [:seon.schedule/id schedule-id]}
                         {:seon.schedule.fire/id fire-id
                          :seon.schedule.fire/task [:seon.schedule.task/id task-id]
                          :seon.schedule.fire/agent
-                         [:seon.agent/id "maintenance-schema-test/root"]
+                         [:seon.agent/id "maintenance-schema-test-root"]
                          :seon.schedule.fire/nominal-at nominal-at
                          :seon.schedule.fire/observed-at observed-at}
                         {:seon.maintenance.receipt/id receipt-id
@@ -124,7 +124,7 @@
                           [:seon.schedule.fire/id fire-id]
                           :seon.maintenance.request/handler [:seon.fn/sym handler]
                           :seon.maintenance.request/agent
-                          [:seon.agent/id "maintenance-schema-test/root"]
+                          [:seon.agent/id "maintenance-schema-test-root"]
                           :seon.maintenance.request/cluster-name "default"
                           :seon.maintenance.request/repository-root "/repo"
                           :seon.maintenance.request/managed-root "/repo"

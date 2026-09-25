@@ -179,9 +179,16 @@
               (throw (ex-info (:seon.error/message events) events)))
           event (first events)
           _ (when-let [failure (:seon.sci.reader/error event)]
-              (throw (ex-info (:seon.error/message failure) failure)))]
-      [(program/declaration-row
-        (db/carried-projection database) event :contracted :agent)])))
+              (throw (ex-info (:seon.error/message failure) failure)))
+          row (program/declaration-row
+               (db/carried-projection database) event :contracted :agent)]
+      (when-not row
+        (let [message (str "No namespace declaration row derives for " namespace-name
+                           "; an agent namespace name must be an unqualified symbol.")]
+          (throw (ex-info message {:seon.error/message message
+                                   :seon.error/operation `namespace-seed-call
+                                   :seon.ns/name namespace-name}))))
+      [row])))
 
 (defn branch-call
   "Assign `agent-id` the branch the transacting database holds.

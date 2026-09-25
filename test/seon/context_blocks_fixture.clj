@@ -22,7 +22,7 @@
   [[:example/order '[:string {:seon.db/identity true}]]
    [:example/amount :int]
    [:example/customer :string]
-   [:example/order-row '[:map {:seon.db/attributes true}
+   [:example/order-row '[:map {:seon.db/attributes true :seon.program/partition :seon.data}
                          [:example/order :example/order]
                          [:example/amount :example/amount]
                          [:example/customer :example/customer]]]])
