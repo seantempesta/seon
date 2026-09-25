@@ -383,12 +383,14 @@
              (get-in (first-read-error (events source))
                      [:seon.error/data :seon.sci.reader/error-kind]))))))
 
-(deftest closer-only-recovery-artifacts-are-dropped
+(deftest an-unmatched-closer-is-a-reader-error-after-the-forms-before-it
+  ;; Clojure refuses an unmatched delimiter (LispReader.java:1372-1377); the
+  ;; reader keeps the completed form and then the error, in order.
   (doseq [[source expected]
-          [["(message/user \"hi\")\n}" [:form]]
-           ["(message/user \"hi\")\n]" [:form]]
-           ["(a)\n}\n}\n}" [:form]]
-           ["(let [x 1]\n(f x)\n}" [:error :form]]]]
+          [["(message/user \"hi\")\n}" [:form :error]]
+           ["(message/user \"hi\")\n]" [:form :error]]
+           ["(+ 1 2))" [:form :error]]
+           ["(let [x 1]\n(f x)\n}" [:error :form :error]]]]
     (is (= expected (read-kinds (events source))) (pr-str source))))
 
 (deftest recovery-never-anchors-on-inner-maps-or-vectors

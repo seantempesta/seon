@@ -323,21 +323,24 @@
     :gen/elements [nil true 0 "" :k [] {} #{}]}]]]
 :interns [:map-of :qualified-symbol :seon.sci.eval/intern]
 :namespaces [:map-of :symbol :map]
+:held-value
+[:any
+ {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
+  :seon.schema.admission/reason "A held Var root, Var, namespace map or context state is restored by identity, never traversed.",
+  :gen/elements [nil true 0 "" :k [] {} #{}]}]
+:context-state [:fn {:error/message "must be the atom holding one piece of context state"} seon.sci.eval/context-state?]
 :restoration-step
-[:map {:description "One step restoring a refused program change: a Var's root and metadata, or a namespace-map path set to its held prior value or removed."}
- [:seon.sci.eval/var {:optional true} :seon.sci.eval/sci-var]
- [:seon.sci.eval/root {:optional true}
-  [:any
-   {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
-    :seon.schema.admission/reason "A Var root is any Clojure value; it is restored by identity, never traversed.",
-    :gen/elements [nil true 0 "" :k [] {} #{}]}]]
- [:seon.sci.eval/metadata {:optional true} :map]
- [:seon.sci.eval/path {:optional true} [:vector :symbol]]
- [:seon.sci.eval/prior {:optional true}
-  [:any
-   {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
-    :seon.schema.admission/reason "The held Var or namespace map a path had before the form.",
-    :gen/elements [nil {}]}]]]
+[:or {:description "One step restoring a refused program change: a Var's root and metadata; a namespace-map path set to its held value or removed; or a piece of context state reset to its held value."}
+ [:map {:closed true}
+  [:seon.sci.eval/var :seon.sci.eval/sci-var]
+  [:seon.sci.eval/root :seon.sci.eval/held-value]
+  [:seon.sci.eval/metadata :map]]
+ [:map {:closed true}
+  [:seon.sci.eval/path [:vector {:min 1 :max 2} :symbol]]
+  [:seon.sci.eval/prior {:optional true} :seon.sci.eval/held-value]]
+ [:map {:closed true}
+  [:seon.sci.eval/state :seon.sci.eval/context-state]
+  [:seon.sci.eval/held :seon.sci.eval/held-value]]]
 :restore
 [:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars. A restoration that fails leaves the execution unavailable."}
  [:=> [:cat] :nil]

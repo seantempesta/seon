@@ -813,13 +813,6 @@
     ;; Recovery is a terminating operation, not a hopeful retry.
     (if (> point failure-start) point text-length)))
 
-(defn- closer-only?
-  [source]
-  (and (seq source)
-       (every? #(or (str/blank? (str %))
-                    (closer? %))
-               source)))
-
 (defn- error-event
   [text start end state failure classification]
   (let [[line column] (offset-cursor (line-starts text) start)
@@ -859,11 +852,12 @@
             state-after (or (::reading-state data) state)
             source (subs text absolute-start absolute-end)
             recovered (into recovered partial)
-            recovered (if (closer-only? source)
-                        recovered
-                        (conj recovered
-                              (error-event text absolute-start absolute-end
-                                           state-after pending classification)))]
+            ;; An unmatched closer is a reader error, as in Clojure
+            ;; (LispReader's UnmatchedDelimiterReader): kept in order after
+            ;; the forms before it, never silently repaired away.
+            recovered (conj recovered
+                            (error-event text absolute-start absolute-end
+                                         state-after pending classification))]
         (if (= absolute-end (count text))
           recovered
           (let [suffix (subs text absolute-end)

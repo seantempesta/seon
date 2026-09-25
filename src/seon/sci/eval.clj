@@ -158,6 +158,14 @@
 
 (schema/register-core-predicate! 'seon.sci.eval/sci-var? sci-var?)
 
+(defn context-state?
+  "True for the atom holding one piece of an SCI context's program state."
+  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
+  [value]
+  (instance? clojure.lang.IAtom value))
+
+(schema/register-core-predicate! 'seon.sci.eval/context-state? context-state?)
+
 (def sci-var-generator
   (gen/fmap (fn [_] (sci.utils/new-var 'generated nil)) (gen/return nil)))
 
@@ -610,19 +618,28 @@
         {::var sci-var ::root value ::metadata metadata}
         (some? prior) {::path path ::prior prior}
         :else {::path path})))
-   (for [[namespace-name intern-name prior]
-         (removed-interns before-namespaces after-namespaces)
-         :when (restore? (symbol (str namespace-name) (str intern-name)))]
-     (if (get after-namespaces namespace-name)
-       {::path [namespace-name intern-name] ::prior prior}
-       {::path [namespace-name] ::prior (get before-namespaces namespace-name)}))))
+   (mapcat
+    (fn [[namespace-name intern-name prior]]
+      (let [qualified (symbol (str namespace-name) (str intern-name))
+            {owned ::var value ::value metadata ::metadata} (get before qualified)]
+        (when (restore? qualified)
+          (cond-> [(if (get after-namespaces namespace-name)
+                     {::path [namespace-name intern-name] ::prior prior}
+                     {::path [namespace-name] ::prior (get before-namespaces namespace-name)})]
+            ;; A Var this generation owned was redefined in place before its
+            ;; removal: the held Var carries the new root, so put back the
+            ;; captured one as well.
+            (and (identical? owned prior) (not (identical? absent-intern value)))
+            (conj {::var prior ::root value ::metadata metadata})))))
+    (removed-interns before-namespaces after-namespaces))))
 
 (defn- apply-restoration!
   "Apply `program-restoration`'s steps to `ctx`."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:vector :seon.sci.eval/restoration-step]] :nil]}
   [ctx steps]
-  (doseq [{sci-var ::var path ::path :as step} steps]
+  (doseq [{sci-var ::var path ::path state ::state :as step} steps]
     (cond
+      state (reset! state (::held step))
       sci-var (do (sci.vars/bindRoot sci-var (::root step))
                   (reset-meta! sci-var (::metadata step)))
       (find step ::prior) (swap! (:env ctx) assoc-in (into [:namespaces] path) (::prior step))
@@ -648,25 +665,59 @@
      cause (assoc :seon.error/throwable cause))))
 
 (defn- restore-or-unavailable!
-  "Apply `steps` unless the context reacquired its program since `loaded` was
-  captured. A restoration that cannot run or throws leaves the execution
-  unavailable, never a result that reads as accepted."
+  "Plan and apply a restoration through `steps!`, unless the context
+  reacquired its program since `loaded` was captured. Planning or applying
+  that throws, or a reacquisition, leaves the execution unavailable: the
+  refusal is kept on the context (every later form receives it), delivered
+  through the context's fault recorder, and answered; nil when restored."
   {:malli/schema [:=> [:cat :seon.sci.eval/ctx [:maybe :seon.db/database-value]
-                       [:vector :seon.sci.eval/restoration-step]]
-                  :nil]}
-  [ctx loaded steps]
-  (let [unavailable! #(do (swap! (:env ctx) assoc ::unavailable-execution %) nil)]
-    (cond
-      (empty? steps) nil
-      (not (identical? loaded (::loaded-database @(::kernel/program-snapshot ctx))))
-      (unavailable! (execution-unavailable :program-reacquired nil))
-      :else (try (apply-restoration! ctx steps)
-                 (catch Throwable failure
-                   (unavailable! (execution-unavailable :restore-failed failure)))))))
+                       [:=> [:cat] [:vector :seon.sci.eval/restoration-step]]]
+                  [:maybe :seon.sci.eval/execution-unavailable-error]]}
+  [ctx loaded steps!]
+  (let [unavailable
+        (try
+          (let [steps (steps!)]
+            (cond
+              (empty? steps) nil
+              (not (identical? loaded (::loaded-database @(::kernel/program-snapshot ctx))))
+              (execution-unavailable :program-reacquired nil)
+              :else (do (apply-restoration! ctx steps) nil)))
+          (catch Throwable failure
+            (execution-unavailable :restore-failed failure)))]
+    (when unavailable
+      (swap! (:env ctx) assoc ::unavailable-execution unavailable)
+      (when-let [commit-fault! (:seon.flow/commit-fault! @(::kernel/program-snapshot ctx))]
+        (commit-fault! {:seon.error/source unavailable
+                        :seon.error/declared-schema :seon.sci.eval/execution-unavailable-error}))
+      unavailable)))
+
+(defn- context-restoration
+  "Hold `ctx`'s program state now and answer the one restoration over it:
+  the namespace maps and generation-owned interns (`program-restoration`)
+  and, for a whole restoration, the program snapshot, installed functions
+  and environment state its installs and projection advances replace.
+  Called with a selector, only the selected Vars are restored."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx] :seon.sci.eval/restore]}
+  [ctx]
+  (let [namespaces (:namespaces @(:env ctx))
+        owned (turn-interns ctx)
+        held (into [] (keep (fn [state] (when state {::state state ::held @state})))
+                   [(::kernel/program-snapshot ctx) (::kernel/installed-functions ctx)
+                    (get ctx env/state-carrier)])
+        loaded (::loaded-database (::held (first held)))]
+    (fn restore!
+      ([] (restore! nil))
+      ([restore?]
+       (restore-or-unavailable!
+        ctx loaded
+        #(cond-> (program-restoration namespaces (:namespaces @(:env ctx)) owned
+                                      (turn-interns ctx) (or restore? (constantly true)))
+           (nil? restore?)
+           (into (remove (fn [step] (identical? @(::state step) (::held step)))) held)))))))
 
 (defn- unindexed-change
   "The refusal of a program change the form's analysis does not declare."
-  {:malli/schema [:=> [:cat [:sequential :qualified-symbol]] :seon.sci.eval/unindexed-change-error]}
+  {:malli/schema [:=> [:cat [:sequential {:min 1} :qualified-symbol]] :seon.sci.eval/unindexed-change-error]}
   [members]
   (seon.error.refusal/diagnostic
    (java.util.Date.) :seon.sci.eval/program 'seon.sci.eval/evaluate
@@ -682,7 +733,7 @@
 (defn- multiple-declarations
   "The refusal of a form making more than one program declaration, or a
   declaration beside a removal."
-  {:malli/schema [:=> [:cat [:sequential :seon.sci.eval/program-name] [:sequential :qualified-symbol]]
+  {:malli/schema [:=> [:cat [:sequential {:min 1} :seon.sci.eval/program-name] [:sequential :qualified-symbol]]
                   :seon.sci.eval/multiple-declarations-error]}
   [declared removed]
   (seon.error.refusal/diagnostic
@@ -815,8 +866,9 @@
         (install-function-contract! ctx row projection database))
       rows))
     (catch Throwable failure
-      (restore!)
-      (throw failure))))
+      (if-let [unavailable (restore!)]
+        (throw (ex-info (:seon.error/message unavailable) unavailable failure))
+        (throw failure)))))
 
 (defn- bindings
   [ctx _namespace-name before _source _form _observed-built-in-calls]
@@ -865,13 +917,13 @@
       (map? events)
       (throw (ex-info (:seon.error/message events) events))
 
-      ;; The reader recovers around a malformed form and returns it as an
+      ;; The reader recovers around a malformed span and returns it as an
       ;; event carrying its flat error with a placeholder form. Evaluation
-      ;; refuses that event exactly as it refuses a whole-input failure —
-      ;; the placeholder must never run as if it were the agent's form.
-      (and (= 1 (count events))
-           (:seon.sci.reader/error (first events)))
-      (let [failure (:seon.sci.reader/error (first events))]
+      ;; refuses the whole input on its first such event, even after a
+      ;; complete form: the placeholder must never run, and a request with
+      ;; an unmatched delimiter is not wholly a form.
+      (some :seon.sci.reader/error events)
+      (let [failure (some :seon.sci.reader/error events)]
         (throw (ex-info (:seon.error/message failure) failure)))
 
       (= 1 (count events))
@@ -2769,6 +2821,7 @@
   consequently preserves no private objects. No database read restores them."
   [ctx base]
   (let [generation (:sci/generation @(:env ctx))
+        unavailable (::unavailable-execution @(:env ctx))
         previous @(::base-bindings ctx)
         current (base-bindings base)
         changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
@@ -2821,6 +2874,9 @@
     ;; Agent graphs retain the entering handle. Preserve its owned atoms while
     ;; replacing the environment with the regenerated fork's environment.
     (reset! (:env ctx) @(:env regenerated))
+    ;; An unavailable execution stays unavailable until its context is
+    ;; released: the private layer this carries is the unrestored one.
+    (when unavailable (swap! (:env ctx) assoc ::unavailable-execution unavailable))
     (reset! (::base-bindings ctx) current)
     (reset! (::kernel/installed-functions ctx)
             @(::kernel/installed-functions regenerated))
@@ -3983,7 +4039,7 @@
                            @session-observation]
                   ;; A refused replacement or removal of a stored program
                   ;; row never survives as a private binding.
-                  (when-let [current (some-> connection db/db)]
+                  (when-let [current (or (some-> connection db/db) (:seon.db/db request))]
                     (restore! #(row-backed? current %)))
                   ;; A failed evaluation has no durable program row. Any def
                   ;; it installed before the later throw/cut therefore belongs
@@ -4028,6 +4084,10 @@
          (trusted-evaluation
           (:seon.sci.eval/loaded-identity request loaded-identity)
           (fn []
+          ;; An unavailable execution refuses before acquisition could replace
+          ;; the environment that names it.
+          (when-let [unavailable (::unavailable-execution @(:env evaluation-ctx))]
+            (throw (ex-info (:seon.error/message unavailable) unavailable)))
           (when (contains? evaluation-ctx ::custody)
             (when-let [database (:seon.db/db request)]
               (when-not (acquired-database? evaluation-ctx database)
@@ -4049,8 +4109,6 @@
                              (str ";; PROGRAM CHANGE replaced your definition of "
                                   (str/join ", " replaced)
                                   " with its changed program row; re-evaluate yours to redefine it.")))))))
-          (when-let [unavailable (::unavailable-execution @(:env evaluation-ctx))]
-            (throw (ex-info (:seon.error/message unavailable) unavailable)))
           (when-let [failure (first (:seon.test/acquisition-refusals
                                     (acquired-program evaluation-ctx)))]
             (throw (ex-info "SCI program acquisition refused a declaration." failure)))
@@ -4071,26 +4129,17 @@
             before-namespaces (:namespaces @(:env execution-ctx))
             before-owned (turn-interns execution-ctx)
             before-intern-values (turn-intern-values before-owned)
-            loaded-before (::loaded-database @(::kernel/program-snapshot execution-ctx))
             ;; The one restoration of this form's program change, reused at
             ;; every failure point: admission, arming and settlement refusal
             ;; restore all of it; a throw inside the form only what replaced
             ;; or removed a stored row (`failure-result`).
-            restore!
-            (fn restore!
-              ([] (restore! (constantly true)))
-              ([restore?]
-               (restore-or-unavailable!
-                execution-ctx loaded-before
-                (program-restoration before-namespaces (:namespaces @(:env execution-ctx))
-                                     before-owned (turn-interns execution-ctx) restore?))))
-            _ (when-not namespace-unmap?
-                (vreset! session-observation
+            restore! (context-restoration execution-ctx)
+            _ (vreset! session-observation
                          {:seon.sci.eval/ctx execution-ctx
                           :seon.sci.eval/before-intern-values
                           before-intern-values
                           :seon.sci.eval/restore restore!
-                          :seon.sci.eval/form form}))
+                          :seon.sci.eval/form form})
             before-namespace-state
             (when namespace-unmap?
               (sci/namespace-state execution-ctx))
@@ -4338,12 +4387,17 @@
     :seon.sci.eval/evaluation]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     evaluation :seon.sci.eval/evaluation}]
-  (let [row (:seon.program/row evaluation)]
+  (let [row (:seon.program/row evaluation)
+        ;; Acceptance changes the retained context before settlement, so the
+        ;; evaluation's restoration becomes this recipient's: a refused batch
+        ;; must undo the transfer, not the discarded candidate.
+        restore! (context-restoration ctx)]
     (transfer-evaluated-roots!
      ctx [{:seon.program/row row :seon.sci.eval/evaluation evaluation}])
     (install-candidate-function! ctx database row)
-    (assoc evaluation :seon.sci.admit/value
-           (sci/resolve ctx (:seon.fn/sym row)))))
+    (assoc evaluation
+           :seon.sci.admit/value (sci/resolve ctx (:seon.fn/sym row))
+           :seon.sci.eval/restore restore!)))
 
 (defn refuse-install
   "Project the flat refusal as the evaluation result, discarding candidate roots."

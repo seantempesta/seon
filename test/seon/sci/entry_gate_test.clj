@@ -104,7 +104,7 @@
        (let [refusal (:seon.sci.admit/value
                       (evaluate-in ctx (str "(do (defn one \"Inc.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
                                             " (defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x)))")))]
-         (is (= '#{scratch.entry-gate/one scratch.entry-gate/two}
+         (is (= '[scratch.entry-gate/one scratch.entry-gate/two]
                 (:seon.sci.eval/declarations refusal))
              "two declarations in one form refuse, naming both, rather than keep one row")
          (is (and (absent? "one") (absent? "two"))))
@@ -160,9 +160,9 @@
                (value (str "(do (defn overwritten \"D.\" " contract " [x] x)\n"
                            " (eval '(defn overwritten \"E.\" " contract " [x] (inc x))))"))))
            "an analyzed name is not the declaration that ran when a later eval overwrote it")
-       (value (str "(defn trailing \"D.\" " contract " [x] x))"))
-       (is (= 1 (value "(trailing 1)"))
-           "analysis reads the form the reader accepted, not a stray trailing paren")
+       (is (:seon.error/message (value (str "(defn trailing \"D.\" " contract " [x] x))")))
+           "an unmatched closer refuses the whole input, as Clojure's reader does")
+       (is (absent? "trailing") "and the complete form before it never ran")
        (is (:seon.sci.eval/unindexed (value "(alter-meta! #'kept assoc :doc \"changed\")"))
            "a metadata-only change is a definition change too")
        (is (= "D." (value "(:doc (meta #'kept))")))
@@ -181,7 +181,7 @@
            "a nested unmap of a stored row's Var refuses as unindexed")
        (let [refusal (value (str "(do (defn fresh \"D.\" " contract " [x] x) "
                                  "(ns-unmap 'seon.note 'render-notes-ai))"))]
-         (is (= '#{scratch.entry-gate/fresh} (:seon.sci.eval/declarations refusal)))
+         (is (= '[scratch.entry-gate/fresh] (:seon.sci.eval/declarations refusal)))
          (is (= #{(symbol stored)} (:seon.sci.eval/removals refusal))
              "a definition beside a removal refuses, naming both")
          (is (absent? "fresh")))
