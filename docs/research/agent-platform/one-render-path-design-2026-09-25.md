@@ -137,11 +137,17 @@ use its delimiter/elision constants and namespace-map factoring for structural c
 1. Establish canonical child order and reserve container syntax, whole keys and omission/retrieval evidence.
    Derive the minimum representative share from **that child's first level**: its whole keys plus one-token value
    snippets (converted to characters with the same calibration), including required syntax/elision overhead.
-   Choose the largest affordable representative prefix whose equal shares cover those minima; remaining members
-   get a counted group elision. This shallow selection inspects no hidden subtree and introduces no tunable minimum.
+   Choose the largest affordable representative prefix whose **reserved minima** fit: syntax, keys, separators and
+   the sum of the prefix's minima, plus the group elision only while members remain. Feasibility is not monotone,
+   because the group elision disappears when every member is shown, so test the whole collection on its own terms
+   and **never stop at the first unaffordable prefix**. Remaining members get a counted group elision. This shallow
+   selection inspects no hidden subtree and introduces no tunable minimum. (Draft probe: stopping at the first
+   failure collapsed `{:a (vec (range 1e6)) :b {:c 1} :d "x"}` to one elision at B = 100; `k × largest minimum`
+   excluded cheap siblings of one 250-character minimum.)
 2. Visit selected children cheapest first: known scalar encoded lengths ascending, then collections by cheap counted
    size; unknown-cost/opaque values last. These are separate ordering categories, not interchangeable cost units.
-   For child i, `share = remaining-characters ÷ children-left`; recurse once and subtract actual characters used.
+   For child i, reserve every remaining child's minimum and split only the surplus:
+   `share = minimumᵢ + (remaining − Σ remaining minima) ÷ children-left`; recurse once and subtract actual characters used.
    Small children finish whole and pass unused space forward. There is **no redistribution or refitting loop**.
 3. Place completed children back in canonical order, without printing/sorting them again. Descend only while the
    share lasts; at exhaustion use the existing `:subtree` elision and original path. No frontier expansion,
@@ -161,6 +167,10 @@ its `pr-str` sort and preselected presentation page size. Preserve total/steps/b
 AI gets text; HTML gets Hiccup from the floor's same decision, with no later HTML clipping. MCP emits text plus retrieval metadata, never reprints a semantic map of the rendered node. Elisions name bound, count/unit (unknown
 explicitly), original path and digest/requery; preserve carried admission `::truncated-string` lengths and `:children`
 totals, and `preserve-requery`. A compact shared retrieval legend is charged once through the emitter, not free text.
+Concretely, each elision's text names only omitted count, unit, bound, original path, next offset, a kept character
+prefix and a requery form when one exists. Total (= offset + omitted), the token estimate and the requery refusal
+reason are shared or derivable. One legend map after the value, emitted only when the output holds an elision,
+states the refusal and `:seon.ai.tokens/chars-per-token`. The print node keeps every field.
 Throwables are inside this allocator: class/message/ex-data/causes/suppressed/frames share the allowance. Catch failing
 accessors locally. Do not execute untrusted lazy sequences/host iterators to render them; show opaque identity and
 inspection/requery instead. Cycles show references. Missing retrieval custody says unavailable but does not prevent
@@ -227,7 +237,7 @@ writing, not a partial switch. Shared `value.clj` slices run sequentially; there
 | 0a schema | Declare missing identity owners with `:seon.program/row-schema`; prepare owned-key sets without changing dispatch. Probe agent-id envelope, two identities agreeing/conflicting, partial entity and non-program row classification. | 55 / 0 |
 | 0b schema/render | Add cached error-operation and contracted head-Var alternative lookup without switching dispatch. Probe nested specific error, uncontracted base, ambiguous/no-match alternatives, direct report and `let` floor. | 60 / 0 |
 | 1 render/SCI/MCP + explicit owners | Activate all three lookups; carry head Var into shown-result/MCP. In this same cut convert `oversight/unit`, `seon.run/render-namespace-ai`, four fixtures and walk/bootstrap/web owners. Only then remove old stages/specificity matching. Probe every converted entrance and no paired-error/report loss. | 75 / 260 |
-| 2 floor/print | Fair-share allocation and emitter-owned costs. Exit requires deletion of `fit`, `fit-node`, `fit-children`, `fit-entry`, `structural-elision`, node counter and emit-node re-sort (~220-line core). Probe three branches, huge+tiny siblings, 50 long strings, tiny B, complex/lazy keys and exact charging. | 80 / 250 |
+| 2 floor/print | Fair-share allocation and emitter-owned costs, **plus the compact elision face with the retrieval legend emitted once**. Exit requires deletion of `fit`, `fit-node`, `fit-children`, `fit-entry`, `structural-elision`, node counter and emit-node re-sort (~220-line core), and conversion of the direct emitter caller `error.clj:346` in the same commit. Probe three branches, huge+tiny siblings, 50 long strings, tiny B, complex/lazy keys and exact charging; default-B probe within +20% of 15.9 ms. **Owner waived the 100-line bound, 2026-09-25 ("One slice, waive bound")**: measured draft 283 lines (~180 new, ~60 moved), ~350 deleted. | 180 / 350 |
 | 3 floor/error | Fold Throwable/bounded-text into same allocator; retire independent caps. Probe nested ex-data, throwing accessors, opaque lazy values, cycles and identity-free roots. | 45 / 100 |
 | 4 render/problems | Retire `project-node*` redispatch; accept smaller data/final text using merged units without profile. Convert `ai-prose` to data. Probe nested problems uses one share, text-overage diagnostic, no defaults fallback and no repeated producer. | 30 / 140 |
 | 5 floor/MCP | Offset retrieval inside prepare; delete window and page-size cut. Probe path/offset progress, original keys, full reconstruction, end offsets, missing digest and carried admission elisions. | 25 / 100 |
