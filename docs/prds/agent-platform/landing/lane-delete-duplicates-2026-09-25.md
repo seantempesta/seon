@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (e9e8176e9, b16c62792, 67dc5acb8); tests owed to root
+status: landed (e9e8176e9, b16c62792, 67dc5acb8, reds follow-up); tests owed to root
 lane: delete-duplicates-opus
 created: 2026-09-25
 ---
@@ -88,6 +88,57 @@ and [script/dev roots audit](../../../research/agent-platform/script-dev-roots-a
   line naming `seon.effect/capabilities` 11.3 s ×3 was concurrent work, the cost fix-cost-capabilities
   owns. No test asserts the omission text or class.
 - Lint: clj-kondo 0 errors, 0 warnings. Sizes: src +17/−62 (net −45).
+
+## Reds after adoption at 6ab6cd5e (root run, `tmp/orchestrator/verify-1955.out.d/`)
+
+Broken first: `seon.cluster.subprocess-test` stays **red in 3 members** until `src/seon/cluster/process.clj`
+(not this lane's file) is fixed; the tests assert the wanted behaviour.
+
+`seon.render.ns-test` (008: 32 pass / 52 fail / 6 error). None of the reds reached a line slice 3 changed.
+Proof: the pre-slice file (`git show 67dc5acb8^:src/seon/render/ns.clj`, loaded into a scratch namespace)
+throws the identical `contains? not supported on type: java.lang.String` on `seon.flow` distance 1. The
+causes, per member:
+
+| Member | Cause | Ruling |
+|---|---|---|
+| all fixture members | `namespace-unit` pulled `{:seon.ns/requires [:seon.ns/name]}`; `:seon.ns/requires` is now `:db.type/symbol` many, so the pull returned a read error and every render saw an empty world (`(dir nil)`, `unknown.namespace`) | retired assumption: selector is `:seon.ns/requires` |
+| `install-namespace!` / `function-row` users | hand-built rows lack `:seon.program/definition-digest` and analysis evidence (`:seon.program/analyzed-source-digest`) | retired assumption: canonical writers (`program/declaration-row`, `support/revised-row`, `support/program-row`) through `support/transacted!` |
+| `identity-reads-stewardship…`, `source-less-agent-namespace…` | raw agent rows lack `:seon.agent/branch` | retired assumption: `support/agent-tx` (the first agent stewards) |
+| `fitted-full-html…` | `:seon.ns/requires` written as lookup refs; required namespace rows hand-built | retired assumption: `support/revision` with a symbol set |
+| `distance-one-never-drops-a-member-when-source-is-absent` | `:seon.fn/source` is a required key, so a sourceless function cannot be written | test of retired machinery: deleted, with the survivor's sourceless fallback (`function-source`, `signature-form`, `stored-arglists`, 30 lines) |
+| `schema-closure…` missing-schema / malformed / cap-honesty members | a spec naming an undeclared key, and recursive canonical registrations, are refused by the projection owner | retired cases: deleted; the `a ↔ b` cycle became an acyclic chain; test renamed `schema-closure-is-database-derived-and-budgeted` |
+| `schema-closure…` error schema | the named-error form `[:and :seon.error/base [:map {:error/message …} …]]` never showed its message: `schema-error-message` read only the top form's properties | real loss in the survivor: fixed for forms conjoining `:seon.error/base` |
+| `populated-namespace…`, every distance-1 namespace with referenced schemas | `read-refusal?` called `contains?` on a string section | real loss in the survivor: fixed |
+| `bounded-read-refusals…` | `read-refusal?` keyed on retired `:seon.db/read-operation`, so the `q` refusal passed as rows and HTML reached `surface-id` with nil | real loss: keyed on the declared member `:seon.db/invalid-read`; the test now asserts the declared refusal and compares the faces without `:seon.error/at` (occurrence time) |
+
+REPL evidence (default JVM, edited file loaded into scratch namespace `delete-duplicates.scratch-render-ns`,
+removed after): all `populated-namespace…` assertions true on `seon.flow` d0/d1/d2 (AI and HTML); the bounded
+unit returns the same `seon.db/q` refusal from both faces, `:seon.db/invalid-read true`, layer
+`:seon.db/database-read`. Sweep of 459 namespaces × 3 distances × 2 faces: 0 throws; 2 of 1,374 cases differ
+from HEAD, both `seon.db` named error schemas now showing their message (5.5 s for the sweep). Fixture writes
+were proven on disposable MCP branches `delete-duplicates-fixtures{,-2..-5}` (all retired): closure, cap,
+budget and presentation worlds and three `agent-tx` agents land and the branch stays readable; closure d2
+renders every expected member.
+
+`seon.cluster.subprocess-test` (009: 7 pass / 4 fail). The move is not the cause; the owner changed:
+
+- `reaped?` (two members): `5b5227bc1` made `terminate-subprocess!` return survivors but `run-process!` still
+  stores that vector as `:reaped?`. Tests unchanged (they assert the wanted `true`). Issue
+  `docs/seon/issues/run-process-reaped-flag-carries-the-survivor-vector.md`.
+- duration (one member): the test's own 5,000 ms deadline plus the owner's 1,000 ms grace cannot fit the 5 s
+  test bound; the deadline is now 2,000 ms (the child is ready in about 100 ms).
+- `deadline-member` (one member): with armed contracts the input contract refuses before the body, so the
+  body's `:deadline-member` is unreachable; the test now asserts the armed refusal (`:seon.fn.arity/input`,
+  naming `:seon.operator.subprocess/deadline-ms`). It stays red: the contract's unquoted
+  `[:fn seon.cluster.process/progress-atom?]` makes the refusal unbuildable (REPL: "the refusal could not be
+  built"). Recorded in `docs/seon/issues/a-search-contract-predicate-cannot-be-made-durable.md`.
+- `test/seon/dev/publication_test.clj:34` has the same `reaped?` assertion (not this lane's file).
+
+Out of scope, recorded: `docs/seon/issues/writes-admit-schema-rows-that-break-the-branch-projection.md` (three
+probe writes landed and then every read on the branch refused), and the `pull` budget refusal without
+`:seon.db/invalid-read` (added to `read-refusal-checks-test-error-at-not-invalid-read.md`).
+
+Sizes of the follow-up: src +16/−34; tests +58/−111.
 
 ## Totals
 

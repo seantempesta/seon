@@ -15,6 +15,7 @@
             [seon.render.block :as block]
             [seon.render.hiccup :as hiccup]
             [seon.render.ns :as sut]
+            [seon.program :as program]
             [seon.test-support :as support])
   (:import [java.io PushbackReader StringReader]))
 
@@ -23,12 +24,11 @@
 (deftest identity-reads-stewardship-without-an-agent-cluster-attribute
   (support/with-database
    (fn [connection]
+     ;; The first agent created in a namespace stewards it; a later one shares it.
      (support/transacted! connection
-                          [{:db/id "steward" :seon.agent/id "record-steward"}
-                           {:db/id "namespace" :seon.ns/name 'my.agents.record
-                            :seon.ns/steward "steward"}
-                           {:seon.agent/id "record-agent"
-                            :seon.agent/namespace "namespace"}])
+                          (support/agent-tx @connection "record-steward" 'my.agents.record))
+     (support/transacted! connection
+                          (support/agent-tx @connection "record-agent" 'my.agents.record))
      (let [unit {:seon.db/db @connection
                  :seon.agent/id "record-agent"}
            source (agent/render-identity-ai unit)
@@ -51,7 +51,7 @@
                      :seon.ns/name
                      :seon.ns/source
                      :seon.ns/doc
-                     {:seon.ns/requires [:seon.ns/name]}
+                     :seon.ns/requires
                      {:seon.ns/aliases
                       [:seon.ns.alias/local :seon.ns.alias/target-ns]}
                      {:seon.ns/imports
@@ -92,28 +92,32 @@
          (tree-seq coll? seq value))))
 
 (defn- install-namespace!
-  [connection namespace-name source schema-rows function-rows]
-  (is (:db-after
-       (db/transact! connection
-                     [(cond-> {:seon.ns/name namespace-name}
-                        source (assoc :seon.ns/source source))])))
+  "Write one fixture namespace through the canonical writers: its declaration
+  row, its schema rows, then its functions analyzed from their source."
+  [connection namespace-name source schema-rows functions]
+  (support/transacted!
+   connection
+   [(program/declaration-row (db/carried-projection @connection)
+                             {:seon.ns/name namespace-name :seon.ns/source source}
+                             :all :agent)])
   (when (seq schema-rows)
-    (let [report (db/transact! connection
-                               (mapv #(assoc % :seon.schema.admission/source :core)
-                                     schema-rows))]
-      (is (:db-after report) (pr-str report))))
-  (when (seq function-rows)
-    (let [report (db/transact! connection function-rows)]
-      (is (:db-after report) (pr-str report)))))
+    (support/transacted!
+     connection
+     (mapv #(support/revised-row @connection
+                                 (assoc % :seon.schema.admission/source :core) {} nil)
+           schema-rows)))
+  (when (seq functions)
+    (support/transacted!
+     connection
+     (mapv (fn [{::keys [sym source overrides]}]
+             (support/program-row @connection [:seon.fn/sym sym] source overrides))
+           functions))))
 
 (defn- function-row
-  [namespace-name function-name source options]
-  (merge (cond-> {:seon.fn/sym (symbol (str namespace-name) (str function-name))
-          :seon.schema.admission/source :core
-          :seon.fn/ns [:seon.ns/name namespace-name]
-          :seon.fn/private? false}
-           source (assoc :seon.fn/source source))
-         options))
+  [namespace-name function-name source overrides]
+  {::sym (symbol (str namespace-name) (str function-name))
+   ::source source
+   ::overrides overrides})
 
 (deftest bounded-read-refusals-remain-flat-errors
   (support/with-database
@@ -126,10 +130,11 @@
                         :seon.sci.admit/caps caps)
             ai (sut/render-ai unit)
             html (sut/render-html unit)]
-        (is (= ai html)
+        (is (= (dissoc ai :seon.error/at) (dissoc html :seon.error/at))
             "both projections return the same refusal from the owning read")
-        (is (= :seon.db/read (:seon.error/layer ai)))
-        (is (contains? ai :seon.db/read-operation))
+        (is (true? (:seon.db/invalid-read ai)))
+        (is (= :seon.db/database-read (:seon.error/layer ai)))
+        (is (= 'seon.db/q (:seon.db/refused-read-operation ai)))
         (is (string? (:seon.error/message ai)))))))
 
 (deftest populated-namespace-renders-the-inverse-distance-gradient
@@ -186,30 +191,6 @@
           (is (not (str/includes? html2-text "fault-graph-definition")))
           (is (not (str/includes? html2-text "work-launcher-step"))))))))
 
-(deftest distance-one-never-drops-a-member-when-source-is-absent
-  (support/with-database
-    (fn [connection]
-      (let [namespace-name 'fixture.total
-            exact-source "(defn exact [value] (str value))"
-            fallback-row
-            (dissoc
-             (function-row
-              namespace-name 'fallback nil
-              {:seon.fn/spec "[:=> [:cat :string] :string]"
-               :seon.fn/doc "Return the supplied value."})
-             :seon.fn/source)]
-        (install-namespace!
-         connection namespace-name "(ns fixture.total)" []
-         [(function-row namespace-name 'exact exact-source {}) fallback-row])
-        (let [unit (namespace-unit @connection namespace-name 1 100000)
-              ai (sut/render-ai unit)
-              html (hiccup/->string (sut/render-html unit))]
-          (is (str/includes? ai exact-source))
-          (is (str/includes? ai "(defn fallback"))
-          (is (str/includes? html exact-source))
-          (is (str/includes? html "fixture.total/fallback"))
-          (is (reader-valid? ai)))))))
-
 (deftest fitted-full-html-leads-with-description-and-function-summaries
   (support/with-database
     (fn [connection]
@@ -230,16 +211,11 @@
            {:seon.fn/spec "[:=> [:cat :string] :string]"
             :seon.fn/doc "Return the useful value."})])
         (support/transacted!
-                connection
-                (conj
-                 (mapv (fn [required-name] {:seon.ns/name required-name})
-                       required-names)
-                 {:seon.ns/name namespace-name
-                  :seon.ns/doc
-                  "Useful namespace summary.\n\nLonger stewardship text."
-                  :seon.ns/requires
-                  (mapv (fn [required-name] [:seon.ns/name required-name])
-                        required-names)}))
+         connection
+         [(support/revision @connection [:seon.ns/name namespace-name]
+                            {:seon.ns/doc
+                             "Useful namespace summary.\n\nLonger stewardship text."
+                             :seon.ns/requires (set required-names)})])
         (let [raw (sut/render-html
                    (namespace-unit @connection namespace-name 1 100000))
               raw-html (hiccup/->string raw)
@@ -279,12 +255,7 @@
   (support/with-database
     (fn [connection]
       (support/transacted! connection
-                         [{:db/id "fresh-namespace"
-                           :seon.ns/name 'my.agents.fresh
-                           :seon.ns/steward "fresh-agent"}
-                          {:db/id "fresh-agent"
-                           :seon.agent/id "fresh"
-                           :seon.agent/namespace "fresh-namespace"}])
+                           (support/agent-tx @connection "fresh" 'my.agents.fresh))
       (let [db @connection
             unit (namespace-unit db 'my.agents.fresh 1 256)
             ai (sut/render-ai unit)
@@ -333,7 +304,7 @@
                                  :seon.ns.refer/target-ns 'seon.db
                                  :seon.ns.refer/target-name 'q})))))
 
-(deftest schema-closure-is-database-derived-cycle-safe-and-budgeted
+(deftest schema-closure-is-database-derived-and-budgeted
   (support/with-database
     (fn [connection]
       (let [closure-ns 'fixture.closure
@@ -343,6 +314,10 @@
              [:=>
               [:catn [:fixture.labels/input :fixture.closure/own]]
               [:enum :fixture.enum/not-a-schema :ok]])
+            ;; A named error needs a non-base domain member; canonical
+            ;; registrations are acyclic (`seon.schema/assert-acyclic-references!`).
+            subject-row {:seon.schema/key :fixture.closure/subject
+                         :seon.schema/form ":string"}
             own-row {:seon.schema/key :fixture.closure/own
                      :seon.schema/form
                      (pr-str [:map [:value :fixture.external/a]])}
@@ -354,27 +329,19 @@
                [:map {:seon.render/ai 'seon.error/render-ai
                       :seon.render/html 'seon.error/render-html
                       :error/message "must identify the absent fixture"}
-                [:seon.error/message :string]]])}
+                :fixture.closure/subject]])}
             closure-schema-rows
-            [own-row error-row
+            [subject-row own-row error-row
              {:seon.schema/key :fixture.external/a
               :seon.schema/form (pr-str [:or :string :fixture.external/b])}
              {:seon.schema/key :fixture.external/b
-              :seon.schema/form (pr-str [:maybe :fixture.external/a])}]
+              :seon.schema/form (pr-str [:maybe :string])}]
             closure-function-rows
             [(function-row
               closure-ns 'uses-own
               "(defn uses-own [value] value)"
               {:seon.fn/spec closure-spec
-               :seon.fn/doc "Uses an own schema whose closure crosses namespaces."})
-             (function-row
-              closure-ns 'missing-schema
-              "(defn missing-schema [value] value)"
-              {:seon.fn/spec (pr-str [:=> [:cat :fixture.missing/key] :any])})
-             (function-row
-              closure-ns 'malformed
-              "(defn malformed [value] value)"
-              {:seon.fn/spec "["})]
+               :seon.fn/doc "Uses an own schema whose closure crosses namespaces."})]
             _ (install-namespace! connection closure-ns closure-source
                                   closure-schema-rows closure-function-rows)
             db @connection
@@ -418,9 +385,6 @@
           (is (not (str/includes? ai2
                                   "(register! :fixture.enum/not-a-schema"))
               "a qualified enum value is not a schema ref")
-          (is (not (str/includes? ai2
-                                  "(register! :fixture.missing/key"))
-              "a missing row never becomes a fake registration")
           (is (not (str/includes? (pr-str html2) "(register!"))
               "HTML names referenced schemas without repeating their source")
           (is (str/includes? (pr-str html2) ":fixture.external/a"))
@@ -462,31 +426,7 @@
         (testing "uncontracted public functions and their docs remain whole"
           (is (str/includes? ai "fixture.cap/uncontracted"))
           (is (str/includes? ai long-doc))
-          (is (not (str/includes? ai " [clipped]"))))
-
-        (let [honest-ns 'fixture.cap-honesty
-              honest-spec
-              (pr-str [:=> (into [:cat]
-                                  (conj (subvec cap-keys 0 40)
-                                        :z/missing))
-                       :any])
-              _ (install-namespace!
-                 connection honest-ns "(ns fixture.cap-honesty)" []
-                 [(function-row
-                   honest-ns 'exactly-forty
-                   "(defn exactly-forty [& values] values)"
-                   {:seon.fn/spec honest-spec})])
-              honest-ai
-              (sut/render-ai (namespace-unit @connection honest-ns 2 100000))]
-          (testing "the cap line requires a forty-first resolvable definition"
-            (is (= 40
-                   (count
-                    (filter #(= "fixture.external" (namespace %))
-                            (keep :seon.schema/key
-                                  (edn/read-string honest-ai))))))
-            (is (not (str/includes? honest-ai
-                                    "40+ referenced schemas are reachable"))))))
-
+          (is (not (str/includes? ai " [clipped]")))))
       (let [budget-ns 'fixture.budget
             large-form
             (pr-str

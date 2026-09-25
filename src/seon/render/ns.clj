@@ -50,8 +50,11 @@
       (assoc :max-results max-collection))))
 
 (defn- read-refusal?
+  "A bounded read's refusal: `seon.db`'s declared `:seon.db/invalid-read-error`,
+  known by its distinguishing member. Sections are also strings and hiccup
+  vectors, which are never refusals."
   [value]
-  (contains? value :seon.db/read-operation))
+  (and (map? value) (contains? value :seon.db/invalid-read)))
 
 (defn- namespace-row
   [unit]
@@ -258,30 +261,6 @@
   [doc]
   (some-> doc str/split-lines first str/trim not-empty))
 
-(defn- stored-arglists
-  [serialized]
-  (let [arglists (read-edn serialized)]
-    (when (and (seq arglists) (every? vector? arglists))
-      arglists)))
-
-(defn- signature-form
-  [{:seon.fn/keys [sym arglists doc private? spec]}]
-  (let [qualified (symbol sym)
-        function-name (symbol (name qualified))
-        arglists (stored-arglists arglists)
-        schema (read-edn spec)
-        prefix (cond-> [(if private? 'defn- 'defn) function-name]
-                 (first-doc-line doc) (conj (first-doc-line doc))
-                 (and (nil? arglists) schema)
-                 (conj {:malli/schema schema}))]
-    (if (= 1 (count arglists))
-      (apply list (concat prefix [(first arglists) nil]))
-      (apply list
-             (concat prefix
-                     (if (seq arglists)
-                       (map #(list % nil) arglists)
-                       [['& 'arguments] nil]))))))
-
 (defn- require-specs
   [{:seon.ns/keys [requires aliases]}]
   (let [required-names (set requires)
@@ -427,15 +406,18 @@
        (when owner-agent-id (str "; it belongs to agent " owner-agent-id))
        ". Every contracted `defn` evaluated here becomes one."))
 
-(defn- function-source
-  [function]
-  (or (:seon.fn/source function) (pr-str (signature-form function))))
-
 (defn- schema-error-message
+  "The `:error/message` a schema declares on its own properties or, for a named
+  error `[:and :seon.error/base [:map {...} ...]]`, on a conjunct's."
   [row]
-  (let [form (::schema-form (schema-definition row))]
-    (when (and (vector? form) (map? (second form)))
-      (:error/message (second form)))))
+  (let [form (::schema-form (schema-definition row))
+        message (fn [child]
+                  (when (and (vector? child) (map? (second child)))
+                    (:error/message (second child))))]
+    (when (vector? form)
+      (or (message form)
+          (when (and (= :and (first form)) (some #{:seon.error/base} form))
+            (some message (rest form)))))))
 
 (defn- compact-schema-line
   [row]
@@ -495,7 +477,7 @@
                  (pr-str (ns-form namespace-name requires))
                  namespace-source)
         member-parts
-        (concat (map function-source functions)
+        (concat (map :seon.fn/source functions)
                 (map (fn [row]
                        (schema-registration-line
                         (:seon.schema/key row)
@@ -645,7 +627,7 @@
            (map (fn [function]
                   [:details
                    [:summary [:code (:seon.fn/sym function)]]
-                   [:pre [:code (function-source function)]]])
+                   [:pre [:code (:seon.fn/source function)]]])
                 functions)))
          )))))
 

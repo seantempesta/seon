@@ -89,3 +89,15 @@ be one valid contract.
 - A sweep confirms no other first-party `:malli/schema` writes a predicate
   unquoted; the program graph already records every arity's declaration, so
   this is a query rather than a read-through.
+
+## Observation 2026-09-25: `seon.cluster.process/run-process!`
+
+Same class. Its contract names `[:fn seon.cluster.process/progress-atom?]`
+unquoted (`src/seon/cluster/process.clj:215`; `terminate-subprocess!` names
+`process?` the same way). Calling it without `:seon.operator.subprocess/deadline-ms`
+on default returns "run-process! :malli.core/invalid-input: the refusal could
+not be built." with a chain ending in "A durable Malli definition contains an
+unnamed callable", instead of a refusal naming the missing deadline.
+`seon.cluster.subprocess-test/foreign-process-refuses-an-undeclared-deadline-before-launch`
+asserts the wanted refusal and stays red until the predicates are quoted.
+

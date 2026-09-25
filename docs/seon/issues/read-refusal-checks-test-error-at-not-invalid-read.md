@@ -38,3 +38,16 @@ fix-adoption-dependents). Remaining: the other `(:seon.error/at X)` checks on
 database reads in `src/seon/cluster.clj` and elsewhere, and making `q`'s
 refusals always satisfy `:seon.db/invalid-read-error` (narrow its output union
 so a refusal-shaped map without the base members refuses at the producer).
+
+## Observation 2026-09-25 (lane delete-duplicates)
+
+`seon.render.ns/read-refusal?` keyed on `:seon.db/read-operation`, which no
+current `seon.db` refusal carries, and it called `contains?` on string and
+hiccup sections, throwing `IllegalArgumentException` on any distance-1 namespace
+that references schemas. It now tests the declared member `:seon.db/invalid-read`
+on maps only. Producer gap found at the same REPL: a bounded `seon.db/pull`
+budget refusal (`{:selector [:seon.ns/name {:seon.fn/_ns [:seon.fn/sym]}] :max-results 1}`
+on `seon.flow`) returns `:datahike.budget/*` plus the error base but neither
+`:seon.db/invalid-read` nor `:seon.db/refused-read-operation`, so every
+member-keyed check misses it; the equivalent `q` refusal carries both.
+

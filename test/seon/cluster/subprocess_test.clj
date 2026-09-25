@@ -1,6 +1,7 @@
 (ns seon.cluster.subprocess-test
   (:require [babashka.process :as process]
             [clojure.java.io :as io]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support])
@@ -74,7 +75,9 @@
                   ["/usr/bin/python3" "-c" python
                    (.getPath ready-file) (.getPath go-file)
                    (.getPath child-file)]
-                  :seon.operator.subprocess/deadline-ms 5000})))]
+                  ;; The parent and child start in ~100 ms; the deadline plus the
+                  ;; owner's 1 s TERM grace must fit the test's 5 s bound.
+                  :seon.operator.subprocess/deadline-ms 2000})))]
         (try
           (await-created! watcher (.getName ready-file))
           (spit go-file "")
@@ -104,7 +107,11 @@
          #((var-get #'operator.process/run-process!)
             {:seon.operator.subprocess/argv
              ["/a/foreign/process/that/must/not/be-launched"]}))]
-    (is (= :seon.operator.subprocess/deadline-ms (:seon.operator.subprocess/deadline-member (ex-data failure))))))
+    ;; The armed contract refuses before the body runs, naming the absent
+    ;; deadline as its input problem.
+    (is (= :seon.fn.arity/input (:seon.error/member (ex-data failure))))
+    (is (str/includes? (str (:seon.error/message (ex-data failure)))
+                       ":seon.operator.subprocess/deadline-ms"))))
 
 (deftest foreign-process-deadline-covers-output-capture
   (let [release-capture (promise)
