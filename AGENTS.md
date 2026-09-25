@@ -58,7 +58,10 @@ running system: a specification or source citation is not evidence of installati
    libraries on the web before writing replacements in a shrinking assignment.
    If a fix, cleanup, conversion or replacement grows code, justify to the owner before
    integration what it adds, why nothing smaller works, and what it lets go later.
-4. **Review before implementation.** Obtain independent design review for simplicity,
+4. **Review before implementation.** Opus writes every first-pass design and implements;
+   Astra, an outside model trained on a different distribution, reviews every design and
+   diff and audits existing code, so hybrid designs improve on both and bugs surface in
+   designs and code alike. Obtain that independent review for simplicity,
    dependency use, correctness and these laws; root rules on every finding and gives the
    implementer the reviewed design and findings. The sole exception is an obvious small
    bug fix at a named seam, stated in the assignment. Review actual diffs and evidence;
@@ -296,8 +299,8 @@ No git worktrees without the owner's personal authorization for that specific us
 Preserve unrelated edits: no `git add -A`, `reset --hard`, `stash` or shared-file restore.
 Commit coherent slices with `git commit --only -- <owned paths>`; report released paths
 so root updates the ledger. Never push or merge beyond explicit owner authorization.
-Use native collaboration, the documented launcher or Opus; read the lane skill before
-`bin/codex-agent`. Do not nest delegation in bounded assignments, sandbox assigned work,
+Use Opus for design and implementation lanes and Astra through `bin/codex-agent` for
+reviews and audits; read the lane skill before `bin/codex-agent`. Do not nest delegation in bounded assignments, sandbox assigned work,
 or overlap your own probe/test JVMs. Cite the existing issue/spec and raw evidence in
 assignments; use verify/falsify/probe language. Resume usage-limited agents only with
 owner authorization, retaining their identity. Make paid provider runs deliberate.
