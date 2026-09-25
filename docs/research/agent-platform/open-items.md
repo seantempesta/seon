@@ -128,6 +128,7 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 - accretion `source-harvest-keeps-refusal-render-contracts-coherent` 10.7–17.5 s vs 5 s: rebuilds the whole program's rows per run (cost owner).
 - Process owner race (S-process landing): a descendant forked during termination escapes and the refusal reads `reaped? true` — OWNER DECISION: kill -STOP freeze / process groups / declared outside the guarantee.
 - Publication gap: `script/` namespaces loaded by path (`dev_cache.clj:220-221` loads `script/seon/dev/dependency_digest.clj` only when absent) are never reloaded by adoption, so committed script changes never reach the running JVM (S-scripts landing). Fold into the `script/` indexing/move-into-src plan.
+- accretion `a-gate-test-runs-with-its-authors-cluster-custody` 6.3 s vs 5 s (newly measurable; candidate evaluation + gate test, unprofiled).
 - Datahike parity baseline (`test/seon/schema/datahike_parity.edn`) is weeks stale (516 forms differ, ~53 extra / 32 missing attributes): regenerate inside a test world with a per-attribute explanation, as its own assignment — never as a side effect of another lane.
 - `seon.ai/complete` ignores `:seon.ai/no-provider` (issue provider-completion-ignores-the-no-provider-request-attribute.md; ai.clj owner).
 - Concurrency: long-tier suites (independence 137 s pool, streams, publication-concurrency) run with --include-long at a quiet window; concurrency-test "Agent creation refused" error unassigned.
