@@ -754,14 +754,19 @@
    digest owner `seon.db/definition-digest-of` with its namespace's stored row
    in `database`, the digest `seon.db/write-digest-error` reproduces. Never
    assoc onto a row."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map :map] :map]}
-  [database row overrides]
-  (let [row (merge row overrides)
-        namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))]
-    (assoc row :seon.program/definition-digest
-           (db/definition-digest-of
-            (db/carried-projection database) row
-            (some->> namespace-name (vector :seon.ns/name) (db/pull database '[*]))))))
+  {:malli/schema [:function
+                  [:=> [:cat :seon.db/database-value :map :map] :map]
+                  [:=> [:cat :seon.db/database-value :map :map [:maybe :map]] :map]]}
+  ([database row overrides]
+   (let [namespace-name (second (or (:seon.fn/ns row) (:seon.test/ns row)))]
+     (revised-row database row overrides
+                  (some->> namespace-name (vector :seon.ns/name) (db/pull database '[*])))))
+  ([database row overrides namespace-row]
+   ;; The writer digests with the namespace row the SAME transaction stores, so a
+   ;; fixture that writes its namespace beside the row hands that row in.
+   (let [row (merge row overrides)]
+     (assoc row :seon.program/definition-digest
+            (db/definition-digest-of (db/carried-projection database) row namespace-row)))))
 
 (defn revision
   "The upsert changing the STORED declaration `identity` by `overrides`, with the
@@ -785,16 +790,16 @@
   ([database identity source overrides]
    (let [projection (db/carried-projection database)
          [attribute declaration-symbol] identity
+         ns-row (namespace-row database (symbol (namespace declaration-symbol)))
          rows (seon.fn/source-rows
-               database (program/shapes-in projection)
-               (namespace-row database (symbol (namespace declaration-symbol)))
+               database (program/shapes-in projection) ns-row
                source (set (keys (:seon.schema.projection/forms projection))))]
      (revised-row
       database
       (or (some #(when (= declaration-symbol (get % attribute)) %) rows)
           (throw (ex-info "The fixture source did not define the requested declaration."
                           {:seon.program/identity identity :seon.program/source source})))
-      overrides))))
+      overrides ns-row))))
 
 (defn program-fn-row
   "A complete indexed declaration, or an explicitly analyzed agent fixture.
