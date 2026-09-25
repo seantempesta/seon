@@ -101,18 +101,20 @@
     (mapv
      (fn [advertisement]
        (let [cluster (:seon.boot/cluster-name advertisement)
-             observation
+             ;; Discovery needs only health; the whole observation stays in the JVM.
+             health
              (try
                ((ns-resolve 'seon.operator 'prepl-value!) advertisement
                 (pr-str `(do
                            (~'seon.cluster/project-next-prepl-value!
                             {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
-                           (~'seon.cluster/mcp-runtime-observation ~cluster))))
+                           (:seon.dev.mcp/health
+                            (~'seon.cluster/mcp-runtime-observation ~cluster)))))
                (catch Exception _ nil))]
          {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster
           :seon.dev.mcp/path (str (io/file root "data/clusters" cluster "prepl.edn"))
-          :seon.dev.mcp/state (if observation
-                               (if (#{:observed :faulted} (:seon.dev.mcp/health observation)) :alive :degraded)
+          :seon.dev.mcp/state (if health
+                               (if (#{:observed :faulted} health) :alive :degraded)
                                :unknown)
           :seon.dev.mcp/advertisement advertisement :seon.dev.mcp/source :advertisement}))
      advertisements)))
@@ -686,9 +688,10 @@
                 ((requiring-resolve
                   'seon.cluster/project-next-prepl-value!)
                  {:seon.dev.mcp/read-only? true})
-                ((requiring-resolve
-                  'seon.cluster/mcp-runtime-observation)
-                 ~cluster)))
+                ;; The observation's declared AI face, the one `bin/seon status` prints.
+                ((requiring-resolve 'seon.cluster/runtime-observation-ai)
+                 {:seon.render/value
+                  ((requiring-resolve 'seon.cluster/mcp-runtime-observation) ~cluster)})))
             default-timeout-ms))]
       (or (:seon.dev.mcp/value projected) projected))
     (catch Throwable throwable

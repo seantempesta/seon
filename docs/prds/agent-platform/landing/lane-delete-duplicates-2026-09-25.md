@@ -185,11 +185,14 @@ evidence, so the assertion now compares the refusal without them.
   3,000-char messages and a 30,000-char failure renders to 575 chars, count 50, omitted 45.
 - Babashka: `(require 'seon.operator)` loads, `-main` resolves, `status-summary` is gone; the hook loads;
   `bin/seon status` runs end to end (against the not-yet-adopted JVM it prints the old bounded value as sent).
-- Not done, needs `script/seon/dev/mcp.clj` (bridge owner): MCP `runtime_status` prints the whole observation
-  through the value projection (the one clipper), not through this face; to use the face its form
-  (`mcp.clj:690`) must call `seon.cluster/runtime-observation-ai` on the observation. Risk for the same owner:
-  `discovery-rows` (`mcp.clj:110`) reads the observation with `:seon.dev.mcp/project? false` on every call and
-  needs only `:seon.dev.mcp/health`; the producer is now unbounded, so that read should ask for health alone.
+- MCP (granted `script/seon/dev/mcp.clj` afterwards): `runtime_status`'s form calls
+  `seon.cluster/runtime-observation-ai` on the observation, so MCP and `bin/seon status` print one face;
+  `discovery-rows` asks the JVM for `(:seon.dev.mcp/health ...)` alone. REPL on default: the discovery value is
+  `:faulted`, 8 chars, where it was the whole observation; the face is 2,231 chars. Regression
+  `seon.dev.mcp-bridge-test/runtime-status-prints-the-observations-declared-ai-face` (real `mcp-io-prepl`).
+  Order: the bridge reloads `mcp.clj` on change, and `runtime-observation-ai` exists in default only after
+  `cluster.clj` is adopted; until then `runtime_status` shows the unresolved-function error value (discovery is
+  unaffected).
 
 ## Round 5, R5 grader half (root ruling option 1): completion is a fact
 

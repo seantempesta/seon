@@ -595,6 +595,38 @@
         (clojure.core.server/stop-server server-name)
         (delete-fixture-root! fixture-root)))))
 
+(deftest runtime-status-prints-the-observations-declared-ai-face
+  ;; MCP runtime_status and `bin/seon status` print one face: the observation's
+  ;; declared `seon.cluster/runtime-observation-ai`, never the whole value.
+  (let [cluster (first (sort (keys @@(ns-resolve 'seon.cluster (symbol "running-instances")))))
+        fixture-root (io/file project-root "tmp" (str "mcp-face-" (random-uuid)))
+        root (.getCanonicalPath (doto fixture-root .mkdirs))
+        server-name (str "mcp-face-" (random-uuid))
+        server (clojure.core.server/start-server
+                {:name server-name :accept 'seon.cluster/mcp-io-prepl
+                 :args [cluster seon.config/defaults]
+                 :address "127.0.0.1" :port 0})]
+    (try
+      (is (some? cluster) "a running cluster answers runtime_status")
+      (write-advertisement! root cluster (assoc (advertisement cluster (.pid (java.lang.ProcessHandle/current))
+                                                               (current-process-start-date))
+                                                :seon.boot/prepl-port (.getLocalPort server)))
+      (let [face ((bridge-var 'runtime-observation) root cluster)]
+        (is (= cluster (:seon.dev.mcp/cluster face)) (pr-str face))
+        (is (#{:observed :faulted :unknown} (:seon.dev.mcp/health face)))
+        (is (not-any? #(contains? face %) [:seon.dev.mcp/open-fault-count
+                                            :seon.dev.mcp/replaced-root-count
+                                            :seon.dev.mcp/profile])
+            "the face names totals inside each family, not the whole value's members")
+        (when-let [faults (:seon.dev.mcp/open-faults face)]
+          (is (<= (count (:seon.dev.mcp/top faults)) 5))
+          (is (not-any? :seon.error/message (:seon.dev.mcp/top faults)))))
+      (testing "discovery reads health alone and still classifies the live cluster"
+        (is (= [:alive] (mapv :seon.dev.mcp/state ((bridge-var 'discovery-rows) root)))))
+      (finally
+        (clojure.core.server/stop-server server-name)
+        (delete-fixture-root! fixture-root)))))
+
 (deftest an-unreadable-prepl-value-keeps-its-raw-text-beside-the-reader-error
   (let [event {:tag :ret :val "#object[java.lang.Object 0x1]" :ns "user"}
         decoded ((bridge-var 'decoded-projection-event) event)]
