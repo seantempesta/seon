@@ -1,412 +1,513 @@
 ---
 type: design
-status: "Opus first pass (lane design-references-as-refs-opus); awaiting Astra review; no source edited"
+status: "Opus revision 2: Astra REVISE 93b519229 (nine findings) folded in place; P10 run on fresh default; awaiting Astra re-review; no source edited"
 created: 2026-09-25
-scope: Which program relations become Datahike refs with a named target schema, produced at the one analysis producer (var-row and its siblings), validated at the writer and followed by the render walk; which stay values and why; the render index
-source-pin: HEAD e7b9e8791 (C4 step A; 0bd3a38b4 reverted by e00a3ccda); REPL on default at pid 59566 before root replaced the JVM at 21:53Z
-aligned-with: parser-proves-the-spec-2026-09-25.md; language-requirements-2026-09-24.md §§1.9-1.15, 5a, 7, 11, 12; task-context-install-design-2026-09-25.md (revision 4, §4.1 interim value edges); datahike-deletion-and-the-program-graph-2026-09-16.md
+scope: Which program relations become Datahike refs with a named target, produced at the one analysis producer (var-row and its siblings), validated at the final writer and followed by the render walk; which stay values and why; which relations are live deletion obligations; the render index
+source-pin: HEAD 757964097; Datahike 4157916b; Malli befcd302a. REPL P1-P9 on default pid 59566 (old store), P10-P14 on fresh default pid 39484
+aligned-with: parser-proves-the-spec-2026-09-25.md; language-requirements-2026-09-24.md §§1.9-1.15, 5a, 7, 11, 12; task-context-install-design-2026-09-25.md (revision 4, §4.1 interim value edges); datahike-deletion-and-the-program-graph-2026-09-16.md; unbreakable-connections-2026-09-16.md
+review: references-as-refs-design-review-2026-09-25.md (93b519229)
 ---
 
 # References as refs: one producer names every link
 
-**What exists.** clj-kondo analysis already carries every link (calls, references, keywords, `:seon/tasks`,
-`:seon/must-read`, `:seon/see-also`, seeds, contract keys). `seon.fn/var-row` (`src/seon/fn.clj:683`),
-`namespace-row` (`:226`), `task-links` (`:616`) and `seon.schema/canonical-schema-rows` (`src/seon/schema.clj:3700`)
-turn it into rows. The writer stores them, and the walk and the deletion check read them back.
-Today "this attribute names that identity" is written down in six places, by hand or by guessing (§1c).
+**What exists.**
+- The one analyzer is clj-kondo. Its analysis already carries every link: calls, references, keywords,
+  `:seon/tasks`, `:seon/must-read`, `:seon/see-also`, seeds and docstrings.
+- The producers turn that analysis into canonical rows: `seon.fn/var-row` (`src/seon/fn.clj:683`), `namespace-row`
+  (`:226`), `task-links` (`:616`), `seon.program/contract-facts` (`src/seon/program.cljc:1072`) and
+  `seon.schema/canonical-schema-rows` (`src/seon/schema.clj:3700`).
+- In a canonical row a ref is already written as its target's identity lookup ref, `[:seon.ns/name n]`. The writer
+  (`declaration-value`, `src/seon/db.clj:4224`) and the portable exporter (`published-index-rows`, `fn.clj:3597`)
+  reproduce that form, and every definition digest is computed over it.
+- Which attribute names which identity is recorded in six separate places (§1c).
 
-**The principal Clojure approach.** Every attribute that names another entity declares its target identity once, as
-data in its schema: a single `:seon.db/reference-to` property. The storage type is chosen per relation. It is a ref
-when the fact is a statement about a program row that must exist when the fact is written. It stays a value when the
-fact observes a token that may name nothing: an external Var, a function not yet written, or evidence that outlives
-its target. The deletion obligations, the walk's edge families, the issue citation index and the render-target check
-all derive from that one declaration.
+**The principal Clojure approach.**
+- One schema property, `:seon.db/reference-to`, names the **direct target identity** of every attribute that names
+  another entity. It carries no other meaning.
+- Which relations are **live deletion obligations** is not a new flag. It is already decided by row ownership: the
+  attribute belongs to a program declaration family, or to a component owned by one, and `seon.program/shapes-in`
+  (`program.cljc:255`) is the one answer to that question.
+- Storage is chosen per relation:
+  - a ref where the producer can prove the target exists in the candidate world, namely contract keys, schema uses
+    and schema render pairs;
+  - a value for an observed token: an external Var, a function not yet written, an authored link that may name a
+    path or a dependency, or evidence that outlives its target.
+- Invocation (reach) stays with `:seon.fn/invokes`. Issue citation stays within the issue schema. Neither is inferred
+  from `reference-to`.
 
 ## 0. Broken things first
 
-- **The default JVM was replaced mid-lane.** Root replaced it at 21:53:18Z (new pid 75756). Its boot had not
-  published `:seon.boot/cluster-connection` after more than 10 minutes. Probes P1–P9 ran on the old pid 59566. The
-  remaining counts (P10) could not run and are marked unmeasured. The replacement is not this lane's doing: every
-  probe was read-only or ran under `datahike.api/with`.
-- **The same fact is recorded in six ways.** Four hand lists or guesses say which attribute names which identity:
-  - the deletion obligations in `removed-definition-error` (`src/seon/db.clj:4077-4094`);
-  - `write-render-target-error`, which re-reads every schema form with `edn/read-string` (`:4021-4059`);
-  - the declared-edge rules (`src/seon/fn.clj:1690-1705`, `src/seon/test.clj:384-392`);
-  - the walk's interim table (task-context §4.1).
-
-  Two schema properties say it as well: `:seon.fn/reference-to` (`resources/seon/schemas/seon.fn.edn:17`) and
-  `:seon.issue/cites` (`seon.issue.edn:8-25`). They disagree already: `:seon.test/subject` has no obligation, and
-  `:seon.fn/must-read` and `see-also` are in no obligation list, so a must-read target can be deleted with no refusal.
-- **56 first-party callee names have no program row.** On default, 56 distinct `seon.*`/`my.*` callee symbols in
-  `:seon.fn/calls` resolve to no `:seon.fn/sym` row. Examples:
-  - `seon.render/same-call-cache-evidence?` is a `def` alias (`src/seon/render.clj:897`) and has no function row;
-  - `seon.dev.docstring/format-findings` lives under `script/`, outside the indexed roots;
-  - `seon.sci.eval/absent-intern` is a `def` of an `Object`.
-
-  The Var population is not the row population. Any design that makes callees refs has to face this first (§3a).
-- **A tempid that names nothing is admitted silently** (P7). `{:db/id "a" … :probe/calls #{"nobody"}}` stored
-  `[123838 :probe/calls 123839]`, and 123839 has 0 datoms. A producer that emits refs through tempids must define every
-  tempid it names. The writer must refuse a ref target with no identity datom. Datahike does not check this
-  (`reference-code/datahike/src/datahike/db/transaction.cljc:34-53`).
+- **Default was replaced twice during this lane.** Root replaced the JVM at 21:53Z and later swapped in a fresh
+  store (pid 39484).
+  - P1–P9 were measured on the old store. P10–P14 were measured on the fresh one.
+  - On the fresh store, entity-id history is trivially stable (1,611 transactions), so the history-stability half of
+    P10 proves nothing and is not counted as evidence.
+  - Every probe was read-only or ran under `datahike.api/with`, and this lane created no branches.
+- **Six places record "attribute names identity", and they disagree** (§1c).
+  - `:seon.fn/must-read` and `:seon.fn/see-also` are in no deletion obligation.
+  - The first revision said `:seon.test/subject` was missing too. That was wrong: `removed-definition-error` lists it
+    (`db.clj:4086`).
+- **Docstring links already point at deleted functions** (P13).
+  - Function docstrings on the fresh store hold 44 `[[x]]` links, and 41 resolve in the holder's namespace.
+  - The three that do not are `seon.schema/restore!`'s `[[snapshot-state]]` and `[[restore-state!]]`
+    (`schema.clj:3663`), which name functions that no longer exist, and `seon.ai.tokens/estimate`'s
+    `[[shipped-calibration]]`.
+  - Namespace docstrings hold 4 more links, which were not resolved.
+  - Nothing ingests these links today, so the rot is invisible.
+- **A tempid that names nothing is admitted silently** (P6). `{:db/id "a" … :probe/calls #{"nobody"}}` stored a ref to
+  an entity with 0 datoms. Datahike checks only the value's type (`db/transaction.cljc:34-53`).
+- **56 first-party callee names have no row** (P3, old store). Examples are `def` aliases
+  (`seon.render/same-call-cache-evidence?`, `render.clj:897`), `script/` namespaces and `def`s of objects. The Var
+  population is not the row population.
+- **Schema dependency ordering does not terminate on a cycle** (`dependency-first-schema-keys`, `schema.clj:3681`).
+  - The helper adds a key to `seen` only after visiting its dependencies, so a cycle recurses until the stack
+    overflows.
+  - P12: the fresh store has 1,951 schemas that reference others, with 0 cycles and 0 self-references, so nothing
+    fires today.
+  - S2 must refuse a cycle by name (§3b).
 
 ## 1. Inventory: attributes that name another entity
 
-### 1a. Program attributes, measured on default (P1–P3, pid 59566)
+### 1a. Program attributes (P2 old store; P10 fresh store)
 
-A value "resolves" when an identity row carries it. The Why column gives the stated reason, with its source.
+"Resolve" means an identity row carries the value. "Lifecycle" is what surviving declarations do when the target is
+removed:
+- **blocks** means removal refuses while a surviving declaration still names the target;
+- **observation** means the value survives and never blocks;
+- **sweep** and **refuse** are Datahike's optional and required ref behavior.
 
-| Attribute | Schema (HEAD) | Stored | Datoms / distinct / resolve | Why a value today | Verdict |
-|---|---|---|---|---|---|
-| `:seon.fn/calls` | `seon.fn.edn:49` `[:set {:seon.db/index true} :seon.program/edge-symbol]` | symbol, many, indexed | 65,935 / 5,032 / 4,299 (22,202 datoms resolve, 34%) | 0e8f7d323 retyped it from `[:set :seon.db/ref]` (deletion study D1–D6). `retractEntity` on a callee silently swept every caller edge. A dangling ref was invisible. Redefinition minted a new eid that the old refs did not follow | **value** (§3a) |
-| `:seon.fn/references` | `seon.fn.edn:70` | symbol, many, indexed | 33,419 / 2,673 / 1,529 | same commit: "Names survive target retraction; selection follows them conservatively" | **value** |
-| `:seon.fn/unresolved-references` | `seon.fn.edn:71` | symbol, many | 2,414 / 564 / 262 | unresolved by definition | **value** |
-| `:seon.fn/keywords` | `seon.fn.edn:124` | keyword, many | 42,894 / 5,930 / 2,303 | literal mentions. 3,212 first-party keywords (`:seon.db/result`, test-local keys) are not schemas | **value, not a reference** |
-| `:seon.fn/writes` | `seon.fn.edn:72` | keyword, many | 1,107 / unmeasured (P10) | 0e8f7d323: "Values survive schema-row retraction" | **value** (analysis over-reports helpers) |
-| `:seon.fn/must-read`, `:seon.fn/see-also` | `seon.fn.edn:68-69` | symbol, many, indexed | 0 on default (task-links has not been republished) | written by `task-links` (`fn.clj:616-633`) as resolved symbols | **ref** (§2, §3b) |
-| `:seon.fn.arity/input-refs`, `output-refs`, `guard-refs` | `seon.fn.arity.edn:2-10` | keyword, many, indexed | 3,038 / 572 / **572**; 2,270 / 586 / **586**; guard unmeasured | 0e8f7d323 retyped them from `[:set :seon.db/ref]` in the same sweep, with no separate reason recorded | **ref** |
-| `:seon.schema/references` | `seon.schema.edn:82` | keyword, many | 5,841 / 2,479 / **2,479** | the same sweep. `canonical-schema-rows` already refuses a missing target ("Missing targets still refuse", `schema.clj:3702`) | **ref** |
-| `:seon.ns/requires` | `seon.ns.edn:35` `[:set {:seon.db/index true} :symbol]` | symbol, many | 4,334 / 217 / 111 | 106 required namespaces are external (`datahike.pull-api`, `sci.impl.opts`) | **value** |
-| `:seon.fn/defined-by` | `seon.fn.edn:35` | symbol | 4,928 / 8 / 0 | the defining macro (`clojure.core/defn`), a grammar token | **value** |
-| `:seon.test/subject` | `seon.test.edn:10` | symbol, indexed | 0 datoms | test-first: a test may name a function not written yet (7.6 raised → specified) | **value** |
-| `:seon.test/reach` | `seon.test.edn:2` | symbol, many | 0 datoms | execution evidence of the tested closure (5a.7). It must outlive a deleted function | **value** |
-| `:seon.task/tasks` | `seon.task.edn:11` | string handle, many, indexed | 8 / 3 / 3 | ruled: "stored as keyword VALUES, not refs, so tasks never ride program merge" (7.2; parser R2) | **value** |
-| `:seon.task/must-read` | `seon.task.edn:9` | symbol, many | 7 / 7 / 6 | the dangling one, `seon.sci.eval/definition-rows`, is a function the task asks for. 7.4 allows EDN to name a subject that does not exist yet | **value** |
-| `:seon.fn/ns`, `:seon.test/ns`, `:seon.fn/file` | `seon.fn.edn`, `seon.test.edn` | **ref** | 4,928 / 2,205 / 7,589 | already refs, written as lookup refs `[:seon.ns/name n]` | installed |
-| `:seon.fn.arity/input-schema`, `return-schema` | C4 step A made them optional (e7b9e8791) | **ref** → shape | 2,321 each | the shape mirror, which C4 retires | retiring (not this lane) |
-| `:seon.render/ai`, `:seon.render/html` on schema rows | `seon.render.edn:19` `[:or :qualified-symbol :string]` | **EDN-string codec** | 334 / 50 renderers / 50 have rows | the `:or` falls to the string codec (`src/seon/schema/datahike.clj:113-121`). The same attribute also holds rendered text | **ref**, under a new name (§4) |
-| `:seon.schedule.task/function` | `seon.schedule.task.edn:3` | **ref**, `:seon.fn/reference-to :seon.fn/sym` | — | the installed precedent: a ref with its target named | installed; rename the property |
-| `:seon.issue/functions`, `keys`, `namespaces`, `tests`, `errors`, `runs`, `issues` | `seon.issue.edn:8-25` | **ref**, `:seon.issue/cites [...]` | — | the installed precedent. Unresolved tokens are kept as values in `:seon.issue/unresolved` (`issue.clj:419`) | installed; rename the property |
-| `:seon.error/operation`, `:seon.instrument/fn`, `:seon.eval/renderer` | `seon.error.edn:377` etc. | symbol, indexed | 133 / 133 / 11 | the guide (§3): "A fault must retain the identity it observed even if the function is later deleted" | **value**. Conflicts with 12.2, see §7 Q3 |
+| Attribute | Holder family | Stored | Datoms / distinct / resolve | Why a value today | Storage verdict | Lifecycle |
+|---|---|---|---|---|---|---|
+| `:seon.fn/calls` | fn, test rows | symbol, many, indexed | 65,605 datoms (fresh); old store 65,935 / 5,032 / 4,299, of which 677 names are external | 0e8f7d323, deletion study D1–D6 | value | blocks (a program declaration) |
+| `:seon.fn/references` | fn, test | symbol, many, indexed | 33,419 / 2,673 / 1,529 (old) | "Names survive target retraction" (0e8f7d323) | value | blocks |
+| `:seon.fn/unresolved-references` | file row | symbol, many | 2,414 / 564 / 262 (old) | unresolved by definition | value | observation (no `reference-to`: the targets are unknown) |
+| `:seon.fn/keywords` | fn, test | keyword, many | 42,894 / 5,930 / 2,303 (old) | literal mentions | value | none: not a reference, so no `reference-to` |
+| `:seon.fn/writes` | fn | keyword, many | **P10: 1,107 / 291 / 236**. Unresolved: `:db.unique/identity`, `:datahike/expected-basis-t`, `:seon.config/desired-row` | analysis observes written keys, including installed attributes and tx-meta keys | value, `reference-to #{:seon.schema/key :db/ident}` | blocks, for both schema rows and installed attributes (today's `db.clj:4096` case) |
+| `:seon.effect/capability` | fn | symbol, indexed | 10 (old) | metadata token | value | blocks, fn holders only (today's `db.clj:4099-4100` condition) |
+| `:seon.fn/must-read`, `:seon.fn/see-also` | fn, ns | symbol, many, indexed | 0 on both stores (no source annotation outside tests) | `task-links` resolves them through aliases. Authored targets include external Vars (`task_ingestion_test.clj:24`: `` `s/join ``) and paths | **value** (changed from revision 1) | blocks for program targets |
+| docstring `[[x]]` links | fn, ns | not ingested | P13: 44 fn-doc links, 41 resolve; 4 ns-doc links | — | value, in `:seon.fn/see-also` (§3e) | blocks for program targets |
+| `:seon.fn.arity/input-refs`, `output-refs` | arity (component of fn) | keyword, many, indexed | **P10: inputs 3,048 / 575 / 575**; old outputs 2,270 / 586 / 586 | 0e8f7d323 swept them along; no reason of their own was recorded | **ref** under new names | blocks, through the owning fn |
+| `:seon.fn.arity/guard-refs` | arity | keyword, many | **P10: 0 datoms** | same | ref under a new name | blocks |
+| `:seon.schema/references` | schema row | keyword, many | 5,841 / 2,479 / 2,479 (old) | same sweep. `canonical-schema-rows` refuses a missing target (`schema.clj:3702`) | **ref** under a new name | blocks |
+| `:seon.render/ai`, `:seon.render/html` stored on schema rows | schema row | EDN-string codec | 334 / 50 renderers / 50 have rows (old) | the `:or` falls to the codec (`schema/datahike.clj:113-121`) | **ref** under schema-specific new names | blocks |
+| `:seon.ns/requires` | ns | symbol, many | 4,334 / 217 / 111 (old); 106 external | external namespaces | value | blocks for program targets |
+| `:seon.fn/defined-by` | fn | symbol | 4,928 / 8 / 0 | grammar token (`clojure.core/defn`) | value | none (no `reference-to`) |
+| `:seon.test/subject` | test | symbol, indexed | 0 (fresh) | test-first: a test may name a function not yet written | value | blocks once the subject exists (today, `db.clj:4086`) |
+| `:seon.test/reach` | `:seon.test/result` (data) | symbol, many | 0 | execution evidence | value | observation: invalidates proof reuse, never blocks |
+| `:seon.task/tasks` | fn, ns, test | string handle, many | P10: 8 / 3 / 3 | ruled in 7.2: tasks are data and never ride program merge | value, `reference-to #{:seon.task/id}` | destination-gate dangling check (7.5, installed `seon.issue/candidate-dangling`), not a program deletion obligation |
+| `:seon.task/must-read` | task (data) | symbol, many | 7 / 7 / 6 (old) | 7.4: EDN may name a subject that does not exist yet | value | observation |
+| `:seon.fn/ns`, `:seon.test/ns`, `:seon.fn/file` | fn, test | ref | installed | — | ref | required members; portable through `published-index-rows` |
+| `:seon.schedule.task/function` | schedule task (data) | required ref | 3 holders | — | ref | a required ref refuses the sweep. Invocation comes from `schedule.clj:630` `{:seon.fn/invokes #{:seon.schedule.task/function}}` |
+| `:seon.issue/functions` … `issues` | issue (data) | ref | installed | `:seon.issue/cites` | ref | the issue's own required/optional and retention rules; not program obligations |
+| `:seon.issue/files` → `:seon.issue.citation/file` | issue → owned citation → file | two refs | installed | the `cites` target sits on the outer edge today | refs | component and ref |
+| `:seon.agent/task` (proposed by task-context) | agent (data) | optional ref | — | — | ref | sweep |
+| `:seon.error/operation`, `:seon.instrument/fn`, `:seon.eval/renderer` | error, instrument, eval (data) | symbol, indexed | 133 / 133 / 11 (old) | guide §3: the observed identity must survive deletion | value (observations) | observation. Live error relations are open (§7 Q3) |
 
-Error-member attributes that only report an offending name (`:seon.call-preparation/unresolved-symbol`,
-`:seon.flow/unsupported-method`, and about 60 more in `seon.effect`, `seon.env`, `seon.config`, `seon.issue` and
-`seon.db`) observe a token inside a refusal. They stay values. They are not relations the walk or the deletion check
-follows.
+About 60 error-member attributes only report an offending name inside a refusal, for example
+`:seon.call-preparation/unresolved-symbol`. They stay values without `reference-to`.
 
 ### 1b. The history, quoted
 
-- **0e8f7d323** (2026-09-16), "Retype program edges and enforce final-state deletion obligations." It moved `calls`,
-  `references`, `writes`, arity `input`/`output`/`guard-refs` and `reach` from refs to values, deleted the `seon.fn.ast`
-  family, and deleted `:seon.fn/pending-calls`. That attribute's description was "Analyzer-observed call targets whose
-  program identity is not yet admitted. The declaration writer resolves them when that identity arrives." It was the
-  forward-reference machinery the ref model needed.
-- The reason is the deletion study's defect table (`datahike-deletion-and-the-program-graph-2026-09-16.md` §1):
-  - D1: `retractEntity` silently retracts every caller's ref;
-  - D2 and D3: the tombstones that avoided D1 looked like live functions and needed a second validator;
-  - D4: a ref to an eid with no datoms is admitted and then vanishes from joins;
-  - D5: redefinition mints a new eid and callers keep the dead one;
-  - D6: "`:seon.fn/calls` … declare **a relation between two entities** where the program actually has **a name
-    mentioned in source text**."
-
-  Option B was recommended because "it deletes three mechanisms (tombstones, identity minting, the second validator)
-  rather than adding one."
-- **The dissolved invariant.** Ruling 47, as quoted in the study §4: "every name the SCI context can resolve has a
-  program row, minted where the context learns it, so call edges cannot dangle by construction." Making callees refs
-  again brings it back.
-- **The contract keys were swept along without a reason of their own.** They resolve 100% (P3). Malli already
-  refuses an unregistered key when compiling the contract (parser T11). The deletion obligation already names them
-  (`db.clj:4091-4093`). None of D1–D6 applies to a relation whose target cannot be missing at write time.
+- **0e8f7d323** (2026-09-16) moved `calls`, `references`, `writes`, arity `input`/`output`/`guard-refs` and `reach`
+  from refs to values. It deleted `seon.fn.ast` and `:seon.fn/pending-calls`, whose description was
+  "Analyzer-observed call targets whose program identity is not yet admitted. The declaration writer resolves them
+  when that identity arrives."
+- The deletion study (§1) records D1–D6:
+  - D1: the sweep silently loses caller edges;
+  - D2 and D3: tombstones and their second validator;
+  - D4: a ref to an entity with no datoms is admitted and then disappears from joins;
+  - D5: redefinition mints a new eid;
+  - D6: "a name mentioned in source text" had been declared as "a relation between two entities".
+- Ruling 47's dissolved invariant ("every name the SCI context can resolve has a program row, minted where the
+  context learns it") is not revived.
+- **Refs for contract keys, schema uses and render pairs are acceptable only with the proofs of §3.** D1, D4 and D5
+  do apply to them: the sweep on target deletion, a target identity replaced under a new eid, and a foreign eid
+  replayed by merge. What differs is that the producer can refuse a missing target at admission, because Malli refuses
+  an unregistered contract key (parser T11) and `canonical-schema-rows` refuses a missing schema. The final writer
+  (§3c) and the portable-row owner (§3d) carry the rest.
 
 ### 1c. The six places that record "attribute → identity"
 
-| Place | What it holds | Fate |
+| Place | Holds | Fate |
 |---|---|---|
-| `removed-definition-error` obligations, `src/seon/db.clj:4077-4094` | hand list: calls, references, subject, capability → fn; requires → ns; writes, schema refs, arity refs → schema | derived from `:seon.db/reference-to` (S0) |
-| `write-render-target-error`, `db.clj:4021-4059` | `edn/read-string` of every schema form, then renderer symbols without rows | deleted: the render pair becomes a ref (S3) |
-| `declared-reference-rules`, `fn.clj:1690-1705`; `test.clj:384-392` | Datalog over `:seon.fn/reference-to` rows | read the one property (S0) |
-| `:seon.issue/cites`, `issue.clj:189-217` | issue attribute → cited identity attributes | the same property (S0) |
-| `:seon.fn/reference-to`, `seon.fn.edn:17` | one declaration, on `:seon.schedule.task/function` | renamed `:seon.db/reference-to` (S0) |
-| the walk's interim value-edge table, task-context §4.1 | eight `[holder identity]` pairs | derived. The three contract/schema rows become forward refs (S2) |
+| `removed-definition-error` obligations, `db.clj:4067-4104` | calls, references, subject, capability → fn; requires → ns; writes, schema refs, arity refs → schema; writes → `:db/ident` | derived (§2b). The equality witness is that the derived set equals today's list plus must-read and see-also |
+| `write-render-target-error`, `db.clj:4027-4065` | re-reads every schema form with `edn/read-string` for renderer symbols without rows | kept until S3 proves the form-to-ref derivation (§3c) |
+| `declared-reference-rules` rule 2, `fn.clj:1696-1701`; `test.clj:384-392` `reference-to` branch | `reference-to` treated as a reach edge | **P14: rule 2 yields 0 edges**. The only declaration is `:seon.schedule.task/function`, whose holders are schedule tasks, not function rows, and its reach comes from `:seon.fn/invokes` (`schedule.clj:630`). Both branches are deleted; invocation stays with `invokes` |
+| `:seon.issue/cites`, `issue.clj:189-217` | issue attribute → cited identities, one map entry per identity (a later attribute overwrites an earlier one) | kept as the issue-local citation property (§2c) |
+| `:seon.fn/reference-to`, `seon.fn.edn:17` | one declaration, on `:seon.schedule.task/function` | renamed to `:seon.db/reference-to`, direct-target meaning only |
+| the walk's interim table, task-context §4.1 | eight `[holder identity]` pairs | derived from `:seon.db/reference-to` |
 
 ## 2. The model
 
-### 2a. One declaration per relation
+### 2a. The descriptor, specified and validated
 
 ```clojure
-;; resources/seon/schemas/seon.db.edn: one property, whose value is the set of target identity attributes
-:seon.db/reference-to [:set {:min 1} :qualified-keyword]
-
-;; a statement: a ref, target named, required-ness decides refuse or sweep
-:seon.fn.arity/inputs [:set {:seon.db/reference-to #{:seon.schema/key}} :seon.db/ref]
-
-;; a token: the target's own identity schema as the member, so the value validates as that identity's shape
-:seon.fn/calls [:set {:seon.db/index true :seon.db/reference-to #{:seon.fn/sym}} :seon.program/edge-symbol]
+;; resources/seon/schemas/seon.db.edn
+:seon.db/reference-to
+[:set {:min 1 :description "Direct target identity attributes of this attribute's values. Navigation only: invocation is :seon.fn/invokes; deletion obligation derives from row ownership."}
+ :qualified-keyword]
 ```
 
-- The **projection derives** a `{attribute {:targets #{identity…} :storage (:ref | :value)}}` map once per projection
-  identity. The source is `m/properties` on the registry entries (the same read `issue.clj:204-209` does), plus the
-  bridge's value type. It is O(schema): 1,176 attributes are declared and about 40 carry the property. That one value
-  feeds:
-  - the deletion obligations, replacing the hand list in `db.clj:4077-4094`;
-  - the walk's edge families, replacing the §4.1 interim constant;
-  - issue citation;
-  - the declared-edge rules for test reach (`:seon.fn/invokes` stays the invocation marker it already is, so
-    `reference-to` no longer implies reach).
-- **A ref validates twice.**
-  - The producer resolves each target through its identity. A value with no row refuses by holder, attribute and
-    value, as `task-links` already refuses malformed annotations (`fn.clj:627-628`).
-  - The final writer checks that every asserted ref datom's target has one of the declared identity datoms. This is
-    one AEVT probe per distinct target and closes the tempid trap (§0).
-- **A value validates as its identity's shape.** Whether it resolves is a query: one `not-join`.
-- **Rendering follows a ref.** An EAVT seek reaches the target entity, and its identity attribute's
-  `:seon.program/row-schema` names the schema whose pair renders it. A value edge is followed by one AVET seek on the
-  declared identity. With the target named, the render key is exact, never guessed.
+- **Descriptor validation.** Validation runs once per supplied projection, in the one projection-derived value
+  `seon.program/references-in` (memoized on projection identity, like `shapes-in`). Every target must be:
+  - a registered schema whose properties carry `:seon.db/identity true`, or `:db/ident`;
+  - carrying a `:seon.program/row-schema`, except for `:db/ident`.
 
-### 2b. Per relation: storage, cardinality, lifecycle
+  A violation refuses the projection by attribute and target, as `assert-complete-schema!`
+  (`src/seon/schema/internal.cljc:309`) refuses incomplete contracts. `m/properties` only reads properties; it does
+  not validate them (`reference-code/malli/src/malli/core.cljc:2592`). So the property values are validated with a
+  compiled `m/validator` (`core.cljc:2637`) over the descriptor schema. No second registry or discriminator is added.
+- **Its value** is `{attribute {:targets #{identity…} :storage (:ref | :value) :owner-family identity-attribute?}}`.
+  - `:storage` comes from the bridge's value type (`compiled-storage`, `schema/datahike.clj:77`).
+  - `:owner-family` comes from `shapes-in` plus `:seon.db/component-schema`, for component attributes such as
+    arity members.
+  - It is O(schema). About 25 attributes carry the property.
+- **The value representation at each stage**, each with its schema and producer:
 
-| Relation | Storage | Card. | Component | Required | Lifecycle when the target goes | Named key |
-|---|---|---|---|---|---|---|
-| arity → input / output / guard schema | **ref** | many | no | optional member of the arity row | refuse while a contract names the key (derived obligation). The sweep never lands | new names `:seon.fn.arity/inputs`, `outputs`, `guards` (a value-type change cannot be adopted in place; see e00a3ccda) |
-| schema → schema it references | **ref** | many | no | optional | refuse (derived obligation) | `:seon.schema/uses` |
-| schema → its AI / HTML renderer | **ref** | one each | no | optional | refuse while a schema declares the pair | `:seon.schema/render-ai`, `:seon.schema/render-html` |
-| fn / ns → must-read, see-also, docstring links | **ref** | many | no | optional | refuse (derived obligation) | `:seon.fn/must-read`, `:seon.fn/see-also` (retyped before any datom exists: 0 on default) |
-| fn / test → callees, references | value | many | — | — | none; a dangling name is a `not-join` | `:seon.fn/calls`, `:seon.fn/references` + `reference-to` |
-| ns → required namespace | value | many | — | — | none | `:seon.ns/requires` + `reference-to #{:seon.ns/name}` |
-| test → subject; test → reach | value | one / many | — | — | none | + `reference-to #{:seon.fn/sym}` |
-| code → task; task → must-read | value | many | — | — | none. Tasks are data (7.13) | + `reference-to #{:seon.task/id}`, `#{:seon.fn/sym}` |
-| agent → task | **ref** | one | no | optional | sweep. Both are data, and a settled task is closed, not deleted | `:seon.agent/task` (task-context §4.1 proposed a handle value) |
-| fault → operation | value | one | — | — | none | see §7 Q3 |
+| Stage | Representation | Schema / owner |
+|---|---|---|
+| authored metadata | `:seon/tasks #{"handle"}`, `:seon/must-read ['q/sym]`, docstring `[[sym]]` | `:seon.task/annotation` (installed, `fn.clj:627`). The task id stays the installed string handle (`seon.task.edn:4`), not the parser prototype's keyword |
+| analysis entry | clj-kondo var and keyword entries | the `seon.fn.analyzer/analyze` contract (parser §2b proposes entry schemas) |
+| canonical row | a value member, or a ref member as its identity lookup ref `[:seon.schema/key :k]` | `:seon.program/row`. This is the digest input (`program.cljc:390`) and the form `declaration-value` rebuilds (`db.clj:4224`; it reproduced 7,040 stored digests) |
+| transaction encoding | an installed target stays a lookup ref; a target that is only a candidate becomes an identity-keyed tempid whose entity map is in the same transaction | the writer (`seon.db/transact!`) |
+| datom | an eid | Datahike |
+| pulled shape | derived from the entity schema plus the selector | data-modeling guide §7 |
 
-Refs are cardinality-many sets with no order. Contract order that matters lives on the arity row, as it does today
-(`:seon.fn.arity/order`).
+### 2b. Deletion obligation authority, without a second list
 
-## 3. The blocking reasons, answered per reason
+A declaration that survives in the final database still names a removed target. That refuses unless the same
+transaction repairs it (§3c). The attribute counts when:
+
+1. it declares `:seon.db/reference-to`; and
+2. it is owned by a program declaration family in `seon.program/shapes-in` (fn, test, ns, file, lint, schema), or
+   by a component whose `:seon.db/component-schema` a family owns (the arity rows); and
+3. the removed target's identity attribute is in its `:targets`.
+
+What this rule decides:
+- **Blocks:** calls, references, requires, writes (schema key or `:db/ident`), subject, capability (fn holders),
+  must-read, see-also, docstring links, contract keys, schema uses and render pairs.
+- **Observation:** evidence lives on data-partition entities (`:seon.test/result`, errors, instrument and eval rows),
+  which are not in `shapes-in`, so those relations never block. Reach invalidates proof reuse through its own owner.
+- **Tasks and issues** are data. Their relations follow their own writers: the destination-gate dangling check, and
+  the issue's required/optional refs.
+- **`:seon.fn/keywords`** declares no `reference-to` and never blocks.
+
+The equality witness for S0: on the fresh store, the derived obligation set equals the hand list at
+`db.clj:4067-4104`, plus must-read, see-also and docstring links.
+
+### 2c. Issue citations keep their own property
+
+`reference-to` is global, so a scan for "attributes targeting `:seon.fn/sym`" would find calls, must-read and
+schedule fields. Issue citation destinations are therefore derived only from issue attributes. The change:
+- `:seon.issue/cites` stays, and is read only on attributes of the issue schema (`:seon.issue/issue`).
+- `citation-attributes` (`issue.clj:189`) refuses when two issue attributes declare the same cited identity,
+  instead of overwriting the map entry.
+- The two-hop file citation keeps its structure:
+  - `:seon.issue/files` is the component edge to `:seon.issue.citation/citation`;
+  - the direct target sits on `:seon.issue.citation/file` (`seon.issue.citation.edn:4`), which gains
+    `:seon.db/reference-to #{:seon.fn.file/relative-path}`.
+
+### 2d. Storage per relation (recommended scope)
+
+| Relation | Storage | Card. | Named key (new names for every retype, e00a3ccda) |
+|---|---|---|---|
+| arity → input / output / guard schema | ref | many (order stays on the arity row) | `:seon.fn.arity/inputs`, `outputs`, `guards`, retiring `input-refs`, `output-refs`, `guard-refs` |
+| schema → schema used | ref | many | `:seon.schema/uses`, retiring `:seon.schema/references` |
+| schema → AI / HTML renderer | ref | one each | `:seon.schema/render-ai`, `:seon.schema/render-html`, retiring only the schema-row codec use. The value-level `:seon.render/ai`/`html` override stays |
+| calls, references, requires, writes, subject, capability, must-read, see-also, docstring links, tasks, task must-read, evidence | value + `reference-to` | as installed | unchanged names |
+| agent → task | optional ref | one | `:seon.agent/task` (the task-context lane owns it) |
+
+## 3. The blocking reasons, answered
 
 ### 3a. External dependency Vars have no rows
 
-- **Measured (P2–P4).** 43,733 of 65,935 call datoms (66%) name a Var outside the program: 677 distinct names, led by
-  `clojure.core` 304, `datahike.api` 36, `malli.core` 31 and `sci.core` 28. 106 of 217 required namespaces are
-  external. No `:seon.ns/name` row exists for `clojure.core`, `datahike.api`, `malli.core` or `sci.core`.
-- **Can clj-kondo supply rows?** `seon.fn.analyzer/analyze-dependencies!` lints the JVM's classpath minus the
-  checkout's roots into the clj-kondo cache (AGENTS.md; about 6 s warm). That cache holds a var definition per
-  dependency Var, so a producer *could* emit one row per external Var that some first-party function names:
-  - about 700 rows, or tens of thousands for every dependency Var;
-  - in a new non-program partition, since dependency Vars are neither merged nor written back.
-- **The principled answer is no.**
-  - A call to `clojure.core/map` observes a token of a pinned dependency. The dependency owns that identity; Seon
-    does not.
-  - Rows for it bring back ruling 47's population invariant ("every name … has a program row, minted where the
-    context learns it"), which 0e8f7d323 dissolved. AGENTS.md forbids it: "never invent placeholder
-    functions/tests".
-  - The 56 first-party dangling names (§0) show the invariant would refuse today's program on day one.
-- **Splitting calls into two attributes also fails.** A ref for first-party callees beside a value for external ones
-  puts one relation in two encodings, the smell the data-modeling skill names ("a sibling attribute storing the same
-  name as a value beside the ref").
-- **Verdict.** Calls, references and requires stay values, with the target declared. The render walk gains nothing
-  measurable from refs here (§5).
+- **Measured (P2–P4, old store).**
+  - 677 distinct external callee names account for 43,733 of 65,935 call datoms.
+  - 106 of 217 required namespaces are external.
+  - There are 0 `:seon.ns/name` rows for `clojure.core`, `datahike.api`, `malli.core` or `sci.core`.
+- **What clj-kondo could supply.** Its dependency cache (`seon.fn.analyzer/analyze-dependencies!`) holds definitions
+  for dependency Vars, so rows for them *could* be produced.
+- **Why they should not be.** Such rows would bring back ruling 47. They would sit in no program partition, and the
+  56 first-party Vars without rows would refuse the program on day one.
+- **Authored links name external Vars too.** One test's see-also names `` `s/join `` (`task_ingestion_test.clj:24`).
+  That is why must-read and see-also stay values in this revision.
+- **Calls stay values, with declared targets, and they block deletion of known program targets.** Splitting one
+  relation into a ref for program callees and a value for external ones would be one relation in two encodings.
 
-### 3b. Forward references to functions not yet defined
+### 3b. The producer's candidate world and forward references
 
-- **Within one publication, tempids resolve cycles and forward names** (P6). Mutual calls `a ↔ b` plus an upsert of
-  existing `seon.db/q` stored `#{[a b] [a q] [b a]}`, and `q` kept its eid. So one transaction handles every intra-file
-  and cross-file forward reference, as long as the producer emits tempids keyed by the target identity value and
-  defines each one.
-- **Lookup refs refuse forward names** (P6). `[:seon.fn/sym tmp.p/z]` earlier in the same tx than `z`'s own entity
-  failed with "Nothing found for entity id". A missing external name refuses the same way. The producer uses tempids
-  for program targets. A lookup ref is the loud existence check for a target that must already be installed
-  (schemas, the renderer's function row).
-- **Across evaluations.** SCI and Clojure refuse an unresolved symbol at analysis. `declare` creates a Var, and
-  whether the SCI entrance mints a row for a declared Var is **unverified** (probe S1). A function body therefore
-  cannot name a first-party function that exists nowhere. Tokens that genuinely name the future are:
-  - task must-reads;
-  - test subjects in test-first work;
-  - evidence.
+The producer resolves every link against **the admitted base database plus the complete candidate identity set** of
+the publication: every row that `analyze-rows` or `canonical-schema-rows` builds in this admission.
 
-  Those are values. The ref relations of §2b are authored links (must-read, see-also) and contract or schema keys.
-  An author who links to a function that does not exist has made a mistake, so the producer refuses by name. This
-  follows "never invent placeholder functions", rather than a pending-calls queue, which is not revived.
+- **An installed target** is written as its lookup ref. At transaction time a lookup ref resolves against the
+  database state reached so far (`db/utils.cljc:115`); P6 showed one naming a later operation refuses with "Nothing
+  found for entity id".
+- **A target in the candidate set but not yet installed** is written in the canonical row as the same lookup ref. The
+  writer's transaction encoding turns it into an identity-keyed tempid, and that candidate's entity map is in the same
+  transaction.
+  - P6: tempids resolved a mutual cycle `a ↔ b` and upserted the existing `seon.db/q` without changing its eid.
+  - This covers a new renderer arriving with the schema that declares it, and a function using a schema created in
+    the same admission.
+- **A target in neither set** refuses by holder, attribute and value at the producer. There is no placeholder row and
+  no pending queue.
+- **Schema cycles.** 0 exist (P12). Recursive schema references are **refused** by the schema owner, by name, before
+  rows are built. This means a cycle check before the helper at `schema.clj:3681`, whose post-order `seen` would
+  otherwise overflow the stack. Supporting recursive schemas is out of scope.
+- **Function versus test identity.** A value resolves against each identity in `:targets`. More than one match
+  refuses as ambiguous. P11: fn and test symbols are disjoint today (4,868 against 2,198, overlap 0), so no
+  ambiguity arises now.
+- **Malformed experimental contracts.** Arity rows exist only after `m/function-schema` compiles the contract
+  (`program.cljc:1095`), so a malformed contract admitted under `:warn` produces no arity refs. Whether its function
+  row then carries no arity rows at all is **unverified** (witness W8).
+- Validation happens at `var-row` and its sibling constructors. No renderer or reader parses links again.
 
-### 3c. Deletion: sweep, refuse and the unbreakable graph
+### 3c. The final check and deletion repair
 
-- **Optional refs sweep. Required refs refuse only for a whole-row requirement.** A cardinality-many set that loses
-  one member still validates, so required-ness cannot protect a set member.
-- The owner's rule, "Retraction shouldn't be allowed until a fix is also proffered", therefore needs the obligation
-  check whichever storage is used. For refs it reads the incoming datoms in the database before the write, because the
-  sweep has already removed them from the database after (`db/transaction.cljc:999-1016`). Deletion is refused while a
-  surviving referrer still names the target, unless the same transaction repairs it: the referrer is re-analyzed, so
-  its new definition digest no longer names the target.
-- Once the obligation map is derived (S0), every declared relation is covered, including must-read, see-also, subject
-  and render pairs, which the hand list misses today.
-- **Refs change the failure mode, not the guarantee.** If a check ever misses, a value edge survives as a visible
-  dangling name. A ref edge is swept and the evidence is gone. That is why values remain the right storage for
-  high-volume, cross-owner or historical relations. Refs are used where Malli or the producer already makes a missing
-  target impossible.
+The check lives in the existing final-report validator (`write-report-validator`, `db.clj:4398`, through
+`write-report-error`, `:4321`). It sees the database before and after, the effective tx-data and the attempted
+datoms.
 
-### 3d. Merge across branches: are eids stable?
+1. **Selection.** Take the relations of `references-in` from:
+   - (a) every asserted datom of a declared ref attribute;
+   - (b) every removed or changed target identity, found by comparing identity datoms before and after. This covers
+     a retracted identity datom, a renamed identity and a re-created identity. Their incoming holders come from the
+     before AVET (refs) or the before and after AVET (values, which are indexed).
 
-- **No, after divergence** (P6). Two `d/with` from the same base value allocated the same eid 123838 to different new
-  entities. Two branches forked from one commit therefore allocate colliding eids for different rows. Eids from the
-  common ancestor stay equal: `branch!` shares index roots (`versioning.cljc:224-284`).
-- Merge (`seon.cluster.source/prepare-merge!`/`accept-merge!`, `src/seon/cluster/source.clj:780-880`) transfers rows by
-  identity through `program/digest-map` and `replacement`. For ref attributes, the replacement must emit the target
-  as a lookup ref by its identity: the pattern `seon.issue/adopt-tx` already uses for citations
-  (`issue.clj:1143-1175`). It must never replay the tested branch's eid.
-- Definition digests stay branch-independent, because the producer computes `program/definition-digest` over the
-  analysis value (symbols and keywords) before storage (`fn.clj:822-827`, `schema.clj:3726`).
-- Cost: one identity lookup per ref datom in the delta.
+   An identity-less arity component resolves to its owning function through `:seon.fn/arities` in whichever of the
+   two databases holds it. The existing complete owning-value validation stays unchanged. Components gain no
+   identities.
+2. **Existence.** For each distinct target eid in (a), an EAVT seek for one of the allowed identity attributes, keyed
+   by `(eid, targets)`. Memoizing only by eid would let one attribute's check pass another attribute's target family.
+   This refuses the dangling tempid (P6) and a ref to an identity-less entity.
+3. **Obligation.** For each target in (b), every holder in the before database that survives in the after database
+   refuses, unless it is repaired.
+4. **Repair evidence.** A holder counts as repaired only when this transaction carries **current producer evidence**
+   for it:
+   - its `:seon.program/analyzed-source-digest` is asserted in this transaction, on the owning declaration for an
+     arity component;
+   - and its final relation set equals what the producer derived from that analysis. The row the producer submitted
+     is the attempted datoms of that entity.
+
+   Coordinated removal of the holder also counts. An edge that disappears only through the sweep is **not** evidence:
+   swept datoms are not in the attempted set. A changed definition digest alone is not evidence either.
+5. **Render pairs.** `write-render-target-error` stays until S3 proves form-ref agreement. The rule to prove is that
+   the stored `render-ai`/`render-html` refs of a schema row equal the pair derived from its `:seon.schema/form` by
+   `canonical-schema-rows`. The schema row's definition digest covers both the form and the refs, and the writer
+   already recomputes digests from stored rows. Only once that is witnessed does the form re-read retire.
+
+Witnesses, each a regression in the deletion class:
+
+| # | Case | Expected |
+|---|---|---|
+| W1 | retract a callee's identity datom only; its other datoms and incoming values unchanged | refuse |
+| W2 | rename a schema key that a contract names | refuse, or accept with the repair evidence of every holder |
+| W3 | sweep the last member of an arity `inputs` set | refuse (the before holder survives, and there is no repair evidence) |
+| W4 | sweep one of many members | refuse |
+| W5 | coordinated repair: re-analyze the caller without the call, and delete the callee | accept |
+| W6 | coordinated deletion of holder and target | accept |
+| W7 | retract and re-create a target under a new eid, with holder refs to the old eid | refuse: the old eid has no identity (existence check) |
+| W8 | a `:warn`-admitted malformed contract | no arity refs; the row admits |
+| W9 | a dangling tempid in a ref member | refuse by attribute and value |
+
+### 3d. Merge and portability reuse the existing owner
+
+- **Entity ids collide after divergence** (P6: two `with` values from one base gave the same eid to different rows).
+- The existing portable-row owner is `seon.fn/published-index-rows` (`fn.clj:3597`).
+  - It reads peer refs as `[identity value]` through `reference` (`:3628`), drops `:db/id` in `row` (`:3639`) and
+    keeps owned components structurally.
+  - Merge's `replacement` already delegates to it and `reconcile-tx` (`src/seon/cluster/source.clj:772`).
+  - The new ref attributes get the same treatment by declaration, with no second normalizer. The witness is that
+    `published-index-rows` exports `inputs` and `uses` as lookup refs.
+- **Digests** use the same canonical form everywhere. Producer rows, `declaration-value` (`db.clj:4224`) and the
+  portable export all write a peer ref as its identity lookup ref. Tempids exist only in transaction encoding.
+  - Witness: the producer digest equals the stored-reconstruction digest, which equals the branch-export digest, for
+    a function whose contract names a schema key.
+- **The merge entrance's current boundary.** `prepare-merge!` refuses additions, deletions and empty deltas; it
+  accepts replacements of existing functions and tests (`cluster/source.clj:780`, `:811`). So a merge adding schema
+  keys on two branches is not an executable witness today.
+  - The collision witness (W10) sits at the portable-row seam: export a function row whose `inputs` name a schema key
+    from branch A, and transact it onto branch B, where that key has a different eid.
+  - A full schema-addition merge is a prerequisite owned by the merge lane.
+- Missing destination targets refuse, through §3c existence. Program and data partitions keep their rule
+  (`published-index-rows` inlines a data ref as its declared identity).
+
+### 3e. Docstring links: grammar at the producer
+
+Grammar (owner question Q2):
+- `[[name]]` or `[[ns/name]]` inside a function or namespace docstring is a link.
+- `name` is one symbol token. It resolves through the holder's namespace, with aliases applied as `seed-symbol`
+  does (`fn.clj:487`).
+- Anything else inside double brackets (whitespace, a vector literal such as `[[a b]]`, a keyword) is prose, not a
+  link.
+
+| Docstring text | Link |
+|---|---|
+| `see [[build-projection]]` in `seon.schema` | `seon.schema/build-projection` |
+| `[[db/q]]` with `seon.db :as db` | `seon.db/q` |
+| `[[snapshot-state]]` (no such function) | refuse: `:dangling-doc-link`, holder `seon.schema/restore!`, value `snapshot-state` |
+| `(fn [[a b]] …)` in an example | not a link (whitespace) |
+| `[[:seon.db/db]]` | not a link in this grammar |
+
+- Resolved links join `:seon.fn/see-also` values. The canonical head keeps the docstring bytes, and the digest
+  already covers the docstring.
+- Extraction is a scan of the docstring string that kondo returns (`::analyzer/doc`). The existing prose tokenizer,
+  `seon.issue/words` (`issue.clj:44-61`), treats brackets as separators, so it cannot see link boundaries.
+- The options are Q2's. No reader-side parser is added. The three dangling links today (§0) are the first
+  refusals, and the lane that lands S1 repairs them in the same cut.
 
 ## 4. The render index
 
-There are three sources, matching 11.1's order. The value's own key needs no index.
-
-1. **Declared pairs** are schema → renderer. Today they live as Malli properties in the projection (read per value by
-   `declared-producers`, `src/seon/render.clj:470-516`) and as the codec string on 334 schema rows.
-   - The index: `{schema-key {:ai sym :html sym}}`, memoized on projection identity, which is the value
-     `render-declarations-in` (`schema.clj:1852-1868`) already computes for admission.
-   - Stored as the refs `:seon.schema/render-ai`/`render-html`, "which schemas does `f` render" becomes one AVET seek
-     on the ref. That replaces `my.program/render-referrers` (`src/my/program.clj:228`; 17.7 ms in parser T15).
-   - `write-render-target-error` becomes the ordinary missing-target refusal.
-   - **P8:** `[?s :seon.render/ai ?r] [?s :seon.schema/key ?k]` returned 334 rows over 50 renderers in **0.54 ms cold**.
-     All 50 renderers have fn rows.
-2. **The viewing namespace's render functions.** `namespace-stage` (`render.clj:622-646`) scans every public function
-   of the namespace through `sci.kernel/public-functions-in`. It runs `function-accepts-and-returns-in?` on each, per
-   value rendered.
-   - The index: arities whose outputs name a face schema, joined to their namespace, over the existing arity attributes:
-
-     ```clojure
-     [:find ?f ?in :in $ ?ns [?face ...]
-      :where [?n :seon.ns/name ?ns] [?f :seon.fn/ns ?n] [?f :seon.fn/arities ?ar]
-             [?ar :seon.fn.arity/output-refs ?face] [?ar :seon.fn.arity/input-refs ?in]]
-     ```
-
-   - **P8:** over all namespaces, 108 arities in 84 functions return `:seon.render/ai` (9), `:seon.render/hiccup` (90)
-     or `:seon.render/rendered` (9), in **1.31 ms cold**. 43 of them accept the generic `:seon.render/unit`, so the
-     accepted schema does not narrow the candidates. The contract check stays, over the few face-returning functions
-     instead of every public.
+1. **Declared pairs** map schema → renderer.
+   - The pair map `{schema-key {:ai sym :html sym}}` is derived from the projection, memoized on projection identity.
+     It is the same value `render-declarations-in` computes (`schema.clj:1852`).
+   - With S3's refs, "which schemas does `f` render" becomes one AVET seek. That replaces the form scan in
+     `my.program/render-referrers` (`src/my/program.clj:228`; 17.7 ms in parser T15).
+   - P8, old store, on the stored codec attribute: 334 rows over 50 renderers in 0.54 ms cold.
+2. **The viewing namespace's render functions.**
+   - **No face-role fact is installed.** `:seon.fn/projection-boundary` (`fn.clj:810`) marks output-sink analysis;
+     it does not mark a render role.
+   - AGENTS.md says a render function "is known by its face role; its output may be any spec'd shape, rendered in
+     turn". The role therefore cannot be inferred from the return schema.
+   - **Prerequisite (Q4):** an authored metadata key, `{:seon.render/face :seon.render/ai}`, which `var-row` ingests
+     as `:seon.fn/render-face` (`[:enum :seon.render/ai :seon.render/html :seon.render/form]`). It gets a stage-1
+     refusal for any other value.
+   - The candidates are the role facts of the viewing namespace's program rows, plus the private SCI definitions the
+     agent's context holds. Each is keyed by what it reads: row definition digests for program rows, and the agent
+     context's private-definition set for private definitions. Never by projection identity.
+   - The existing contract and default-supply owner (`function-accepts-and-returns-in?` and call preparation) then
+     matches the value. Visibility, ambiguity and first-match stay exactly as in `namespace-stage`
+     (`render.clj:618-646`).
+   - P8's 1.31 ms (108 arities over 84 functions) measures the **old output-reference query only**. It is not
+     evidence for this index.
 3. **The floor** needs no index.
 
-**The walk's join.** The structure the walk memoizes on projection identity (task-context §4.2) gains two maps:
-- identity attribute → row schema → pair, from source 1;
-- namespace → face functions, from source 2 on the committed value.
+The walk's structure then holds the pair map (by projection) and, per namespace, the candidate map (by row digests
+and context). A frontier node's pair is a map lookup through its identity attribute's `:seon.program/row-schema`.
 
-A frontier node's pair is then a map lookup by its identity attribute. The walk's "render presence" query family
-(task-context §2.2 family 5) becomes that lookup.
+## 5. Cost: refs against value joins (P5, old store)
 
-## 5. Cost: refs against value joins, measured
+`:probe/calls` held 22,202 resolved call datoms inside `datahike.api/with`. Building it took 166 ms and wrote
+nothing.
 
-Probe P5 built `:probe/calls` (a ref attribute) inside `datahike.api/with` on default's value. It asserted the 22,202
-call datoms whose callee has a row, which took 166 ms and wrote nothing. Timings are from `datahike.api/q` and
-`datoms`. "Cold" is the first query on a fresh `with` value; the others average five warm runs.
-
-| Walk | Value join `[?e :seon.fn/calls ?v] [?t :seon.fn/sym ?v]` | Ref `[?e :probe/calls ?t]` |
+| Walk | Value join | Ref |
 |---|---:|---:|
-| forward, frontier 1 (`seon.sci.eval/evaluate`, 58 edges) | 0.21 ms | 0.04 ms |
-| forward, frontier 60 random fns (96 edges) | 0.93 ms | 0.33 ms |
-| forward, frontier 500 (902–968 edges), warm / cold | 2.27 / 2.99 ms | 0.85 / 1.18 ms |
-| reverse, 50 targets (150 callers) | 0.98 ms | 0.55 ms |
-| full callee closure of `evaluate` (919 nodes) | 20.0 ms | 3.9 ms |
-| `sym → eid` map for all 4,928 fns (removes the value join's extra seek, per operation) | 0.38 ms | — |
+| forward, one function (58 edges) | 0.21 ms | 0.04 ms |
+| forward, 60 functions (96 edges) | 0.93 ms | 0.33 ms |
+| forward, 500 functions, warm / cold | 2.27 / 2.99 ms | 0.85 / 1.18 ms |
+| reverse, 50 targets | 0.98 ms | 0.55 ms |
+| callee closure of `evaluate` (919 nodes) | 20.0 ms | 3.9 ms |
 
 Caveats:
-- The probe's ref datoms sat in the unflushed `with` tail, which favours the ref column.
-- The committed store was not measured. That is S2's clock row.
+- The ref datoms sat in the unflushed `with` tail.
+- The 500-frontier runs drew different random frontiers (902 and 968 edges), so the ratios are indicative, not a
+  requirement.
+- The committed store is unmeasured; that is S2's clock row.
 
-**What the walk gains.**
-- **Forward joins run 2.5–5× faster, on sub-millisecond queries.** The walk's measured cost (14–100 ms per render,
-  task-context §2.2) is dominated by plan compilation (53 of 71 ms), not by edge seeks.
-- **Reverse edges are not free through a VAET index.** Datahike has no VAET
-  (`reference-code/datahike/src/datahike/db.cljc:310`). A reverse ref lookup is an AVET seek, because refs are indexed
-  automatically (`db/utils.cljc:307-313`). The symbol edges already declare `:seon.db/index true`, so reverse lookup
-  is the same AVET shape, and the measured gain is 1.8×. Task-context §3's "VAET reverse" should read "AVET on the ref".
-- **Native pull.** Only refs let `pull` follow a link: `{:seon.fn/arities [{:seon.fn.arity/inputs [:seon.schema/key]}]}`.
-  The walk's contract family (task-context family 3, a three-clause join through the arity component) becomes part
-  of the forward-ref family. Five query families per level become four.
-- **The main gain is correctness, not speed.** A named target means an exact render key, a derived obligation and a
-  missing target refused at write time.
+What the walk gains:
+- Forward seeks are faster, on sub-millisecond queries. The walk's cost is dominated by plan compilation (53 of 71
+  ms, task-context §2.2).
+- Reverse lookup is AVET on the ref. Datahike has no VAET (`datahike/db.cljc:310`), and refs are auto-indexed
+  (`db/utils.cljc:307-313`). Task-context's "VAET reverse" should read "AVET on the ref".
+- Native pull through contract keys: the walk's three-clause contract family becomes a forward-ref family.
+- The larger gain is correctness: a named target, an exact render key, and a refusal at the writer.
 
 ## 6. Migration in loadable slices
 
-Each slice edits its owner in place, converts callers and ends with its REPL probe repeated on the adopted program.
-Schema changes are proven by incremental adoption on a branch of the live store. e00a3ccda shows why: a retirement
-the stored row schemas still require cannot adopt, so every retype is a **new attribute name**, adopted in two steps
-(add and write, then retire the old name), as C4 now does.
+Each slice edits its owner in place and ends with its probe repeated on the adopted program.
 
-| Slice | Change | Deletions (lines) | Added (est.) | Proof |
-|---|---|---|---|---|
-| **S0: declare targets** | `:seon.db/reference-to` in `seon.db.edn`. Declare it on each attribute of §2b. Derive the relation map in `seon.program` (memoized on projection). Convert `removed-definition-error` obligations, `declared-reference-rules`, `test.clj:384-392` and `issue/citation-attributes` to read it. Delete `:seon.fn/reference-to` and `:seon.issue/cites` | hand obligation list −18; `:seon.fn/reference-to` decl and reader −6; `cites` decl reads −8; walk interim constant −10 | +25 | the derived obligations equal today's list plus subject, must-read, see-also and capability; deleting a must-read target refuses (new regression, one class) |
-| **S1: one producer emits links** | `var-row`, `namespace-row`, `task-links`, `canonical-schema-rows` emit every link through one `links` step: tasks, must-read and see-also (already in `task-links`), docstring `[[x]]` links resolved in the holder's namespace by `seed-symbol` (`fn.clj:487`), and seeds (installed). Stage schemas as in parser §2b | the file row's misfiled `:seon.fn/unresolved-references` for ns-level links (parser T4); `write-render-target-error`'s EDN re-read moves to S3 | +20 (docstring links), schemas +10 | rows of the parser prototype's sources, validated at each stage; the 50 docstring `[[…]]` occurrences in `src/` (0 qualified) resolve or refuse by name |
-| **S2: contract and schema keys become refs** | new `:seon.fn.arity/inputs`, `outputs`, `guards`, `:seon.schema/uses` (`[:set {:seon.db/reference-to #{:seon.schema/key}} :seon.db/ref]`). `arity-row` (`program.cljc:1007-1081`) and `canonical-schema-rows` emit lookup refs (schema rows precede: already dependency-first, `schema.clj:3715-3724`). Merge `replacement` normalizes by identity. Readers: `my.program/reads-key`, the walk's family 3, `contract-facts`. Retire the four keyword attributes in the second adoption | the walk's family 3 (≈12); interim rows −3; the four keyword attributes | +15 | P5's forward and reverse timings on the adopted store; `reads-key` unchanged output |
-| **S3: render pairs become refs** | `:seon.schema/render-ai`/`render-html` refs from `canonical-schema-rows`; the render index of §4 | `write-render-target-error` (`db.clj:4021-4059`, −39); `my.program/render-referrers` form scan | +12 | the 334-row index at P8's cost; deleting a renderer with a declaring schema refuses |
-| **S4 (option): must-read/see-also refs** | retype `:seon.fn/must-read`/`see-also` (0 datoms, so no adoption conflict) to refs targeting fn, schema and file identities, resolved by value type (symbol → fn or test, keyword → schema, string → file path), as `seon.issue` already resolves citations | interim rows −2 | +8 | a must-read to a missing function refuses at `var-row`; one regression |
+**Adoption pattern for a retype** (the lesson of e00a3ccda: stored row requirements blocked a retirement). One set
+of three publications covers S2 and S3 together:
+- **P-a.** Add the new attributes (`inputs`, `outputs`, `guards`, `uses`, `render-ai`, `render-html`) as optional
+  row-schema members. Make the old members optional. The producer writes both.
+- **P-b.** Switch every reader to the new attributes: `my.program/reads-key`, the walk, `removed-definition-error` via
+  `references-in`, and `published-index-rows` (by declaration).
+- **P-c.** Stop writing the old attributes, retract their datoms, and retire their declarations.
 
-Totals, estimated before review: about +90 added against about −100 deleted, plus the retired attribute
-declarations. Every slice sits under 100 added lines, and each names what it deletes.
+| Slice | Change | Deletions | Added (est.) |
+|---|---|---|---|
+| **S0: declare targets; derive obligations** | `:seon.db/reference-to` with descriptor validation (§2a); `references-in`; declarations on the §1a attributes; `removed-definition-error` reads `references-in` + `shapes-in` (§2b); rename `:seon.fn/reference-to`; `citation/file` gains its direct target; `citation-attributes` refuses duplicates (§2c) | the hand obligation list (−20), `declared-reference-rules` rule 2 and `test.clj` branch (−12), the walk's interim constant (−10) | +40 (descriptor validation 12, `references-in` 12, derived obligation 10, citation refusal 6) |
+| **S1: one producer emits every link** | the link step inside `var-row`/`namespace-row`/`task-links`: tasks, must-read and see-also (installed), docstring `[[x]]` (§3e), stage schemas; the three dangling doc links repaired | the file row's misfiled ns-level references (parser T4) | +25 |
+| **S2+S3 retypes (P-a, P-b, P-c)** | contract and schema keys and schema render pairs become refs; the candidate-world encoding (§3b); the schema cycle refusal; the final check of §3c; W1–W10 | `write-render-target-error` (−39) after W-form; the walk's contract family (−12); the six retired attribute declarations | +70 (final-check selection 25, existence 10, repair evidence 15, candidate tempid encoding 10, cycle refusal 5, pair refs 5) |
+| **S4: face role** (prerequisite for the §4 index, Q4) | `:seon.render/face` metadata → `:seon.fn/render-face`; `namespace-stage` retrieves role candidates | the per-value scan over all publics | +20 |
+
+Totals: about +155 added and about −95 deleted, before review. S2+S3 is the one slice near the 100-line presumption.
+Its additions are the final writer check, which the review requires for any ref. The alternative is option 1 below.
 
 **Risks.**
-- S2 and S3 change hot writer paths. Each needs a clock row on parent against change for full reindex and for a
-  one-file publication, and must fix regressions over 20% or 50 ms.
-- The derived obligation map widens refusals. Deletions that pass today (a must-read target, a test subject) will
-  refuse, which is intended. Expect reds in deletion tests that relied on the gap.
-- Merge normalization is new work on `replacement`. If it is missed, it silently cross-links eids after divergence.
-  That class needs one regression: two branches each adding a schema key, merged.
-- Docstring `[[x]]` extraction is a text scan. AGENTS.md requires owner permission for a production regex. The
-  existing prose tokenizer is `seon.issue/words` (`issue.clj:44-61`), which drops brackets. See §7 Q2.
-- Only 50 wikilinks exist, all unqualified, and at least one (`[[sym]]`) is likely a code example that would refuse.
+- The writer path is hot. S2+S3 need a clock row, parent against change, for a full reindex and a one-file
+  publication, with regressions over 20% or 50 ms fixed.
+- The derived obligations widen refusals (must-read, see-also, doc links). Deletion tests that relied on the gap
+  will go red.
+- The candidate tempid encoding is new at the writer. W9 guards the trap.
+- Recursive schemas become a named refusal.
 
-**Priced options** (simplest first; each gives its guarantee, cost and sacrifice).
-
-1. **Values everywhere, targets declared (S0 + S1).** About 2 hours.
-   - Guarantee: one declared relation map drives obligations, the walk, citations and the render index; links are
-     ingested at the one producer; every deletion obligation is derived.
-   - Sacrifice: no native pull through contract keys; dangling authored links are found by query rather than refused
-     at write time.
-2. **Recommended: refs where the target is program-partition and already required to exist (S0–S3, S4 optional).**
-   About 6 hours across four adoptions.
-   - Guarantee: contract keys, schema uses, render pairs and authored links are refs, validated at the producer and the
-     writer. The walk follows them natively and dead render targets refuse.
-   - Sacrifice: merge normalization work; two-step adoption per retype.
-   - Tokens (calls, references, requires, tasks, subjects, reach, evidence) stay values.
-3. **Refs for every relation, including calls and requires, with dependency rows from clj-kondo's dependency cache.**
-   Several days.
-   - Guarantee: a fully ref-typed graph.
-   - Sacrifice: about 700+ external rows in a new partition, and ruling 47's population invariant reinstated. It
-     refuses 56 current first-party names and brings back a pending-calls queue for forward names. Merge must
-     normalize 66k edges. Deleted-callee evidence is lost on any missed check.
+**Priced options**, simplest first:
+1. **Values everywhere, targets declared (S0 + S1).** About 3 hours.
+   - Guarantee: one descriptor drives navigation, derived obligations and the walk; links are ingested and
+     validated at the one producer; stale docstring links refuse.
+   - Sacrifice: no native pull through contract keys; a missing contract or schema target is refused by Malli and
+     the producer, but not by the writer.
+2. **Recommended: option 1 plus the S2+S3 retypes and S4.** About 8 hours across three adoptions.
+   - Guarantee: contract keys, schema uses and render pairs are refs, proven by W1–W10 and portable through
+     `published-index-rows`; the render index follows face roles.
+   - Sacrifice: the final-check machinery (+70) and three adoptions.
+3. **Refs for every relation, with dependency rows from kondo's cache.** Days.
+   - It reinstates ruling 47 and refuses 56 current first-party names.
+   - It cannot express authored links to paths and external Vars.
    - Not recommended.
 
-## 7. Requirement rows closed
+## 7. Requirement rows
 
-| Row | Requirement | Becomes | Closed by |
-|---|---|---|---|
-| 1.9 | every reference followable both ways | `:seon.db/reference-to` names the target for every relation. Forward is EAVT (ref) or one AVET seek (value); reverse is one AVET seek on the ref or the indexed value | S0 (declaration), S2–S4 (refs) |
-| 1.10 | REPL authoring; one deletion authority | `ns-unmap!`/`remove-ns!` retract through the writer, whose derived obligations refuse a surviving referrer on every declared relation | S0 |
-| 1.12 | contracts may be derived | derived input keys stored as the same `:seon.fn.arity/inputs` refs, so derived and explicit contracts share one relation | S2 (storage); the derivation stays with derived-contracts |
-| 1.14 | canonical authoring | links are read from the canonical head (attribute map, docstring) by the one producer; the digest covers them | S1 |
-| 1.15 | every stage specified; nothing silently dropped | stage schemas at `analyze`, the link step and the writer; a ref to a missing target refuses; a tempid without an identity refuses | S1 + writer check (S0) |
-| 5a.2–5a.3 | hop 1 content, hop 2 addresses | the walk follows declared relations; the named target selects the pair | S0 + §4 |
-| 5a.6 | must-read/see-also not ingested | installed in `task-links`; S4 makes them refs | S1/S4 |
-| 7.2, 7.3 | `:seon/tasks` one key, holder decides role, values | unchanged: values with `reference-to #{:seon.task/id}` | S0 (declaration only) |
-| 7.5 | dangling id refuses at the gate | `not-join` over the declared relation (installed as `seon.issue/candidate-dangling`) | installed; S0 derives its attribute set |
-| 7.9, 7.9b | ingestion of links and seeds | the one `links` step in `var-row` and siblings | S1 |
-| 7.13 | tasks are data, never program | task relations stay values; `:seon.agent/task` is a data→data ref | S0 |
-| 11.1, 11.2 | per-face selection; functions known by face role | the render index of §4 (declared pairs; face-returning namespace functions by `outputs`) | S3 + §4 |
-| 12.2 | error members referring to another entity use refs | **conflict**, see Q3 | open |
+Rows that depend on an open question are marked open.
 
-### Questions for root
-
-1. **Q1: the property name.** `:seon.db/reference-to` (recommended; the database owner's namespace, one key for refs
-   and values), versus keeping `:seon.fn/reference-to` widened (task-context §10 Q1 option A), which Astra ruled
-   carries eid and reach meaning.
-2. **Q2: docstring links.** (a) Extend `seon.issue/words` with a bracket mode and move it to a shared owner, about
-   8 lines (recommended; one prose tokenizer). (b) A production regex, which needs owner permission. (c) Links only in
-   `:seon/see-also` metadata, with docstrings as prose.
-3. **Q3: error members.** Language row 12.2 says an error member naming another entity is a ref. The data-modeling
-   guide §3 says a fault retains the observed identity after the function is deleted. An optional ref from
-   `:seon.error/operation` to a fn row would sweep on deletion, and the fault would lose its subject. Recommended: keep
-   the value with `reference-to #{:seon.fn/sym}`, and amend 12.2 to read "names the entity through a declared
-   reference".
-
-## 8. Probe log (default, JVM mode, read-only; `tmp.refs-probe` namespace)
-
-| # | Form (abridged) | Result |
+| Row | Becomes | Status after this design |
 |---|---|---|
-| P1 | installed `:schema` grouped by value type | 260 ref, 94 symbol, 174 keyword attributes |
-| P2 | per attribute: datoms, distinct values, values carried by an identity row | §1a table |
-| P3 | first-party split of unresolved calls | 56 first-party and 677 external callee names; `:seon.fn/keywords` 3,212 first-party unresolved |
-| P4 | `:seon.ns/name` rows for four dependency namespaces | 0 |
-| P5 | `(d/with db (keep … :probe/calls …))` over resolved call datoms | 22,202 datoms, 166 ms; §5 timings |
-| P6 | tempid cycle, forward lookup ref, missing lookup ref, dangling tempid | `#{[a b] [a q] [b a]}`, q eid unchanged; "Nothing found for entity id" twice; dangling tempid admitted with 0 target datoms (123838 → 123839) |
-| P7 | holders of `:seon.render/ai` | 334 schema rows, codec strings such as `"seon.background/render-ai"` |
-| P8 | render index queries, cold on a fresh `with` value | pairs 0.54 ms / 334; face functions 1.31 ms / 108 arities, 84 fns |
-| P9 | `[[…]]` in `src/seon`, `src/my` (rg) | 50 occurrences, 0 qualified |
-| P10 | `:seon.fn/writes`/`guard-refs` resolution; schema and fn eids across history | **not run**: the replacement JVM had not acquired its connection |
+| 1.9 followable both ways | `reference-to` names every direct target; forward by EAVT (ref) or AVET (value), reverse by AVET | closed by S0 for navigation |
+| 1.10 one deletion authority | the derived obligation (§2b) at the final writer | closed by S0; repair evidence by S2+S3 |
+| 1.12 derived contracts | derived inputs stored in the same `inputs` refs | storage by S2+S3; the derivation stays with derived-contracts |
+| 1.14 canonical authoring | links read from the canonical head; the digest covers them | S1 |
+| 1.15 every stage specified | §2a stage table; refusals at the producer and the writer | S0+S1; W1–W10 for refs |
+| 5a.2–5a.3 hop content and addresses | the walk follows `references-in`; the named target selects the pair | S0 |
+| 5a.6 must-read/see-also ingestion | installed in `task-links`; docstring links added | S1, **open on Q2** |
+| 7.2, 7.3, 7.5, 7.13 tasks | values with `reference-to #{:seon.task/id}`; destination-gate dangling check | S0 (declaration only) |
+| 7.9, 7.9b ingestion | the one link step | S1 |
+| 11.1, 11.2 per-face selection, face role | the §4 index | **open on Q4** |
+| 12.2 error members as refs | historical observations stay values; live error relations undecided | **open on Q3** |
+
+### Questions for root and the owner
+
+1. **Q1: the property name.** `:seon.db/reference-to`, direct target only (recommended), or a widened
+   `:seon.fn/reference-to`. Astra ruled the latter carries reach meaning.
+2. **Q2: docstring link extraction.**
+   - (a) A bracket-aware mode for `seon.issue/words`, moved to a shared owner, about 10 lines (recommended; one prose
+     tokenizer, no regex).
+   - (b) A production regex, which needs owner permission.
+   - (c) Links only in `:seon/see-also` metadata.
+
+   The grammar and its examples are in §3e.
+3. **Q3: error members.** Row 12.2 says an error member naming another entity is a ref. The guide says an observed
+   identity survives deletion.
+   - Proposal: an occurrence's observation (`:seon.error/operation`, `:seon.instrument/fn`) stays a value.
+   - Relations to live entities (an occurrence → its agent, already a ref: `:seon.error.occurrence/agent`) are refs.
+   - Row 12.2 stays open until the owner rules. This design does not amend it.
+4. **Q4: the face role.** The authored key `:seon.render/face`, stored as `:seon.fn/render-face` (recommended), or a
+   convention the owner prefers. The §4 namespace index waits on it.
+
+## 8. Probe log (JVM mode, read-only or `datahike.api/with`)
+
+| # | Store | Probe | Result |
+|---|---|---|---|
+| P1 | old | installed attributes by value type | 260 ref, 94 symbol, 174 keyword |
+| P2 | old | datoms / distinct / resolve per attribute | §1a |
+| P3 | old | unresolved callees, first-party against external | 56 first-party, 677 external |
+| P4 | old | ns rows for four dependency namespaces | 0 |
+| P5 | old | `:probe/calls` built in `with` | 22,202 datoms, 166 ms; §5 |
+| P6 | old | tempid cycle, forward lookup ref, missing lookup ref, dangling tempid, eid allocation | `#{[a b] [a q] [b a]}`; "Nothing found for entity id" ×2; dangling tempid → 0-datom target; same eid 123838 in two `with` values |
+| P7 | old | holders of `:seon.render/ai` | 334 schema rows, codec strings |
+| P8 | old | pair query; old output-ref query | 0.54 ms / 334; 1.31 ms / 108 arities (old query only) |
+| P9 | checkout | `[[…]]` in `src/` text (rg) | 50 occurrences, including code (`(fn [[sym]] …)`, `sci/eval.clj:2581`) |
+| P10 | fresh | writes / guard / inputs resolution | writes 1,107 / 291 / 236; guard 0; inputs 3,048 / 575 / 575; must-read, see-also, subject 0 |
+| P11 | fresh | fn and test symbol overlap | 4,868 fn, 2,198 test, 0 shared |
+| P12 | fresh | cycles in schema references | 1,951 holders, 0 cycles, 0 self-references |
+| P13 | fresh | docstring `[[x]]` links resolving in the holder namespace | 44 fn-doc links, 41 resolve (dangling: `snapshot-state`, `restore-state!`, `shipped-calibration`); 4 ns-doc links |
+| P14 | fresh | `declared-reference-rules` rule 2 edges; `reference-to` declarations | 0 edges; one declaration (`:seon.schedule.task/function`, 3 holders) |
