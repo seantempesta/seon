@@ -2031,7 +2031,7 @@ handle))}}
   (with-server
     (fn [connection server _context]
       (support/transacted! connection
-                         {:tx-data [{:seon.agent/id "debug-trigger"}]
+                         {:tx-data (support/agent-tx @connection "debug-trigger")
                           :tx-meta {:seon.db/user
                                     [:seon.agent/id agent-id]}})
       (let [stream (open-feed server (debug-feed-path

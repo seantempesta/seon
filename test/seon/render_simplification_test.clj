@@ -367,7 +367,7 @@
                                {:seon.cluster.eval/source source,
                                 :seon.cluster.eval/ns [:seon.ns/name fixture-a],
                                 :seon.program/row
-                                {:seon.fn/sym (str (symbol (str fixture-a) (str name))),
+                                {:seon.fn/sym (symbol (str fixture-a) (str name)),
                                  :seon.fn/ns [:seon.ns/name fixture-a],
                                  :seon.fn/source source,
                                  :seon.fn/arglists (pr-str (list (nth definition 2))),
@@ -377,7 +377,7 @@
                 rows (mapv second (seon.fn/analyze-forms (db/db connection) requests))
                 report (db/transact! connection rows)]
             (is (:db-after report) (pr-str report))
-            (is (some #{[:seon.fn/sym (str helper)]} (:seon.fn/calls (second rows))))
+            (is (some #{[:seon.fn/sym helper]} (:seon.fn/calls (second rows))))
             (sci/binding
               [sci/ns (sci/create-ns fixture-a)]
               (doseq [definition definitions] (sci/eval-form ctx definition)))))
