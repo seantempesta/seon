@@ -467,7 +467,7 @@
                               "(seon.run/complete \"Installed.\")")})]
           (let [reports (drive! (dissoc cluster :seon.config.test/auto-check-cases) 10)
                 installed (db/pull @connection [:seon.fn/spec]
-                                   [:seon.fn/sym 'my.agents.agent-a/configured-inc])
+                                   [:seon.fn/sym (symbol "my.agents.agent-a" "configured-inc")])
                 cases (db/q '[:find [?n ...]
                               :where [_ :seon.test.accretion/case-count ?n]]
                             @connection)]
@@ -626,7 +626,7 @@
                         :where
                         [?fn :seon.fn/sym ?sym]
                         [?fn :seon.fn/spec ?spec]]
-                      @connection 'my.agents.agent-a/durable))
+                      @connection (symbol "my.agents.agent-a" "durable")))
                 "the open input-map contract admits and persists")
             (is (empty?
                  (db/q '[:find ?entity
@@ -638,9 +638,9 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            identity [:seon.fn/sym 'my.agents.agent-a/obsolete]
+            identity [:seon.fn/sym (symbol "my.agents.agent-a" "obsolete")]
             deletion {:seon.program/delete-identities
-                      [identity [:seon.test/sym 'my.agents.agent-a/obsolete]]
+                      [identity [:seon.test/sym (symbol "my.agents.agent-a" "obsolete")]]
                       :seon.program/source "(ns-unmap 'my.agents.agent-a 'obsolete)"}]
         (is (true? (sci.eval/committed-row? (db/db connection) deletion))
             "an identity that never existed has no remaining definition facts")
@@ -974,7 +974,7 @@
                  (:seon.eval/shown (nth (agent-evaluations (db/db connection)) 2))))
           (let [row (db/pull @connection
                             '[*]
-                            [:seon.fn/sym 'my.agents.agent-a/f])]
+                            [:seon.fn/sym (symbol "my.agents.agent-a" "f")])]
             (is (= "(defn ^{:malli/schema [:=> [:cat :int] :int]} f [x] (+ x 2))"
                    (:seon.fn/source row)))
             (is (= :agent (:seon.schema.admission/source row)))
@@ -1000,7 +1000,7 @@
           (is (nil?
                (db/pull @connection
                        [:seon.fn/sym]
-                       [:seon.fn/sym 'my.agents.agent-a/bad]))
+                       [:seon.fn/sym (symbol "my.agents.agent-a" "bad")]))
               "the failed declaration commits no program fact"))))))
 
 (deftest runtime-schema-registration-commits-the-evaluated-form-and-attribute
@@ -1145,7 +1145,7 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            test-sym 'my.agents.agent-a/versioned-test]
+            test-sym (symbol "my.agents.agent-a" "versioned-test")]
         (with-redefs [ai/complete
                       (fn [_projection _]
                         {:seon.ai/text
@@ -1349,7 +1349,7 @@
   (with-cluster
     (fn [cluster]
       (let [connection (:seon.db/connection cluster)
-            function-sym 'my.agents.agent-a/refused-live
+            function-sym (symbol "my.agents.agent-a" "refused-live")
             agent-ctx (:seon.sci.eval/ctx
                        (sci.eval/fork-for-turn
                         {:seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
