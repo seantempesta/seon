@@ -665,7 +665,8 @@
                     bindings)
               (throw
                (ex-info
-                "A durable Malli definition contains an unnamed callable."
+                (str "A durable Malli definition contains an unnamed callable: contracts are data; "
+                     "use a registered predicate schema or a quoted symbol naming an admitted predicate.")
                 {:seon.schema/error :seon.schema/noncanonical-definition
                  :seon.schema/noncanonical-definition ::unnamed-callable
                  :seon.schema/value value
@@ -733,6 +734,11 @@
                          (nil? (next (next value)))
                          (qualified-symbol? (second value)))
                     (second value)
+
+                    ;; An unevaluated callable form in a predicate slot, e.g.
+                    ;; `(fn [r] (seq r))` read from source metadata, names nothing.
+                    (and (= :predicate reference-kind) (seq? value))
+                    (callable-symbol value)
 
                     (sequential? value)
                     (doall (map #(canonicalize % false) value))
