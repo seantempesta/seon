@@ -13,6 +13,30 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Thirteenth follow-up: census e (red-baseline-census-2026-09-25e.md)
+
+- `25180b4dd` RDISPATCH UPDATE-TEST: render_simplification :158 asserts the argument carries no database (b195ae037);
+  the authored-source viewer gets its own namespace (under 634d8aaa2 fixture-a's unit-contract `namespace-ai` became
+  that viewer's default and outranked the subject pair; recorded actual `"A:…fixture-a"`).
+- `3fa1465b2` fix-digest-fixtures changes applied: program_test :463/:742/:750/:844 overrides through
+  `program-fn-row`, entity_pairs :26 through `program-row`, cluster_test `restamp!` and retained_test
+  `replace-renderer!` as `test-support/revision`.
+- **value_test (not in this row), exact UPDATE-TEST:** `block-pairs-remain-explicit` (:102) renders raw values with no
+  producer; pass each producer as `:seon.render.call/function`: report `seon.db/transact!`, directory
+  `seon.sci.eval/directory-value`, step `seon.plan/item`, whole-plan `seon.plan/plan` (probed: their declared returns
+  hold `:seon.db/transaction-report`, `:my.plan/render-step`, `:my.plan/component-view`).
+  `declared-producers-still-have-absolute-precedence` (:402/:405) asserts structural matching of an identity-less,
+  producer-less map; give `failure` the error base (`:seon.error/at`, `:layer`, `:operation`) so rule 1 composes the
+  base pair (`seon.error/render-ai`/`render-html`, the same functions the fixture pair names).
+- **Still red, not attributable without a run:** fixture renderers invoked from SCI still produce the compiled
+  `namespace-ai` output after 9f82663e1 (generic-renderer :805, live-Var :545, shared-invocation :714, retained
+  :402/:454) — sci/eval.clj install owner; web-debug saved-history shows
+  `seon.sci.kernel/invoke refused argument 0 at [:seon.db/db] … got nil`: a caller passes `:seon.db/db nil` in a unit,
+  which `:seon.render/unit`'s declared entry (b195ae037) now refuses — the passing site is not found by reading;
+  web-debug agent-identity (settings/runtime units missing), block-reference-headers (`referenced-identities` returns
+  [] for an alias identity), web session panel 500 (nil text), distance :601.
+- ERRREC (error.clj) not attempted: every member needs its fixture's recorded fact, which the results do not hold.
+
 ## Twelfth follow-up: declared inputs through call preparation
 
 - `3785970b9` call preparation supplies OPTIONAL map entries of a supplied default's key and shape (map-entry and
