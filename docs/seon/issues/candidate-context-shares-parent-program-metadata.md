@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 tags: [issue, sci, schema, agent, wave/agent-context]
 ---
@@ -92,3 +92,12 @@ unchanged Var behavior alone cannot make the test pass.
 
 The design-lab preview should reuse that verified agent path. This finding
 does not authorize a separate SCI setup or a second publication mechanism.
+
+## Resolved 2026-09-25 (lane fix-candidate-isolation-opus, f3c57b5cc)
+No leak: the observed parent write was `acquire!` catching an *unacquired* parent up to its branch head (eval.clj:3334 via
+evaluate :4184) — the fixture made the parent before adding its row. With the parent acquired first, two candidate forks of
+one base (`(inc x)`, `(dec x)`) leave the parent's Var, root bytes, namespace map, program snapshot, installed set and env all
+`identical?`; each fork has its own Var (answers [1 2 0]); SCI copy-on-write covers install (sci core.cljc:345, utils.cljc:364,
+:395, evaluator.cljc:36-49). Class regression: `seon.test.accretion-test/two-candidate-forks-of-one-base-keep-their-own-roots`.
+Open design point: a fork evaluating over a stale parent updates the parent and the PROGRAM CHANGE notice reaches the fork,
+not the parent's agent (does not fire in production, where the parent is the agent's already-acquired context).
