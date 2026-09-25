@@ -1497,22 +1497,25 @@
         options (kernel/context-options)
         ctx (assoc (sci/init {:interrupt-fn (:interrupt-fn options)})
                    :seon.sci.kernel/guard (:seon.sci.kernel/guard options))]
-    (is (= "Instrumentation constructed an invalid refusal." (ex-message thrown)))
+    ;; A refusal its schema rejects is the minimal base (A1-8b): the rejection
+    ;; is the root of its chain, never the thrown message.
+    (is (= "seon.instrument-test/refusal-drift :malli.core/invalid-input: the refusal could not be built."
+           (ex-message thrown)))
+    (is (= "Instrumentation constructed an invalid refusal."
+           (:seon.error/message (peek (:seon.error/chain (ex-data thrown))))))
     (kernel/with-arm
      ctx (* 1000 test-support/event-backstop-seconds)
      (fn [armed]
        (let [outcome (kernel/failure-value
                       {:seon.sci.kernel/time-limit-kind :seon.sci.eval/time-limit
                        :seon.sci.kernel/failure-kind :seon.sci.eval/evaluation-failed}
-                      thrown ((:seon.sci.kernel/record armed) :error))]
-         (is ((schema/projection-validator canonical :seon.instrument/contract-error)
-              outcome))
-         (is (= (select-keys (ex-data thrown)
-                            [:seon.instrument/check :seon.error/expected-shape
-                             :seon.instrument/explanations :seon.instrument/fn])
-                (select-keys outcome
-                             [:seon.instrument/check :seon.error/expected-shape
-                              :seon.instrument/explanations :seon.instrument/fn]))))))))
+                      thrown ((:seon.sci.kernel/record armed) :error))
+             evidence [:seon.error/member :seon.error/expected :seon.error/offending
+                       :seon.error/chain :seon.error/message]]
+         (is ((schema/projection-validator canonical :seon.error/base) outcome))
+         (is (= (select-keys (ex-data thrown) evidence)
+                (select-keys outcome evidence))
+             "the kernel boundary keeps the minimal base's whole evidence"))))))
 
 (defn reporting-failure
   "A declared humanizer that fails while the real reporter explains a value."
@@ -1533,8 +1536,13 @@
                  projection :panic
                  (config/result-caps (test-support/effective-config)) identity)
         failure (try (wrapped "wrong") (catch Throwable thrown thrown))]
-    (is (= "The contract humanizer failed." (ex-message failure)))
-    (is (= "original cause" (:seon.instrument-test/reporting-evidence (ex-data failure))))
+    ;; The humanizer's failure is the root of the minimal base's chain, with
+    ;; its own evidence; the base is a core fault, not a contract violation.
+    (let [root (peek (:seon.error/chain (ex-data failure)))]
+      (is (= "The contract humanizer failed." (:seon.error/message root)))
+      (is (= "original cause"
+             (get-in root [:seon.error/data :seon.instrument-test/reporting-evidence]))))
+    (is ((schema/projection-validator (schema/handed-projection) :seon.error/base) (ex-data failure)))
     (is (not ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data failure))))))
 
 (deftest adoption-arms-only-the-named-identity
