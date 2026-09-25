@@ -107,4 +107,52 @@ Net source is +206 with no deletions.
 - the agent HTML face failure (item 3);
 - the query-work cap tied to `max-nodes` (item 2).
 
+## T0: deleting the dead opening generator (root granted A, 2026-09-25)
+
+**What was deleted.**
+
+- `src/seon/bootstrap.clj:204-731`: the opening-candidate generator, from `entry-form-source` through `pull-result`,
+  `root-candidate`, `next-entry-in` and `next-entry`, plus the requires that are now unused (`seon.plan`,
+  `seon.ai.tokens`, `seon.render`, `seon.render.walk`, `seon.schema`, `seon.sci.kernel`).
+- `src/seon/render/walk.clj`: the episode section (`reference-keys`, `introduced-subject?`, `form-symbols`,
+  `explained-symbol?`, `ordered-episode`), the empty "Assembly" header, and the unused `seon.print` require.
+- Tests of the deleted machinery only:
+  - six `bootstrap_test` cases (`drive-free-generation…`, `reborn-opening…`, `every-opening-candidate…`,
+    `intent-membership…`, `absent-intent…`, `missing-or-failed…`), with `generator-request` and `candidate-sources`;
+  - `test/seon/render/episode_test.clj`, the whole file;
+  - the three `history_test` episode cases, with `settled-node`, `episode-candidates` and `episode-request`.
+
+**Lines.** Source −650 (bootstrap −535, walk −113, and the ns forms). Tests −561. The S1 slice was +206, so the net
+over the two slices is about −444 source lines.
+
+**No production callers, confirmed before deleting.**
+
+- clj-kondo's `:var-usages` over `src` and `test` lists callers of the deleted vars only inside the deleted cluster
+  and in `bootstrap_test`.
+- `rg` for `next-entry`, `pull-result`, `ordered-episode`, `form-symbols` and `root-candidate` over `src`, `test` and
+  `resources` now leaves only these:
+  - a comment in `test/seon/cluster/bootstrap_resume_child.clj:20`, recording an earlier retirement;
+  - `seon.issue.detect/shared-form-symbols`, a different function;
+  - the schema key `:seon.repl/pull-result`.
+- `seon.bootstrap` keeps `help`, `situation`, `run-id`, `task-message`, `supervision-run-id`, `supervision-tx` and
+  `seed-tx`, which live code calls.
+
+**Limits.**
+
+- The load is unproven: per the no-lane-reload ruling, the edited namespaces were not loaded in default. clj-kondo is
+  clean at error level. Root's adoption is the load proof.
+- Declarations now read by nothing, outside this grant and left for their owner:
+  - `resources/seon/schemas/seon.bootstrap.edn`: `:root-acquisition-empty-error` and the beyond-closure,
+    unmatched-source and prefix error members;
+  - `resources/seon/schemas/seon.config.bootstrap.edn`: `:beyond-closure-token-budget`, also still set by
+    `bootstrap_test`'s `seed-cluster!`;
+  - `resources/seon/schemas/seon.repl.edn:75-79`: the episode request's `:root-key`, `:candidates` and `:settled`.
+
+**Root runs:**
+
+```
+bin/test-check default --ns seon.bootstrap-test
+bin/test-check default --ns seon.render.history-test
+```
+
 RESET NEEDED: no. **Re-arm needed** for `seon.render.walk` and `seon.render.web`.

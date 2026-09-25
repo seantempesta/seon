@@ -38,7 +38,6 @@
             [seon.cluster.wake :as wake]
             [seon.eval :as evaluation]
             [seon.error :as error]
-            [seon.print :as print]
             [seon.render :as render]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -807,118 +806,6 @@
                          marker (conj marker))))))
                  order)))))))
 
-;;; ---------------------------------------------------------------------------
-;;; Assembly — the AI projection
-;;; ---------------------------------------------------------------------------
-
-;;; ---------------------------------------------------------------------------
-;;; The generated opening episode
-;;; ---------------------------------------------------------------------------
-
-(defn- reference-keys
-  "Comparable spellings of one structural reference.
-
-  Program identities retain their declared database representation (for
-  example a function identity is stored as a string), while values introduce
-  real Clojure symbols. This generic normalization relates those two spellings
-  without knowing which domain shape supplied either one."
-  [reference]
-  (cond
-    (and (vector? reference) (= 2 (count reference)))
-    (into #{reference} (reference-keys (second reference)))
-
-    (symbol? reference)
-    #{reference (str reference)}
-
-    :else
-    #{reference}))
-
-(defn- introduced-subject?
-  [frontier subject]
-  (boolean (some frontier (reference-keys subject))))
-
-(defn form-symbols
-  "Qualified and namespace symbols structurally present in one form."
-  {:malli/schema [:=> [:cat :seon.repl/form] [:set :symbol]]}
-  [form]
-  (into #{}
-        (filter (fn [value]
-                  (and (symbol? value)
-                       (or (namespace value)
-                           (str/includes? (str value) ".")))))
-        (tree-seq coll? seq form)))
-
-(defn- explained-symbol?
-  [explained subject candidate-symbol]
-  (or (some explained (reference-keys candidate-symbol))
-      (some (reference-keys subject) (reference-keys candidate-symbol))))
-
-(defn ordered-episode
-  "Derive the deterministic executable prefix from one bounded pull result.
-
-  Generation is macroexpansion to a teaching fixed point: before emitting a
-  form, recursively select explanations for every qualified or namespace
-  symbol it contains. A candidate is ready only when its subject appeared in
-  an earlier settled value and every other symbol in its form has already been
-  explained by a settled candidate. The explanation form may name its own
-  subject. Resolve means teach; a subject or symbol with no candidate in the
-  bounded pull fails closed by leaving the dependent form ungenerated.
-
-  The pull decides membership and carries fact order; introductions decide
-  readiness without re-sorting that order. A reference outside the pulled
-  neighborhood grows no context.
-
-  The returned vector contains the settled prefix plus at most one next entry
-  awaiting execution. Calling this pure function again with that entry's
-  settled evaluation extends the same byte-stable prefix. Saved shown text
-  is an observation, never decoded to recover references. Only an actual
-  print node supplied by an older caller can introduce structural references."
-  {:malli/schema [:=> [:cat :seon.repl/pull-result] :seon.repl/episode]}
-  [{root-key :seon.repl/root-key
-    candidates :seon.repl/candidates
-    settled :seon.repl/settled
-    identity-attributes :seon.print/identity-attributes
-    intent-subjects :my.plan/intent-subjects}]
-  (let [settled-by-key
-        (into {} (map (juxt :seon.repl/key identity)) settled)
-        ordered-candidates (vec candidates)]
-    (loop [remaining ordered-candidates
-           frontier (into #{} (mapcat reference-keys) intent-subjects)
-           explained #{}
-           episode []]
-      (let [selected
-            (if (empty? episode)
-              (some #(when (= root-key (:seon.repl/key %)) %) remaining)
-              (first
-               (filter
-                (fn [{subject :seon.repl/subject entry :seon.repl/entry
-                      previous-key :seon.repl/previous-key}]
-                  (and (introduced-subject? frontier subject)
-                       (or (nil? previous-key)
-                           (some #(= previous-key (:seon.repl/key %)) episode))
-                       (every? #(explained-symbol? explained subject %)
-                               (form-symbols (:seon.repl/form entry)))))
-                remaining)))]
-        (if-not selected
-          episode
-          (let [entry (assoc (:seon.repl/entry selected)
-                             :seon.repl/key (:seon.repl/key selected)
-                             :seon.repl/subject (:seon.repl/subject selected))
-                episode (conj episode entry)
-                settlement (get settled-by-key (:seon.repl/key selected))
-                settled-node (:seon.sci.admit/print-node settlement)]
-            (if-not settlement
-              episode
-              (recur (into [] (remove #(= (:seon.repl/key selected)
-                                           (:seon.repl/key %))
-                                      remaining))
-                     (into frontier
-                           (mapcat reference-keys)
-                           (when (print/node? settled-node)
-                             (print/references identity-attributes settled-node)))
-                     (into explained
-                           (reference-keys (:seon.repl/subject selected)))
-                     episode))))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The agent's history
