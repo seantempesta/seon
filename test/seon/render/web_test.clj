@@ -657,19 +657,28 @@ handle))}}
        (is (= [] (declared projection database "ordinary value")))))))
 
 (deftest an-attribute-description-comes-from-the-projection-form
-  (let [projection
-        {:seon.schema.projection/forms
-         {:my/documented [:string {:description "What this attribute means."}]
-          :my/plain :string}}
-        description (web-private 'attribute-description)]
-    (is (= "What this attribute means."
-           (description projection :my/documented))
-        "the authored :description is read from the parsed form")
-    (is (= "What this attribute means."
-           (description projection :my/_documented))
-        "a reverse unit is described by its forward attribute")
-    (is (nil? (description projection :my/plain))
-        "an undeclared description is absent, never invented")))
+  ;; The description is read from the projection's retained compiled schema,
+  ;; so the projection is admitted by its owner, never a hand-built forms map
+  ;; that carries no registry.
+  (support/with-database
+   (fn [connection]
+     (let [projection
+           (reduce (fn [projection [schema-key definition]]
+                     (schema/projection-with-schema
+                      projection schema-key definition
+                      {:seon.schema.admission/source :agent}))
+                   (db/carried-projection (db/db connection))
+                   [[:my/documented [:string {:description "What this attribute means."}]]
+                    [:my/plain :string]])
+           description (web-private 'attribute-description)]
+       (is (= "What this attribute means."
+              (description projection :my/documented))
+           "the authored :description is read from the compiled schema")
+       (is (= "What this attribute means."
+              (description projection :my/_documented))
+           "a reverse unit is described by its forward attribute")
+       (is (nil? (description projection :my/plain))
+           "an undeclared description is absent, never invented")))))
 
 (deftest applicable-render-functions-list-alternatives-and-hide-rejections
   (let [candidate (fn [producer status]
