@@ -162,6 +162,40 @@
        nil seeds)
        (@acquire-context! member nil {:seon.agent/branch (:seon.agent/branch member)})))))
 
+(def ^:private attempt-writers
+  (delay {:agent (requiring-resolve 'seon.cluster.agent/creation-tx)
+          :turn (requiring-resolve 'seon.turn/open-tx)
+          :context (requiring-resolve 'seon.effect/*request-context*)}))
+
+(defn- attempt-request-context
+  "Open an effect-reaching member's attempt agent and turn through the canonical writers (owner
+  2026-09-25: no other world changes); return its evaluation's request context, else the refusal."
+  {:malli/schema [:=> [:cat :seon.agent/execution-handle :seon.test/sym]
+                  [:or :seon.effect/request-context :seon.error/value]]}
+  [member test-symbol]
+  (let [{:keys [agent turn]} @attempt-writers
+        connection (:seon.db/connection member)
+        agent-id (str "attempt-" (id/id)) turn-id (str agent-id "-turn")
+        cluster-name (:seon.cluster/name member)
+        failed (some #(let [written (db/transact! connection %)] (when (:seon.error/at written) written))
+                     [(agent {:seon.agent/id agent-id :seon.ns/name (symbol (namespace test-symbol))
+                              :seon.cluster/name cluster-name :seon.agent/branch (:seon.agent/branch member)})
+                      (turn {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
+                             :seon.turn/opened-tx "datomic.tx"})])
+        effective (when-not failed (config/effective (db/db connection) cluster-name))
+        ctx (:seon.sci.eval/ctx member)]
+    (cond failed failed
+          (:seon.error/at effective) effective
+          :else
+      {:seon.db/connection connection :seon.agent/id agent-id :seon.turn/id turn-id
+       :seon.cluster.eval/ordinal 0 :seon.boot/cluster-name cluster-name
+       :seon.sci.admit/caps (config/result-caps effective)
+       :seon.config/on-core-error (:seon.config/on-core-error effective)
+       :seon.sci.eval/projection-state (:seon.sci.eval/projection-state (meta connection))
+       :seon.env/environment (env/scope (env/of ctx) {:seon.agent/id agent-id :seon.turn/id turn-id
+                                                      :seon.cluster.eval/ordinal 0})
+       :seon.sci.eval/ctx ctx :seon.effect/counter (atom -1)})))
+
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
 
@@ -180,7 +214,8 @@
                        [:=> [:cat] [:or :seon.test/var :seon.error/value]] [:int {:min 1}]
                        [:map [:seon.db/connection {:optional true} :seon.db/connection]
                         [:seon.sci.eval/ctx :seon.sci.eval/ctx]
-                        [:seon.test/member {:optional true} :seon.agent/execution-handle]]
+                        [:seon.test/member {:optional true} :seon.agent/execution-handle]
+                        [:seon.test/effect-attempt? {:optional true} :boolean]]
                        [:=> [:cat :boolean] :nil]]
                   :seon.test.runner/captured-result]}
   [loaded since test-symbol resolve! timeout-ms custody release!]
@@ -195,11 +230,16 @@
                      #(let [test-var (resolve!)
                             ;; Seeds prepare under the body's program-change detection.
                             member (if (:seon.error/at test-var) member
-                                       (apply-seeds! member test-symbol test-var))]
+                                       (apply-seeds! member test-symbol test-var))
+                            ;; Only an `effect/request*`-reaching member gets an evaluation.
+                            context (when (and (:seon.test/effect-attempt? custody) (not (:seon.error/at member)))
+                                      (attempt-request-context member test-symbol))]
                         (cond
                           (:seon.error/at test-var) test-var
                           (:seon.error/at member) member
+                          (:seon.error/at context) context
                           :else
+                          (with-bindings {(:context @attempt-writers) context}
                           (with-test-loader
                            (fn [] (if (var? test-var)
                               ;; A host body runs unarmed (it may evaluate its own SCI
@@ -211,12 +251,12 @@
                               ;; declared per-test bound; `duration-failures` fails
                               ;; any body that completes over it.
                               (sci.eval/run-test
-                               (assoc (dissoc custody :seon.test/member)
+                               (assoc (dissoc custody :seon.test/member :seon.test/effect-attempt?)
                                       :seon.test/var test-var
                                       :seon.sci.eval/time-limit-ms
                                       (or (:seon.test/long-ms
                                            (program/test-markers (meta test-var) (meta (:ns (meta test-var)))))
-                                          5000)))))))))))
+                                          5000))))))))))))
             thread (.unstarted (Thread/ofVirtual) task)
             failed (fn [message exited?]
                      {:seon.test/sym test-symbol
@@ -1801,7 +1841,7 @@
   A body still live at the bound keeps its branch; `settle!` records its
   termination (and any cleanup failure) once the watcher observes its exit."
   {:malli/schema [:=> [:cat :seon.agent/execution-handle :map :seon.test/sym [:int {:min 1}]
-                       [:=> [:cat :seon.test.runner/captured-result] :nil]]
+                       [:=> [:cat :seon.test.runner/captured-result] :nil] :boolean]
                   [:map [:seon.test/result :seon.test.runner/captured-result]
                    [:seon.test/timings
                     [:map [:seon.agent/branch :seon.agent/branch]
@@ -1809,7 +1849,7 @@
                      [:seon.test.timing/resolve-ms :seon.test.timing/resolve-ms]
                      [:seon.test.timing/run-ms :seon.test.timing/run-ms]
                      [:seon.test.timing/release-ms :seon.test.timing/release-ms]]]]]}
-  [request-handle since test-symbol remaining-ms settle!]
+  [request-handle since test-symbol remaining-ms settle! effect-attempt?]
   (let [elapsed (fn [started] (/ (- (System/nanoTime) started) 1000000.0))
         started (System/nanoTime)
         child (@acquire-context! request-handle nil
@@ -1878,7 +1918,7 @@
                       #(bounded-result
                         sci.eval/loaded-identity since test-symbol resolve! remaining-ms
                         {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)
-                         :seon.test/member child}
+                         :seon.test/member child :seon.test/effect-attempt? effect-attempt?}
                         (fn [watched?]
                           (release! watched?)
                           (when watched?
@@ -2166,6 +2206,9 @@
                 ;; differing program rows, never from its operational data.
                 request-handle (when (seq ordered)
                                  (clean-request-handle execution recording cluster effective))
+                ;; Once per request: the members an attempt evaluation serves.
+                effect-reach (when-let [reach (some-> request-handle :seon.db/db (functions/gate-set 'seon.effect/request*))]
+                               (if (vector? reach) (set reach) (throw (ex-info "Effect reach is unreadable." reach))))
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [settle! (fn [result]
@@ -2182,7 +2225,8 @@
                         (if-not (pos? (remaining-ms))
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [{result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle since test-symbol (remaining-ms) settle!)]
+                                (member-result request-handle since test-symbol (remaining-ms) settle!
+                               (contains? effect-reach test-symbol))]
                           ;; An unknown loaded program started nothing: this
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]
