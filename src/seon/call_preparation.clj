@@ -1015,7 +1015,8 @@
                  :required (db/q database required-map-entry-query sym)
                  :required-named (db/q database required-named-map-entry-query sym
                                        (:seon.schema.shape/required-map-entries current))})
-        refused (refused-read (vals reads))]
+        ;; An uncontracted identity reads nothing; `(vals nil)` is nil, not a sequence.
+        refused (refused-read (vec (vals reads)))]
     (cond
       (not (number? contract-t)) contract-t
       refused refused

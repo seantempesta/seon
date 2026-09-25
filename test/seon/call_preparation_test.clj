@@ -207,6 +207,19 @@
 ;;; Registry-derived: a row plus a matching contract, no dispatch edit
 ;;; ---------------------------------------------------------------------------
 
+(deftest the-shipped-database-suppliers-are-coherent-in-the-executing-program
+  ;; Both refused when a schema edit re-shaped `:seon.env/environment` in
+  ;; republished arities but not in its own stored row: no call anywhere was
+  ;; then prepared, and every elided connection arrived as a missing argument.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection database-rows)
+     (let [current (cp/snapshot @connection (projection))]
+       (is (= [] (mapv :seon.error/message (:seon.call-preparation/refusals current))))
+       (is (= #{:seon.db/db :seon.db/connection}
+              (set (keys (select-keys (:seon.call-preparation/supplied-defaults current)
+                                      [:seon.db/db :seon.db/connection])))))))))
+
 (deftest a-synthetic-third-default-is-derived-from-its-row
   (testing "one transacted row and one declared function yield an injection
             plan with no change to any dispatch code"
@@ -829,6 +842,9 @@
      (fn [connection]
        (test-support/transacted! connection database-rows)
        (let [ctx (sci.eval/cluster-ctx @connection connection)
+             ;; cluster-ctx acquires lazily at `kernel/invoke`; a raw
+             ;; `sci/eval-string*` needs the program acquired first.
+             _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db @connection})
              acquired-projection (:seon.schema/projection ctx)
              environment
              (env/refuse-incomplete-environment!
@@ -867,6 +883,9 @@
                (plan/plan {:seon.db/db @connection
                            :seon.agent/id "missing"}))))
        (let [ctx (sci.eval/cluster-ctx @connection connection)
+             ;; cluster-ctx acquires lazily at `kernel/invoke`; a raw
+             ;; `sci/eval-string*` needs the program acquired first.
+             _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db @connection})
              acquired-projection (:seon.schema/projection ctx)
              environment
              (env/refuse-incomplete-environment!
