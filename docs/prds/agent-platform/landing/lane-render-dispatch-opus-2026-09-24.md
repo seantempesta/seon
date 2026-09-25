@@ -2,7 +2,7 @@
 type: landing
 status: current
 created: 2026-09-24
-scope: One render path slices 0a, 0b, 1a and part of 1b landed; 1b remainder and 1c wait on two rulings
+scope: One render path 0a, 0b, 1a, part of 1b, bounded-text storage and census class 12 landed; 1b remainder and 1c stopped
 ---
 # Lane render-dispatch-opus: one render path 0a, 0b, 1a, 1b (part) — 2026-09-24
 
@@ -12,6 +12,45 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/seon/render_source_test.clj`, `test/seon/render/transcript_run_test.clj`, `test/seon/render/retained_test.clj`,
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
+
+## Second follow-up (root rulings: namespace pages deleted, MCP JVM floor-only, eval.clj transferred)
+
+- **`3d460e2eb` error.clj `bounded-text`** stores fault-field text as `admit/canonical-edn` of the admitted value, not
+  `print/emit-text` (+4/−5; `seon.print` require dropped). Probed: bytes follow the value's own entry order —
+  `{:b 2 :a 1}` prints `{:b 2, :a 1}` where emit printed `{:a 1, :b 2}`, and `#{3 1 2}` prints in hash order. Equal values
+  built in different insertion orders therefore store different text; the D13 signature (`error.clj:150-175`) never
+  reads these fields, so signatures are unaffected. floor lane's slice 2 is unblocked.
+- **`386fe724d` test fallout**: `error_test.clj:715,735`, `oversight_test.clj:164-165`, `contracts_fixture.clj:53` fixed.
+- **`50c9d6a5c` census c class 12**: probed both members. `error.clj`'s declaration validator is correct in both; the
+  producers were retired test shapes. (1) error-test `schema-refusals-are-admitted-at-the-recorder`:
+  `schema/projection-from-database` of a map now meets `seon.db/carried-projection`'s input contract, so its refusal is
+  an instrument contract error missing `:seon.schema/refused-value`/`:expected-value`; the test now records
+  `schema/refuse-projection-source`'s genuine refusal (probed: validates, `prepare` succeeds). The unreachable
+  `refuse-projection-source` path under `projection-from-database` is a schema.clj observation for its owner.
+  (2) **cluster-test `a-core-fault-commits-with-the-dial-its-cluster-config-carries` (`test/seon/cluster_test.clj:127`,
+  not in this row)** puts the throwable at `:seon.flow/ex`; `error/throwable` reads flow's `:clojure.core.async.flow/ex`
+  (`error.clj:90-100`, as `fault.clj:206` and `boot.clj:355` supply it). Probed: `:seon.flow/ex` → "The supplied error
+  declaration does not validate its observation."; `:clojure.core.async.flow/ex` → prepares. One-key test fix for its owner.
+- MCP JVM mode: nothing was planned in cluster.clj beyond the landing's option text; no edit made.
+
+**Stopped again before the rest of 1b and 1c** (no production edits for them):
+1. Deleting the `my.turn` page needs `src/my/turn.clj` (`render-namespace-ai` delegates to `seon.run/render-namespace-ai`,
+   whose contract names `:my.turn/namespace-unit`) and deleting that schema form from `resources/seon/schemas/my.turn.edn`;
+   neither is in this row.
+2. The namespace stage is the vehicle of behavior tests that are not about namespaces: retained-call reuse counts
+   `kernel/public-functions-in` discoveries (`render_simplification_test.clj:348-490`, `render/retained_test.clj:40-70`),
+   live-Var invocation (`:627-690`), and ambiguity (`:588-626`). Converting them needs a declared vehicle (a supplied
+   projection with a fixture schema + function contract, which interacts with `call-cache-evidence`'s ctx projection)
+   and test runs to get right; blind, under the load rule, it would trade one known state for unknown reds.
+3. 1c's schema-stage deletion drops structural pairs for nested values: `render_simplification_test.clj`
+   `nested-values-render-their-declared-faces` (behavior established by `cecfaf428`) asserts a transaction report nested
+   under an unregistered key renders its declared face. About 30 identity-less non-error pairs are reached only this way
+   today (for example `:seon.db/transaction-report`, `:seon.print/elision`, `:seon.problems/problems`, `:seon.help/help`,
+   `:seon.ns.alias/binding` components, `:seon.cluster.status/concern`, `:seon.agent/settings`, `:seon.test/result`).
+   Keeping component/child pairs needs the design's attribute-element identity inside the floor walk
+   (`render/value.clj:470`, render-floor-opus), and the remaining root entrances need producer evidence one by one.
+   Needs a ruling: accept those losses as the design states ("Missing declared pair means floor"), or carry child
+   identity through value.clj first.
 
 ## Broken or unproven first
 
