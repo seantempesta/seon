@@ -27,8 +27,29 @@ restores the whole change at each failure point.
       reflects that publication, not a behaviour.
   - a9c74ad46 (P0-D, P1-A/B/C) is proven only on a scratch copy (`m1probe.evalcopy`) against
     the real branch context.
-- **Armed cost is unmeasured (P1-D).** All numbers below come from the unarmed scratch copy.
-  Root measures the installed, armed cost.
+- **Armed cost (P1-D), measured on published S1 (6ab6bf57).** Ten runs on a fresh branch,
+  installed and armed, with thread allocation per form:
+
+  | Form | Fresh branch | After 200 private defs | Pre-S1 installed (parent) |
+  |---|---:|---:|---:|
+  | one-line contracted `defn` | 16.3 ms, 33.1 MB | 18.8 ms, 35.1 MB | 22.4 ms |
+  | `(+ 1 2)` | 1.50 ms, 2.3 MB | 2.57 ms, 4.3 MB | 2.41 ms |
+
+  The parent column was measured the same way before S1; allocation was not recorded then, and
+  the parent was not measured with 200 private defs. The 200-def case is +7% over the parent's
+  fresh-branch `(+ 1 2)`: private state widens the `turn-interns` walk. Retained memory through
+  batch release is not measured.
+- **Verification after 6ab6bf57 (root's run, `tmp/orchestrator/verify-1840.out.d/`).**
+  Entry-gate 66/0 and reply 124/0. Three reds, handled as follows:
+  - `restoration-test` (4 errors): this lane's test bugs, fixed. The test passed keyword
+    stand-ins where the contract (correctly) requires a database value, and a scratch context
+    had no program-snapshot atom. The corrected bodies pass against the installed, armed code.
+  - `reader-test/read-failures-are-isolated`: an unclosed form also produced a second error for
+    its whitespace-only remainder. Only whitespace-only spans are now dropped; stray closers stay
+    errors, and there is one error per unreadable span.
+  - `evaluate-sources-test/ordered-evaluation-retains…:204` (`:seon.turn/recorded-content-conflict`):
+    already red before this lane's changes (`verify-6ab6ae2a-results.txt:20`, 12:01, and
+    `rerun-results-2026-09-25.txt:49`, 09-24). Not caused by S1.
 - **Batch refusal is proven at the restore member, not by a provoked `settle-batch!` refusal.**
   The new regression drives the ordinary path's pieces directly:
   - it runs `evaluate-for-install` and `accept-candidate!`;

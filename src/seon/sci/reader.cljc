@@ -854,10 +854,13 @@
             recovered (into recovered partial)
             ;; An unmatched closer is a reader error, as in Clojure
             ;; (LispReader's UnmatchedDelimiterReader): kept in order after
-            ;; the forms before it, never silently repaired away.
-            recovered (conj recovered
-                            (error-event text absolute-start absolute-end
-                                         state-after pending classification))]
+            ;; the forms before it, never silently repaired away. Only a
+            ;; whitespace-only recovery span holds nothing to report.
+            recovered (if (str/blank? source)
+                        recovered
+                        (conj recovered
+                              (error-event text absolute-start absolute-end
+                                           state-after pending classification)))]
         (if (= absolute-end (count text))
           recovered
           (let [suffix (subs text absolute-end)

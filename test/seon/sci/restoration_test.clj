@@ -53,7 +53,8 @@
              "the prior contract is still armed"))))))
 
 (deftest a-var-redefined-then-removed-gets-its-captured-root-back
-  (let [ctx (sci/fork (sci/init {}))
+  (let [ctx (assoc (sci/fork (sci/init {}))
+                   :seon.sci.kernel/program-snapshot (atom {}))
         turn-interns @#'sci.eval/turn-interns]
     (sci/eval-string* ctx "(defn g [x] (inc x))")
     (let [namespaces (:namespaces @(:env ctx))
@@ -65,26 +66,29 @@
       (is (= 2 (sci/eval-string* ctx "(g 1)"))))))
 
 (deftest a-restoration-that-cannot-run-leaves-the-execution-unavailable
-  (let [delivered (atom [])
-        ctx (assoc (sci/init {})
-                   :seon.sci.kernel/program-snapshot
-                   (atom {:seon.sci.eval/loaded-database :acquired
-                          :seon.flow/commit-fault!
-                          (fn [observation]
-                            (swap! delivered conj (:seon.error/declared-schema observation))
-                            [observation :seon.flow/committed])}))
-        restore #(#'sci.eval/restore-or-unavailable! ctx %1 %2)]
-    (is (nil? (restore :acquired (constantly []))) "nothing to restore changes nothing")
-    (is (nil? (restore :reacquired (constantly []))))
-    (is (empty? @delivered))
-    (let [planning (restore :acquired #(throw (ex-info "planning broke" {})))]
-      (is (= :restore-failed (:seon.sci.eval/unavailable planning)))
-      (is (seq (:seon.error/chain planning)) "the whole cause is kept"))
-    (is (= :program-reacquired
-           (:seon.sci.eval/unavailable (restore :reacquired (constantly [{:seon.sci.eval/path '[user x]}])))))
-    (is (= :program-reacquired
-           (get-in @(:env ctx) [:seon.sci.eval/unavailable-execution :seon.sci.eval/unavailable]))
-        "the execution names its unavailability for every later form")
-    (is (= [:seon.sci.eval/execution-unavailable-error :seon.sci.eval/execution-unavailable-error]
-           @delivered)
-        "each fault is delivered through the context's recorder")))
+  (support/with-database
+   (fn [connection]
+     (let [acquired (db/db connection)
+           delivered (atom [])
+           ctx (assoc (sci/init {})
+                      :seon.sci.kernel/program-snapshot
+                      (atom {:seon.sci.eval/loaded-database acquired
+                             :seon.flow/commit-fault!
+                             (fn [observation]
+                               (swap! delivered conj (:seon.error/declared-schema observation))
+                               [observation :seon.flow/committed])}))
+           restore #(#'sci.eval/restore-or-unavailable! ctx %1 %2)]
+       (is (nil? (restore acquired (constantly []))) "nothing to restore changes nothing")
+       (is (nil? (restore nil (constantly []))))
+       (is (empty? @delivered))
+       (let [planning (restore acquired #(throw (ex-info "planning broke" {})))]
+         (is (= :restore-failed (:seon.sci.eval/unavailable planning)))
+         (is (seq (:seon.error/chain planning)) "the whole cause is kept"))
+       (is (= :program-reacquired
+              (:seon.sci.eval/unavailable (restore nil (constantly [{:seon.sci.eval/path '[user x]}])))))
+       (is (= :program-reacquired
+              (get-in @(:env ctx) [:seon.sci.eval/unavailable-execution :seon.sci.eval/unavailable]))
+           "the execution names its unavailability for every later form")
+       (is (= [:seon.sci.eval/execution-unavailable-error :seon.sci.eval/execution-unavailable-error]
+              @delivered)
+           "each fault is delivered through the context's recorder")))))
