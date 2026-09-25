@@ -58,7 +58,11 @@ Design: `docs/research/agent-platform/derived-contracts-2026-09-25.md` §8 (S0),
 - The naked, `[k]` and explicit spellings share fingerprint `0d066320a365`.
 - `[k {:optional true}]` and `[k {:optional true} k]` share `05eee2b7b7ff`.
 - A nested naked map inside an explicit child round-trips.
-- Each spelling decodes to the explicit spelling.
+- Each spelling decodes to the explicit spelling's **canonical** form. `canonical-form` (`schema_shape.clj:49`,
+  unchanged by S0) sorts `:map` entries by `schema/canonical-data-string` of the key. That key is
+  length-prefixed (`"k11::seon.db/db"` < `"k14::seon.agent/id"`), so `:seon.db/db` precedes
+  `:seon.agent/id`. Authored order is not stored. Fingerprints are order-free by design and Malli
+  `:map` validation is order-independent (both verified at the REPL).
 - Per-spelling time was 0.7–1.5 ms, and 8.2 ms for the first, cold one.
 - The shape rows of every variant are `=` to their explicit twin's rows. So call preparation's
   `map-entry-query`/`named-map-entry-query` (`call_preparation.clj:850-900`), which join on the entry
@@ -82,7 +86,7 @@ removed from default after the probes.
 - it covers the naked, `[k]`, `[k properties]` and reordered spellings, and a nested naked entry;
 - rows equal their explicit twin;
 - it stores, reads back through `database-form` and `compiled-in`, and checks fingerprint equality,
-  decoding to the explicit form and the same validation.
+  decoding to the explicit form's `normalized-form` (canonical order) and the same validation.
 
 ## Root runs (serially, quiet window)
 
@@ -107,3 +111,15 @@ This lane holds these files and no longer needs them:
 - `src/seon/fn/schema_shape.clj` and `test/seon/fn/schema_shape_test.clj` (committed);
 - `src/seon/instrument.clj`, `test/seon/instrument_test.clj`, `src/seon/fn/analyzer.clj` and
   `reference-code/clj-kondo` (untouched; release them until S2/F1 resume).
+
+## Correction after root's first run (2026-09-25)
+
+- The first published run was red: `schema_shape_test.clj:229`, the same assertion failing in two runs.
+- My assertion `(= explicit decoded)` assumed that decoding preserves authored entry order. It does
+  not, by design: the codec stores the canonical, key-sorted form.
+- REPL on default, with S0 installed: `d/with` store, then `database-form`, gave
+  `[:map [:seon.db/db :seon.db/db] [:seon.agent/id {:optional true} :seon.agent/id]]`. That equals
+  `normalized-form` for all three explicit cases.
+- The swapped-order form has the same fingerprint and validates the same.
+- The codec was right; I fixed the test to compare against `normalized-form`.
+- Root reruns: `bin/test-check default --test seon.fn.schema-shape-test/every-malli-map-entry-spelling-stores-one-shape`.

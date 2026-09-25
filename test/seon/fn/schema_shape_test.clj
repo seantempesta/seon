@@ -226,7 +226,13 @@
            (is (= row (row-of variant)) (pr-str variant))
            (is (= (:seon.schema.shape/fingerprint row)
                   (:seon.schema.shape/fingerprint (row-of decoded))))
-           (is (= explicit decoded) "the stored shape decodes to the explicit spelling")
+           ;; The codec stores the canonical form: entries sorted by
+           ;; `schema/canonical-data-string` of their key (length-prefixed,
+           ;; so :seon.db/db precedes :seon.agent/id), not authored order.
+           (is (= (:seon.schema.shape/form
+                   (shape/normalized-form (m/schema explicit options) forms predicates))
+                  decoded)
+               "the stored shape decodes to the explicit spelling's canonical form")
            (doseq [value [{} {:seon.db/db 1} {:seon.agent/id 1 :seon.db/db 1}]]
              (is (= (m/validate (m/schema variant options) value)
                     (m/validate (shape/compiled-in stored entity) value))
