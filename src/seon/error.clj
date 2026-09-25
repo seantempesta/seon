@@ -1484,6 +1484,16 @@
        :seon.blob/staged-writes [staged]})
     {:seon.error/fact fact :seon.blob/staged-writes []}))
 
+(defn- distinguishing-members
+  "The members the declared schema adds to :seon.error/base, as observed.
+  The fact keeps the base site; the returned value keeps what makes this
+  error the declared one (for example :seon.turn.loop/phase-failed)."
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.error/declared-schema :map] :map]}
+  [projection declared-schema observation]
+  (let [registry (:seon.schema.projection/registry projection)
+        entries #(into #{} (map first) (some-> (mr/schema registry %) internal/entity-entries))]
+    (select-keys observation (remove (entries :seon.error/base) (entries declared-schema)))))
+
 (defn recording
   "Prepared identities, flat value and transaction data for one error.
 
@@ -1555,7 +1565,10 @@
      {:seon.error/fact fact
       :seon.error/ref [:seon.error/signature signature]
       :seon.error.occurrence/ref [:seon.error.occurrence/id occurrence-id]
-      :seon.error/value (value fact)
+      :seon.error/value (merge (value fact)
+                               (distinguishing-members (:seon.schema/projection request)
+                                                       (:seon.error/declared-schema fact)
+                                                       (:seon.error/source request)))
       :seon.blob/staged-writes staged
       :seon.db/tx-data tx}))))
   ([cluster database declared-schema source at attribution]
