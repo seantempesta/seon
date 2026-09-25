@@ -1,157 +1,92 @@
 ---
 type: living-list
 status: current
-updated: 2026-09-24
+updated: 2026-09-25
 ---
 
 # Open items (living list — root rewrites it in place; ledger of file owners: tmp/orchestrator/file-ownership.md)
 
-## Now (rewritten 2026-09-24 ~22:10Z; ledger: tmp/orchestrator/file-ownership.md)
+## Now (rewritten in place 2026-09-25 ~17:40Z; ledger: tmp/orchestrator/file-ownership.md)
 
-**RESOLVED (2026-09-25 ~03:30Z): call preparation dead on default** — stale dependent shape fingerprints. Fixed a0d2db39a
-(a schema edit re-derives its dependents' shapes), 757bd7004 (a publication re-derives rows whose stored shape disagrees
-with the projection), 7610ba9e9 (contract keys :seon.schema/key). After `(require 'seon.fn :reload)` + one publication,
-default converged: seon.call-preparation-test 127/0 (was 80/21/13), supplier coherence 2/0. Not healed: 39 referenced
-shapes whose own schema row is correct (finding them needs a hand list of shape-pointing attributes — not done).
-Hub schema edit re-derives ~1,500 rows in 3 s, 2.4 s in seon.test.accretion/generatable? (unassigned).
+### Resume here — read, don't assume
+1. Read `AGENTS.md` end to end: today's laws are "The one REPL path", the per-face render order, "an error is an ordinary
+   value", "Bound a code change by what it lets us cut" (design docs may grow when revised in place), and "Opus writes
+   first-pass designs and implements; Astra reviews every design and diff and audits".
+2. Read the living spec `docs/research/agent-platform/language-requirements-2026-09-24.md` end to end.
+3. Read this section, the ACTIVE rows of the ledger, and the landing note of every running lane before touching its files.
+4. **Before designing or assigning anything, find the existing owner** (owner: "The agent didn't know there was already a
+   parser so they wrote another one"). `rg` the concept; check `reference-code/` (the clj-kondo fork is the ONE parser;
+   malli, clerk, fipp, puget, orchard, nrepl are vendored); read `duplicate-paths-audit-2026-09-25.md` §11 (the only
+   deletion-credit ledger) and `query-render-building-block-2026-09-25.md` (11 prior query+render generations). Never
+   write a second parser, renderer, registry, runner or retry.
+5. Verify at the REPL (MCP `runtime_status`, `eval_clj` jvm with `(seon.cluster.boot/connection "default")`) before
+   trusting any doc claim; probes finite, never on new code in default (PROBE SAFETY in the lane preamble).
 
-**CHECKPOINT RUN 2026-09-25 (74 commands, 562 members): ~70 red; 28/74 commands green.** Stored counts (MCP): 301 failed,
-26 unknown (was 365/18). Census lane census-checkpoint-reds → red-baseline-census-2026-09-25c.md. PUBLICATION ORDER
-DEFECT seen: `init --changed` of S2b-b paths read render 0a's schema resources (new :seon.program/row-schema on
-:seon.error.occurrence/id) from disk while the loaded program.cljc was pre-0a → panic "A program identity attribute
-declares no source attribute". A --changed request ran full_source_refresh! (reads every schema resource). Fix: publish
-0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
-cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
+### The goal (big picture)
+Seon agents — ours included — code through ONE REPL path (read → eval → record → print; MCP and the test harness are
+entrants, printing only at the edge; everything before it is a Malli-typed value, fact or blob). The language (code
+metadata + task EDN + schemas) co-locates every fact where grep finds it and indexes it once for REPL agents; every id is a
+handle followable by grep and by one REPL call. Docs, plans and issues move into the codebase as tasks. Six ingredients,
+made capable and reused everywhere: value+schema, fact store, function, evaluation, render, flow.
 
-**FINDING 2026-09-25 (derived-contracts lane):** 2,768 of 4,867 loaded function rows in default carry no contract, against
-"contract every admitted function"; three separate producers of :seon.fn/spec. Owner ruled: an underivable output
-refuses at the entry gate with the tag named, so derived contracts (inputs from destructured qualified keys, outputs from
-the clj-kondo fork's exported return tag, F1) are how that count shrinks without longer authoring.
+### Owner authorizations for this push (2026-09-25, owner away)
+- Root approves slices over the line bound itself; when possible, schedule identification of obsolete code/docs to delete.
+- Task migration: slice 2 (3 records), then batches of hand-checked tasks, each Astra-reviewed.
+- Floor printer: Opus revises the design per Astra `6e9deea71`, Astra re-reviews, Opus implements if it passes.
+- Derived contracts: S0 (shape codec on `[:map :k]`), S2 (arm from projection contracts), F1 (clj-kondo fork exports
+  per-arity return tags; push to seantempesta/clj-kondo). S3+ waits for the sweep's measured deletions.
+- Standing: no paid agent calls (default runs no-provider via `config/development.edn`); root parks dirty lane edits as
+  patches itself for publishes and restarts (never waits); no PRs; push personal forks.
 
-**OWNER DIRECTION 2026-09-25 (errors, rendering):** an error is a declared schema plus a key attachable to any value;
-identity exists to store at least one copy, link it, and find/notify the agent to fix it (error ids are fine). The six
-schemas reusing ANOTHER entity's identity attribute as a member (seon.message.edn:156, seon.context.edn:79,
-seon.sci.eval.edn:200, seon.test.runner.edn:73/:75, turn compaction-agent-id) should use refs, not the identity attr.
-Inline render override restored (aa91ecb34, 82c63dbfb, design §1 a54278422). Inline render FUNCTIONS and how render
-inputs (database) are supplied: owner deferred the question — do not proceed until asked. HTML face = our Hiccup; a cut
-is an expandable node fetching its path (same fetch as MCP get_value).
+### Critical path, in order
+1. **PLATFORM:** publication is blocked: "seon.fn/gate-set is refused: dangling-id" — default's cluster has zero task
+   entities (lane fix-task-gate-publication-opus). Then publish HEAD.
+2. **Verify:** read `tmp/orchestrator/verify-6ab6a945-results.txt` (50 focused commands, run b7sqnn06h); then run the
+   queued lists in `tmp/orchestrator/verification-queue-2026-09-24.md` newest sections (render hand-off, turn, test rows,
+   digest). **`seon.cluster.turn-test` first after publishing:** every turn opened `:error` before any model call until
+   `3d0e68452` restored the database in the render argument (unpublished when written).
+3. **Tasks:** run ingestion's tests (`seon.issue.task-ingestion-test`, `seon.fn-test`, `seon.issue-test`,
+   `seon.cluster.source-test`) → slice 2 per `language-requirements-review-2026-09-25.md` "The first three slices" →
+   slice 3 (`(task h)` and a function's open tasks) → batches from `tmp/task-inventory/draft-tasks.edn` (first batch of
+   10 in `task-migration-inventory-2026-09-25.md`). Unwired: dangling check on program MERGE (`accept-merge!`).
+4. **Floor redesign cycle** (above).
+5. **Derived contracts S0, S2, F1** (above).
+6. **One-REPL milestone** M0 → M1 (option B) → D1 per `one-repl-language-2026-09-25.md` (`42308d868`); write-back is
+   constrained by 7.17 (one-file-one-owner; honest guarantee).
+7. **Then** the function face (`52e252f74`; Astra `49b1122d4` implement after fixes) and the query+render block
+   (`2ae3e003c`; Astra `ae7cfa793` implement after fixes), both on the floor's one pipeline.
 
-**CENSUS D (a34e5d800) routed 2026-09-25:** 169 red = 33 new verified + 6 probable + 130 prior classes; 17 of census c fixed.
-Lanes: fix-harness-fallout (R0 arm-first-loads refused 13 commands; S4a custody → option B, keep S4a; S4c clean world; seed
-attr; overlay read the working tree; lazy install), fix-agent-test-leak (ai/complete with-redefs leaked into ai-test ×13),
-fix-test-rows-d, fix-config-flat (config errors not flat, 9 sites; schema_test triage). Remaining: BOUND 26 (7 over 10 s:
-64.5/55.6/45.8 s; 44 cluster.turn-test members no outcome at 120 s), RENDER 11 + ERRREC 7 → render-dispatch after its
-rerun. REPEAT: clj-kondo dependency cache was empty AGAIN after the restart (3 fn-test reds) — find why the cache does not
-survive a JVM restart. Writer picks entity schemas by required identity attrs (db.clj:3162), never :seon.program/row-schema.
+### Designs (authorities; each revised in place)
+| Design | Latest | Review verdict |
+|---|---|---|
+| Living spec | `language-requirements-2026-09-24.md` (task ids = `seon.id/id` over ordered `[ns name kind]`; one `:seon/tasks` key; 1.15 staged schemas) | reviewed `4aedb01b2`, shaken `6cfb6a789`, integrated |
+| One REPL path | `one-repl-language-2026-09-25.md` `42308d868` | proceed after fixes (re-review) |
+| Render selection §1–§2 | `one-render-path-design-2026-09-25.md` (value key → viewing agent's ns fn → schema pair → floor; contract inputs are defaults, caller wins) | installed; nested ladder open |
+| Floor §3 | same file, shell order `0b83d61a5` | redesign before implementation `6e9deea71` — revising |
+| Query+render block | `query-render-building-block-2026-09-25.md` `2ae3e003c` | implement after fixes |
+| Function face | `function-face-and-canonical-authoring-2026-09-25.md` `52e252f74` | implement after fixes |
+| Derived contracts | `derived-contracts-2026-09-25.md` `d88ce949f` (call-graph return inference) | implement after fixes `511b948c6` |
+| Parser proof | `parser-proves-the-spec-2026-09-25.md` `76d5f06b3` | links exist in kondo analysis; producers dropped them |
+| Duplicate paths | `duplicate-paths-audit-2026-09-25.md` `7c577876d` | 3,062 measured retirement candidates |
 
-**OWNER RULING 2026-09-25 (output faces):** two faces from one shell-order selection: `:seon.render/ai` = pretty-printed and
-clipped (the saved text the AI sees; optimize later); HTML = explorable, unclipped, each cut a lazy expander fetching the next
-selection at path+offset (Clerk/orchard style); the debug view shows both side by side so the user has the same or better
-context than the AI. In the Opus floor design brief.
-**OWNER RULINGS 2026-09-25 (later):** shell-order floor adopted (research 717e01bbb); floor split into SELECTION (ours) and
-EMISSION (library where it fits: fipp/puget evaluated); Opus writes first-pass designs, Astra reviews + audits (AGENTS.md
-87f718819). Opus lane design-floor-shell-order-opus writing §3/§6. Adopted-HEAD run (133 commands, 874 members): 169
-unique red, 47/133 commands green → census d lane. DEFECT: adding reference-code submodules (not deps) made init refuse
-"JVM RESTART NEEDED: loaded dependencies changed" — the dependency check counts every reference-code gitlink, not the
-classpath's; restart cost 30 s. Default at 6ab68445 (render 1c adopted).
+### Open defects, not yet assigned (assign when files free)
+- `:my.edit/error` and `my.fs` error schemas require attributes their handlers never produce (make them the handler's union).
+- ~50 `ai/complete` redefs in `test/seon/cluster/turn_test.clj` → the injected local provider seam (`146b8a5fb` pattern).
+- `seon.fn/analyzed-form` merges digested attributes after the digest; `var-row` is a second digest producer.
+- Call preparation cannot see optional inputs inside `:seon.render/unit` (patch in `lane-fix-render-handoff` landing).
+- `:int`→`:string` schema change throws ClassCastException in `seon.db/transact-call`; `seon.effect/request!` writes the
+  wrong branch inside a nested test run; SCI undeclared-attribute write returns no read error (`lane-fix-test-rows-e`).
+- `render_coverage_test.clj:49`: forms threaded into `comp` make assertions vacuous (`0f5f849bd` class).
+- Census e BOUND/HANG/LOOP/BUDGET classes (`red-baseline-census-2026-09-25e.md` §3).
+- 2,768 of 4,867 loaded function rows carry no contract; three producers of `:seon.fn/spec`.
+- Operational: the clj-kondo dependency cache empties across restarts (refill `(seon.fn.analyzer/analyze-dependencies!)`);
+  MCP eval echoes every stderr line; adding reference-code submodules forces "JVM RESTART NEEDED"; `init --changed` runs a
+  full refresh; publication takes 25–47 s; the testing skill wrongly says `seon.test/run` does not arm contracts.
 
-**OWNER RULING 2026-09-25: floor allocator REDESIGN as one folded cut (slices 2+3+5)** around one bounded descriptor per
-reached value, after three review rounds (2d9f3641a, 59649109e, 9f839573e: net +203 lines, static JVM-exhaustion paths
-still open). Attempt parked as tmp/render-floor-opus/slice2c-worktree-reference.patch. Astra rewrites design §3/§6 in place
-(design-floor-descriptor-astra); a fresh Opus lane implements; hostile shapes run only as platform members. Meanwhile
-render-dispatch lands the child-identity carriage + 1c on the current floor. Default adopted HEAD (6ab5ec54; my.turn
-deletion re-landed 84f5a9fe2); 132-command verification running.
-
-**INCIDENT 2026-09-25 03:09Z: default OOM-killed** by render-floor-opus's scratch probe (an infinite `(range)` map key hashed
-by its new identity-first ordering; 17.8 GB dump data/heap/java_pid67823.hprof — owner to delete). Recovery: floor slice
-parked at tmp/render-floor-opus/slice2b-worktree.patch, dispatch 1c parked at tmp/render-dispatch-opus/inflight.patch;
-restart refused twice. (1) PUBLICATION ORDER: incremental publication wrote schema rows before program rows, refusing a
-schema naming a renderer defined in the same publication (seon.error/notice-prose) — fixed 5c80755da. The refusal's
-printed chain dropped the missing names (keep-the-whole-cause defect in boot's response/refused!). Root's revert
-6f0a37843 of 5a07f31e3 (my.turn page deletion) was based on a WRONG guess; re-land after adoption is proven. (2)
-ADOPTION: development-namespaces fed a refusal map's entries back as namespace names ([:seon.db/invalid-read true]) —
-lane fix-adoption-dependents-opus. Default is UP (03:27Z) running HEAD code over OLD rows (6ab5d3a3, 18 stale Vars)
-until adoption lands; lanes paused from REPL probes except the adoption lane. init took 39.5 s (over 10 s: issue owed).
-
-**RULINGS 2026-09-25 (owner):** floor slice 2 lands as ONE slice with the 100-line bound waived (conditions: §3
-fixes folded in, ≤+20% time, compact elisions, Astra diff review). Harness S4c: attempt agent/turn only for members
-whose reach includes effect/request*; a reach miss refuses loudly. **(root):** namespace-specific pages deleted (one
-pair per entity schema); MCP JVM mode renders floor-only (no custody); error.clj bounded-text is STORAGE → canonical
-EDN, not the floor; no-provider moves to config/development.edn applied by boot to default (census c option A);
-overlay candidate attributes belong in its world. Census c (fe2f67953): 127 red + 17 never started; lanes
-fix-config-boot, fix-test-shapes, fix-agent-test-redefs running. Kondo dependency cache refilled (434 files, 0 errors,
-4.5 s). UGLY: MCP eval echoes every clj-kondo stderr line (~230 "already linted" events) unbounded — events bypass the
-one render path; route events through the floor.
-**Var-redefinition class (measured 2026-09-25):** 323 `with-redefs`/`alter-var-root` sites in 94 test files — a CLAUDE.md
-law violation that leaks across members when a test never exits (StackOverflow x11 came from one). agent_test's
-evaluator redef removed (2519a9ae0); its ai/complete, prompt, async/close!, next-agent-work, turn, next-entry redefs and
-alter-var-root #'seon.turn/step remain. Owner: harness S5 sweep + S9 loopback/function provider (injection seams).
-**Harness S4 landed (unverified):** S4a db7f1c919, S4b 15daddb0a, S4c 71f45f476. Open: §2c timeout/"wait" case,
-background-launcher request and base/candidate sibling check not written; attempt writes no evaluation row; a seed that
-redefines its own test runs the old Var (smallest fix: digest-compare refusal, needs a seon.test.seed.edn alternative);
-schema/datahike_parity.edn unchanged since 2026-09-22 (drifts); file-store fixtures borrow the member ctx.
-**Test-shape sweep landed (unverified, 16 commits 1d8e5da9f..10d353039, net −18):** open from it — problems-unavailable
-branch (cluster.clj:674–676) lost its regression (only a readiness redef reached it); seon.maintenance/
-project-cluster-cleanup-result has no producer since cleanup-cluster! was deleted (dead code); problems_test/absent-facts
-still redefs problems/html-report; declaration-row's output refusal names the wrong member. db.clj retention refusal lacks
-:seon.error/at → escapes as outcome-unknown under :panic (lane fix-retention-refusal-opus).
-
-**OWNER RULING 2026-09-25: ONE render path** — a value is rendered by its schema's declared render function
-(responsible: renders less), else by the floor printer, which holds the ONE budget and spreads it across the value's shape
-(snippets of every branch of deep large values); nothing else clips. Clipping audit c6e75e57c (21 sites). Design
-one-render-path-design-2026-09-25.md revised after Opus review 8a9e946d7 (67645d512); OWNER GO 2026-09-24 for all 11
-slices (~725 net lines deleted). Running: render-dispatch-opus (slices 0a, 0b, 1) and render-floor-opus (slices 2, 3);
-slices 4–11 follow in order, file-disjoint ones in parallel.
-
-**RESUME (2026-09-25 ~02:30Z).** Tests 2,154; 365 failed + 18 unknown (current, after a full rerun). Running, code only:
-fixture-agent-rows (73), fix-sci-zero-arg-and-names (23), fix-src-singles-db-schema, update-retired-test-shapes (52),
-fix-mcp-value-window-budget. When they land: checkpoint `bin/seon init --dev default` (never restart without one first), run
-each landing's commands serially (tmp/orchestrator/verification-queue-2026-09-24.md), rerun the 16 non-routing unknowns,
-report the count. Then: harness S2b-b/c and S4, S5 scripted migration (~120), one-happy-path wave 3 in parallel (src 84,806
-lines, +647 net since f2bc7088a). Ledger: tmp/orchestrator/file-ownership.md.
-
-**Standing rules (owner 2026-09-24).** No paid agent calls: config/default.edn ships `:seon.config.ai/no-provider true`
-and `:seon.config.error/escalate-to` absent (boot re-applies that file). Root reads errors via MCP first, logs second.
-LOAD RULE: lanes write and commit code; root runs every test request and adoption serially. Hook publication is
-PAUSED; root publishes at checkpoints with `bin/seon init --dev default --changed <paths>` (zsh: `${=paths}`), because
-a restart loads code from the checkout but schema and test rows install only through publication.
-
-**Adoption unblocked (~23:10Z):** d1ff2e02c (first-party = file under the checkout outside every :local/root; analyzed, kept
-by the stale check) + 366355e2f (fill = `(seon.fn.analyzer/analyze-dependencies!)`, 5.9 s warm). Nested-run hang DIAGNOSED by thread dump: not a wait — reach-entries derives every test's
-reach cold on each new branch (572af5fb9 keyed the index by connection); fix: requested symbols only, one content-keyed
-cache shared across branches (lane locks-fs-and-runner-stamp).
-
-**Owner rulings 2026-09-24 (evening):**
-1. Publication: OPTION 3 — named lane branches → root-accepted merge → fail-closed convergence (b8fae5bf8); option 1
-   (root-only checkpoints, hook paused) is the interim until it lands. Slice plan: lane plan-publication-option3-astra.
-2. Full reanalysis over 10 s (16 s) AUTHORIZED until analysis is made cheap (issue a-full-reanalysis-publication-takes-twenty-five-seconds.md).
-3. SCI evaluation vs adoption: owner — locks are a smell, reloads are rare (root checkpoints / accepted merges). Proposed: DETECT, don't prevent — compare the loaded program identity (S3c loaded-commit-id) at evaluation/member start and end; a mismatch reads unknown with a named cause; then delete the program-change lock (da9910fec, S3a). OWNER YES 2026-09-24: "just detect and push back if there's a conflict. We don't need read/write locking most of the time in clojure so definitely audit all places this is happening" → lanes detect-program-change + audit-locks.
-4. Test-declared expected faults: DESIGNED 59b52dd2e — a fault is expected iff a PASSING assertion's :actual holds its receipt (:seon.fault/recorded, by declared schema; or a passing thrown?'s cause chain); any other fault on the member's branches is a test error. No list, no metadata. 3 slices (runner ~25, member-result ~30, one-line test edit). Blocked on: nested branches acquired from a member handle must record :seon.test.member/branch and copy faults to the member, not cluster-default — launch after harness S2a lands (it reshapes test worlds).
-5. Inherited agents inside test members: RULED (owner) — they disappear: a member contains only the agents its seeds or body create (harness S2a builds this).
-
-**Publication option 3 plan:** D1 revised (ffad218e2; §10 corrected to the detect ruling, b0f5a286d): 19 slices O0–O7,
-each ≤100 lines, depending on harness S2/S3/S4. Running: O0 (delete hook auto-publication). Next: O1a after S2a.
-**Lock audit (9437d0e01):** 38 sites — 17 keep (cross-process file locks, PrintStream/prepl monitors, Thread.interrupt
-holder, Flow CAS, Datahike writer/konserve), 7 replace, program-change lock (detect-program-change), one dead family
-(reserve-cluster!, cluster.clj:818–842). Worst: agent.clj:872 acquire-context! holds the contexts monitor across branch
-creation + SCI acquire + transact! (serializes every turn start); routing monitor held through join-graph! with a hidden
-lock order vs contexts. Running: fs/jvm.clj write lock + runner.clj reach-index stamp. Waiting on files: agent.clj pair
-(after S2a names its files), reserve-cluster! + running-instances/held-flocks/branch-open-monitor (cluster.clj/boot.clj
-held). Findings: two forked prepl writers (cluster.clj:553 vs resources/seon/operator/prepl.clj); maintenance.clj:518
-opens a store outside the refcount (correctness risk); lock-file generator leaves files under tmp/.
-
-**Harness (all approved):** S12, S0, S1, S3a–S3c landed; next S2/S2a (clean facts/branch) → S2b (seeds; three seed
-forms, design §2b) → S4 (custody, effects) → S5 (scripted migration by namespace groups).
-**One-happy-path:** wave 1 mostly done; wave 2 −885 (launcher compute half) with log-line/log-report, dead boot fns,
-dead snapshot fields still owed; wave 3 F2/F5/F6 (projection wrappers, call-with-projection sweep, lazy registry) next.
-
-**Verification (root, serial):** tmp/orchestrator/verification-queue-2026-09-24.md. TRUE BASELINE 2026-09-25 ~01:40Z: 365 failed,
-18 unknown (all current). Census #3 (aab55ddd3), 14 classes: H1 hand-built rows 58 + agent rows without branch 40 + label-
-branch helper agent-row (turn_test.clj:131) 33; BOUND 43; spies never reached 33; nested refusal fields 27; single-owner 27
-(17 FIX-SRC); retired shapes 25; SCI regressions 23; clean-world data 22; render selection 15; problems compile 12 (rerun);
-sibling worlds 4. The 18 unknowns: two routing-conservation tests whose threads never exit block their requests.
-Lanes (code only): fixture-agent-rows, fix-sci-zero-arg-and-names, fix-src-singles-db-schema,
-fix-src-singles-prompt-web-mcp-config, update-retired-test-shapes.
+### Where evidence lives
+Ledger `tmp/orchestrator/file-ownership.md` · run queue `tmp/orchestrator/verification-queue-2026-09-24.md` · runner
+`tmp/orchestrator/run-verify2.sh LIST OUT` (full outputs in `OUT.d/`) · landing notes `docs/prds/agent-platform/landing/` ·
+censuses `red-baseline-census-2026-09-25c/d/e.md` · lane preamble `tmp/orchestrator/fix-lane-preamble-2026-09-24.md`.
 
 ## New platform findings (2026-09-25)
 - Small publication 14.6 s: 9.4 s was relinting all 179 callers of zero-argument functions whose arity rows never compared
