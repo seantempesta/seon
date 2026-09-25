@@ -472,8 +472,18 @@
                    (let [node {:seon.print/face :seon.print/map :seon.print/entries []}
                          ;; The node's path names its attribute, whose named
                          ;; schema identifies an identity-less child value.
+                         ;; An identity projection's result is its projection
+                         ;; function's declared return (rule 2 at this node).
+                         projector (when identity
+                                     (let [form (get (:seon.schema.projection/forms projection)
+                                                     (:seon.schema/key identity))]
+                                       (when (and (vector? form) (map? (second form)))
+                                         (:seon.schema/identity-projection (second form)))))
                          projected (@render-project-node
-                                    (assoc unit :seon.render.data/path path) value node output)]
+                                    (cond-> (assoc unit :seon.render.data/path path)
+                                      projector (assoc :seon.render/value value
+                                                       :seon.render.call/function projector))
+                                    value node output)]
                      (when (not= node projected) projected)))]
     (when ai? (vswap! remaining dec))
     (cond
