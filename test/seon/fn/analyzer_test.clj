@@ -249,3 +249,23 @@
     (is (= ['union] (mapv ::analyzer/name (::analyzer/clause-refers definition))))
     (is (= [] (::analyzer/clause-renames definition))
         "a :rename keyword read outside the ns form is not a clause")))
+
+(deftest dependency-analysis-is-missing-exactly-for-unmarked-jars
+  ;; Boot fills the dependency analysis when a jar lacks kondo's skip mark
+  ;; (`ensure-dependency-analysis!`): an empty cache names every jar, a mark
+  ;; covers every coordinate sharing its jar name, and directories carry none.
+  (let [directory (fixture-directory (str (random-uuid)))
+        cache (.getPath (io/file directory "cache"))
+        entries ["/m2/com/lambdaisland/glogi/1.3.169/glogi-1.3.169.jar"
+                 "/m2/lambdaisland/glogi/1.3.169/glogi-1.3.169.jar"
+                 "/m2/cheshire/cheshire/6.0.0/cheshire-6.0.0.jar"
+                 "/checkout/reference-code/sci/src"]
+        unanalyzed #(#'analyzer/unanalyzed-jars cache entries)]
+    (try
+      (is (= (pop entries) (unanalyzed)) "an empty cache lacks every jar")
+      (let [mark (io/file cache "v1" "skip" "glogi-1.3.169.jar.4468ce4e")]
+        (io/make-parents mark)
+        (spit mark (second entries)))
+      (is (= ["/m2/cheshire/cheshire/6.0.0/cheshire-6.0.0.jar"] (unanalyzed))
+          "one mark names both coordinates sharing its jar name, whatever path it holds")
+      (finally (test-support/delete-recursively! directory)))))

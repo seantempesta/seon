@@ -444,27 +444,59 @@
           (comp (keep :to) (filter symbol?) (distinct) (remove defined) (remove analyzed?))
           (:var-usages analysis))))
 
-(defn analyze-dependencies!
-  "Fill the checkout's clj-kondo cache from the classpath this JVM runs with
-  (its alias's extra deps included): every entry outside the checkout or under
-  a `:local/root`, never a project root, whose namespaces are first-party
-  (`classpath-source`). One-time setup, root's to run; kondo skip-marks each
-  jar (clj_kondo/impl/core.clj:489-506). `--skip-lint` would only copy configs
-  (clj_kondo/core.clj:126-129); canonical paths name a jar entry `<jar>:<entry>`
-  (impl/core.clj:289-291), which `stale-cache-entries` keeps."
-  {:malli/schema [:=> [:cat] :map]}
+(defn- dependency-entries
+  "The canonical classpath entries this JVM runs with (its alias's extra deps
+  included) outside the checkout or under a `:local/root`: never a project root,
+  whose namespaces are first-party (`classpath-source`)."
+  {:malli/schema [:=> [:cat] [:vector :string]]}
   []
   (let [checkout (.getCanonicalPath (io/file "."))
         {::keys [dependency-roots]} (roots-of checkout)
         first-party? #(and (or (= % checkout) (str/starts-with? % (str checkout java.io.File/separator)))
-                           (not (under? dependency-roots %)))
-        entries (into [] (comp (map #(.getCanonicalPath (io/file ^String %))) (remove first-party?))
-                      (enumeration-seq (java.util.StringTokenizer. (System/getProperty "java.class.path")
-                                                                   java.io.File/pathSeparator)))]
-    (select-keys (clj-kondo/run! {:lint entries :dependencies true :parallel true :copy-configs true
-                                  :config-dir config-directory :cache-dir cache-directory
-                                  :config {:output {:canonical-paths true}}})
-                 [:summary])))
+                           (not (under? dependency-roots %)))]
+    (into [] (comp (map #(.getCanonicalPath (io/file ^String %))) (remove first-party?))
+          (enumeration-seq (java.util.StringTokenizer. (System/getProperty "java.class.path")
+                                                       java.io.File/pathSeparator)))))
+
+(defn analyze-dependencies!
+  "Fill the checkout's clj-kondo cache from `dependency-entries`. Kondo
+  skip-marks each jar (clj_kondo/impl/core.clj:489-506). `--skip-lint` would
+  only copy configs (clj_kondo/core.clj:126-129); canonical paths name a jar
+  entry `<jar>:<entry>` (impl/core.clj:289-291), which `stale-cache-entries` keeps."
+  {:malli/schema [:=> [:cat] :map]}
+  []
+  (select-keys (clj-kondo/run! {:lint (dependency-entries) :dependencies true :parallel true :copy-configs true
+                                :config-dir config-directory :cache-dir cache-directory
+                                :config {:output {:canonical-paths true}}})
+               [:summary]))
+
+(defn- unanalyzed-jars
+  "Classpath jars kondo holds no skip mark for. A mark is named
+  `<jar-name>.<config-hash>` and holds the last path linted under that name
+  (clj_kondo/impl/core.clj:490-498, :603-607), so two coordinates sharing a jar
+  name (com/lambdaisland/glogi and lambdaisland/glogi) share one mark: a jar
+  is analyzed when its name is marked, whatever the path or config hash."
+  {:malli/schema [:=> [:cat :string [:vector :string]] [:vector :string]]}
+  [cache-dir entries]
+  (let [skip (io/file (kondo.core/resolve-cache-dir config-directory true cache-dir) "skip")
+        marked (into #{} (map #(let [mark (.getName ^java.io.File %)]
+                                 (subs mark 0 (str/last-index-of mark "."))))
+                     (.listFiles skip))]
+    (into [] (comp (filter #(str/ends-with? % ".jar"))
+                   (remove #(marked (.getName (io/file ^String %)))))
+          entries)))
+
+(defn ensure-dependency-analysis!
+  "Boot's fill of the dependency analysis program analysis reads: run
+  `analyze-dependencies!` in this JVM when any classpath jar is unmarked (an
+  empty cache after a nuke, a fresh root, a new coordinate); nil when every jar
+  is marked. A new `:local/root` directory carries no mark; its calls refuse
+  by name with `seon.fn/dependency-analysis-command`."
+  {:malli/schema [:=> [:cat] [:maybe [:map [::unanalyzed-jars [:vector :string]] [:summary :map]]]]}
+  []
+  (let [missing (unanalyzed-jars cache-directory (dependency-entries))]
+    (when (seq missing)
+      (assoc (analyze-dependencies!) ::unanalyzed-jars missing))))
 
 (defn forget-namespaces!
   "Remove superseded declarations from one explicitly owned resolver cache."

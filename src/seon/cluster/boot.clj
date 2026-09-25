@@ -16,6 +16,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.fault :as fault]
+            [seon.fn.analyzer :as analyzer]
             [seon.error.refusal :as refusal]
             [seon.flow :as flow]
             [seon.fs :as fs]
@@ -187,6 +188,10 @@
         _ (cluster/write-advertisement!
            (cluster/cluster-paths (:seon.boot/root config) cluster-name)
            (:seon.boot/advertisement instance))
+        ;; Program analysis classifies host bindings from clj-kondo's
+        ;; dependency analysis; a root whose cache lacks it (nuke, fresh
+        ;; archive) fills it here, in this JVM, before publication reads it.
+        _ (analyzer/ensure-dependency-analysis!)
         ;; A resume publishes exactly the inputs whose bytes differ from the
         ;; published program (files edited while the JVM was down), and nothing
         ;; when none differ; a first start publishes everything. A refused
