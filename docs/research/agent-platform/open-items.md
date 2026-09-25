@@ -31,6 +31,9 @@ updated: 2026-09-26
   mode keywords) → one composer (topological: definitions before uses; turns by tx; each node once, later refs back-point;
   renders cached by content digest + face). Renderers MAY read the stable db value they are handed. Root gets a standing
   root task. `:seon.render/units` is to be deleted (the walk replaces it). The debug page shows it: `/agent/{id}/debug?n=0..3`.
+- **Render functions select data; the one printer lays it out.** A pair returns a spec'd value (the fields worth showing),
+  rendered in turn by the floor printer built on fipp (walk → fipp operations with an explicit stack → fipp's engine; our code
+  keeps classification + the one budget); text only for deliberate prose, no `pr-str` layout inside a pair (impl-floor-on-fipp).
 - **Store references, never copies:** errors/facts carry a db value as commit id/basis, an SCI ctx as agent/branch identity,
   a request as its evaluation/turn ref, a large value as one blob digest. Opaque world objects are typed identities at the
   admission edge, never walked.
