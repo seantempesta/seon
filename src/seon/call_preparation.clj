@@ -608,7 +608,10 @@
                   [:or :map :seon.db/error-result]]}
   [database projection memo committed]
   (let [commit-key [::commit (:datahike.value/commit-id committed)]
-        derivation (fn [_] (delay (derive-snapshot database projection)))
+        ;; A memoized derivation is no caller's read: only a miss would
+        ;; record it, so it stays out of the caller's evidence.
+        derivation (fn [_] (delay (binding [db/*read-evidence-sink* nil]
+                                    (derive-snapshot database projection))))
         derived
         (if (= :all @snapshot-read-attributes)
           @(cache/lookup-or-miss memo commit-key derivation)
