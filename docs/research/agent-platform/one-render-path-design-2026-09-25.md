@@ -88,13 +88,17 @@ These are review measurements (2.7-ms census, prepl 6 ms; ownership prepl 7 ms),
    entity field; this is a closed-key ownership check, not a claim of complete validation. `:db/id` alone names no owner.
    Never search all schemas containing the attribute. Adding this property does not turn runtime rows into program rows.
 
-**Inline faces come first (owner, 2026-09-25; AGENTS.md a54b689ff, f3a14238e).** Selection is `:explicit-value`, then
-`:declared` (the schema default), then `:floor`. A map's own `:seon.render/ai` or `:seon.render/html` overrides the
-default for that face only; a value may override one face or both. The face value is a renderer symbol, rendered data
-(which reaches its face's emitter as data at the display edge, never a pre-printed string), or an inline function: an
-ordinary agent function through the same SCI entrance, admission and instrumentation, receiving the one merged unit with
-the database and other render inputs only when its declared input keys ask for them. Face keys are render data, not
-entity attributes, so they do not void rule 3's ownership.
+**Per face, the first match wins (owner, 2026-09-25; AGENTS.md a54b689ff, f3a14238e, 7fc304482).** (a) the value's own
+`:seon.render/ai`/`:seon.render/html`, the master override: a renderer symbol, an inline function, or rendered data
+(which reaches its face's emitter as data, never a pre-printed string); (b) a render function in the VIEWING agent's
+namespace whose contract fits the value and returns the face, the agent's own default from its point of view (sorted
+candidates, more than one refused); (c) the schema's declared pair, the shipped default; (d) the floor. Face keys are
+render data, not entity attributes. A render function's output may be any properly declared shape and renders in turn.
+**Inputs are the contract's, supplied like any call.** A render function declares what it wants in its Malli `:=>`
+input, as map keys or positional `:cat` schemas. The render boundary passes its arguments; inputs the contract declares
+and the caller omits (the database, the unit) are supplied as defaults by declared schema name through the one call
+preparation mechanism (`seon.call-preparation`, the kernel invocation hook), and caller arguments always win. An inline
+function with no schema gets just the value.
 Within `:declared`, order: the error's own operation, then a known direct-call return, then eligible entity ownership,
 then the attribute's named schema, else floor. A declared report result may legitimately contain an entity identity; rule 3
 must not capture that report envelope.
