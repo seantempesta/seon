@@ -22,6 +22,7 @@ Each requirement names its source (O = owner ruling, R = a dogfood/experiment ru
 | 1.5 | Links written the way a REPL resolves them: syntax quote in code, bare fully qualified symbols in EDN data, `'sym` inside requirement code | O, R | met |
 | 1.6 | Task files are read by the Clojure reader without evaluation (edamame, quote on): `clojure.edn` silently misreads `'sym` as one symbol named `'sym` | R | met |
 | 1.7 | Elegant and intuitive, not merely sufficient: the fewest authored keys; everything derivable is derived | O | v0.1: authored = id, intent, subjects, [schemas], [done-when]; 76 → 47 lines for the same eight tasks |
+| 1.9 | **Every reference is a handle followable both ways from limited context:** an id (task, function, schema, error, test) appears literally where it is defined, in a file its namespace names, so `rg <id>` finds the definition and every referrer; and the same id is one REPL call away (`(task :x.task/y)`, `(source 'f)`, `(callers 'f)`), which returns its explicitly linked graph neighbours. Rendered context shows ids plus the call that expands them, never the expansion by default | O 2026-09-25 | proposed |
 | 1.8 | Keys read as English: `:seon.task/done-when`, `:seon.task/intent` (a feature is not a problem) | O, R | met |
 
 ## 2. Tasks are the one unit of work
