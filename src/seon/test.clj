@@ -2199,9 +2199,9 @@
                 own-write! (fn [operation written]
                              (when (and (:seon.error/at written) (not (:seon.test/admission-refusal written))
                                         (not (get-in written [:seon.error/data :seon.db/ambient-branch])))
-                               (core-fault! operation (ex-info (:seon.error/message written) written
-                                                               (let [cause (:seon.error/throwable written)]
-                                                                 (when (instance? Throwable cause) cause)))))
+                               ;; The refusal holds its whole cause as data, `:seon.error/chain`
+                               ;; (`seon.error.refusal/diagnostic` consumes the Throwable).
+                               (core-fault! operation (ex-info (:seon.error/message written) written)))
                              written)
                 recording-completion
                 (fn [batch-provenance results terminated?]

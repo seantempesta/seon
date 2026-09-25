@@ -3,6 +3,7 @@
   member's branch through the agent entrance and unlinks it after the body."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.blob :as blob]
             [seon.cluster.registry :as registry]
             [seon.config :as config]
             [seon.db :as db]
@@ -232,7 +233,9 @@
            store (:seon.store/store handle)
            test-symbol 'seon.test.one-request-test/resolves-nowhere]
        (define-agent-test! handle "(clojure.test/deftest resolves-nowhere (clojure.test/is true))")
-       (support/transacted! connection [{:seon.test/sym test-symbol :seon.test/ns [:seon.ns/name probe-ns]}])
+       (support/transacted! connection (support/replacement-tx (db/db connection) [:seon.test/sym test-symbol]
+                                                               "(clojure.test/deftest resolves-nowhere (clojure.test/is true))"
+                                                               {:seon.test/ns [:seon.ns/name probe-ns]}))
        (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
                               :seon.test/recording-connection connection
                               :seon.test/policy :named
@@ -395,15 +398,21 @@
                        (catch clojure.lang.ExceptionInfo panic panic))
            refusal @refused
            recorded (:seon.fault/recorded (ex-data thrown))]
-       (is (:seon.error/throwable refusal) (pr-str (dissoc refusal :seon.error/throwable)))
+       (is (= {:error ::writer-refused} (:seon.error/data (peek (:seon.error/chain refusal))))
+           (pr-str (:seon.error/chain refusal)))
        (is (= :panic (:seon.fault/policy recorded)) (pr-str (ex-data thrown)))
        (is (true? (:seon.fault/committed? recorded)) "stored before it throws")
        (is (= 'seon.test/admit-run (:seon.error/operation recorded)))
-       (is (= refusal (ex-data (ex-cause thrown))) "the fault carries the whole refusal")
-       (is (identical? (:seon.error/throwable refusal) (ex-cause (ex-cause thrown))) "and its cause chain")
-       (is (some #(= "recording writer refused" (ex-message %)) (take-while some? (iterate ex-cause thrown))))
-       (is (some? (:seon.error/signature (db/pull (db/db connection) [:seon.error/signature]
-                                                  [:seon.error/signature (:seon.error/signature recorded)]))))
+       (is (= refusal (ex-data (ex-cause thrown))) "the fault carries the whole refusal, its cause chain included")
+       (is (= "recording writer refused" (:seon.error/message (peek (:seon.error/chain (ex-data (ex-cause thrown)))))))
+       (let [row (db/pull (db/db connection)
+                          [{:seon.error/occurrences [{:seon.error.occurrence/data-blob [:seon.error.occurrence/blob-digest]}]}]
+                          [:seon.error/signature (:seon.error/signature recorded)])
+             digest (get-in (first (:seon.error/occurrences row))
+                            [:seon.error.occurrence/data-blob :seon.error.occurrence/blob-digest])]
+         (is (string? digest) "the fault is stored with its evidence")
+         (is (str/includes? (str (blob/get connection digest)) "writer-refused")
+             "the stored evidence keeps the root cause's data"))
        (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]
                          (db/db connection)))
            "the refused admission reserved nothing")))))
