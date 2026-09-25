@@ -92,7 +92,9 @@
               (is (valid? true))
               (is (not (valid? false)))
               (is (not (valid? nil))))))
-        (test-support/apply-config! connection "flag-test" {})
+        ;; An apply changes only its keys: clearing a flag is an explicit absence.
+        (test-support/apply-config! connection "flag-test"
+                                    (zipmap (keys flags) (repeat config/absent)))
         (let [row (db/pull (db/db connection)
                            [:seon.config/cluster
                             :seon.config.agent/show-all-settings

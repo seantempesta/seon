@@ -108,13 +108,17 @@
                      :seon.agent/id agent-id
                      :seon.turn/id turn-id}} now)
            database @connection]
-       (doseq [result [applied seeded created written opened report]]
+       ;; `seed-cluster!` returns nil by contract; it throws on a refused write.
+       (is (nil? seeded))
+       (doseq [result [applied created written opened report]]
          (is (or (:db-after result) (boolean? (:seon.reconcile/converged? result)) (:seon.turn.loop/outcome result)) (pr-str result)))
        (is (true? (:seon.config.ai/no-provider (ai/agent-overlay database agent-id))))
-       (is (= "(+ 1 1)" (:seon.turn/reply
-                         (db/pull database '[*] [:seon.turn/id turn-id]))))
-       (is (= ["2"] (db/q '[:find [?value ...]
-                              :where [_ :seon.eval/shown ?value]] database)))
+       ;; A virtual turn's reply is empty and evaluates nothing (seon.turn,
+       ;; `(freeze! {:seon.ai/text ""})`); the "(+ 1 1)" stand-in retired in e915d2de0.
+       (is (= "" (:seon.turn/reply
+                  (db/pull database '[*] [:seon.turn/id turn-id]))))
+       (is (empty? (db/q '[:find [?value ...]
+                           :where [_ :seon.eval/shown ?value]] database)))
        (is (empty? (db/q '[:find [?attempt ...]
                            :where [?attempt :seon.ai.attempt/id]] database)))
        (is (empty? (db/q '[:find [?error ...]

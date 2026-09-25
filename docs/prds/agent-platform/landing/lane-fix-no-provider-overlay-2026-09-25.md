@@ -164,3 +164,18 @@ bin/test-check default --ns seon.no-provider-test
 bin/test-check default --ns seon.schema.datahike-test   # already red (stale oracle, see above); expect one more extra attribute
 bin/test-check default --ns seon.turn-loop-test         # watches for any test that relied on an exact reset
 ```
+
+## Round 3: reds on adopted HEAD 6ab6f5fb
+
+Outputs: `tmp/orchestrator/verify-reds.out.d/001.txt` (22:31Z) and `002.txt`. I compared them with
+`verify-fresh.out.d/001.txt`/`002.txt` (22:14Z) and `red-adopted-2026-09-25.txt`.
+
+| member | class | action |
+|---|---|---|
+| config-test/a-refused-read-is-returned-as-the-cause-not-reported-as-missing-facts | pre-existing (in red-adopted-2026-09-25 before this lane; the `seon.db/pull` path renames the refused operation) | none; `seon.db` owner |
+| config-test/config-loads-the-packaged-population-in-a-fresh-jvm (10.8 s > 5 s) | pre-existing (in red-adopted-2026-09-25) | none; bound owner |
+| config-test/optional-setting-flags-assert-only-true | retired assumption: the second `{}` apply expected an exact reset | now clears the flags with explicit `:seon.config/absent` |
+| config-test/cluster-scoped-config-refuses-an-omitted-cluster (4) | not reproducible: green in the 22:14Z run, and red at 22:31Z while three commits (22:28–22:31) were publishing. At the REPL on 6ab6f5fb, `apply!` without a cluster refuses with `:seon.instrument/fn seon.config/apply!` / `:check :input`, and `(effective db)` refuses by arity. The run overlapped a reload that re-armed seon.config | rerun |
+| config-test/sparse-file-reading-does-not-compile-a-second-time (22:14Z only) | caused, transient: on a fixture base built before the attribute existed, `accrete-row-attributes!` acquires a second declaration projection. Green once the base has the attribute (22:31Z) | none; the one-time install cost is by design |
+| no-provider-test/settings-select-a-real-virtual-turn-without-provider-attempts (3) | retired assumption, independent of config: the virtual reply has been `""` with no evaluation since e915d2de0 (2026-09-09), and `seed-cluster!` returns nil by contract | assertions updated to reply `""`, no shown values, `seeded` nil |
+| no-provider-test/terminal-provider-refusal-records-one-fault-and-defers-reopening (2 closed turns, expected 1) | not caused by config: the world applies no manifest, so the row equals the old code's row. The extra closed turn is turn settlement | route to the turn.clj owner |
