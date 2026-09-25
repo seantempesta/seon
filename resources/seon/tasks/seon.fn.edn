@@ -1,4 +1,6 @@
-[#:seon.task{:id :seon.fn.task/tests-reaching-saturates
+[#:seon.task{:id "300aca1ad57c"
+             :name "tests-reaching-saturates"
+             :kind :function
              :intent "Reach for a core function saturates: seon.fn/tests-reaching took 1.9 s and 6.5 GB and reported 1,720 tests for one function. The gate set must follow real reach and stay sub-second."
              :must-read #{seon.fn/reverse-closure seon.fn/gate-sets}
              :evidence #{"docs/research/agent-platform/language-requirements-2026-09-24.md"}}]

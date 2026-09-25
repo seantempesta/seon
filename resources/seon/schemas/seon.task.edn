@@ -1,22 +1,53 @@
 #:seon.task
-{:id [:qualified-keyword {:seon.db/identity true :seon.program/row-schema :seon.task/task
-                          :description "The task's identifying aspect written literally: its component (`<owning-ns>.task`) plus its name. The same token appears in task EDN, :seon/tasks metadata and rendered context (spec 1.9, 3b.6)."}]
+{:handle [:string {:min 12 :max 12}]
+ :id [:and {:seon.db/identity true :seon.program/row-schema :seon.task/task
+            :description "The task handle: seon.id/id over the ordered aspect [ns name kind] (spec 3b.6), written literally in task EDN, :seon/tasks annotations and rendered context. seon.issue/task-handle returns it."} :seon.task/handle]
+ :ns [:symbol {:description "The owning namespace: the task file's stem, resources/seon/tasks/<ns>.edn."}]
+ :name [:string {:min 1 :description "The readable name; with :ns and :kind the identifying aspect."}]
+ :kind [:enum {:description "The subject kind the task concerns; part of its aspect."} :function :namespace :schema]
  :intent [:string {:min 1}]
- :must-read [:set {:description "Functions a task's worker reads first; bare qualified symbols in task EDN."} :seon.program/edge-symbol]
- :evidence [:set {:description "Repository paths of evidence documents; linked, never parsed."} [:string {:min 1}]]
- :tasks [:set {:min 1 :seon.db/index true :description "Task ids a definition's :seon/tasks names, as keyword values (never refs). On a deftest they are the tasks it proves; anywhere else the tasks it is subject to."} :qualified-keyword]
- :entry [:map {:closed true :description "One authored entry of resources/seon/tasks/<owning-ns>.edn."}
-         [:seon.task/id :seon.task/id] [:seon.task/intent :seon.task/intent]
-         [:seon.task/must-read {:optional true} :seon.task/must-read]
+ :must-read [:set {:min 1 :description "Functions a task's worker reads first; bare qualified symbols in task EDN."} :seon.program/edge-symbol]
+ :evidence [:set {:min 1 :description "Repository paths of evidence documents; linked, never parsed."} [:string {:min 1}]]
+ :tasks [:set {:min 1 :seon.db/index true :description "Task handles a definition's :seon/tasks names, as string values (never refs). On a deftest they are the tasks it proves; anywhere else the tasks it is subject to."} :seon.task/handle]
+ :entry [:map {:closed true :description "Stage 1: one authored entry of resources/seon/tasks/<ns>.edn; empty optional sets are absent."}
+         [:seon.task/id {:optional true} :seon.task/id] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
+         [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
          [:seon.task/evidence {:optional true} :seon.task/evidence]]
  :file [:vector :seon.task/entry]
+ :files [:map-of {:description "Task file path to its exact text; a deleted file is \"[]\", an empty declaration."} [:string {:min 1}] :string]
+ :declaration [:map {:description "Stage 3: a task's declared content, compared as its revision (7.16)."}
+               [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
+               [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
+               [:seon.task/evidence {:optional true} :seon.task/evidence]]
+ :basis [:map-of {:description "The declarations the caller read, by handle; an absent handle was read as absent."} :seon.task/handle :seon.task/declaration]
  :task [:map {:seon.db/attributes true :seon.program/partition :seon.data}
-        [:seon.task/id :seon.task/id] [:seon.task/intent :seon.task/intent]
-        [:seon.task/must-read {:optional true} :seon.task/must-read]
+        [:seon.task/id :seon.task/id] [:seon.task/ns :seon.task/ns] [:seon.task/name :seon.task/name] [:seon.task/kind :seon.task/kind]
+        [:seon.task/intent :seon.task/intent] [:seon.task/must-read {:optional true} :seon.task/must-read]
         [:seon.task/evidence {:optional true} :seon.task/evidence]]
+ :quoted-symbol [:cat [:= quote] :qualified-symbol]
+ :annotation [:map {:description "Stage 1: the task and link members of one attribute map."}
+              [:seon/tasks {:optional true} :seon.task/tasks]
+              [:seon/must-read {:optional true} [:or [:vector :seon.task/quoted-symbol] [:set :seon.task/quoted-symbol]]]
+              [:seon/see-also {:optional true} [:or [:vector :seon.task/quoted-symbol] [:set :seon.task/quoted-symbol]]]]
+ :links [:map {:description "Stage 3: the edges one holder's annotation produces."}
+         [:seon.task/tasks {:optional true} :seon.task/tasks] [:seon.fn/must-read {:optional true} :seon.fn/must-read]
+         [:seon.fn/see-also {:optional true} :seon.fn/see-also]]
+ :subjects [:set :symbol] :proofs [:set :symbol] :referrers [:set [:or :symbol :seon.task/handle]]
+ :edges [:map [:seon.task/subjects :seon.task/subjects] [:seon.task/proofs :seon.task/proofs] [:seon.task/referrers :seon.task/referrers]]
+ :dangling [:map-of :seon.task/handle [:set :symbol]] :triage [:set :seon.task/handle]
+ :findings [:map [:seon.task/dangling :seon.task/dangling] [:seon.task/triage :seon.task/triage]]
+ :request [:map [:seon.db/connection :seon.db/connection] [:seon.task/files :seon.task/files] [:seon.task/basis {:optional true} :seon.task/basis]]
+ :changed? :boolean
+ :report [:map [:seon.task/changed? :seon.task/changed?] [:seon.db/transaction-report {:optional true} :seon.db/transaction-report]]
  :refused [:enum {:description "The ingestion rule one task entry or annotation broke."}
-           :not-a-set-of-ids :auto-resolved-id :unquoted-link :metadata-after-test-name
-           :invalid-entry :misplaced-id :duplicate-id :dangling-id]
- :holder [:symbol {:description "The definition, namespace or task file stem whose annotation or entry was refused."}]
- :refused-error [:map {:error/message "must name the rule broken, its holder and the offending value"}
-                 [:seon.task/refused :seon.task/refused] [:seon.task/holder :seon.task/holder] [:seon.error/offending :seon.schema/value]]}
+           :malformed-annotation :metadata-after-test-name :unreadable-file :not-one-vector :invalid-entry
+           :handle-mismatch :duplicate-id :misplaced-file :revision-conflict :dangling-id]
+ :holder [:symbol {:description "The definition or namespace whose annotation, or the owning namespace whose task file, was refused."}]
+ :explanation :seon.schema/value
+ :refused-error [:and :seon.error/base
+                 [:map [:seon.task/refused :seon.task/refused] [:seon.task/holder :seon.task/holder] [:seon.error/offending :seon.schema/value]
+                  [:seon.task/explanation {:optional true} :seon.task/explanation]]]
+ :base :seon.task/declaration :current :seon.task/declaration :proposed :seon.task/declaration
+ :conflict-error [:and :seon.task/refused-error
+                  [:map [:seon.task/base {:optional true} :seon.task/base]
+                   [:seon.task/current {:optional true} :seon.task/current] [:seon.task/proposed {:optional true} :seon.task/proposed]]]}
