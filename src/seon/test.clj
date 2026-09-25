@@ -2183,6 +2183,24 @@
                 batches (vec (partition-all limit ordered))
                 deadline (+ started (* 1000000 bound))
                 remaining-ms #(quot (- deadline (System/nanoTime)) 1000000)
+                ;; One policy for the runner's own admission, completion, stop and
+                ;; exit writes, on this thread and the exit watcher's: a declared
+                ;; caller mistake (admission evidence disagreed, or a recording
+                ;; connection outside the caller's custody) is returned; any other
+                ;; refusal is a stored, delivered core fault, which throws under
+                ;; :panic and leaves the request unsuccessful under :record.
+                core-fault! #(fault/fault!
+                              (env/environment {:seon.boot/cluster-name cluster :seon.db/connection recording
+                                                :seon.sci.admit/caps (config/result-caps effective)})
+                              %2 {:seon.error/layer :seon.test/recording :seon.error/operation %1
+                                  :seon.db.process/id (cluster.process/id (cluster.process/current-identity))})
+                own-write! (fn [operation written]
+                             (when (and (:seon.error/at written) (not (:seon.test/admission-refusal written))
+                                        (not (get-in written [:seon.error/data :seon.db/ambient-branch])))
+                               (core-fault! operation (ex-info (:seon.error/message written) written
+                                                               (let [cause (:seon.error/throwable written)]
+                                                                 (when (instance? Throwable cause) cause)))))
+                             written)
                 recording-completion
                 (fn [batch-provenance results terminated?]
                   {:seon.db/db database
@@ -2202,7 +2220,7 @@
                                      (and (zero? index) (seq exclusion-rows))
                                      (assoc :seon.test.run/exclusions exclusion-rows)
                                      (pos? index) (dissoc :seon.test.run/covered-by))
-                               report (db/transact! recording [[:db.fn/call admit-run row]])]
+                               report (own-write! `admit-run (db/transact! recording [[:db.fn/call admit-run row]]))]
                            (if (:seon.error/at report)
                              report
                              {::provenance batch-provenance
@@ -2227,20 +2245,13 @@
                 run-batch
                 (fn [outcome batch-provenance members]
                   (let [run-id (:seon.test.run/id batch-provenance)
-                        ;; No caller reads a watcher's thread: each failure there is a
-                        ;; stored, delivered core fault (`seon.fault/record!`, total).
-                        fault! #(fault/record! recording cluster
-                                               (cluster.process/id (cluster.process/current-identity))
-                                               (config/result-caps effective)
-                                               {:seon.error/source {::flow/ex %}
-                                                :seon.error/declared-schema :seon.flow/exception-error})
                         ;; The exit only: the recorded outcome is never re-sent.
+                        ;; A cleanup failure is recorded even when the exit write panics.
                         record-exit! (fn [test-symbol cleanup-failure]
-                                       (let [written (runner/record-exit! recording run-id test-symbol)]
-                                         (when (:seon.error/at written)
-                                           (fault! (ex-info (:seon.error/message written) written)))
-                                         (some-> cleanup-failure fault!)
-                                         nil))]
+                                       (try (own-write! `runner/record-exit!
+                                                        (runner/record-exit! recording run-id test-symbol))
+                                            (finally (some->> cleanup-failure (core-fault! `release-context!))))
+                                       nil)]
                     ;; A throw leaves no admitted member open: each unrecorded
                     ;; member is recorded red with the throwable, which is rethrown.
                     (try
@@ -2257,11 +2268,12 @@
                           ;; member and the rest keep no outcome, so read unknown.
                           (if-let [cause (:seon.test.run/stopped result)]
                             (assoc outcome ::stopped (vec remaining) ::stop-cause cause)
-                          (let [committed (runner/commit-results!
+                          (let [committed (own-write! `runner/commit-results!
+                                          (runner/commit-results!
                                            recording
                                            (recording-completion
                                             batch-provenance [(dissoc result :seon.agent/branch)]
-                                            (true? (:seon.test.run/terminated? result))))
+                                            (true? (:seon.test.run/terminated? result)))))
                                 outcome (-> outcome
                                             (update :seon.test/timings conj
                                                     (assoc timings :seon.test/sym test-symbol))
@@ -2297,8 +2309,9 @@
                 ;; no outcome, so each reads as an unknown (never green) and,
                 ;; the run being stopped, covers no later request.
                 (fn [batch-provenance cause]
-                  (db/transact! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
-                                            :seon.test.run/stopped cause]]))
+                  (own-write! `release-not-started!
+                              (db/transact! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
+                                                        :seon.test.run/stopped cause]])))
                 outcome
                 (try
                   (loop [index 0

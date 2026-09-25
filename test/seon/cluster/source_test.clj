@@ -345,7 +345,10 @@
                          {:seon.test/policy :named :seon.test/execution execution
                           :seon.test/recording-connection (:seon.db/connection execution)
                           :seon.test/changed ['scratch.gate-class/f]})]
-            (is (:seon.db/transaction-refused refused) (pr-str (select-keys refused [:seon.error/message]))))
+            (is (:seon.db/transaction-refused refused) (pr-str (select-keys refused [:seon.error/message])))
+            ;; A recording connection outside the caller's custody is the caller's
+            ;; mistake: returned, never a core fault (which would throw under :panic).
+            (is (get-in refused [:seon.error/data :seon.db/ambient-branch])))
           (finally (cluster.agent/release-context! execution))))
       (finally (registry/retire-branch! {:seon.store/store held-store :seon.store/branch s})))))
 
