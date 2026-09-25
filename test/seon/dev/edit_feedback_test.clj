@@ -701,6 +701,42 @@
                    "measured " elapsed-ms " ms including process startup."))))
       (finally (test-support/delete-recursively! directory)))))
 
+(deftest a-derived-write-reaches-the-agent-whose-tool-call-spanned-it
+  ;; subagents share their parent's session id; a session-wide baseline
+  ;; replaced a read-only lane's tool result with another agent's refusal
+  (let [directory (fixture-directory)
+        root (str "tmp/" (.getName directory))
+        config (io/file directory "hook.edn")
+        state (doto (io/file directory "state") .mkdirs)
+        source (io/file directory "shared.clj")
+        event (fn [agent-id hook-event]
+                (let [result
+                      (run-process
+                       {::command [(str (io/file repo-root "bin/seon-hook"))]
+                        ::directory repo-root
+                        ::environment {"SEON_HOOK_CONFIG" (str config)
+                                       "SEON_HOOK_STATE_DIR" (str state)}
+                        ::input
+                        (json/generate-string
+                         {:hook_event_name hook-event
+                          :tool_name "Bash"
+                          :session_id "derived-attribution-regression"
+                          :agent_id agent-id
+                          :tool_input {:command "true"}})})]
+                  (is (hook-exit-honest? result) (::stderr result))
+                  (json/parse-string (str/trim (::stdout result)) true)))]
+    (try
+      (spit config (shell-write-config root))
+      (spit source "(ns shared)\n(def value 1)\n")
+      (event "writer" "PreToolUse")
+      (spit source "(ns shared)\n(def value (inc 1)\n")
+      (is (= "block" (:decision (event "writer" "PostToolUse")))
+          "The agent whose tool call spanned the write is told.")
+      (event "reader" "PreToolUse")
+      (is (nil? (:decision (event "reader" "PostToolUse")))
+          "An agent whose call began after the write is not handed it.")
+      (finally (test-support/delete-recursively! directory)))))
+
 (deftest the-development-hook-config-keeps-the-derived-scan
   ;; The derived scan is off for a config that declares no `:shell-writes`,
   ;; which is how a fixture opts out. The one checked-in development config

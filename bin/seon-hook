@@ -1762,21 +1762,26 @@
 
   The bytes are already written — a shell write has no payload to check
   before it lands — so the refusal fires the moment the tool returns and
-  names the path and the tool that wrote it. It runs on EVERY PostToolUse,
-  including a payload-named edit: a codex lane fires this hook only for
-  `apply_patch`, so its next patch is the first moment an earlier shell
-  write of its own can be reported to it at all. Paths the payload named
-  are left to the payload's own check, which already ran."
+  names the path and the tool that wrote it. PreToolUse records the
+  baseline and PostToolUse compares, both keyed by session AND subagent:
+  subagents share their parent's session id, and a session-wide baseline
+  handed one agent's broken write to whichever agent's tool returned next
+  (a codex lane's read-only `nl | sed` was replaced twice by a refusal for
+  a file a Claude subagent broke, 2026-09-25T14:48:50Z), while the writer
+  itself could miss it. Paths the payload named are left to the payload's
+  own check, which already ran."
   {:malli/schema [:=> [:cat :map :map]
                   [:maybe [:map
                            [:seon.hook/paths [:vector :string]]
                            [:seon.hook/refusal [:maybe :string]]]]]}
   [event config]
-  (when (and (= "PostToolUse" (:hook_event_name event))
+  (when (and (#{"PreToolUse" "PostToolUse"} (:hook_event_name event))
              (get-in config [:shell-writes :enabled] true))
     (when-let [roots (scan-roots config)]
-     (let [session (or (:session_id event) "orchestrator")
-          previous (recorded-digests session)
+     (let [session (cond-> (or (:session_id event) "orchestrator")
+                     (:agent_id event) (str "-" (:agent_id event)))
+          previous (when (= "PostToolUse" (:hook_event_name event))
+                     (recorded-digests session))
           digests (tree-digests roots)
           named (into #{} (map display-path) (event-file-paths event))
           changed (when previous
@@ -1933,7 +1938,9 @@
                   contract-blocked
                   (when-not (or schema-blocked lint-blocked)
                     (some validate-contract-edit path-events))
-                  blocked (or schema-blocked lint-blocked contract-blocked)]
+                  blocked (or schema-blocked lint-blocked contract-blocked)
+                  ;; this tool call's baseline for the derived scan
+                  _ (derived-write-feedback event config)]
               (if blocked
                 (do
                   (log! "CLOJURE_BLOCK" (:reason blocked))
