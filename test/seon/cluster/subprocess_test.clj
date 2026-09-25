@@ -5,8 +5,7 @@
             [clojure.test :refer [deftest is]]
             [seon.cluster.process :as operator.process]
             [seon.test-support :as test-support])
-  (:import [java.nio.file FileSystems StandardWatchEventKinds]
-           [java.util.concurrent TimeUnit]))
+  (:import [java.util.concurrent TimeUnit]))
 
 (defn- caught
   [f]
@@ -17,21 +16,16 @@
       error)))
 
 (defn- await-created!
-  [watcher filename]
-  (loop []
-    (let [watch-key (.poll watcher test-support/event-backstop-seconds
-                           TimeUnit/SECONDS)]
-      (when-not watch-key
-        (throw
-         (ex-info "The foreign child did not publish its filesystem event."
-                  {:seon.operator.subprocess/expected-file filename})))
-      (let [created?
-            (some #(= filename (str (.context ^java.nio.file.WatchEvent %)))
-                  (.pollEvents watch-key))]
-        (.reset watch-key)
-        (if created?
-          filename
-          (recur))))))
+  ;; Polls: macOS's JDK WatchService is a PollingWatchService whose ~2 s latency
+  ;; (measured 2009 ms) let the spawn signal race the 2 s deadline.
+  [^java.io.File file]
+  (let [deadline (+ (System/nanoTime) (.toNanos TimeUnit/SECONDS test-support/event-backstop-seconds))]
+    (loop []
+      (cond (.exists file) file
+            (> (System/nanoTime) deadline)
+            (throw (ex-info "The foreign child did not publish its filesystem event."
+                            {:seon.operator.subprocess/expected-file (.getName file)}))
+            :else (do (Thread/sleep 10) (recur))))))
 
 (defn- run-babashka [expression]
   (let [root (System/getProperty "user.dir")
@@ -61,45 +55,39 @@
          "subprocess.Popen([sys.executable,'-c',code,child_pid])\n"
          "signal.pause()\n")]
     (.mkdirs root)
-    (with-open [watcher (.newWatchService (FileSystems/getDefault))]
-      (.register (.toPath root)
-                 watcher
-                 (into-array
-                  java.nio.file.WatchEvent$Kind
-                  [StandardWatchEventKinds/ENTRY_CREATE]))
-      (let [failure
-            (future
-              (caught
-               #(operator.process/run-process!
-                 {:seon.operator.subprocess/argv
-                  ["/usr/bin/python3" "-c" python
-                   (.getPath ready-file) (.getPath go-file)
-                   (.getPath child-file)]
-                  ;; The parent and child start in ~100 ms; the deadline plus the
-                  ;; owner's 1 s TERM grace must fit the test's 5 s bound.
-                  :seon.operator.subprocess/deadline-ms 2000})))]
-        (try
-          (await-created! watcher (.getName ready-file))
-          (spit go-file "")
-          (await-created! watcher (.getName child-file))
-          (let [error (test-support/await-event!
-                       failure :foreign-process-deadline)
-                data (ex-data error)
-                child-pid (parse-long (slurp child-file))
-                child (some-> (java.lang.ProcessHandle/of child-pid)
-                              (.orElse nil))]
-            (try
-              (is (keyword? (:seon.operator.subprocess/phase data)))
-              (is (= :process-exit
-                     (:seon.operator.subprocess/phase data)))
-              (is (true? (:seon.operator.subprocess/reaped? data)))
-              (is (false? (boolean (and child (.isAlive child))))
-                  "the deadline reaps a descendant born after process launch")
-              (finally
-                (when (and child (.isAlive child))
-                  (.destroyForcibly child)))))
-          (finally
-            (test-support/delete-recursively! root)))))))
+    (let [failure
+          (future
+            (caught
+             #(operator.process/run-process!
+               {:seon.operator.subprocess/argv
+                ["/usr/bin/python3" "-c" python
+                 (.getPath ready-file) (.getPath go-file)
+                 (.getPath child-file)]
+                ;; The parent and child start in ~100 ms; the deadline plus the
+                ;; owner's 1 s TERM grace must fit the test's 5 s bound.
+                :seon.operator.subprocess/deadline-ms 2000})))]
+      (try
+        (await-created! ready-file)
+        (spit go-file "")
+        (await-created! child-file)
+        (let [error (test-support/await-event!
+                     failure :foreign-process-deadline)
+              data (ex-data error)
+              child-pid (parse-long (slurp child-file))
+              child (some-> (java.lang.ProcessHandle/of child-pid)
+                            (.orElse nil))]
+          (try
+            (is (keyword? (:seon.operator.subprocess/phase data)))
+            (is (= :process-exit
+                   (:seon.operator.subprocess/phase data)))
+            (is (true? (:seon.operator.subprocess/reaped? data)))
+            (is (false? (boolean (and child (.isAlive child))))
+                "the deadline reaps a descendant born after process launch")
+            (finally
+              (when (and child (.isAlive child))
+                (.destroyForcibly child)))))
+        (finally
+          (test-support/delete-recursively! root))))))
 
 (deftest foreign-process-refuses-an-undeclared-deadline-before-launch
   (let [failure

@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: 3 commits landed (be3226eaa, 48d550c22, 4fbf072b5); focused tests await root
+status: landed (be3226eaa, 48d550c22, 4fbf072b5); reds on adopted 6ab6f5fb classified and the caused-by-timing one fixed
 ---
 # Lane impl-seams-s-process-opus: lost-error seams cut S-process (2026-09-25)
 
@@ -40,6 +40,31 @@ private copies in `issue.clj` and `test/cache.clj` now go through it.
 - **Out of scope, in the dependency:** babashka.process's `:in` copier catches its exception and only prints it
   (`reference-code/babashka-process/src/babashka/process.cljc:416-421`). `run-process!` passes `:in` for string
   input. No issue was filed. The input path belongs to the A08-class owner in `shell/jvm.clj`, not to this cut.
+
+## Reds on adopted HEAD 6ab6f5fb (root, 23:30Z), classified
+
+- **issue-test, 110 pass / 24 fail / 2 error (`verify-reds.out.d/023.txt`): PRE-EXISTING, not caused by this cut.**
+  At `6ab6ae2a` (`verify-6ab6ae2a-results.txt.d/057.txt`) the same members were red: 107 pass / 25 fail / 2 error.
+  After normalising `fn--N` names, the red member set is identical except that `issue-worker-opening-links-its-issue`
+  is now green. The reds are real-note drift (renamed or archived notes, missing `:seon.issue/keys`), a fixture that
+  writes the symbol `seon.db/*conn*` as `:seon.issue/id`, and a stale definition digest for
+  `seon.cluster/require-coherent-program!`. The new `issue-history-refuses-a-failed-git-read` passed (12 executed
+  against 11). No note under test lacks git history, so the nonzero-exit refusal did not fire.
+- **subprocess-test, 15 pass / 1 fail (`017.txt`): PRE-EXISTING, and a test timing defect exposing an owner race.**
+  `foreign-process-deadline-reaps-a-late-descendant` was red on every recorded run today (`verify-1955` 009,
+  `verify-fresh` 028). The JDK's macOS `WatchService` is `sun.nio.fs.PollingWatchService`; a create event took
+  **2009 ms** to arrive. So the test wrote its spawn signal at about the 2000 ms deadline. The probe:
+
+  | Spawn signal at | Child alive after refusal | Refusal |
+  |---|---|---|
+  | 1990 ms | yes | `reaped? true` |
+  | 2000–2010 ms | no child spawned | `reaped? true` |
+
+  A fork racing termination escapes `terminate-subprocess!`'s one tree walk. It is filed as
+  `docs/seon/issues/a-descendant-forked-during-termination-escapes-and-reads-as-reaped.md`, for an owner ruling. The
+  test now polls for its files every 10 ms under the same backstop instead of watching. The watcher, its `with-open`
+  and two imports are deleted. Proof: with the signal at about 70 ms (the file poll), the installed owner reaps the
+  child and returns in 3024 ms with `reaped? true`.
 
 ## What changed
 
