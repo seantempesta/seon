@@ -52,11 +52,16 @@
     :db/cardinality :db.cardinality/one}])
 
 (defn- probe-schema-rows [projection forms probe-keys]
-  ;; Keep the canonical dependency closure of the synthetic declarations.
-  ;; Unrelated render declarations require program definitions, not this
-  ;; file-store fixture's schema-only population.
+  ;; Keep the canonical dependency closure of the synthetic declarations and
+  ;; of the writer's own dials (the `seon.config.db` family `seon.db/transact!`
+  ;; reads its write and validation bounds from): once these rows exist the
+  ;; store's declared program is its projection, so without the dials every
+  ;; later write refuses. Unrelated render declarations require program
+  ;; definitions, not this file-store fixture's schema-only population.
   (let [references (:seon.schema.projection/schema-dependencies projection)]
-    (loop [needed (set probe-keys)]
+    (loop [needed (into (set probe-keys)
+                        (filter #(= "seon.config.db" (namespace %)))
+                        (keys forms))]
       (let [expanded (into needed
                            (mapcat #(get references %))
                            needed)]

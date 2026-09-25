@@ -182,6 +182,32 @@ target. A second path on the same branch would therefore record nothing new.
 the same commit as this test. **Unmeasured:** two fresh acquisitions. One complete acquisition was measured at
 1,090 ms (branch_execution_test); the test runs under the default 5 s bound.
 
+## Registry-test red (verify-1935 008, verify-1955 001): the cause is the fixture, not round 4
+
+- **The symptom.** 12 errors, every one at `with-source-store`'s marker write
+  (registry_test.clj:120). That is before any `record-fork!` and away from the line round 4
+  changed.
+- **Reproduced at the REPL without round-4 code**, on disposable file stores under
+  `tmp/fix-custody-round4-opus/` (deleted):
+  - The fixture declares only three schema rows.
+  - Its store then declares a 3-form program, and `carried-projection` has 3 forms.
+  - `transact-call` reads `(m/properties (mr/schema registry :seon.config.db/write-time-limit-ms))`
+    (db.clj:4546) and compiles nil. That is the `{:schema nil :form nil}` Root saw.
+- **Not a wrong-branch lookup.** The projection is the fresh store's own `:db` value.
+- **Two alternatives, both refuted:**
+  - Declaring the write bound alone: the validation bound then refuses by name.
+  - The full canonical population: refused ("Render declarations name functions absent from
+    the final program"), and 3.2 s.
+- **Fix.** `probe-schema-rows` also seeds the writer's dial family, `seon.config.db`, which it
+  selects from the projection's forms by the namespace db.clj reads, not from a hand list.
+  That gives 7 rows.
+- **Probe after the fix.** The marker write, `branch!` to `:current-src`, and `ensure-cluster!`
+  through `record-fork!` all commit.
+- **Regression.** The 12 fixture-using registry tests are the class regression.
+- **Writer diagnostic, out of scope.** It is filed at
+  `docs/seon/issues/a-program-without-the-writers-dials-crashes-every-write-as-an-unknown-outcome.md`
+  (owner seon.db).
+
 ## Commits
 
 - 3c4952503: custody, each owner binds its own branch work once (finding 2).
