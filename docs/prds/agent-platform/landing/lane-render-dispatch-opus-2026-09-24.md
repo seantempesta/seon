@@ -13,6 +13,31 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Twelfth follow-up: declared inputs through call preparation
+
+- `3785970b9` call preparation supplies OPTIONAL map entries of a supplied default's key and shape (map-entry and
+  prepared-symbol queries, named-entry facts), caller wins, required list unchanged (+6/−6). Probed: five existing
+  functions declare such entries (`seon.render/call-with-walk-context` db+connection, `seon.sci.eval/run-test`,
+  `run-tests`, `seon.test/bounded-result` connection) and now receive defaults when they omit them.
+- `b195ae037` render (+27/−21): `render-argument` no longer carries `:seon.db/db`; `:seon.render/unit` is an open map
+  declaring `[:seon.db/db {:optional true} :seon.db/database-value]`, so the named-entry path supplies it;
+  `invoke-selected` scopes the invocation environment with the request's database (`env/scope`, a `:turn` member),
+  so `seon.db/supplied-database-value` returns that value; scripted sweep (`sweep-db.bb`) moved 11 database-reading
+  renderers with non-unit inputs onto `:seon.render/unit`. Not swept: `seon.db/render-transaction-ai/html` (db.clj has
+  another lane's uncommitted work). Deleted: the unit's unconditional database custody.
+- `775be6ea8` regression: omitted db is the request's own (supplied); a value carrying a db keeps it.
+  `6c9cd5a41` design §2.
+- **Gap 2 (closures) stopped:** `plan`/`plan-for` (call_preparation.clj:989-1170) compile a plan only from program
+  rows keyed by `:seon.fn/sym` (arity, positional, entry and validator queries over shape rows); a closure has no rows,
+  so "derive its plan from the contract" is a second plan compiler (about 120 lines) unless the contract is analysed
+  into speculative rows (`d/with` a synthetic function row, then the same `plan-for`), about 30 lines plus one analysis
+  per distinct contract. Needs a ruling.
+- **Found limit:** the namespace stage's contract fit (`function-accepts-and-returns-in?` with one argument) never
+  selects a positional renderer that declares a second `:seon.db/database-value` input; the fit would have to use
+  call preparation's derived shapes. Positional regression therefore not added.
+- Behaviour changes to watch: renderers now reject non-map arguments where their input was `:any`
+  (error render-ai/html, prose renderers); `:seon.render/unit` accepts unqualified keys.
+
 ## Eleventh follow-up: per-face precedence (AGENTS.md 7fc304482) and contract-declared inputs
 
 - `6d25d9483` kernel: `seon.sci.kernel/invoke` accepts `:seon.sci.eval/function` (an agent function value) through the
