@@ -522,6 +522,26 @@
      :seon.issue/index-refused "Issue indexing was refused."
      {:seon.source/digest source-digest})))
 
+(defn- index-tasks!
+  "Reconcile task files (all, or the changed task `paths`) through the task writer,
+  then refuse any dangling handle, an annotation naming no admitted task, with its
+  holders before the head advances (spec 7.5, 7.13)."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string [:maybe [:vector :string]]]
+                  [:maybe :seon.task/report]]}
+  [connection source-digest directory paths]
+  (when (get (:schema (db/db connection)) :seon.task/id)
+    (let [report (require-committed!
+                  ((requiring-resolve 'seon.issue/index-tasks!)
+                   {:seon.db/connection connection
+                    :seon.task/files ((requiring-resolve 'seon.issue/task-files) directory paths)})
+                  :seon.task/index-refused "Task indexing was refused." {:seon.source/digest source-digest})
+          findings (require-committed! ((requiring-resolve 'seon.issue/task-findings) (db/db connection))
+                                       :seon.task/findings-refused "Task findings could not be read." {})]
+      (when-let [[handle holders] (first (:seon.task/dangling findings))]
+        (fn/task-refused! 'seon.cluster.source/publish! :dangling-id (first (sort holders)) handle
+                          {:seon.task/dangling (:seon.task/dangling findings) :seon.source/digest source-digest}))
+      report)))
+
 (defn- publication-input-digest!
   "Require the snapshot inventory before beginning a publication transaction."
   {:malli/schema [:=> [:cat :string] :seon.source/digest]}
@@ -557,6 +577,8 @@
                     (not= requested-commit (:seon.source/commit-id published)))
         note-paths (when (and published changed-paths)
                      (filterv (requiring-resolve 'seon.issue/note-path?) changed-paths))
+        task-paths (when (and published changed-paths)
+                     (filterv (requiring-resolve 'seon.issue/task-path?) changed-paths))
         committed (when published
                     (d/commit-as-db (:seon.store/connection-object store)
                                     (:seon.source/commit-id published)))
@@ -634,10 +656,11 @@
                   _ (when (or (nil? note-paths) (seq note-paths))
                       (progress! "publication issue indexing"))
                   issues (index-issues! connection source-digest (or directory (fs/source-directory)) note-paths)
+                  tasks (index-tasks! connection source-digest (or directory (fs/source-directory)) task-paths)
                   _ (progress! "publication source identity")]
             (require-committed! population-result ::source-population-refused
                                 "The source population was refused." {})
-            (if (and unchanged? (nil? (:seon.db/transaction-report issues)))
+            (if (and unchanged? (nil? (:seon.db/transaction-report issues)) (not (:seon.task/changed? tasks)))
               {:seon.source/built? false}
               (do
             ;; The source seal is the genesis boundary. Population must first
