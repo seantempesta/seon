@@ -1,5 +1,6 @@
 (ns seon.operator-test
   (:require [clojure.core.server :as server]
+            [clojure.string :as str]
             [clojure.test :refer [deftest is]]
             [seon.operator :as operator]
             [seon.test-support :as test-support]))
@@ -56,4 +57,4 @@
     (is (= 495 (get-in cluster [:seon.dev.mcp/open-faults :seon.operator/omitted])))
     (is (= 3000 (get-in cluster [:seon.dev.mcp/open-faults :seon.operator/top 0 :seon.operator/message-chars])))
     (is (= 1500000 (get-in cluster [:seon.dev.mcp/problems-unavailable :seon.operator/message-chars])))
-    (is (clojure.string/includes? (:seon.operator/requery summary) "runtime_status"))))
+    (is (str/includes? (:seon.operator/requery summary) "runtime_status"))))
