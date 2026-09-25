@@ -619,7 +619,7 @@
           (is (= basis (db/basis-t (db/db connection)))
               "the armed input contract refuses before an effect can open"))))))
 
-(deftest capability-reachability-is-a-database-query
+(deftest capability-reachability-follows-the-roots-reach
   (test-support/with-database
     (fn [connection]
       (install-capability! connection)
@@ -628,7 +628,22 @@
        [(test-support/program-fn-row
          (db/db connection) 'seon.effect-test/pure-caller
          "(defn pure-caller [request] (capability-owner request))")])
-      (let [database (db/db connection)]
+      (transact-fixture!
+       connection
+       [(test-support/program-fn-row
+         (db/db connection) 'seon.effect-test/indirect-caller
+         "(defn indirect-caller [request] (if request (pure-caller request) (indirect-caller request)))")])
+      (let [database (db/db connection)
+            started (System/nanoTime)
+            leaf (effect/capabilities database 'clojure.core/inc)
+            leaf-ms (/ (- (System/nanoTime) started) 1e6)]
+        (testing "a fresh database value walks only the root's reach, never the whole call graph"
+          (is (= #{} leaf))
+          (is (< leaf-ms 250.0) (str "leaf capabilities took " leaf-ms " ms")))
+        (is (= #{'seon.effect-test/capability-owner}
+               (effect/capabilities database 'seon.effect-test/indirect-caller))
+            "reach is transitive and a self-call terminates")
+        (is (= #{} (effect/capabilities database 'seon.effect-test/absent-root)))
         (is (= #{'seon.effect-test/capability-owner}
                (effect/capabilities database
                                     'seon.effect-test/capability-owner)))

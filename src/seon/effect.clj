@@ -140,34 +140,27 @@
           [[:p {:class "seon-effect-blob"}
             "Blob digest " [:code digest]]]))))))
 
-(def ^:private reach-rules
-  '[[(reachable ?function ?target)
-     [?function :seon.fn/calls ?target-symbol]
-       [?target :seon.fn/sym ?target-symbol]]
-    [(reachable ?function ?target)
-     [?function :seon.fn/calls ?called-symbol]
-       [?called :seon.fn/sym ?called-symbol]
-     (reachable ?called ?target)]])
-
 (defn capabilities
-  "Query capability-owner symbols reachable from `function-symbol`."
+  "Capability-owner symbols reachable from `function-symbol`, the root included.
+  Walks stored `:seon.fn/calls` one `pull-many` per depth, so cost follows the
+  root's reach, never the program's call graph."
   {:malli/schema [:=> [:cat :seon.db/database-value :qualified-symbol]
                   [:set :seon.fn/sym]]}
   [database function-symbol]
-  (let [root (db/pull database
-                      [:db/id :seon.fn/sym :seon.effect/capability]
-                      [:seon.fn/sym function-symbol])
-        reached
-        (db/q '[:find [?owner-symbol ...]
-                :in $ % ?root
-                :where
-                (reachable ?root ?owner)
-                [?owner :seon.effect/capability]
-                [?owner :seon.fn/sym ?owner-symbol]]
-              database reach-rules (:db/id root))]
-    (cond-> (set reached)
-      (:seon.effect/capability root)
-      (conj (:seon.fn/sym root)))))
+  (loop [pending #{function-symbol} visited #{} owners #{}]
+    (if (empty? pending)
+      owners
+      (let [rows (db/pull-many database
+                               '[:seon.fn/sym (limit :seon.fn/calls nil)
+                                 :seon.effect/capability]
+                               (mapv #(vector :seon.fn/sym %) pending))
+            visited (into visited pending)]
+        (when (map? rows) (throw (ex-info (str (:seon.error/message rows)) rows)))
+        (recur (into #{} (comp (mapcat :seon.fn/calls) (remove visited)) rows)
+               visited
+               (into owners (comp (filter :seon.effect/capability)
+                                  (map :seon.fn/sym))
+                     rows))))))
 
 (defn- owner-symbol
   [owner]
