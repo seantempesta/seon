@@ -127,6 +127,9 @@ at start vs end) and pushes back, never a lock. A **reload** uses
 program; selected development clusters adopt explicitly. Every program function is
 callable: prompt visibility grants no execution permission; consumer domains stay downstream.
 
+**The Seon agent is the perspective.** Everything is modeled from a Seon agent's side: its task, its context, its REPL, its
+branch. The MCP server, the test harness and the web interface are views into that world, not owners of their own: they
+enter through the agent's path and render its values, and hold no second model, evaluator, printer or store.
 **The one REPL path** is read → eval → record → print, from the agent's side of the prompt.
 Every entrant uses it: product agents, outside agents through MCP, and tests through the
 harness; none builds a second evaluator, printer or result store. A form is parsed once and
