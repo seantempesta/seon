@@ -71,8 +71,10 @@ special exemption. Include changed callers/tests as well as changed callees in
 validation so a new edge cannot escape merely because its target did not change.
 
 **Existing implementation:** calls/references and test reach already use symbol
-values; they are not pending ref-to-value migrations. Canonical arities link to
-shared `seon.schema.shape` facts; the old AST family is not a current model.
+values; they are not pending ref-to-value migrations. Canonical arities store no
+schema rows: contract schemas are read from the projection's compiled Malli
+registry (`seon.call-preparation/contract-arities`); the old AST family is not a
+current model.
 **Grounding:** `reference-code/datahike/src/datahike/db/transaction.cljc:440-484`
 history; `reference-code/datahike/src/datahike/gc.cljc:22-81,144-167` retained roots;
 `src/seon/db.clj:4050-4121` final report; `src/seon/program.cljc` replacement.
@@ -134,15 +136,12 @@ idempotent writes. Wildcard pull is not a completeness proof; current validation
 builds complete EAVT owning values under the declared bound.
 
 Do not add identity to an owned child merely to make a selector find it. Conversely,
-shared content-addressed schema shapes are peers, not components owned by each
-referrer. The shape owns its child/entry occurrence rows; those rows can reference
-shared shapes without claiming exclusive ownership. Reclamation of shared shapes
-belongs to a separately evidenced maintenance policy, not cascade.
+shared, independently identified values are peers, not components owned by each
+referrer; their reclamation belongs to a separately evidenced maintenance policy,
+not cascade.
 
 **Grounding:** `src/seon/db.clj:3586-3609,4050-4121` complete values/final admission;
-`reference-code/datahike/src/datahike/db/transaction.cljc:831-836,1206-1226`;
-`resources/seon/schemas/seon.schema.shape.edn` and
-`resources/seon/schemas/seon.schema.shape.child.edn`.
+`reference-code/datahike/src/datahike/db/transaction.cljc:831-836,1206-1226`.
 
 ## 5. Positive observation, empty collections and time
 

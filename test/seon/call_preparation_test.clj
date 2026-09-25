@@ -433,9 +433,7 @@
 (def ^:private program-members
   [:seon.call-preparation/supplied-defaults
    :seon.call-preparation/prepared-symbols
-   :seon.call-preparation/validators
-   :seon.schema.shape/supplied-map-entries
-   :seon.schema.shape/required-map-entries])
+   :seon.call-preparation/validators])
 
 (defn- unrelated-row
   "One ordinary fact no snapshot query reads."
@@ -806,6 +804,36 @@
                   [])]
              (is (= :seon.db/db (:seon.call-preparation/unavailable-key result)))
              (is (zero? @entered) "the target body was never entered"))))))))
+
+(deftest an-unavailable-optional-entry-stays-absent-and-a-required-one-refuses
+  ;; Optional is a declared absence: the call runs without the key. A required
+  ;; entry still refuses by name before the body (owner ruling 2026-09-25).
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection database-rows)
+     (let [current (cp/snapshot @connection (projection))
+           environment (environment-for connection)
+           compiled (cp/plan-for @connection current
+                                 'seon.call-preparation-test/probe-received-connection?)
+           entry {:seon.fn.argument/index 0
+                  :seon.call-preparation/key :seon.agent/id
+                  :seon.call-preparation/entry-key :seon.agent/id
+                  :seon.call-preparation/supplier-symbol 'sample/nowhere-at-all}
+           prepared (fn [entry]
+                      (cp/prepare current environment
+                                  (assoc compiled
+                                         :seon.call-preparation/empty? false
+                                         :seon.call-preparation/by-supplied-count
+                                         {1 {:seon.call-preparation/ambiguous? false
+                                             :seon.call-preparation/inserts []
+                                             :seon.call-preparation/entries [entry]}})
+                                  [{:sample/label "caller"}]))]
+       (is (some? compiled))
+       (is (= [{:sample/label "caller"}]
+              (prepared (assoc entry :seon.call-preparation/optional? true)))
+           "the optional entry is left absent and the caller's map is unchanged")
+       (is (= :seon.agent/id (:seon.call-preparation/unavailable-key (prepared entry)))
+           "the required entry refuses by name")))))
 
 (deftest two-clusters-supply-their-own-custody
   (testing "two sovereign contexts live in one JVM; each call is supplied the

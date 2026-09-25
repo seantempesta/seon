@@ -2,7 +2,6 @@
   "Pure declaration identities and exact-row ownership for program rows."
   (:require [malli.core :as m]
             [seon.error.refusal :as error]
-            [seon.fn.schema-shape :as schema-shape]
             [seon.fn.signature :as signature]
             [seon.id :as id]
             [seon.schema :as schema]
@@ -772,6 +771,52 @@
                        (pr-str (get defaults local-binding)))))))
          (#(with-meta % {:seon.fn.binding/as as-binding})))))
 
+;; A map-entry key's typed facts (`seon.schema.map-entry`): one value
+;; attribute per EDN key kind, so a binding key is queryable by its own type.
+(defn- key-kind
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema.map-entry/key-kind]}
+  [value]
+  (cond
+    (nil? value) :nil
+    (keyword? value) :keyword
+    (string? value) :string
+    (symbol? value) :symbol
+    (boolean? value) :boolean
+    (integer? value) :int
+    (double? value) :double
+    (uuid? value) :uuid
+    (inst? value) :inst
+    (vector? value) :vector
+    (map? value) :map
+    (set? value) :set
+    (sequential? value) :sequential
+    :else
+    (throw
+     (ex-info "Schema map entry has an unsupported non-EDN key."
+              {:seon.schema.map-entry/key-edn (pr-str value)}))))
+
+(defn- typed-key-facts
+  "Typed database facts for one Malli map-entry key."
+  {:malli/schema [:=> [:cat :seon.schema/value] :map]}
+  [value]
+  (let [kind (key-kind value)
+        base {:seon.schema.map-entry/key-kind kind
+              :seon.schema.map-entry/key-fingerprint
+              #?(:clj (schema/sha-256 [(.getBytes ^String (schema/canonical-data-string value)
+                                                  java.nio.charset.StandardCharsets/UTF_8)])
+                 :cljs (id/digest 64 [(schema/canonical-data-string value)]))
+              :seon.schema.map-entry/key-edn (pr-str value)}]
+    (case kind
+      :keyword (assoc base :seon.schema.map-entry/key-keyword value)
+      :string (assoc base :seon.schema.map-entry/key-string value)
+      :symbol (assoc base :seon.schema.map-entry/key-symbol value)
+      :boolean (assoc base :seon.schema.map-entry/key-boolean value)
+      :int (assoc base :seon.schema.map-entry/key-int (long value))
+      :double (assoc base :seon.schema.map-entry/key-double value)
+      :uuid (assoc base :seon.schema.map-entry/key-uuid value)
+      :inst (assoc base :seon.schema.map-entry/key-inst value)
+      base)))
+
 (defn- binding-entry-row
   [function-symbol arity-order argument-index path
    {order :seon.fn.binding.entry/order
@@ -788,7 +833,7 @@
      :seon.fn.binding.entry/binding
      (binding-row function-symbol arity-order argument-index
                   (conj path :entry order :binding) local-binding)}
-    (schema-shape/typed-key-facts source-key))
+    (typed-key-facts source-key))
     default-edn
     (assoc :seon.fn.binding.entry/default-edn default-edn)))
 
@@ -970,40 +1015,22 @@
     (string? label) (assoc :seon.fn.argument/label-string label)
     (symbol? label) (assoc :seon.fn.argument/label-symbol label)))
 
-(defn- rest-element-schema
-  [tail]
-  (when (contains? #{:* :+ :repeat} (m/type tail))
-    (let [children (m/children tail)]
-      (when (and (= 1 (count children)) (m/schema? (first children)))
-        (first children)))))
-
 (defn- argument-row
   [function-symbol arity-order source-signature order
-   {compiled :seon.fn.argument/compiled-schema
-    label :seon.fn.argument/label}
-   schema-forms predicate-functions]
+   {label :seon.fn.argument/label}]
   (let [bindings (:seon.fn.signature/bindings source-signature)
-        rest-index (:seon.fn.signature/rest-index source-signature)
-        rest? (= order rest-index)
-        shape (schema-shape/shape-row compiled schema-forms predicate-functions)
-        repeated (when rest? (rest-element-schema compiled))]
+        rest-index (:seon.fn.signature/rest-index source-signature)]
     (cond->
      {:db/id (component-id function-symbol [:arity arity-order :argument order])
       :seon.fn.argument/order (long order)
       :seon.fn.argument/index (long order)
-      :seon.fn.argument/rest? rest?
+      :seon.fn.argument/rest? (= order rest-index)
       :seon.fn.argument/binding
-      (binding-row function-symbol arity-order order [] (nth bindings order))
-      :seon.fn.argument/schema shape}
-      rest? (assoc :seon.fn.argument/rest-tail-schema shape)
-      repeated
-      (assoc :seon.fn.argument/rest-element-schema
-             (schema-shape/shape-row repeated schema-forms predicate-functions))
+      (binding-row function-symbol arity-order order [] (nth bindings order))}
       (some? label) (merge (label-facts label)))))
 
 (defn- arity-row
-  [function-symbol order info canonical-keys source-signature
-   schema-forms predicate-functions]
+  [function-symbol order info canonical-keys source-signature]
   (let [input-refs (schema-references (:input info) canonical-keys)
         output-refs (schema-references (:output info) canonical-keys)
         guard-refs (when-let [guard (:guard info)]
@@ -1025,28 +1052,19 @@
                         :seon.error/expected expected-count})))
         arguments (mapv (fn [argument-order slot]
                           (argument-row function-symbol order source-signature
-                                        argument-order slot schema-forms
-                                        predicate-functions))
+                                        argument-order slot))
                         (range) slots)]
     (cond->
      {:db/id (component-id function-symbol [:arity order])
       :seon.fn.arity/order (long order)
       :seon.fn.arity/arity (pr-str (:arity info))
       :seon.fn.arity/min (long (:min info))
-      :seon.fn.arity/input-schema
-      (schema-shape/shape-row (:input info) schema-forms predicate-functions)
-      :seon.fn.arity/argument-count (long (count arguments))
-      :seon.fn.arity/return-schema
-      (schema-shape/shape-row (:output info) schema-forms predicate-functions)}
+      :seon.fn.arity/argument-count (long (count arguments))}
       ;; Absence is no key: storage keeps no empty component set, so an empty
       ;; vector here differed from every stored zero-argument arity and made
       ;; each republished one a signature change that relinted all callers.
       (seq arguments) (assoc :seon.fn.arity/arguments arguments)
       (contains? info :max) (assoc :seon.fn.arity/max (long (:max info)))
-      (:guard info)
-      (assoc :seon.fn.arity/guard-schema
-             (schema-shape/shape-row (:guard info) schema-forms
-                                     predicate-functions))
       (seq input-refs) (assoc :seon.fn.arity/input-refs input-refs)
       (seq output-refs) (assoc :seon.fn.arity/output-refs output-refs)
       (seq guard-refs) (assoc :seon.fn.arity/guard-refs guard-refs))))
@@ -1072,7 +1090,6 @@
     compile-options :seon.program/compile-options
     predicate-functions :seon.program/predicate-functions
     canonical-keys :seon.program/schema-keys
-    schema-forms :seon.program/schema-forms
     reader-namespace :seon.program/reader-namespace
     reader-aliases :seon.program/reader-aliases}]
   (let [compiled (m/function-schema
@@ -1110,8 +1127,7 @@
       (mapv (fn [order arity]
               (let [info (m/-function-info arity)]
                 (arity-row function-symbol order info canonical-keys
-                           (get source-by-key (malli-arity-key info))
-                           schema-forms predicate-functions)))
+                           (get source-by-key (malli-arity-key info)))))
             (range)
             arities)}
       override? (assoc :seon.fn/arglists-override? true))))
@@ -1131,7 +1147,6 @@
     compile-options :seon.program/compile-options
     predicate-functions :seon.program/predicate-functions
     canonical-keys :seon.program/schema-keys
-    schema-forms :seon.program/schema-forms
     reader-aliases :seon.program/reader-aliases}]
   (cond
     (:seon.fn/spec row)
@@ -1144,20 +1159,11 @@
               :seon.program/compile-options compile-options
               :seon.program/predicate-functions predicate-functions
               :seon.program/schema-keys canonical-keys
-              :seon.program/schema-forms
-              (or schema-forms (schema/registered-schemas))
               :seon.program/reader-namespace
               (second (:seon.fn/ns row))
               :seon.program/reader-aliases (or reader-aliases {})}
               (:seon.fn/arglists row)
               (assoc :seon.program/arglists (:seon.fn/arglists row)))))
-
-    (:seon.schema/key row)
-    (assoc row :seon.schema/shape
-           (schema-shape/shape-row
-            (m/schema (:seon.schema/key row) compile-options)
-            (or schema-forms (schema/registered-schemas))
-            predicate-functions))
 
     :else row))
 
@@ -1264,8 +1270,7 @@
                           (schema/canonical-schema-rows
                            candidate-projection {schema-key definition}))]
             (cond-> (assoc (merge (select-keys candidate
-                                              [:seon.schema/generatable?
-                                               :seon.schema/shape])
+                                              [:seon.schema/generatable?])
                                  row)
                            :seon.schema.admission/source
                            (:seon.schema.admission/source candidate))
