@@ -13,6 +13,36 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Seventh follow-up: rerun (tmp/orchestrator/verify-render-fix-results-2026-09-25.txt, 58 reds)
+
+Fixed: `7ea24ee67` (the analyze-forms refusal: the retained-call regression's fn rows used string `:seon.fn/sym`; probed,
+the symbol form validates and `declaration-row` digests it; web-test's debug trigger agent via `agent-tx`);
+`47d582c10` entity-pairs `:90` (census d class 5 UPDATE: `seon.render.test/render-ai` now emits
+`recorded-result`/`changed-since-green`/`host`, render/test.clj:40-62).
+
+**CFG (census d class 9) — producer found, file not mine:** `src/seon/sci/eval.clj:173-183` `projection-state` builds
+every cluster context's environment with the literal `{:seon.boot/cluster-name "current-src"}`, so
+`seon.render/request-profile` (render.clj:143-156) asks `config/effective` for a cluster the database does not hold
+(`:available ["default"]`). render.clj reads the name correctly and refuses by name. Fix at the producer: the context's
+environment names its caller's cluster (`cluster-ctx` callers pass it into `projection-state`). Needs lines 173-183 and
+the `cluster-ctx` arities of sci/eval.clj; request root sequencing with fix-harness-fallout-opus.
+
+**ERRREC (class 7) and the two turn-loop members — need a probe I cannot run under PROBE SAFETY/LOAD:** escalation is
+decided in `commit-call` (error.clj:1443-1455): steward, else interrupted-and-attributed agent, else escalate only when
+the fact has no agent (`76e4e0ab6`, owner ruling). `a-refused-phase…` expects `["supervisor"]` at the limit; the answer
+depends on `opening`, `escalation-present` and `(:seon.error/agent fact)` in that fixture. Asking root for the
+`refuse-phase!` prepared fact (`(:seon.error/fact prepared)` keys) and the `:777` terminal value's `actual` text.
+
+**Need `actual` text (truncated in the results file)** for: render-simplification :482 :539 :605 :714 :776 :805 :891;
+retained :211 and equal-committed; render-source :125 :212 and `render-call refused return value … expected nil, got a
+map` (web.clj:1444: the source-call path's contract expects nil; which render returned a map); page-settings :36;
+transcript :1284; web :1790 :651 :2447; value :405 :557 :797 :976; error :76 :156 :1265; program indexed-and-evaluated.
+
+Not mine: value_test.clj :102 shows `seon.plan/render-plan-ai` output printed by the floor as a data map (the plan
+renderer or its value); `test/seon/render/value_test.clj`, `test/seon/render/transcript_test.clj`,
+`test/seon/error_test.clj` complete-component (`:seon.error-test/manifest` missing component schema) and oversight
+(`[:seon.config/cluster "unconfigured"]`, config family).
+
 ## Sixth follow-up: root's verification (tmp/orchestrator/verify-render-1c-results-2026-09-25.txt, 105 reds)
 
 Fixed at the producer (one commit per class):
