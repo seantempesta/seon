@@ -275,6 +275,47 @@ reproduced in a throwaway namespace.
     If the program digest differs, some write between the two requests touched a program
     attribute; name it with `runner/program-written-since?`.
 
+## Sixth follow-up (266187a0e, 2f4ea22d9)
+
+- **(a) in-process check (266187a0e).** Probe on a `db-with` of live default plus two indexed
+  tmp files: changed `[long cheap]` selected nothing. Both rows are `:core` under tmp roots, so
+  only agent rows, the `test` root or named identities were eligible. A test named as changed
+  in an incremental request is now eligible from any root.
+- **(b) One nested request by phase.** A named request for one fresh `seon.id-test` member on
+  an MCP branch of default, warm, measured by the armed profiler, 4,155 ms end to end:
+
+| phase | ms | proportional to |
+|---|---:|---|
+| checkpoint lookup (`checkpoint-head`) | 9 | one raw commit read |
+| overlay compute (`program-overlay-tx`) | 35 | two digest queries (10,779 declarations) and the changed rows |
+| overlay write (one 15-datom `transact!`) | ~900 | the checked writer. The arity base missed at 1,856 ms under 1e39e06a0's commit-only key; it is now commit, then content |
+| request-branch SCI acquisition | ~500 | **cut in 2f4ea22d9**: nobody evaluated in it |
+| selection (`select`) | 702 | `selection-facts` 564 ms, over the branch's recorded run history |
+| admission (`admit-run`) | 354 | `runner/program-written-since?` 186 ms, program attributes × history index |
+| member acquisition (`sci.eval/acquire!`) | 1,144 | base-ctx derivation (~225–475 ms) per new commit, plus install |
+| body (`run-var!`) | 42 | the test |
+| recording (`commit-results!`) | 167 | admitted member write plus blob publication |
+| reach (`reach-digests`) | 116 | the index, content-keyed |
+| release | 10 | |
+
+  - After 2f4ea22d9 the world (checkpoint, overlay and request branch) measured
+    1,316 / 1,210 ms. That is almost all the overlay transaction.
+  - The remaining largest phases:
+    - Member acquisition: base-ctx is memoized by program identity, and each request's head is
+      a new commit.
+    - The overlay write.
+    - Selection over run history.
+  - All three sit well above the ≤150 ms target, and none is measured after these commits yet.
+- **(c) one-request :87/:203 probe.** On an isolated agent branch of default, with one agent
+  test and two identical requests, the second request **reused** (executed 0, reused 1). The
+  first run recorded all of these:
+    - program digest `8aab2bdb…`;
+    - input digest `61bf53da…`;
+    - loaded commit `6ab5b9ff…`;
+    - member reach digest `7406749e…`, equal to the current one.
+  - So reuse works in that shape, and :87's difference is in its fixture. Its first request runs
+    two marker-writing members over an extra raw-schema attribute. Not reproduced further.
+
 ## Root runs (serially, after adopting the three commits)
 
 1. `bin/test-check default --test seon.test.scoped-first-run-test/a-first-incremental-request-naming-a-change-selects-only-its-reach`
