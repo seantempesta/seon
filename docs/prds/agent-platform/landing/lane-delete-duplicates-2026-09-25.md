@@ -146,6 +146,22 @@ five `process-handle?` slots) are quoted symbols, the form `seon.schema/canonica
 recorded in the two issue notes; `test/seon/dev/publication_test.clj:34`'s `(true? reaped?)` is correct again
 without change. Sizes: src +8/−8.
 
+## Round 4, C6: test-only projection serializer (root ruling option 1)
+
+- Survivor: `seon.schema/build-projection`, the one constructor `projection-from-rows` calls after parsing rows.
+- Deleted from `src/seon/schema.clj` (−97/+5): `projection-pure-data`, `materialize-projection`, and what only
+  they used: `projection-runtime-keys` and the whole-build twin `shape-projections` (the build derives its shape
+  indexes inline; `shape-projections-with` is the incremental path). Two docstrings and one comment that cited
+  them are corrected.
+- Tests: `schema_test` loses the pure-data assertion and `pure-projection-data-materializes-compiled-entity-indexes`
+  (tests of the deleted serializer); `schema/datahike_test` builds the historical population with
+  `build-projection`.
+- Baseline `test/seon/schema/datahike_parity.edn`: `build-projection` refuses 129 of the 3,277 historical forms
+  (44 identity-bearing entity schemas without a partition, the rest their referrers). REPL loop over refusals:
+  dropping them builds 3,148 forms to 836 attributes, and those 836 attributes and their native rows EQUAL the
+  original 1,191-entry baseline filtered to them, so the oracle stays independent (filtered, not regenerated).
+  Only `:initial-baseline` was spliced; every other key reads back equal to HEAD. The build takes 213 ms.
+
 ## Totals
 
 | Slice | Commit | Deleted | Added | Net |

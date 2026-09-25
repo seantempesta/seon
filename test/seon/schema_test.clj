@@ -645,10 +645,7 @@
     (testing "the compiled state is on the projection, not in a shared slot"
       (is (some? (:seon.schema.projection/compiled projection-a)))
       (is (not (identical? (:seon.schema.projection/compiled projection-a)
-                           (:seon.schema.projection/compiled projection-b))))
-      (is (not (contains? (schema/projection-pure-data projection-a)
-                          :seon.schema.projection/compiled))
-          "and it is runtime state, never part of the projection's EDN"))))
+                           (:seon.schema.projection/compiled projection-b)))))))
 
 (defn predicate-under-test?
   "Root-rebound by the collision regression below. Its value is never asserted
@@ -1069,25 +1066,6 @@
            (get-in function-candidate
                    [:seon.schema.projection/function-contracts
                     'seon.schema-test.incremental/accept])))))
-
-(deftest pure-projection-data-materializes-compiled-entity-indexes
-  (test-support/with-database
-   (fn [_connection]
-     (let [base (schema/handed-projection)
-           changed (schema/projection-with-schema
-                    base ::optional-entity
-                    [:map {:seon.db/attributes true :seon.program/partition :seon.data}
-                     [:seon.agent/id {:optional true} :seon.agent/id]]
-                    {:seon.schema.admission/source :core})
-           data (schema/projection-pure-data changed)
-           restored (schema/materialize-projection (edn/read-string (pr-str data)))]
-       (is (not (contains? data :seon.schema.projection/registry)))
-       (is (not (contains? data :seon.schema.projection/shape-index)))
-       (is (= (:seon.schema.projection/shape-index changed)
-              (:seon.schema.projection/shape-index restored)))
-       (is (some #{::optional-entity}
-                 (get-in restored [:seon.schema.projection/shape-index :seon.agent/id])))
-       (is ((schema/projection-validator restored ::optional-entity) {}))))))
 
 (deftest component-preparation-preserves-local-recursion-and-literal-data
   (test-support/with-database

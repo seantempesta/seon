@@ -2391,22 +2391,6 @@
       (assert-render-contracts! projection (keys forms)))
     (with-compiled-cache projection compiled-function-contracts)))))
 
-(def ^:private projection-runtime-keys
-  #{:seon.schema.projection/registry
-    :seon.schema.projection/shape-index
-    :seon.schema.projection/required-by-key
-    :seon.schema.projection/catalog
-    :seon.schema.projection/compile-options
-    :seon.schema.projection/compiled
-    :seon.schema.projection/predicate-functions
-    :seon.schema.projection/definition-strings})
-
-(defn projection-pure-data
-  "Return the EDN-only portion of one immutable projection."
-  {:malli/schema [:=> [:catn [::projection :map]] :map]}
-  [projection]
-  (apply dissoc projection projection-runtime-keys))
-
 (defn- projection-fingerprint-from-data
   [projection]
   (projection-fingerprint
@@ -2424,82 +2408,6 @@
          (:seon.schema.projection/fingerprint-version projection))
     (:seon.schema.projection/fingerprint projection)
     (projection-fingerprint-from-data projection)))
-
-(defn- shape-projections
-  [registry shape-rows]
-  (let [required-by-key
-        (into (sorted-map)
-              (map (fn [[k row]]
-                     [k (:seon.schema/required-attrs row)]))
-              shape-rows)
-        raw-shape-index
-        (reduce-kv
-         (fn [index schema-key required-attrs]
-           (reduce (fn [result attr]
-                     (update result attr (fnil conj []) schema-key))
-                   index
-                   (or (seq required-attrs)
-                       (map first (internal/entity-entries (mr/schema registry schema-key))))))
-         (sorted-map)
-         required-by-key)
-        shape-rank
-        (fn [schema-key]
-          [(- (count (get required-by-key schema-key))) (str schema-key)])
-        shape-index
-        (into (sorted-map)
-              (map (fn [[attr schema-keys]]
-                     [attr (vec (sort-by shape-rank schema-keys))]))
-              raw-shape-index)
-        catalog
-        (->> shape-rows
-             (sort-by (comp str key))
-             (map second)
-             (filter :seon.schema/entity?)
-             vec)]
-    {:seon.schema.projection/required-by-key required-by-key
-     :seon.schema.projection/shape-index shape-index
-     :seon.schema.projection/catalog catalog}))
-
-(defn materialize-projection
-  "Rematerialize registry/options over preproved pure projection data."
-  {:malli/schema
-   [:function
-    [:=> [:catn [::projection :map]] :map]
-    [:=> [:catn [::projection :map]
-                 [:seon.schema/projection-options :map]]
-     :map]]}
-  ([pure-data]
-   (materialize-projection pure-data {}))
-  ([pure-data {:seon.schema/keys [predicate-functions]
-               :or {predicate-functions {}}}]
-   (let [forms (:seon.schema.projection/forms pure-data)
-         contracts (get pure-data :seon.schema.projection/function-contracts {})
-         predicate-symbols
-         (into (into #{} (mapcat predicate-symbols-in) (vals forms))
-               (mapcat predicate-symbols-in)
-               (vals contracts))
-         predicate-functions
-         (reduce (fn [bindings predicate]
-                   (if (contains? bindings predicate)
-                     bindings
-                     (if-let [f (runtime-predicate predicate)]
-                       (assoc bindings predicate f)
-                       bindings)))
-                 predicate-functions
-                 predicate-symbols)
-         registry (projection-registry forms predicate-functions contracts {})
-         options {:registry registry}]
-     ;; Population policy was proved before publication. Runtime roots are
-     ;; realized serially by the same construction owner as a fresh build.
-     (with-compiled-cache
-      (with-predicate-functions
-       (merge pure-data
-              {:seon.schema.projection/registry registry
-               :seon.schema.projection/compile-options options}
-              (shape-projections registry (:seon.schema.projection/shape-rows pure-data)))
-       predicate-functions)
-      (into {} (map (fn [sym] [sym (mr/schema registry sym)]))
-            (keys contracts))))))
 
 (defn- replace-reverse-dependencies
   [reverse-edges dependent before after]
@@ -2584,8 +2492,8 @@
           fingerprint identities))
 
 (defn- shape-index-attributes
-  "The attributes `schema-key`'s shape row indexes, as [[shape-projections]]
-   derives them; empty without a row."
+  "The attributes `schema-key`'s shape row indexes, as the whole
+   [[build-projection]] derives them; empty without a row."
   {:malli/schema
    [:=> [:cat [:fn malli.registry/registry?] :map :keyword]
     [:sequential :keyword]]}
@@ -2596,7 +2504,7 @@
     []))
 
 (defn- shape-projections-with
-  "[[shape-projections]] of `shape-rows`, derived from `projection`'s indexes
+  "The shape indexes of `shape-rows`, derived from `projection`'s indexes
    by replacing only `schema-keys`' rows.
 
    A key's rank depends only on its own row, so every other key keeps its
@@ -3205,8 +3113,8 @@
               :seon.schema/validate-render-contracts? true}))
           ;; The row text each form was read from, so the next derivation
           ;; from this projection reads only rows whose text differs. A
-          ;; runtime member (`projection-runtime-keys`): every other
-          ;; constructor drops it, so it never outlives its forms.
+          ;; runtime member: every other constructor drops it, so it never
+          ;; outlives its forms.
           definition-strings
           (persistent!
            (reduce-kv (fn [strings identity row]

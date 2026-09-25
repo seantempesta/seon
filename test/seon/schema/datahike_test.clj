@@ -79,13 +79,12 @@
            expected (edn/read-string
                      (slurp (io/resource "seon/schema/datahike_parity.edn")))
            initial (:seon.bridge.parity/initial-baseline expected)
-           ;; This is the previously admitted historical population, including
-           ;; observations now refused at admission. Retired non-storable class
-           ;; properties are removed; the original native storage oracle stays.
-           ;; Materialize those historical definitions without readmitting them.
-           initial-projection (schema/materialize-projection
-                               {:seon.schema.projection/forms
-                                (:seon.bridge.parity/forms initial)})
+           ;; The previously admitted historical population, built by the one
+           ;; constructor. Its forms that current admission refuses (129 of
+           ;; 3,277, lane delete-duplicates 2026-09-25) were dropped with their
+           ;; attributes and native rows; the rest is the original oracle.
+           initial-projection (schema/build-projection
+                               (:seon.bridge.parity/forms initial))
            initial-attributes (schema.datahike/database-attributes-in initial-projection)
            expected-keys (set (:seon.bridge.parity/attributes expected))
            actual-keys (set attributes)
@@ -103,7 +102,7 @@
        (is (true? (= (:seon.bridge.parity/attributes initial) initial-attributes)))
        (is (true? (= (:seon.bridge.parity/native initial)
                      (schema.datahike/malli->datahike-schema-in initial-projection initial-attributes)))
-           "The original 1,012-attribute population remains an independent oracle")
+           "The historical admitted population remains an independent oracle")
        (is (seq attributes))
        (is (= (count attributes) (count native)))
        (is (empty? (into (sorted-set)
