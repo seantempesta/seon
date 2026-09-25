@@ -1,6 +1,6 @@
 ---
 type: design
-status: "Opus revision 3: all five P1 findings of review 511b948c6 fixed, and the cond-> cause added to F2; awaiting Astra re-review"
+status: "Opus revision 4: tail calls resolved through the call graph (owner ruling 2026-09-25); review 511b948c6 fixes kept; awaiting Astra re-review"
 created: 2026-09-25
 scope: Contracts derived from destructured qualified keys (inputs) and clj-kondo return tags (outputs); rows 1.12, 1.13, 1.15
 source-pin: 19e9fe5f4 (Seon), befcd302a8e6 (malli), 57252e0797 (clj-kondo fork)
@@ -240,7 +240,8 @@ The translation is a total function of the normalized tag:
 | map with no qualified key | refuse `:unqualified-return-keys` |
 | set | translate each member recursively, dedupe equal forms, sort deterministically, emit `[:or …]`. `:nil` stays a `:nil` alternative. **Any unsupported member refuses the whole derivation**; members are never filtered out, and there is no component collapse (P1-2). |
 | `:nil` alone | `:nil` |
-| `{:call …}`, with or without `:kw-calls` | refuse `:call-return` in v1 (§2.4) |
+| `{:call {:resolved-ns n :name g :arity a}}` | g's **effective output** for arity `a` (§2.4), copied as a Malli form, so named schemas and named errors survive |
+| `{:call … :kw-calls [k]}` (one step) | `k`'s registered schema when every map member of g's effective output requires `k`, else `[:maybe k]`. A non-map member of g's output refuses. |
 | `:any`, other keywords (`:associative`, `:nilable/map`, `:sorted-map`, scalars), missing arity entry | refuse `:unsupported-return-tag` / `:missing-return`, naming the tag and arity |
 
 - **Bound.** At most 64 union alternatives per arity. Beyond that the derivation refuses
@@ -255,39 +256,90 @@ The translation is a total function of the normalized tag:
   identity" already requires of `o`.
 - Astra must rule on this rule before it lands. It is not in the first cut.
 
-### 2.4 Tail calls to other functions (P1-3), a new decision with three priced options
+### 2.4 Tail calls: resolved through the call graph (owner ruling 2026-09-25)
 
-Copying a callee's output into the caller's spec creates a function-to-function derivation dependency.
-Changing only `g`'s contract must then rederive `f`, even when `f`'s source is unchanged.
-- The existing caller relint cannot do this. `caller-files` selects callers on contract change
-  (`fn.clj:2489-2543`), but the relint keeps **only `:seon.lint/id` rows** (`:3899-3920`), and it runs
-  after the first transaction.
-- A configured kondo return can also replace the call before F1 sees it (`types.clj:457-476`). Seon's
-  generated Malli type config is empty today (`.clj-kondo/metosin/malli-types-clj/config.edn` is `{}`),
-  but that is a precondition, not a guarantee.
+The owner ruled: resolve tail calls. "I always want the system to know and understand what data is where."
 
-1. **Recommended — refuse tail calls in v1** (`:call-return`, "return is a call to `g`; declare
-   `:malli/schema`").
-   - Guarantee: a derived contract depends only on the function's own source, aliases and the named keys'
-     schemas.
-   - Cost: 0 extra lines.
-   - Sacrifice: delegating functions write an explicit contract.
-   - F1's configured-return test keeps the precondition honest: if a structural tag replaced a first-party
-     call, Seon could not tell, so the Malli type config must stay empty. A committed check asserts it.
-2. **Resolve calls against the candidate world, before the write.**
-   - Resolution order: the batch's explicit contract, then the batch's derived contract, then the held
-     projection for callees the batch does not touch. The applicable arity is chosen by Malli bounds.
-     Explicit contracts end recursion; a path-local visited set refuses cycles.
-   - Changed contracts widen the analysed set to their derived-contract callers (via `:seon.fn/calls`),
-     iterating to a fixpoint. Everything is admitted in one transaction. SCI redefinition runs the same
-     widening on its branch.
-   - Guarantee: named callee outputs, including error schemas, flow through.
-   - Cost: about 45 lines plus publication and SCI proofs.
-   - Sacrifice: publication cost now follows the call graph.
-3. **Rederive callers in the existing post-commit relint.**
-   - Cost: about 20 lines.
-   - Sacrifice: a window in which `f`'s committed spec is stale, which breaks "one effective contract value".
-   - Rejected.
+**Rule.** When f's output tag is a call to g, or a union containing call and map tails, f's output is g's
+**effective output contract**:
+- g's explicit `:malli/schema` when present, which always wins;
+- otherwise g's derived output.
+
+kondo's cache-resolved structural tag for g is never consulted. F1 exports the raw `{:call …}` name, so
+Seon resolves the name, not kondo's guess. The applicable arity of g is chosen by Malli bounds
+(`m/-function-info` `:min`/`:max`) for the call's arity.
+
+**Dependency facts.** Each of f's derived arities records:
+- `:seon.fn.arity/output-from`: the set of qualified callee symbols whose effective output f's output
+  copies. It is always a subset of f's existing `:seon.fn/calls` (validated at the producer), so it is a
+  marker on an existing edge, not a new graph.
+- `:seon.fn.arity/return-tag`: the normalized F1 tag as EDN, validated by `:seon.fn.analyzer/return-tag`
+  (row 1.15). This is the parser observation for f's current source, replaced whenever f's row is. It lets
+  the writer re-derive f without re-running kondo or reading f's file.
+
+These are the only two new attributes. They are declared in `resources/seon/schemas/seon.fn.arity.edn`
+next to `input-refs`/`output-refs`. Explicit contracts carry neither, because explicit ends the chain.
+
+**Freshness without a stale window: one function, both writers.**
+`seon.program/derive-outputs` is pure over the writer's transaction database value and the candidate rows:
+1. **Changed set C:** candidate function rows whose effective output differs from the stored one, including
+   deletions.
+2. **Affected closure A:** repeatedly add every stored arity whose `:seon.fn.arity/output-from` names a
+   member of C ∪ A. The query uses the existing callers index shape, the same Datalog as `caller-files`'
+   `:seon.fn/calls` join (`fn.clj:2530-2536`), with `output-from` in place of `calls`.
+3. **Dependency order:** a topological order over `output-from` restricted to C ∪ A (Kahn). Explicit
+   contracts and callees outside C ∪ A are leaves, read from the transaction database's projection.
+4. **Re-derive** each member of A from its stored `return-tag` and the now-current callee outputs, then emit
+   its updated `:seon.fn/spec` and arity rows.
+5. **Commit together.** All of these rows join the candidate's transaction; there is no second transaction
+   and no stale window.
+
+It runs where the basis cannot move:
+- **File publication:** `index!` (`fn.clj:3835`) writes an unpublished scratch branch that the population
+  owns ("nothing can change its database between this diff and write", `fn.clj:3918-3919`). Its
+  `desired-rows` → `add-contract-facts` step (`:2882`) calls `derive-outputs` before the write.
+- **SCI evaluation:** the settlement transaction function that admits the evaluation's program rows calls
+  the same `derive-outputs` on the transaction's own database, as `:db.fn/call` provides
+  (`reference-code/datahike/src/datahike/db/transaction.cljc:1171-1172`). Which function that is must be
+  pinned by S6; the candidate is `seon.turn/receipt-settle-call` (`turn.clj:1584`), unverified.
+- A branch's redefinition of g therefore re-derives f on that branch, in the same transaction.
+
+**Refusals by name.** Each one reads "return depends on g, which …; declare :malli/schema":
+
+| Case | `:seon.fn.derived/reason` |
+|---|---|
+| cycle in C ∪ A, including direct and mutual recursion | `:recursive-return` (names the cycle) |
+| call kondo cannot resolve: `apply`, a call through a local or higher-order argument (`{:call}` with no `:resolved-ns`), protocol method, Java interop | `:unresolved-call` |
+| g is a multimethod | `:multimethod-callee` |
+| g has neither an explicit nor a derivable contract, e.g. a dependency function or an uncontracted Seon function | `:uncontracted-callee` |
+| g is in no candidate row and not in the transaction database's projection (cross-namespace, not yet published) | `:unpublished-callee` |
+| g was deleted in this transaction | `:unpublished-callee` |
+| `:kw-calls` longer than one step, or g's output has a non-map member | `:unsupported-return-tag` |
+
+**Explicit ends the chain.** A delegating function whose callee is explicit derives exactly that explicit
+output form, including `[:or ok-schema :seon.x/error]`, so declared error alternatives stay named
+(AGENTS.md "Declare errors as flat data").
+
+**Cost.**
+- Work is proportional to |C ∪ A| times tag size, plus one indexed query per closure round.
+- It is not proportional to the whole program, and there is no per-call work.
+- A body-only edit to g that leaves its effective output equal adds nothing to C, so it re-derives no one.
+
+**Configured-return precondition.** A configured kondo return can replace a call with a structural tag
+before F1 sees it (`types.clj:457-476`). Seon's generated Malli type config is `{}` today
+(`.clj-kondo/metosin/malli-types-clj/config.edn`). F1's test and a committed check keep that true for
+first-party namespaces, so Seon never mistakes kondo's structural guess for a name it could resolve.
+
+**Render and call time: the actual value against the effective output.**
+- **Call time:** the armed wrapper validates every return against f's effective output (S2 arms derived
+  contracts; `instrument.clj:624-750`). A delegating f therefore validates the same value g already
+  validated. That double check costs one cached validator call per return and must be measured in S6.
+- **Render time:** `seon.render/selection` (`src/seon/render.clj:671`), rule 2 of the one-render-path
+  design (`one-render-path-design-2026-09-25.md` §1, rule 2). For a top-level contracted call it validates
+  the result against the head's declared output alternatives through `schema/function-matching-outputs-in`
+  (`src/seon/schema.clj:3894`), reading `:seon.schema.projection/function-contracts`. Derived contracts are
+  stored there like explicit ones, so rule 2 needs no change: one satisfied alternative selects that
+  schema's renderer, and none diagnoses.
 
 ### 2.5 Underivable outputs
 
@@ -299,7 +351,7 @@ Underivable in v1:
 - `cond->`, `->` and similar tails, until F2;
 - `merge`, `sorted-map`, `into`;
 - `assoc` on a destructured argument (the F3 question);
-- tail calls (§2.4);
+- tail calls that §2.4 refuses (unresolved, recursive, multimethod, uncontracted or unpublished callee);
 - keyword access;
 - unqualified-key maps;
 - `:any` branches;
@@ -335,7 +387,9 @@ Underivable in v1:
 - `:seon.fn.derived/direction` `[:enum :input :output]`;
 - `:seon.fn.derived/reason`, an enum over the bounded reasons in §1–§2:
   `:positional-argument :sequential-argument :rest-argument :no-qualified-key :unsupported-declaration
-  :unqualified-return-keys :unsupported-return-tag :missing-return :call-return :union-bound :unregistered-key`;
+  :unqualified-return-keys :unsupported-return-tag :missing-return :union-bound :unregistered-key
+  :recursive-return :unresolved-call :multimethod-callee :uncontracted-callee :unpublished-callee`;
+  - the call-graph reasons also carry `:seon.fn.derived/callee` and, for cycles, the cycle path;
 - `:seon.error/offending`, the tag or argument form;
 - `:seon.error/expected :malli/schema`.
 
@@ -372,8 +426,11 @@ Whether a contract was derived is itself derived from the source: no `:malli/sch
 keeps the short source.
 
 **Recompiled only when a dependency changes (1.12).**
-- Under §2.4 option 1, a derived contract's inputs are the declaration's source digest, its aliases, and
-  the registered schemas of its named keys.
+- A derived contract's inputs are:
+  - the declaration's source digest and aliases;
+  - the registered schemas of its named keys;
+  - the effective outputs of its `output-from` callees. §2.4's `derive-outputs` re-derives on those in the
+    writer's transaction.
 - Key-schema changes already propagate through `reference-fingerprints` (`schema_shape.clj:119-146`),
   `shape-dependent-rows` (`fn.clj:3116-3137`) and `current-wrapper?` (`instrument.clj:752-766`). The spec
   keeps the key names, so the spec string is unchanged while the validator recompiles.
@@ -494,7 +551,8 @@ In this sample:
 | S1 | `declared-contract` inputs: argument kinds, the three corrections, declaration join incl. trailing attr map; move `map-binding-entries` (net 0); the `underivable-error` schema | ~40 | S0 |
 | F1 | fork export and normalization (§2.2) — **fork, priced separately** | ~25 src + ~60 test | — |
 | S3 | Seon side of F1 (~12) + tag translation (~30) + gate integration: `::underivable` on the analysed row and the `missing-contract` arity (~12) | ~54 | S1, F1 |
-| S5 | commit a pinned census script (`tmp/` or `test/`). Report the intersection of all-arity input eligibility, output eligibility and registered keys, then one scripted sweep deleting only explicit contracts whose derived contract is **equal** as data (requiredness, named errors, guards). Measure the net lines | net negative, measured | S0–S3 |
+| S6 | call-graph resolution (§2.4): `derive-outputs` (closure query, Kahn order, arity choice, one-step `:kw-calls`, the five refusal reasons) ~30; the two arity attributes with their schemas ~6; calls from `add-contract-facts` and from the settlement transaction function ~6; the subset validation of `output-from` against `:seon.fn/calls` ~3 | ~45 | S3 |
+| S5 | commit a pinned census script (`tmp/` or `test/`). Report the intersection of all-arity input eligibility, output eligibility and registered keys, then one scripted sweep deleting only explicit contracts whose derived contract is **equal** as data (requiredness, named errors, guards). Measure the net lines | net negative, measured | S0–S3, S6 |
 
 **Fork slices after the first cut**, each proven by fork tests plus a rerun of P13:
 
@@ -507,12 +565,22 @@ In this sample:
 
 `merge` inference is not proposed: overwrite order and unknown maps make naive `:val` merging unsound.
 
-**First cut:** S0, S2, S1, F1, S3, then S5.
-- Seon adds about 121 lines, and the fork about 25 plus tests.
+**First cut:** S0, S2, S1, F1, S3, S6, then S5.
+- Seon adds about 166 lines, and the fork about 25 plus tests.
 - That is **above the ~100-line bar**. The justification owed to root:
   - it lets go of every explicit contract that S5's census shows is derived equally;
   - it gives contracts to uncontracted map-input functions without new authored text;
   - it deletes nothing else.
+- **S6's own justification.** Delegating functions are the class whose explicit output only restates a
+  callee's contract. S6 makes their explicit contracts deletable, and it lets new delegating code omit
+  them. S5's census must therefore report that class separately:
+  - arities whose F1 tag is a call, or a union of calls and maps, onto contracted callees;
+  - with their explicit contract lines;
+  - with how many derive **equal** through S6.
+
+  S6 lands only if that class's measured deletions, plus S5's other deletions, at least cover the ~166
+  added lines. Otherwise the numbers go to the owner. The proofs S6 needs are listed under acceptance
+  cases 7, 10 and 11 below.
 - S5's measured net decides whether the cut pays.
 - There is no smaller complete variant: row 1.12 forbids a derived input combined with an explicit output.
 - If S5 shows no net deletion, report that to the owner with the number instead of landing an unpaid cut.
@@ -531,9 +599,15 @@ Per-call work is zero, because all of this runs at declaration.
 4. `.cljc` duplicates joined on the same `:clj` occurrence;
 5. changing a derived key's schema with unchanged source re-arms, and deleting the key refuses;
 6. explicit wins over an unsupported derivation;
-7. a delegating return refuses `:call-return`;
+7. f → g → h in one batch derives in dependency order. Changing only h's explicit output re-derives g and
+   f **in the same transaction**, both at publication and through SCI settlement on a branch. An unrelated
+   write re-derives nothing.
 8. naked, optional and explicit entry spellings reach call preparation's required-entry facts;
-9. an unregistered output key refuses with its producer named.
+9. an unregistered output key refuses with its producer named;
+10. every §2.4 refusal: direct and mutual recursion, `apply`, a local function call, a multimethod, a
+    dependency callee, an unpublished cross-namespace callee, and deletion of g with f surviving;
+11. explicit g beats kondo's structural tag, and `[:or ok :seon.x/error]` flows to f with its names intact;
+    render rule 2 selects the error renderer for f's error result.
 
 **Unproven** (falsify these):
 1. F1's exact raw shapes, until its tests pin them.
@@ -542,6 +616,35 @@ Per-call work is zero, because all of this runs at declaration.
 4. That `canonical-row-in` never stores `::underivable`.
 5. That P13 counts transfer from resolved tags to F1 raw tags.
 6. The 1.11 correspondence (§6).
+7. Which SCI settlement transaction function admits program rows (§2.4). `receipt-settle-call` is a
+   candidate from its name only.
+8. The measured cost of `derive-outputs` per closure and of the double return validation (§2.4).
+
+---
+
+## 8a. Proposed row 1.12 wording (for root to integrate; this lane does not edit the requirements)
+
+> **1.12 A contract may be derived.**
+> - **Inputs** come from destructured fully qualified keys: `(fn [{:keys [seon.db/db seon.render/value]}] …)`
+>   binds the locals and declares the input map from those keys' registered schemas. A key with an `:or`
+>   default is optional. Unqualified keys, positional, sequential and rest arguments derive nothing, and they
+>   require an explicit contract. Positional `:cat` contracts remain.
+> - **Outputs** come from two sources only:
+>   - an explicit `:malli/schema`, which names inputs and outputs in one place and always wins;
+>   - otherwise, the return keys that the one parser (the clj-kondo fork's type inference, exported per arity)
+>     finds. A tail call resolves through the call graph to the callee's effective output contract,
+>     explicit or derived, so the system knows what data is where ahead of time. The writer re-derives
+>     dependent callers in dependency order in the same transaction as the change, from the recorded
+>     `output-from` facts.
+> - There is no third metadata key. There are exactly two contract modes, complete explicit or complete
+>   derived, with one effective contract value, recompiled only when a dependency changes (source, key
+>   schemas, callee outputs).
+> - When no output can be found, the entry gate refuses by name, citing what it saw: "return is
+>   :associative; declare :malli/schema", or "return depends on g, which is recursive; declare
+>   :malli/schema". Every admitted function stays contracted.
+> - At call and render time, the actual value is checked against the effective output: the armed wrapper,
+>   and render selection rule 2.
+> - Design: `derived-contracts-2026-09-25.md`.
 
 ---
 
