@@ -193,6 +193,30 @@ evaluation, history, issue or error producer.
 - **Limit:** that load did not arm the test namespace's contracts through adoption. Root should adopt or arm it
   before the rerun if armed private helpers matter.
 
+## Round 2: test resolution of an absent namespace (94df186e9)
+
+**What changed.** `seon.test/resolve-test`'s host branch now calls `resolve-loaded`, a new private function in
+`src/seon/test.clj` (+16 / −1). When the test's namespace is absent from the JVM, it runs
+`(require ns :reload)` under the test loader, then `requiring-resolve`. This is the case
+`seon.sci.eval/host-namespace!` (`eval.clj:1925-1933`) handles for the process classpath. That owner cannot be
+reused here: it consults only the process classpath (`classpath-locatable?`), never the test loader.
+
+**Regression.** `seon.test-resolution-test/a-registered-but-absent-test-namespace-resolves-and-runs`. It uses
+the dedicated fixture namespace `seon.test-resolution-fixture`, which nothing else requires.
+
+1. `remove-ns` the fixture, and assert it is still in `*loaded-libs*`.
+2. `resolve-test` returns a Var and the namespace exists again.
+3. The test body runs.
+
+Both files are new and need adoption to be indexed as core test rows.
+
+**The walk-graph red has a second cause, not in this lane.** After the namespace was loaded, verify-final 006
+reached the fixture and failed: `seon.issue/file-declarations` refused `tg.a` with `:handle-mismatch`. The
+fixture in `test/seon/render/walk_graph_test.clj:15-29` hard-codes task id `"7a5c0d1e2f30"`, but
+`issue.clj:596-597` now requires the id to equal `(task-handle ns name kind)`. This is a retired assumption in
+the S1 lane's test. The fix is to derive the handle through `task-handle` in the fixture, in both the task EDN and
+the source's `:seon/tasks` metadata.
+
 ## Limits
 
 - The page walks from an agent only, and default has one agent (root). Task-rooted graphs of 400–2,000 nodes were
