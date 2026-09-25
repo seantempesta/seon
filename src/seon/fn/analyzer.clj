@@ -129,7 +129,8 @@
     (present-values
      entry
      [:ns :name :defined-by :defined-by->lint-as :arglist-strs :doc :meta
-      :private :macro :test :fixed-arities :varargs-min-arity :lang :literal-def?]))))
+      :private :macro :test :fixed-arities :varargs-min-arity :lang :literal-def?
+      :task-map-after-name?]))))
 
 (defn- var-usage
   [entry]
@@ -589,7 +590,8 @@
   {:malli/schema [:=> [:cat :string :string]
                   [:map [:seon.fn.analyzer/var-quotes [:vector :map]]
                    [:seon.fn.analyzer/require-forms [:vector :map]]
-                   [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]]]}
+                   [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]
+                   [:seon.fn.analyzer/task-maps-after-name [:set [:tuple :int :int]]]]]}
   [filename source]
   (let [nodes (tree-seq (comp seq :children) :children
                         (binding [kondo.reader/*reader-exceptions* (atom [])]
@@ -613,6 +615,17 @@
                                       (and (= 4 (count form)) (string? (nth form 2))))
                                   (literal-value? (last form)))
                          [(:row (meta node)) (:col (meta node))])))))
+           nodes)
+     ;; A map naming :seon/tasks right after a defining form's name (and an
+     ;; optional docstring): for a deftest it is a body value, not metadata.
+     ::task-maps-after-name
+     (into #{}
+           (keep (fn [node]
+                   (let [[_ named first-form second-form] (:children node)
+                         attributes (if (:lines first-form) second-form first-form)]
+                     (when (and (= :list (:tag node)) (symbol? (:value named)) (= :map (:tag attributes))
+                                (some #(= :seon/tasks (:k %)) (:children attributes)))
+                       [(:row (meta node)) (:col (meta node))]))))
            nodes)}))
 
 (defn- with-namespace-clauses
@@ -739,7 +752,10 @@
                                          (and (= 'clojure.core/def (:defined-by entry))
                                               (get-in spans [(:filename entry) ::literal-defs
                                                              [(:row entry) (:col entry)]]))
-                                         (assoc :literal-def? true))) definitions)))
+                                         (assoc :literal-def? true)
+                                         (get-in spans [(:filename entry) ::task-maps-after-name
+                                                        [(:row entry) (:col entry)]])
+                                         (assoc :task-map-after-name? true))) definitions)))
         quotes (mapcat ::var-quotes (vals spans))
         require-forms (into [] (comp (mapcat ::require-forms) (map location)) (vals spans))
         attributed (group-by #(if (:class %) :java-class-usages :var-usages)
