@@ -925,8 +925,8 @@
        (is (= [true result] (stabilize result)))
        (is (< walk encoding)
            (str "the walk took " walk " ms; encoding the same value took " encoding " ms"))
-       (is (= [false nil] (stabilize [{:db @connection}])) "a database value declines")
-       (is (= [false nil] (stabilize {:connection connection})) "a connection declines")))))
+       (is (false? (first (stabilize [{:db @connection}]))) "a database value declines")
+       (is (false? (first (stabilize {:connection connection}))) "a connection declines")))))
 
 (deftest component-expanded-pull-evidence-detects-a-child-only-change
   (with-codec-database

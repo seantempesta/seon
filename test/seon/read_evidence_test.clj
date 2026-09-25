@@ -44,7 +44,11 @@
                       :seon.db/pattern-value juniper} %)
                  patterns)
            (pr-str evidence))
-       (is (true? (db/read-evidence-current? @connection evidence)))
+       (is (true? (db/read-evidence-current? @connection evidence))
+           (pr-str (into [] (comp (remove #(db/read-evidence-current? @connection [%]))
+                                  (map #(select-keys % [:seon.db/read-request :seon.db/read-result-digest
+                                                        :datahike.read/revision])))
+                         evidence)))
        (is (some? (:db-after (db/transact!
                   connection
                   [{:seon.message/id "next" :seon.message/to [:seon.agent/id recipient] :seon.message/content "Next message"}]))))
