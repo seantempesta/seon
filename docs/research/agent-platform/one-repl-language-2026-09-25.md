@@ -1,503 +1,704 @@
 ---
 type: design
-status: revised design (Opus, revision 2), integrating Astra's review 7117f211f, the duplicate-path audit 7c577876d and the owner rulings of 2026-09-25; for root ruling; no production code
+status: revised design (Opus, revision 3), integrating Astra's re-review of e5f9b923e (appended to one-repl-language-review-2026-09-25.md) and aligned with language-requirements-2026-09-24.md at 19e9fe5f4; for root ruling; no production code
 created: 2026-09-25
 revised: 2026-09-25
-lane: design-one-repl-language-opus → revise-one-repl-opus
-source-pin: 3785970b9 (HEAD at revision; first pass pinned a34e5d800/8f6eb00ff)
-scope: the one REPL path from the agent's side; one definition and deletion authority; REPL-native change with gated write-back; co-location and configuration layering; auto-pulled context; a priced milestone; proposed requirement revisions
+lane: design-one-repl-language-opus → revise-one-repl-opus → revise2-one-repl-opus
+source-pin: 19e9fe5f4. Every cited file is byte-identical at 3785970b9 except src/seon/{fn,render,error,repl,plan}.clj, src/seon/cluster/message.clj and the render and sci.eval schemas, whose citations stay at 3785970b9
+scope: the one REPL path from the agent's side; one definition and deletion authority; gated write-back; tasks and issues moved into the codebase; co-location and configuration layering; auto-pulled context; ordered and priced milestones; the requirement rows still to revise
 ---
 
 # One REPL, one language: read → eval → record → print, and where facts live
 
-**What exists.** Seon already has the owners of one REPL path: the reply reader
-(`seon.cluster.reply/sources`), SCI evaluation (`seon.sci.eval/evaluate`), ordinary run submission and
-settlement (`seon.cluster.agent/submit-source!`, `src/seon/cluster/agent.clj:635`; `turn/evaluation-facts`),
-test capture and recording (`seon.test/run`, `seon.test.runner`), program rows, call preparation
-(`src/seon/call_preparation.clj`), and one declared render selection with a floor. Three entrants still
-bypass parts of it: MCP SCI evaluates without settlement, MCP JVM reads and evaluates separately, and test
-bodies are invoked outside the evaluation recorder (duplicate-path audit §5, 7c577876d).
+**What exists.** Seon already has the owners of one REPL path:
 
-**The principal approach.** Route every entrant through the existing owners instead of adding a path:
-MCP SCI submits source through `submit-source!` as a named agent; tests hand their captured body to the same
-recorder; evaluation admits a form's program change as one whole set or refuses it; files change only by a
-gated write-back of accepted rows. Printing is the one render selection at the terminal boundary. Facts live
-with their owner: shapes and render defaults on schemas, dial defaults on dial schemas, initialization rows
-in their own file, per-agent choices in the agent's namespace and settings.
+- the reply reader, `seon.cluster.reply/sources`;
+- SCI evaluation, `seon.sci.eval/evaluate`;
+- ordinary run submission and settlement, `seon.cluster.agent/submit-source!` (`src/seon/cluster/agent.clj:635`)
+  and `turn/evaluation-facts`;
+- test capture and recording, `seon.test/run` and `seon.test.runner`;
+- program rows and call preparation (`src/seon/call_preparation.clj`);
+- one declared render selection, with a floor;
+- guarded source publication, `seon.cluster.source/publish!`;
+- an issue owner that joins problem statements to program identities (`src/seon/issue.clj`).
+
+Three entrants still bypass parts of this path. MCP SCI evaluates without settlement. MCP JVM reads and
+evaluates separately. Test bodies are invoked outside the evaluation recorder (duplicate-path audit §5). Issues
+are also out of place: they are indexed by parsing Markdown prose, whereas they belong in the codebase as tasks
+(requirements 7.11).
+
+**The principal approach.** Every entrant goes through the existing owners; no new path is added.
+
+- MCP SCI submits source through `submit-source!` as a named agent.
+- Tests hand their captured body to the same recorder.
+- Evaluation admits a form's program change as one whole set, or refuses it.
+- Files change only by a gated write-back of accepted rows, proven before they are exposed.
+- Tasks are the issue owner evolved in place. Their data is task EDN. Their subject edges and proof edges are
+  metadata that the analyzer already reads.
+- Printing is the one render selection, applied at the terminal boundary.
+
+**The owner's goal, and how this design orders it.** The owner wants to "start using this so we can move the
+docs and issues into the codebase". This design therefore orders the work in three steps (§3.4, §6):
+
+1. **M0** moves the tasks in. Its slices are file-disjoint from the REPL slices and can run alongside them.
+2. **M1** makes one existing-function replacement land from the REPL.
+3. **D1**, the first dogfood milestone, has a lane settle one migrated task through M1.
 
 ## 0. Broken things first
 
 The first-pass probes ran on default (pid 35446, health `faulted`) on the retired SCI branch
-`design-one-repl-language-opus`. Astra's review (7117f211f §1) re-scoped each claim; the corrected claims
-are below. Revision-2 probes were read-only JVM reads on default and source reads at 3785970b9.
+`design-one-repl-language-opus`. Revision 2 made read-only JVM reads and source reads. Revision 3 made one
+read-only JVM query of the issue index on default (8 ms), plus source reads at 19e9fe5f4. The re-review confirmed
+items 4, 8, 9 and 10 against source. It did not reproduce any of them live.
 
-1. **A qualified `defn` into another namespace is refused, in SCI as in Clojure.** Source-confirmed:
-   `reference-code/sci/src/sci/impl/analyzer.cljc:839-849` accepts a simple name or the current namespace;
-   Clojure `Compiler.java:538-552` likewise. Binding `*ns*` to the target explains the reported success. This
-   shows the entrance needs a rule. It does not show the first pass's macroexpansion rule is correct (§2.1).
-2. **The entry gate checks rows, not changed Vars.** `definition-rows` (`src/seon/sci/eval.clj:489`)
-   emits a row only when analysis matches a changed Var. `refuse-uncontracted-definitions!` (`:456`) checks
-   those rows. An `eval` of a quoted `defn` therefore changes a Var with no row and passes unrefused and
-   unarmed. The correct name is "an unindexed program change". Calling it "missing contract" would be false,
-   because a contracted dynamic definition is lost the same way.
-3. **Evaluation keeps only the first definition row.** `evaluate` computes every `var-rows`, arms them, then
-   keeps `(first var-rows)` as the singular `:seon.program/row` (`eval.clj:3820-3834`). Turn submission then
-   collects one row per evaluation (`src/seon/turn.clj:4887-4894`). A `(do (defn a …) (defn b …))` arms two
-   Vars and records one row. This silent loss is P0-A (§2.2).
-4. **Deletion has two authorities and one hole.**
-   - (i) A top-level `(ns-unmap 'n 'f)` is marked by the reader (`src/seon/sci/reader.cljc:395-404`).
-     `evaluate` diffs interns only in that case (`eval.clj:3729-3745`, `unmap-row` `:3132-3172`) and yields
-     `program/deletion-row` (`src/seon/program.cljc:1374`), which settles with the run.
-   - (ii) `my.program/ns-unmap!` (`src/my/program.clj:548`) calls `breaks`, retracts in its own transaction,
-     then runs native unmap on the executing fork **and the shared base** (`:510-546`), with no rollback if
-     the native step fails.
-   - (iii) A nested native `ns-unmap` (inside `let`, `when`, a function) is neither intercepted
-     (`native-call-refusal`, `:625-666`, omits it) nor diffed. The Var disappears and its row survives:
-     the 2026-09-24 deletion-run defect.
-5. **Entry refusals render with a contract finding.** Partly supported (review §1.3). `evaluate` returns an
-   evaluation envelope whose value member is arbitrary (`resources/seon/schemas/seon.sci.eval.edn:32`), and
-   `kernel/failure-value` declares the base (`src/seon/sci/kernel.clj:531-533`). The fix separates three
-   things: the producer's shape failure, nested-result attribution, and missing named render alternatives.
-   Adding an error union to the envelope is not automatically the fix. The offending envelope ("got nil nil")
-   was not retained and must be reproduced before a fix is designed.
+1. **A qualified `defn` into another namespace is refused, in SCI as in Clojure.** Two sources confirm this:
+   `reference-code/sci/src/sci/impl/analyzer.cljc:839-849` accepts only a simple name or the current namespace,
+   and Clojure's `Compiler.java:538-552` behaves the same. Binding `*ns*` explains the success reported earlier.
+   Requirement 1.10 asks the entrance to admit `(defn other.ns/f …)`. That clause stays deferred (§2.1).
+2. **The entry gate checks rows, not changed Vars.** `definition-rows` (`src/seon/sci/eval.clj:489`) emits a
+   row only when analysis matches a changed Var, and `refuse-uncontracted-definitions!` (`:456`) checks only
+   those rows. An `eval` of a quoted `defn` therefore changes a Var that has no row, and it passes unrefused
+   and unarmed. The accurate name is "an unindexed program change".
+3. **Evaluation keeps only the first definition row.** `evaluate` arms every entry of `var-rows` but keeps
+   `(first var-rows)` (`eval.clj:3820-3834`). Turn submission then collects one row per evaluation
+   (`src/seon/turn.clj:4887-4894`).
+4. **Deletion has two authorities and one hole.** Three paths exist today:
+   - **(i) Top-level `ns-unmap`.** The reader marks a top-level `(ns-unmap 'n 'f)`
+     (`src/seon/sci/reader.cljc:395-404`). Only in that case does `evaluate` take the full intern snapshot
+     (`eval.clj:3729-3746`). `unmap-row` (`:3143-3157`) has the same guard.
+   - **(ii) `my.program/ns-unmap!`.** It checks references inside a transaction function, commits, and then
+     mutates both the executing context **and the shared base** (`src/my/program.clj:527-542`).
+   - **(iii) Nested native `ns-unmap`.** `native-call-refusal` (`:636-641`) omits `ns-unmap`, so a nested call
+     removes the Var while its row survives. This hole follows from the code. It is the mechanism behind the
+     2026-09-24 deletion-run defect.
+5. **Entry refusals render with a contract finding.** This is partly supported (review §1.3). The offending
+   envelope ("got nil nil") was not retained, so it must be reproduced before a fix is designed.
 6. **MCP SCI has no ordinary run or evaluation settlement.** `script/seon/dev/mcp.clj:501-545` calls
-   `evaluate` directly, with no run, ordinal or settled row. Evaluated code may still write through its
-   owners, and MCP writes result blobs, so "records nothing" was too strong. The tool description admits it:
-   "private SCI state, never program rows".
-7. **Unbounded printers remain on the MCP path:**
-   - `src/seon/cluster.clj:532`;
-   - `mcp.clj:434-441` (`printed-value-event`);
-   - `src/seon/sci/admit.clj:85-95` (`canonical-edn` is an unbounded `pr-str`, not a bounded encoder);
-   - `mcp.clj:333-356`, which accumulates every `:out`/`:err` event.
-8. **`config apply` keeps one overlay.** Three places each compose layers differently:
-   - boot composes defaults → `config/development.edn` → `--config` (`src/seon/cluster/boot.clj:432-437`);
-   - `bin/seon config apply NAME PATH` compiles defaults → PATH only (`boot.clj:630-632`,
-     `script/seon/operator.clj:1405-1412`), dropping the development overlay;
-   - the publication re-apply compiles defaults → development only (`boot.clj:664-676`), dropping any
-     `--config` or applied overlay.
+   `evaluate` directly. The tool's own description says so: "private SCI state, never program rows".
+7. **Unbounded printers remain on the MCP path.** The sites are `src/seon/cluster.clj:532`,
+   `mcp.clj:434-441`, `src/seon/sci/admit.clj:85-95` (an unbounded `pr-str`), and `mcp.clj:333-356`.
+8. **`config apply` loses layers for the cluster it applies.** Three sites each compose a different stack:
+   - boot composes defaults, then development, then `--config` (`src/seon/cluster/boot.clj:432-437`);
+   - apply compiles defaults and the submitted file only (`boot.clj:629-634`,
+     `script/seon/operator.clj:1405-1412`);
+   - publication recompiles defaults and development only (`boot.clj:660-676`).
 
-   `apply-compiled!` reconciles exactly (`src/seon/config.clj:661-729`). The last writer therefore erases the
-   others, and nothing records which layers produced the row.
-9. **Nine readers take an arbitrary cluster's config row.** Each queries `[?c :seon.config/cluster _]` with
-   a scalar find (`.`) and so answers from whichever row it meets:
-   - `src/seon/turn.clj:2698` and `:4017`;
-   - `src/seon/agent.clj:132` and `:186`;
-   - `src/seon/repl.clj:71`, `src/seon/issue.clj:1232`, `src/seon/bootstrap.clj:132`;
-   - `src/seon/render/transcript.clj:1181`, `src/seon/sci/eval.clj:741`.
+   Reconciliation is exact (`src/seon/config.clj:673-725`), so a later apply erases **that cluster's** earlier
+   layer decisions. Other clusters' referenced rows are deliberately retained (`config.clj:677-705`).
+   Nothing records which layers produced a row.
+9. **Nine readers have no bound cluster identity.** The sites are:
+   - `src/seon/turn.clj:2697-2700` and `:4012-4017`;
+   - `src/seon/agent.clj:132` and `:185-187`;
+   - `src/seon/repl.clj:69-72`, `src/seon/issue.clj:1232-1233` and `src/seon/bootstrap.clj:131-134`;
+   - `src/seon/render/transcript.clj:1180-1182` and `src/seon/sci/eval.clj:738-745`.
 
-   `turn.clj:4019` also reads `:seon.config.eval.result/blob-threshold` from any entity. Probe (JVM,
-   read-only, 4 ms): default holds one row today (`#{["default"]}`, `no-provider true`). A branch holds more
-   when it inherits rows that another cluster's `:seon.cluster/config` names, because `apply-compiled!`
-   retains those (`config.clj:681-693`). A test world forked there reads a stranger's dials.
-10. **Inline render functions get no supplied defaults.** `kernel/invoke` applies a function value's
-    arguments without call preparation (6d25d9483; `call_preparation.clj:1535`, `callee-identity` nil).
-    The render boundary passes the whole unit, database included, as a caller argument (render-dispatch
-    landing 549b4d58c). Both conflict with the ruling that declared-but-omitted inputs are supplied for
-    **all** functions (§4.0).
-11. **Allocation is unattributed.** The first pass reported 31-87 MB per one-line `defn` and 71 MB for one
-    `callers` read. There is no per-owner breakdown, warm sample or retained-heap figure, so these are
-    observations, not attributions (review §1.7). R-timing in §6 measures them per phase.
+   These are nine sites, not one repeated query. `turn.clj:4020-4023` also reads the blob threshold from any
+   entity. A branch that inherits another cluster's referenced row holds several eligible rows, and the
+   selection then has nothing to do with custody. The one-row probe on default (4 ms) shows the ambiguity
+   exists. **It does not demonstrate a wrong live result.**
+10. **Inline render functions get no supplied defaults.** `src/seon/sci/kernel.clj:633-640` bypasses
+    preparation for a function value. Even the present hook passes through a callee that has no program
+    identity (`call_preparation.clj:1538-1541`). The render boundary passes the unit, including its database
+    and context fields (`src/seon/render.clj:196-249`, `:452-482`), as a caller argument. Declared attribute
+    renderers receive the raw attribute instead. The fix is the shared preparation owner consuming the inline
+    function's retained declared contract (§2.4).
+11. **Allocation is unattributed.** The first pass observed 31-87 MB for each one-line `defn` and 71 MB for one
+    `callers` read. There is no per-owner breakdown, so these figures are observations. The R-timing rows in
+    §6 measure them.
+12. **The issue owner parses prose.** `seon.issue` indexes each `docs/seon/issues/*.md` at publication
+    (`src/seon/cluster/source.clj:512-523`; the changed-path filter is at `:559`) with a hand parser:
+    - `parse-note` (`src/seon/issue.clj:96-122`) reads header fields and the "## Problem" section;
+    - the citation tokenizer (`:35-58`, `:166-320`) turns words into function, test, error, key, file and
+      commit refs.
 
-These are recorded here as their durable home. Root files issues; this lane commits only this file.
+    This conflicts with 1.4 ("prose is never parsed") and 7.4 ("code owns subject edges"). The cited
+    functions are **mentions**, not the producers that must change (2.3).
+
+    Probe (read-only JVM, 8 ms): 405 issues are indexed as open. Of these, 241 cite at least one function (438
+    function edges) and 75 name tests. But 450 note files carry `status: open`. The missing 45 are
+    **unexplained**; T3b must account for each one.
+13. **MCP JVM mode reads with the bridge's single-form reader.** `execute-clj-eval` calls
+    `require-single-clj-form!` before choosing a mode (`mcp.clj:692-705`), and `jvm-evaluation-form` wraps a
+    single `read-string` (`:486-499`). Moving SCI alone therefore cannot retire audit R7 (§2.5).
+
+These are recorded here as their durable home. Root files the issues; this lane commits only this file.
 
 ## 1. The failures, and what would have prevented each
 
-Each row was verified against its cited file, commit or report. The review corrected rows 1-4 and 6-8
-(7117f211f §2). "Pull" is context placed before the agent unasked. "Grep" is a co-located fact `rg` finds.
-
 | # | Failure (verified source) | Cause | Prevention |
 |---|---|---|---|
-| 1 | OOMs: a whole overlay `pr-str`'d as `:seon.error/offending` (open-items.md:162-168, 10.8 GB); an infinite `(range)` key hashed by floor code (open-items.md:52-61, 17.8 GB); a >2 GB PREPL answer (fix-schedule-2026-09-23.md:184) | **not one cause**: unbounded printing, and unbounded hashing and ordering before presentation | the value is classified with a bound before any hash, order or path is built; serialization is bounded *during* encoding; one presentation boundary. A namespace "edge" annotation would not have caught the hashing case, so it is dropped |
-| 2 | Publication order (5c80755da): `:seon.error/notice` names `seon.error/notice-prose`; schema rows published before function rows | publication was not coherent | **fixed by atomic publication** (5c80755da). The schema owns the relation and the function owns the implementation. The reverse edge is shown by `breaks`/`callers` as a typed field (§5). No migration is needed (§4.0 ruling 1) |
-| 3 | Shipped `config/default.edn` carried `no-provider true`: 33 reds and 17 never started (census c :25, :43, :96; fixed 3a7ffa69c) | development policy in the shipped layer; a test world read a document nobody saw | layers are separated (§4.4). The test world reports its resolved documents, digests, applied layers and effective decisions, **and each default's provenance**, since a wrong default is invisible in a diff-from-default view |
-| 4 | Refusals dropped data: `(edn/read-string (pr-str response))` at `boot.clj:527-536`; message strings lost names (open-items.md:49) | print-then-read inside the system | the typed refusal value is kept with a durable reference where it must outlive its subject; it is rendered at the edge. A live handle alone does not survive restart |
-| 5 | MCP is a parallel REPL (audit §1.1) | a second submission policy and result policy | MCP SCI becomes an ordinary entrant (§2.5); retrieval uses the shared cut entrance. Assignment is by the audit ledger, once |
-| 6 | Paused hooks, stale Vars (open-items.md:60, :102-104); a 16,352 ms 2-file publication (boot-regression-2026-09-25.md:40-47) | whole-program recomputation is a **publication defect**, not a cost of files | publication cost follows changed inputs (its owner's cut). REPL work still needs publication, adoption and write-back. A branch that intentionally differs from loaded code is not drift: report adopted upstream identity separately from accepted local delta |
-| 7 | False premises (S2b-c landing :36-48; census c hypotheses) | unsupported diagnosis; the graph can also be stale | the task opener pulls positive analysis evidence **and its unknowns** before the first form; an empty graph answer is never proof |
-| 8 | Three floor design rounds before prior art (717e01bbb) | the relevant dependency seam was not in front of the designer | a design task receives the dependency seams its subjects reach, with guarantees, not a roster of every checkout |
-
-**Three distinct problems**, not one: unbounded work before or during presentation (rows 1, 4); missing
-coherent publication and authority (rows 2, 3, 5, 6); unsupported diagnosis (rows 7, 8).
+| 1 | OOMs: an overlay `pr-str`'d as `:seon.error/offending` (open-items.md:162-168); an infinite `(range)` key hashed by floor code (:52-61); a >2 GB PREPL answer (fix-schedule-2026-09-23.md:184) | unbounded printing, hashing and ordering before presentation | classify with a bound before hash, order or path; bound serialization during encoding; one presentation boundary |
+| 2 | Publication order (5c80755da) | incoherent publication | fixed by atomic publication; the reverse edge is a typed `breaks`/`callers` field (§5) |
+| 3 | Shipped `no-provider true` (fixed 3a7ffa69c) | development policy in the shipped layer | separated layers, with each default's provenance reported (§4.4) |
+| 4 | Refusals dropped data (`boot.clj:527-536`; open-items.md:49) | print-then-read inside the system | typed refusal values kept; rendered at the edge |
+| 5 | MCP is a parallel REPL (audit §1.1) | a second submission and result policy | MCP SCI becomes an ordinary entrant (§2.5) |
+| 6 | Paused hooks, stale Vars; a 16,352 ms two-file publication | whole-program recomputation in publication | cost follows changed inputs (publication owner's cut); intended branch differences reported separately from drift |
+| 7 | False premises (S2b-c landing :36-48) | unsupported diagnosis; stale graph | the task opener pulls positive analysis evidence and its unknowns; an empty answer is never proof |
+| 8 | Three floor design rounds before prior art (717e01bbb) | the dependency seam was not in view | a design task receives the seams its subjects reach (§5) |
+| 9 | Issues cite mentions as subjects; 45 open notes not indexed as open (§0.12) | prose parsed for relations | tasks carry code-owned subject edges and test-owned proof edges; the Markdown body is linked evidence (§3.5) |
 
 ## 2. The one REPL path, from the agent's side
 
-### 2.1 Read: once, as a target
+### 2.1 Read: shared owners now, once-only later
 
-"Read once" is **a target, not existing behavior** (review P1-A). Today:
+"Read once" is a **target**. Today the reader runs several times:
 
-- `reply/sources` parses once for admission and again for recovery (`src/seon/cluster/reply.clj:350-359`);
-- `plan-sources` discards parsed forms (`:185-218`);
+- `reply/sources` parses twice (`src/seon/cluster/reply.clj:350-359`);
+- `plan-sources` discards the parsed forms (`:185-218`);
 - `turn/planned-sources` repairs the strings (`turn.clj:3112-3140`);
-- `evaluate` calls `one-event` again when no event is supplied (`eval.clj:3688-3697`). The "never
-  reparsed" comment describes only a supplied event.
+- `evaluate` calls `one-event` again when no reader event is supplied (`eval.clj:3688-3697`).
 
-The design keeps the ordinary reader event from submission through evaluation: exact bytes, reader
-namespace and aliases, and repair evidence. Each successive form is read after the namespace effects of the
-accepted form before it. Source is stored for history, never replayed. The cut that does this must count
-actual reader invocations before and after. The bridge's own pre-reader (`mcp.clj:27, 249-331`, audit
-**R7 = 80** lines) is deleted when MCP SCI submits reply text (§2.5).
+**M1 claims shared owners only:** the same reader functions, evaluator and settlement for every entrant, not a
+guarantee that each form is parsed once. Once-only reading is its own slice, **S0**. S0 carries the reader event
+(exact bytes, reader namespace and aliases, repair evidence) from `reply` through `turn` into `evaluate`, and
+reads each successive form after the namespace effects of the form before it. S0 counts reader invocations
+before and after. It is unpriced until its reply/turn call graph is traced, and no other slice depends on it.
 
-**Qualified definitions are deferred** (review P1-B, accepted). The first pass named `sci/macroexpand-1`,
-which `sci.core` does not expose, and `my.program/create-ns!`, which does not exist. It also risked two
-problems: expanding once to find the destination and again to evaluate runs a macro twice, and binding
-`*ns*` after reading cannot reinterpret `::kw`, syntax quote or aliases the reader already resolved.
-Dogfooding uses the existing request namespace or separate `in-ns`/`defn` forms.
+**Qualified definitions are deferred** (1.10's `(defn other.ns/f …)` clause). The first pass named APIs that do
+not exist (`sci/macroexpand-1` in `sci.core`, `my.program/create-ns!`). It also risked two problems:
 
-The later cut must specify two contexts: the reader context (the session's) and the target evaluation and
-analysis context (the target namespace's). It expands once under the existing arm, preserves source and
-metadata, and gives `definition-rows` the target namespace and aliases (today it receives the originating
-ones, `eval.clj:3820-3824`). Proofs required:
+- expanding once to find the destination and again to evaluate would run the macro twice;
+- `*ns*` cannot reinterpret what the reader already resolved.
 
-- a macro counter showing a single expansion;
-- target alias use;
-- a reader-resolved `::kw`;
-- an unknown namespace refused by name;
-- a private def;
-- an unchanged session namespace.
+The later cut separates the reader context (the session's) from the target evaluation and analysis context. It
+expands once, under the existing arm, and passes the target namespace and aliases to `definition-rows`, which
+receives the originating ones today (`eval.clj:3820-3824`). Its proofs:
 
-It is unpriced until specified.
+- a macro counter shows a single expansion;
+- a target alias resolves;
+- a reader-resolved `::kw` behaves correctly;
+- an unknown namespace is refused by name;
+- a private def works;
+- the session namespace is unchanged.
+
+Until then, agents use the request namespace or separate `in-ns` and `defn` forms. No shim is authorized.
 
 ### 2.2 Eval: one definition authority (P0-A)
 
-**The accepted change set** of one evaluated form is:
+**The change set of one evaluated form has two members**, kept apart because they are observed differently:
 
-- every function or test Var whose root **or metadata** changed (`turn-interns` captures metadata,
-  `changed-interns` compares roots, `eval.clj:363-429`);
-- every program identity whose Var was removed.
+- **Definitions.** These are the function or test Vars whose root **or metadata** changed.
+  - *Observation.* `turn-interns` (`eval.clj:388-426`) already observes them. It walks only the namespace maps
+    that are not `identical?` to the acquired program's maps, and it captures values and metadata for Vars
+    stamped with this fork's generation. Inherited-root writes are stamped too (`sci/impl/evaluator.cljc:25-49`).
+  - *Matching.* Each observed definition must match exactly one analyzed row (`definition-rows`).
+- **Removals.** These are the program identities whose intern disappeared.
+  - *Observation.* Before the form runs, the evaluator holds SCI's `namespace-state`: the persistent namespace
+    map, an O(1) read (`reference-code/sci/src/sci/core.cljc:751-760`). After the form, only namespace maps
+    that are not `identical?` to the held ones are diffed, by key. `namespace-interns` (`:732-749`) walks every
+    namespace and is **not** used.
+  - *Matching.* A removed intern counts as a program removal only when the held before-state gives it a
+    **row-backed identity** (`:seon.fn/sym` or `:seon.test/sym` present in the acquired database). It is never
+    matched against an analyzed `defn` row. A private Var with no row unmaps with no program write.
 
-It is matched one-to-one against the analyzed rows. It is admitted whole or refused whole, at the existing
-boundary in `evaluate` (`:3820-3834`). There is no new evaluator.
+The prior roots and metadata are retained separately from the maps, because the maps hold mutable Vars. For a
+Var that the fork generation owned before the form, `turn-interns`' before-map supplies them. For an inherited
+program Var written for the first time, the root comes from the Var read under the acquired program's
+generation. That is unverified: probe **P-S1b** establishes it before S1 is coded.
 
-1. **Match.** Each observed mutation must match exactly one analyzed row. An unmatched mutation refuses as
-   `:seon.sci.eval/unindexed-change`, a new declared error over `:seon.error/base`. It names the Var, the form
-   and the fix ("define it as a top-level form"), and it is never labelled a missing contract.
-2. **One declaration per form, for now.** More than one analyzed declaration in one form refuses as
-   `:seon.sci.eval/multiple-declarations`, naming them, with the fix "send them as separate top-level forms".
-   This is an initial constraint, not a Clojure restriction. MCP accepts reply text with many top-level forms
-   once R7 goes (§2.5), so nothing is lost. The general form (a `:seon.program/rows` vector through
-   settlement, `turn.clj:4887`) is a later accretion, priced when needed.
-3. **Validate inside the refusal boundary.** Contract validation that throws inside `definition-rows`
-   (`:499-502`) is caught into the same declared refusal and restoration. Today it escapes before the
-   missing-contract restoration runs.
-4. **Restore and say so.** A refusal restores every observed changed root **and its metadata** from the
-   before-snapshot and returns a refusal, never an evaluation that reads as accepted. The private-binding
-   retention after a later throw (`:3626-3637`) stays for private Vars only.
-5. **State the limitation.** A post-evaluation check cannot undo a call made inside the defining form, IO,
-   or atom mutation. `:gate` refusals that can run before evaluation still do so: a reader event naming
-   `:seon.fn/sym` with no `:malli/schema` refuses first (`evaluate-for-install`, `:3944-3966`). The
-   post-evaluation match only catches what preflight cannot see. Entry policy is unchanged: `:gate` refuses,
-   explicit `:warn` admits with declared diagnostics, and merge always needs positive proof.
+**Rules**, all at the existing boundary in `evaluate` (`:3820-3834`); there is no new evaluator:
 
-Cost: one set comparison over the intern diff the gate already takes, O(changed Vars); UNMEASURED.
-Price in §6 (S1).
+1. **Match or refuse.**
+   - An unmatched definition refuses as `:seon.sci.eval/unindexed-change`, a new declared error over
+     `:seon.error/base`. It names the Var and form and gives the fix "define it as a top-level form".
+   - Anonymous `(fn …)` rows (1.11) are data owned by their evaluation, not program Vars. They are neither
+     matched nor refused here.
+2. **One declaration per form, for now.** More than one analyzed declaration refuses as
+   `:seon.sci.eval/multiple-declarations`, naming each one. A form that both defines and removes also refuses,
+   because it would silently choose one row (`eval.clj:3851`); the refusal names both members. These are
+   initial constraints, not Clojure restrictions. MCP accepts many top-level forms per submission once R7 goes
+   (§2.5), so nothing is lost.
+3. **Validate inside the refusal boundary.** Contract conversion (`eval.clj:515-516`) and contract validation
+   can throw inside `definition-rows`. The throw is caught into the same declared refusal and restoration.
+   Today it escapes before restoration runs. The derived contracts of 1.12 come from the function-face owner;
+   this boundary validates whatever contract that owner produces and derives none of its own.
+4. **Restore at every failure point**, reusing the evaluation's execution ownership rather than a second
+   rollback manager. The failure points are:
+   - (a) a throw after a program mutation but before the post-evaluation check;
+   - (b) an unmatched or refused change;
+   - (c) contract installation or arming failure;
+   - (d) a later settlement refusal.
+
+   Restoration puts every observed definition's root and metadata back, and re-interns every removed Var
+   into its held namespace map. The private-binding retention after a throw (`:3626-3637`) keeps
+   **private, row-less** Vars only; it never keeps a refused replacement of an existing program Var. There are
+   two further guards:
+   - Restoration never overwrites an intervening acquisition. If the context's loaded-program identity at
+     restoration differs from the one captured at the start, the execution is made unavailable instead.
+   - A restoration that throws also leaves the execution **unavailable**, named in status with the whole
+     cause. It never returns a result that reads as accepted.
+5. **Limits.**
+   - A post-evaluation check cannot undo IO, atom mutation or calls made inside the form.
+   - `:gate` refusals that can run before evaluation still run first (`evaluate-for-install`, `:3944-3966`).
+   - Entry policy is unchanged: `:gate` refuses, explicit `:warn` admits with declared diagnostics, and merge
+     always needs positive proof.
+
+**Cost.** The work is O(namespaces) `identical?` checks, plus O(entries of the changed namespace maps), plus
+O(generation-owned Vars). That matches today's `turn-interns`, with one extra held map per form. UNMEASURED:
+S1's landing times it on a one-line `defn` against its parent commit.
 
 ### 2.3 Record: what each entrant stores
 
-One pipeline does not erase distinct facts (review P1-E; audit §7). The inventory:
-
 | Entrant or material | Disposition |
 |---|---|
-| Product replies and MCP SCI submissions | the same reader, evaluator, install and settlement owners, under named execution custody; one run and evaluation history |
-| Generated openings and refreshed reads | the same evaluation and recording owners (`system-turn`, `record-evaluated-*`); exact historical text and read evidence kept; reads refresh, writes never replay |
-| Test members, task proofs, candidate checks | the same evaluation recorder around the existing assertion capture and execution bounds (§2.6); host-bound members remain a classified backend |
-| Raw source, evaluation facts, program rows | source and provenance kept apart from declarations; only the admitted program partition merges |
-| Live result objects, private state | the existing SCI-context handles (`result/e…`); never serialized; after restart, typed unknown |
-| Error occurrences, result/report blobs | the existing staging, publication and retention owners; core faults also get cluster visibility and delivery |
-| Test evidence on the requesting branch | typed counts, tested content and input identities, completion and evaluation references survive member unlink; shown text is an observation, not the oracle |
-| Browser cuts, MCP retrieval, host PREPL | one cut entrance with server custody, never re-evaluating the origin; the host PREPL alone keeps the no-record exception (§2.4) |
+| Product replies and MCP SCI submissions | the same reader, evaluator, install and settlement owners, under named execution custody |
+| Generated openings and refreshed reads | the same recording owners (`system-turn`, `record-evaluated-*`); historical text and read evidence kept; writes never replay |
+| Test members and task proofs | the same evaluation recorder around the existing capture and bounds (§2.6) |
+| Test-selection refusals | the test request's own declared result (no member evaluation exists to record) |
+| Raw source, evaluation facts, program rows | source and provenance kept apart from declarations; only the program partition merges |
+| Live result objects, private state | existing SCI-context handles (`result/e…`); never serialized; after restart, typed unknown |
+| Error occurrences, result/report blobs | existing staging, publication and retention owners; core faults also get cluster visibility and delivery |
+| Test evidence on the requesting branch | counts, tested identities, completion and evaluation references survive member unlink |
+| Browser cuts, MCP retrieval, host PREPL | one cut entrance, never re-evaluating the origin; the host PREPL's record rule is OPEN 8.6 (§2.4) |
 
-**The durable result reference is an open owner decision.** The audit (§1.4) found two contradictory
-plans. README §7 and B1 §3b R5 delete `get_value` and the MCP blobs. Render design §3f keeps `get_value`
-and adds artifact digests to evaluations. Root is asking the owner. This design books **no saving from
-either side** and prices the store so the ruling can be made:
+**The durable result reference is the owner's open decision, and this design books no saving from either
+side.** Two corrections to revision 2:
 
-- *Shape.* One optional `:seon.cluster.eval/result` component with exactly one of three members:
-  - `{:entity lookup, :basis-t t}`: a current entity, pinned to its observation basis when historical
-    equality is claimed;
-  - `{:artifact digest}`: an admitted plain-data artifact reusing `seon.render.value/artifact`, not a print
-    node;
-  - `{:live handle}` or typed `:unavailable` with its reason.
+- `seon.render.value/artifact` uses the print node as its sole value source (`src/seon/render/value.clj:683-710`,
+  at 3785970b9). It is **not** a plain-data artifact, and borrowing its name does not make it one.
+- An entity lookup plus basis-t is not a pinned observation across divergent branches unless it also retains
+  a database commit identity and history.
 
-  Nil and false are real results. Several matching schemas are ambiguity. The schema name comes from
-  declared provenance, never a registry scan, and is validated by cached Malli validators.
-- *Bounds.* Traversal and byte bounds apply **during** encoding under the evaluation's existing bound.
-  There is no post-hoc size check after `pr-str`, no hashing of an opaque key, and no probing of a lazy
-  value for finiteness. An oversized or non-EDN value stays a live handle or typed unavailable.
-- *Staging.* The blob is staged with settlement, so no cut advertises an unpublished artifact, and a
-  referenced artifact survives ordinary GC. This is a retention rule for the store owner.
-- *Price (UNVERIFIED):* schema 3 attributes; settlement +30; bounded encoder +40 (replacing the unbounded
-  `canonical-edn` body in `sci/admit.clj:85-95`); the MCP artifact write moves, not duplicates. If the
-  owner keeps `get_value`, the retrieval side is the render design's shared `prepare` at path and offset.
-  If the owner deletes it, the store shrinks to live handles plus entity refs, and cuts of a finished
-  evaluation answer "not retrievable". **M1 needs neither** (§3.4): it returns shown bytes and a live
-  handle, as today.
+A future schema therefore needs its own fully namespaced keys, a retained commit identity and a stated
+retention rule. It is **unpriced**, because its representation is not established.
+
+**M1 needs none of it.** M1 returns the shown bytes and a live handle, and it keeps the complete durable error
+and test evidence through the existing owners, whatever happens to the success handle.
 
 ### 2.4 Print is rendering: one selection, rendered once at the terminal boundary
 
-Printing is the one render pipeline (owner, AGENTS.md "Apply presentation limits once"). Selection is per
-face, first match wins (owner ruling 2026-09-25, AGENTS.md 7fc304482; §4.0):
+Selection is per face, and the first match wins (requirement 11.1; AGENTS.md "Render ordinary values totally"):
 
 1. the value's own key;
 2. a contract-fitting render function in the **viewing** agent's namespace;
 3. the schema's declared pair;
 4. the floor.
 
-What this design takes from that:
+- **The shown bytes are the evaluating agent's view.** The AI face is rendered once, for the final settled
+  success or refusal, and saved as exact bytes. Today an install refusal can replace a preliminary shown
+  result (`eval.clj:3955-3966`). The target is that the preliminary render never happens.
+- **Another viewer gets a current view,** labelled as such. It is rendered from the same selected value, tree
+  inputs, profile and render-program identity.
+- **Render inputs come from call preparation (1.13), and selection and invocation share it.** A function must
+  not fail selection only because a declared default is missing from the caller's arguments.
+  - For an inline function value, the shared owner consumes the value's retained declared contract through
+    Malli's `m/schema`, `m/properties` and the cached `m/validator`
+    (`reference-code/malli/src/malli/core.cljc:2561`, `:2592`, `:2637`). Derivation follows a change in
+    contract content, not every render call.
+  - Caller arguments win, and ambiguity refusals are preserved.
+  - No contract is inferred from shape, and there is no renderer-only supplier.
 
-- **The shown bytes are the evaluating agent's view.** The AI face is rendered once, for the final
-  settled success or refusal, at the terminal boundary, and saved as exact bytes. Today an install refusal
-  can replace a preliminary shown result (`eval.clj:3955-3966`). That boundary is reorganized so the
-  preliminary render never happens: "prints once" is the target, not today's claim.
-- **Another viewer renders a current view.** Root through MCP, or a human on the page, may select a
-  different renderer at stage (b). That view is labelled current, not "as shown". Both faces take the same
-  selected value and tree inputs, profile and render-program identity.
-- **Render inputs come from call preparation.** Before calling a render function, the selection reads its
-  contract. Inputs it declares but the caller omitted are supplied by declared schema name through
-  `seon.call-preparation/hook` (`call_preparation.clj:1497-1547`), as for every function; caller arguments
-  win. Gap (§0.10): inline function values skip preparation. That is `call_preparation.clj`'s owner cut,
-  not this design's.
-- **The host PREPL keeps its exception, and the behaviors it still needs** (review P1-F). Root's MCP
-  `jvm` mode records nothing and needs no database, configuration or projection. Its `valf` is the floor's
-  AI face under a fixed compiled profile. `:out`/`:err` are bounded at their producer, the prepl event
-  collector, not by `valf`. The exception class, whole cause and data are kept; `exception-summary`
-  (`cluster.clj:348-366`) loses them and goes with audit **R6**. `loaded-code-mark` (`cluster.clj:513-519`)
-  stays until a host `defn` or `ns-unmap` notifies through an existing owner, because a host change does
-  not pass through adoption. `mcp-instance` keeps its runtime-status caller (`cluster.clj:663`). Machine
-  protocol responses are never clipped and reparsed.
+  This cut belongs to `call_preparation.clj`'s owner. The claim "all functions get supplied defaults" depends
+  on it.
+- **The host PREPL keeps the behaviors it needs:**
+  - it runs with no database, configuration or projection;
+  - `valf` is the floor's AI face under a fixed compiled profile;
+  - `:out` and `:err` are bounded at the prepl event collector;
+  - the whole cause is kept (`exception-summary`, `cluster.clj:348-366`, goes with audit R6);
+  - `loaded-code-mark` (`cluster.clj:513-519`) stays until a host change notifies through an existing owner;
+  - `mcp-instance` keeps its runtime-status caller (`cluster.clj:663`);
+  - machine responses are never clipped and reparsed.
+- **OPEN 8.6 (owner): should MCP JVM evaluations be recorded?** Recommended hybrid: when the call names a
+  cluster whose database is available, record the evaluation as **root's**, on that cluster's current branch,
+  through the existing `record-evaluated-*` owner. The record is floor-rendered, has no custody and is never
+  program. When no database is available (boot-failure diagnosis), record nothing and say
+  `:seon.dev.mcp/recorded? false`, so diagnosis never depends on the store. Price: about +30, UNVERIFIED
+  (whether a root origin can use that recorder without an agent run is probe P-86). It is outside M1.
+- **OPEN 9.5 (owner): may the floor realize a lazy value?** This design needs only one thing from either
+  answer: the recorder never realizes a value in order to store it. An unrealized result is kept as a live
+  handle, and its durable form is typed unavailable. One tension remains for the owner. Under 5c.3, an agent
+  used to `clojure.main` expects `(map inc [1 2])` to print `(2 3)`. The recorded OOMs came from hashing and
+  ordering an infinite key, not from printing a bounded prefix. A `*print-length*`-style bounded prefix,
+  labelled as realized by the printer, is the alternative to put beside "never realize". That decision
+  belongs to the floor owner (`one-render-path-design-2026-09-25.md`).
 
-### 2.5 MCP SCI becomes an entrant: execution identity and completion (P1-D)
+### 2.5 MCP becomes an entrant: execution custody and completion (P1-D)
 
-`eval_clj` with `mode sci` **requires a branch**. Without one it would mutate the cluster's shared SCI
-context, which is a second world and is retired. The call submits the code as **reply text** (many
-top-level forms, so the bridge's single-form reader, audit R7, is deleted) through `submit-source!`.
+**Both modes read many forms.**
 
-- **Identity.** The agent is an ordinary agent row **on that branch's database**, with id
-  `mcp/<session-id>`, created and armed by the ordinary agent-creation owner (namespace assigned, routing
-  armed). It is not a context acquired with a nil id (`mcp.clj` today).
+- *SCI mode* submits the code as reply text through `submit-source!`.
+- *JVM mode* replaces `jvm-evaluation-form`'s single `read-string` (`mcp.clj:486-499`) with a read-eval loop
+  over one `LineNumberingPushbackReader`. It keeps `{:read-cond :allow}`, evaluates each form after the
+  effects of the one before (as `clojure.core/load-string` does,
+  `reference-code/clojure/src/clj/clojure/core.clj:4119-4127`), and returns the last value. Reader EOF and
+  other reader failures return with their whole cause.
+- `execute-clj-eval` then stops calling `require-single-clj-form!`, so all six R7 definitions
+  (`mcp.clj:27`, `:249-331`) retire together. No other bridge scanner replaces them.
 
-  *Disagreement with the review, with evidence:* agent rows live in the branch database, and each branch is
-  a separate database within one root's store. The id therefore cannot collide across roots, clusters or
-  branches. It collides only between sessions on the same branch that share the bridge's `"default"`
-  session id.
+**SCI mode requires a branch.** Without one it would mutate the cluster's shared context, and that second world
+is retired.
 
-  *Hybrid:* the tool requires an explicit `session_id` for `sci` with a branch (no `"default"`). A second
-  session on the same branch is a different agent.
-- **Settings.** The MCP agent's `:seon.agent/settings` carries `:seon.config.ai/no-provider true`, the
-  per-agent layer of §4.4. A submission can never cause a paid model turn, whatever the cluster decides.
-- **Namespace continuation.** The next submission starts in the namespace the previous run ended in (the
-  run's recorded ending namespace). `submit-source!` takes `:seon.turn/starting-ns` for this
-  (`agent.clj:661`), so no bridge state is kept.
-- **Busy.** The run transaction already refuses a busy agent (`agent.clj:640-641`). The tool returns that
-  refusal with the open run's id.
-- **Completion.** The tool registers its listener on the run's terminal datom **before** submitting, then
-  rechecks durable state after registration, so a fast close cannot be missed. Terminal run settlement and
-  actual execution exit are distinct. The tool answers on settlement. It reports "execution still exiting"
-  if the agent graph has not released the context, and the next submission is refused as busy until exit.
-- **Timeout.** On timeout the tool returns the run id and the requery form. Ownership is retained, and
-  there is no overlap or replay.
-- **Errors since.** The previous evaluation's stored basis on this agent's runs is the durable cursor
-  (requirement 8.3). The first observation and a lost session answer typed initial or unknown, never
-  "no errors". `window-bases` is not recreated under another name.
-- **Retirement.** `branch retire` today refuses any agent holder (`mcp.clj:596-601`). It is converted to
-  archive the branch's `mcp/*` agents after their actual exit, then retire.
+- **Custody on every call.** The root, cluster and branch select the live handle and routing on **every**
+  submission and retrieval. The bridge keeps its `[root cluster session-id]` session key (`mcp.clj:685-691`).
+  A branch-local agent id does not need to encode these values, because agent rows live in the branch's
+  database. It also does not prove ownership.
+- **The session requires an explicit `session_id`.** The `"default"` value is not accepted.
+- **The agent is `mcp/<session-id>` on that branch,** created and armed by the ordinary agent-creation owner.
+  A fork inherits agent rows, but an inherited row is not an armed agent. The bridge arms only the agent it
+  created, and it records that ownership in its session entry: the agent id plus the branch it armed on.
+- **Settings.** The agent's `:seon.agent/settings` carries `:seon.config.ai/no-provider true`, the per-agent
+  layer of §4.4.
+- **Namespace continuation** uses the previous run's recorded ending namespace, passed as
+  `:seon.turn/starting-ns` (`agent.clj:661`). The bridge keeps no namespace state.
+- **Busy.** The run transaction refuses a busy agent. The comment at `agent.clj:638-642` describes an **open
+  run**, not an exit fence.
+- **The exit fence is Flow's.** One agent graph has one turn proc, and Flow runs one transform at a time on that
+  proc's loop thread (`agent.clj:525-545`, citing
+  `reference-code/core.async/src/main/clojure/clojure/core/async/flow/impl.clj:305`). A second submission's
+  wake is handled only after the first transform returns. Across graph replacement, `arm!` refuses until the
+  previous executor has terminated (`agent.clj:1084-1093`). No bridge busy registry is added.
+- **Completion.** Before submitting, the bridge registers a listener for terminal run datoms on this branch for
+  this agent. `submit-source!` allocates the run id during submission (`agent.clj:697`) and returns it. The
+  bridge then filters on that id and rechecks durable state, so a fast close is never missed.
+- **Timeout.** The tool returns the run id and the requery form, and retains ownership. The next submission
+  is refused as busy until settlement, and there is no replay.
+- **Errors since.** The cursor is the previous evaluation's stored basis for this agent (requirement 8.3).
+  First and lost observations answer typed initial or unknown. `window-bases` is not recreated.
+- **Retirement.** `branch retire` retires only the agents this session **owns**, by the ids in its session
+  entry. It never retires every `mcp/*` row. For each owned agent, in order:
+  1. `disarm!` (`agent.clj:1277`) joins the executor, which is the actual-exit proof;
+  2. the agent is archived;
+  3. `release-context!` (`:804`) releases the context;
+  4. the branch retires.
 
-What the bridge keeps: transport, discovery, sessions, `runtime_status`, `branch`, and a thin `get_value`
-if the owner keeps it (§2.3).
+  A branch still held by an agent the session does not own keeps today's refusal (`mcp.clj:596-601`).
+
+What the bridge keeps: transport, discovery, sessions, `runtime_status`, `branch`, and a thin `get_value` if
+the owner keeps it (§2.3).
 
 ### 2.6 Tests enter through the recorder (P1-C)
 
-A bare `(ns/test-name)` evaluation does not return the assertion report, and wrapping host bodies in an
-outer SCI arm causes nested-arm refusals. The design is therefore **a body adapter at the common evaluation
-boundary**, not a source form:
-
-- **The capture owner wraps the body.** It encloses the body and returns its typed report value, keeping
-  fixture and hook semantics (`src/seon/test/runner.clj:359-399`, `:447-469`). This holds for SCI members
-  (`run-test`, `eval.clj:3978-4005`) and host members (`src/seon/test.clj:254-269`). The body runs once.
-- **Recording and printing are the evaluation owner's.** The same recorder records the typed value and the
-  same terminal render prints it. Host-bound members keep running unarmed, classified as host.
-- **Evidence survives member unlink.** Before unlink (`test.clj:2080-2093`, `:2235-2259`), the evaluation
-  evidence is recorded through the existing recorder **on the retaining branch**, with member origin and
-  tested identities. Test results reference it. Assertion counts, input and digest proof, positive
-  completion, unfinished-member ownership and reuse checks stay the test owner's facts.
-- **The report becomes a value.** `failure-report` renders expected/actual to strings, and `report-identity`
-  hashes them (`runner.clj:160-204`). The report keeps native operands, bounded as values, and is rendered
-  once at the boundary. Old identities remain historical. This is audit **R10** (50 old lines, ceiling 25).
-  Converting the schema and identity for `failure-report` (25) and `report-identity` (19) earns no extra
-  credit (audit §6).
-- **The candidate gate uses the ordinary request.** The pre-install candidate test
-  (`run-candidate-test!`, `evaluate-candidate`, `candidate-test-result`) becomes one `seon.test/run`
-  request on the actual candidate, recording its whole outcome. This is audit **C1** (87 old lines, ceiling
-  45). It is conditional on candidate fixture, input and source-line proofs and ordinary settlement.
+- **The common recording seam is `turn/evaluation-facts`**, the function that records product evaluations. The
+  test owner calls it with a test-member origin. There is no recorder for tests alone.
+- **The capture owner wraps the body once.** It encloses the body and returns its typed report, keeping
+  fixture and hook semantics (`src/seon/test/runner.clj:359-399`, `:447-469`). This covers SCI members
+  (`run-test`, `eval.clj:3978-4005`) and host members (`src/seon/test.clj:254-269`).
+- **"Host-bound" means no extra outer SCI arm.** A host member's own function contracts stay armed.
+- **Task proofs are ordinary deftests that name their task** (7.3), so they are ordinary members. A
+  done-when form compiled into a task-local body (3b.2) goes through the same `seon.test/run` on the attempt
+  branch and never counts as coverage.
+- **Selection refusals** (missing coverage, an unknown member) are the request's declared result, recorded by
+  the test owner as today.
+- **Evidence survives member unlink.** It is recorded on the retaining branch before unlink
+  (`test.clj:2080-2093`, `:2235-2259`), with member origin and tested identities.
+- **The report becomes a value.** `failure-report` and `report-identity` (`runner.clj:160-204`) keep native
+  operands, rendered once. This retires audit **R10** (`report-value`, `message-text`, `failure-message`; 50
+  lines). Root assigns R10 once, across this budget and the render budget.
+- **The candidate gate is one ordinary `seon.test/run` request** on the actual candidate. This retires audit
+  **C1** (87 lines), conditional on candidate fixture, input and source-location proofs. Copying C1's behavior
+  into the adapter would not retire it.
 
 ## 3. REPL-native program change
 
 ### 3.1 The change loop
 
-| Step | REPL form | Owner | Status at 3785970b9 |
+| Step | REPL form | Owner | Status at 19e9fe5f4 |
 |---|---|---|---|
-| write | `(defn f …)` in the session namespace (or after `(in-ns 'n)`) | reader → `evaluate` → change set (§2.2) → entry gate → settlement | reply path exists; change-set authority **missing** (§0.2-0.3); MCP not settled (§0.6) |
-| write, qualified | `(defn n/f …)` from elsewhere | §2.1 | **deferred** |
-| delete | `(ns-unmap 'n 'f)`, `(remove-ns 'n)` | §3.2 | two authorities and a hole (§0.4); **not advertised in M1** |
-| read before changing | `(my.program/callers …)`, `tests-reaching`, `breaks`, `reads-key`, `history` | `src/my/program.clj` | exists. `callers` returns a breakage **map**; `breaks` has a typed `render-declared-by` relation (`:228-245`). The render reverse edge joins `callers` as a typed field, not a mixed set |
-| test the change | `(my.test/check {:seon.test/changed ['n/f]})` | `src/my/test.clj:14-28` → `seon.test/run` policy `:named` | exists; branch-row correctness and cost UNVERIFIED (earlier 1,147 ms was a different request, `:named` refusal) |
-| merge | root: `prepare-merge!` then `accept-merge!` | `src/seon/cluster/source.clj:747-840` | exists for **replacements only**; needs an issue on the candidate |
+| write | `(defn f …)` after `(in-ns 'n)` | reader → `evaluate` → change set (§2.2) → gate → settlement | change-set authority **missing** (§0.2-0.3); MCP unsettled (§0.6) |
+| write, qualified | `(defn n/f …)` | §2.1 | **deferred** (1.10 clause) |
+| delete | `(my.program/ns-unmap! …)`, `remove-ns!`, or nested native `ns-unmap` | §3.2 | two authorities and a hole (§0.4); **outside M1** |
+| read first | `(my.program/callers …)`, `tests-reaching`, `breaks`, `reads-key`, `history` | `src/my/program.clj` | exists |
+| test | `(my.test/check {:seon.test/changed ['n/f]})` | `src/my/test.clj:14-28` | exists; cost on branch rows UNVERIFIED |
+| merge | root: `prepare-merge!`, then `accept-merge!` | `src/seon/cluster/source.clj:747-844` | replacements only |
 | write back | root: `write-back!` after accept | §3.3 | **missing** |
 
-### 3.2 Deletion: one authority (P0-B)
+### 3.2 Deletion: one authority, the public forms kept (P0-B)
 
-**The hybrid.** The review's smallest fix keeps `my.program`'s transaction and advances only the executing
-fork. This design goes one step further to remove the second authority altogether: deletion becomes part
-of the same accepted change set as definition (§2.2), written by settlement.
+Requirement 1.10 and AGENTS.md name `my.program/ns-unmap!` and `remove-ns!` as the public deletion forms, and
+this revision keeps them. Retiring them in favor of native forms alone would be an authority and API change,
+which the re-review flags as needing a root ruling. **The hybrid:** keep the public names, and let **one writer**
+decide.
 
-1. **Detect every removal.** `evaluate` diffs interns for **every** form, not only a reader-marked
-   top-level `ns-unmap` (`eval.clj:3729-3745`). The diff is taken from the snapshot the gate already takes.
-   The `:seon.sci.reader/ns-unmap?` special case (`reader.cljc:395-404`) retires. A nested native
-   `ns-unmap` is then seen like a top-level one, which closes hole (iii) with no interception. The *real
-   subject* is derived from the removed intern, `(symbol (ns-name ns) name)`, whatever argument forms
-   `ns-unmap` received (namespace object or symbol).
-2. **Validate at the writer.** Settlement writes the deletion row with the run. The retraction's
-   referrer check (`breaks` blocking, schema-owning namespace refusal, `my/program.clj:520-526`) runs
-   **inside the transaction function**, where `retract-operation!` runs it today (`:527-537`). This is one
-   writer-side decision, not a pre-read.
-3. **Fail in order.** The SCI change happens first, in the executing fork only, and is reversible from the
-   before-snapshot. The database write comes last. If settlement refuses, the fork is restored and the
-   evaluation returns the declared refusal. If the native step throws, nothing has been written. No shared
-   base is mutated by an agent's call. The base advances through ordinary adoption (rows → load → arm →
-   record), and other executions detect the loaded-identity change at their boundary.
-4. **Retire the second path.** `my.program/ns-unmap!` and `remove-ns!` and their `retract-operation!`
-   become redundant with native forms: 64 lines at 3785970b9 (`src/my/program.clj:510-575`). These lines
-   are **not in the audit ledger**, so this design books 0 for them and asks root to measure and add them.
-   `ns-unalias!` keeps its own component retraction until namespace aliases join the change set.
-   `native-call-refusal` keeps `intern`/`alter-var-root` advice.
+1. **The public forms become native changes in the executing fork.** `ns-unmap!` performs the native unmap in
+   the calling execution's fork only. Its own transaction and its base mutation (`my/program.clj:510-546`) are
+   deleted. The removal is then observed by §2.2's removal member, exactly like a nested native `ns-unmap`,
+   which closes hole (iii) without interception. The reader's `:seon.sci.reader/ns-unmap?` special case
+   (`reader.cljc:395-404`) and `unmap-row`'s guard retire. The subject is derived from the removed intern
+   itself, whatever form the arguments took.
+2. **The writer decides.** Settlement writes the removal with the run. The referrer check (`breaks` blocking,
+   plus the schema-owning-namespace refusal) runs **inside the transaction function**, as
+   `retract-operation!` does today (`my/program.clj:520-537`).
+3. **`remove-ns` is a namespace change, not a set of unmaps.** It changes namespace identity, aliases, imports
+   and resolver state, and it can remove a namespace that has no interns
+   (`reference-code/sci/src/sci/impl/namespaces.cljc:604-609`; compare `sci-ns-unmap` at `:567-587`, which also
+   removes refers and imports).
+   - The removal member therefore carries one namespace entry: the namespace name plus its row-backed
+     identities.
+   - The writer decides that whole entry, keeping the schema-owning-namespace refusal.
+   - `native-call-refusal`'s `remove-ns` redirect retires only once `remove-ns!` works through this path.
+     `ns-unalias!` keeps its component retraction until aliases join the change set.
+4. **Failure order.** The fork changes first, and the database write comes last. §2.2 rule 4 restores the fork
+   at every failure point, including a nested unmap followed by a throw, which has already changed the fork.
+   No shared base is ever mutated by an agent's call. The base advances through ordinary adoption, and other
+   executions detect the loaded-identity change at their boundary.
 
-Proof (root runs):
+**Proofs** (root runs; none was run here):
 
-- a top-level and a nested `ns-unmap` of a row-backed function each retract the row in the run's settlement;
-- a referenced function refuses, and its Var is restored in the fork;
-- the base is untouched until adoption;
-- a second agent acquiring the branch head sees neither Var nor row;
-- a private Var with no row unmaps with no program write.
+- a top-level `ns-unmap!`, and a nested native `ns-unmap` of a row-backed function, each retract the row in
+  settlement;
+- a referenced function refuses, and its Var is re-interned in the fork;
+- a nested unmap followed by a throw restores the fork and writes nothing;
+- `remove-ns!` of a namespace with rows, of an empty namespace, and of a schema-owning namespace (which
+  refuses);
+- a mixed define-and-remove form refuses, naming both members;
+- a private Var with no row unmaps with no write;
+- the base is untouched until adoption, and a second agent acquiring the branch head sees neither the Var nor
+  the row;
+- every caller of the retiring internals is converted in the same slice.
 
 Deletion is still **not merged**: `prepare-merge!` refuses retractions (`source.clj:767`) until R8.
 
-### 3.3 Write-back: the smallest gated route (P0-C)
+### 3.3 Write-back: prove the candidate before exposing it (P0-C)
 
-`my.edit/form!` is an effect capability (`src/my/edit.clj:35-60`, `:seon.effect/capability
-'seon.edit.jvm/edit`). A bare root JVM call has no evaluation context and refuses (`effect.clj:724-735`).
-A digest fence proves fresh bytes, not acceptance or equivalence. It is **not** write-back.
+`my.edit/form!` is an effect capability that refuses without an evaluation context (`src/my/edit.clj:35-60`;
+`effect.clj:724-735`). A digest fence proves fresh bytes, not acceptance or equivalence. Publishing a candidate
+and then republishing the originals is not rollback either: observers may already have seen the candidate,
+history has advanced, and restoring the files does not undo the accepted cluster rows.
 
-**The route: accepted rows → file bytes → publication → equivalence, all after `accept-merge!`.**
-`seon.cluster.source/write-back!` takes `[source held-store accept-report]` and is called by root:
+**The route.** Root calls `seon.cluster.source/write-back!` with `[source held-store acceptance]`.
+**M1 constrains it to one physical file.**
 
-1. **Read the accepted set.** From the merge commit, read the exact delta `accept-merge!` transacted (its
-   tx-data identities). For each replaced function or test, read the row's file (`:seon.fn/file`), source
-   and name. Refuse, by name, targets with no trustworthy file or base: a REPL row that did not keep the
-   replaced row's file provenance, or a file absent from the destination commit's
-   `:seon.source/relative-file-digests`.
-2. **Fence each file.** The file's current digest must equal the destination commit's recorded digest,
-   otherwise refuse "file moved since publication".
-3. **Splice purely.** Call `seon.edit/form` (`src/seon/edit.clj:314`), the pure, lossless, unambiguous
-   top-level-form transform the effect handler also uses, with `:replace` and the row's source. An
-   ambiguous or missing form refuses.
-4. **Write and publish.** Write every changed file, keeping the original bytes in memory, then publish the
-   changed paths through the ordinary `publish!` (`source.clj`). This is not a second publication path.
-5. **Prove equivalence.** The published head's `program/digest-map` over the delta must equal the tested
-   branch's. On mismatch, restore the original bytes, republish, and refuse with both digest maps.
+1. **Capture and authenticate the bases.**
+   - `accept-merge!` accretes two members onto its transaction report (open map; `source.clj:803-844`):
+     `:seon.source/accepted-identities`, the `delta` it already computes, and `:seon.source/tested-commit`, the
+     `e-id` it already reads.
+   - The acceptance value is that report plus root's named acceptance. It carries the destination before and
+     after commits, the tested commit, the accepted identities and the source-publication commit whose file
+     digests are the base.
+   - Transaction entities are resolved to identities through the identity owner on the report's `db-after`. An
+     unchanged identity attribute need not appear in the tx datoms.
+   - **There are two fences, because there are two authorities.** The cluster head must still equal the
+     report's after-commit. The source publication head (`current-src`) must still equal the base commit.
+     Either move refuses the stale acceptance.
+2. **Recover the provenance from the before-state.** A replacement row may intentionally lack file
+   coordinates (`src/seon/program.cljc:96-105`), so the base declaration is read from the report's
+   **`db-before`**:
+   - its `:seon.fn/file` entity, resolved to a path;
+   - its exact selector: head (`defn` or `defn-`), name, and dispatch.
 
-Additions (append to a file) and retractions (remove a span) are **R9b**, after R8. Price: +45, no
-deletion (§6 S5). Its justification is the owner's merge law: files are the write-back of accepted rows,
-and without this route M1 cannot land.
+   A target with no base file, or one whose file is absent from the base commit's
+   `:seon.source/relative-file-digests`, refuses by name. The replacement bytes are the accepted row's stored
+   **canonical** source (1.14). Files and rendered context therefore agree.
+3. **Build and prove the candidate in memory, before anything is exposed.**
+   - Read the file's held bytes and check that their digest equals the base digest.
+   - Fold every replacement for the file over **one** candidate string with `seon.edit/form`
+     (`src/seon/edit.clj:314-373`: pure, lossless, unambiguous), passing its context-byte bound.
+   - Analyze the candidate string with the ordinary analyzer through its existing stdin seam
+     (`analyzer/analyze` with `::analyzer/paths ["-"]`, as `src/seon/fn.clj:933-934` does). Analyze the base
+     bytes the same way.
+   - **Require three things:**
+     - every accepted identity's semantic digest in the candidate equals the accepted row's digest;
+     - every other declaration in the file has a digest equal to the base;
+     - the `ns` form and its requires and aliases (the resolver context) are byte-equal to the base.
 
-### 3.4 The milestone, re-cut
+     `program/digest-map` deliberately excludes file and lint rows (`program.cljc:462-476`), which is why the
+     third, exact check accompanies the semantic ones.
+   - Missing evidence, or equal-looking refusal maps, is never proof of equality.
 
-**M1: one existing-function replacement, with existing tests, lands from the REPL end to end.** It
-deliberately does not claim additions, new tests, deletion or qualified definitions. The steps:
+   *Disagreement with the review, with evidence.* The review puts this check inside `publish!`, before its
+   guarded pointer update (`source.clj:601-685`). But `publish!` populates from files on disk, so a check
+   there comes after the candidate is already on disk and visible to colleagues and hooks. The in-memory proof
+   comes before any exposure and uses the same analyzer. It leaves `publish!` without a second verification
+   seam.
 
-1. A lane creates its branch (`branch create`) and opens an MCP SCI session with an explicit `session_id`.
-2. It replaces `n/f` with a top-level `(defn f …)` after `(in-ns 'n)`. Settlement records the row (S1, S2).
-3. It runs `(my.test/check {:seon.test/changed ['n/f]})` on the branch. The record goes through the
-   recorder if S3 is in scope; otherwise the existing harness is used, with no "one path for tests" claim.
-4. Root runs `prepare-merge!` with the existing issue, then `accept-merge!` with the tested run, then
-   `write-back!` (S5). Root names the accepter and the tested head.
+   *Hybrid.* Prove in memory (this step). Then let `publish!` reindex the real path ordinarily. Then require
+   that the published commit's recorded digest for the path equals the candidate's digest, and that the
+   analyzer digest is unchanged (step 4). Rows are a deterministic function of bytes and analyzer, so this
+   carries the in-memory proof over to the published head.
+4. **Fence the installation, and name every failure.**
+   - At the existing file writer's installation boundary, recheck that the disk digest still equals the base.
+     If a colleague has edited the file, refuse and write nothing.
+   - Write the candidate to a temporary sibling and rename it atomically.
+   - Call `publish!` with `:seon.source/expected-commit-id` set to the fenced source head. Overlapping
+     publication is **detected**, not locked: the pre-scratch check refuses (`source.clj:586-593`), and
+     `d/force-branch!` refuses inside it with `:expected-current-commit`.
+   - Then check the published digest (step 3's hybrid).
+   - **Failures:**
+     - If the publication refuses or throws, or the published digest differs, restore the original bytes
+       **only while the disk bytes still equal this candidate**. A colleague's intervening edit is never
+       overwritten.
+     - A failed restore leaves a named **write-back-unavailable** state for the path, with the evidence
+       retained.
+     - Every failure reports **accepted-but-not-written**: the accepted cluster rows are not undone.
+   - **Process loss** after the rename and before publication leaves the disk holding a candidate already
+     proven equal. The next ordinary publication converges it. The originals held in memory are not relied
+     on.
 
-The root proof for M1:
+There is one source owner, one analyzer and the existing guarded publication. No filesystem transaction
+framework is added. Additions and retractions in write-back are **R9b**, after R8. Price: S5 in §6.
+
+### 3.4 Milestones, ordered
+
+**M0 — tasks in the codebase** (§3.5). It is file-disjoint from M1 except for `src/seon/cluster/source.clj`: T2
+edits the issue-indexing seam at `:512-559`, while S5 edits the merge and write-back functions. One owner at a
+time, so T2 lands its `source.clj` hunk before S5 starts.
+
+1. **T1** ingests metadata edges.
+2. **T2** adds task data and reconciliation.
+3. **T3a** migrates the defects listed in the requirements (7.12).
+4. **T3b** migrates the issue notes (7.11).
+5. **T4** retires the Markdown indexer.
+
+**M1 — one existing-function replacement lands from the REPL (option B, recommended).** The slices land in order
+S1, S2, S5. S3 lands when its recorder seam and the conditional C1 proofs are ready. The flow:
+
+1. A lane creates its branch and opens an MCP SCI session with an explicit `session_id`.
+2. It evaluates `(in-ns 'n)` and then `(defn f …)`. Settlement records one row (S1, S2).
+3. It runs `(my.test/check {:seon.test/changed ['n/f]})` on the branch. The existing harness is used until S3
+   lands, and until then there is no "one path for tests" claim.
+4. Root runs `prepare-merge!` with the task, `accept-merge!` with the tested run, and `write-back!` (S5) for the
+   one file. Root names the accepter and the tested head.
+
+The proof root runs for M1:
 
 - the same source through the product and MCP entrances gives the same settled row;
 - effects run once;
-- the admitted row and complete error evidence are present;
-- a second call and an affected caller execute the new definition;
-- focused tests are tied to that digest, with evidence preserved after member retirement;
-- a moved head and a moved file each refuse;
-- the accepted row, the file and the reindexed digest are equal.
+- the admitted row and the complete error evidence are present;
+- a second call and an affected caller run the new definition;
+- focused tests are tied to its digest, with evidence preserved after member retirement;
+- a moved cluster head, a moved source head and a moved file each refuse;
+- the accepted row, the file bytes and the reindexed digest agree;
+- an injected publication refusal restores only an unmodified candidate, and reports accepted-but-not-written.
 
-Measure acquisition, read and analysis, execution, record and print, test selection, body and recording,
-merge, and write-back separately, each with allocation and retained memory. Anything over one second names
-its owner.
+Each phase is measured separately, with allocation and retained memory: acquisition, read and analysis,
+execution, record and print, test selection, body and recording, merge, candidate proof, and installation. Any
+phase over one second names its owner.
 
-**M2** (general REPL development) adds new functions and tests, deletion merge, and additions and
-retractions in write-back (R8, R9b, and §3.2 proven). **M3** adds qualified definitions (§2.1) and the
-durable result store and cuts, per the owner's ruling (§2.3).
+**D1 — the first dogfood milestone: a migrated task settles through M1.**
+
+- A lane takes one T3a task whose fix replaces one existing function, and works it through MCP SCI on its own
+  branch.
+- Its proof deftest names the task (`^{:seon/task …}`).
+- The replacement's attribute map drops the id from `:seon/tasks`. That is a metadata change in the same
+  accepted row, as 7.6 requires.
+- Root merges, and write-back lands the one file.
+- `(my.issue/task :id)`, the task reader (§3.5, T2), shows the task as settled.
+
+D1 is the point where agents begin working the migrated backlog.
+
+**M2** adds new functions and tests, deletion merge (R8), additions and retractions in write-back (R9b), S4 and
+S0. **M3** adds qualified definitions (§2.1) and the durable result store, following the owner's ruling (§2.3).
+
+### 3.5 Tasks in the codebase: the issue owner evolved in place (7.1-7.12)
+
+**What exists.** `seon.issue` is already the one work family (2.1).
+
+- It stores issue entities keyed by `:seon.issue/id`, the note's slug string
+  (`resources/seon/schemas/seon.issue.edn`).
+- It holds function and test refs, lifecycle facts (`agent`, `budget`, `resolved-tx`), the detectors in
+  `seon.issue.detect`, and the thin `my.issue` surface.
+- Publication indexes the Markdown notes through `index-issues!` (`source.clj:512-523`).
+
+The target joins each task from three small places (7.1):
+
+- its data comes from `resources/seon/tasks/<owning-ns>.edn`;
+- its subjects are the definitions whose attribute map lists the id (7.2);
+- its proofs are the deftests that name it (7.3).
+
+The composition keeps one owner, `seon.issue`. Its input changes from parsed prose to EDN plus analyzer edges.
+The lifecycle machinery is reused, not rebuilt.
+
+**The identity decision** (3b.6 rules `:seon.task/id`, a qualified keyword under an identity attribute).
+Three priced options, simplest first:
+
+| Option | Guarantee | Cost | Sacrifice |
+|---|---|---|---|
+| **(a) Transitional second identity (recommended)** | the issue entity gains `:seon.task/id`; T3b sets it on every migrated entity; T4 retires `:seon.issue/id` with the indexer that mints it | T2: +3 schema lines; T4 removes the slug identity | one entity carries two identity attributes between T2 and T4, named as a retirement |
+| (b) Keyword ids under the old name | `:seon.issue/id` becomes a keyword | one attribute type change plus a scripted conversion of callers | 3b.6's name is not honoured; `issue` and `task` stay two names for one thing |
+| (c) Rename the family to `seon.task` now | one name everywhere | a scripted rename across 38 files by `rg` (the issue namespaces, `seon.plan`, `seon.turn`, `seon.cluster`, `source.clj` and their tests) plus schema files; line-neutral but cross-owner | collides with every lane holding those files; delays D1 |
+
+Option (c) can follow later, as one scripted rename, once its files are free.
+
+**The slices, in order:**
+
+- **T1 — ingestion (7.9, 5a.6, 7.3).** The analyzer's row builder in `src/seon/fn.clj` already reads each
+  definition's attribute map, including `:malli/schema` and `:seon.workload`. It stores four more metadata
+  keys as native values:
+
+  | Metadata key | Written on | Stored as |
+  |---|---|---|
+  | `:seon/tasks` | function, namespace and schema rows | `[:set :qualified-keyword]` |
+  | `:seon/task` | deftest rows | a qualified keyword |
+  | `:seon/must-read` | definitions | a set of qualified symbols or keywords |
+  | `:seon/see-also` | definitions | a set of qualified symbols or keywords |
+
+  They are keyword values, not refs: a ref would force the task entity to be populated before the code that
+  names it. Test seeds (7.9b) are **T1b**, priced separately and not needed for D1.
+- **T2 — task data and reconciliation (7.1, 7.4, 7.5, 1.6).**
+  - **Reading.** Task files are read with edamame, quote on (`borkdude/edamame` is already a dependency,
+    `deps.edn:57`).
+  - **Selection.** They are reconciled by `:seon.task/id` at publication through the **existing** seam:
+    `index-issues!`, with its changed-path selection (`note-path?`) widened to task files.
+  - **Schema.** Three attributes are added to the entity: `:seon.task/intent`, `:seon.task/must-read` and
+    `:seon.task/needs`.
+  - **Refusals, at the writer.**
+    - A dangling id in code or a test (no task entity) refuses.
+    - A duplicate id, an unknown need and a cycle each refuse.
+    - A task with no subject and no proof is listed for triage.
+  - **Subjects in EDN are allowed only for a subject that does not exist yet** (7.4).
+  - **Lifecycle.** `done?` (`issue.clj:1002-1044`) reads proof edges from the deftests' `:seon/task` instead of
+    `:seon.issue/tests`. `start!` and the budget and resolved-tx facts are reused unchanged. Attempts and
+    decisions stay runtime entities (7.7).
+  - **Reader.** `my.issue/task` implements `(task :id)` (7.10, 1.9). It returns the entity with its subject
+    ids, proof ids and the calls that expand them.
+- **T3a — the first migrated tasks (7.12).** The twelve defects in the requirements' "Defects the runs exposed"
+  become hand-authored entries, and their subject `defn`s gain the ids. This is data and metadata only. It
+  pilots the format and supplies D1's task.
+- **T3b — scripted migration of the issue notes (7.11).** One committed script,
+  `script/seon/dev/migrate_issues.clj`, runs once over the full set and is deleted after it lands (git keeps
+  it).
+  - **Sources.** It reads the live index (`:seon.issue/*` on default) and the note files. No new prose parsing
+    is added: the existing index has already parsed the notes once.
+  - **Entries.** Each open note becomes a task entry: an id from its slug, its intent from its indexed title,
+    and a `must-read` to its path. The entry goes into the task EDN of its owning namespace. That is the
+    namespace shared by its cited functions when there is exactly one; otherwise the entry goes to a triage
+    file named by the script.
+  - **Proof edges.** A note's **explicit test refs** (75 notes) become `^{:seon/task …}` on those deftests.
+    These are authored relations, not mentions.
+  - **Subject edges are not added mechanically** from cited functions (241 notes, 438 edges). Citations are
+    mentions (2.3), and turning them into `:seon/tasks` would inflate definitions with ids they do not own.
+    Migrated tasks start **raised** (7.5 triage) with their evidence linked.
+  - **Triage.** Setting subjects is triage work: a task whose deliverable is subject edges (2.9). Until then,
+    grep finds the mentions in the linked note (1.9).
+  - **Accounting.** The script reconciles every note file with the live index and names each of §0.12's 45
+    unexplained notes. Closed notes stay Markdown history.
+- **T4 — retire the Markdown indexer.**
+  - **Deleted:** the prose parser and citation indexer (`issue.clj:35-526`: `words`, `note-opened`,
+    `parse-note`, `note-path?`, `notes`, the citation functions, `replacement-tx`, `index-tx`, `index!`), the
+    `:seon.issue/id` slug identity and the citation attributes that only the indexer writes.
+  - **Converted:** the callers at `source.clj:512-523`, `:559` and `cluster.clj:2013`.
+  - **Replaced:** `bin/issues-index` and the ranked README index become rendered views of task data (2.1,
+    5.11).
+  - **Unchanged:** long designs, research and skills stay Markdown, linked by symbol and pinned `file:line`.
+  - **Caller check first.** Before deleting, T4 checks that `adopt-tx` and `citation-pattern`
+    (`issue.clj:875-952`) do not share these helpers, and converts or retains them by name if they do.
 
 ## 4. Co-location, owner rulings, and configuration
 
 ### 4.0 Owner rulings, 2026-09-25
 
-1. **Render selection is per face, first match wins** (AGENTS.md "Render ordinary values totally",
-   7fc304482):
-   - **(a)** the value's own `:seon.render/ai` or `:seon.render/html` key: the master override, which may
-     be a renderer symbol, an inline function, or rendered data;
-   - **(b)** a contract-fitting render function defined in the **viewing** agent's namespace: that agent's
-     own defaults. The deleted namespace stage was restored by render-dispatch-opus (634d8aaa2, regression
-     47eb7af16);
-   - **(c)** the schema's declared pair: the shipped default;
-   - **(d)** the floor.
-
-   Render output may be any spec'd shape, rendered in turn.
-
-   **Consequence for C1:** it is no longer a migration. It becomes "keep pairs on schemas, add a reverse
-   view, add the agent-namespace override, keep the value override". This composition is better than moving
-   pairs onto functions, for four reasons:
-   - The schema pair is now the shipped *default*, not the only owner. A relation schema × face → function
-     belongs to the schema, and shared renderers serve many schemas (`seon.dev.mcp.edn:2-22`). A scalar
-     reverse annotation on the function cannot express that.
-   - The demonstrated defect was publication order, and atomic publication fixed it (5c80755da).
-   - The owner's co-location goal, "change how I see X next to my code", is met by stage (b). An agent's
-     own renderer lives in its own namespace file, beside the code that uses it, and needs no schema edit.
-   - The value override covers one-off presentation with no program change.
-
-   The ~695 schema properties are references, not duplicate implementations, so a sweep would add work
-   and delete nothing (review §5).
-2. **Supplied defaults by declared schema name, for all functions; caller arguments win** (AGENTS.md "Match
-   supplied defaults by declared schema name"). Before calling a render function, the selection reads its
-   contract. Inputs it declares but the caller omits (the database, the unit) are supplied by
-   `seon.call-preparation`. This applies to every entrant in this design: MCP submissions, test bodies
-   declaring their inputs, and renderers. Two gaps are named for their owners, not implemented here:
-   - the render boundary should stop passing the database as a caller argument, so preparation supplies it
-     only when declared (render-dispatch landing 549b4d58c, 47 of 105 renderers read it);
-   - inline function values need preparation too (`call_preparation.clj:1535`).
-3. **Configuration: do the move** (§4.4):
-   - dial defaults and their reasons go onto the dial schemas;
-   - initialization data stays with its owner in its own file;
-   - configs differ by situation through ordered layers, most specific winning;
-   - `config apply`'s one-overlay defect and the arbitrary-row readers are fixed;
-   - proof: effective configuration is equal before and after, on default and on a test world.
+1. **Render selection is per face, and the first match wins** (11.1; §2.4). Schema pairs stay as the shipped
+   default. The viewing agent's namespace holds overrides, and values may carry their own. The reverse view is
+   a typed `callers` field. About 695 schema properties are references, not duplicate implementations, so no
+   migration earns deletion credit.
+2. **Supplied defaults go by declared schema name, for all functions; caller arguments win** (1.13). Two gaps
+   are named for their owners:
+   - the render boundary should stop passing the database as a caller argument (landing 549b4d58c: 47 of 105
+     renderers read it);
+   - inline function values need preparation (§0.10, §2.4).
+3. **Configuration: do the move** (13.1-13.2; §4.4).
 
 ### 4.1 The rules, for agents with shell tools
 
-- **G1: Write native qualified references.** Metadata and data hold qualified symbol and keyword *values*;
-  function-value symbols are not forcibly quoted. The grep promise is narrowed to what is true. `rg` finds
-  a spelling; `(defn notice-prose …)` does not contain `seon.error/notice-prose`, and `#:seon.config.ai{…}`
-  does not contain the full keyword. Identity is the analyzer's.
-- **G2: A fact lives with its owner.** Intent, contracts and links go on the definition; namespace intent on
-  `ns`; shapes, render defaults and dial defaults on their declarations. A relation is owned once, by the
-  side that decides it. The schema owns its default renderer; the viewing agent's namespace owns its
-  overrides; the cluster's facts own its running configuration, not the compiled constant.
-- **G3: grep finds spellings, the index answers relations**, with positive analysis-digest evidence and
-  typed unknowns. A keyword mention is not a read; `reads-key` says so (`my/program.clj:211-226`). Dynamic
-  dispatch and macro references remain explicitly incomplete.
-- **G4: A data input carries its identity.** The loader names its path. Configuration compilation
-  carries the actual resolved documents, content digests and applied layers into its result and the test
-  world's evidence (§4.4). A docstring is not provenance.
+- **G1: write native qualified references.** Metadata and data hold qualified symbol and keyword values. Grep
+  finds a spelling; the analyzer resolves identity. `(defn notice-prose …)` does not contain the text
+  `seon.error/notice-prose`.
+- **G2: a fact lives with its owner** (1.2). A task id appears literally at its definition and at every
+  referrer (1.9). Code owns subject edges, tests own proof edges, and EDN owns only the task's own data (7.4).
+- **G3: grep finds spellings; the index answers relations,** with analysis-digest evidence and typed unknowns.
+  A keyword mention is not a read (`my/program.clj:211-226`).
+- **G4: a data input carries its identity:** the resolved documents, digests, layers, environment decisions
+  and default provenance (§4.4).
 
 ### 4.2 The indexed form a REPL agent queries
 
@@ -505,199 +706,231 @@ durable result store and cuts, per the owner's ruling (§2.3).
 |---|---|---|
 | calls / references / invokes | `:seon.fn/calls` etc. | exists (29,375 test call edges) |
 | keyword mentions / writes | `:seon.fn/keywords`, `:seon.fn/writes` | exists (mentions, not proven reads) |
-| contract → schema keys | `program/contract-facts` compiled by Malli (`src/seon/program.cljc:1053-1081`), arity input/output/guard refs (`:1007-1010`, `:1049-1051`), queried by `reads-key` (`my/program.clj:182-193`) | **exists**. The first pass's "missing" claim and requirement 5a.5 are stale. Verify population and adoption; add no keyword edge |
-| schema → default renderer | schema property `:seon.render/ai`/`html`; `breaks` `render-declared-by` | exists; `callers` gains it as a typed field (S6). `render-referrers` queries all pairs then filters (`:237-241`) and must bind the renderer at the database owner first |
-| agent namespace → override renderer | a contract-fitting render function in the agent's namespace (634d8aaa2) | exists as selection; no stored edge (the contract fit is the relation) |
-| definition → must-read / see-also / tasks | — | missing (5a.6, 7.9); structured metadata first; `[[…]]` parsing deferred (conflicts with 1.4) |
-| test seeds → writes / calls | — | missing (7.9b); seeds validated through canonical writers |
-| config compilation → documents, digests, layers | — | missing; §4.4 |
+| contract → schema keys | `program/contract-facts` with input/output/guard refs (`program.cljc:1007-1081`), queried by `reads-key` | exists; verify population |
+| schema → default renderer | schema property; `breaks` `render-declared-by` | exists; `render-referrers` (`my/program.clj:237-241`) must bind the renderer first (S6) |
+| agent namespace → override renderer | contract fit (634d8aaa2) | exists as selection |
+| definition → task ids, must-read, see-also | `:seon/tasks`, `:seon/must-read`, `:seon/see-also` values | **T1** |
+| test → task | `:seon/task` value | **T1** |
+| test seeds → writes and calls | — | T1b (7.9b) |
+| config compilation → documents, digests, layers | — | S7 (§4.4) |
 | evaluation → value, error, rows | evaluation row + refs | partly; §2.3 |
 
 ### 4.3 Each data-file family
 
-| Family | Verdict | Reason |
-|---|---|---|
-| Schema EDN, 211 files | **keep** | Malli owns the registry; filenames organize one population; one key, one declaration |
-| Render pairs in schema EDN | **keep as the shipped default** (ruling 1); add the typed reverse view; overrides live in agent namespaces or on values | §4.0.1 |
-| `config/default.edn` dial decisions (lines 1-518) | **move onto dial schemas** (ruling 3, §4.4) | a dial's shape, default and reason in one declaration; provenance stays visible |
-| `config/default.edn` `:seon.config/initialization` (line 519 on: call-preparation rows, providers, models) | **keep with its owner in its own file**, `config/initialization.edn`, read by `default-population` and `compile-manifest` (`config.clj:365-371`, `:527-554`) | these are entities, not dial defaults |
-| `config/development.edn` | **keep, sparse**, as a deployment layer | the actual fix for development-only policy (3a7ffa69c) |
-| `config/test.edn` | **delete after a verified no-reader check**: it uses `#merge/#include "system.edn"`, which the plain-EDN compiler cannot read | dead input; a bounded search found no reader, which is not a load proof |
-| Help and getting-started | **consolidate without inferring order from `:require`**: one small REPL-protocol docstring; tool docs derived from task uses and explicit must-reads. Fix the stale "uncontracted defn is scratch" claim (`src/seon/cluster/instruction.clj:23`) in that cut | dependency order is not teaching order |
-| Task backlog | **keep minimal EDN** plus code/test id edges; reconcile without overwriting attempts or decisions | — |
-| Test seeds | **keep in code** (literal data, qualified fn, inline fn); ingest as edges (7.9b) | — |
-| Docs, skills, research | **keep Markdown**; symbol links for current navigation; pinned revision + `file:line` for historical evidence and non-Var material | a moving link cannot cite history |
-| Issues | **keep the existing owner** during this cut | one task family is a separate reconciliation |
-| Empty `resources/{seed,sample-data,integrant}` | remove if present and unused; **zero line credit** | untracked |
-| Reference code | navigation from task subjects' dependencies plus explicit prior-art references; no new store | — |
+| Family | Verdict |
+|---|---|
+| Schema EDN, 211 files | keep: Malli owns the registry |
+| Render pairs in schema EDN | keep as the shipped default (ruling 1) |
+| `config/default.edn` dial decisions | move onto the dial schemas (S7) |
+| `config/default.edn` `:seon.config/initialization` | move to `config/initialization.edn`, read by name |
+| `config/development.edn` | keep, sparse, as a deployment layer |
+| `config/test.edn` | delete after a verified no-reader check (D0) |
+| Help and getting-started | one REPL-protocol docstring; fix `src/seon/cluster/instruction.clj:23` in that cut |
+| **Issue notes `docs/seon/issues/*.md`** | **become task entries (T3b); their bodies stay as linked evidence, never parsed; the index becomes a rendered view (T4)** |
+| **Task data** | **`resources/seon/tasks/<owning-ns>.edn`, edamame-read, minimal keys (T2)** |
+| Test seeds | keep in code; ingest as edges (T1b) |
+| Docs, skills, research | keep Markdown; symbol links for navigation, pinned `file:line` for history |
+| Reference code | navigation from task subjects' dependency seams (§5) |
 
-### 4.4 Configuration by situation (ruling 3)
+### 4.4 Configuration by situation (ruling 3; slice S7)
 
-**What exists.** `compile-settings` merges defaults → one manifest → environment (`config.clj:474-525`).
-`registration-defaults` already reads `:seon.config/default` from a dial's schema properties
-(`config.clj:154-168`). Three dials use it today, two in `seon.config.db.edn` and one in `seon.test.edn:184`.
-The effective map is exact-reconciled as one row per cluster. Per-agent settings exist as an overlay entity
-(`:seon.agent/settings`, merged by `seon.ai/settings`, `src/seon/ai.clj:316-323`).
+**What exists.**
 
-**The layers, least to most specific:**
+- `compile-settings` merges defaults, then one manifest, then environment (`config.clj:474-525`).
+- `registration-defaults` reads `:seon.config/default` from dial schemas (`:154-168`).
+- `effective-in` returns only the stored row's dials (`config.clj:772-789`).
+- Per-agent settings are merged by `seon.ai/settings` (`src/seon/ai.clj:316-323`).
 
-| # | Layer | Where it lives | Who changes it |
+**The layers, least to most specific** (13.2):
+
+| # | Layer | Lives in | Changed by |
 |---|---|---|---|
-| 1 | shipped default | each dial schema's `:seon.config/default`, with unit and reason in `:description` | a program change (schema file) |
-| 2 | deployment overlays, **ordered and composable** | sparse EDN documents, e.g. `config/development.edn`, then `--config` files | `config apply NAME PATH…`, `start --config` |
+| 1 | shipped default | the dial schema's `:seon.config/default`, reason in `:description` | a program change |
+| 2 | deployment overlays, ordered | sparse EDN documents | `config apply NAME PATH…`, `start --config` |
 | 3 | environment | the typed environment map at compile (exists) | the launcher |
-| 4 | cluster facts | a sparse overlay entity referenced by the cluster, `:seon.cluster/settings`, of the same overlay schema agents use | a transaction by root or an authorized agent; never erased by re-apply |
+| 4 | cluster facts | `:seon.cluster/settings`, of the overlay schema agents use | a transaction; never erased by re-apply |
 | 5 | per-agent settings | `:seon.agent/settings` (exists) | the agent or root |
 
-The **effective row** stores layers 1-3, compiled and exact-reconciled as today, plus
-`:seon.config/layers`: an ordered vector of `{:path … :digest …}` for the applied documents. Layers 4-5
-are merged at read, because they are small sparse maps and a stored merge would drift.
+The environment is a compile input that already exists. Requirement 13.2 omits it, and §7 proposes adding it.
 
-**`config apply` records the selection**, so every re-apply composes the same stack:
+**The stored row.** Layers 1-3 are compiled and exact-reconciled as today. **In the same transaction** the row
+records the selection and its evidence:
 
-- `apply!` takes an ordered vector of documents. The operator accepts several paths.
-- Boot (`boot.clj:432`) and publication re-apply (`boot.clj:664-676`) recompile from the **recorded** layer
-  paths, re-reading each document and comparing digests, instead of hard-coding the development overlay.
-- A config-document change re-applies only clusters whose recorded layers name it. This keeps the existing
-  cost-follows-changed-inputs check.
-- `apply-compiled!` retains the cluster settings entity as it retains other clusters' rows
-  (`config.clj:681-693`).
+- `:seon.config/layers`: the ordered documents, each as a path relative to the named operator root plus a
+  content digest;
+- the typed environment decisions that were applied;
+- each default's provenance (schema key and schema digest).
 
-**The one reader.** `seon.config/agent-effective` takes `[db cluster-name agent-id]` and returns
-`(merge (effective db cluster-name) cluster-settings agent-settings)`. It is contracted, and it returns the
-existing declared errors. All nine arbitrary-row readers (§0.9) and `turn.clj:4019` call it, or
-`effective` when no agent is in scope. Each gets `cluster-name` from its caller's handle or environment
-(`:seon.boot/cluster-name`); the world is passed explicitly, never discovered. The per-site caller edits
-are UNMEASURED.
+This evidence comes from the compiled inputs, not from a second configuration authority. Layers 4 and 5 are
+merged at read.
+
+**Apply semantics.**
+
+- An explicit `config apply NAME PATH…` **replaces** the recorded stack.
+- `start` without `--config` **reuses** the recorded stack, and `start --config` replaces it.
+- Boot (`boot.clj:432`) and publication re-apply (`:664-676`) recompile from the recorded paths, re-reading and
+  comparing digests. The hard-coded development branch goes.
+- Re-apply triggers on a changed recorded document, **or** a changed dial-schema default, **or** changed
+  initialization content. Only clusters whose recorded inputs changed are re-applied.
+- `apply-compiled!` retains the cluster settings entity as it retains other clusters' rows.
+
+**The readers.**
+
+- `seon.config/effective` itself derives layers 1-4, taking `[db cluster-name]`. An optional agent id adds
+  layer 5, so there is one reader with an optional agent.
+- A refused read (`:seon.db/invalid-read`, `:seon.config/error`) propagates **before** any `merge`, since an
+  error map is also a map.
+- The final merged value is validated against `:seon.config/effective`.
+- All nine sites (§0.9) and `turn.clj:4020-4023` call the reader with the cluster name taken from their
+  caller's handle or environment.
+- The transcript reader (`render/transcript.clj:1180-1182`) keeps its **historical** database value, the
+  observation made at opening time. It does not switch to a head read.
 
 **The dial move** is one scripted sweep:
 
-1. For every dial (selected by declared `:seon.config/dial` membership, never a namespace roster) with an
-   explicit decision in `default.edn`, write `:seon.config/default` on its schema, and fold its unit and
-   provenance comment into `:description`.
-2. Keep the symbolic `:seon.config/available-processors` resolved in `resolve-smart-decision`.
-3. Keep explicit absence as "optional with no default" (`registration-defaults` already maps that to
-   `absent`).
-4. Never write `false` for `no-provider`, which admits only literal true when present
-   (`seon.config.ai.edn:64-72`).
-5. `validate-default-decisions` keeps its "missing default for a required dial" refusal.
-6. `default-document` stops reading dial decisions; the initialization document is read by name.
+1. Select dials by `:seon.config/dial` membership.
+2. Write `:seon.config/default` and fold the reason into `:description`.
+3. Keep `:seon.config/available-processors` symbolic.
+4. Keep explicit absence as optional-with-no-default.
+5. Never write `false` for `no-provider`.
+6. Keep `validate-default-decisions`.
 
-**Proof (root runs, before and after the sweep, recorded in the landing):**
+**Proof** (root runs, before and after, recorded in the landing):
 
-- `(= before after)` for `(config/default-decisions)`, `config/defaults` and `(config/default-population)`,
-  captured as EDN digests;
-- `(config/effective db "default")` on default's live branch is unchanged;
-- a test world compiled by `seon.test`'s seed path (`test.clj:157-158`) gives the same effective map and
-  population;
-- `config apply default config/development.edn X.edn` keeps both layers, and a following publication
-  re-apply keeps both;
-- a branch carrying a second cluster's row returns this cluster's dials from every converted reader.
+- `(config/default-decisions)`, `config/defaults` and `(config/default-population)` digests are equal;
+- `(config/effective db "default")` is unchanged;
+- a `seon.test` seed world gives the same effective map and population;
+- `config apply default config/development.edn X.edn` keeps both layers through a publication re-apply;
+- a changed dial-schema default re-applies;
+- a branch carrying a second cluster's row returns this cluster's dials from every converted reader;
+- a refused read surfaces as the refusal, not as a merged map.
 
 ## 5. Auto-pulled context, derived by query plus render function
 
-Every pull is an ordinary evaluation of a short named call, rendered through its schema's pair. The pulls
-are built **once, as a typed observation at the common evaluation boundary**, and rendered by both faces.
-There is no graph work in an AI renderer, which would repeat on page and replay and omit HTML.
+Each pull is an ordinary evaluation of a short named call, built **once as a typed observation at the common
+evaluation boundary** and rendered by both faces. Following 1.9 and 5a.3, a pull shows **ids and counts plus
+the call that expands them**, never the expansion by default. The exception is the subject's own source, which
+renders whole (5.8).
 
 | Class | Where | Query (owner) | Cost |
 |---|---|---|---|
-| a change was accepted | the settled evaluation | per changed identity in the **accepted change set**: callers and render referrers as typed fields (`breaks` shape), reaching-test count, the check form `(my.test/check {:seon.test/changed […]})`. For a retraction: the **before-state** incoming edges | bounded by matched edges plus rendering; `render-referrers` bound to the renderer first; target ≤ 50 ms is an acceptance target, UNMEASURED; large fan-in as counts retrievable through the floor |
-| a printer call was introduced | the same observation | the new row's `:seon.fn/calls` ∩ known printers | **advice only**: macros (`with-out-str`, `binding`), aliases and bounded encoders make it incomplete. Existing sink facts are reused (`mcp.clj:43`, `:968`). No namespace "edge" exemption |
-| a test world | the member's evidence | resolved documents, digests, applied layers (§4.4), effective decisions relevant to the member, and each default's provenance | one small map per world |
-| a task's subjects | the task opener | explicit subjects, must-reads, triggering observations, proof calls; tools may be subjects; raised tasks may have no proofs; negative and deletion observations count; only the form plan is reusable without fresh read evidence | as above |
-| a design task | the task opener | the dependency seams its subjects reach (`:seon.fn/calls` into non-first-party namespaces) with their guarantees; the gitlink pin labels which source is shown | one query; no invalidation widened over reference-only gitlinks |
-| errors since the last evaluation | every settled response | durable per-execution previous basis → captured current basis (8.3); first observation, lost session and inherited branch errors answer typed initial or unknown | exists as the MCP window; moves |
+| a change was accepted | the settled evaluation | per identity in the accepted change set: caller ids and render referrers as typed fields, reaching-test count, open task ids from `:seon/tasks`, the check form. For a removal: the before-state incoming edges | bounded by matched edges; `render-referrers` bound first; target ≤ 50 ms, UNMEASURED |
+| a printer call was introduced | the same observation | new `:seon.fn/calls` ∩ known printers | advice only; macros and aliases make it incomplete |
+| a test world | the member's evidence | documents, digests, layers, environment decisions, default provenance (§4.4) | one small map |
+| a task's subjects | the task opener | `(task :id)`: subject ids, proof ids, must-reads, triggering observations; hop 1 is content for seeds, hop 2 is addresses (5a.2-5a.3) | measured by 5.10's brief budget |
+| a design task | the task opener | the dependency seams its subjects reach, with guarantees; the gitlink pin labels the source shown | one query |
+| errors since the last evaluation | every settled response | durable per-execution basis (8.3); first and lost observations typed | exists as the MCP window; moves |
 
 ## 6. Slice plan, priced against the audit ledger
 
-**Rules.** Deletions are booked **only** from the audit ledger (7c577876d §11), each group once. The
-ledger's "source addition ceiling" is the replacement cost the audit already assigned to that group. My
-"added" column is the whole slice, including that ceiling. Rendering groups (R1-R4, R6, R8) belong to the
-render design's budget and are not booked here. Lines relocated between files (config EDN into schemas) are
-neither deleted nor added code. All sizes are UNVERIFIED estimates until each landing measures its diff.
+**Rules.**
 
-| # | Slice | Owner files | Added | Booked deletion (ledger) | Net | Proof root runs |
-|---|---|---|---:|---:|---:|---|
-| **S1** | one definition authority (§2.2): change-set match, one-declaration constraint, validation inside the boundary, full restore; two declared errors | `src/seon/sci/eval.clj`, `resources/seon/schemas/seon.sci.eval.edn` | +30 | 0 | +30 | `(eval '(defn …))` refuses as unindexed; `(do (defn a) (defn b))` refuses naming both; a contract that throws in analysis refuses and restores root + metadata |
-| **S2** | MCP SCI entrant (§2.5): reply text through `submit-source!`, named agent with explicit session, no-provider agent setting, listen-then-check completion, busy/timeout/exit, errors-since cursor, retire conversion; delete the bridge pre-reader and the non-settling template | `script/seon/dev/mcp.clj`, `src/seon/cluster/agent.clj` (agent creation call only) | +60 | **R7 80** | −20 | a `defn` through MCP is a settled row; a second call and a caller see it; evaluation count grows; busy and timeout answer the run id; no provider attempt row |
-| **S3** | tests through the recorder (§2.6): body adapter at the common boundary; evidence on the retaining branch before unlink; report as native value; candidate gate as one ordinary request | `src/seon/sci/eval.clj`, `src/seon/test.clj`, `src/seon/test/runner.clj`, test schema | +95 (C1 ceiling 45 + R10 ceiling 25 + adapter/retention 25) | **C1 87** (conditional) + **R10 50** | −42 | a member leaves one evaluation on the retaining branch after unlink; its failure keeps native expected/actual; candidate gate records a whole run |
-| **S4** | deletion as change set (§3.2) | `src/seon/sci/eval.clj`, `src/seon/sci/reader.cljc`, `src/my/program.clj` | +20 | 0 (64 measured lines of `my.program` retire, **not in ledger**) | +20 booked | the five §3.2 proofs |
-| **S5** | gated write-back of replacements (§3.3) | `src/seon/cluster/source.clj` | +45 | 0 | +45 | accepted replacement lands with equal digests; moved file refuses; mismatch restores bytes |
-| **S6** | accepted-change observation (§5 row 1): typed callers + render referrers + reach count + check form, built once at the boundary | `src/my/program.clj` (`callers`, `render-referrers` bound), `src/seon/turn.clj` (settled observation) | +40 | 0 | +40 | a renderer replacement shows its schemas; a retraction shows before-state callers; ≤ 50 ms measured |
-| **C2** | configuration (§4.4): layers vector, cluster settings entity, recorded layer selection, one reader + nine callers, scripted dial move, `config/initialization.edn` | `src/seon/config.clj`, `src/seon/cluster/boot.clj`, `script/seon/operator.clj`, config schemas, nine reader files, `config/*.edn` | +45 code | 0 (audit §8.4 books 0) | +45 − caller edits (the nine readers each lose a 3-5 line query: ≈ −30, UNMEASURED, unbooked) | §4.4 proof list |
-| **D0** | delete `config/test.edn` after a verified no-reader check | file | 0 | 0 (6 plausible lines, not in ledger) | 0 | HEAD loads |
-| later | R8 deletion merge; R9b add/retract write-back; qualified definitions (§2.1); durable result store (§2.3, after owner ruling); C4 link/seed ingestion | — | unpriced | — | — | — |
+- Deletions are booked **only** from `duplicate-paths-audit-2026-09-25.md` §11, each group once.
+- A ledger "source addition ceiling" is included in the slice's added column.
+- Rendering groups (R1-R6, R8) are the render budget's. R10 is assigned once by root; this table books it in
+  S3, and moves it if root assigns it to rendering.
+- Relocated EDN is neither added nor deleted code.
+- Lines outside the ledger are shown as **unbooked** and are never subtracted in the net column.
+- Every size is an UNVERIFIED estimate until its landing measures the diff, and schema, caller and regression
+  costs are shown with it.
+- This design's configuration slice is named **S7**, so it cannot be confused with ledger C2, the unrelated test
+  snapshot and restore cut.
 
-**Dropped from the first pass:**
+| # | Slice | Owner files | Added | Booked (§11) | Net | Unbooked retirement | Proof root runs |
+|---|---|---|---:|---:|---:|---|---|
+| **S1** | definition member, match or refuse, one declaration, mixed-change refusal, validation inside the boundary, restore at four failure points, unavailable-on-failed-restore; two errors | `src/seon/sci/eval.clj`, `resources/seon/schemas/seon.sci.eval.edn` | +45 | 0 | +45 | — | quoted `eval` refuses; `(do (defn a) (defn b))` refuses naming both; throwing contract restores root and metadata; throw-after-mutation restores; P-S1b settled first |
+| **S2** | MCP entrant: SCI reply text via `submit-source!`; JVM read-eval loop; custody per call; owned-agent session entry; listen, submit, filter by run id, recheck; busy, timeout, exit via Flow; retire owned agents; errors-since cursor | `script/seon/dev/mcp.clj`, `src/seon/cluster/agent.clj` (creation call only) | +85 | **R7 80** | +5 | — | a `defn` via MCP is one settled row; multi-form JVM input evaluates in order; busy and timeout answer the run id; retire leaves unowned agents; no provider attempt row |
+| **S3** | tests through `turn/evaluation-facts`; host members armed with no outer arm; evidence before unlink; native report; candidate gate as one request | `src/seon/sci/eval.clj`, `src/seon/test.clj`, `src/seon/test/runner.clj`, test schema | +95 (C1 45, R10 25, adapter 25) | **C1 87** (conditional) + **R10 50** | −42 | — | a member leaves one evaluation on the retaining branch; failure keeps native operands; the candidate gate records a whole run |
+| **S4** | removal member, namespace entry, public forms as fork changes, writer-side decision | `src/seon/sci/eval.clj`, `src/seon/sci/reader.cljc`, `src/my/program.clj` | +30 | 0 | +30 | ≈ −50 of `my/program.clj:510-575` (64 lines shrink to thin forms) | the §3.2 proofs |
+| **S5** | write-back of one file: acceptance members on `accept-merge!` (+5), two fences, before-state provenance, in-memory candidate proof, installation fence, guarded restore, unavailable state, accepted-but-not-written report | `src/seon/cluster/source.clj` | +75 | 0 | +75 | — | the M1 write-back proofs (§3.4) |
+| **S6** | accepted-change observation (§5 row 1) | `src/my/program.clj`, `src/seon/turn.clj` | +40 | 0 | +40 | — | a renderer replacement shows its schemas; ≤ 50 ms measured |
+| **S7** | configuration (§4.4): layer record with environment and provenance, cluster settings, apply replace/reuse, re-apply triggers, one reader with error propagation and final validation, ten callers, dial sweep, `config/initialization.edn` | `src/seon/config.clj`, `src/seon/cluster/boot.clj`, `script/seon/operator.clj`, config schemas, nine reader files, `config/*.edn` | +75 | 0 | +75 | ≈ −30 (nine bespoke queries) | the §4.4 proof list |
+| **D0** | delete `config/test.edn` | file | 0 | 0 | 0 | 6 lines | HEAD loads |
+| **T1** | analyzer stores `:seon/tasks`, `:seon/task`, must-read, see-also | `src/seon/fn.clj`, `resources/seon/schemas/seon.fn.edn` (and test/ns schemas) | +35 | 0 | +35 | — | a `defn` with `:seon/tasks` publishes the edge; a deftest's `:seon/task` publishes; values are keywords, not strings |
+| **T2** | task data: edamame reader, reconcile by `:seon.task/id` through `index-issues!`, four attributes, refusals, `done?` on proof edges, `my.issue/task` | `src/seon/issue.clj`, `src/my/issue.clj`, `resources/seon/schemas/seon.issue.edn`, `src/seon/cluster/source.clj` (seam `:512-559` only) | +85 | 0 | +85 | — | a task file publishes one entity; a dangling id, duplicate, unknown need and cycle each refuse; `(task :id)` shows subject and proof ids |
+| **T3a** | the requirements' twelve defects as tasks | `resources/seon/tasks/*.edn`, the subjects' attribute maps | data only | 0 | 0 | — | each id resolves; `(task :id)` for each |
+| **T3b** | scripted migration of the issue notes | `script/seon/dev/migrate_issues.clj` (+60, deleted after running), `resources/seon/tasks/*.edn`, proof deftests | +60 transient | 0 | 0 at rest | — | every note file accounted for (including the 45); 75 notes' proof edges present; triage list rendered |
+| **T4** | retire the Markdown indexer; index and README as rendered views | `src/seon/issue.clj`, `src/seon/cluster/source.clj`, `src/seon/cluster.clj`, `bin/issues-index` | +15 | 0 | +15 | ≈ −490 (`issue.clj:35-526`) −12 (`source.clj:512-523`), subject to T4's caller check | publication indexes no Markdown; `bin/issues-index` renders from task data; HEAD loads |
+| later | S0 read-once; R8 deletion merge; R9b; qualified definitions; durable result store; T1b seeds; 8.6 recording (+30) | — | unpriced | — | — | — | — |
 
-- the old R2 (replaced by S1);
-- the old R3 "+3" (replaced by S4);
-- the old R5 (MCP projection deletion: rendering budget R3/R4/R6 plus the durable-value ruling; ~380 + ~330
-  lines were double-counted with R4's template and window);
-- the old T1 "+30/−30" (replaced by S3);
-- the old C1 sweep (owner ruling 1);
-- the old C3 help "−140" (unsupported; a later consolidation);
-- C4 as priced (the contract edge exists);
-- C5 roster (replaced by §5 row 5).
+**Deletion accounting, stated plainly.**
 
-**M1, three options** (AGENTS.md step 4: a new cross-owner decision; simplest viable constraint first):
+- §11 has **no task or issue group**. T1, T2 and T4 add about +135 source lines with **0 booked**. They are
+  justified only if root measures the indexer retirement (about 500 lines, `issue.clj:35-526` plus the
+  `source.clj` seam) and adds it to the ledger, as it was asked to do for `my.program`'s 64 lines. Until then
+  M0 is growth that needs root's explicit acceptance.
+- M0's case for that acceptance: it removes a prose parser that violates 1.4, and it lets the ranked index stop
+  being hand-maintained.
 
-| Option | Slices | Guarantee | Added / booked deletion / net | Sacrifice |
+**Prerequisites, priced.**
+
+| Prerequisite | Needed by | Price |
+|---|---|---|
+| P-S1b: an inherited Var's prior root under the acquired program's generation | S1 | one read-only REPL probe on a scratch branch |
+| the stdin analysis yields `program/digest-map`-comparable declaration digests | S5 | one read-only probe |
+| whether a REPL replacement row keeps `:seon.fn/file` (it need not, since S5 reads `db-before`) | S5 | — |
+| `my.test/check` cost on branch rows | M1 | root measurement |
+| candidate fixture, input and source-location proofs for C1 | S3 | the proofs are the gate |
+| the T1 row-builder site in `src/seon/fn.clj` | T1 | UNVERIFIED, one read |
+| P-86: root origin through `record-evaluated-*` | 8.6 | one read |
+
+**M1: three options** (AGENTS.md step 4; the simplest viable constraint first):
+
+| Option | Slices | Guarantee | Added / booked / net | Sacrifice |
 |---|---|---|---|---|
-| **A. private durable-edit experiment** | S1 + S2 | a lane's REPL work is settled, durable, testable with the existing harness; no landing claim | +90 / −80 / **+10** | nothing lands from the REPL; tests stay outside the path; files stay the working medium for landing |
-| **B. landable replacement** | A + S5 | one existing-function replacement lands REPL → merge → file with equal digests | +135 / −80 / **+55** | growth justified only by the owner's merge law; tests still outside the path |
-| **C. landable replacement, one path for every entrant (recommended)** | B + S3 | as B, and a test member's body, report and evidence use the same recorder and printer; the only option that satisfies "bound a change by what it lets us cut" | +230 / −217 / **+13** | S3's C1 half is conditional on candidate-gate proofs; if they fail, C degrades to B + R10 (+160 / −130 / +30) |
+| A. private durable-edit experiment | S1 + S2 | REPL work settles durably and is testable with the existing harness | +130 / −80 / **+50** | nothing lands from the REPL |
+| **B. landable replacement (recommended)** | A + S5 | one existing-function replacement lands REPL → merge → one file, proven before exposure | +205 / −80 / **+125** | growth justified by the merge law; tests stay outside the path until S3 |
+| C. B plus one path for tests | B + S3 | as B, and test bodies, reports and evidence use the same recorder and printer | +300 / −217 / **+83** | depends on conditional C1; without C1: +255 / −130 / **+125**, which is B plus report cleanup, with no candidate unification |
 
-S4, S6 and C2 are outside M1. C2 is an owner-ordered defect repair with no ledger deletion. It is
-justified by §0.8-0.9 (wrong-cluster reads and erased overlays), and nothing smaller fixes the readers than
-one reader function. It lets go the nine bespoke queries and the hard-coded development-overlay branches in
-boot.
+B is recommended over C, as the re-review proposes. C's lower net rests on the conditional C1 credit, so S3
+lands only when its proofs are ready, and not to balance B's budget.
 
-## 7. Proposed revisions to `language-requirements-2026-09-24.md` (a diff of rows; not applied)
+**Combined first dogfood (D1 = M0 + B):** about +340 source, −80 booked, **+260 net booked**. That becomes
+about **−240** if root adds the indexer retirement to the ledger. All of this is growth or neutral until each
+landing measures it, and root must accept the repriced growth explicitly.
+
+## 7. Requirement rows still to revise (a diff against 19e9fe5f4; not applied)
+
+The revised rows 1.2 and 1.9-1.14, 3b.6, 7.11-7.12, 11, 12 and 13 already absorb most of revision 2's proposals.
+Revision 2's own row numbers 11.x-13.x collided with them and are withdrawn. What remains:
 
 | Row | Change | Proposed text |
 |---|---|---|
-| 1.2 | revise | Code carries what is true of one definition: intent, contract, links. Schemas carry shapes, their default render pair and dial defaults with reasons. An agent's namespace carries its own render overrides. EDN carries overlays, initialization entities and backlog. A fact with two homes is a defect |
-| 1.5 | extend | Metadata and data hold native qualified reference values; grep finds spellings, the analyzer resolves identity (G1) |
-| 5a.5 | correct | ~~contract is stored only as a string~~: contract facts are compiled by Malli with input/output/guard refs (`program.cljc:1007-1081`) and queried by `reads-key`; verify population, add no edge |
-| 5c.3 | extend | Also true for MCP and test members: each entrant's result is the stored shown text of its settled evaluation, rendered for the evaluating agent |
-| 5c.4 | revise | One printer at the terminal boundary: the per-face selection (value key → viewing agent's namespace → schema pair → floor) renders the final settled result once; bounds apply during encoding; no namespace exemption |
-| 5c.6 | revise | Help is one REPL-protocol docstring plus the docs of tools the task uses or must-reads; one source; order is not inferred from `:require` |
-| 5.5 | revise | One value, two faces: shown text (AI) and HTML come from the same selected value and tree inputs; another viewer's render is a current view, never "as shown" |
-| 5.5b | new | **Printing is rendering, one pipeline, two consumers** (owner 2026-09-25); retrieving a cut is one entrance, subject to the owner's durable-value ruling |
-| 5.12 | new | **Render inputs are supplied defaults.** A render function's declared-but-omitted inputs are supplied by declared schema name through call preparation, as for every function (inline functions included); caller arguments win |
-| 8.3 | revise | Errors since the previous evaluation are part of every settled response, from a durable per-execution basis; first and lost observations are typed |
-| 8.6 | revise | MCP JVM mode is root's host REPL: io-prepl, floor face under a fixed profile, output bounded at its producer, whole cause kept, no record, no custody |
-| 8.7 | extend | The MCP window and `window-bases` are deleted with S2; `get_value` and MCP blobs follow the owner's durable-value ruling |
-| **11.1** | new | **One entrance.** Product agents, MCP SCI sessions (named agents with explicit session ids, on a branch) and test bodies (through the capture adapter) are read, evaluated, recorded and printed by the same owners |
-| **11.2** | new | **Values before the edge.** A result is a live handle, a pinned entity reference, or a bounded admitted artifact; a non-EDN or oversized value is never printed for storage |
-| **11.3** | new | **REPL-native change.** Define in the namespace (qualified definitions later, §2.1); delete with native `ns-unmap`/`remove-ns`; files are write-back of accepted rows |
-| **11.4** | new | **One definition authority.** A form's changed Vars (root or metadata) and removed Vars match its analyzed rows one-to-one and are admitted whole or refused whole; an unindexed change refuses as such |
-| **11.5** | new | **A settled change carries its reach** as a typed observation built once: callers and render referrers as typed fields, before-state edges for retractions, reaching-test count, the exact check form |
-| **11.6** | new | **Write-back is gated.** Accepted replacement rows are spliced by the pure form transform, fenced by the published file digest, published ordinarily, and proven by digest equality or restored |
-| **12.1** | new | **Grep finds spellings, the index answers relations**, with analysis evidence and typed unknowns (G3) |
-| **12.2** | new | **Data inputs carry identity**: configuration compilation records resolved documents, digests and applied layers; a test world reports them with each default's provenance (G4) |
-| **13.1** | new | **Configuration is layered**, least to most specific: dial-schema default, ordered deployment overlays, environment, cluster facts, per-agent settings; the applied overlay selection is recorded and every re-apply composes it |
-| **13.2** | new | **One effective-configuration reader** takes the cluster name (and agent) explicitly; no reader takes an arbitrary cluster's row |
+| 1.10 | stage | "…the entrance admits `(defn other.ns/f …)` **(deferred to M3, §2.1: single expansion, reader versus target context)**; `my.program/ns-unmap!`/`remove-ns!` and nested native `ns-unmap` are removals in the evaluation's change set, decided by one writer at settlement; `remove-ns` is a namespace change…" |
+| 1.15 | new | **One definition authority.** A form's changed Vars (root or metadata) match its analyzed rows one-to-one, and its removed interns match row-backed identities; the set is admitted whole or refused whole and restored at every failure point; an unindexed change refuses as such |
+| 5c.3 | extend | Also true for MCP and test members: each entrant's result is the stored shown text of its settled evaluation |
+| 7.6 | clarify | Settlement's "diff removes the id from its subjects" is the id's removal from the accepted replacement's attribute map, merged and written back with it (D1) |
+| 7.11 | refine | Migrated tasks take their proof edges from the note's explicit test refs; cited functions are mentions and are **not** converted to subject edges; subjects are set by triage (2.9); every note file is accounted for |
+| 7.13 | new | **Write-back is proven before exposure:** accepted replacement rows are spliced into one candidate, proven equal by the ordinary analyzer in memory, fenced by both heads and the file digest, published ordinarily and checked by digest; a failure restores only an unmodified candidate and reports accepted-but-not-written |
+| 8.6 | recommend | Record MCP JVM evaluations as root's, floor-rendered, without custody, **when the named cluster's database is available**; with no database, record nothing and say so (§2.4) |
+| 8.8 | new | **An MCP SCI session is a named, owned agent on a branch:** explicit session id; custody selected on every call; completion by listening before submitting, then rechecking by run id; retirement disarms only the agents the session owns |
+| 9.5 | note | The recorder never realizes a value in order to store it; place the bounded-prefix alternative beside "never realize" for the owner (§2.4) |
+| 13.2 | extend | Add the typed environment between the overlays and the cluster facts; record the stack, environment decisions and default provenance atomically; an explicit apply replaces the stack, a start reuses it; re-apply on changed documents, schema defaults or initialization |
+| 13.3 | new | **One effective-configuration reader** derives layers 1-4 for a named cluster (plus 5 for an optional agent), propagates read refusals before merging, and validates the final value; historical readers keep their database value |
 
 ## 8. Verification limits
 
-- Revision-2 probes:
-  - one read-only JVM read on default (config rows and `no-provider`, 4 ms);
-  - source reads at 3785970b9 of `config.clj`, `boot.clj`, `operator.clj`, the nine readers, `eval.clj`
-    `evaluate`/`unmap-row`, `reader.cljc`, `my/program.clj` deletion owners, `my/edit.clj`, `edit.clj`,
-    `source.clj` merge, and `agent.clj` `submit-source!`;
-  - the audit's ledger;
-  - the render-dispatch landing.
-- No write, test, adoption or new code was run. PROBE SAFETY was observed: only small finite values were
-  read.
-- Unverified, and to be established by the owning slice:
-  - SCI namespace-object argument handling in `ns-unmap` subject derivation;
-  - whether REPL replacement rows keep `:seon.fn/file`;
-  - writer-side `breaks` inside settlement;
-  - `my.test/check` correctness and cost on branch rows;
-  - the per-site edits for `agent-effective` callers;
+- **Revision-3 probes.**
+  - One read-only JVM query of the issue index on default, 8 ms: 405 open, 241 with functions, 438 function
+    edges, 75 with tests.
+  - A file count: 483 notes, 450 carrying `status: open`.
+  - Source reads at 19e9fe5f4: `seon.issue` (indexer, schema, callers), `source.clj` (`publish!`,
+    `accept-merge!`, the issue seam), `agent.clj` (`submit-source!`, `turn-step`, `arm!`, `disarm!`,
+    `release-context!`), `mcp.clj` (JVM form, SCI form, retire, `execute-clj-eval`), `eval.clj`
+    (`turn-interns`, `removed-program-identities`, contract conversion), `config.clj` (`effective-in`), SCI
+    `namespace-state` and `namespace-interns`, Clojure `load-string`, and `fn.clj`'s stdin analysis.
+  - The audit ledger §11, and the re-review.
+- **Not run.** No write, test, adoption, arming or new code was run. PROBE SAFETY was observed: one bounded
+  count query.
+- **Unverified, to be established by the owning slice:**
+  - P-S1b;
+  - stdin-analysis digest comparability;
+  - the T1 row-builder site;
+  - the 45 unexplained open notes;
+  - T4's shared-helper check;
+  - `my.test/check` cost;
+  - P-86;
   - every line estimate in §6.
-- Line counts: `wc -l` and `sed -n` at 3785970b9. Ledger figures are the audit's, pinned at 056ef6fe0.
-- Source/test delta of this lane: 0 / 0. Changed path: this file only.
+- **Line counts** come from `sed -n` and `grep -n` at 19e9fe5f4. Ledger figures are the audit's, pinned at
+  056ef6fe0.
+- **This lane's delta.** Source and test: 0 / 0. Changed path: this file only.
