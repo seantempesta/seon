@@ -23,7 +23,6 @@
             [seon.db :as db]
             [seon.id :as id]
             [seon.error.refusal :as error.refusal]
-            [seon.print :as print]
             [seon.repl :as repl]
             [seon.render.route :as render.route]
             [seon.render.value :as render.value]
@@ -330,8 +329,9 @@
 (defn- bounded-text
   "One value as the text a fault field stores, under the evidence bound.
 
-  A string is its own text; anything else is its admitted node emitted
-  through the one printer. Over the bound the field IS the missing marker —
+  A string is its own text; anything else is its admitted value as
+  canonical EDN, so signatures and deduplication read deterministic bytes.
+  This is storage, not presentation. Over the bound the field IS the missing marker —
   the same data every other surface reports an absent value with — and the
   whole value stays reachable in the fault's evidence content."
   {:malli/schema [:=> [:cat :seon.error/source :seon.sci.admit/caps]
@@ -343,8 +343,7 @@
       (let [projected (:seon.sci.admit/value admitted)]
         (if (string? projected)
           projected
-          (print/emit-text (:seon.sci.admit/print-node admitted)
-                           (print/default-options)))))))
+          (admit/canonical-edn projected))))))
 
 (defn- stack-failing-function
   "The first first-party function on the Throwable's stack, as `ns/name`.
