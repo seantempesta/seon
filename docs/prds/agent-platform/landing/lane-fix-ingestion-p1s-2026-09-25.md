@@ -13,6 +13,28 @@ committed but **not yet run**: under the LOAD RULE this lane ran no test request
 into default. Root runs the commands below.
 
 ## Broken or unresolved first
+## Root run at 18:40 (tmp/orchestrator/verify-1840.out.d/003.txt): a production defect in `prepare-merge!`
+
+- **Where it failed.** "The merge delta was refused" was raised in `prepare-merge!`'s `write!`
+  (source.clj:818), which `candidate-gate!` calls (cluster.clj:2766). It never reached
+  `accept-merge!` or `index-tasks!`.
+- **Cause.** `write!` transacted S's connection while the caller's custody was bound. The writer
+  refuses that as a write into another cluster's branch (`seon.db/foreign-connection-error`,
+  db.clj:457). Every agent or test body that calls `prepare-merge!` hits this.
+  `development-source-refresh!` does not, because it runs with no ambient custody.
+- **REPL proof** on disposable branches `fip-a` and `fip-b`, since released and retired:
+  - a write to `:fip-b` under `:fip-a` custody is refused, naming both branches;
+  - the same write inside `(db/call-with-custody {:seon.db/connection b} …)` commits.
+- **Fix (`2245ab5a5`).** `write!` now runs under S's own custody.
+  - `candidate-gate!` is arguably the better owner, since it acquires the execution. It lives in
+    cluster.clj outside this lane's grant, so this is recorded for root.
+- **merge-test still red, from another lane's code.** In the same run
+  (`verify-1840.out.d/001.txt`), `seon.cluster.merge-test` now refuses at fixture setup. The
+  refusal: `source-rows refused namespace-row at [:seon.ns/requires]: expected a set, got a
+  vector`, called from test_support.clj:799. The stored namespace row, as pulled, is handed to
+  `source-rows`, and Datahike returns cardinality-many values as vectors. That belongs to root's
+  `program-row` follow-up.
+
 ## Root run on 6ab6bdc1 (tmp/orchestrator/verify-6ab6bdc1-results.txt.d/002-004) and diagnosis
 
 - **`seon.cluster.merge-test`, both members red. The cause is in another lane's file, not in
