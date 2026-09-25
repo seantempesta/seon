@@ -2518,7 +2518,7 @@
           (throw (ex-info "Publication could not read the changed declarations' callers." paths)))
         (set paths)))))
 
-(declare file-rows)
+(declare file-rows published-index-rows)
 
 (defn- removed-definition-caller-paths
   "Files outside `selected` holding a stored edge to a `removed` definition.
@@ -3068,6 +3068,26 @@
           {:seon.schema/predicate-functions (schema/predicate-functions-in prior)
            :seon.schema/validate-render-contracts? true})))))
 
+;; A shape's fingerprint carries its references' definition fingerprints
+;; (seon.fn.schema-shape/reference-fingerprints), so a changed schema changes
+;; every shape reaching it. Unchanged stored rows in that closure are re-derived
+;; in the same publication; otherwise one reference holds two shapes.
+(defn- shape-dependent-rows
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.schema/projection [:set :keyword]
+                       [:set [:tuple :qualified-keyword :seon.schema/value]]]
+                  :seon.program/rows]}
+  [database projection schema-keys derived]
+  (let [reverse-functions (:seon.schema.projection/reverse-function-dependencies projection)
+        identities (into [] (remove derived)
+                         ;; A removed key is in the closure but not the projection: it leaves.
+                         (concat (map #(vector :seon.schema/key %)
+                                      (sort (filter (:seon.schema.projection/forms projection) schema-keys)))
+                                 (map #(vector :seon.fn/sym %)
+                                      (sort (into #{} (mapcat #(get reverse-functions % #{})) schema-keys)))))
+        stored (if (seq identities) (published-index-rows database identities #{:seon.fn/arities}) [])]
+    (when (:seon.error/at stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (mapv #(dissoc % :seon.schema/shape) stored)))
+
 (defn- desired-rows
   {:malli/schema [:=> [:cat :seon.fn/index-request [:or :nil [:=> [:cat :string] :seon.schema/value]]] :seon.program/rows]}
   [request progress!]
@@ -3088,9 +3108,13 @@
                                   :seon.program/analyzed-source-digest))
                    source-rows)
           source-rows)
-        selected-forms (if partial? (select-keys packaged-forms (changed-schema-keys request)) packaged-forms)
         projection (or (when partial? (incremental-projection request source-rows))
                        (schema/build-projection packaged-forms))
+        dependent-keys (when partial?
+                         (schema/dependent-schema-keys
+                          projection (into (changed-schema-keys request)
+                                           (keep :seon.schema/key) changed-rows)))
+        selected-forms (if partial? (select-keys packaged-forms dependent-keys) packaged-forms)
         canonical-schemas
         (if (seq selected-forms)
           (mapv (partial accretion/schema-row packaged-forms)
@@ -3100,6 +3124,13 @@
         (remove (fn [row]
                   (contains? canonical-keys (:seon.schema/key row)))
                 changed-rows)
+        source-only
+        (if-let [database (when partial? (:seon.source/previous-database request))]
+          (into (vec source-only)
+                (shape-dependent-rows
+                 database projection dependent-keys
+                 (into #{} (map program/row-identity) (concat canonical-schemas changed-rows))))
+          source-only)
         desired-identities (into #{} (map program/row-identity) (concat source-only canonical-schemas))]
     (doseq [{schema-key :seon.schema/key
              form-string :seon.schema/form}
