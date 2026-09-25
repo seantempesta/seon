@@ -57,12 +57,22 @@ Under the LOAD RULE no test request ran, and nothing was loaded into default.
   - The caller-mistake half is already asserted by source_test's
     `work-on-an-acquired-branch-runs-as-that-branchs-own-work-under-an-agents-custody`
     (foreign recording connection, returned).
-- **Uncertain in slice 2's regression.** It assumes that a `:db.fn/call` throwing
-  `(ex-info … {:error …})` reaches `seon.db/transact!`'s Datahike-abort branch, which is
-  `rejected-value` and carries `:seon.error/throwable`.
-  - I could not probe that without a projection-carrying disposable connection.
-  - If it lands in the outcome-unknown branch instead, `db/transact!` itself panics and
-    the test fails loudly at the first assertion.
+- **Root's run 87d5e4b91051 on adopted HEAD found two reds, fixed in 6839d16a8. Not rerun.**
+  - *Refused-write regression.* No cause was dropped. `seon.error.refusal/diagnostic`
+    (refusal.clj:91) consumes every Throwable into `:seon.error/chain`. The stored
+    refusal held three links: the outer ExceptionInfo, the ExecutionException, and the
+    transaction function's ex-info with `{:error ::writer-refused}`.
+    - `own-write!`'s `:seon.error/throwable` cause lookup could never be non-nil for a
+      writer refusal. It is deleted.
+    - The test now asserts the chain's root data, the whole refusal as the fault's data,
+      and the stored occurrence evidence.
+  - *`a-member-whose-test-does-not-resolve…`.* It wrote `:seon.test/ns` onto a stored
+    declaration, and the writer's digest check refused it. It now uses
+    `test-support/replacement-tx`, which I checked at the REPL (one analyzed row,
+    22 ms).
+    - The seon.test.edn change did not cause this red. `:seon.test/recording-writer` is
+      in the projection but is not a storage attribute (`-schema` lacks it), so the
+      test family's owned attributes are unchanged.
 - **Out-of-scope finding.** 75 decoy fixture namespaces (tmp/ mirrors) sit in the
   shared kondo cache. Issue:
   `docs/seon/issues/tmp-fixture-sources-write-decoy-entries-into-the-shared-kondo-cache.md` (6c7117400).
@@ -115,7 +125,7 @@ Under the LOAD RULE no test request ran, and nothing was loaded into default.
     `seon.test/admit-run`, the cause's ex-data equal to the writer's whole refusal, and
     the next cause identical to the refusal's throwable.
   - The error row exists by signature, and nothing was reserved for the member.
-- Size: src +7 −5 (test.clj), edn +5, test +40.
+- Size: src +7 −5 (test.clj, then −2 net in 6839d16a8), edn +5, test +40 (+9 in 6839d16a8).
 
 ## Duplicates
 
