@@ -13,6 +13,29 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Eleventh follow-up: per-face precedence (AGENTS.md 7fc304482) and contract-declared inputs
+
+- `6d25d9483` kernel: `seon.sci.kernel/invoke` accepts `:seon.sci.eval/function` (an agent function value) through the
+  same arm, custody, admission and failure path (+12/−8; schema member in seon.sci.eval.edn).
+- `634d8aaa2` the viewing agent's namespace stage restored (409fcf269^ code, keyed by the request's
+  `:seon.render/namespace` else the rendering agent's assigned namespace): order `:explicit-value` → `:namespace` →
+  `:declared` → `:floor`; enum and four-stage bound (+44/−1). `47eb7af16` regression
+  `the-viewing-agents-own-renderer-beats-the-schema-default` (default without viewer; viewer's renderer beats the
+  schema default for its face only; the value's face beats both). `9b90a9a16` design §1.
+- **Parked, superseded:** my declared-input rewrite (`render-arguments` selecting unit keys by the contract's entries,
+  plus a 24-renderer contract sweep) is `tmp/render-dispatch-opus/declared-inputs-inflight.patch` (485 lines, not
+  committed): ruling 3 says inputs come from the existing call-preparation mechanism, not a render-only selector.
+- **The general mechanism exists; the remaining work, for a ruling on scope:** `seon.call-preparation/hook`
+  (call_preparation.clj:1497-1547) runs on every named Var call, including kernel/invoke's render invocations, and
+  supplies declared-but-omitted inputs by schema name from four rows on default (`:seon.db/db` →
+  `seon.db/supplied-database-value`, `:seon.db/connection`, `:seon.agent/id`, `:my.program/context`); caller arguments
+  win. Two gaps: (1) the render boundary passes the whole merged unit, database included, so every renderer receives
+  the database as a caller argument whether it asks or not; honouring "only when declared" means dropping
+  `:seon.db/db` from `render-argument` and declaring it (a REQUIRED map entry of complete shape, per
+  `supplied-map-entries`, call_preparation.clj:864-869) in the 47 of 105 renderers that read it transitively (clj-kondo
+  keyword analysis). (2) closures are never prepared (call_preparation.clj:1535, `callee-identity` nil), so an inline
+  function with a schema gets no defaults: that is call_preparation.clj's owner.
+
 ## Tenth follow-up: inline faces restored (owner correction)
 
 - `aa91ecb34` (+69/−11): selection `:explicit-value` → `:declared` → `:floor`; face value is a renderer symbol or rendered
