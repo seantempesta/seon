@@ -367,3 +367,43 @@
              (str "an identical later request is admitted and reruns the unstarted member: " (sut/tally again)))
          (is (not-any? #{unstarted} (:seon.test/pending again)) (sut/tally again))
          (is (= 1 (:seon.test/pass-count (first (runner/latest-results (db/db connection) [unstarted]))))))))))
+
+(deftest ^{:seon.test/long "One agent test definition and one nested request stopped at admission: unmeasured; bounded by the sibling one-definition, one-request test's measured 13.8 s (define 1.0 s, request 12.6 s)."
+           :seon.test/long-ms 20000}
+  a-refused-recording-write-is-a-stored-core-fault-carrying-its-whole-refusal
+  ;; The recording writer is the request's value (lane impl-world-injection
+  ;; 2026-09-25): a writer the dependency refuses, with no caller mistake, is
+  ;; stored as a core fault that throws under :panic. A caller mistake stays a
+  ;; returned refusal (source-test's foreign recording connection).
+  (support/with-database
+   (fn [connection]
+     (let [handle (support/execution-handle connection)
+           refused (atom nil)
+           writer (fn [recording tx-data]
+                    (reset! refused
+                            (db/transact! recording
+                                          (conj (vec tx-data)
+                                                [:db.fn/call (fn [_] (throw (ex-info "recording writer refused"
+                                                                                     {:error ::writer-refused})))]))))
+           _ (define-agent-test! handle "(clojure.test/deftest refused-recording (clojure.test/is true))")
+           thrown (try (sut/run {:seon.test/execution (support/execution-handle connection)
+                                 :seon.test/recording-connection connection
+                                 :seon.test/recording-writer writer
+                                 :seon.test/policy :named
+                                 :seon.test/identities #{'seon.test.one-request-test/refused-recording}})
+                       nil
+                       (catch clojure.lang.ExceptionInfo panic panic))
+           refusal @refused
+           recorded (:seon.fault/recorded (ex-data thrown))]
+       (is (:seon.error/throwable refusal) (pr-str (dissoc refusal :seon.error/throwable)))
+       (is (= :panic (:seon.fault/policy recorded)) (pr-str (ex-data thrown)))
+       (is (true? (:seon.fault/committed? recorded)) "stored before it throws")
+       (is (= 'seon.test/admit-run (:seon.error/operation recorded)))
+       (is (= refusal (ex-data (ex-cause thrown))) "the fault carries the whole refusal")
+       (is (identical? (:seon.error/throwable refusal) (ex-cause (ex-cause thrown))) "and its cause chain")
+       (is (some #(= "recording writer refused" (ex-message %)) (take-while some? (iterate ex-cause thrown))))
+       (is (some? (:seon.error/signature (db/pull (db/db connection) [:seon.error/signature]
+                                                  [:seon.error/signature (:seon.error/signature recorded)]))))
+       (is (empty? (db/q '[:find [?m ...] :where [?m :seon.test.member/symbol seon.test.one-request-test/refused-recording]]
+                         (db/db connection)))
+           "the refused admission reserved nothing")))))

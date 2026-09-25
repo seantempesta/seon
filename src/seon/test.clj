@@ -2067,7 +2067,8 @@
   changed reach and outstanding obligations from recorded evidence; `:platform`
   the declared rows; `:all` every eligible row). Selection and admission read
   and write the explicit `:seon.test/recording-connection`, which must hold the
-  execution branch. A member whose recorded green still holds is answered from
+  execution branch; `:seon.test/recording-writer` (default `seon.db/transact!`)
+  writes admission and stop there. A member whose recorded green still holds is answered from
   the record with `:seon.test/unchanged` and no execution.
 
   Each executed member is an isolated agent for one body: a fresh branch off
@@ -2093,7 +2094,8 @@
                    :seon.sci.eval/interpretation-error :seon.test/not-runnable-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
-    namespaces :seon.test/namespaces :as request}]
+    namespaces :seon.test/namespaces write! :seon.test/recording-writer
+    :or {write! db/transact!} :as request}]
   (let [started (System/nanoTime)
         elapsed #(/ (- (System/nanoTime) started) 1000000.0)
         cluster (:seon.cluster/name execution)
@@ -2220,7 +2222,7 @@
                                      (and (zero? index) (seq exclusion-rows))
                                      (assoc :seon.test.run/exclusions exclusion-rows)
                                      (pos? index) (dissoc :seon.test.run/covered-by))
-                               report (own-write! `admit-run (db/transact! recording [[:db.fn/call admit-run row]]))]
+                               report (own-write! `admit-run (write! recording [[:db.fn/call admit-run row]]))]
                            (if (:seon.error/at report)
                              report
                              {::provenance batch-provenance
@@ -2310,8 +2312,8 @@
                 ;; the run being stopped, covers no later request.
                 (fn [batch-provenance cause]
                   (own-write! `release-not-started!
-                              (db/transact! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
-                                                        :seon.test.run/stopped cause]])))
+                              (write! recording [[:db/add [:seon.test.run/id (:seon.test.run/id batch-provenance)]
+                                                  :seon.test.run/stopped cause]])))
                 outcome
                 (try
                   (loop [index 0
