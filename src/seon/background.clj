@@ -66,18 +66,21 @@
                        :seon.effect/duration-ms
                        :seon.effect/interrupted-at]
                       result-ref)]
-      (cond-> (select-keys receipt
-                          [:seon.effect/id :seon.effect/request-edn])
-        (:seon.effect/result-edn receipt)
-        (merge (select-keys receipt
-                            [:seon.effect/result-edn
-                             :seon.effect/result-blob
-                             :seon.effect/result-size
-                             :seon.effect/duration-ms]))
+      ;; a refused read is its declared error, never projected as a receipt
+      (if (:seon.error/at receipt)
+        receipt
+        (cond-> (select-keys receipt
+                            [:seon.effect/id :seon.effect/request-edn])
+          (:seon.effect/result-edn receipt)
+          (merge (select-keys receipt
+                              [:seon.effect/result-edn
+                               :seon.effect/result-blob
+                               :seon.effect/result-size
+                               :seon.effect/duration-ms]))
 
-        (:seon.effect/interrupted-at receipt)
-        (assoc :seon.effect/interrupted-at
-               (:seon.effect/interrupted-at receipt)))
+          (:seon.effect/interrupted-at receipt)
+          (assoc :seon.effect/interrupted-at
+                 (:seon.effect/interrupted-at receipt))))
       (seon.error.refusal/diagnostic (java.util.Date.) :my.background/poll 'seon.background/poll
        {:seon.error/message "The background effect receipt does not exist."
         :seon.error/fix "Use the lookup ref returned by background."

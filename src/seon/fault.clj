@@ -168,7 +168,7 @@
   [mode committed?]
   (if (and (= :record mode) committed?) :record :panic))
 
-(defn- carried-receipt
+(defn carried-receipt
   "The receipt a panic already carries anywhere in `failure`'s cause chain."
   {:malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
   [failure]

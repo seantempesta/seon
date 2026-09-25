@@ -25,6 +25,7 @@
             [malli.core :as m]
             [malli.registry :as mr]
             [sci.core :as sci]
+            [seon.ai :as ai]
             [seon.ai.tokens :as tokens]
             [seon.config :as config]
             [seon.cluster :as cluster]
@@ -189,53 +190,68 @@
            calls (atom 0)
            candidate-name (symbol (str "host-declared-schema-" (random-uuid)))
            candidate (intern 'seon.instrument-test candidate-name
-                             (fn [value & _] (swap! calls inc) value))
-           committed (atom [])
-           recorder (fn [value]
-                      (let [outcome (fault/record!
-                                     connection "host-error-wrapper" "host-wrapper-test" caps value)]
-                        (swap! committed conj [(:seon.error/source value) outcome])
-                        outcome))]
+                             (fn [value & _] (swap! calls inc) value))]
        (try
+         ;; D01 (lost-error seams): the wrapper returns only declared values in
+         ;; BOTH dials. Every refusal throws; none is returned as the value of
+         ;; a function whose output contract does not declare it, and the
+         ;; wrapper records nothing: the owning boundary decides that.
          (doseq [mode [:panic :record]]
            (arm-with! candidate contract projection caps
                       {:seon.config/on-core-error mode
                        :seon.config.error/max-evidence-bytes
                        (:seon.config.error/max-evidence-bytes
-                        (test-support/effective-config))
-                       :seon.flow/commit-fault! recorder})
+                        (test-support/effective-config))})
            (let [before @calls
-                 input (if (= :panic mode)
-                         (test-support/refusal-data #(candidate 42)) (candidate 42))
-                 arity (if (= :panic mode)
-                         (test-support/refusal-data #(candidate)) (candidate))]
+                 input (test-support/refusal-data #(candidate 42))
+                 arity (test-support/refusal-data #(candidate))]
              (is (= before @calls) "Input and arity checks precede the body.")
              (doseq [[refusal declared-schema] [[input :seon.instrument/contract-error]
                                       [arity :seon.instrument/arity-error]]]
                (is ((schema/projection-validator projection declared-schema) refusal)
                    (pr-str refusal))))
-           (let [refusal (if (= :panic mode)
-                           (test-support/refusal-data #(candidate domain)) (candidate domain))]
+           (let [refusal (test-support/refusal-data #(candidate domain))]
              (is (= :output (:seon.instrument/check refusal)) (pr-str refusal))
              (is (= 1 (:seon.instrument/arity refusal)))
              (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))
-             (when (= :record mode)
-               (is (identical? refusal (first (peek @committed)))
-                   "The call returns the exact flat value handed to the committer."))
              (is (= domain (candidate domain 1)) "Only the declaring arity permits this declared-schema."))
-           (let [refusal (if (= :panic mode)
-                           (test-support/refusal-data #(candidate base)) (candidate base))]
+           (let [refusal (test-support/refusal-data #(candidate base))]
              (is (= :output (:seon.instrument/check refusal)))
              (is ((schema/projection-validator projection :seon.instrument/contract-error) refusal))))
-         (is (= 4 (count @committed)))
-         (doseq [[value [_fact outcome]] @committed]
-           (is (= :seon.flow/committed outcome) (pr-str outcome))
-           (is (seq (db/q '[:find ?e :in $ ?function ?arity
-                           :where [?e :seon.instrument/fn ?function]
-                                  [?e :seon.instrument/arity ?arity]]
-                         (db/db connection) (:seon.instrument/fn value)
-                         (:seon.instrument/arity value)))))
+         (is (empty? (db/q '[:find ?e :in $ ?function
+                             :where [?e :seon.instrument/fn ?function]]
+                           (db/db connection) (symbol "seon.instrument-test" (str candidate-name))))
+             "The wrapper stores no fault in either dial.")
          (finally (ns-unmap 'seon.instrument-test candidate-name)))))))
+
+(deftest armed-compositions-return-only-their-declared-alternatives
+  ;; D02, D03 (lost-error seams): a unit naming no root identity is valid
+  ;; input, and the floor answers it with its declared refusal. The attempt
+  ;; renderers now declare that alternative, so their armed output check
+  ;; admits it instead of refusing a value the callee declares.
+  (let [unit {:seon.render/value {:seon.ai.attempt/id "rootless"}}
+        missing-root? (schema/projection-validator (schema/handed-projection)
+                                                   :seon.render.value/missing-root-identity-error)]
+    (is (contains? (instrument/instrumented) #'ai/attempt-ai))
+    (doseq [render [ai/attempt-ai ai/attempt-html]]
+      (is (missing-root? (render unit)))))
+  ;; E07: a core fault already recorded by this propagation is rethrown by
+  ;; the evaluation boundary's one normalizer, directly or wrapped, never
+  ;; turned into an ordinary evaluation value.
+  (let [receipt {:seon.boot/cluster-name "seon-instrument-test"
+                 :seon.fault/committed? true :seon.fault/policy :panic
+                 :seon.error/layer :seon.instrument-test/receipt
+                 :seon.error/operation 'seon.instrument-test/receipt}
+        panic (ex-info "SEON CORE FAULT (panic): recorded" {:seon.fault/recorded receipt}
+                       (ex-info "the original failure" {}))
+        request {:seon.sci.kernel/time-limit-kind :seon.sci.kernel/time-limit
+                 :seon.sci.kernel/failure-kind :seon.sci.kernel/invocation-failed}
+        record (kernel/unarmed-record (System/nanoTime))]
+    (doseq [thrown [panic (ex-info "an interpreter frame" {} panic)]]
+      (is (identical? thrown (try (kernel/failure-value request thrown record)
+                                  (catch clojure.lang.ExceptionInfo rethrown rethrown)))))
+    (is (:seon.error/at (kernel/failure-value request (ex-info "not recorded" {}) record))
+        "an unrecorded failure is still the evaluation's value")))
 
 (deftest a-public-multi-arity-does-not-reenter-its-instrumented-var
   (let [base (str "tmp/instrumented-fs-test/" (random-uuid))
@@ -327,8 +343,13 @@
     (is (= 'my.agents.contract/value
            (get-in (ex-data failure)
                    [:seon.error/operation])))
-    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) (test-support/refusal-data (fn* [] (instrument/wrap-interpreted (quote my.agents.contract/value) "[:=> [:cat [:fn clojure.core/int?]] :int]" projection :record caps wrapped))))
-        ":record cannot arm without acquired recording custody")))
+    (let [recorded (instrument/wrap-interpreted
+                    'my.agents.contract/value
+                    "[:=> [:cat [:fn clojure.core/int?]] :int]"
+                    projection :record caps original)]
+      (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error)
+           (test-support/refusal-data #(recorded "wrong")))
+          ":record arms without a recorder, and its refusal throws as :panic's does"))))
 
 (deftest sci-installed-contracts-enforce-declared-schemas-and-refusals-in-both-dials
   (test-support/with-database
@@ -338,16 +359,8 @@
                                    {:seon.config/on-core-error mode})
        (let [database (db/db connection)
              projection (schema/projection-from-database database)
-             caps (config/result-caps (config/effective database "sci-wrapper"))
-             recorded (atom [])
-             recorder (fn [value]
-                        (let [outcome (fault/record!
-                                       connection "sci-wrapper" "sci-wrapper-test" caps value)]
-                          (swap! recorded conj [(:seon.error/source value) outcome])
-                          outcome))
-             ctx (sci.eval/base-ctx database {:seon.flow/commit-fault! recorder})
-             _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database
-                                   :seon.flow/commit-fault! recorder})
+             ctx (sci.eval/base-ctx database)
+             _ (sci.eval/acquire! {:seon.sci.eval/ctx ctx :seon.db/db database})
              domain {:seon.error/at #inst "2026-09-18T00:00:00Z"
                      :seon.error/layer ::sci-body
                      :seon.error/operation 'user/sci-declared-schema
@@ -373,7 +386,7 @@
                            (fn [_]
                              (let [invoke #(sci/eval-form
                                             ctx (cons name (map (fn [value] (list 'quote value)) args)))]
-                               [(if (and declared-schema (= :panic mode))
+                               [(if declared-schema
                                   (test-support/refusal-data invoke) (invoke))])))]
              (is (= (+ before (if ran? 1 0)) (sci/eval-string* ctx "@calls")))
              (if declared-schema
@@ -383,20 +396,16 @@
                  (is (= (count args) (:seon.instrument/arity result)))
                  (when (= :undeclared label)
                    (is (= :output (:seon.instrument/check result))))
-                 (when (= :record mode)
-                   (let [[value [_ outcome]] (peek @recorded)]
-                     (is (= :seon.flow/committed outcome)
-                         (if (instance? Throwable outcome) (ex-message outcome) (pr-str outcome)))
-                     (is (identical? value result))
-                     (is (seq (db/q '[:find ?e :in $ ?function
-                                      :where [?e :seon.instrument/fn ?function]
-                                             [?e :seon.error.occurrence/process ?process]
-                                             [?process :seon.db.process/id "sci-wrapper-test"]]
-                                    (db/db connection) qualified))))))
-               (is (= domain result)))))
-         (is (= (if (= :record mode) 3 0) (count @recorded))))))))
+                 (is (empty? (db/q '[:find ?e :in $ ?function
+                                     :where [?e :seon.instrument/fn ?function]]
+                                   (db/db connection) qualified))
+                     "The wrapper stores no fault in either dial."))
+               (is (= domain result))))))))))
 
-(deftest a-sovereign-sci-fork-acquires-its-own-recorder
+(deftest a-sovereign-sci-fork-refuses-by-throwing-under-both-dials
+  ;; D01 (lost-error seams): an interpreted wrapper no longer needs a fault
+  ;; recorder, because it never records or returns its refusal: a fork under
+  ;; :record constructs without one and throws exactly as its :panic source does.
   (test-support/with-database
    (fn [connection]
      (test-support/seed-cluster! connection "sci-fork-recorder")
@@ -405,9 +414,9 @@
                                          {:seon.schema.admission/source :agent
                                           :seon.fn/source "(defn valid? [length id] true)"})])
      (let [committed (db/pull (db/db connection) '[*] [:seon.fn/sym 'seon.id/valid?])
-            _ (is (= "(defn valid? [length id] true)" (:seon.fn/source committed))
-                  (pr-str (select-keys committed [:seon.error/operation :seon.error/message])))
-            base (sci.eval/base-ctx (db/db connection))
+           _ (is (= "(defn valid? [length id] true)" (:seon.fn/source committed))
+                 (pr-str (select-keys committed [:seon.error/operation :seon.error/message])))
+           base (sci.eval/base-ctx (db/db connection))
            _ (is (::instrument/interpreted-original
                   (meta @(sci/resolve base 'seon.id/valid?)))
                  "The source context holds a real interpreted wrapper.")
@@ -416,39 +425,19 @@
            database (db/db connection)
            projection (schema/projection-from-database database)
            state (sci.eval/projection-state database projection "sci-fork-recorder")
-           caps (config/result-caps (config/effective database "sci-fork-recorder"))
-           recorded (atom [])
-           recorder (fn [value]
-                      (let [outcome (fault/record!
-                                     connection "sci-fork-recorder" "sci-fork-test" caps value)]
-                        (swap! recorded conj [(:seon.error/source value) outcome])
-                        outcome))
-           missing (test-support/refusal-data
-                    #(sci.eval/fork-cluster-ctx base database connection state))
-           missing-base (test-support/refusal-data #(sci.eval/base-ctx database))
-           fork (sci.eval/fork-cluster-ctx base database connection state
-                                          {:seon.flow/commit-fault! recorder})
-           invoke (fn [ctx mode]
+           fork (sci.eval/fork-cluster-ctx base database connection state)
+           invoke (fn [ctx]
                     (first (kernel/with-arm
                             ctx (* 1000 test-support/event-backstop-seconds)
-                            (fn [_] [(if (= :panic mode)
-                                       (test-support/refusal-data
-                                        #(sci/eval-string* ctx "(seon.id/valid?)"))
-                                       (sci/eval-string* ctx "(seon.id/valid?)"))]))))]
-       (is ((schema/projection-validator projection :seon.instrument/registration-error)
-            missing))
-       (is ((schema/projection-validator projection :seon.instrument/registration-error)
-            missing-base)
-           "Construction cannot publish a context containing an unarmed definition.")
-       (is ((schema/projection-validator projection :seon.instrument/arity-error)
-            (invoke base :panic)))
-       (is (empty? @recorded) "The source context keeps its panic policy.")
-       (let [result (invoke fork :record)
-             [value [_ outcome]] (first @recorded)]
-         (is (= 1 (count @recorded)))
-         (is (= :seon.flow/committed outcome))
-         (is (identical? value result))
-         (is ((schema/projection-validator projection :seon.instrument/arity-error) result)))))))
+                            (fn [_] [(test-support/refusal-data
+                                      #(sci/eval-string* ctx "(seon.id/valid?)"))]))))]
+       (doseq [ctx [base fork]]
+         (is ((schema/projection-validator projection :seon.instrument/arity-error)
+              (invoke ctx))))
+       (is (empty? (db/q '[:find ?e :in $ ?function
+                           :where [?e :seon.instrument/fn ?function]]
+                         (db/db connection) 'seon.id/valid?))
+           "Neither context's wrapper stores its refusal.")))))
 
 (defn guarded-result
   "A fixture function whose pair of arguments and return must be a map."
@@ -1229,10 +1218,8 @@
 
 (deftest cluster-policy-and-removal-preserve-the-jvm-wrappers
   (instrument/apply! {:seon.config/on-core-error :panic})
-  (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))
-        applied (instrument/apply! {:seon.config/on-core-error :record})]
+  (let [before (into {} (map (juxt identity deref)) (instrument/instrumented))]
     (is (pos? (count before)))
-    (is ((schema/projection-validator (schema/handed-projection) :seon.instrument/registration-error) applied))
     (is (= (count before) (instrument/remove!)))
     (is (= (count before) (instrument/remove!)))
     (is (every? (fn [[candidate root]] (identical? root @candidate)) before))

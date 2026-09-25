@@ -455,10 +455,10 @@
 (declare compiled-wrapper registration-error ^:dynamic *compiling-contract*)
 
 (defn wrap-interpreted
-  "Apply one committed agent function contract under the core-error dial.
+  "Apply one committed agent function contract.
 
-  Both dials use the host boundary's per-arity enforcement. Record mode
-  requires a recording operation acquired by the caller before installation."
+  Both core-error dials use the host boundary's per-arity enforcement: every
+  refusal throws, and the evaluation boundary decides what it records."
   {:malli/schema
    [:function
     [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
@@ -466,8 +466,7 @@
      :seon.instrument/callable]
     [:=> [:cat :qualified-symbol :string :map :seon.config/on-core-error
           [:or :seon.sci.admit/caps :seon.config/error :seon.error/base] :seon.instrument/callable
-          [:map [:seon.flow/commit-fault! {:optional true} :seon.flow/commit-fault!]
-           [:seon.config.error/max-evidence-bytes {:optional true}
+          [:map [:seon.config.error/max-evidence-bytes {:optional true}
             :seon.config.error/max-evidence-bytes]
            [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
            [:seon.profile/context {:optional true} :seon.profile/context]]]
@@ -487,17 +486,6 @@
                prior
                (profile/cell callable-identity))
         arm-request (dissoc arm-request :seon.program/definition-digest :seon.profile/context)]
-    (when (and (= :record mode) (not (:seon.flow/commit-fault! arm-request)))
-      (let [failure
-            (registration-error
-             function-symbol
-             {:seon.error/message "Record-mode SCI instrumentation requires an acquired fault recorder."
-              :seon.error/layer :instrumentation
-              :seon.error/operation 'seon.instrument/wrap-interpreted
-              :seon.error/member :seon.flow/commit-fault!
-              :seon.error/expected :seon.flow/commit-fault!
-              :seon.error/offending ::absent})]
-        (throw (ex-info (:seon.error/message failure) failure))))
     (when-not (and (map? caps)
                    (pos-int? (:seon.config.eval.result/max-bytes caps))
                    (pos-int? (:seon.config.eval.result/max-source caps)))
@@ -647,7 +635,6 @@
                          projection ::refusal-validator
                          #((mi/-f->original schema/projection-validator)
                            projection :seon.instrument/refusal-result)))
-        marker (Object.)
         ;; The base from Malli's report alone: valid by construction, a core
         ;; fault, the report key naming who is wrong, the failure in its chain.
         ;; Each report carries its arm's schema and checked values (arity:
@@ -709,21 +696,13 @@
                     (binding [*compiling-contract* true]
                       (let [[declared-schema value] (refusal kind data)]
                         (throw (ex-info (:seon.error/message value)
-                                        (with-meta value {::boundary marker
-                                                          :seon.error/declared-schema declared-schema}))))))}
+                                        (with-meta value {:seon.error/declared-schema declared-schema}))))))}
          original options)]
-    (fn [& arguments]
-      (try (apply wrapped arguments)
-           (catch clojure.lang.ExceptionInfo failure
-             (if (and (= :record (:seon.config/on-core-error policy))
-                      (identical? marker (::boundary (meta (ex-data failure)))))
-               (let [value (ex-data failure)
-                     outcome ((:seon.flow/commit-fault! policy)
-                              {:seon.error/source value
-                               :seon.error/declared-schema (:seon.error/declared-schema (meta value))})]
-                 (if (= :seon.flow/committed (second outcome)) value
-                     (throw (ex-info "Recording the instrumentation refusal failed." value failure))))
-               (throw failure)))))))
+    ;; Malli's instrumented function IS the wrapper: every refusal throws, in
+    ;; both core-error modes, so no value outside the arity's declared output
+    ;; can escape. Who is responsible, and whether it is stored, is decided by
+    ;; the boundary that owns the evaluation's world, never here.
+    wrapped))
 
 (defn- contract-definitions
   "Canonical declarations closed over by a function contract, following Malli refs."
@@ -847,30 +826,20 @@
   An identity without a retained contract is disarmed on adoption.
   Unrelated contracts are neither inspected nor re-armed.
 
-  Host wrappers capture the supplied disposition and recording operation at
-  arm time. Calls validate through the wrapper compiled here, against this
-  adoption's projection; a call's own projection never re-selects it.
-  Record-mode acquisition requires a recorder."
+  Host wrappers capture the supplied admission caps and evidence bound at arm
+  time. Calls validate through the wrapper compiled here, against this
+  adoption's projection; a call's own projection never re-selects it. Every
+  refusal throws in both core-error modes; recording is the boundary's."
   {:malli/schema
    [:=> [:cat :seon.instrument/request]
     [:or :seon.instrument/applied :seon.instrument/registration-error]]}
   [{mode :seon.config/on-core-error
     caps :seon.sci.admit/caps
     max-evidence-bytes :seon.config.error/max-evidence-bytes
-    commit-fault! :seon.flow/commit-fault!
     supplied-projection :seon.schema/projection
     digests :seon.profile/definition-digests
     :as request}]
   (cond
-    (and (= :record mode) (not (fn? commit-fault!)))
-    (registration-error 'seon.instrument/apply!
-     {:seon.error/message "Record-mode instrumentation requires an acquired fault recorder."
-      :seon.error/layer :instrumentation
-      :seon.error/operation 'seon.instrument/apply!
-      :seon.error/member :seon.flow/commit-fault!
-      :seon.error/expected :seon.flow/commit-fault!
-      :seon.error/offending ::absent})
-
     (not (#{:panic :record} mode))
     (registration-error 'seon.instrument/apply!
        {:seon.error/message "Instrumentation requires :panic or :record core-error mode."
@@ -893,13 +862,11 @@
           :seon.error/offending :seon.instrument/missing-projection})
         (let [defaults config/defaults
               caps (or caps (config/result-caps defaults))
-              policy (cond-> {:seon.config/on-core-error mode
-                              :seon.sci.admit/caps caps
-                              :seon.config.error/max-evidence-bytes
-                              (or max-evidence-bytes
-                                  (:seon.config.error/max-evidence-bytes defaults))}
-                       (and (= :record mode) commit-fault!)
-                       (assoc :seon.flow/commit-fault! commit-fault!))
+              policy {:seon.config/on-core-error mode
+                      :seon.sci.admit/caps caps
+                      :seon.config.error/max-evidence-bytes
+                      (or max-evidence-bytes
+                          (:seon.config.error/max-evidence-bytes defaults))}
               changed (find request :seon.instrument/changed-identities)
               candidates (when changed
                            (into #{}

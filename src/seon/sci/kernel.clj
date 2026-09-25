@@ -22,6 +22,7 @@
             [seon.db :as db]
             [seon.error :as error]
             [seon.error.refusal :as error.refusal]
+            [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.admit :as admit])
   (:import [java.lang.management ManagementFactory]
@@ -527,13 +528,17 @@
   "Preserve an existing structural refusal and accrete guard evidence.
   Otherwise return the kernel declared-schema with the observed evaluation duration;
   the complete diagnostic record retains whether the deadline fired.
-  This error-handling normalizer preserves any producer error under the bare base contract."
+  This error-handling normalizer preserves any producer error under the bare base contract.
+  A core fault already recorded by this propagation (its receipt anywhere in the
+  cause chain, `seon.fault/carried-receipt`) is rethrown, never turned into an
+  ordinary evaluation value: its panic reaches the caller."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
     :seon.error/base]}
   [{subject :seon.fn/sym}
    throwable
    diagnostic-record]
+  (when (fault/carried-receipt throwable) (throw throwable))
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
         throwable-data (not-empty (dissoc (ex-data throwable) :sci.impl/interrupt))
         evidence (cond-> {:seon.sci.eval/throwable (.getName (class throwable))
