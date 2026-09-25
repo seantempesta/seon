@@ -546,7 +546,11 @@
               [{:seon.context.capture/id "replayed-capture"
                 :seon.context.capture/prompt (str composed " drifted")}])
              (let [drifted (prompt/prompt (db/db connection) (request connection ctx))]
-               (is (string? (:seon.schema/expected-value drifted)))
+               (is (= {:seon.error.evidence/attribute :seon.context.capture/prompt
+                       :seon.error.evidence/value (str composed " drifted")}
+                      (:seon.cluster.prompt/derivation-observation drifted))
+                   "the captured prompt is the named evidence, not a schema key")
+               (is (= "walker" (:seon.cluster.prompt/error-agent-id drifted)))
                (is (= "walk-run" (:seon.turn/id drifted)))))))))))
 
 

@@ -344,9 +344,9 @@
   whole unselected join: identical at a budget large enough to keep every
   unit, and a false `capture-mismatch` at every smaller one. A live turn
   has no capture yet, so this answers only for a replay."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id :string]
-                  [:or :nil :seon.schema/validation-refusal]]}
-  [database turn-id text]
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/id :seon.agent/id :string]
+                  [:or :nil :seon.cluster.prompt/error]]}
+  [database turn-id agent-id text]
   (let [capture (db/q '[:find ?text . :in $ ?id
                         :where [?t :seon.turn/id ?id]
                                [?c :seon.context.capture/run ?t]
@@ -354,11 +354,14 @@
                       database turn-id)]
     (when (and (string? capture) (not= capture text))
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.cluster.prompt/capture 'seon.cluster.prompt/capture-mismatch
-       {:seon.schema/expected-value capture
-       :seon.schema/refused-value text
-       :seon.error/message
-       "Saved evaluations do not reconstruct the captured provider prompt."
-       :seon.turn/id turn-id}))))
+       {:seon.error/message
+        "Saved evaluations do not reconstruct the captured provider prompt."
+        :seon.turn/id turn-id
+        :seon.cluster.prompt/error-agent-id agent-id
+        ;; The captured prompt is the value the recomposition failed to match.
+        :seon.cluster.prompt/derivation-observation
+        {:seon.error.evidence/attribute :seon.context.capture/prompt
+         :seon.error.evidence/value capture}}))))
 
 (defn- acquire-context-report
   "`settings` is the ONE resolution `prompt` already made (2.1): the turn
@@ -407,11 +410,7 @@
             contributions (history-contributions segments calibration)
             report (tokens/budget-report text budget calibration)]
         (or (when-let [turn-id (:seon.turn/id request)]
-              (when-let [failure (capture-mismatch database turn-id text)]
-                (assoc failure :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
-                       :seon.cluster.prompt/derivation-observation
-                       {:seon.error.evidence/attribute :seon.error/message
-                        :seon.error.evidence/value (:seon.error/message failure)})))
+              (capture-mismatch database turn-id (:seon.agent/id request) text))
             {:seon.cluster.prompt/text text
              :seon.context/contributions
              (update contributions (dec (count contributions))
