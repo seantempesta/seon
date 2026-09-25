@@ -124,6 +124,8 @@ REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate,
 - Call preparation cannot see optional inputs inside `:seon.render/unit` (patch in `lane-fix-render-handoff` landing).
 - `:int`→`:string` schema change throws ClassCastException in `seon.db/transact-call`; `seon.effect/request!` writes the
   wrong branch inside a nested test run; SCI undeclared-attribute write returns no read error (`lane-fix-test-rows-e`).
+- UGLY/UNBOUNDED: `bin/seon status` printed 1.1 MB after a restart, one full error map per never-started test in `:seon.problems/failed-tests-unknown` (18:43Z); problems must render through the one render path with counts, not raw maps.
+- PRE-S1 RED: evaluate-sources-test `ordered-evaluation-retains-one-explicit-basis-without-publication` :204 expects `:seon.turn/recorded-content-conflict` (red since 09-24, rerun-results-2026-09-25.txt:49); owner = turn settlement, unassigned.
 - HANG SOURCE: `seon.error/prepare-result` renders a contract error's offending value as full HTML with no bound (stuck deep in `seon.render.hiccup/hiccup?` on a huge value) — violates the one render path; it must go through the floor (lane-fix-turn-hang landing).
 - SECURITY-SHAPED: `shown-result` reads a key from the raw result before the floor classifies it (`sci/eval.clj:3274`), so a hostile `java.util.Map` runs its own code first (`RT.java:788`); the floor design moves the read after classification.
 - `render_coverage_test.clj:49`: forms threaded into `comp` make assertions vacuous (`0f5f849bd` class).
