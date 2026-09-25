@@ -1,6 +1,6 @@
 ---
 type: design
-status: "round 4 (Opus) after Astra re-review dc0597005 and owner rule 23:00Z (errors reference the world); awaiting Astra re-review"
+status: "round 5 (Opus): Astra ACCEPT-AFTER-FIXES 9b0e5e813, five corrections folded; owner authorized implementation; P0 implementing"
 created: 2026-09-25
 scope: One owner change per lost-error class A–G from the 2026-09-25 audit, plus fault observation in the agent's MCP replies
 ---
@@ -74,9 +74,9 @@ The disposer's contract:
 |---|---|
 | input | Flow's report map: `::flow/pid`, `::flow/status`, `::flow/cid`, `::flow/op`, `::flow/msg`, `::flow/state`, `::flow/count`, `::flow/ex` |
 | failure value | the owner's rule (§0.4), references not copies. `(ex-info "Flow proc loop failure" {pid status cid op count, :seon.agent/id, :seon.flow/graph <graph identity>} (::flow/ex report))`. `::flow/state` is never copied: the pid and graph identity reference it. `::flow/msg` is referenced by the blob digest of its safe-storage selection (render slice 2(i)); until that lands, by its class and count only. The original throwable stays the cause. The declared schema is the existing `:seon.flow/exception-error` |
-| 1. stop request | `stop-panicked-graph!` (`flow.clj:234-246`; a non-blocking `put!` and `poll!`) is requested **first** when the cluster's `:seon.config/on-core-error` reads `:panic` or cannot be read. This is the one config read `fault!` already makes (`fault.clj:215`), moved ahead of recording. Under `:record`, the stop is requested when recording throws or does not commit. Either way, a stalled or failing later step cannot be the only thing standing between a panic and the stop |
+| 1. stop request | the proc's **own control tap** `put!` of `::flow/stop` (the first form of `stop-panicked-graph!`, `flow.clj:245`; an async put, which enqueues or parks without blocking the caller) is requested **first**. This is a *request* only. The graph-wide `flow/stop` that follows (`:246`) takes Flow's `ReentrantLock` and a blocking `>!!` onto a control channel of capacity 10 (`impl.clj:71-75`, `:99`, `:174-183`), so it is **not** claimed nonblocking or bounded; it runs after recording, and actual exit is `join-graph!`'s. Until a saturated-control and contended-stop probe passes, P1 claims no bounded stop. The stop request is made when the cluster's `:seon.config/on-core-error` reads `:panic` or cannot be read. This is the one config read `fault!` already makes (`fault.clj:213-216`). **P2 moves it ahead of recording inside `fault.clj`**: `fault!` accepts a declared context member `:seon.fault/stop-request!`, which is the execution owner's stop request, calls it first under `:panic`, and then records. There is no second config read, and P1 passes its request through that member. Under `:record`, the stop is requested when recording throws or does not commit. Either way, a stalled or failing later step cannot be the only thing standing between a panic and the stop |
 | 2. recording | `proc-failed!` → `fault!` with the proc's carried environment |
-| 3. emergency | only if 2 threw or did not commit, and only best effort: `prn` of pid, op and the throwable's `floor`, inside its own `try`. Its failure is dropped only after the stop request has already been made |
+| 3. emergency | only if 2 threw or did not commit, and only best effort: `prn` of pid, op and the throwable's `floor`, inside its own `try`. It always runs **after** the stop request, so a blocked or throwing stderr cannot prevent the stop. `proc-failed!`'s existing print-then-return ordering (`flow.clj:220-232`) is inverted in P1 to request stop, then record, then print |
 | totality | steps 1 to 3 sit in one `try`. `put!` always returns the box, so nothing propagates into Flow's catch (`impl.clj:312-319`) |
 
 **Bound and owner of the whole fault path** (correction 1). `fault!` owns it, and there are three terms:
@@ -97,7 +97,9 @@ P1 is this change. The review accepts it as an investigation now, and as product
    - more than 100 reports are all disposed;
    - a stalled recorder blocks only its proc, and the stop request still lands first;
    - a failing recorder leaves the graph stopped, with emergency evidence;
-   - a failing emergency printer still leaves the graph stopped.
+   - a failing emergency printer still leaves the graph stopped;
+  - **a throwing or stalled emergency output** still leaves the stop requested;
+  - **a saturated control channel (10 pending) and a contended `flow/stop`** are observed, not assumed bounded.
 2. The two dependencies above must have landed.
 
 **0.2 Task ownership stays with each existing owner.** There is no `await/task`. Exit is proven by `Thread.join`,
@@ -177,11 +179,19 @@ then carries only replaceable launcher accounting, never the only copy of a fail
   - **Body failure**: `(fault/fault! (env/of work) body-failure ctx)`. A body failure that already carries a receipt
     is not recounted; `fault!` rethrows it (`fault.clj:194`), and `io-terminal!` keeps that receipt.
   - **Callback or release failure** (`complete!`, the `release-arm!` inside it, and `io-terminal!`'s own cleanup):
-    a separate `fault!`. Its context names the submission id and effect id as references (§0.4), plus the body's
-    occurrence id when there is one.
+    a separate `fault!`. **The references must reach durable data** (correction 3). P2 makes `fault!` forward
+    exactly three declared context members into the recording request, and nothing else:
+    - `:seon.flow/submission-id`;
+    - `:seon.effect/id`;
+    - `:seon.error/related-occurrence`, the body's occurrence id.
+
+    They are stored on the occurrence as `:seon.error.occurrence/submission-id`, `:seon.error.occurrence/effect`
+    (a ref) and `:seon.error.occurrence/related` (a ref), which P2 declares in `seon.fault.edn` (context) and
+    `seon.error.occurrence.edn` (stored). A context is never merged wholesale. L, T and R1t use these members only
+    after P2.
   - **Panic in either**: `(::stop! work)` runs, and the other failure is still recorded.
-  - **Recording itself throws**: the emergency `prn` of the ids, then `::stop!`. This is the only case with
-    emergency-only handling.
+  - **Recording itself throws**: `::stop!`'s *request* first, then the emergency `prn` of the ids, best effort.
+    This is the only case with emergency-only handling.
   - **Ordering**: all of this happens before `(swap! submissions dissoc id)`. Removal stays in `finally`.
   - **Accounting**: the completion offered while `::active?` holds carries the receipts. The launcher's
     `proc-failed!` call at `:518-519` is deleted.
@@ -204,7 +214,7 @@ CAS, inside `io-terminal!`'s containing `try`:
 | stopped before entry | the runnable reads `::active?`, finds it false, and settles launcher-stopped; the callback rule applies |
 | queued and never executed | stop's CAS settles launcher-stopped; the callback rule applies |
 | stopped while running | interrupted only; the task disposes its own outcome, and the join proves exit |
-| a failure to record or contain | emergency `prn` plus `::stop!` |
+| a failure to record or contain | `::stop!`'s request first, then the emergency `prn`, best effort |
 
 No Seon task reaches the uncaught handler (E06).
 
@@ -310,7 +320,10 @@ errors. C03 offers exhaustion and backstop faults to the dropping channel (`turn
 - `opening-deferred?` answers the declared missing-dial error, and both consumers branch on it.
 - **Duplicate disposition is decided at the writer, by obligation identity, without comparing clocks**
   (correction 8). The obligation is the unanswered wake, identified by its `:seon.message/id`.
-  - The deferral fault's commit request names `:seon.error/obligation <wake message id>`.
+  - The deferral fault's commit request names `:seon.error/obligation <wake message id>`. It gets there because
+    `fault!` forwards the declared context member `:seon.error/obligation` (P2, `seon.fault.edn`) into the
+    recording request field that controls occurrence identity. A caller setting it on some other map would never
+    reach the writer.
   - **The obligation has its own identity, stable across attempts** (correction 5). For a request that names an
     obligation, `recording` (`error.clj:1537-1544`) builds the occurrence id from
     `{signature, obligation, agent-id, origin branch}` through the same `id/id`. It **excludes** `turn-id` and
@@ -488,14 +501,33 @@ transaction data (`:1331-1335`), invoked by `:db.fn/call` (`:1550-1551`). It inf
 - **P2, a compatible preparation.** It does *not* complete routing.
   - `commit-call`'s return contract is unchanged. **Delivery evidence identifies the current opening**
     (correction 4).
-    - After each target commits, `record!` reads, from that target's `:db-after`, the signature's current opening
-      with the writer's own `opening` function (`error.clj:1293-1311`, evaluated on `:db-after`).
-    - It then reads the messages `[?m :seon.message/about signature] [?m :seon.message/to ?a]
-      [?m :seon.message/id ?mid]`.
-    - It keeps a recipient only when `?mid` equals `(id/id [signature recipient opening])`, the writer's own
-      identity rule (`:1319`).
-    - An open notification of **this** opening counts as delivery. A message left over from a previous, resolved
-      opening does not.
+    - The writer records its own selection, so the receipt never re-derives it. `opening`
+      (`error.clj:1293-1311`) answers whether the *next* occurrence opens: 0 for the first, a resolution token
+      before a reopening, and **nil while already open**. Calling it on `:db-after` therefore cannot identify the
+      opening this transaction selected. `:db-after` is also batch-wide: Datahike's writer replaces each report's
+      `:db-after` with the batch's database (`datahike/writer.cljc:229-264`).
+    - So `commit-call` writes the selected opening's notification messages onto the occurrence, as
+      `:seon.error.occurrence/notified`, a cardinality-many ref declared in `seon.error.occurrence.edn`.
+      - On a **new opening** it retracts the previous set and asserts the new message refs.
+      - On a **recurrence within the open opening** it keeps the set.
+      - Message ids come from one shared function, `notification-id`, extracted from `message-tx` (`:1319`). It
+        keeps the first-opening special case: `[signature recipient]` for opening 0, with the opening appended only
+        when it is nonzero.
+    - `record!` derives the receipt from **this transaction's own** `:tx-data` together with its `:db-before`, both of
+      which are per transaction. The set is the `notified` datoms asserted here, plus the prior set as of
+      `:db-before` that this transaction did not retract. It never reads `:db-after`, and never looks up the latest
+      message.
+    - `:seon.fault/delivered-to` is the recipients of that set. An empty set means **committed but undeliverable**.
+    - Cost: one datom filter over the transaction's own data, plus one `:db-before` pull. The schema grant is
+      `seon.error.occurrence.edn`, +1 attribute, in P2.
+    - Required cases (P2 and R4):
+      - first delivery;
+      - a recurrence in the same opening;
+      - resolved, then reopened with only the old message present;
+      - a delivered opening resolved before observation;
+      - another resolution and reopening in the same writer batch.
+
+      They must distinguish undelivered from delivered without recounting.
   - The kept recipients go into the tuple and into the receipt as `:seon.fault/delivered-to`, which references
     agent ids, never copies of agents. It is an optional member of `seon.fault.edn`, taken per target.
   - Also in P2:
@@ -503,7 +535,8 @@ transaction data (`:1331-1335`), invoked by `:db.fn/call` (`:1550-1551`). It inf
     - the obligation identity (C.2);
     - F08, a fixed message in `fault.clj`.
 
-    F01's HTML deletion and F07/F22 move to fix-unbounded-capture-opus's `error.clj` scope, or follow it (§0.4).
+    F01's HTML deletion has **landed** in fix-unbounded-capture-opus (`e62d8489c`: `prepare-result` stores the
+    value's admitted artifact, not the full HTML face). F07 and F22 stay in F producers, after that lane (§9.7).
   - Routing stays **explicitly incomplete** until R4.
 - **R4, E-activation**, atomic and last (after R1, R1t, R2, R3). It holds the whole files `fault.clj`, `error.clj`,
   `seon.fault.edn`, `test/seon/turn_test.clj` and `test/seon/cluster/fault_message_test.clj`.
@@ -551,8 +584,9 @@ transaction data (`:1331-1335`), invoked by `:db.fn/call` (`:1550-1551`). It inf
   `take max-window-errors` (`:533`), builds its own requery text (`:562`), and appends a second text block
   (`:629-635`).
 - **The shared history.** `render/transcript.clj:346-402` (`branch-errors`) already derives each settled evaluation's
-  window, from the previous settlement transaction to this one, with `occurred-since` as-of that settlement. Later
-  recurrences therefore never rewrite an earlier response, and a refused read is a typed unknown.
+  window, from the previous settlement transaction to this one, with `occurred-since` as-of that settlement. That
+  recomputation is **not** stable: a later recurrence advances the no-history `last-at` and `count`, and the
+  earlier window can lose it (M.1). A refused read is a typed unknown.
 - **The query owner.** `seon.error/occurred-since` (`error.clj:1571-1616`) returns unresolved signatures touched in
   the window, with their message, operation, branches and summed cumulative counts.
 
@@ -639,10 +673,29 @@ and browser adapter checks:
 - a continuation beyond B;
 - the `:error` outcome, and `isError`.
 
-**Order.** P2 (the delivery evidence) comes first. The M cut then lands **inside the pipeline that owns MCP reply
-assembly**, which is design-one-pipeline S2 together with render slice 2(i). It owns `mcp.clj` after
-delete-mcp-bridge-opus lands, plus `transcript.clj`, the settlement writer's schema and `error.clj`'s
-`occurred-since`, sequenced after R4. The M cut is not startable now.
+**Order and handoff** (correction 5). P2's delivery evidence comes first, then R4. M lands at the **P3m
+boundary of the one-pipeline plan**. Its recording owners are `turn/settle!` and `turn/evaluation-facts`
+(`one-repl-language-2026-09-25.md:20-26`).
+
+That plan, at revision 5 (`60e060b52`), still specifies `:seon.cluster.eval/fault-basis` and a history rebuilt from
+basis pairs (`:329`, `:484`, `:898`). That is the rejected design. Its owner must replace those rows with this
+section's contract before M starts:
+- the single captured observation;
+- the exact saved shown text;
+- the live result handle;
+- the `fault-window` references (cluster, commit, lower, upper);
+- advancement only on commit.
+
+The M cut's grant is then concrete:
+- `src/seon/turn.clj` (`settle!` and `evaluation-facts` only);
+- `src/seon/render/transcript.clj`;
+- `src/seon/error.clj` (`occurred-since` only);
+- `script/seon/dev/mcp.clj` (the retirements);
+- `resources/seon/schemas/seon.cluster.eval.edn` and `seon.error.edn`;
+- `test/seon/problems_test.clj` and `test/seon/dev/mcp_bridge_test.clj`.
+
+It carries one estimate for the shared work. This lane does not edit that plan. M is not startable until that
+plan's owner reconciles its rows and P2 supplies delivery evidence.
 
 ## F. Arbitrary value expands before the single presentation bound (23)
 
@@ -687,7 +740,7 @@ face is not safe either, so no producer row closes F before render slice 2(i).
 | IDs | Conversion | − / + |
 |---|---|---|
 | F02, F03, F04, F12, F13, F18 | render slices 2(i) and 4 | there |
-| F01, and the retained evidence admission (`error.clj:460-492`, `:524-538`, `:657-660`) | the HTML producer is deleted, and the admission follows the reference rule, inside fix-unbounded-capture-opus's `error.clj` scope or after it (§9.7); the retained admission converts inside render slice 2(i) | −6 / +1 |
+| F01 (`error.clj:469-525`) | **one allocation** (correction 4). The HTML deletion **landed** in fix-unbounded-capture-opus `e62d8489c`: the blob is the value's admitted artifact, and its readers are unchanged, since `data-blob` is still a digest of stored evidence. The remaining raw admission (`admit/admit-value` in `prepare-result`, and `bounded-error-admission`) converts once, inside render slice 2(i)'s safe-selection activation. No row here | 0 |
 | F07 (`error.clj:1110`, `:2013`, `:2056`), F22 (`:892`), F08 (`fault.clj:159`) | fixed prose with the value in data (P2) | −11 / +5 |
 | F05 `render/hiccup.clj:280` | the head becomes the offending value | −2 / +1 |
 | F06 `db.clj`; F09 `sci/eval.clj:3589`, `:3637`, `:3793`; F10 `turn.clj:3704`, `:3753`; F11 `render.clj`; F14 `accretion.clj:136-138`, `:370-375`; F15 `test.clj:1944`, `runner.clj:398`, `:986-988`; F16 `fn.clj:58-59`; F17 `schema/internal.cljc:469-523`, `admission.clj:409-410`; F19 `cluster.clj:3470`, `status.clj:177`; F21 `background.clj:55` (P0), `my/program.clj:265`, `plan.clj:1367` (cut T); F23 `render/ns.clj` | the producer rule, scripted once, then lint, load and hand-fix the residue | about −60 / +30 |
@@ -758,7 +811,7 @@ a row means exactly the named files.
 | **S-process** | `src/seon/cluster/process.clj`, `src/seon/issue.clj`, `src/seon/test/cache.clj`; — ; `test/seon/cluster/subprocess_test.clj`, `test/seon/issue_test.clj` | A07, G05, then C06 and G12 | `process.clj` released by delete-duplicates-opus round 3 |
 | **P0 D-delete** | `src/seon/instrument.clj`, `src/seon/sci/kernel.clj`, `src/seon/fault.clj` (visibility token), `src/seon/ai.clj`, `src/seon/background.clj`; `resources/seon/schemas/seon.instrument.edn`; `test/seon/instrument_test.clj`, `test/seon/ai_test.clj`, `test/seon/background_test.clj` | D01–D04, E05, the E07 rethrow, B05, B07, F21 (background) | `kernel.clj` released by fix-unbounded-capture-opus; `instrument.clj` confirmed free after impl-shape-mirror-malli round 3 |
 | P1 fault port | `src/seon/flow.clj`; `resources/seon/schemas/seon.flow.edn` (the `::stop!` member of the proc args schema, and the port's report-reference members); `test/seon/flow_test.clj` | 0.1, G16 | the 0.1 probe; fix-unbounded-capture-opus and render slice 2(i), for the production bound |
-| P2 delivery prep | `src/seon/fault.clj`, `src/seon/error.clj`; `resources/seon/schemas/seon.fault.edn`, `seon.error.edn` (obligation member), `seon.config.error.edn`; `test/seon/cluster/fault_message_test.clj`, `test/seon/cluster/fault_storage_test.clj` | E01 preparation (current-opening evidence), the C.2 obligation identity, F08 | P0's `fault.clj` token; `error.clj` released by fix-unbounded-capture-opus |
+| P2 delivery prep | `src/seon/fault.clj`, `src/seon/error.clj`; `resources/seon/schemas/seon.fault.edn` (context members `:seon.fault/stop-request!`, `:seon.flow/submission-id`, `:seon.effect/id`, `:seon.error/related-occurrence`, `:seon.error/obligation`; receipt `delivered-to`), `seon.error.occurrence.edn` (`notified`, `submission-id`, `effect`, `related`), `seon.error.edn` (obligation member), `seon.config.error.edn`; `test/seon/cluster/fault_message_test.clj`, `test/seon/cluster/fault_storage_test.clj` | E01 preparation (current-opening evidence), the C.2 obligation identity, F08 | P0's `fault.clj` token; `error.clj` released by fix-unbounded-capture-opus |
 | R1 retirement | `src/seon/flow.clj`, `src/seon/cluster.clj`, `src/seon/cluster/boot.clj`, `src/seon/cluster/agent.clj`, `src/seon/render/web.clj`; the C.3 schemas; `test/seon/flow_test.clj`, `test/seon/cluster_test.clj`, `test/seon/cluster/fault_message_test.clj` | C03, A04, A09, E06, F19 (cluster) | P1, P2 |
 | R1t | `src/seon/turn.clj`; — ; `test/seon/cluster/turn_test.clj` | C01–C03, A10, B04, E08 (turn), F10 | P1, P2 |
 | R2 acquisition | `src/seon/sci/eval.clj`; `resources/seon/schemas/seon.sci.eval.edn`; `test/seon/sci/eval_test.clj`, `test/seon/sci/branch_execution_test.clj`, `test/seon/adoption_diagnostic_test.clj` | E09, B31, F09 | P2 |
@@ -790,6 +843,16 @@ default, and grants are rechecked then.
 - `seon.flow.edn`: P1, then R1, then L.
 - `fault.clj`: P0, then P2, then R4.
 - `error.clj`: fix-unbounded-capture-opus, then P2, then R4, then M.
+- **The capture lane's expanded holds** (ledger rows 446 and 448; correction 4) come before these cuts:
+  - `seon.sci.eval.edn` → R2;
+  - `src/seon/schema.clj` → B-platform;
+  - `src/seon/sci/admit.clj` → render slice 2(i);
+  - `src/seon/test.clj` → T;
+  - `seon.env.edn` and `seon.schema.edn` → whichever cut first needs them;
+  - `render.clj` (render-result admission) → F producers.
+
+  None of these cuts is independent of the root-cause cut. The capture landing is PARTIAL, and a released hold is
+  not proof that its safety dependency is installed.
 - `boot.clj`: R1, then L.
 - `agent.clj`: R1, then G-agent.
 - `kernel.clj`: fix-unbounded-capture-opus, then P0, then R3.
@@ -826,9 +889,7 @@ default, and grants are rechecked then.
   a shared helper only if they are identical.
 - **9.6** RULED by root. Responsibility comes from stored program call data, and ambiguous cases return to the
   agent. The three evidence cases and the data path are in D.2.
-- **9.7** New, for root, if the review agrees. When fix-unbounded-capture-opus lands, confirm whether F01's HTML
-  deletion and F07/F22 are inside its scope. If they are, drop them from P2 and F. If not, P2 takes them after that
-  lane releases `error.clj`.
+- **9.7** Resolved by evidence. F01's HTML deletion landed in `e62d8489c` (the capture lane), and retained admission converts in render slice 2(i). F07/F22 stay in F producers after the capture lane; root confirms from that lane's final diff.
 
 ## 10. Evidence and limits
 
