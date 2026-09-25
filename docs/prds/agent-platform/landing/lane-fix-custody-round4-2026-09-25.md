@@ -208,6 +208,27 @@ the same commit as this test. **Unmeasured:** two fresh acquisitions. One comple
   `docs/seon/issues/a-program-without-the-writers-dials-crashes-every-write-as-an-unknown-outcome.md`
   (owner seon.db).
 
+## Reds on adopted HEAD 6ab6f5fb (verify-reds 010, 011)
+
+- **agent-custody-test: 3 fails, caused by my new C test.**
+  - *Wrong readback member.* The poison row is an agent row, so its refusal is the agent's
+    mistake (`:seon.sci.eval/agent-mistakes`), stored with `:seon.sci.eval/refused-function`.
+    The test queried `:seon.sci.eval/row-member`, which is only on core row-acquisition
+    errors, so both reads found nil.
+  - *REPL proof.* Both a lazy `cluster-ctx` acquisition and the agent entrance under
+    default's custody record the refusal on the child. The entrance took 872 ms, with no
+    refusal on the parent. The query by `refused-function` finds it.
+  - *Over its bound.* The run took 6,555 ms against 5 s. It now declares
+    `:seon.test/long-ms 10000` with the measured parts.
+  - Custody itself was right: acquisition neither threw nor wrote the parent.
+- **registry-test: 57 pass, 0 fail, `passed?` false. Pre-existing cost, not a failure.**
+  - Two members stayed pending (not started) because the request exhausted its time limit:
+    62.6 s for 11 executed, about 5.7 s each.
+  - Each member builds a file store and writes every canonical Datahike attribute. That write
+    was about 2 s in my probe. The fixture's added 4 dial rows are not measurable against it.
+  - This is over the sub-second target and needs a shrink assignment: share one populated
+    store per namespace or stop writing every attribute. Not fixed here.
+
 ## Commits
 
 - 3c4952503: custody, each owner binds its own branch work once (finding 2).

@@ -80,15 +80,19 @@
     {:child child :bad (member "bad") :good (member "good") :agent-id (str "poison-" tag)}))
 
 (defn- recorded-refusal
-  "The stored acquisition refusal naming `row-member` on `connection`'s branch, or nil."
+  "The stored acquisition refusal of `function` on `connection`'s branch, or nil.
+  An agent row that cannot interpret is its agent's mistake, recorded with
+  `:seon.sci.eval/refused-function`, not `:seon.sci.eval/row-member`."
   {:malli/schema [:=> [:cat :seon.db/connection :qualified-symbol] [:maybe :int]]}
-  [connection row-member]
-  (db/q '[:find ?error . :in $ ?member
+  [connection function]
+  (db/q '[:find ?error . :in $ ?function
           :where [?error :seon.error/occurrences ?occurrence]
-                 [?occurrence :seon.sci.eval/row-member ?member]]
-        (db/db connection) row-member))
+                 [?occurrence :seon.sci.eval/refused-function ?function]]
+        (db/db connection) function))
 
-(deftest an-acquisition-records-its-refusal-on-the-acquired-branch-under-another-custody
+(deftest ^{:seon.test/long "Measured 6,555 ms (root run 16b466ddab78, 2026-09-25): two isolated child acquisitions with their fixture writes (about 0.8 s and 0.9 s each at the REPL) and two program acquisitions (0.7-1.3 s each)."
+           :seon.test/long-ms 10000}
+  an-acquisition-records-its-refusal-on-the-acquired-branch-under-another-custody
   ;; Astra de1075aa3 finding 1: recording an un-installable row is the acquired
   ;; branch's own write, whether acquisition enters through the agent entrance or
   ;; through a lazy first invocation, and whoever's custody the caller holds.
