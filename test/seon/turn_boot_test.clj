@@ -71,7 +71,7 @@
            (db/db connection)
            (merge (select-keys handle [:seon.sci.admit/caps :seon.config.error/max-evidence-bytes
                                        :seon.config.error/recurrence-limit])
-                  {:seon.error/source refusal :seon.error/id "boot-proof-error"
+                  {:seon.error/source refusal :seon.error/declared-schema :seon.fn/namespace-unresolvable-error :seon.error/id "boot-proof-error"
                    :seon.error/at #inst "2026-09-22T00:00:00Z"
                    :seon.error/process cluster/boot-process-identity :seon.agent/id "root"})))
          (support/transacted! connection [{:seon.message/id "opening-wake"

@@ -443,8 +443,9 @@
                        {:seon.error/source
                         {
                          :seon.error/message "the function violated its contract"
-                         :seon.error/data {:seon.instrument/fn 'my.agents.agent-a/broken
-                                           :seon.instrument/arm :input}}
+                         :seon.instrument/fn 'my.agents.agent-a/broken
+                         :seon.instrument/arm :input}
+                        :seon.error/declared-schema :seon.error/normalization-error
                         :seon.error/id "fault-wake" :seon.error/at (Date.)
                         :seon.error/process "wake-test-process"
                         :seon.sci.admit/caps result-caps

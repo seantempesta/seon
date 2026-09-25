@@ -33,7 +33,7 @@
        (is (seq callers) "The real indexed identity must have live referrers.")
        (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
        (is (= (count callers)
-              (count (get-in refusal [:seon.error/data :seon.program/referrers]))))
+              (count (:seon.program/referrers refusal))))
        (is (= basis (db/basis-t (db/db connection))))
        (support/transacted!
         connection
@@ -52,7 +52,7 @@
        (doseq [operations [[[:db/retract entity :seon.fn/sym target]]
                            [[:db/add entity :seon.fn/sym 'seon.turn/renamed-open?]]]]
          (let [refusal (db/transact! connection operations)
-               referrers (get-in refusal [:seon.error/data :seon.program/referrers])]
+               referrers (:seon.program/referrers refusal)]
            (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
            (is (seq referrers) "The refusal names the surviving callers, not just the missing identity.")
            (is (every? #(= target (:seon.program/subject %)) referrers))
@@ -147,7 +147,7 @@
                                :where [?referrer ?relation ?target]]
                              database target relations)
              refusal (db/transact! connection [[:db/retractEntity [identity-attribute target]]])
-             referrers (get-in refusal [:seon.error/data :seon.program/referrers])]
+             referrers (:seon.program/referrers refusal)]
          (is (seq expected))
          (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
          (is (= (set expected)
@@ -174,7 +174,7 @@
                     :seon.config/on-core-error :panic})
            refusal (:seon.sci.admit/value result)]
        (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str result))
-       (is (seq (get-in refusal [:seon.error/data :seon.program/referrers])))
+       (is (seq (:seon.program/referrers refusal)))
        (is (= (db/basis-t database) (db/basis-t (db/db connection))))))))
 
 (deftest ^{:seon.test/fixture-observation
@@ -277,7 +277,7 @@
                       (merge (select-keys defaults [:seon.config.error/recurrence-limit
                                                      :seon.config.error/max-evidence-bytes
                                                      :seon.config.error/escalate-to])
-                             {:seon.error/source failure :seon.error/id (id/id)
+                             {:seon.error/source failure :seon.error/declared-schema :seon.error/normalization-error :seon.error/id (id/id)
                               :seon.error/at (java.util.Date.)
                               :seon.error/process "seon.db.process/boot"
                               :seon.sci.admit/caps (config/result-caps defaults)}))
@@ -365,7 +365,7 @@
    (fn [connection]
      (let [target 'seon.fs.jvm/write
            refusal (db/transact! connection [[:db/retractEntity [:seon.fn/sym target]]])
-           referrers (get-in refusal [:seon.error/data :seon.program/referrers])]
+           referrers (:seon.program/referrers refusal)]
        (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
        (is (some #(and (= target (:seon.program/subject %))
                        (= :seon.effect/capability (:seon.program/relation %))

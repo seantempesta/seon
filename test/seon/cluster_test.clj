@@ -8,6 +8,7 @@
             [seon.flow :as seon.flow]
             [seon.db :as db]
             [seon.error :as error]
+            [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -117,7 +118,7 @@
                       :seon.boot/cluster-name fault-cluster})
       (let [dials (config/effective @connection fault-cluster)
             caps (config/result-caps dials)
-            commit-fault! (var-get (ns-resolve 'seon.cluster 'commit-fault!))
+            commit-fault! fault/record!
             [fact outcome] (commit-fault!
                             connection fault-cluster "cluster-test-process" caps
                             {:seon.error/declared-schema :seon.flow/exception-error

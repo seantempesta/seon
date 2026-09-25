@@ -128,8 +128,8 @@
                                         :my.message/content "No recipient."
                                         :seon.db/connection connection
                                         :seon.agent/id "bob"})]
-          (is (true? (:seon.message/unknown-recipient missing)))
-          (is (= 'seon.cluster.message/send!
+          (is (= "absent" (:seon.message/unknown-recipient missing)))
+          (is (= 'seon.cluster.message/delivery
                  (:seon.error/operation missing)))
           (is (= 3 (db/q '[:find (count ?m) . :where [?m :seon.message/id _]] @connection))))))))
 

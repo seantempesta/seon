@@ -25,7 +25,7 @@
      (let [basis (:max-tx @connection)
            refusal (test-support/refusal-data
                     #(apply schedule/fire-due! [connection "root" (Date.)]))]
-       (is (= (quote seon.schedule/fire-due!) (:seon.instrument/contract-violated refusal)))
+       (is (= (quote seon.schedule/fire-due!) (:seon.instrument/fn refusal)))
        (is (= basis (:max-tx @connection)))))))
 
 (deftest root-maintenance-seed-is-complete-and-has-no-minute-task

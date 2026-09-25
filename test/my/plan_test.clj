@@ -198,7 +198,7 @@
         (is (= [verify] (plan/blocked @connection "alice")))
         (is (= ["prepare"] (:my.plan/needs verify)))
         (is (= [prepare verify] (plan/steps @connection "alice")))
-        (is (true? (:my.plan/not-owned
+        (is (= "prepare" (:my.plan/unowned-item-id
                     (plan/start! "prepare" connection "bob"))))
         (is (= (assoc prepare :my.plan/state :current) (plan/start! "prepare" connection "alice")))
         (is (= (assoc prepare :my.plan/state :current) (plan/current @connection "alice")))
@@ -207,7 +207,7 @@
                  (dissoc completed :my.plan.item/completed-tx)))
           (is (inst? (get-in completed [:my.plan.item/completed-tx :db/txInstant]))))
         (is (= {} (plan/current @connection "alice")))
-        (is (true? (:my.plan/unusable-current-step
+        (is (= "prepare" (:my.plan/unusable-current-id
                     (plan/start! "prepare" connection "alice"))))
         (is (= [(assoc verify :my.plan/state :ready)] (plan/ready @connection "alice")))
         (is (= [] (plan/blocked @connection "alice")))))))
@@ -338,8 +338,8 @@
           (is (= ["root" "prepare" "verify"] (ids (:my.plan/steps current))))
           (is (= {:my.plan.item/id "prepare"} (:my.plan/current-step current))))
         (testing "two siblings may not claim one position"
-          (is (= true
-                 (:my.plan/duplicate-position
+          (is (= 0
+                 (:my.plan/duplicate-sibling-position
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "a" :my.plan.item/title "A"
@@ -348,8 +348,8 @@
                       :my.plan.item/position 0}]}
                    @connection connection "alice")))))
         (testing "one step may not be owned by two parents"
-          (is (= true
-                 (:my.plan/duplicate-identity
+          (is (= "shared"
+                 (:my.plan/duplicate-item-id
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "one" :my.plan.item/title "One"
@@ -362,16 +362,16 @@
                         :my.plan.item/title "Shared"}]}]}
                    @connection connection "alice")))))
         (testing "the current step must be an open step of this plan"
-          (is (= true
-                 (:my.plan/unusable-current-step
+          (is (= "absent"
+                 (:my.plan/unusable-current-id
                   (plan/plan!
                    {:my.plan/steps [{:my.plan.item/id "root"
                                      :my.plan.item/title "Improve the plan"}]
                     :my.plan/current-step {:my.plan.item/id "absent"}}
                    @connection connection "alice")))))
         (testing "dependencies may not form a cycle"
-          (is (= true
-                 (:my.plan/dependency-cycle
+          (is (contains? #{"prepare" "verify"}
+                 (:my.plan/cycle-item-id
                   (plan/plan!
                    {:my.plan/steps
                     [{:my.plan.item/id "prepare" :my.plan.item/title "Prepare"
