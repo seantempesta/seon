@@ -4100,7 +4100,10 @@
                 :seon.db/db database
                 :seon.sci.eval/current-db (if connection (db/db connection) database)
                 :seon.schema/projection projection
-                :seon.cluster.eval/source source
+                ;; Analyze the bytes the reader accepted as this form, never
+                ;; the raw request: the reader drops trailing input such as a
+                ;; stray `)`, which clj-kondo's parser cannot analyze.
+                :seon.cluster.eval/source (or (:seon.sci.reader/source event) source)
                 :seon.sci.eval/before-owned before-owned
                 :seon.sci.eval/before-namespaces before-namespaces
                 :seon.sci.eval/namespace-row

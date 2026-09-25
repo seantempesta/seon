@@ -137,6 +137,9 @@
              (str source " is an unindexed change: " (pr-str refusal)))
          (is (absent? (str changed)) source))
        (value (str "(defn kept \"D.\" " contract " [x] (inc x))"))
+       (value (str "(defn trailing \"D.\" " contract " [x] x))"))
+       (is (= 1 (value "(trailing 1)"))
+           "analysis reads the form the reader accepted, not a stray trailing paren")
        (is (:seon.sci.eval/unindexed (value "(alter-meta! #'kept assoc :doc \"changed\")"))
            "a metadata-only change is a definition change too")
        (is (= "D." (value "(:doc (meta #'kept))")))
@@ -158,7 +161,9 @@
                         "(throw (ex-info \"boom\" {})))"))))
        (is (true? (value (str "(identical? held (var " stored "))")))
            "every refusal and a later throw leave the stored row's Var as it was")
-       (let [admitted (evaluate-in ctx (str "(defn kept \"D.\" " contract " [x] (* 5 x)))"))]
+       (let [admitted (evaluate-in ctx (str "(defn kept \"D.\" " contract " [x] (* 5 x))"))]
+         (is (= 'scratch.entry-gate/kept (get-in admitted [:seon.program/row :seon.fn/sym]))
+             (pr-str (:seon.sci.admit/value admitted)))
          (is (= 5 (value "(kept 1)")))
          ((:seon.sci.eval/restore admitted))
          (is (= 2 (value "(kept 1)"))

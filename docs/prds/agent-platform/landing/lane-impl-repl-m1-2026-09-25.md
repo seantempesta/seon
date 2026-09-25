@@ -143,6 +143,29 @@ Size: +448/−92 over four files. Source: eval.clj +301/−81, turn.clj +15/−1
 and docstrings on eleven helpers, plus the restore-step shape; the restoration had to become data
 so that "nothing to restore" never marks an execution unavailable.
 
+## First root run (6ab6b447) and its fix
+
+`seon.sci.entry-gate-test` went red in the new regression, with two defects:
+
+- **Test defect.** The admitted-redefinition source had a stray trailing `)`. The form was refused,
+  so the evaluation carried no `:seon.sci.eval/restore`, and calling that nil produced the NPE at
+  entry_gate_test.clj:163.
+- **Producer defect behind it, pre-existing.**
+  - The reader accepts `(defn …))` by dropping the stray `)`: its event source is
+    `(defn …)`, and `(+ 1 2))` evaluates to 3.
+  - But `evaluate` handed the raw request text to `definition-rows`.
+  - clj-kondo's parser then NPEs inside `rewrite-clj.parser.core/trailing-paren` (a `swap!` on a
+    nil atom). The failure chain runs `seon.fn/source-rows` → `analysis-rows-by-file`
+    (fn.clj:1403).
+
+The fix sets `admit-program-change!`'s source to the reader event's `:seon.sci.reader/source`, and
+the test source is corrected. A new assertion covers the stray paren: `(defn trailing …))` is
+admitted with source `(defn trailing …)` and armed, `(trailing "a")` refuses at `:input`. It was
+REPL-proven on a scratch copy against the published default (6ab6b7a7).
+
+Open question for the reader's owner (this lane): Clojure refuses a trailing `)` with "Unmatched
+delimiter", whereas the reader here silently drops it. The fix above does not change that.
+
 ## Root runs
 
 1. Publish and adopt `resources/seon/schemas/seon.sci.eval.edn` and `src/seon/sci/eval.clj`
