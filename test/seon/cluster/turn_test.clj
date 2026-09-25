@@ -6,6 +6,7 @@
   evaluations from generated system reads."
   (:require [malli.core] [clojure.core.async :as async]
             [clojure.core.async.flow :as flow.core]
+            [clojure.data.json :as json]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -37,7 +38,9 @@
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support])
-  (:import [java.util Date]))
+  (:import [com.sun.net.httpserver HttpExchange HttpHandler HttpServer]
+           [java.net InetSocketAddress]
+           [java.util Date]))
 
 (def ^:private test-environment
   ;; The subset environment (store layer only) every crossing this
@@ -355,7 +358,66 @@
                          :seon.turn.work/next work}
                         (:seon.turn.work/now request)))))))))
 
+(defn- with-provider!
+  "Name a local OpenAI-compatible provider answering `text` in the cluster's
+  config, run `body` with the request ledger, and stop the server however
+  `body` exits. `ai/complete` runs as installed; only the peer is local."
+  [cluster text body]
+  (let [ledger (atom [])
+        server (HttpServer/create (InetSocketAddress. "127.0.0.1" 0) 0)
+        event #(str "data: " (json/write-str {"choices" [%]}) "\n\n")]
+    (.createContext
+     server "/chat"
+     (reify HttpHandler
+       (handle [_ exchange]
+         (let [document (json/read-str (slurp (.getRequestBody ^HttpExchange exchange)))
+               payload (.getBytes
+                        ^String (if (get document "stream")
+                                  (str (event {"delta" {"content" text}})
+                                       (event {"delta" {"content" ""} "finish_reason" "stop"})
+                                       "data: [DONE]\n\n")
+                                  (json/write-str {"choices" [{"message" {"content" text}
+                                                               "finish_reason" "stop"}]}))
+                        "UTF-8")]
+           (swap! ledger conj document)
+           (.sendResponseHeaders ^HttpExchange exchange 200 (alength payload))
+           (with-open [out (.getResponseBody ^HttpExchange exchange)] (.write out payload))))))
+    (.start server)
+    (try
+      (let [configured (config/apply!
+                        {:seon.db/connection (:seon.db/connection cluster)
+                         :seon.boot/cluster-name "turn-test"
+                         :seon.config/manifest
+                         {:seon.config.ai/endpoint (str "http://127.0.0.1:" (.getPort (.getAddress server)) "/chat")
+                          :seon.config.ai/no-auth true
+                          :seon.config.ai/model "turn-test-provider"}})]
+        (when (or (:seon.config/error-key configured) (:seon.db/invalid-read configured))
+          (throw (ex-info "The local provider configuration was refused." configured)))
+        (body ledger))
+      (finally (.stop server 0)))))
 
+(deftest a-turn-through-a-local-provider-settles-and-exits-within-its-bound
+  ;; Class regression (lane-fix-turn-hang-2026-09-25): the call pass once
+  ;; re-derived the opening over an opening value; each prompt then took
+  ;; 36 s, every renderer hit its 2 s limit and the pass refused, so the
+  ;; driver re-opened until the request bound. Measured with the fix: open
+  ;; ~1.4 s, cold prompt 3.0 s (13 ms warm); the bound leaves room for one
+  ;; cold render cache and one evaluation.
+  (with-cluster
+    (fn [cluster]
+      (with-provider! cluster "(+ 40 2)\n(seon.run/complete \"answered\")"
+        (fn [ledger]
+          (let [started (System/nanoTime)
+                reports (drive-agent! cluster "agent-a" 4)
+                elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+            (is (= [:open :call] (mapv :seon.turn.work/situation reports))
+                (pr-str (mapv #(dissoc % :seon.turn.loop/cluster) reports)))
+            (is (= :closed (:seon.turn.loop/outcome (last reports))))
+            (is (= 1 (count @ledger)) "one provider request, no refused re-open")
+            (is (= ["42"] (keep #(when (= "(+ 40 2)" (str/trim (:seon.cluster.eval/source %)))
+                                   (:seon.eval/shown %))
+                                (agent-evaluations @(:seon.db/connection cluster)))))
+            (is (< elapsed-ms 10000.0) (str "the turn took " elapsed-ms " ms"))))))))
 
 (deftest function-install-reads-the-case-count-from-cluster-facts
   (with-cluster
@@ -2631,8 +2693,10 @@
              "(+ 40 2)\n"
              "(+ 42 1)\n"
              "(seon.run/complete \"indexed\")")]
-        (with-redefs [ai/complete (fn [_projection _] {:seon.ai/text source})]
-          (drive! cluster 12))
+        (with-provider! cluster source
+          (fn [ledger]
+            (drive! cluster 12)
+            (is (= 1 (count @ledger)) "one provider request, no refused re-open")))
         (let [database @connection
               function-symbol 'my.agents.agent-a/extract-id
               test-symbol 'my.agents.agent-a/extract-id-test
