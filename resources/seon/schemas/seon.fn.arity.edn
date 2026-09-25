@@ -20,11 +20,12 @@
                  [:seon.fn.arity/max
                   {:optional true}
                   :seon.fn.arity/max]
-                 [:seon.fn.arity/input-schema :seon.fn.arity/input-schema]
+                 [:seon.fn.arity/input-schema {:optional true} :seon.fn.arity/input-schema]
                  [:seon.fn.arity/arguments {:optional true} :seon.fn.arity/arguments]
                  [:seon.fn.arity/argument-count
                   :seon.fn.arity/argument-count]
                  [:seon.fn.arity/return-schema
+                  {:optional true}
                   :seon.fn.arity/return-schema]
                  [:seon.fn.arity/guard-schema
                   {:optional true}

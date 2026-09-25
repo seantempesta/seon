@@ -16,7 +16,7 @@
                     [:seon.fn.argument/index :seon.fn.argument/index]
                     [:seon.fn.argument/rest? :seon.fn.argument/rest?]
                     [:seon.fn.argument/binding :seon.fn.argument/binding]
-                    [:seon.fn.argument/schema :seon.fn.argument/schema]
+                    [:seon.fn.argument/schema {:optional true} :seon.fn.argument/schema]
                     [:seon.fn.argument/rest-tail-schema
                      {:optional true}
                      :seon.fn.argument/rest-tail-schema]
