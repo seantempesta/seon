@@ -16,6 +16,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as value]
             [seon.render.walk :as walk]
+            [seon.program :as program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.sci.eval :as eval]
@@ -57,6 +58,13 @@
     owning-namespace
     (assoc :seon.render.call/function (symbol (str owning-namespace) "subject"))))
 
+(defn- schema-row
+  "One schema declaration row as the program owner writes it (with its digest)."
+  [connection schema-key form]
+  (program/declaration-row (db/carried-projection (db/db connection))
+                           {:seon.schema/key schema-key :seon.schema/form (pr-str form)}
+                           :all :core))
+
 (defn declare-subject!
   "Declare a fixture subject through the canonical writers: a schema named
   like PRODUCER (default `<namespace>/subject`) whose AI/HTML pair names the
@@ -68,8 +76,8 @@
   (let [producer (if (qualified-symbol? named) named (symbol (str named) "subject"))
         subject (keyword (namespace producer) (name producer))]
     (support/transacted! connection
-                         [{:seon.schema/key subject :seon.schema.admission/source :core
-                           :seon.schema/form (pr-str [:map pair [:seon.ns/name {:optional true} :seon.ns/name]])}])
+                         [(schema-row connection subject
+                                      [:map pair [:seon.ns/name {:optional true} :seon.ns/name]])])
     (support/transacted! connection
                          [(support/program-fn-row
                            (db/db connection) producer
@@ -453,9 +461,8 @@
       ;; An identity-less value nested under a registered attribute gets that
       ;; attribute's named schema (design §1): the report renders its pair.
       (support/transacted! connection
-                           [{:seon.schema/key :seon.render-simplification-test/report
-                             :seon.schema.admission/source :core
-                             :seon.schema/form (pr-str :seon.db/transaction-report)}])
+                           [(schema-row connection :seon.render-simplification-test/report
+                                        :seon.db/transaction-report)])
       (let [database (db/db connection)
             ctx (support/fork-cluster-ctx connection)
             report (db/transact! connection [])
@@ -489,9 +496,8 @@
         connection
         (vec (for [[schema-key renderer] [[:seon.render-simplification.fixture-ambiguous/first first-ai]
                                           [:seon.render-simplification.fixture-ambiguous/second second-ai]]]
-               {:seon.schema/key schema-key :seon.schema.admission/source :core
-                :seon.schema/form (pr-str [:map {:seon.render/ai renderer}
-                                           [:seon.ns/name :seon.ns/name]])})))
+               (schema-row connection schema-key
+                           [:map {:seon.render/ai renderer} [:seon.ns/name :seon.ns/name]]))))
        (support/transacted!
         connection
         [(support/program-fn-row
