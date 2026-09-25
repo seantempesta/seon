@@ -767,7 +767,8 @@
 (defn- install-function-from-database!
   "Install one selected function from the acquired database snapshot. A definition
   the loaded program holds unchanged binds its compiled Var, exactly as acquisition
-  binds a loaded namespace's; only an overridden or affected row interprets source."
+  binds a loaded namespace's, unless this context already defined the symbol itself;
+  only an overridden or affected row interprets source."
   [ctx db function-symbol]
   (let [{source ::function-source
          namespace-name ::function-namespace}
@@ -782,9 +783,13 @@
                   ::missing-function-row function-symbol
                   :seon.fn/sym function-symbol
                   :seon.error/expected :seon.sci.eval/acquired-function}))))
+    ;; An uninstalled program symbol has no SCI entry, so one present is this
+    ;; context's own definition, which survives its first install (AGENTS.md).
     (when-not (and (not (contains? interpreted function-symbol))
                    (not (overridden-row? loaded (db/pull db '[*] [:seon.fn/sym function-symbol])))
-                   (install-jvm-root! ctx function-symbol))
+                   (or (contains? (get-in @(:env ctx) [:namespaces namespace-name])
+                                  (symbol (name function-symbol)))
+                       (install-jvm-root! ctx function-symbol)))
     (let [namespace-row (kernel/program-namespace ctx namespace-name)]
       (install-declared-classes! ctx [namespace-row])
       (sci/install-namespace-bindings!
