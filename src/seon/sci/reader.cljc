@@ -521,14 +521,9 @@
                           ::failure-start source-offset
                           ::reading-state state})
                   failure))))
-            end-line (sci/get-line-number source-reader)
-            end-column (sci/get-column-number source-reader)
-            ;; A token ending at EOF (a number) reads nil and unreads it;
-            ;; tools.reader 1.6.0 reader_types.clj:137-141 still steps the
-            ;; column back, so an exhausted reader ends at the text's end.
-            end (if (rt/peek-char source-reader)
-                  (cursor-offset starts text-length end-line end-column)
-                  text-length)]
+            end (cursor-offset starts text-length
+                               (sci/get-line-number source-reader)
+                               (sci/get-column-number source-reader))]
         (if (= eof form)
           (if (seq events)
             (assoc events (dec (count events))
