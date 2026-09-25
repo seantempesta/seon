@@ -36,3 +36,7 @@ identities. One new test file, twelve seconds.
 (fn.clj) writing program rows, 12 s more in `populate-source!` (cluster.clj:1643) via `full-source-refresh!` (cluster.clj:1953,
 from boot.clj:197). A separate `bin/seon init --dev` adoption of 38 paths took 32 s (20:00Z). Start with no changed source is the
 ~4–5 s layer cost. Cost follows total analysis of changed files, not the change: the fix belongs in analysis reuse.
+
+## Sighting 2026-09-25 23:50Z (impl-debug-page-ui landing)
+`bin/seon init --dev default --changed src/seon/render/web.clj` took 2.4–14 s per iteration; the profile shows
+`seon.cluster/refresh-source!` three times plus `full-source-refresh!` — whole-program work for a one-file change.
