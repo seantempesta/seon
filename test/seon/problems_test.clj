@@ -20,6 +20,7 @@
             [seon.schema.internal] [malli.core] [clojure.set :as set]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
+            [seon.agent :as agent]
             [seon.db :as db]
             [seon.config :as config]
             [seon.error :as error]
@@ -28,6 +29,7 @@
             [seon.render.hiccup :as hiccup]
             [seon.schema]
             [seon.schema.edn :as schema.edn]
+            [seon.test]
             [seon.test-support :as test-support]))
 
 (def ^:private live "9999-1785191833372")
@@ -52,10 +54,23 @@
   [unit]
   (problems/block unit))
 
+(defn- world-namespaces
+  "The namespaces the member's own world leaves unstewarded. The test world
+  carries default's agent-authored namespace rows without their agents
+  (S2c), so those rows are the world's findings, never a fixture's."
+  {:malli/schema [:=> [:cat] [:set [:map [:seon.ns/name :seon.ns/name]]]]}
+  []
+  (set (:seon.problems/unowned-namespaces
+        (problems/problems (db/db (:seon.db/connection seon.test/*member*)) {}))))
+
 (defn- found
+  "The problems the fixture's own facts derive: the world's findings removed."
   [connection]
-  (problems/problems @connection
-                     {}))
+  (let [value (problems/problems @connection {})
+        own (vec (remove (world-namespaces) (:seon.problems/unowned-namespaces value)))]
+    (cond (:seon.error/at value) value
+          (seq own) (assoc value :seon.problems/unowned-namespaces own)
+          :else (dissoc value :seon.problems/unowned-namespaces))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The database fixtures — each commits ONLY its own family's facts
@@ -224,12 +239,14 @@
   (with-db
     (fn [connection]
       (test-support/transacted!
-                   connection
-                   [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "z-cluster-model"]
-                    {:seon.agent/id "agent-a"
-                     :seon.config.ai/model "a-agent-model"}
-                    {:seon.agent/id "agent-b"
-                     :seon.config.ai/model "z-cluster-model"}])
+       connection
+       (into [[:db/add [:seon.config/cluster "default"] :seon.config.ai/model "z-cluster-model"]]
+             (test-support/agent-tx @connection "agent-b")))
+      ;; An agent's model override is its one owned settings component.
+      (is (= {:seon.config.ai/model "a-agent-model"}
+             (agent/settings! {:seon.config.ai/model "a-agent-model"} connection "agent-a")))
+      (is (= {:seon.config.ai/model "z-cluster-model"}
+             (agent/settings! {:seon.config.ai/model "z-cluster-model"} connection "agent-b")))
       (let [value (found connection)
             entries (:seon.problems/missing-models value)]
         (is (= [{:seon.config.ai/model "a-agent-model"}
@@ -537,10 +554,10 @@
                          (problems/block
                           {:seon.db/db db
                            })))]
-        (is (str/includes? (render-at healthy) "nothing is wrong")
-            "the healthy surface still occupies its space")
-        (is (str/includes? (render-at broken) "the model did not answer"))
-        (is (not (str/includes? (render-at broken) "nothing is wrong")))))))
+        (is (= (render-at (db/db (:seon.db/connection seon.test/*member*))) (render-at healthy))
+            "the fixture's healthy value renders exactly its world's surface")
+        (is (not (str/includes? (render-at healthy) "the model did not answer")))
+        (is (str/includes? (render-at broken) "the model did not answer"))))))
 
 (deftest missing-projection-is-a-refusal-not-query-rows
   (test-support/with-database
