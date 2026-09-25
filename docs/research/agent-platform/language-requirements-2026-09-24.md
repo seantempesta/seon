@@ -76,7 +76,7 @@ Designs this spec is implemented by: `one-repl-language-2026-09-25.md` (the path
 | 3b.3 | Decisions are components: accept / revise / reject / obsolete / supersede, with by, reason, the inputs reviewed and the exact deliverables selected (root's cherry-pick) | A | open |
 | 3b.4 | Attempts carry base commit, task digest, test-run identities, deliveries (commit + digest) and an actual exit; three agents on one task = three attempts; resume keeps the attempt | A | attempts as values only |
 | 3b.5 | "Same cause" is a relation distinct from "must precede" (`needs`) | A | open |
-| 3b.6 | Task identity: a readable qualified keyword stored under an identity attribute (`:seon.task/id`), not a `:db/ident` (Datahike reserves idents for attributes); generated tasks derive their keyword from producer + subject (2.5) | O 2026-09-25 | ruled |
+| 3b.6 | Task identity comes from the one id function: `seon.id` over the task's defining data (producer + subject, or an authored task's own data) under `:seon.task/id` — never a `:db/ident`. A migrated issue gets its new id and keeps a link to its existing issue path as evidence until it is rewritten (owner 2026-09-25) | O 2026-09-25 | ruled |
 
 ## 4. The writer refuses badly written tasks (constraints, not advice)
 
@@ -159,7 +159,7 @@ explode and the metadata larger than the actual function… tasks and references
 | 7.8 | **Runtime tasks** (detectors, errors, users, agents) are database writes through `seon.task/create!`; they may name subjects explicitly because no code lists them yet | O, A | proposed |
 | 7.9 | **Ingestion:** the analyzer stores `:seon/tasks` and `:seon/must-read`/`:seon/see-also` references as symbol/keyword edges (today it drops them); task EDN reconciles by id into the same task schema | O | open |
 | 7.9b | **Test seeds are edges too:** a deftest's `:seon.test/seed` entries — literal tx data, a qualified seed-fn symbol, or an inline `(fn [input] ...)` (owner 2026-09-24: all three; literal data taught first; bodies stay out of EDN task files) — are ingested as edges (a symbol as its own edge; literal data and inline fns through the test's own analysis and definition digest), so a task's context walk follows task → test → seed fn (doc, contract, source) → the schema keys it writes (`:seon.fn/writes`, already stored) → their forms; the seed's tx-data is validated against those schemas at admission, so the context shows data of known shape (owner 2026-09-24) | O | open: part of the ingestion slice |
-| 7.11 | **Issues and plans move into the codebase as tasks:** each `docs/seon/issues/*.md` becomes a task entry (id from its slug, intent from its summary, `must-read` to its evidence file) in its owning namespace's task EDN; its subjects gain the id in their `:seon/tasks`; its proof is the regression that names it; the markdown body stays as linked evidence, never parsed. The ranked issue index and plan READMEs become rendered views of task data (2.1, 5.11). Long designs, research and skills stay Markdown, linked by symbol and pinned `file:line` | O 2026-09-25 | proposed: first slice after 7.9 |
+| 7.11 | **Issues and plans move into the codebase as tasks:** each `docs/seon/issues/*.md` becomes a task entry (id from `seon.id` over its data, 3b.6; intent from its summary, `must-read` to its evidence file) in its owning namespace's task EDN; its subjects gain the id in their `:seon/tasks`; its proof is the regression that names it; the markdown body stays as linked evidence, never parsed. The ranked issue index and plan READMEs become rendered views of task data (2.1, 5.11). Long designs, research and skills stay Markdown, linked by symbol and pinned `file:line` | O 2026-09-25 | proposed: first slice after 7.9 |
 | 7.12 | Defects listed in "Defects the runs exposed" below are the first tasks migrated | O | proposed |
 | 7.10 | **Context:** `(task :id)` shows the entity with its subjects and proofs; a function's context lists the open tasks that reference it, so work on one function surfaces its other known problems | O | proposed |
 
@@ -195,7 +195,7 @@ explode and the metadata larger than the actual function… tasks and references
 | 8.3 | Each evaluation response carries the open errors on its branch that occurred after the previous evaluation's stored basis | lane launched |
 | 8.4 | Core faults (not agent mistakes) are also recorded on the cluster branch with their origin branch, so status, root, stewards and `faults --wait` see platform bugs hit inside attempts, and unlinking a branch never drops an open core fault. Owner 2026-09-24: a core fault does NOT wake root's paid LLM turn until root's context can act on one (a config dial, default off); it stays recorded and visible in status, the MCP error window and the faults feed | lane launched |
 | 8.5 | Errors are data, never program: they never merge; an agent's mistakes go with its branch | met by the partition |
-| 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults. **OPEN (owner):** conflicts with 1.10/the one REPL path, under which MCP is an entrant that records every evaluation; root recommends recording JVM-mode evaluations as root's, floor-rendered, without custody | open |
+| 8.6 | MCP JVM-mode probe errors return to their caller and are never recorded as cluster faults. **RULED (owner 2026-09-25):** when a cluster database is available, an MCP JVM-mode evaluation is recorded as a root evaluation on the one REPL path, floor-rendered, without custody; its errors are recorded like any evaluation's | ruled |
 | 8.7 | The per-session `:seon.dev.mcp/new-faults` cursor (`e868e5ec5`) is deleted, replaced by 8.3 | lane launched |
 
 ## 10. Contracts and isolation stance (owner 2026-09-24)
@@ -215,7 +215,7 @@ explode and the metadata larger than the actual function… tasks and references
 | 9.2 | The fix is at the producers, not in contract spellings: no invented "nothing" schema; core contracts keep `:nil`/`[:maybe]` where nil truly means nothing | ruled; census running (`ambiguous-nil-producers-2026-09-24.md`) |
 | 9.3 | Catch sites either handle a declared case or resurface the whole cause (existing law); a catch that returns nil/default is a defect | law; census running |
 | 9.4 | A lookup distinguishes "no such row" (nothing) from "could not read" (declared error) | census running |
-| 9.5 | **OPEN (owner):** the floor never realizes a lazy value, so an unrealized result shows as not-yet-realized — a declared presentation, never something that reads as nil | open |
+| 9.5 | **RULED (owner 2026-09-25):** rendering never realizes a lazy value; an unrealized result shows a declared "unrealized lazy seq" marker with its class, and realizing a bounded page happens only on explicit request (the HTML expander or a REPL call), never as nil | ruled |
 
 ## 6. Defects the runs exposed (each becomes a task at migration, 7.12)
 
