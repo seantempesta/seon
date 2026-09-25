@@ -219,7 +219,9 @@ Private experiments remain possible; local green never implies shared acceptance
   failed rendering gives a diagnostic. Compose error base and satisfied schema renderers.
   An attribute request stays an attribute request; report ugly output and estimate tokens.
 - **Apply presentation limits once.** One render path: a value's declared render function renders less, else the floor value
-  printer holds the one budget and spreads it across the value's shape; nothing else clips (owner 2026-09-25). Save their exact
+  printer holds the one budget and spreads it across the value's shape; nothing else clips (owner 2026-09-25). Printing is
+  rendering, and it has two consumers on one pipeline: AI agents through MCP and humans through the browser share the
+  same selection, node tree and cut retrieval; only the final face differs. Build minimal infrastructure. Save their exact
   text, select whole prompt units, never clip HTML or historical units again.
   Keep query-work bounds and deadlines separate; elisions name bound, count, path and requery,
   with floor hits counted. Derive missing profiles at entry or refuse explicitly.
