@@ -155,7 +155,8 @@
                            producer)]
             (is (= producer (:seon.render.selection/selected decision)))
             (is (= entity (:seon.render/value argument)))
-            (is (= database (:seon.db/db argument)))
+            (is (not (contains? argument :seon.db/db))
+                "the database is a declared input call preparation supplies, not a unit member")
             (is
               (not=
                 producer
@@ -723,8 +724,10 @@
       (db/transact!
         connection
         (agent/creation-tx
+          ;; Its own namespace: fixture-a's renderers would be this viewer's
+          ;; defaults and outrank the subject's declared pair.
           {:seon.agent/id "source-cache-agent",
-           :seon.ns/name fixture-a,
+           :seon.ns/name 'my.agents.source-cache,
            :seon.cluster/name "source-cache"}))
       (declare-subject! connection fixture-a
                         {:seon.render/ai 'seon.render-simplification-test/authored-source})
