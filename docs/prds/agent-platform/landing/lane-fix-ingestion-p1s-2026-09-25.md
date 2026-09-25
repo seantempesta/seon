@@ -13,6 +13,59 @@ committed but **not yet run**: under the LOAD RULE this lane ran no test request
 into default. Root runs the commands below.
 
 ## Broken or unresolved first
+## Custody class, commit c1e40b7e8, superseding 2245ab5a5's per-write wrapper
+
+### The defect
+
+Three writes to a freshly acquired branch inherited the caller's custody, and the writer refuses
+each as a write into another branch:
+
+- the candidate write in `prepare-merge!`;
+- the nested `seon.test/run` inside `candidate-gate!` (verify-1845 003/004);
+- the refusal records `acquire-context!` writes through `sci.eval/acquire!`
+  (`docs/seon/issues/acquisition-refusal-records-write-under-the-callers-custody.md`).
+
+### Fix
+
+- **Custody is bound where the branch's work is owned.**
+  - `candidate-gate!` binds the candidate execution's custody once, around its write and its test
+    run.
+  - `acquire-context!` binds the acquired branch's custody around `acquire!`.
+  - The wrapper in `prepare-merge!` is retired.
+- **Why there are two bindings, not one.** A dynamic binding cannot outlive
+  `acquire-context!`'s return, so the owner of work done after acquisition has to bind it. That
+  owner is the gate.
+- **`seon.test/run`'s contract.** It passes a refused recording write through as its answer, but
+  did not declare that shape. It now declares `:seon.db/transaction-refused-error`, the writer's
+  declared output. The REPL value satisfies that schema and `:seon.db.write/validation-refusal`,
+  but not `:seon.db.write/error`.
+- **Size:** +32/−14 source across four files, +37 test.
+
+### REPL evidence (default JVM)
+
+Setup: an isolated handle from the turn-loop cluster, holding a fixture function and its test,
+with a candidate branch.
+
+1. Under the handle's custody, the unfixed gate refused the write: 978 ms.
+2. With only the write wrapped, the run failed `seon.test/run`'s own output contract. That is the
+   verify-1845 failure.
+3. The fixed composition, whole body under the candidate's custody, ran green: run
+   `55cde0c70fa9`, executed 1, pass 1, 4,788 ms. Total 5.6 s.
+4. `accept-merge!` then merged it: `(defn f [] 2)` landed on the head, 1.8 s.
+   `candidate-dangling` took 477 ms of that. That is over the sub-second-per-part target and is
+   noted for follow-up.
+5. A direct `run` whose recording write is refused returns the writer's refusal,
+   `:seon.db/transaction-refused true`.
+
+The acquisition binding was not exercised with real refusal rows, because this world had none. It
+is the same composition as steps 3–5. All probe branches were retired and the scratch namespace
+removed.
+
+### Regression
+
+`seon.cluster.source-test/work-on-an-acquired-branch-runs-as-that-branchs-own-work-under-an-agents-custody`
+(bound 15 s; measured 5.6 s at the REPL).
+
 ## Root run at 18:40 (tmp/orchestrator/verify-1840.out.d/003.txt): a production defect in `prepare-merge!`
 
 - **Where it failed.** "The merge delta was refused" was raised in `prepare-merge!`'s `write!`
