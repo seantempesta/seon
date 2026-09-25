@@ -233,9 +233,9 @@
            store (:seon.store/store handle)
            test-symbol 'seon.test.one-request-test/resolves-nowhere]
        (define-agent-test! handle "(clojure.test/deftest resolves-nowhere (clojure.test/is true))")
-       (support/transacted! connection (support/replacement-tx (db/db connection) [:seon.test/sym test-symbol]
-                                                               "(clojure.test/deftest resolves-nowhere (clojure.test/is true))"
-                                                               {:seon.test/ns [:seon.ns/name probe-ns]}))
+       ;; A partial edit of the stored row, digested by its final namespace as the writer digests it.
+       (support/transacted! connection [(support/revision (db/db connection) [:seon.test/sym test-symbol]
+                                                          {:seon.test/ns [:seon.ns/name probe-ns]})])
        (let [result (sut/run {:seon.test/execution (support/execution-handle connection)
                               :seon.test/recording-connection connection
                               :seon.test/policy :named
