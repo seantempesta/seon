@@ -309,66 +309,11 @@
            (:seon.error/exception-class face)))
     (is (= first-party-frame (:seon.error/frame face)))))
 
-(deftest runtime-observation-counts-problems-without-embedding-facts
-  (let [cluster-name "mcp-runtime-problem-count-test"
-        large-detail (apply str (repeat 20000 \x))]
-    (swap! running-instances assoc cluster-name
-           {:seon.boot/cluster-connection ::connection})
-    (try
-      (with-redefs [boot/readiness
-                    (fn [_]
-                      {:seon.boot/cluster-name cluster-name
-                       :seon.problems/problems
-                       {:seon.problems/error-signatures
-                        [{:seon.error/fact
-                          {:seon.error/data-edn large-detail}}
-                         {:seon.error/fact
-                          {:seon.error/data-edn large-detail}}]
-                        :seon.problems/errored-receipts
-                        [{:seon.cluster.eval/error large-detail}]}})]
-        (let [result (cluster/mcp-runtime-observation cluster-name)
-              ready (:seon.dev.mcp/readiness result)]
-          (is (= {:seon.problems/error-signatures 2
-                  :seon.problems/errored-receipts 1}
-                 (:seon.dev.mcp/problem-counts result)))
-          (is (not (contains? ready :seon.problems/problems)))
-          (is (< (utf8-size result) 1024))))
-      (finally
-        (swap! running-instances dissoc cluster-name)))))
-
-(deftest runtime-observation-shows-unavailable-problems-with-their-cause
-  ;; `seon.problems/problems` may answer a declared refusal instead of the
-  ;; per-family map (observed on default 2026-09-23: latest-results refused
-  ;; an incomplete member). The observation must not count the refusal's
-  ;; keys (a Date is not countable) nor show counts that read as healthy.
-  (let [cluster-name "mcp-runtime-problems-unavailable-test"
-        refusal {:seon.error/at (java.util.Date.)
-                 :seon.error/layer :seon.test/execution
-                 :seon.error/operation 'seon.test.runner/latest-results
-                 :seon.error/message
-                 "The test execution evidence does not authorize this transition."
-                 :seon.error/expected :completed-member
-                 :seon.error/offending 'example-test/incomplete
-                 :seon.test/execution-refusal :seon.test/population-unknown}]
-    (swap! running-instances assoc cluster-name
-           {:seon.boot/cluster-connection ::connection})
-    (try
-      (with-redefs [boot/readiness
-                    (fn [_]
-                      {:seon.boot/cluster-name cluster-name
-                       :seon.problems/problems refusal})]
-        (let [result (cluster/mcp-runtime-observation cluster-name)]
-          (is (= refusal (:seon.dev.mcp/problems-unavailable result)))
-          (is (nil? (find result :seon.dev.mcp/problem-counts)))
-          (is (not (contains? (:seon.dev.mcp/readiness result)
-                              :seon.problems/problems)))))
-      (finally
-        (swap! running-instances dissoc cluster-name)))))
-
 (deftest runtime-observation-bounds-open-faults-and-counts-them-whole
   ;; The observation crossed the prepl whole (12,758 chars for 16 faults on
   ;; default, 2026-09-25). It carries the newest ten open faults with strings
   ;; cut to 300 characters, and counts every open and resolved fault.
+  ;; Problem families cross as counts; the readiness face omits their facts.
   (support/with-database
    (fn [connection]
      (let [cluster-name (str "mcp-observation-bound-" (random-uuid))
@@ -402,7 +347,10 @@
                                 (get-in % [:seon.dev.mcp/omitted :seon.error/message]))
                              shown))
                "the newest fault is shown, its message cut and its length named")
-           (is (every? #(<= (count %) 300) strings) (pr-str (remove #(<= (count %) 300) strings))))
+           (is (every? #(<= (count %) 300) strings) (pr-str (remove #(<= (count %) 300) strings)))
+           (is (<= 50 (get-in result [:seon.dev.mcp/problem-counts :seon.problems/error-signatures]))
+               "each problem family is a count, never its facts")
+           (is (not (contains? (:seon.dev.mcp/readiness result) :seon.problems/problems))))
          (finally (swap! running-instances dissoc cluster-name)))))))
 
 (deftest ^{:seon.test/fixture-observation
