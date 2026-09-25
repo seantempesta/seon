@@ -300,7 +300,7 @@
 
  :seon.error/base
  [:map
- {:seon.db/attributes true}
+ {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
  [:seon.error/at :seon.error/at]
  [:seon.error/layer :seon.error/layer]
  [:seon.error/operation :seon.error/operation]

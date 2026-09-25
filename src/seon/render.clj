@@ -558,16 +558,41 @@
         (render-argument request)
         (producer-argument request)))))
 
+(defn- declared-producers
+  "The renderers `value`'s declared identity names for `output`: the
+  alternatives its own error operation returns, else the returns of the root
+  call's contracted function, else its owning row schema. Distinct producers."
+  {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :map :seon.schema/value :seon.render/output]
+                  [:vector :qualified-symbol]]}
+  [projection request value output]
+  (let [registry (:seon.schema.projection/registry projection)
+        function (:seon.render.call/function request)
+        pairs (fn [schema-keys]
+                (into [] (comp (keep #(when-let [s (mr/schema registry %)]
+                                      (get (or (internal/entity-properties s) (m/properties s)) output)))
+                               (filter qualified-symbol?) (distinct))
+                      schema-keys))]
+    (cond
+      (or (nil? projection) (not (map? value)) (attribute-scoped? request)) []
+      (and (:seon.error/at value) (qualified-symbol? (:seon.error/operation value)))
+      (pairs (error-alternatives projection value))
+      (and function (identical? value (render-value request)))
+      (pairs (satisfied-alternatives projection function value))
+      :else (pairs (some-> (entity-owner projection value) vector)))))
+
 (defn- declared-producer
   {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.render/output]
                   [:or :nil :qualified-symbol :seon.render/ambiguous-error]]}
   [projection request value output]
-  (if (attribute-scoped? request)
-    (attribute-producer projection request output)
-    (schema-producer projection request value output)))
+  (let [declared (declared-producers projection request value output)]
+    (cond
+      (attribute-scoped? request) (attribute-producer projection request output)
+      (= 1 (count declared)) (first declared)
+      (seq declared) (ambiguity nil output declared)
+      :else (schema-producer projection request value output))))
 
 (def ^:private selection-stage-order
-  [:explicit-value :explicit-request :namespace :schema :floor])
+  [:explicit-value :explicit-request :namespace :declared :schema :floor])
 
 (defn- selection-candidate
   [producer]
@@ -680,9 +705,21 @@
       (= 1 (count producers)) (selected-stage stage (first producers))
       :else {:seon.render.selection/stage stage})))
 
+(defn- declared-stage
+  [request projection value output]
+  (let [producers (declared-producers projection request value output)
+        evidence (mapv selection-candidate producers)]
+    (case (count producers)
+      0 {:seon.render.selection/stage (selection-stage :declared :no-match evidence)}
+      1 (selected-stage (selection-stage :declared :selected evidence) (first producers))
+      (let [selection-error (ambiguity nil output producers)]
+        (selected-stage (selection-stage :declared :ambiguous evidence selection-error)
+                        selection-error)))))
+
 (defn- selection-stage-result
   [stage-name request projection value output output-schema]
   (case stage-name
+    :declared (declared-stage request projection value output)
     :explicit-value (explicit-value-stage request output)
     :explicit-request (explicit-request-stage request output)
     :namespace (namespace-stage request output output-schema)

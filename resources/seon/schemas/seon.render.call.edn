@@ -1,5 +1,8 @@
 #:seon.render.call
 {:id [:or :qualified-keyword [:vector :seon.schema/value]]
+ :function
+ [:qualified-symbol
+  {:description "The contracted function a top-level evaluated call named; its declared returns select the root value's renderer."}]
  :entry
  [:map
   [:seon.render.call/static-evidence :map]
