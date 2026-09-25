@@ -813,8 +813,11 @@
         (not (:db/id subject)) (refuse "The issue is absent on the candidate." issue)
         :else
         (let [s (keyword (str "merge-" (id/id)))
+              ;; S's write is S's own work: under the caller's custody the writer
+              ;; refuses a write naming another branch (seon.db/foreign-connection-error).
               write! (fn [execution]
-                       (let [written (db/transact! (:seon.db/connection execution) {:tx-data tx})]
+                       (let [c (:seon.db/connection execution)
+                             written (db/call-with-custody {:seon.db/connection c} #(db/transact! c {:tx-data tx}))]
                          (when (:seon.error/at written) (throw (ex-info "The merge delta was refused." written)))
                          (into delta (map #(vector :seon.test/sym (:seon.test/sym %))) (:seon.issue/tests subject))))
               gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (constantly #{}))
