@@ -5,6 +5,7 @@
             [seon.config :as config]
             [seon.db :as db]
             [seon.render :as render]
+            [seon.render-simplification-test :as simplification]
             [seon.render.web-test :as web-test]
             [seon.sci.eval :as sci.eval]
             [seon.sci.kernel :as kernel]
@@ -21,6 +22,13 @@
                    :seon.cluster.eval/ordinal 0 :seon.cluster.eval/at (java.util.Date.)
                    :seon.eval/shown shown}])]
     (is (:db-after report) (pr-str (select-keys report [:seon.error/operation :seon.error/message])))))
+
+(defn- declare-subject!
+  "Fixture A's declared subject, whose AI pair names its namespace-ai renderer."
+  [connection]
+  (simplification/declare-subject!
+   connection 'seon.render-simplification.fixture-a
+   {:seon.render/ai 'seon.render-simplification.fixture-a/namespace-ai}))
 
 (defn- replace-renderer! [connection ctx form]
   (let [report (db/transact! connection
@@ -39,6 +47,7 @@
    (fn [connection]
      (let [namespace-name 'seon.render-simplification.fixture-a
            _ (seed-shown! connection namespace-name "one")
+           _ (declare-subject! connection)
            ctx (support/fork-cluster-ctx connection)
            profile (render/agent-render-profile config/defaults)
            caps (config/result-caps config/defaults)
@@ -49,7 +58,7 @@
            request (fn []
                      {:seon.db/db (db/db connection)
                       :seon.sci.eval/ctx ctx
-                      :seon.render/namespace namespace-name
+                      :seon.render.call/function (symbol (str namespace-name) "subject")
                       :seon.render/value {:seon.ns/name namespace-name}
                       :seon.render/output :seon.render/ai
                       :seon.render/profile profile
@@ -114,6 +123,7 @@
          (support/with-database
           (fn [other]
             (seed-shown! other namespace-name "other connection")
+            (declare-subject! other)
             (is (not (render/same-committed-database? (db/db connection) (db/db other))))
             (is (= "other connection"
                    (render/render-call (assoc (request) :seon.db/db (db/db other))))))))))))

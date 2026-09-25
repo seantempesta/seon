@@ -1,8 +1,8 @@
 (ns seon.render-simplification.fixture-b)
 
 (defn namespace-ai
-  "Identify the fixture B namespace through its own renderer."
-  {:malli/schema [:=> [:cat :seon.ns/ns] :seon.render/ai]}
+  "Identify fixture B's declared subject (seon.render-simplification-test/declare-subject!)."
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
   [value]
   (str "B:" (:seon.ns/name value)))
 

@@ -55,7 +55,34 @@
      :seon.sci.eval/time-limit-ms 2000,
      :seon.config/on-core-error :panic}
     owning-namespace
-    (assoc :seon.render/namespace owning-namespace)))
+    (assoc :seon.render.call/function (symbol (str owning-namespace) "subject"))))
+
+(defn declare-subject!
+  "Declare NAMESPACE-NAME's fixture subject through the canonical writers: a
+  schema whose AI/HTML pair names that namespace's renderers and a contracted
+  producer returning it. A request naming that producer selects the pair."
+  {:malli/schema [:=> [:cat :seon.db/connection :symbol [:map-of :qualified-keyword :qualified-symbol]]
+                  :qualified-symbol]}
+  [connection namespace-name pair]
+  (let [subject (keyword (str namespace-name) "subject")
+        producer (symbol (str namespace-name) "subject")]
+    (support/transacted! connection
+                         [{:seon.schema/key subject :seon.schema.admission/source :core
+                           :seon.schema/form (pr-str [:map pair [:seon.ns/name :seon.ns/name]])}])
+    (support/transacted! connection
+                         [(support/program-fn-row
+                           (db/db connection) producer
+                           (str "(defn subject {:malli/schema [:=> [:cat] " subject "]} [] {})"))])
+    producer))
+
+(defn- declare-fixture-subjects!
+  "The fixture A and B subjects most regressions render."
+  [connection]
+  (declare-subject! connection fixture-a
+                    {:seon.render/ai 'seon.render-simplification.fixture-a/namespace-ai})
+  (declare-subject! connection fixture-b
+                    {:seon.render/ai 'seon.render-simplification.fixture-b/namespace-ai
+                     :seon.render/html 'seon.render-simplification.fixture-b/holes-html}))
 
 (defn- render-ai
   [request]
@@ -150,19 +177,13 @@
                       (render-request
                         database
                         (support/fork-cluster-ctx connection)
-                        'seon.plan
+                        nil
                         pulled)
                       :seon.render/output
                       :seon.render/html)
             decision (selection request)
-            namespace-stage (nth (:seon.render.selection/stages decision) 2)
-            candidate (some
-                        #(when
-                          (=
-                            'seon.plan/render-item-html
-                            (:seon.render.selection.candidate/producer %))
-                          %)
-                        (:seon.render.selection.stage/candidates namespace-stage))
+            declared-stage (some #(when (= :declared (:seon.render.selection.stage/name %)) %)
+                                 (:seon.render.selection/stages decision))
             rendered (render-html request)]
         (is (integer? (:my.plan.item/agent prepared)))
         (is
@@ -172,8 +193,8 @@
           (= prepared (value/transacted (dissoc pulled :db/id) database))
           "normalization does not depend on a root :db/id projection")
         (is (= 'seon.plan/render-item-html (:seon.render.selection/selected decision)))
-        (is (= :selected (:seon.render.selection.stage/status namespace-stage)))
-        (is (= :compatible (:seon.render.selection.candidate/status candidate)))
+        (is (= :selected (:seon.render.selection.stage/status declared-stage))
+            "the item's identity names its row schema's pair")
         (is (str/includes? (hiccup/->string rendered) "Render the pulled item"))))))
 
 (deftest
@@ -213,76 +234,30 @@
                 (:seon.render.selection/selected decision)))
             (is (= (agent/render-identity-ai pulled) (render-ai request)))))))))
 
-(deftest candidate-input-and-output-must-fit-the-same-arity
-  (support/with-database
-   (fn [connection]
-     (let [cross-arity 'probe.render/cross-arity
-           matching 'probe.render/matching
-           argument-schema [:map [:seon.render/value :int]]
-           projection
-           (schema/build-projection
-            (schema.edn/packaged-forms)
-            {cross-arity
-             [:function
-              [:=> [:cat argument-schema] :int]
-              [:=> [:cat :string :string] :seon.render/ai]]
-             matching [:=> [:cat argument-schema] :seon.render/ai]})
-           request
-           ;; THE PROJECTION IS HANDED ON THE DATABASE VALUE. Selection
-           ;; derives its projection from the value's own world
-           ;; (`seon.render/request-projection`), so this test supplies the
-           ;; projection it wants the way any caller does. It used to
-           ;; redefine `kernel/context-projection` instead, because before
-           ;; 2026-09-16 mutating the ctx was the ONLY way to ask selection a
-           ;; question about another projection — the ergonomic defect the
-           ;; render-selection issue names. The ctx stays real and
-           ;; unmodified; only the candidate SYMBOLS still come from it.
-           (assoc (render-request (vary-meta (db/db connection)
-                                             assoc :seon.schema/projection
-                                             projection)
-                                  (support/fork-cluster-ctx connection)
-                                  'probe.render 7)
-                  :seon.render/output :seon.render/ai
-                  :seon.render/profile
-                  {:seon.render.profile/id :seon.render.profile/agent
-                   :seon.render.profile/token-budget 100
-                   :seon.render.profile/max-depth 4
-                   :seon.render.profile/max-children 10
-                   :seon.render.profile/composition
-                   :multiline})]
-       (with-redefs [kernel/public-functions-in
-                     (fn [_ctx _namespace-name] [cross-arity matching])]
-         (let [decision (selection request)
-               namespace-stage
-               (nth (:seon.render.selection/stages decision) 2)]
-           (is (= matching (:seon.render.selection/selected decision)))
-           (is (= [:explicit-value :explicit-request :namespace
-                   :declared :schema :floor]
-                  (mapv :seon.render.selection.stage/name
-                        (:seon.render.selection/stages decision))))
-           (is (= [:no-match :no-match :selected
-                   :not-consulted :not-consulted :not-consulted]
-                  (stage-statuses decision)))
-           (is (= [{:seon.render.selection.candidate/producer cross-arity
-                    :seon.render.selection.candidate/status :rejected
-                    :seon.render.selection.candidate/reason
-                    :no-same-arity-match}
-                   {:seon.render.selection.candidate/producer matching
-                    :seon.render.selection.candidate/status :compatible}]
-                  (:seon.render.selection.stage/candidates
-                   namespace-stage)))
-           (with-redefs [m/function-schema
-                         (fn [& _] (throw (ex-info "unexpected recompilation" {})))
-                         m/validator
-                         (fn [& _] (throw (ex-info "unexpected validator compilation" {})))]
-             (is (schema/function-accepts-in?
-                  projection matching [{:seon.render/value 7}]))
-             (is (schema/function-returns-in?
-                  projection matching :seon.render/ai))
-             (is (schema/function-accepts-and-returns-in?
-                  projection matching [{:seon.render/value 7}] :seon.render/ai))
-             (is (= [:int] (schema/function-matching-outputs-in
-                            projection cross-arity [{:seon.render/value 7}]))))))))))
+(deftest function-arities-are-matched-without-recompilation
+  (let [cross-arity 'probe.render/cross-arity
+        matching 'probe.render/matching
+        argument-schema [:map [:seon.render/value :int]]
+        projection
+        (schema/build-projection
+         (schema.edn/packaged-forms)
+         {cross-arity
+          [:function
+           [:=> [:cat argument-schema] :int]
+           [:=> [:cat :string :string] :seon.render/ai]]
+          matching [:=> [:cat argument-schema] :seon.render/ai]})]
+    (with-redefs [m/function-schema
+                  (fn [& _] (throw (ex-info "unexpected recompilation" {})))
+                  m/validator
+                  (fn [& _] (throw (ex-info "unexpected validator compilation" {})))]
+      (is (schema/function-accepts-in?
+           projection matching [{:seon.render/value 7}]))
+      (is (schema/function-returns-in?
+           projection matching :seon.render/ai))
+      (is (schema/function-accepts-and-returns-in?
+           projection matching [{:seon.render/value 7}] :seon.render/ai))
+      (is (= [:int] (schema/function-matching-outputs-in
+                     projection cross-arity [{:seon.render/value 7}]))))))
 
 (deftest explicit-value-selection-records-a-value-without-calling-it-a-producer
   (support/with-database
@@ -311,7 +286,7 @@
            ctx (support/fork-cluster-ctx connection)
            missing-profile (config/effective database "missing-profile")
            result (render-html
-                   (assoc (render-request database ctx fixture-b
+                   (assoc (render-request database ctx nil
                                           {:fixture/value 1})
                           :seon.render/html
                           'seon.render-simplification.fixture-b/holes-html
@@ -350,12 +325,13 @@
   (support/with-database
     (fn [connection]
       (db/transact! connection [{:seon.ns/name fixture-a, :seon.ns/doc "one"}])
+      (declare-fixture-subjects! connection)
       (let [ctx (support/fork-cluster-ctx connection)
             call-id [:seon.render-simplification-test/cached-namespace]
             helper 'seon.render-simplification.fixture-a/cache-helper
             discoveries (atom 0)
             invocations (atom 0)
-            public-functions-in kernel/public-functions-in
+            selection-of seon.render/selection
             invoke kernel/invoke
             request (fn [database retained captured]
                       (cond->
@@ -372,7 +348,8 @@
                         retained
                         (assoc :seon.render/retained-calls retained)))]
         (let [definitions '[(defn cache-helper [] "H1")
-                            (defn namespace-ai [value]
+                            (defn ^{:malli/schema [:=> [:cat :seon.render/unit] :seon.render/ai]}
+                              namespace-ai [value]
                               (str
                                 "A:"
                                 (:seon.ns/name value)
@@ -412,10 +389,10 @@
               [sci/ns (sci/create-ns fixture-a)]
               (doseq [definition definitions] (sci/eval-form ctx definition)))))
         (with-redefs
-          [kernel/public-functions-in
-           (fn [candidate-ctx namespace-name]
+          [seon.render/selection
+           (fn [request]
              (swap! discoveries inc)
-             (public-functions-in candidate-ctx namespace-name))
+             (selection-of request))
            kernel/invoke
            (fn [invocation] (swap! invocations inc) (invoke invocation))]
           (let [first-captured (atom {})
@@ -549,84 +526,10 @@
                 (str/index-of rendered (str first-producer))
                 (str/index-of rendered (str second-producer))))))))))
 
-(deftest owning-namespace-alone-selects-across-a-walk
-  (support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           ctx (support/fork-cluster-ctx connection)
-           rendered-value {:seon.ns/name fixture-b}
-           request (render-request database ctx fixture-b rendered-value)]
-       (is (= (str "B:" fixture-b) (render-ai request)))
-       (is (= (str "A:" fixture-b)
-              (render-ai (assoc request :seon.render/namespace fixture-a))))
-       (let [walked (walk/neighborhood
-                     {:seon.db/db database
-                      :seon.sci.eval/ctx ctx
-                      :seon.render.walk/lookup [:seon.ns/name fixture-b]
-                      :seon.render/output :seon.render/ai
-                      :seon.sci.admit/caps caps
-                      :seon.sci.eval/time-limit-ms 2000
-                      :seon.config/on-core-error :panic
-                      :seon.render/distance 0})
-             root-unit (first walked)]
-         (is (vector? walked))
-         (is (= (str "B:" fixture-b) (:seon.render/output root-unit)))
-         (is (not-any? #(contains? root-unit %)
-                       [:seon.render/unit
-                        :seon.render/kind
-                        :seon.render/projection
-                        :seon.render/would-fall-to-floor?])))
-       (db/transact! connection
-                     [[:db.fn/retractEntity
-                       [:seon.fn/sym
-                        "seon.render-simplification.fixture-b/namespace-ai"]]])
-       (let [without-owner-function
-             (render-ai (assoc request :seon.db/db (db/db connection)))]
-         (is (not (str/starts-with? (str without-owner-function) "A:")))
-         (is (string? without-owner-function)))))))
-
-(deftest overlapping-contracts-refuse-loudly-and-deterministically
-  (support/with-database
-   (fn [connection]
-     (let [database (db/db connection)
-           ctx (support/fork-cluster-ctx connection)
-           request (render-request database ctx fixture-ambiguous
-                                   {:seon.ns/name fixture-ambiguous})
-           result (render-ai request)
-           decision (selection
-                     (assoc request :seon.render/output :seon.render/ai))
-           walked (walk/neighborhood
-                   {:seon.db/db database
-                    :seon.sci.eval/ctx ctx
-                    :seon.render.walk/lookup
-                    [:seon.ns/name fixture-ambiguous]
-                    :seon.render/output :seon.render/ai
-                    :seon.sci.admit/caps caps
-                    :seon.sci.eval/time-limit-ms 2000
-                    :seon.config/on-core-error :panic
-                    :seon.render/distance 0})
-           expected #{"seon.render-simplification.fixture-ambiguous/first-ai"
-                      "seon.render-simplification.fixture-ambiguous/second-ai"}]
-       (is (seq (:seon.render/candidates result)))
-       (is (seq (:seon.render/candidates (:seon.render.selection/selected decision))))
-       (is (= [:no-match :no-match :ambiguous
-               :not-consulted :not-consulted :not-consulted]
-              (stage-statuses decision)))
-       (is (= expected
-              (set (:seon.render/candidates (:seon.error/data result)))))
-       (is (= (sort expected)
-              (:seon.render/candidates (:seon.error/data result))))
-       (is (seq (get-in (first walked)
-                      [:seon.error/value :seon.render/candidates])))
-       (is (= expected
-              (set (get-in (first walked)
-                           [:seon.error/value
-                            :seon.error/data
-                            :seon.render/candidates]))))))))
-
 (deftest renderer-invocation-is-sci-only-and-live-var-backed
   (support/with-database
    (fn [connection]
+     (declare-fixture-subjects! connection)
      (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            request (render-request database ctx fixture-b
@@ -640,60 +543,26 @@
           ctx
           '(defn namespace-ai [value]
              (str "B2:" (:seon.ns/name value)))))
-       (is (= (str "B2:" fixture-b) (render-ai request)))
+       (is (= (str "B2:" fixture-b) (render-ai request))
+           "the declared pair invokes the live SCI Var")
        (sci/binding [sci/ns (sci/create-ns fixture-b)]
          (sci/eval-form
           ctx
-          '(defn namespace-ai [_value]
+          '(defn holes-html [_value]
              [:div (seon.render.hiccup/raw
                     "<script>raw-agent-bytes</script>")])))
-       (let [raw-result
-             (render-html
-              (assoc (render-request database ctx fixture-b {:fixture/value 1})
-                     :seon.render/html
-                     'seon.render-simplification.fixture-b/namespace-ai))]
+       (let [raw-result (render-html request)]
          (is (hiccup/hiccup? raw-result))
-         (is (not
-              (hiccup/raw?
-               (get-in raw-result
-                       [1]))))
+         (is (not (hiccup/raw? (get-in raw-result [1]))))
          (is (str/includes? (hiccup/->string raw-result)
                             "&lt;script&gt;raw-agent-bytes&lt;/script&gt;"))
          (is (not (str/includes? (hiccup/->string raw-result)
-                                 "<script>raw-agent-bytes</script>"))))
-       (let [evaluation
-             (eval/evaluate
-              {:seon.cluster.eval/source
-               (str "(defn live-html "
-                    "{:malli/schema [:=> [:cat :map] :seon.render/hiccup]} "
-                    "[_value] [:article {:class \"live-html\"} \"live\"])")
-               :seon.cluster.eval/ns [:seon.ns/name fixture-a]
-               :seon.sci.eval/ctx ctx
-               :seon.sci.admit/caps caps
-               :seon.sci.eval/time-limit-ms 2000
-               :seon.config/on-core-error :panic})
-             row (dissoc (:seon.program/row evaluation)
-                         :seon.sci.eval/evaluated?)
-             report
-             (db/transact! connection [row])]
-         (eval/install-evaluated-rows!
-          {:seon.sci.eval/ctx ctx
-           :seon.db/db (:db-after report)
-           :seon.sci.eval/installations
-           [{:seon.program/row row
-             :seon.sci.eval/evaluation evaluation}]})
-         (is (some #{'seon.render-simplification.fixture-a/live-html}
-                   (kernel/public-functions-in ctx fixture-a))
-             "the terminal install publishes a new renderer candidate")
-         (is (= [:article {:class "live-html"} "live"]
-                (render-html
-                 (render-request (db/db connection) ctx fixture-a
-                                 {:seon.ns/name fixture-a})))
-             "an ordinary durable defn auto-wires onto the next render"))))))
+                                 "<script>raw-agent-bytes</script>"))))))))
 
 (deftest cold-context-reacquires-the-same-row
   (support/with-database
    (fn [connection]
+     (declare-fixture-subjects! connection)
      (let [database (db/db connection)
            request (fn [ctx]
                      (render-request database ctx fixture-b
@@ -747,15 +616,13 @@
 (deftest old-slot-and-ref-markers-are-inert-renderer-output
   (support/with-database
    (fn [connection]
+     (declare-fixture-subjects! connection)
      (let [database (db/db connection)
            ctx (support/fork-cluster-ctx connection)
            expected [:section {:data-slot "inert"}
                      [:span {:data-ref "[:db/id 7]"} "also inert"]]
            result
-           (render-html
-            (assoc (render-request database ctx fixture-b {:fixture/value 1})
-                   :seon.render/html
-                   'seon.render-simplification.fixture-b/holes-html))]
+           (render-html (render-request database ctx fixture-b {:seon.ns/name fixture-b}))]
        (is (= expected result))
        (is (hiccup/hiccup? result))))))
 
@@ -788,6 +655,7 @@
      (db/transact! connection
                    [{:seon.ns/name fixture-a
                      :seon.ns/doc "one"}])
+     (declare-fixture-subjects! connection)
      (let [ctx (support/fork-cluster-ctx connection)
            invoke kernel/invoke
            invocations (atom 0)
@@ -927,6 +795,7 @@
    (fn [connection]
      (db/transact! connection [{:seon.ns/name fixture-a
                                 :seon.ns/doc "identity input"}])
+     (declare-fixture-subjects! connection)
      (let [database (db/db connection)
            entity (db/pull database '[*] [:seon.ns/name fixture-a])
            ctx (support/fork-cluster-ctx connection)]
