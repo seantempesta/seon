@@ -15,9 +15,16 @@
 (def ^:private interrupted 'seon.id-test/data-shape-and-explicit-length-determine-identity)
 (def ^:private red 'seon.id-test/printed-identity-ignores-the-callers-print-bindings)
 
+(defn- outcome [test-symbol fails]
+  {:seon.test/sym test-symbol :seon.test.member/began? true :seon.test.member/ended? true
+   :seon.test/pass-count (- 1 fails) :seon.test/fail-count fails :seon.test/error-count 0})
+
 (defn- admitted-run!
-  "Admit three members in one run: `finished` green, `red` red; `interrupted` stays open."
-  [connection]
+  "Admit `members` in one run and record `results`; by default `finished` green,
+  `red` red and `interrupted` open."
+  ([connection]
+   (admitted-run! connection [finished red interrupted] [(outcome finished 0) (outcome red 1)]))
+  ([connection members results]
   (let [handle (support/execution-handle connection)
         database (db/db connection)
         provenance (runner/provenance database)
@@ -29,7 +36,7 @@
                    :seon.test.run/include-long? false
                    :seon.test.run/members
                    (mapv #(hash-map :seon.test.member/symbol % :seon.test.member/reasons #{:named})
-                         [finished red interrupted])}
+                         members)}
         completion (fn [results]
                      {:seon.db/db database
                       :seon.test.runner/results results
@@ -38,18 +45,9 @@
                       :seon.test.run/provenance provenance
                       :seon.test.run/terminated? true})
         _ (support/transacted! connection [[:db.fn/call sut/admit-run admission]])
-        committed (runner/commit-results!
-                   connection
-                   (completion [{:seon.test/sym finished
-                                 :seon.test.member/began? true :seon.test.member/ended? true
-                                 :seon.test/pass-count 1 :seon.test/fail-count 0
-                                 :seon.test/error-count 0}
-                                {:seon.test/sym red
-                                 :seon.test.member/began? true :seon.test.member/ended? true
-                                 :seon.test/pass-count 0 :seon.test/fail-count 1
-                                 :seon.test/error-count 0}]))]
+        committed (runner/commit-results! connection (completion results))]
     (is (not (:seon.error/at committed)) (pr-str committed))
-    {:seon.test.run/id (:seon.test.run/id provenance) ::completion (completion [])}))
+    {:seon.test.run/id (:seon.test.run/id provenance) ::completion (completion [])})))
 
 (deftest ^{:seon.test/long "admit-run measured 13.7-15.3 s on default pid 90963 (2026-09-23), the rest under 1 s: it derives the program digest from every program row changed since the source seal (docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md)." :seon.test/long-ms 30000}
   a-thrown-request-records-its-unfinished-members-as-failed-obligations
@@ -195,3 +193,27 @@
            "its member evidence stays readable as history")
        (is (contains? failed red) "a current test's red is listed")
        (is (not (contains? failed deleted)) "a symbol that is no test row is not a failed test")))))
+
+(deftest ^{:seon.test/long "two admit-runs, each measured 13.7-15.3 s on default pid 90963 (2026-09-23; docs/seon/issues/admit-run-derives-the-program-digest-from-every-change-since-the-seal.md); the reads under test are about 1 ms." :seon.test/long-ms 45000}
+  latest-results-reads-one-batch-whatever-the-runs-it-spans
+  (support/with-database
+   (fn [connection]
+     (let [first-run (:seon.test.run/id (admitted-run! connection))
+           reads (fn []
+                   (let [captured (atom [])
+                         latest (binding [db/*read-evidence-sink* captured]
+                                  (runner/latest-results (db/db connection) [finished red interrupted]))]
+                     [(count @captured) (group-by (some-fn :seon.test/sym :seon.test/error-test-symbol) latest)]))
+           [one-run-reads _] (reads)
+           second-run (:seon.test.run/id (admitted-run! connection [finished] [(outcome finished 1)]))
+           [two-run-reads by-symbol] (reads)]
+       (is (= one-run-reads two-run-reads)
+           "the reads are one batch: a second run the answer spans adds none")
+       (is (= [[:seon.test.run/id second-run] 1]
+              ((juxt :seon.test/run :seon.test/fail-count) (first (by-symbol finished))))
+           "a test's latest run answers, not an older green")
+       (is (= [[:seon.test.run/id first-run] 1]
+              ((juxt :seon.test/run :seon.test/fail-count) (first (by-symbol red)))))
+       (is (= [:seon.test.run/id first-run] (:seon.test/run (first (by-symbol interrupted))))
+           "the open member stays its own unknown in its own run")
+       (is (:seon.error/at (first (by-symbol interrupted))))))))

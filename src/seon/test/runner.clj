@@ -1114,61 +1114,76 @@
     (throw (ex-info (:seon.error/message value) value)))
   value)
 
+(defn- admitted-members
+  "The admitted members of `runs` (each pulled with `:db/id`, `:seon.test.run/id`
+  and `:seon.test.run/selection-tx`) as `[run-eid member]` pairs, each member
+  pulled once; `wanted` `[run-eid symbol]` tuples select, nil takes all.
+  Membership refs are asserted only by the admission transaction, so any
+  membership datom from another transaction (an addition or a retraction) is
+  a changed population: one history read of every run's refs, never an as-of
+  view of the store. Reads are one batch whatever the number of runs."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential :map]
+                       [:maybe [:sequential [:tuple :int :seon.test/sym]]]]
+                  [:vector [:tuple :int :map]]]}
+  [database runs wanted]
+  (doseq [run runs]
+    (when-not (:seon.test.run/selection-tx run)
+      (execution-refusal! 'seon.test.runner/execution-members (:seon.test.run/id run)
+                          :seon.test/population-unknown :admitted-selection
+                          (if (:db/id run) run :absent))))
+  (let [attributes [:seon.test.run/members :seon.test.run/covered-by]
+        run-ids (into {} (map (juxt :db/id :seon.test.run/id)) runs)
+        changed (execution-read
+                 (db/q '[:find ?run ?member :in $ [[?run ?selected] ...] [?attribute ...]
+                         :where [?run ?attribute ?member ?tx] [(not= ?tx ?selected)]]
+                       (db/history database)
+                       (mapv (juxt :db/id (comp :db/id :seon.test.run/selection-tx)) runs) attributes))
+        _ (when-let [[run] (first changed)]
+            (execution-refusal! 'seon.test.runner/execution-members (run-ids run)
+                                :seon.test/population-unknown :admitted-membership
+                                (vec (keep (fn [[r m]] (when (= r run) m)) changed))))
+        current (vec (execution-read
+                      (if wanted
+                        (db/q '[:find ?run ?member :in $ [[?run ?symbol] ...] [?attribute ...]
+                                :where [?run ?attribute ?member] [?member :seon.test.member/symbol ?symbol]]
+                              database (vec wanted) attributes)
+                        (db/q '[:find ?run ?member :in $ [?run ...] [?attribute ...]
+                                :where [?run ?attribute ?member]]
+                              database (vec (keys run-ids)) attributes))))
+        pulled (execution-read
+                (db/pull-many database
+                              [:db/id :seon.test.member/symbol :seon.test.member/reasons
+                               :seon.test.member/worker :seon.test.member/claimed-at
+                               :seon.test.member/claim-tx :seon.test.member/host
+                               :seon.test.member/completed-tx :seon.test.member/terminated-tx
+                               :seon.test.member/pass-count :seon.test.member/fail-count
+                               :seon.test.member/error-count :seon.test.member/began?
+                               :seon.test.member/ended? :seon.test.member/error
+                               :seon.test.member/reach-digest]
+                              (mapv second current)))]
+    (mapv
+     (fn [[run] member]
+       (let [counts (select-keys member [:seon.test.member/pass-count :seon.test.member/fail-count
+                                         :seon.test.member/error-count])]
+         (when (or (and (:seon.test.member/completed-tx member)
+                        (or (not= 3 (count counts))
+                            (not (boolean? (:seon.test.member/began? member)))
+                            (not (boolean? (:seon.test.member/ended? member)))))
+                   (and (seq counts) (not (:seon.test.member/completed-tx member))))
+           (execution-refusal! 'seon.test.runner/execution-members (run-ids run)
+                               :seon.test/population-unknown :complete-outcome member))
+         [run member]))
+     current pulled)))
+
 (defn- execution-members
-  "The admitted members of `run-id` (those named by `symbols` when given), each
-  pulled once. Membership refs are asserted only by the admission transaction,
-  so any membership datom from another transaction (an addition or a
-  retraction) is a changed population: one history read of this run's refs,
-  never an as-of view of the store."
+  "The admitted members of `run-id` (those named by `symbols` when given)."
   ([database run-id] (execution-members database run-id nil))
   ([database run-id symbols]
    (let [run (execution-read
-              (db/pull database [:db/id :seon.test.run/selection-tx]
-                       [:seon.test.run/id run-id]))
-         _ (when-not (:seon.test.run/selection-tx run)
-             (execution-refusal! 'seon.test.runner/execution-members run-id
-                                 :seon.test/population-unknown :admitted-selection
-                                 (or run :absent)))
-         attributes [:seon.test.run/members :seon.test.run/covered-by]
-         changed (execution-read
-                  (db/q '[:find [?member ...] :in $ ?run [?attribute ...] ?selected
-                          :where [?run ?attribute ?member ?tx] [(not= ?tx ?selected)]]
-                        (db/history database) (:db/id run) attributes
-                        (get-in run [:seon.test.run/selection-tx :db/id])))
-         _ (when (seq changed)
-             (execution-refusal! 'seon.test.runner/execution-members run-id
-                                 :seon.test/population-unknown :admitted-membership changed))
-         current (execution-read
-                  (if symbols
-                    (db/q '[:find [?member ...] :in $ ?run [?attribute ...] [?symbol ...]
-                            :where [?run ?attribute ?member] [?member :seon.test.member/symbol ?symbol]]
-                          database (:db/id run) attributes (vec symbols))
-                    (db/q '[:find [?member ...] :in $ ?run [?attribute ...]
-                            :where [?run ?attribute ?member]]
-                          database (:db/id run) attributes)))]
-     (mapv
-      (fn [member]
-        (let [counts (select-keys member [:seon.test.member/pass-count :seon.test.member/fail-count
-                                          :seon.test.member/error-count])]
-          (when (or (and (:seon.test.member/completed-tx member)
-                         (or (not= 3 (count counts))
-                             (not (boolean? (:seon.test.member/began? member)))
-                             (not (boolean? (:seon.test.member/ended? member)))))
-                    (and (seq counts) (not (:seon.test.member/completed-tx member))))
-            (execution-refusal! 'seon.test.runner/execution-members run-id
-                                :seon.test/population-unknown :complete-outcome member))
-          member))
-      (execution-read
-       (db/pull-many database
-                     [:db/id :seon.test.member/symbol :seon.test.member/reasons
-                      :seon.test.member/worker :seon.test.member/claimed-at
-                      :seon.test.member/claim-tx :seon.test.member/host
-                      :seon.test.member/completed-tx :seon.test.member/terminated-tx
-                      :seon.test.member/pass-count :seon.test.member/fail-count
-                      :seon.test.member/error-count :seon.test.member/began?
-                      :seon.test.member/ended? :seon.test.member/error
-                      :seon.test.member/reach-digest]
-                     (vec current)))))))
+              (db/pull database [:db/id :seon.test.run/id :seon.test.run/selection-tx]
+                       [:seon.test.run/id run-id]))]
+     (mapv second (admitted-members database [(or run {:seon.test.run/id run-id})]
+                                    (when symbols (mapv #(vector (:db/id run) %) symbols)))))))
 
 (defn- worker-identity [database worker]
   (execution-read
@@ -1616,31 +1631,42 @@
    :seon.test/failure-message])
 
 (defn- recorded-member-results
-  "The recorded results of `test-symbols` in one admitted `run`, by symbol:
-  one member read, one report query and one report pull for the whole set.
-  A member without a completed outcome is its own typed unknown, so the
-  others' evidence stays readable and the unknown is never counted."
-  {:malli/schema [:=> [:cat :seon.db/database-value :map [:sequential :seon.test/sym]]
+  "The recorded results of each `[run-id test-symbol]` in `wanted`, by symbol:
+  one run pull, one member read, one report query and one report pull for the
+  whole set, however many runs it spans. A member without a completed outcome
+  is its own typed unknown, so the others' evidence stays readable and the
+  unknown is never counted."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:sequential [:tuple :seon.test.run/id :seon.test/sym]]]
                   [:map-of :seon.test/sym [:or :seon.test/result :seon.test/result-unknown]]]}
-  [database run test-symbols]
-  (let [members (execution-members database (:seon.test.run/id run) (mapv symbol test-symbols))
+  [database wanted]
+  (let [run-ids (vec (distinct (map first wanted)))
+        runs (zipmap run-ids
+                     (execution-read
+                      (db/pull-many database
+                                    [:db/id :seon.test.run/id :seon.test.run/selection-tx
+                                     :seon.test.run/at :seon.test.run/stopped
+                                     :seon.test.run/basis-t :seon.test.run/program-digest
+                                     :seon.test.run/published-base-digest
+                                     :seon.test.run/overlay-input-digest :seon.test.run/input-digest]
+                                    (mapv #(vector :seon.test.run/id %) run-ids))))
+        by-eid (into {} (map (juxt :db/id identity)) (vals runs))
+        pairs (admitted-members database (mapv #(or (runs %) {:seon.test.run/id %}) run-ids)
+                                (mapv (fn [[id sym]] [(:db/id (runs id)) (symbol sym)]) wanted))
         report-rows (execution-read
                      (db/q '[:find ?member ?report :in $ [?member ...]
                              :where [?member :seon.test.member/failures ?report]]
-                           database (mapv :db/id members)))
+                           database (mapv (comp :db/id second) pairs)))
         reports (group-by first report-rows)
         pulled (zipmap (map second report-rows)
-                       (execution-read (db/pull-many database '[*] (mapv second report-rows))))
-        base (merge (select-keys run [:seon.test.run/program-digest :seon.test.run/basis-t
-                                      :seon.test.run/published-base-digest
-                                      :seon.test.run/overlay-input-digest])
-                    (select-keys (execution-read
-                                  (db/pull database [:seon.test.run/input-digest]
-                                           [:seon.test.run/id (:seon.test.run/id run)]))
-                                 [:seon.test.run/input-digest]))]
+                       (execution-read (db/pull-many database '[*] (mapv second report-rows))))]
     (into {}
-          (map (fn [member]
-                 (let [member-reports (mapv #(dissoc (get pulled (second %)) :db/id)
+          (map (fn [[run-eid member]]
+                 (let [run (by-eid run-eid)
+                       base (select-keys run [:seon.test.run/program-digest :seon.test.run/basis-t
+                                              :seon.test.run/published-base-digest
+                                              :seon.test.run/overlay-input-digest
+                                              :seon.test.run/input-digest])
+                       member-reports (mapv #(dissoc (get pulled (second %)) :db/id)
                                             (get reports (:db/id member)))
                        test-symbol (:seon.test.member/symbol member)
                        run-ref [:seon.test.run/id (:seon.test.run/id run)]]
@@ -1672,7 +1698,7 @@
                       ;; (`seon.test/failure-message`), never per read.
                       (seq member-reports)
                       (assoc :seon.test.failure/reports member-reports)))])))
-          members)))
+          pairs)))
 
 (defn commit-results!
   "Commit captured test results and return those exact committed facts."
@@ -1703,8 +1729,9 @@
                        (db/pull after [:seon.test.run/selection-tx]
                                 [:seon.test.run/id (get-in completion [:seon.test.run/provenance :seon.test.run/id])]))
             by-symbol (when admitted?
-                        (recorded-member-results after (:seon.test.run/provenance completion)
-                                                 (mapv :seon.test/sym results)))
+                        (recorded-member-results
+                         after (let [run-id (get-in completion [:seon.test.run/provenance :seon.test.run/id])]
+                                 (mapv #(vector run-id (:seon.test/sym %)) results))))
             recorded (mapv (fn [{test-symbol :seon.test/sym}]
                              (if admitted?
                                (get by-symbol (symbol test-symbol))
@@ -1848,17 +1875,11 @@
                       database test-symbols
                       (get-in (db/schema-database database) [:config :branch])))
           latest (vals (reduce (fn [result [sym :as row]] (assoc result sym row))
-                               (sorted-map) (sort-by #(nth % 2) rows)))]
-      ;; One read per distinct run, never one per test.
-      (->> (group-by second latest)
-           (mapcat (fn [[run-id rows]]
-                      (let [run (execution-read
-                                 (db/pull database
-                                          [:seon.test.run/id :seon.test.run/at :seon.test.run/stopped
-                                           :seon.test.run/basis-t :seon.test.run/program-digest]
-                                          [:seon.test.run/id run-id]))
-                            results (recorded-member-results database run (mapv first rows))]
-                        (map (comp results first) rows))))
+                               (sorted-map) (sort-by #(nth % 2) rows)))
+          results (recorded-member-results database (mapv (fn [[sym id]] [id sym]) latest))]
+      ;; One batch of reads for every run, never one per run or per test.
+      (->> latest
+           (map (comp results first))
            (sort-by (some-fn :seon.test/sym :seon.test/error-test-symbol))
            vec))
     (catch Exception failure (result-read-error "latest-results" failure))))
