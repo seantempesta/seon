@@ -4,6 +4,7 @@
             [sci.core :as sci]
             [seon.config :as config]
             [seon.db :as db]
+            [seon.env :as env]
             [seon.fn :as seon.fn]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
@@ -166,6 +167,11 @@
                  (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/green-test] source {})
                  (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/red-test] source {})]))
       (let [parent (test-support/fork-cluster-ctx connection)
+            ;; The parent holds the program its database holds, as a live
+            ;; agent context does. A stale parent is advanced by the fork's
+            ;; first evaluation (`evaluate` acquires `::base-ctx`), which
+            ;; replaces a definition whose row changed: adoption, not leakage.
+            _ (sci.eval/acquire! {:seon.sci.eval/ctx parent :seon.db/db @connection})
             _ (when-not (sci/find-ns parent 'fixture.candidate)
                 (sci/add-namespace! parent 'fixture.candidate {}))
             _ (sci/binding [sci/ns (sci/create-ns 'fixture.candidate)]
@@ -223,6 +229,57 @@
           (is (= 1
                  (sci/eval-string*
                   parent "(fixture.candidate/target 1)"))))))))
+
+(deftest two-candidate-forks-of-one-base-keep-their-own-roots
+  ;; CLASS: a candidate installs into its fork only. Two forks of one acquired
+  ;; base install different roots for one symbol; the base keeps its Var, root
+  ;; bytes, program snapshot, installed set and environment, and each fork its own.
+  (test-support/with-database
+    (fn [connection]
+      (admit! connection
+              (test-support/agent-tx @connection "fork-author" 'fixture.forks))
+      (admit! connection
+              [(test-support/program-fn-row
+                @connection 'fixture.forks/target
+                "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)")])
+      (let [base (test-support/fork-cluster-ctx connection)
+            _ (sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db @connection})
+            _ (when-not (sci/find-ns base 'fixture.forks)
+                (sci/add-namespace! base 'fixture.forks {}))
+            _ (sci/binding [sci/ns (sci/create-ns 'fixture.forks)]
+                (sci/eval-string*
+                 base "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)"))
+            root-bytes #(.getBytes (binding [*print-meta* true]
+                                     (pr-str (first (sci/var-root-data % ['fixture.forks/target]))))
+                                   java.nio.charset.StandardCharsets/UTF_8)
+            base-var (sci/resolve base 'fixture.forks/target)
+            [root-before snapshot installed environment]
+            [(root-bytes base) @(:seon.sci.kernel/program-snapshot base)
+             @(:seon.sci.kernel/installed-functions base) (env/of base)]
+            candidate
+            (fn [body]
+              (:seon.test.accretion/candidate-ctx
+               (sci.eval/evaluate-candidate
+                {:seon.sci.eval/ctx base :seon.db/db @connection
+                 :seon.db/connection connection :seon.agent/id "fork-author"
+                 :seon.cluster.eval/source
+                 (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] " body ")")
+                 :seon.test.accretion/gate-set []
+                 :seon.sci.eval/time-limit-ms 2000
+                 :seon.sci.admit/caps (config/result-caps config/defaults)
+                 :seon.config/on-core-error :panic})))
+            inc-fork (candidate "(inc x)")
+            dec-fork (candidate "(dec x)")]
+        (is (some? base-var))
+        (is (identical? base-var (sci/resolve base 'fixture.forks/target)))
+        (is (java.util.Arrays/equals ^bytes root-before ^bytes (root-bytes base)))
+        (is (identical? snapshot @(:seon.sci.kernel/program-snapshot base)))
+        (is (identical? installed @(:seon.sci.kernel/installed-functions base)))
+        (is (identical? environment (env/of base)))
+        (is (not (identical? (sci/resolve inc-fork 'fixture.forks/target)
+                             (sci/resolve dec-fork 'fixture.forks/target))))
+        (is (= [1 2 0] (mapv #(sci/eval-string* % "(fixture.forks/target 1)")
+                             [base inc-fork dec-fork])))))))
 
 (deftest a-gate-test-runs-with-its-authors-cluster-custody
   ;; A GATE TEST IS THE AUTHOR'S OWN WORK. It is evaluated in the candidate
