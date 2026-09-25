@@ -155,8 +155,8 @@
                            producer)]
             (is (= producer (:seon.render.selection/selected decision)))
             (is (= entity (:seon.render/value argument)))
-            (is (not (contains? argument :seon.db/db))
-                "the database is a declared input call preparation supplies, not a unit member")
+            (is (= database (:seon.db/db argument))
+                "the render boundary passes its database in the unit")
             (is
               (not=
                 producer
@@ -575,6 +575,26 @@
               (render-ai (request (support/fork-cluster-ctx connection)))))
        (is (= (str "B:" fixture-b)
               (render-ai (request (support/fork-cluster-ctx connection)))))))))
+
+(deftest an-agent-neighborhood-renders-its-database-reading-units
+  ;; The system turn opens from this neighborhood (`seon.turn/declared-sources`);
+  ;; a unit renderer reading `(:seon.db/db unit)` (runtime owner, saved shown
+  ;; text) refused a nil database and every turn open ended `:error`.
+  (support/with-database
+    (fn [connection]
+      (support/transacted! connection (support/agent-tx @connection "neighborhood-owner"))
+      (let [units (walk/neighborhood
+                    {:seon.db/db (db/db connection),
+                     :seon.sci.eval/ctx (support/fork-cluster-ctx connection),
+                     :seon.render.walk/lookup [:seon.agent/id "neighborhood-owner"],
+                     :seon.render/output :seon.render/ai,
+                     :seon.sci.admit/caps caps,
+                     :seon.sci.eval/time-limit-ms 2000,
+                     :seon.config/on-core-error :panic})]
+        (is (seq units))
+        (is (empty? (keep :seon.error/value units)) (pr-str (keep :seon.error/value units)))
+        (is (some #(str/includes? (str (:seon.render/output %)) "\"neighborhood-owner\"") units)
+            "the runtime unit names its owner, read through the unit's database")))))
 
 (deftest
   distance-spends-only-real-ref-hops-and-caps-win

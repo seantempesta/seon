@@ -195,11 +195,12 @@
 
 (defn- render-argument
   [request]
-  ;; The database is not a unit member here: a render function that declares
-  ;; it gets it as a supplied default (call preparation), scoped to this
-  ;; request's database by `invoke-selected`.
+  ;; The render boundary holds the database, so it is the CALLER of each
+  ;; render function and passes it in the unit; caller arguments win over a
+  ;; supplied default (root ruling 2026-09-25).
   (let [context (select-keys request
-                             [:seon.sci.eval/ctx
+                             [:seon.db/db
+                              :seon.sci.eval/ctx
                               :seon.agent/id
                               :seon.turn/id
                               :seon.render.call/id
