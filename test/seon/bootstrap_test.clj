@@ -170,23 +170,17 @@
         :seon.ns/name namespace-name})
       (support/transacted!
               connection
-              [{:seon.fn/sym (symbol (str namespace-name) "current-items")
-                :seon.schema.admission/source :core
-                :seon.fn/ns [:seon.ns/name namespace-name]
-                :seon.fn/source "(defn current-items [items] items)"
-                :seon.fn/arglists "([items])"
-                :seon.fn/private? false
-                :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
-               {:seon.test/sym (symbol (str namespace-name) "current-items-test")
-                :seon.schema.admission/source :core
-                :seon.test/ns [:seon.ns/name namespace-name]
-                :seon.test/source "(deftest current-items-test)"
-                :seon.test/usage true
-                :seon.test/pass-count 1
-                :seon.test/fail-count 0
-                :seon.test/error-count 0
-                :seon.test/run-basis-t (db/basis-t @connection)
-                :seon.test/run-at (java.util.Date. 1786500000000)}])
+              [(support/program-fn-row @connection (symbol (str namespace-name) "current-items")
+                "(defn current-items {:malli/schema [:=> [:cat [:vector :int]] [:vector :int]]} [items] items)")
+               (support/program-row
+                @connection [:seon.test/sym (symbol (str namespace-name) "current-items-test")]
+                "(deftest current-items-test)"
+                {:seon.test/usage true
+                 :seon.test/pass-count 1
+                 :seon.test/fail-count 0
+                 :seon.test/error-count 0
+                 :seon.test/run-basis-t (db/basis-t @connection)
+                 :seon.test/run-at (java.util.Date. 1786500000000)})])
       (let [request (generator-request connection)
             pull (bootstrap/pull-result request)
             namespace-key [[:seon.ns/name namespace-name] 0]
@@ -242,23 +236,17 @@
         :seon.ns/name namespace-name})
       (support/transacted!
        connection
-       [{:seon.fn/sym (symbol (str namespace-name) "current-items")
-         :seon.schema.admission/source :core
-         :seon.fn/ns [:seon.ns/name namespace-name]
-         :seon.fn/source "(defn current-items [items] items)"
-         :seon.fn/arglists "([items])"
-         :seon.fn/private? false
-         :seon.fn/spec "[:=> [:cat [:vector :int]] [:vector :int]]"}
-        {:seon.test/sym (symbol (str namespace-name) "current-items-test")
-         :seon.schema.admission/source :core
-         :seon.test/ns [:seon.ns/name namespace-name]
-         :seon.test/source "(deftest current-items-test)"
-         :seon.test/usage true
-         :seon.test/pass-count 1
-         :seon.test/fail-count 0
-         :seon.test/error-count 0
-         :seon.test/run-basis-t (db/basis-t @connection)
-         :seon.test/run-at (java.util.Date. 1786500000000)}])
+       [(support/program-fn-row @connection (symbol (str namespace-name) "current-items")
+         "(defn current-items {:malli/schema [:=> [:cat [:vector :int]] [:vector :int]]} [items] items)")
+        (support/program-row
+         @connection [:seon.test/sym (symbol (str namespace-name) "current-items-test")]
+         "(deftest current-items-test)"
+         {:seon.test/usage true
+          :seon.test/pass-count 1
+          :seon.test/fail-count 0
+          :seon.test/error-count 0
+          :seon.test/run-basis-t (db/basis-t @connection)
+          :seon.test/run-at (java.util.Date. 1786500000000)})])
       (let [pull (bootstrap/pull-result (generator-request connection))
             candidates (:seon.repl/candidates pull)
             namespace-subjects
@@ -300,25 +288,18 @@
       (support/transacted!
               connection
               [(support/namespace-row @connection 'fixture.intent)
-               {:seon.fn/sym 'fixture.intent/target
-                :seon.schema.admission/source :core
-                :seon.fn/ns [:seon.ns/name 'fixture.intent]
-                :seon.fn/source "(defn target [x] (inc x))"
-                :seon.fn/arglists "([x])"
-                :seon.fn/private? false
-                :seon.fn/spec "[:=> [:cat :int] :int]"}
-               {:seon.test/sym 'fixture.intent/target-usage
-                :seon.schema.admission/source :core
-                :seon.test/ns [:seon.ns/name 'fixture.intent]
-                :seon.test/source
+               (support/program-fn-row @connection 'fixture.intent/target
+                                       "(defn target {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+               (support/program-row
+                @connection [:seon.test/sym 'fixture.intent/target-usage]
                 "(clojure.test/deftest target-usage (clojure.test/is (= 2 (target 1))))"
-                :seon.test/usage true
-                :seon.fn/calls ['fixture.intent/target]
-                :seon.test/pass-count 1
-                :seon.test/fail-count 0
-                :seon.test/error-count 0
-                :seon.test/run-basis-t (db/basis-t @connection)
-                :seon.test/run-at (java.util.Date. 1786500000000)}])
+                {:seon.test/usage true
+                 :seon.fn/calls ['fixture.intent/target]
+                 :seon.test/pass-count 1
+                 :seon.test/fail-count 0
+                 :seon.test/error-count 0
+                 :seon.test/run-basis-t (db/basis-t @connection)
+                 :seon.test/run-at (java.util.Date. 1786500000000)})])
       (plan/add! {:my.plan.item/id "use-target"
                   :my.plan.item/title "Use the target"}
                  connection agent-id)

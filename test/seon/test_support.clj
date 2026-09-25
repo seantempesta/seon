@@ -770,6 +770,21 @@
     (assoc row :seon.program/definition-digest
            (program/definition-digest row (namespace-context database namespace-name)))))
 
+(defn revision
+  "The upsert changing the STORED declaration `identity` by `overrides`, with the
+   digest of its final value: the stored row as the writer reads it
+   (`seon.db/declaration-value`), `overrides` merged, sets unioned as an upsert
+   accretes them. The partial edit leaves the row's components alone."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity :map] :map]}
+  [database [attribute value :as identity] overrides]
+  (let [entity (or (db/q '[:find ?e . :in $ ?a ?v :where [?e ?a ?v]] database attribute value)
+                   (throw (ex-info "A revision needs its stored declaration." {:seon.program/identity identity})))
+        stored (@#'seon.db/declaration-value database (db/identity-attributes database) entity)]
+    (assoc overrides attribute value
+           :seon.program/definition-digest
+           (:seon.program/definition-digest
+            (revised-row database (merge-with #(if (set? %1) (into %1 %2) %2) stored overrides) {})))))
+
 (defn program-row
   "Analyze an explicit synthetic declaration through the production source path,
    then `revised-row` with `overrides`."

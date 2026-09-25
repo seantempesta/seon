@@ -80,14 +80,15 @@
            source "(defn fixture-history [] :first)"
            changed-source "(defn fixture-history [] :second)"
            creation (support/transacted!
-                     connection
-                     [(assoc (support/program-fn-row (db/db connection) target source) :seon.fn/source source)])
+                     connection [(support/program-fn-row (db/db connection) target source)])
            before (:db-after creation)
            old-t (db/basis-t before)
            metadata-change (support/transacted!
-                            connection [{:seon.fn/sym target :seon.fn/doc "Later metadata"}])
+                            connection [(support/revision before [:seon.fn/sym target]
+                                                          {:seon.fn/doc "Later metadata"})])
            metadata-t (db/basis-t (:db-after metadata-change))]
-       (support/transacted! connection [{:seon.fn/sym target :seon.fn/source changed-source}])
+       (support/transacted! connection [(support/revision (:db-after metadata-change) [:seon.fn/sym target]
+                                                          {:seon.fn/source changed-source})])
        (let [snapshot (program/history {:seon.db/db (db/db connection)
                                         :seon.program/subject (symbol target) :seon.db/tx old-t})
              metadata-snapshot (program/history {:seon.db/db (db/db connection)
@@ -115,8 +116,8 @@
        (let [database (db/db connection)
              test-name 'my.program-test/past-reach-is-advisory-and-source-history-survives-retraction]
          (support/transacted! connection
-                              [[:db/add [:seon.test/sym test-name] :seon.test/reach
-                                'seon.turn/open?]])
+                              [(support/revision (db/db connection) [:seon.test/sym test-name]
+                                                 {:seon.test/reach #{'seon.turn/open?}})])
          (let [report (program/breaks {:seon.db/db (db/db connection)
                                        :seon.program/subject 'seon.turn/open?})]
            (is (contains? (:seon.program/stale-reach report) (symbol test-name)))

@@ -36,8 +36,7 @@
                       :seon.config/on-core-error :panic})]
          (is (= 'seon.turn/open? (get-in result [:seon.sci.admit/value :seon.program/blocked-subject]))
              (pr-str (select-keys result [:seon.cluster.eval/error :seon.eval/shown]))))
-       (support/transacted! connection [(assoc (support/program-fn-row (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")
-                                              :seon.fn/source "(defn disposable [] 42)")])
+       (support/transacted! connection [(support/program-fn-row (db/db connection) (symbol "my.program" "disposable") "(defn disposable [] 42)")])
        (doseq [target [ctx fork]]
          (sci/eval-string* target "(do (in-ns 'my.program) (defn disposable [] 42))"))
        (let [removed (program/ns-unmap! context (symbol "my.program" "disposable"))]
@@ -86,10 +85,13 @@
         {:seon.ns/name 'my.disposable.program :seon.ns/source "(ns my.disposable.program)"
          :seon.ns/aliases #{{:seon.ns.alias/local 'text
                              :seon.ns.alias/target-ns 'clojure.string}}}
-        :all :agent)
-       (support/program-fn-row (db/db connection) (symbol "my.disposable.program" "target") "(defn target [] 42)")
-       (assoc (support/program-fn-row (db/db connection) (symbol "my.disposable.program" "caller") "(defn caller [] (target))")
-              :seon.fn/calls #{(symbol "my.disposable.program" "target")})])
+        :all :agent)])
+     ;; The rows digest with the namespace's stored aliases, as the writer does.
+     (support/transacted!
+      connection
+      [(support/program-fn-row (db/db connection) (symbol "my.disposable.program" "target") "(defn target [] 42)")
+       (support/program-fn-row (db/db connection) (symbol "my.disposable.program" "caller") "(defn caller [] (target))"
+                               {:seon.fn/calls #{(symbol "my.disposable.program" "target")}})])
      (let [base (support/fork-cluster-ctx connection)
            fork (sci/fork base)
            context {:seon.sci.eval/ctx fork :my.program/base-ctx base :seon.db/connection connection}]
