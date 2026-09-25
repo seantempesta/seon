@@ -26,4 +26,4 @@
          (is (var? resolved) (pr-str resolved))
          (is (some? (find-ns 'seon.test-resolution-fixture)) "resolution loaded the absent namespace")
          (when (var? resolved)
-           (is (nil? ((:test (meta resolved)))) "the resolved test body runs")))))))
+           (is (true? ((:test (meta resolved)))) "the resolved test body runs; its last `is` returns true")))))))

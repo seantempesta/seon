@@ -78,7 +78,8 @@
          (let [g (graphs 3) position (zipmap (order g) (range))]
            (is (= 2 (get (levels g) 'tg.a/b)))
            (is (< (position 'tg.a/c) (position 'tg.a/b) (position 'tg.a/a)))
-           (is (= (count (order g)) (count (distinct (order g)))) "each node renders once")
+           ;; By entity: tg.a's two refer bindings (deftest, is) are nodes that `lookup-of` names nil.
+           (is (apply distinct? (:seon.render.walk/graph-order g)) "each node renders once")
            (testing "the p/q cycle renders once with one back-reference"
              (is (= 1 (count (filter (fn [[holder target]] (= #{'tg.a/p 'tg.a/q} #{(lookup-of g holder) (lookup-of g target)}))
                                     (:seon.render.walk/back-references g))))))
