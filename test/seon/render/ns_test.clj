@@ -130,7 +130,10 @@
                         :seon.sci.admit/caps caps)
             ai (sut/render-ai unit)
             html (sut/render-html unit)]
-        (is (= (dissoc ai :seon.error/at) (dissoc html :seon.error/at))
+        ;; The occurrence time and cause-chain frames name each call site; the
+        ;; refusal itself (operation, member, message, data) is one value.
+        (is (= (dissoc ai :seon.error/at :seon.error/chain)
+               (dissoc html :seon.error/at :seon.error/chain))
             "both projections return the same refusal from the owning read")
         (is (true? (:seon.db/invalid-read ai)))
         (is (= :seon.db/database-read (:seon.error/layer ai)))

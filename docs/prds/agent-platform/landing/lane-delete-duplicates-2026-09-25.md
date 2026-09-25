@@ -155,6 +155,13 @@ contracts now declare the alternative the producer actually returns, `:seon.db/i
 refusal and the source/hiccup value and still reject an arbitrary map. The render pipeline renders it through
 the error schema's declared pair.
 
+## Red on adopted 6ab6f5fb: `bounded-read-refusals-remain-flat-errors` (CAUSED, lane's own assertion)
+
+`tmp/orchestrator/verify-reds.out.d/016.txt`: the two faces' refusals differ in `:seon.error/chain` as well as
+`:seon.error/at`; the chain's frames name `render_ai` versus `render_html`. REPL on default: exactly those two
+keys differ; operation, member, message, data, layer and exception class are equal. Both are occurrence
+evidence, so the assertion now compares the refusal without them.
+
 ## Round 4, R5 (shown-text reparsing): browser half landed, grader half blocked
 
 - `src/seon/repl.clj` (−10/+2): `pretty-response` deleted. The browser's evaluation entry now shows the exact
