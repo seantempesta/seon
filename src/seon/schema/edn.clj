@@ -97,8 +97,7 @@
                      :seon.program/partition :seon.data
                      :seon.render/ai 'seon.config/render-ai
                      :seon.render/html 'seon.config/render-html}
-               [:seon.config/cluster :seon.config/cluster]
-               [:seon.config/overlay-keys {:optional true} :seon.config/overlay-keys]]
+               [:seon.config/cluster :seon.config/cluster]]
               effective-entries))
       forms)))
 
