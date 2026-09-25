@@ -568,15 +568,16 @@
                 :datahike.query.source/symbol '$)])
              receipt
              (fn [id read-request dependency-plan]
+               ;; The holder is a canonical namespace declaration (digest derived).
+               (merge
+                (support/namespace-row (db/db connection) (symbol (str "codec." id)))
                {:db/id id
-                :seon.ns/name (symbol "codec" id)
-                :seon.ns/source (pr-str (list 'ns (symbol "codec" id)))
                 :seon.db/source-argument-position 0
                 :datahike.read/dependency-plan dependency-plan
                 :datahike.read/revision
                 {:datahike.read/attributes :all
                  :datahike.read/cache-eligible? false}
-                :seon.db/read-request read-request})]
+                :seon.db/read-request read-request}))]
          (let [forward-tx
                (binding [*print-namespace-maps* false]
                  (support/transacted! connection [(receipt "codec-forward" request plan)]))
@@ -625,7 +626,8 @@
         (schema/call-with-projection
          projection
          (fn []
-           (let [report (db/transact! connection [{:seon.ns/name 'sample.tuple ::position [9 2]}])]
+           (let [report (db/transact! connection [(assoc (support/namespace-row (db/db connection) 'sample.tuple)
+                                                                ::position [9 2])])]
              (is (:db-after report))
              (when (:db-after report)
                (is (= [9 2] (::position (db/pull (:db-after report) [::position]
