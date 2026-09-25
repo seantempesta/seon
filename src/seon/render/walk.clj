@@ -1134,7 +1134,10 @@
                   targets (remove nodes (distinct (map peek kept)))
                   fresh (vec (sort (filter (comp rendered schemas) targets)))
                   admitted (vec (take (max 0 (- max-nodes (count nodes))) fresh))
-                  nodes (into nodes (map (fn [e] [e {::node-level (inc level) ::node-schema (schemas e)}])) admitted)]
+                  ;; An identity-less owned row is known by the component attribute reaching it.
+                  reached (into {} (keep (fn [[_ a t]] (when ((::component-owners structure) a) [t a]))) kept)
+                  nodes (into nodes (map (fn [e] [e (cond-> {::node-level (inc level) ::node-schema (schemas e)}
+                                                      (reached e) (assoc ::attribute (reached e)))])) admitted)]
               (recur (inc level) admitted (into edges (filter (comp nodes peek)) kept)
                      (reduce #(update %1 (get schemas %2 ::unowned) (fnil conj #{}) %2) skipped (remove (comp rendered schemas) targets))
                      (cond-> (into cuts (keep (fn [[[e a] group]] (when (> (count group) per-attribute)

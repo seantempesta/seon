@@ -141,7 +141,7 @@
  :seon.render.walk/level-result [:map [:seon.render.walk/edges :seon.render.walk/edges] [:seon.render.walk/owning-schemas :seon.render.walk/owning-schemas]]
  :seon.render.walk/node-level [:int {:min 0}]
  :seon.render.walk/node-schema [:maybe :qualified-keyword]
- :seon.render.walk/node [:map [:seon.render.walk/node-level :seon.render.walk/node-level] [:seon.render.walk/node-schema :seon.render.walk/node-schema] [:seon.render/value {:optional true} [:maybe :map]]]
+ :seon.render.walk/node [:map [:seon.render.walk/node-level :seon.render.walk/node-level] [:seon.render.walk/node-schema :seon.render.walk/node-schema] [:seon.render.walk/attribute {:optional true} :seon.render.walk/attribute] [:seon.render/value {:optional true} [:maybe :map]]]
  :seon.render.walk/nodes [:map-of :int :seon.render.walk/node]
  :seon.render.walk/graph-root :int
  :seon.render.walk/graph-order [:vector :int]
