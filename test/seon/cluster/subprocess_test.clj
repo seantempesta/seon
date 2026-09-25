@@ -39,21 +39,34 @@
      :out (:seon.operator.subprocess/output result)
      :err (:seon.operator.subprocess/error-output result)}))
 
+(def ^:private late-spawner
+  "A python parent that forks one TERM-ignoring child, which records its pid,
+  once its `go` file exists. A file, not a fifo: a fifo writer whose reader was
+  killed blocks in an uninterruptible open."
+  (str
+   "import os,signal,subprocess,sys,time\n"
+   "ready,go,child_pid=sys.argv[1:]\n"
+   "open(ready,'x').close()\n"
+   "while not os.path.exists(go): time.sleep(0.001)\n"
+   "code=\"import os,signal,sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); tmp=sys.argv[1]+'.tmp'; f=open(tmp,'w'); f.write(str(os.getpid())); f.close(); os.replace(tmp,sys.argv[1]); signal.pause()\"\n"
+   "subprocess.Popen([sys.executable,'-c',code,child_pid])\n"
+   "signal.pause()\n"))
+
+(defn- alive-pids
+  "The pids named by `directory`'s file names that are still alive."
+  [^java.io.File directory]
+  (filterv #(some-> (java.lang.ProcessHandle/of %) (.orElse nil) (.isAlive))
+           (keep #(parse-long (.getName ^java.io.File %)) (.listFiles directory))))
+
+(defn- kill-pids! [pids]
+  (doseq [pid pids] (some-> (java.lang.ProcessHandle/of pid) (.orElse nil) (.destroyForcibly))))
+
 (deftest foreign-process-deadline-reaps-a-late-descendant
   (let [root (io/file "tmp/changed-test" (str (random-uuid)))
         ready-file (io/file root "parent-ready")
         go-file (io/file root "spawn-child")
         child-file (io/file root "child-pid")
-        python
-        (str
-         "import os,signal,subprocess,sys\n"
-         "ready,go,child_pid=sys.argv[1:]\n"
-         "os.mkfifo(go)\n"
-         "open(ready,'x').close()\n"
-         "open(go).read()\n"
-         "code=\"import os,signal,sys; signal.signal(signal.SIGTERM, signal.SIG_IGN); tmp=sys.argv[1]+'.tmp'; f=open(tmp,'w'); f.write(str(os.getpid())); f.close(); os.replace(tmp,sys.argv[1]); signal.pause()\"\n"
-         "subprocess.Popen([sys.executable,'-c',code,child_pid])\n"
-         "signal.pause()\n")]
+        python late-spawner]
     (.mkdirs root)
     (let [failure
           (future
@@ -143,6 +156,53 @@
                                            :seon.operator.subprocess/deadline-ms 2000
                                            :seon.operator.subprocess/observe-output!
                                            (fn [_] (throw (ex-info "observer refused" {})))}))))))))
+
+(deftest a-child-forked-as-termination-begins-never-escapes
+  ;; The parent forks when signalled just before, at, or after the 500 ms deadline:
+  ;; the tree is frozen before any member can die, so no child outlives the refusal.
+  (doseq [signal-ms [490 500 505 510]]
+    (let [root (io/file "tmp/changed-test" (str (random-uuid)))
+          started (System/nanoTime)
+          failure (future
+                    (caught
+                     #(operator.process/run-process!
+                       {:seon.operator.subprocess/argv
+                        ["/usr/bin/python3" "-c" late-spawner (.getPath (io/file root "ready"))
+                         (.getPath (io/file root "go")) (.getPath (io/file root "pid"))]
+                        :seon.operator.subprocess/deadline-ms 500})))]
+      (.mkdirs root)
+      (try
+        (await-created! (io/file root "ready"))
+        (Thread/sleep (max 0 (- signal-ms (quot (- (System/nanoTime) started) 1000000))))
+        (spit (io/file root "go") "")
+        (let [data (ex-data (test-support/await-event! failure :foreign-process-deadline))
+              pid (some-> (io/file root "pid") (#(when (.exists ^java.io.File %) (slurp %))) parse-long)
+              child (some-> pid java.lang.ProcessHandle/of (.orElse nil))]
+          (try
+            (is (true? (:seon.operator.subprocess/reaped? data)) (str signal-ms " ms"))
+            (is (false? (boolean (and child (.isAlive child)))) (str signal-ms " ms: the child escaped"))
+            (finally (when (and child (.isAlive child)) (.destroyForcibly child)))))
+        (finally (test-support/delete-recursively! root))))))
+
+(deftest a-tree-forking-through-termination-leaves-no-live-member
+  ;; The root ignores TERM and forks a TERM-ignoring member every 10 ms, each
+  ;; recording its pid, so members are born through the whole TERM grace; a
+  ;; walk taken once, before TERM, misses them. Freezing to a fixpoint ends all.
+  (let [root (io/file "tmp/changed-test" (str (random-uuid)))
+        script (str "trap '' TERM; i=0; while [ $i -lt 300 ]; do /bin/sh -c 'trap \"\" TERM; : > \"$0/$$\"; exec /bin/sleep 30' '"
+                    (.getPath root) "' & i=$((i+1)); /bin/sleep 0.01; done; wait")]
+    (.mkdirs root)
+    (try
+      (let [data (ex-data (caught #(operator.process/run-process!
+                                    {:seon.operator.subprocess/argv ["/bin/sh" "-c" script]
+                                     :seon.operator.subprocess/deadline-ms 300})))]
+        (is (= :process-exit (:seon.operator.subprocess/phase data)))
+        (is (true? (:seon.operator.subprocess/reaped? data)))
+        (is (seq (.listFiles root)) "members were born before the deadline")
+        (is (= [] (alive-pids root)) "no member outlived the refusal"))
+      (finally
+        (kill-pids! (alive-pids root))
+        (test-support/delete-recursively! root)))))
 
 (deftest plain-babashka-cannot-load-the-quarry
   (let [{:keys [exit err]}

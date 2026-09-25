@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: defect
 tags: [issue, process, termination]
 ---
@@ -35,3 +35,26 @@ The JDK has no process-group or stop signal. Closing the race needs one of:
   the refusal saying so.
 
 This needs an owner ruling.
+
+## Resolution (root ruling 2026-09-25: freeze, then kill)
+
+`terminate-subprocess!` now freezes the tree to a fixpoint before any signal can kill
+a member. It sends SIGSTOP to each live member through the OS `kill` and walks
+`ProcessHandle.descendants` again until a walk finds no new pid. Because a stopped
+process cannot fork, the frozen set is complete.
+
+The owner then sends TERM to every frozen member and CONT to them, which keeps the
+graceful TERM handling that `seon.cluster.process-test` asserts. It waits for the
+grace, freezes again (a TERM handler may fork), and SIGKILLs the frozen set. Finally
+it awaits every exit, and any survivor is returned by `(pid, start-instant)`.
+
+Regressions in `seon.cluster.subprocess-test`:
+- `a-child-forked-as-termination-begins-never-escapes` sends the spawn signal at 490,
+  500, 505 and 510 ms against a 500 ms deadline;
+- `a-tree-forking-through-termination-leaves-no-live-member` uses a TERM-ignoring
+  root that forks every 10 ms. Under the old owner about 70 members survived while the
+  refusal said `reaped? true`; under the new owner none survive, in 1.4 s.
+
+What remains: a member that forks and then exits on its own before it is stopped
+leaves an orphan that no walk can reach. Closing that needs process groups.
+

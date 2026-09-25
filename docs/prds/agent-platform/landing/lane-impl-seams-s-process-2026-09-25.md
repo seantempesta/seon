@@ -66,6 +66,56 @@ private copies in `issue.clj` and `test/cache.clj` now go through it.
   and two imports are deleted. Proof: with the signal at about 70 ms (the file poll), the installed owner reaps the
   child and returns in 3024 ms with `reaped? true`.
 
+## Freeze-then-kill (root ruling, after the reds)
+
+`terminate-subprocess!` now works in this order:
+1. `freeze-tree!`: SIGSTOP (OS `kill -STOP`) every live member, walking `ProcessHandle.descendants` again until a walk
+   finds no new pid;
+2. TERM every frozen member;
+3. `kill -CONT` them;
+4. wait up to `grace-ms`;
+5. freeze again;
+6. SIGKILL the frozen set;
+7. await exit, returning survivors by `(pid, start-instant)`.
+
+Two helpers were added: `signal-pids!`, which is bounded, discards output, and refuses naming the kill's pid if kill
+itself hangs; and `freeze-tree!`. The single walk captured before TERM is deleted.
+
+**Deviation from the ruling's wording.** The ruling's steps were freeze and then SIGKILL, with no TERM. I kept the TERM
+grace, placed between the two freezes, because `seon.cluster.process-test` (not this lane's file) asserts TERM
+semantics. It checks exit 143, the TERM-trap marker, and a grandchild forced only after grace. `shell/jvm.clj` also
+passes a termination-grace config. Dropping TERM means deleting the trap handling that the grace provides. That is
+the owner's call, not this lane's.
+
+Probes: the scratch owner in default's JVM, with processes the probe started.
+- The late spawner, sending its signal at 70, 1990, 1995, 2000, 2005 and 2010 ms against a 2000 ms deadline: no live
+  child in any case.
+- A TERM-ignoring fork loop (150 members, one every 5 ms, 300 ms deadline): the old owner leaked a member in **2 of
+  6** runs while reporting `reaped? true`; the new owner leaked in **0 of 6**.
+- The `process-test` shapes under the new owner:
+
+  | Case | Exit | Other results | Time |
+  |---|---|---|---|
+  | grandchild ignoring TERM | 143 | `left []` | 649 ms, inside 500–2500 |
+  | well-behaved tree | 143 | marker "term\n", `left []` | 315 ms |
+  | zombie | — | returned as the survivor, still alive, others dead | — |
+
+- The new regression tests, run through `clojure.test/test-var` in scratch copies of the test namespace:
+
+  | Test | New owner | Old owner |
+  |---|---|---|
+  | `a-child-forked-as-termination-begins-never-escapes` (490/500/505/510 ms against a 500 ms deadline) | 8 pass, 3458 ms | passes too (probabilistic) |
+  | `a-tree-forking-through-termination-leaves-no-live-member` (TERM-ignoring root forking every 10 ms) | 4 pass, 1423 ms and 1430 ms | **fails deterministically**: about 70 live members, with `reaped? true` |
+  | `foreign-process-deadline-reaps-a-late-descendant` | 4 pass, 3404 ms | — |
+  | `foreign-process-joins-its-output-observer-on-every-exit` | 5 pass, 1936 ms | — |
+
+- The spawner now waits for a plain file, not a fifo. A fifo writer whose reader was killed blocks in an
+  uninterruptible `open`. **My earlier fifo probes leaked 3 idle threads in default** (`clojure-agent-send-off-pool-37`,
+  `-55` and `-56`, in `FileOutputStream.open0` on deleted fifos). They use no CPU and cannot be unblocked; they go at
+  the next restart.
+
+Size: `process.clj` +46/−17, `subprocess_test.clj` +70/−10.
+
 ## What changed
 
 | Instances | File | Change |

@@ -158,24 +158,50 @@
           (keep subprocess-identity)
           (iterator-seq (.iterator descendant-stream)))))
 
+(defn- signal-pids!
+  "Send `signal` (\"STOP\" or \"CONT\"; the JDK sends neither) to `pids` through the
+  OS `kill`. A pid that exited meanwhile is not a failure: the next walk sees it gone."
+  {:malli/schema [:=> [:cat :string [:sequential :seon.boot/pid]] :nil]}
+  [signal pids]
+  (when (seq pids)
+    (let [kill (.start (doto (ProcessBuilder. ^java.util.List (into ["kill" (str "-" signal)] (map str) pids))
+                         (.redirectOutput java.lang.ProcessBuilder$Redirect/DISCARD)
+                         (.redirectError java.lang.ProcessBuilder$Redirect/DISCARD)))]
+      (when-not (.waitFor kill subprocess-grace-ms java.util.concurrent.TimeUnit/MILLISECONDS)
+        (.destroyForcibly kill)
+        (throw (ex-info (str "kill -" signal " did not exit within its bound.")
+                        {:seon.boot/pid (.pid kill) :seon.operator.subprocess/argv ["kill" signal]}))))))
+
+(defn- freeze-tree!
+  "SIGSTOP every live member of `identities` and its descendants, walking again
+  until a walk finds no new member: a stopped process cannot fork, so nothing
+  born during termination escapes the set. Returns the frozen set."
+  {:malli/schema [:=> [:cat [:sequential :seon.cluster.process/identity]] [:vector :seon.cluster.process/identity]]}
+  [identities]
+  (loop [frozen [] walked (distinct identities)]
+    (if-let [unseen (seq (remove (set frozen) walked))]
+      (let [frozen (into frozen unseen)]
+        (signal-pids! "STOP" (keep #(when (same-subprocess-handle %) (:seon.boot/pid %)) unseen))
+        (recur frozen (distinct (mapcat #(some-> (same-subprocess-handle %) subprocess-tree-identities) frozen))))
+      frozen)))
+
 (defn terminate-subprocess!
-  "Terminate every captured identity plus the root's current tree: TERM each,
-  wait up to `grace-ms` for all to exit, force survivors, then await actual exit
-  within `cleanup-ms`. Every signal first verifies `(pid, start-instant)`.
-  Returns the captured identities still alive after `cleanup-ms`: empty only
-  when every exit was observed. A survivor (a member this JVM may not signal,
-  or one blocked in the kernel) is the caller's to keep owning, never ended."
+  "Terminate every captured identity plus the root's current tree. Freeze the
+  tree to a fixpoint, TERM each member and CONT it, wait up to `grace-ms` for
+  all to exit, freeze again (a TERM handler may fork), force every frozen
+  member, then await actual exit within `cleanup-ms`. Every signal first
+  verifies `(pid, start-instant)`. Returns the identities still alive after
+  `cleanup-ms`: empty only when every exit was observed. A survivor (a member
+  this JVM may not signal, or one blocked in the kernel) is the caller's to
+  keep owning, never ended."
   {:malli/schema [:=> [:cat [:map [:proc [:fn 'seon.cluster.process/process?]]] [:vector :seon.cluster.process/identity] [:int {:min 0}] [:int {:min 0}]] [:vector :seon.cluster.process/identity]]}
   [process-record launch-identities grace-ms cleanup-ms]
   (let [^Process child (:proc process-record)
-        identities (vec (distinct (concat launch-identities
-                                          (subprocess-tree-identities
-                                           (.toHandle child)))))
-        signal! (fn [destroy!]
+        signal! (fn [identities destroy!]
                   (doseq [process-identity identities]
                     (when-let [handle (same-subprocess-handle process-identity)]
                       (destroy! handle))))
-        await-all! (fn [bound-ms]
+        await-all! (fn [identities bound-ms]
                      (let [deadline (+ (System/nanoTime) (* 1000000 (long bound-ms)))]
                        (doseq [process-identity identities]
                          (when-let [handle (same-subprocess-handle process-identity)]
@@ -184,12 +210,15 @@
                                    (subprocess-remaining-ms deadline)
                                    java.util.concurrent.TimeUnit/MILLISECONDS)
                              (catch java.util.concurrent.TimeoutException _ nil)
-                             (catch java.util.concurrent.ExecutionException error (throw (.getCause error))))))))]
-    (signal! #(.destroy ^java.lang.ProcessHandle %))
-    (await-all! grace-ms)
-    (signal! #(.destroyForcibly ^java.lang.ProcessHandle %))
-    (await-all! cleanup-ms)
-    (filterv same-subprocess-handle identities)))
+                             (catch java.util.concurrent.ExecutionException error (throw (.getCause error))))))))
+        frozen (freeze-tree! (concat launch-identities (subprocess-tree-identities (.toHandle child))))]
+    (signal! frozen #(.destroy ^java.lang.ProcessHandle %))
+    (signal-pids! "CONT" (keep #(when (same-subprocess-handle %) (:seon.boot/pid %)) frozen))
+    (await-all! frozen grace-ms)
+    (let [frozen (freeze-tree! frozen)]
+      (signal! frozen #(.destroyForcibly ^java.lang.ProcessHandle %))
+      (await-all! frozen cleanup-ms)
+      (filterv same-subprocess-handle frozen))))
 
 (defn subprocess-exit
   "A future completing when every one of `identities` has exited; an
