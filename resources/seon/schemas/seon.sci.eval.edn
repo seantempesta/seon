@@ -342,9 +342,9 @@
   [:seon.sci.eval/state :seon.sci.eval/context-state]
   [:seon.sci.eval/held :seon.sci.eval/held-value]]]
 :restore
-[:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars. A restoration that fails leaves the execution unavailable."}
- [:=> [:cat] :nil]
- [:=> [:cat [:=> [:cat :qualified-symbol] :any]] :nil]]
+[:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars. Answers nil, or the unavailable refusal when the restoration could not run."}
+ [:=> [:cat] [:maybe :seon.sci.eval/execution-unavailable-error]]
+ [:=> [:cat [:=> [:cat :qualified-symbol] :any]] [:maybe :seon.sci.eval/execution-unavailable-error]]]
 :current-db :seon.db/database-value
 :reader-row :map
 :namespace-row :map
