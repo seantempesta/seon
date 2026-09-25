@@ -51,10 +51,16 @@ made capable and reused everywhere: value+schema, fact store, function, evaluati
    10 in `task-migration-inventory-2026-09-25.md`). Unwired: dangling check on program MERGE (`accept-merge!`).
 4. **Floor redesign cycle** (above).
 5. **Derived contracts S0, S2, F1** (above).
-6. **One-REPL milestone** M0 → M1 (option B) → D1 per `one-repl-language-2026-09-25.md` (`42308d868`); write-back is
+6. **The system REPL is the main input (owner 2026-09-25): keep improving it.** One-REPL milestone M0 → M1 (option B) → D1 per `one-repl-language-2026-09-25.md` (`42308d868`); write-back is
    constrained by 7.17 (one-file-one-owner; honest guarantee).
 7. **Then** the function face (`52e252f74`; Astra `49b1122d4` implement after fixes) and the query+render block
    (`2ae3e003c`; Astra `ae7cfa793` implement after fixes), both on the floor's one pipeline.
+
+### Running lanes (18:20Z) — read each landing note before touching its files
+impl-repl-m1-opus (S1 one definition authority + qualified defn; then S2) · impl-task-slice2-opus (3 records) ·
+impl-derived-prereqs-opus (S0, S2, F1 fork push) · design-floor-revise-opus (then Astra re-review, then implement) ·
+root verification run bhklahejy (`tmp/orchestrator/verify-6ab6ae2a.txt`, 65 commands, cluster.turn-test first).
+REPL-first is law (AGENTS.md 303972bc7): prove on real data — parse, validate, store, pull back — before implementing.
 
 ### Designs (authorities; each revised in place)
 | Design | Latest | Review verdict |
