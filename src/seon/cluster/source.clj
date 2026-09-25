@@ -525,17 +525,22 @@
 (defn- index-tasks!
   "Reconcile every task file of the published `directory` through the task writer,
   then refuse any dangling handle, an annotation naming no admitted task, with its
-  holders before the head advances (spec 7.5, 7.13). Every file, not the changed
-  ones: a recorded task-file digest does not prove its tasks were admitted (a
-  publication before ingestion recorded it), and the whole set reconciles in ~2 ms."
+  holders before the head advances (spec 7.5, 7.13). Every file, and every stored
+  task's file (a deleted file reads \"[]\"), not the changed ones: a recorded
+  task-file digest does not prove its tasks were admitted (a publication before
+  ingestion recorded it), and the whole set reconciles in ~2 ms."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.source/digest :string]
                   [:maybe :seon.task/report]]}
   [connection source-digest directory]
   (when (get (:schema (db/db connection)) :seon.task/id)
-    (let [report (require-committed!
+    (let [task-files (requiring-resolve 'seon.issue/task-files)
+          stored (require-committed! (db/q '[:find [?ns ...] :where [_ :seon.task/ns ?ns]] (db/db connection))
+                                     :seon.task/findings-refused "Stored task namespaces could not be read." {})
+          report (require-committed!
                   ((requiring-resolve 'seon.issue/index-tasks!)
                    {:seon.db/connection connection
-                    :seon.task/files ((requiring-resolve 'seon.issue/task-files) directory nil)})
+                    :seon.task/files (merge (task-files directory (mapv #(str "resources/seon/tasks/" % ".edn") stored))
+                                            (task-files directory nil))})
                   :seon.task/index-refused "Task indexing was refused." {:seon.source/digest source-digest})
           findings (require-committed! ((requiring-resolve 'seon.issue/task-findings) (db/db connection))
                                        :seon.task/findings-refused "Task findings could not be read." {})]
