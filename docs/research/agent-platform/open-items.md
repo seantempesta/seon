@@ -71,13 +71,19 @@ current component. Unverified commits are debt, not progress.
    `seon.cluster.source-test`) → slice 2 per `language-requirements-review-2026-09-25.md` "The first three slices" →
    slice 3 (`(task h)` and a function's open tasks) → batches from `tmp/task-inventory/draft-tasks.edn` (first batch of
    10 in `task-migration-inventory-2026-09-25.md`). Unwired: dangling check on program MERGE (`accept-merge!`).
-4. **Floor redesign cycle** (above).
+4. **Floor:** re-review `98c563b34` says implement after fixes, naming the first sub-slice; start it after the current run is green.
 4b. **Docs become queryable data** (owner 2026-09-25: "getting all the documentation integrated with the code and parsing it
    and having it all be queryable will make it more useful"), after task slices 2–3 are done: docstrings parsed by the one
    Markdown owner, their `[[wikilinks]]`/symbols/keywords as typed edges (one-REPL design C4); help derived from tool
    namespace docstrings (C3); long docs indexed by heading and links so a definition shows the design sections that govern
    it, and a doc citing a gone definition surfaces as stale (obsolete-doc identification rides here).
-5. **Derived contracts S0, S2, F1** (above).
+5. **Derived contracts:** S0 landed (`eb7e64ffa`); S2 and F1 wait for green. S2 needs a rule for the 43 metadata-only armed
+   Vars, which item 5b resolves by making `script/` program.
+5b. **Index `script/` as program, after cleanup** (owner: "you can index more directories … consider refactoring, merging";
+   audit `script-dev-roots-audit-2026-09-25.md` `6fc7cde58`): (i) delete the changed-test/cache-helper family (663) and
+   `schema_split.clj` (141); (ii) move `dev-cache`, `seon.operator.runtime`, `seon.operator.prepl` and harness-costs into
+   `src/`; (iii) add `script/` as a program root (bb-loadable code stays bb-loadable); the MCP reader and render cuts (145)
+   ride with S2. This unblocks the MCP task migration and arming the 43 Vars.
 6. **The system REPL is the main input (owner 2026-09-25): keep improving it.** One-REPL milestone M0 → M1 (option B) → D1 per `one-repl-language-2026-09-25.md` (`42308d868`); write-back is
    constrained by 7.17 (one-file-one-owner; honest guarantee).
 7. **Then** the function face (`52e252f74`; Astra `49b1122d4` implement after fixes) and the query+render block
