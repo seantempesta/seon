@@ -56,6 +56,7 @@ workstream is judged by whether it moves an entrant onto that path or deletes a 
   patches itself for publishes and restarts (never waits); no PRs; push personal forks.
 
 ### Definition of done (owner 2026-09-25: "one step at a time… refined components we can keep building with")
+- **Every slice collapses duplicates (owner 2026-09-25, "focus on the pillars… not writing parallel solutions").** Before designing, rg for every other place computing the same thing and check the duplicate-paths audit §11; route callers through the one owner and delete the copies in the same slice; the landing names each deleted path with line counts and net lines. Today's slices all grew net (S1 +257/−106, hold +72/−31, custody +32/−14, tff +89/−65) — that stops. Each lane launch carries this rule; every Astra review checks it.
 A component is DONE only when it is REPL-proven on real data, green on published default, Astra diff-reviewed and
 measured. No new implementation starts on top of anything that is not done; in-flight work narrows to what completes the
 current component. Unverified commits are debt, not progress.
