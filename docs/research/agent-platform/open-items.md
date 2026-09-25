@@ -52,9 +52,11 @@ hold (lane fix-one-request-reuse-and-hold).
 
 ## New platform findings (2026-09-25)
 
-- A namespace loaded after boot arming (e.g. a test namespace) is NOT armed: its own contracts do not refuse (found by lane
-  fix-instrument-f2-regressions; tests now arm explicitly via instrument/apply!). Law: rows → load → arm → record; loading
-  must arm. Owner: adoption/instrument. Not yet assigned.
+- A namespace loaded after boot arming is NOT armed (4d849406e): boot arms only src/ namespaces (cluster.clj:2419, by design
+  in ed62a3e06); a test request loads its namespace lazily via requiring-resolve inside the member body (test.clj:1364) and
+  nothing arms it — loaded test namespaces 3 of 46 contracted Vars armed vs 1,908 of 1,952 elsewhere. Ruled: seon.test/run
+  loads each selected test namespace before members run and arms exactly those through instrument/apply! (lane
+  fix-late-load-arming). Also: script/ and dev/ namespaces are never armed (seon.operator 0 of 27) — not yet assigned.
 - seon.test/failure-text (test.clj:39) prints a blob hint `(seon.blob/get digest)` that refuses when followed (get takes a
   connection and a digest) → queued for the test.clj owner.
 - Every seon.db read on an as-of view rebuilds its projection (2,334 ms for 18 reads) — the cold as-of projection item.
