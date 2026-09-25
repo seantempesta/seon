@@ -145,7 +145,6 @@
             (is (str/includes? (:seon.error/message (:seon.cluster.status/store-bytes status))
                                "not scanned")))
           (is (str/includes? (pr-str (#'seon.render.transcript/fault-problems database "error-graph-steward" [])) "occurrences: 6"))
-          (is (str/includes? (error/log-line (error/notice {:seon.error/fact (:seon.error/fact summary) :seon.error/occurrence-count 6})) "occurrences=6"))
           (is (str/includes? (error/render-ai row) "Occurrences: 6"))
           (is (str/includes? (pr-str (error/render-html row)) "Resolution unknown")
               "without a database the resolution cannot be derived")
@@ -696,12 +695,6 @@
                             {:seon.turn/id "run-9"
                              :seon.agent/id "agent-3"})))
 
-(defn- rendered
-  [notice output]
-  (if (= output :ai)
-    (error/ai-prose notice)
-    (error/log-line notice)))
-
 (deftest notices-carry-structured-projection-evidence
   (test-support/assert-check!
    (tc/quick-check
@@ -713,17 +706,14 @@
             notice (error/notice
                     (cond-> {:seon.error/fact fact}
                       reason (assoc :seon.error/reason reason)))
-            human (rendered notice :ai)
-            line (rendered notice :log)]
+            human (error/ai-prose notice)]
         (and
          ((seon.schema/projection-validator (seon.schema/handed-projection) :seon.error/notice) notice)
          (= fact (:seon.error/fact notice))
          (= [:seon.error/id (:seon.error/id fact)]
             (:seon.error/evidence notice))
          (qualified-symbol? (:seon.render/ai notice))
-         (and (string? human) (not (str/blank? human)))
-         (and (string? line) (not (str/blank? line)))
-         (not (str/includes? line "\n")))))
+         (and (string? human) (not (str/blank? human))))))
     :seed 202607280901)
    "structured error projections"))
 
@@ -741,7 +731,7 @@
     (is (= ":seon.error/fact" (:seon.instrument/expected fact)))
     (is (= "[\"not a fact\"]" (:seon.instrument/args fact)))
     (let [notice (error/notice {:seon.error/fact fact})
-          prose (rendered notice :ai)]
+          prose (error/ai-prose notice)]
       (is (= 'seon.error/instrumentation-prose (:seon.render/ai notice)))
       (is (not (str/blank? prose))))))
 
@@ -1481,12 +1471,6 @@
                   :seon.error/message "Schema indexing was refused."})]
       (is (str/includes? prose ":seon.fn/schema"))
       (is (str/includes? prose "rerun initialization")))))))
-
-(deftest the-log-line-is-one-line-and-derived
-  (let [fact (fact)
-        line (rendered (error/notice {:seon.error/fact fact}) :log)]
-    (is (not (str/includes? line "\n")) "a log line that wraps is two log lines")
-    (is (not (str/blank? line)))))
 
 (deftest recorded-identity-uses-the-producer-declared-schema
   (let [projection (schema/handed-projection)
