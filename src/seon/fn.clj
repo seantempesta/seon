@@ -619,6 +619,17 @@
                       {:seon.fn/index-refused true :seon.fn/invokes attributes})))
     #{}))
 
+(defn- with-seed-keywords
+  "Union a deftest's seed attributes into its `:seon.fn/keywords`.
+  Metadata keywords carry no `:from-var`, so kondo attributes them to no
+  holder; seed attributes are nevertheless reach's schema edges."
+  {:malli/schema [:=> [:cat :map [:maybe :map]] :map]}
+  [row metadata]
+  (if-let [used (seq (filter qualified-keyword?
+                             (tree-seq coll? seq (:seon.test/seed metadata))))]
+    (update row :seon.fn/keywords (fnil into (sorted-set)) used)
+    row))
+
 (defn- var-row
   [projection contexts namespace-contexts
    {:keys [calls-by-caller references used-keywords writes call-arities]} entry]
@@ -684,10 +695,7 @@
         (assoc :seon.test/seed
                (seed-occurrences projection (get namespace-contexts namespace-name) qualified
                                  (:seon.test/seed metadata)))
-        ;; Metadata keywords carry no `:from-var`; seed attributes are reach's schema edges.
-        (some qualified-keyword? (tree-seq coll? seq (:seon.test/seed metadata)))
-        (update :seon.fn/keywords (fnil into (sorted-set))
-                (filter qualified-keyword? (tree-seq coll? seq (:seon.test/seed metadata)))))
+        true (with-seed-keywords metadata))
 
             (function-definition? entry)
       (cond-> {:seon.fn/sym qualified
@@ -1073,7 +1081,9 @@
               (seq (get call-arities program-symbol))
               (assoc :seon.fn/call-arities
                      (into #{} (get call-arities program-symbol)))
-              subject (assoc :seon.test/subject subject))))
+              subject (assoc :seon.test/subject subject)
+              ;; An SCI deftest settles through this re-analysis, not `var-row`.
+              (:seon.test/sym program-row) (with-seed-keywords (::analyzer/meta definition)))))
         ;; The row keeps the digest its constructor derived under the
         ;; evaluation's own namespace; the database's namespace here can
         ;; predate this reply's `ns` form.

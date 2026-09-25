@@ -3,6 +3,7 @@
             [clojure.test :refer [deftest is testing]]
             [seon.db :as db]
             [seon.fn :as seon.fn]
+            [seon.program]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as test-support]))
@@ -108,3 +109,20 @@
     (is (= {:seon.test.seed/refused :undeclared-attribute :seon.test/sym 'sample.seeded-test/seeded
             :seon.test.seed/ordinal 0 :seon.schema/key :sample.nothing/here}
            (refused "[[{:sample.nothing/here 1}]]")))))
+
+(deftest an-sci-deftest-settles-with-its-seed-attributes-as-keywords
+  ;; An SCI deftest's row comes from `source-rows`; its settlement re-analysis
+  ;; (`analyze-form`) must keep the seed's schema edges, not only kondo's holders.
+  (let [database (db/db)
+        namespace-row (let [row {:seon.ns/name 'seon.fn.seed-admission-test
+                                 :seon.ns/source "(ns seon.fn.seed-admission-test (:require [clojure.test :refer [deftest is]]))"}]
+                        (assoc row :seon.program/definition-digest (seon.program/definition-digest row)))
+        source "(deftest ^{:seon.test/seed [{:seon.test/skip-reason \"sci\"}]} evaluated (is true))"
+        [row] (seon.fn/source-rows database (seon.program/shapes-in (schema/projection-from-database database))
+                                   namespace-row source #{})
+        [_ settled] (seon.fn/analyze-form database source
+                                          [:seon.ns/name 'seon.fn.seed-admission-test] row)]
+    (is (= [{:seon.test.seed/ordinal 0 :seon.test.seed/writes #{:seon.test/skip-reason}}]
+           (:seon.test/seed row) (:seon.test/seed settled)))
+    (is (contains? (:seon.fn/keywords row) :seon.test/skip-reason))
+    (is (contains? (:seon.fn/keywords settled) :seon.test/skip-reason))))
