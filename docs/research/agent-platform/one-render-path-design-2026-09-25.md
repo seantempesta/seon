@@ -1,6 +1,6 @@
 ---
 type: design
-status: "owner adopted shell-order floor 2026-09-25; Opus first pass, awaiting Astra review"
+status: "owner adopted shell-order floor 2026-09-25; §3 and §6 row 2 revised by Opus after Astra review 6e9deea71; awaiting Astra re-review"
 created: 2026-09-25
 scope: One schema dispatch and one shape-aware, budget-owning floor printer
 ---
@@ -11,6 +11,7 @@ Declared identity ownership and producer error/return alternatives replace struc
 The floor uses one character budget spent in shell order (owner, 2026-09-25), fipp layout for text and an explorable page; renderers keep merged units.
 Problems returns data; prepare owns offset retrieval; overlong renderer text yields a named diagnostic.
 The revised slices land replacements before dispatch removal, convert explicit owners atomically, and price prompt admission.
+§3 and §6 row 2 were revised in place after [Astra review 6e9deea71](floor-shell-order-review-2026-09-25.md): one held-source entrance, a permitted-operation table, entry skeletons with absolute ordinals, B charged on the saved text, fipp's stages over an explicit-stack operation stream, and live-only continuations.
 
 Seon has declared schema pairs, a structural floor, and several competing selection and clipping paths. Compose the existing schema registry, guarded invocation and print nodes: **value + declared identity → schema renderer, else floor**.
 
@@ -135,488 +136,468 @@ not a second pretty-print cost model. Saved historical shown text remains termin
 `problems/ai-prose` returns its family-lines map: remove its nested `render-ai` call and `config/defaults` fallback.
 Missing floor policy is derived once at the entrance from supplied custody or explicitly refused, never defaulted inside a renderer.
 
-## 3. One floor: shell-order selection, then library layout
+## 3. One floor: held source → safe structural selection → one tree → two faces → one continuation entrance
 
-**What exists and what it becomes.** Today the floor walks the value depth-first while it spends a node counter
-named after the token budget (`value-node*`, `value.clj:446–566`). `print/fit` then re-emits, estimates tokens and
-halves limits until the text fits (`print.cljc:1234–1299`). `bounded-text`/`floor` (`value.clj:38–131`) and `window`
-(`value.clj:297–366`, called from `cluster.clj:594`) are two more cut engines. The design replaces all four with one
-data flow: **classify → shell-order selection under one character budget → pruned node tree → layout.**
-Selection is ours. Layout is `fipp.engine` for the AI text, and our own Hiccup emitter for the explorable page.
-The principal Clojure approach is a `loop` over a `java.util.PriorityQueue` of plain maps, the existing
-`ordered-head`, and a pure function from node to document. There is no protocol, no dynamic Var and no retry.
+**What exists and what it becomes.** Today MCP admits a raw value (`admit/admit-value`, which runs
+`Throwable->map` and Java collection admission, `sci/admit.clj:297`), turns it into an artifact, prepares the
+artifact's reconstructed semantic value, rebuilds semantic data from the selected node and serializes that again
+(`cluster.clj:388–494`). `get_value` reads the blob and applies its own string and collection windows
+(`cluster.clj:555–597`, `render.value/window` `value.clj:311`). `/data` separately reads, reconstructs and renders
+(`web.clj:3516`). The floor itself walks depth first under a node counter (`value-node*`, `value.clj:446`), then
+`print/fit` re-emits and halves limits until the text fits (`print.cljc:1234`). `bounded-text`/`floor`
+(`value.clj:65`, `:119`) are two more cut engines, and `repl/pretty-response` reads prepared text back and
+reprints it (`repl.clj:457`).
 
-Owner's words, 2026-09-25: the floor shows “snippets of each part of shapes so deeply nested large values still
-show part of the values while staying under the budget.” The research recommendation
-([prior art](value-printer-prior-art-2026-09-25.md) §3) is adopted. The three Astra review rounds
-([slice-2 review](render-floor-slice2-review-2026-09-25.md)) are requirements. Each numbered safety trace
-there has an answer in §3a–§3c, and the hostile regression list in §3g replays each trace.
-The parked attempt (`tmp/render-floor-opus/slice2c-worktree-reference.patch`) is a lesson, not a base. Its
-mistake was to classify *after* normalization, ordering and pricing had touched the value. Here, classification
-comes first and is the only thing that touches an unclassified value.
+The design is one data flow, owned by the entrance of the
+[query + render building block](query-render-building-block-2026-09-25.md) (`seon.render/units`, its §3e–§3f):
 
-### 3a. The one classification rule, applied before anything touches a value
+1. **Held source.** A live value, a live result handle, an admitted artifact digest or a query at a branch basis,
+   resolved under explicit custody. Nothing touches the value before step 2.
+2. **Safe structural selection** (`render.value/prepare`). A table of permitted operations (§3a) decides what may
+   be done to each reached object. A shell-order queue (§3c) spends one character budget B, which is the saved
+   AI text's length (§3d). It takes **no face target**.
+3. **One tree.** Plain print nodes: retained literal bytes, entries with key and value roles, cuts with absolute
+   offsets and the source reference. No unknown object reaches a face.
+4. **Two faces.** AI: the tree as fipp's own operation stream, laid out by fipp's own stages (§3e); this text is
+   clipped and is the saved text. HTML: the same tree as Hiccup, unclipped, each cut a lazy expander (§3f).
+5. **One continuation entrance.** `get_value` and `/data` decode coordinates and call `units` with the cut's
+   source reference, typed path and absolute offset (§3g). Neither transport navigates, windows or selects.
 
-`classify` is the floor's first question about any reached object. That includes a value, a map key, a set
-member, a seq cell, a node payload, a carried coordinate, a requery identity and a `node-id` input. Nothing
-else — ordering, pricing, hashing, schema lookup, path construction, printing, admission — may receive an
-object that `classify` has not answered for. The answer is one of four kinds:
+The principal Clojure approach: a `loop` over a `java.util.PriorityQueue` of plain maps, a data table of exact
+classes and their permitted operations, and pure functions from nodes to fipp operations and to Hiccup. There is
+no protocol, no dynamic Var, no retry and no second navigator. What disappears is listed in §6 row 2.
 
-| Kind | Exactly which objects | What the floor may do |
+Owner requirements served here: one pipeline for AI through MCP and humans through the browser; a pretty-printed,
+clipped AI face that is the saved text; an explorable, unclipped HTML face whose cuts load lazily; a side-by-side
+debug view; no lazy realization and no user code; snippets of every branch under one budget; sub-second. The
+[Astra review](floor-shell-order-review-2026-09-25.md) (`6e9deea71`) P1-1 to P1-10 are answered in place:
+P1-1/P1-2 in this preamble and §3g; P1-3/P1-4 in §3a; P1-5/P1-6 in §3b–§3c; P1-7 in §3e; P1-8 in §3d;
+P1-9/P1-10 in §3g. The three earlier Astra rounds
+([slice-2 review](render-floor-slice2-review-2026-09-25.md)) stay requirements; §3h replays their traces.
+
+**REPL evidence (2026-09-25, default PID 35446, JVM mode, read-only, scratch namespace `tmp.floor-revise`).**
+Values: the live root agent row (`(seon.db/pull db '[*] [:seon.agent/id "root"])`, 7 keys, 155,340 flat
+characters); the schema projection's forms map (3,435 keys, 626,476 characters); a stored error row (23 keys,
+2,976); a real test run pulled with its members (16 keys, 4,072); and a three-link Throwable chain whose middle
+`ex-data` is the real `seon.db/q` refusal value (2,970 characters as `Throwable->map`). The prototype is
+`tmp/floor-revise/probe.clj`, disposable: complete-shell selection over the §3a table, the §3d charge and the §3e
+layout. It is **not** the queue, so the partial shell is not measured. All timings are single warm runs.
+
+### 3a. Classification is a table of permitted operations
+
+`classify` answers first for every reached object: a value, a map key, a set member, a seq cell, a held
+component, a carried coordinate. Nothing else, including ordering, pricing, hashing, lookup, path construction,
+printing or admission, receives an object `classify` has not answered for. The answer is **a row of the table
+below, matched by `(identical? (class x) C)`**, never `instance?` and never a package name. A row lists the only
+operations the floor may perform and the held objects those operations return, which are classified in turn.
+Every class not in the table is **opaque**: its face is `#object[<Class/getName> 0x<System/identityHashCode>]`,
+and nothing else is called on it. Approval of an outer class never approves its contents.
+
+| Exact class | Permitted operations (source) | Held objects, classified before use |
 |---|---|---|
-| **traversable** | An instance of a `clojure.lang` persistent collection class that is `counted?`: array/hash/tree maps, vectors (including `MapEntry` and subvec), hash/tree sets, `PersistentList`, `PersistentQueue`. Also a record whose `print-method` entry is `identical?` to the `IRecord` default (`get-method` is a hierarchy lookup and runs no user code). | `count`, iterate, `nth`/`get` by a shown key. Members are classified one by one when reached. |
-| **string** | `java.lang.String`, a final class. | `.length` and `subs` into fixed-width chunks of w = 16 characters, split at a code-point boundary. A chunk's charge is `(count (pr-str chunk))`, so escapes are counted by clojure.core itself. |
-| **scalar** | nil, or exactly these classes, matched with `(identical? (class x) C)`, never `instance?` (`BigInteger`, `BigDecimal` and `Date` are not final): `Boolean`, `Long`, `Integer`, `Short`, `Byte`, `Double`, `Float`, `clojure.lang.BigInt`, `BigInteger`, `BigDecimal`, `clojure.lang.Ratio`, `Character`, `clojure.lang.Keyword`, `clojure.lang.Symbol`, `java.util.UUID`, `java.util.Date`. | First the **literal length is estimated from O(1) accessors**: name and namespace `.length` for idents; `.bitLength` × log₁₀2 for integers; `.precision` and `.scale` for decimals; a constant for the rest. Only when that estimate fits the room is `pr-str` called. The printed bytes are kept in the node, so emission never prints the scalar again. A scalar that cannot fit is unaffordable (§3b); nothing prints it. |
-| **opaque** | Everything else. | Shown as `#object[Class 0xidentityhash]` from `.getName` of its class and `System/identityHashCode`. It is **never** seq'd, counted, hashed, compared, printed, admitted, dereferenced or `toString`'d. |
+| `nil`, `Boolean`, `Long`, `Integer`, `Short`, `Byte` | static `toString`; bound 20 | — |
+| `Double`, `Float` | `##NaN`/`##Inf` table, else `Double/toString`; bound 24 | — |
+| `Character` | `char-name-string`/`char-escape-string` lookup, else `\c` | — |
+| `String` | `.length`, `subs` of one chunk, escaped by the same char table | — |
+| `Keyword` | `.sym` (field), then as Symbol | its `Symbol` (exact final class) |
+| `Symbol` | `.getNamespace`, `.getName` (final fields). **Metadata is never read** | — |
+| `java.util.UUID` | `toString`; 36 | — |
+| `java.util.Date` | `.toInstant`, `Instant/toString` (final); ≤ 40 | — |
+| `clojure.lang.BigInt` | public fields `lpart`, `bipart` (`BigInt.java:23–24`) | `bipart` must be exactly `BigInteger` |
+| `BigInteger` | `.bitLength`; `toString` only after the bound fits | — |
+| `clojure.lang.Ratio` | public fields `numerator`, `denominator` (`Ratio.java:23–24`) | both exactly `BigInteger` |
+| `BigDecimal` | `.unscaledValue().bitLength`, `.scale`; `toString` only after the bound fits | unscaled value exactly `BigInteger` |
+| `TaggedLiteral` | public fields `tag`, `form` (artifact faces, §3g) | `tag` Symbol, `form` |
+| `PersistentArrayMap`, `PersistentHashMap` | `count` (field: `PersistentArrayMap.java:212`, `PersistentHashMap.java:263`); `.iterator` | each entry's key and value |
+| `PersistentTreeMap` | `count` (`PersistentTreeMap.java:309`); `.iterator`. **Never** a lookup: lookup calls its comparator (`:313–330`) | key, value |
+| `PersistentVector`, `MapEntry` | `count` (`PersistentVector.java:209`), `nth` | members |
+| `APersistentVector$SubVector` | public fields `v`, `start`, `end` (`APersistentVector.java:610–613`) | `v` must be exactly `PersistentVector` |
+| `PersistentHashSet`, `PersistentTreeSet` | `count` via package-constructed `impl` (`APersistentSet.java:44`; constructors package-private, `PersistentHashSet.java:87`, `PersistentTreeSet.java:40`); `.iterator` | members |
+| `PersistentList`, `PersistentList$EmptyList` | `count` (`PersistentList.java:115`), `first`, `next` (fields) | members, tail |
+| `Cons` | `.first`, `.more` (fields, `Cons.java:36–47`). **Not** `count`, which walks the tail (`:50`) | first, tail |
+| `LazySeq` | `.isRealized` (`lock == null`, `LazySeq.java:287`); when realized, `.seq` returns the field `s` (`:102–105`) | the cached seq. Unrealized: the pending marker |
+| `ChunkedCons` | `.chunkedFirst` (field, `ChunkedCons.java:56`), `.chunkedMore` (field, `:64`) | chunk must be exactly `ArrayChunk` (`nth`/`count` read an array, `ArrayChunk.java:39–51`); tail |
+| `PersistentVector$ChunkedSeq` | `count` (`PersistentVector.java:512`), `first`, `next` over its own vector | members |
+| `Throwable` subclass *C* | Only when `getMessage`, `getCause`, `getStackTrace` and `getSuppressed` all have declaring class `java.lang.Throwable` (`Class/getMethod` + `getDeclaringClass`, memoized per Class). `getData` only for exactly `ExceptionInfo` (`ExceptionInfo.java:34`) | message, data, cause, frames |
 
-Five classes of object get a named rule.
+Consequences, each a closed trace from the review:
 
-- **Host `Counted`.** A class outside `clojure.lang` that implements `clojure.lang.Counted` or `IPersistentMap` (a
-  `deftype`, a Java collection wrapper) is **opaque by class**. `count` is never called on it. Its face is
-  finite: class name plus hash. This closes review re-check 2, item 6 (`display-value`'s `counted-size`), because
-  `display-value` is deleted and totals come only from traversable collections.
-- **Lazy seq: show the realized prefix, never realize.** A seq cell is stepped only if its class is a `clojure.lang` seq
-  class other than `IteratorSeq`/`EnumerationSeq`, which call host iterators, and it is not an unrealized
-  `clojure.lang.IPending`. The step uses `.more`, never `.next`/`seq` on an unclassified object. `Cons.more`
-  and `ChunkedCons.more` return fields. A realized `LazySeq` returns its cached seq. Whatever `.more` returns is
-  classified before it is touched. The first unrealized or opaque cell becomes the seq's tail cut with an
-  unknown total: `(1 2 3 …?)`. So `(range)`, `(filter (constantly false) (range))`, `(cycle …)` and `(iterate …)`
-  are finite: one realized cell at most, or `(…?)`.
-  *Justification.* Realization runs arbitrary host code that no interrupt stops (AGENTS "Bound admission and
-  await actual exit"). The printer runs on shared threads: MCP, web and error recording. The realized prefix is free and safe,
-  and it is often all there is, for example after `doall` or when a result has been partly consumed.
-  An agent that wants more asks inside its own evaluation, where its own bound applies:
-  `(take 50 (value-at result/e12 path))`. An agent's top-level lazy result is realized by the evaluation that
-  produced it, before `shown-result` renders it (§3f, unproven item 4). Realization is never done by the printer.
-- **Record with a custom printer** (a Datahike DB, for example) is opaque unless a declared renderer claims it
-  first (§1). The floor never calls the custom `print-method`. A default-printed record is traversable as
-  `#Name{…}`; its generated `count`/`seq` are `defrecord`'s own code.
-- **Throwable → a safe projection, not `Throwable->map`.** `Throwable->map` walks `.getCause` without a visited
-  set (`reference-code/clojure/src/clj/clojure/core_print.clj:494–497`). A two-link cycle never ends there, and it
-  materializes every frame before any budget applies. The floor instead builds one small persistent value:
-  `#error {:via [{:type C :message M :data D} …] :trace [F …] :suppressed [...]}`.
-  - `:via` is flat, outermost first, and the chain walk keeps an identity set. A repeated link ends `:via` with
-    `{:cycle-to [:via i]}`, a reference and not a repeat.
-  - Each accessor (`getMessage`, `ex-data`, `getStackTrace`, `getSuppressed`, `getCause`) runs in its own
-    `try`. A throwing accessor becomes `{:accessor-failed Class}` in that slot and does not end the projection.
-  - `:trace` is the root link's first-party frames (`refusal/first-party-frame?`), as `"ns/fn (file:line)"`
-    strings after `Compiler/demunge`, as the current `link-lines` prints them.
-  - The keys stay in this declared order: the projection is a node whose entries are not re-sorted (§3c).
-  - `:message` and `:data` values are ordinary strings and maps, so shell order spreads B across every link's
-    class, message and data before any trace grows.
-  - **Limitation stated:** accessors are virtual methods, and a subclass override that never returns cannot be
-    interrupted. The same is true of any host call. Only JDK and `ExceptionInfo` implementations are known inert.
-- **Carried coordinates, requery forms and `node-id` inputs** get one rule. A cursor path, a root address
-  (`:seon.render.value/root`, `:seon.render.call/id`), an identity value read by `identity-address`, a
-  carried `:seon.render.data/path` and a carried `:seon.print/requery-id` are all checked the same way: each is run
-  through this same selection with a small **coordinate allowance** (C = 256 characters), and it is valid only
-  if it is shown **whole** and contains no opaque or cut part. This check comes before `node-id` hashes it
-  (`id/digest` prints with unlimited `pr-str`, `id.clj:29–38`) and before `path-url` prints it.
-  - An invalid entrance coordinate refuses by name with a declared `:seon.render.value/coordinate-error` over
-    `:seon.error/base`, naming member, expected shape and the value's class.
-  - An invalid carried coordinate is dropped at that node, and the node gets the refusal "carried coordinate
-    is not a finite value".
-  - `:seon.print/requery-form` is **never carried or printed from input**. It is always derived at emission
-    from a valid identity and path (`requery-form`, `print.cljc:444–455`).
-  - Paths that selection itself constructs are finite by construction. Their steps are scalar keys already
-    shown whole (so ≤ B characters), ordinals, and chunk offsets.
+- **Seq cells** (P1-3). `ChunkedCons` is safe only through an exact `ArrayChunk`; a user `IChunk` is opaque. A
+  realized `LazySeq` is unwrapped to its cached seq, which is then classified. `StringSeq`, `APersistentMap$KeySeq`,
+  `ASeq` subclasses, `Cycle`, `Iterate`, `Repeat`, `Range`, `IteratorSeq` and `EnumerationSeq` are not rows, so a
+  cell of one of those classes ends the prefix. The first unrealized or unlisted cell becomes the seq's tail cut with
+  an unknown total: `(1 2 3 …?)`. `(range)`, `(iterate f x)` and `(cycle xs)` show `(…?)` or at most their
+  already-held first cell. **Measured:** the probe's `seq-cells` steps `Cons`, realized `LazySeq` and
+  `ChunkedCons`/`ArrayChunk` through fields only.
+- **Row 9.5** (ruled): the pending tail is the declared "unrealized lazy seq" marker naming the cell's class, never
+  nil. Realizing a page is an explicit, bounded evaluation (§3g), never the printer. The old claim that an agent's
+  top-level lazy result is realized before `shown-result` renders it is withdrawn: the review traced the evaluation
+  path (`sci/eval.clj:3264`, `bind-result!` `:620`) and found no such step. An unrealized result shows pending.
+- **Scalars never meet `print-method`** (P1-4). A Symbol with `{:type :user/hostile}` metadata is encoded from its
+  final fields; `print-method`'s `:type` dispatch (`core.clj:3693–3695`) is never reached. Numbers whose text is
+  unbounded are **bounded first**: ⌈bitLength · log₁₀2⌉ + 1 digits for `BigInteger`, the sum for `Ratio`, and
+  unscaled digits plus the scale's digits for `BigDecimal`. Decimal text is made only when that bound fits the
+  room. Otherwise the node is a charged descriptor: `#bigint[≈301030 digits]` or `#ratio[≈2000001 digits]`.
+  Keywords, symbols and strings are names: an oversized one shows a chunk prefix like a string.
+- **Host collections.** A class outside the table that implements `Counted`, `IPersistentMap`, `java.util.Map` or
+  `Collection` is opaque. `count`, `seq`, `iterator` and `get` are never called on it.
+- **Records** are opaque unless a declared renderer claims them (§1). The review showed that `IRecord` plus a
+  default `print-method` does not prove generated `seq`/`count` code. The Datahike DB and connection are opaque
+  as well.
+- **Throwables** (review "Throwable and lazy-result qualifications"). The review's "never run user code" wins
+  over the old per-accessor `try`. A class that overrides any accessor, including `CompilerException`'s
+  formatting (`Compiler.java:7403`, `:7474–7480`), is opaque with its class name. Links are **projected lazily**:
+  `:via` is a seq of links that selection steps one `getCause` at a time, with an **identity** set
+  (`System/identityHashCode` plus `identical?`) bounded by the visited links (≤ B). `getStackTrace` runs only when
+  a link's `:trace` node is reached. It copies at most the JVM's recorded frames (`-XX:MaxJavaStackTraceDepth`,
+  1,024 by default), which is JDK code over already-captured data. `Throwable->map` is never called
+  (`core_print.clj:494–501`). Stored flat `:seon.error/*` maps are plain data and are preferred wherever they
+  exist. The projection is `#error {:via [{:type C, :message M, :data D} …], :trace [F …]}` in that declared
+  order.
+- **Map lookup.** The floor never calls `get`, `find` or `contains?` on a map it did not prove all-scalar
+  (§3b). `Util/equiv` sends a probe key into a stored key's `equiv` when either is a persistent collection
+  (`Util.java:24–36`), so a lookup by keyword into a map holding a user collection key can run user code.
+- **Carried coordinates** (P1-9 and review trace "node-id"). A cursor path, root address, identity value, source
+  reference and agent id are **typed data validated before use** (§3g). They are never hashed, printed or looked
+  up raw. `requery` forms are derived from a validated source reference at emission, never carried from input.
+  Node identity is the occurrence id plus the cut's ordinal (§3f); no path is digested per node.
 
-  This closes re-check 2 item 3 and review-2 P1-C/P1-D.
+### 3b. Structure: entries with roles, held order, absolute ordinals
 
-### 3b. Selection: shell order under one budget
+- **A map is a sequence of entries** in one order. Each entry is a node with two child roles, `:key` and `:val`.
+  A composite key is a value like any other: it is shown through the same selection, so no entry is ever skipped
+  (P1-5, the `(array-map :a 1 [2] :hidden :z 3)` counterexample).
+- **Order is the held order,** except for one bounded case. An array map keeps the producer's order (pulls and
+  `array-map` literals). A tree map keeps its comparator's order, obtained by iteration only. A hash map with at
+  most 64 entries whose keys are all exactly `Keyword` is sorted: declared identity attributes first
+  (`db/identity-attributes`, compared with `identical?`), then by namespace and name through a 64-character
+  window. Every other hash map keeps its iteration order. That check reads at most 64 keys, and the sort costs
+  O(64 log 64). There is **no global sort** and no `ordered-head` scan (P1-6). A hash map's iteration order is
+  arbitrary but stable for the held value, so it is a valid coordinate. Readability costs are real: a 3,435-key
+  map shows keys in hash order.
+- **Path steps are typed:** `[:seon.render.data/entry i]` then `:seon.render.data/key` or `:seon.render.data/val`;
+  `[:seon.render.data/nth i]` for vectors, lists, seqs and sets (held iteration order); `[:seon.render.data/char i]`
+  for strings. A map proved all-scalar (the ≤ 64 sorted case) may use `[:seon.render.data/key k]` with k
+  its shown key: lookup is then safe, because every stored key is an exact `Keyword`. Steps are tagged vectors, not
+  shape guesses, so they cannot collide with a literal map key. There is exactly one navigator, `render.data/at`,
+  rewritten over these steps. It keeps its present-versus-nil result (`data.clj:46`) and drops raw
+  `contains?`/`get`/`nth` on unclassified values (`:54–68`). `print/value-at` (`print.cljc:403`) is deleted.
+- **Offsets are absolute source ordinals.** Selection never skips a member (oversized members become descriptors,
+  §3c), so the shown members of every collection are a prefix. **One tail cut per collection is exact:**
+  `next-offset` = the ordinal of the first unshown member, `omitted` = total − next-offset, and the total is typed
+  unknown for pending seqs.
+- **Navigation cost.** A vector step is O(1) through `nth`. A map, set or seq step at ordinal i iterates i
+  members, through the table and without realization. That is **query work,** charged to the request's work bound
+  and deadline, not to B. A continuation at offset i in a 10⁶-key map costs O(i + shown), never a full scan.
+- **Paths are built incrementally:** a node's path is its parent's path `conj` one step, O(1) with structural
+  sharing. Only cuts and HTML expanders print a path, O(depth) each (§3f).
 
-**Budget.** B is converted once at entry: `B = (tokens/estimate-chars token-budget calibration)`
-(`tokens.cljc:159–169`; the live calibration is 3 characters per token). Only characters are charged.
+### 3c. Selection: skeletons first, then shell order
 
-**Order.** Give the root depth 0. A member has depth d and a 1-based ordinal o in its parent's canonical order
-(§3c). Its **shell** is `s = max(d, o₁, …, o_d)`, where o₁…o_d are the ordinals along its path. The shell is
-monotone down a path, so a child never pops before its parent. The queue pops by
-`[s d o seq]`, where `seq` is the insertion counter. That makes ties round-robin across parents, not
-first-parent-wins.
+**Admission unit** (P1-5 fix). A member is first admitted as its **skeleton**, a bounded face that is always
+followed by a value face:
 
-**Loop.**
-1. Pop the least entry. Price its face exactly as the single-line emitter will print it:
-   - a scalar: its literal;
-   - a string: its quotes when opened, then one chunk per pop;
-   - a map entry: key literal plus `" "`;
-   - a collection: its brackets (`#:ns{` when factored, §3c);
-   - an opaque object: its `#object[…]` face;
-   - the separator before it.
-2. When a collection or string opens, **reserve its tail-cut face** (`…N`, with digits(total)). The reserve is
-   refunded if every member is shown.
-3. If the price fits the room, admit the node and charge it. Then push its parent's **next** member (ordinal
-   o + 1), and push the node's own first member if it is a collection. Only one pending member per open
-   collection is ever queued. This is a k-way merge: queue size ≤ open collections + 1.
-4. If the price does not fit, **close that node's parent.** The node and every later sibling become the parent's
-   one tail cut. Selection then continues with the other branches, so one unaffordable scalar ends only its own
-   collection, not the whole walk. It stops when the queue empties.
+- a scalar: its literal when its bound is ≤ S = 32 characters, else its descriptor;
+- a string, keyword or symbol: its first chunk of w = 16 characters plus the cut `…+N` when longer;
+- a collection: `open …N close` (for example `{…7}` or `[…100000]`);
+- a map entry: key skeleton, a space, value skeleton;
+- an opaque object: its `#object[…]` face, which is at most the class name plus 12 characters. A class name over
+  S characters is chunked like a string.
 
-Every admitted node costs at least 1 character, so visited nodes V ≤ B. Work is O(V log V) queue operations.
-On top of that, each opened unordered collection costs one O(N log n) `ordered-head` pass (§3c), with
-n ≤ ⌊room/2⌋ + 1 because every shown member costs at least 2 characters. That pass is the one
-proportional-to-input cost: a 10⁶-key map pays one iteration of its entries when it is opened, and it is
-reported beside the number (§3h). There is no hidden subtree scan, no refit, no second emission and no search.
+Every skeleton is at most S plus a small cut face, so **an unaffordable member closes its collection only when the
+room left is under one bounded skeleton.** A huge first key no longer starves a later `:ok`: the huge key is a
+descriptor at its position.
 
-**Cuts** use Clerk's shape (`viewer.cljc:1668–1705`). Every closed collection or string yields one elision node
-with `:seon.render.data/path`, `:seon.render.data/next-offset` (= shown count, or characters for a string),
-`:seon.print/omitted` and `:seon.render.data/total`. An unknown total is typed `:seon.render.data/total-unknown`
-and never guessed. The node also carries the requery identity or refusal. Visited members of any collection
-are always a prefix, because a lower ordinal always has a lower-or-equal key. Therefore **one tail cut per
-collection is complete evidence**, and `next-offset` is a real coordinate. A collection that opened but showed
-no member is the same cut at offset 0, which retires `:subtree` as a separate unit.
+**Order.** The root has depth 0. A member has depth d and ordinal o, both 1-based. Its **shell** is
+`s = max(d, o₁, …, o_d)` over the ordinals along its path. A string's k-th chunk is at shell max(s, k), and a
+collection's refinement to member o is at shell max(s, o). The queue pops by `[s d o seq]`, where `seq` is the
+insertion counter. It holds at most one pending member per open collection or string: a k-way merge, with queue
+size ≤ open nodes + 1.
 
-**Equivalence.** When shell k is complete, the visible set is exactly the nodes with depth ≤ k whose every path
-ordinal is ≤ k. That is what clojure.core prints under `*print-length* = k` and `*print-level* = k`
-(`core_print.clj:48–70`), with our cut faces standing in for `...` and `#`. Shell k+1 is then spent in key order
-until B runs out. This is Erlang `io_lib_pretty`'s iterative deepening (`io_lib_pretty.erl:839–893`), made
-two-dimensional and computed in one pass instead of a binary search.
+**Loop.** Pop the least entry, price its skeleton with the §3d charge, and admit it if it fits the room. Then push
+its parent's next member and its own first refinement. If it does not fit, close its parent at that ordinal (one
+tail cut) and continue with the other branches. Stop when the queue empties or the room is under the smallest
+skeleton. Declared renderers run when their node is reached (§2): a smaller returned value takes that node's
+place at the same key, and final text is one leaf charged whole or §2's overage diagnostic.
 
-**Fairness argument.**
-- (i) No node of shell k+1 is shown while any node of shell k is missing, except in a closed collection. So
-  every branch gets a k-member, k-deep snippet before anything goes wider or deeper. That is the owner's
-  sentence.
-- (ii) A huge sibling cannot starve its neighbours. A collection's face costs its brackets, and it grows by one
-  member per shell like everything else. A long string grows by one 16-character chunk per shell.
-- (iii) Inside the partial shell, shallower nodes come first (structure before detail), then earlier ordinals,
-  then round-robin.
-- (iv) The only unfairness left is stated plainly: a scalar whose own literal exceeds the room closes its
-  parent early.
+**What is guaranteed, conditionally** (the review's "What can be proved"). Shells are popped in nondecreasing
+order. If the whole of complete shell k (every node with depth ≤ k and every ordinal ≤ k, at least as a skeleton,
+and every string's first k chunks) costs ≤ B, the output contains all of it. After that, shell k+1 is spent in
+queue order until B runs out. Nothing stronger is claimed. There is no equal per-branch allocation: an early bushy
+branch spends its share of shell k+1 before a later sibling's. A deep singleton chain costs one skeleton per level.
+No finite B shows every part of an arbitrary value; cuts say what was omitted and where.
 
-Worked example: the live agent row below (§3i). At 600 tokens today's floor drops `:seon.agent/plan`,
-`:seon.agent/runtime` and `:seon.agent/settings` whole, because one 155,067-character sibling forced the global
-halving. Shell order shows all seven keys and the first seven turns.
+**Measured complete shells** (prototype, charge ≤ B, §3d):
 
-**The huge-first-sibling regression.** Take `{:a (vec (range 100000)) :b {:c 1} :d "x"}` at B = 100 characters.
-The draft probe in the old §3 showed that stopping at the first failure collapses this value into one elision.
-Shell order prints `{:a [0 1 2 …99997], :b {:c 1}, :d "x"}` (38 characters) by shell 3. It then spends the rest
-of B widening `:a` one member per shell, and the legend is reserved first. The regression asserts that `:b`,
-`:c 1` and `"x"` survive, that `:a`'s cut has path `[:a]` with offset = shown and total 100000, and that the
-flat length is ≤ B.
+| Value | B = 450 | B = 1,800 | B = 45,000 (15,000 tokens) |
+|---|---|---|---|
+| agent row | shell 5 | 7 | 29 |
+| projection forms (3,435 keys) | 3 | 5 | ≥ 200 (probe cap) |
+| stored error row | 4 | 25 | whole value |
+| Throwable chain | 5 | 12 | whole value |
+| test run | 7 | 11 | whole value |
 
-**Declared renderers inside the floor** (§1/§2) run when their node is reached, not before, and never during
-pricing of another node. A returned smaller value takes that node's place in the queue at the same key. Final
-renderer text is one leaf, charged whole. If it cannot be paid, it becomes §2's named renderer-overage
-diagnostic in place. If that diagnostic cannot be paid either, the parent closes. §2's “share” means the room
-at the reached node; no fresh B is ever started.
+**Root and minimum.** If the root's own skeleton plus the legend (§3d) exceeds B, selection returns the declared
+`:seon.print/insufficient-floor-budget-error` (new, over `:seon.error/base`, naming B and the needed charge). It
+never claims a snippet fits. A continuation that cannot admit even its first member's skeleton returns that same
+refusal instead of an unchanged cut, so every successful expansion shows at least one new member (strict
+progress).
 
-**Legend and minimum.** Reserve the legend's exact text L once at entry (about 90 characters). It is emitted
-only when a cut exists. A value within L of B therefore loses one partial shell, which is the stated price of
-never refitting. If B < L plus the root's cheapest face, selection returns the declared
-`:seon.print/insufficient-floor-budget-error` (new, over `:seon.error/base`; `seon.print.edn` declares none today). It never claims a snippet fits.
+### 3d. B is the length of the saved AI text
 
-### 3c. Ordering and path steps
+B is converted once at entry: `(tokens/estimate-chars token-budget calibration)` (3 characters per token live). It
+is charged against the **complete saved AI text**: content, delimiters, separators, descriptors, cuts, the legend,
+newlines and indentation (P1-8). Selection charges every node its **reserved** cost:
 
-- Vectors, lists, seqs, strings, sorted collections, records and print nodes keep their own order.
-- A counted map or set is sorted **only when every key or member is a scalar or string**. The existing
-  `ordered-head` (`value.clj:425–444`) takes its first n members in one pass. The comparator orders declared
-  identity attributes first (`db/identity-attributes`, checked with `contains?` only for keyword keys, whose
-  hash is cached). Then it orders by `[category literal-prefix]`. `literal-prefix` compares at most the first 64 characters,
-  which is a fixed comparison window and not a display bound. Ties go to the iteration ordinal. So ordering
-  never compares whole huge strings or composite values, and never calls `pr-str` or `compare-values`. That
-  closes re-check 2 item 4 and the OOM path in open-items 2026-09-25 03:09Z. `print/compare-values` stays for
-  `db.clj:2998` only.
-- **Composite map keys:** a map with any non-scalar key keeps iteration order, and every entry whose key is
-  composite is **elided whole**. It counts in the map's cut but is never shown or used as a path step.
-  **Limitation:** `{[1 2] :x}`-shaped maps show only their scalar-keyed entries and a count. The legend's requery
-  `(seq (value-at h path))` reaches the rest by position in the agent's own evaluation. Group-by results and
-  tuple-keyed indexes are the known victims.
-- **Sets with composite members** (Datalog results, for example) are not elided. Members are *values*, so each
-  is shown through the same selection at an ordinal step `[:seon.render.data/nth i]` into the held value's
-  iteration order. `value-at` gains that one step kind (`print.cljc:403–411`, +2 lines). The step is valid for
-  the same held value, which is exactly what a result handle or digest names.
-- The attribute projection (`attribute-value`, `value.clj:388–423`) runs only on a classified traversable
-  component collection. Its `pr-str` tie-break (`:413`) becomes the iteration ordinal, and its
-  `(sort-by str (keys …))` becomes the scalar-key rule. That closes re-check 2 item 2.
+- its literal bytes (strings: one pair of quotes per string plus escaped chunk content; not `pr-str` per chunk);
+- its delimiters and cut face;
+- per member, its separator at the **broken** price: `,` + newline + the capped indentation I(d) at that depth.
+  I(d) is the sum of the §3e nests above it, where nesting stops at depth 6, so I(d) ≤ 18 columns;
+- per entry, its key/value break: newline + I(d) + 2;
+- the legend L, reserved at entry and refunded if the selection has no cut.
 
-Every path step is therefore finite: a scalar already shown whole, an ordinal, `[:seon.render.data/nth i]`, or
-a character offset.
+fipp emits exactly the charged text operations. It emits each `:line` either as its inline space (at most the
+reserved break) or as a newline plus an indentation of at most I(d). Therefore **emitted length ≤ charge ≤ B** by
+construction. After layout, `(<= (count text) charge)` is checked once. A violation is the declared
+`:seon.print/allocator-charge-error` (new, over `:seon.error/base`, naming path, B, charge and length): a defect,
+never a second attempt. `:seon.render.value/text-chars` and `:seon.render.value/charge` are recorded with the
+saved text. Whole-unit prompt admission (§5) counts those saved bytes.
 
-### 3d. Emission: selection hands a pruned tree to layout
+Measured on the prototype, with the flat length (a single line), the laid-out text (width 100) and the reserved
+charge, in characters:
 
-The pruned tree is plain print nodes. Each leaf is a known scalar with its bytes retained, a string chunk run,
-a cut, or an opaque face. Each branch is a traversable face. **No unknown object reaches emission.** So no
-`print-method`, `toString` or `deref` can ever run in layout, whichever library does it.
+| Value | B = 450: flat / text / charge | B = 1,800 | B = 45,000 |
+|---|---|---|---|
+| agent row | 182 / 188 / 244 | 1,072 / 1,295 / 1,778 | 32,410 / 37,867 / 43,051 |
+| projection forms | 220 / 224 / 309 | 901 / 974 / 1,220 | 35,702 / 38,367 / 44,184 |
+| stored error | 250 / 270 / 297 | 1,626 / 1,671 / 1,793 | 2,957 / 3,002 / 3,124 |
+| Throwable chain | 233 / 245 / 342 | 1,197 / 1,416 / 1,741 | 1,402 / 1,647 / 2,007 |
+| test run | 261 / 269 / 303 | 646 / 671 / 740 | 4,064 / 4,472 / 5,114 |
 
-**Algorithm lineage.** Wadler-style pretty-printing has one document algebra: text, line, nest/align and group.
-A group prints flat if it fits the remaining width, else its lines break.
-- Oppen (1980) gave the first linear-time, bounded-space version: a scan buffer only as wide as the line.
-- Wadler's "A prettier printer" (2003) made it an algebra with `group x = flatten x <|> x`.
-- Leijen's wl-pprint added `align`, `hang` and `fill`.
-- Swierstra and Chitil's "Linear, bounded, functional pretty-printing" (2009) pruned the lookahead to the
-  width.
-- Kiselyov, Peyton Jones and Sabry's "Lazy v. Yield" (2012) gave the strict-generator form that **fipp ports**
-  (`reference-code/fipp/src/fipp/engine.cljc:1–3`; README "Fast!").
-- Prettier's doc printer is the same algebra with a `fits` check to the line end.
-- zprint searches rule-based alternatives (hang, flow, wrap) per form. It gives better code layout, at a cost
-  that is not linear-bounded.
-- gofmt deliberately does not break by width. It keeps author line breaks and aligns with elastic tabstops.
+Text was ≤ charge ≤ B in all 15 cases. Layout adds 2–21% over flat, against 2.4× for `fipp.edn`'s bracket
+alignment in the first pass. The reservation over-charges the laid-out text by 4–40% (median 15%). That
+unused room is the stated price of never re-fitting. The alternative, B over flat content only, weakens the
+owner's one budget and is not taken.
 
-We take the Wadler/Oppen family through fipp, and we inherit its properties:
-- A group stays on one line when it fits.
-- A group that does not fit breaks its own lines, and each inner group gets its own chance
-  (`doc/primitives.md`, `:group`).
-- Time is linear in document size.
-- Lookahead is bounded by the width (`annotate-begins`, `engine.cljc:92–162`), so memory is O(width).
+**Legend.** It appears once, after the value and only when a cut exists, and it is charged:
+`;; …N = N more · continue: (seon.render/units {:seon.render/source-ref result/e12 :seon.render.data/path P :seon.render.data/offset N})`,
+or `;; …N = N more · not retrievable: <typed reason>` (§3g). About 100 or 50 characters.
 
-**Library evaluation** (both read from source; both are on the development JVM's classpath):
+### 3e. The AI face: fipp's own stages over an explicit-stack operation stream
 
-| Choice | What it gives | Why / why not | `print.cljc` kept |
-|---|---|---|---:|
-| **A.** Keep Seon's emitter (`Sink` protocol, `TextSink`, greedy `soft-separator` wrap at a column) | Nothing new | Its wrap is column-greedy, not group-based, so it cannot keep a small map on one line and break a large one. It keeps about 400 lines of sinks and multimethods. | ≈ 915 |
-| **B. Recommended.** `fipp.engine` 0.6.29 for text: we build the fipp document from nodes ourselves; our own `node->hiccup` for HTML | Group layout, `:align`/`:nest`, `:pass` for zero-width markup (`engine.cljc:24–65`). `annotate-rights` computes the **flat single-line width** of the document as a by-product (`:68–86`). | fipp is on **every** classpath: it is `metosin/malli`'s dependency in all four `.cpcache` bases. We do not use `fipp.edn`'s visitor, whose `visit-unknown` → `ednize` falls back to `(str x)` (`ednize.clj:45–49`), and nodes are not values anyway. We call `serialize` + `annotate-rights` + `annotate-begins` + `format-nodes` into a `StringBuilder`, not `pprint-document`, which writes to `*out*` and appends `println` (`:247–259`). | ≈ 635 |
-| **C.** puget 1.1.2 | ANSI color schemes, `:print-handlers`, `:print-fallback`, `:namespace-maps` (`printer.clj:1–130`) | Its visitor works on **values**, so we would convert nodes back into values with tagged literals. It sorts collections of up to 80 elements with its own order (`:sort-keys`, `order-collection`, `:185–195`). Its namespace rule differs from ours. It emits no Hiccup structure. Decisively, it is **only on the development classpath**, reached through `lambdaisland/deep-diff` and flow-monitor, and absent from the 129-entry runtime classpath. We would keep our Hiccup emitter anyway. | ≈ 900 + a dev-only dependency |
+`tree->ops` walks the tree with an explicit stack and emits fipp's own operation maps: `{:op :text}`,
+`{:op :line :inline " " :terminate ""}`, `:begin`, `:end`, `{:op :nest :offset n}` and `:outdent`
+(`reference-code/fipp/src/fipp/engine.cljc:12–65`). Those maps go straight into
+`(eduction fe/annotate-rights (fe/annotate-begins opts) (fe/format-nodes opts) ops)`, appended to one
+`StringBuilder` (`engine.cljc:68–223`). There is no `serialize`, no `pprint-document` (which writes to `*out*` and
+appends a newline, `:247–259`), no EDN visitor (`ednize.clj:45–61`) and no new layout algorithm (P1-7).
 
-**Recommendation: B.** It deletes the most. The Sink protocol, the three sinks, the `emit` multimethod family,
-table emission and the fit family go, and two pure functions replace them: `node->doc`, about 55 lines, and
-`node->hiccup`, about 45. **HTML needs our own emitter anyway**, said plainly. The page needs
-structure (`<details>` per collection, expanders at cuts, path attributes) that a laid-out character stream
-cannot carry. So the one decision is the pruned tree, laid out twice: fipp for text, and the browser for HTML
-from our Hiccup.
+**Measured (P1-7):**
 
-**Keeping the charge honest.**
-- Selection charges the exact flat single-line characters: retained scalar bytes, chunk `pr-str` lengths, the
-  emitter's own delimiter, separator and cut-face strings, and the legend. Namespace factoring is decided when
-  the map opens (all keys share one namespace and there are at least 2 keys), and is then charged exactly:
-  `#:ns{` once, keys by name.
-- After layout, fipp's final `annotate-rights` position **is** the flat width. It is compared with B **once**. A
-  larger value is a declared `:seon.print/allocator-charge-error` (new, over `:seon.error/base`) naming path, B, charge and width. It is never a second attempt.
-- The layout's newlines and indentation are **excluded from B and measured once after layout**. The prepared
-  projection records `:seon.render.value/flat-chars` and `:seon.render.value/text-chars`. The saved text is exactly
-  what the AI sees, and whole-unit prompt admission (§5) counts those saved bytes. Layout never clips.
-  **Measured (probe below):** `fipp.edn`'s bracket-`:align` style turned a 1,573-character flat agent selection
-  into 3,783 characters, 2.4× more. So the AI face does **not** align to the bracket column.
+- The op-stream layout of the depth-7 agent selection is byte-identical to `pprint-document` of the equivalent
+  document.
+- `fipp.engine/serialize` overflows the stack at depth 1,000. That happens both for a recursive `node->doc`
+  and for a document built iteratively, because `serialize` recurses through `mapcat` (`engine.cljc:12–19`).
+- The explicit-stack op stream lays out depth 1,000 / 5,000 / 20,000 in 13 / 61 / 156 ms with no overflow.
+- Indentation must be capped at every nest, entry nests included. Uncapped entry nesting at depth 100 gave
+  11,187 characters from 501 flat (quadratic). Capped at depth 6 it gave 1,969. At depth 20,000 the text is
+  459,668 characters, about 23 per level: linear.
+- **Memory:** tree O(V), op vector O(V), `format-nodes` tab-stop stack O(depth) (`engine.cljc:171`, `:210–212`),
+  output O(text) ≤ B. This is not O(width); the earlier claim is withdrawn.
 
-### 3e. Readability rules for the AI text (the one clipped face)
+**Readability rules** (the owner's pretty-printed, clipped face):
 
-The owner's ruling: the AI text is pretty-printed and clipped. Its exact text is what the AI sees and what is
-saved. The readability rules are these.
+- Width 100, a soft width: an indivisible literal longer than the line stays whole.
+- A collection is begin, open, nest 1, members, outdent, close, end. A map entry is begin, key, nest 2, line,
+  value, outdent, end: a value that does not fit flows to the next line two columns under its key. Nesting stops
+  at depth 6.
+- Members of an all-scalar collection are each wrapped in their own group (`, [begin line end]`), which is
+  Wadler's `fill`. Other members are separated by `, line`, one per line when broken. There is no column
+  alignment.
+- Namespaced maps: `#:ns{…}` only in the ≤ 64 all-keyword case when every key shares one namespace and there are
+  at least 2 keys, decided when the map opens and charged exactly.
+- **One cut face everywhere:** `…N` after the shown members of a vector, set, list or map (`{:a 1, …3}`),
+  `"shown chars"…+N` after a string (outside the quotes, so a real string ending in `…+N` cannot read as a cut),
+  `…?` for a pending tail. The AI text is display, not EDN to read back; `repl/pretty-response`'s read-back is
+  deleted (review P1-1). The earlier `:…` map key could collide with a real key (review P2) and is withdrawn.
+- Errors read `#error {:via [{:type …, :message …, :data …} …], :trace ["seon.db/q (db.clj:2365)" …]}`.
 
-- **Width 100, nest by level, not by column.**
-  - A collection is `[:group open [:nest 1 …] close]`.
-  - A map entry is `[:group key [:nest 2 :line value]]`. When an entry does not fit, its value flows to the
-    next line indented by 2 under the key (zprint's "flow"), instead of hanging at the key's end column.
-  - Indentation grows 1–2 columns per level. Measure it against the 2.4× bracket-align figure (§3h).
-- **Collections of scalars fill; collections of collections go one per line.** fipp has no `fill` combinator.
-  Wrapping each separator and its following member in its own group, `[:group :line member]`, gives Wadler's
-  `fill`: the member goes on the current line only if it fits there. Without this, fipp prints a broken
-  500-number vector as 500 lines.
-- **No key/value column alignment.** gofmt-style tabstops cost whitespace, and it lands where the budget is
-  tightest. Entries are separated by `,` then `:line`, as in `fipp.edn` and the current emitter.
-- **Namespaced maps.** `#:ns{…}` only when all keys share one namespace, there are at least 2 keys, and it is
-  shorter. This is today's `same-key-namespace` (`print.cljc:581–591`), plus the 2-key rule. puget's majority
-  rule is rejected because it mixes qualified and unqualified keys in one literal.
-- **Order.** Identity attributes first, then scalar keys (§3c). The order is decided once in selection and
-  never re-sorted by the emitter; the `emit-node` re-sort at `print.cljc:856–871` is deleted.
-- **Cuts read inline.**
-  - `[0 1 2 …99997]` and `#{:a :b …12}` in sequences and sets.
-  - `{:a 1, :… 3}` in a map. The cut is a `:…` entry, so the literal still reads as a map.
-  - `"first chars…+452"` for a string.
-  - `(1 2 3 …?)` for an unknown total.
-  - A collection that showed nothing is `{:… 7}`.
-  - The **one legend** follows the value on its own line, only when a cut exists:
-    `{:seon.print/cuts "…N = N more", :seon.print/requery (seon.print/value-at result/e12 path)}`, or
-    `:seon.print/requery-refusal "the value has no result handle"`.
-  - Per-cut paths are not printed. The reader sees where a cut sits, and path, offset and total stay in the node
-    for the page and `get_value`.
-  - **Limitation:** a real string ending in `…+N` reads the same as a cut. The node and the page keep the
-    difference.
-- **Long strings** are never broken inside the literal: a fipp `:text` is atomic. A string that flows sits on its
-  own line under its key. Newlines stay escaped (`\n`), which is EDN-faithful; the page shows them as real line
-  breaks.
-- **Errors** read as `#error {:via [{:type … :message … :data …} …] :trace ["seon.db/q (db.clj:2292)" …]}`.
-  The cause chain is flat and outermost first, as the Clojure REPL's `Throwable->map` presents it, and the trace
-  comes last.
-- **A very wide value** fills lines of scalars to width 100 and ends in `…N`. **A very deep value** is shown to
-  depth k only, where k is the shell reached, with each level indented one or two columns more.
+### 3f. The HTML face and the side-by-side debug view
 
-### 3f. The explorable page, `get_value`, and the side-by-side debug view
+`node->hiccup` renders **the same tree**: a `<details>` per collection with summary `{} 7 keys`, strings in
+`white-space: pre-wrap`, and each cut as
+`[:button {:id <occurrence-id>-c<n> :class "seon-print-cut" :data-on:click "@get('/data?…')"} "…38"]`.
+The id is the occurrence id (building block §3a) plus the cut's ordinal in selection order. So two occurrences of
+one source never share an id, and no path is hashed.
 
-There are exactly two faces from **one selection**. The AI text is clipped. The HTML is explorable, not clipped.
-The page's initial selection is the same pruned tree as the AI's, so the user always has the same context and more.
+- **Unclipped means progressively reachable.** All safely available structure is reachable by expansion; nothing
+  is substring-clipped. A pending tail's expander is labelled as running code and goes through §3g's realization
+  request; an opaque object has no expander.
+- **Depth fragments (measured).** `seon.render.hiccup/->string` serializes 5,000 nested elements and overflows by
+  10,000. The HTML face therefore closes each fragment at relative depth F = 1,000 with a **deeper** expander, a
+  continuation at that path, never a clip. `node->hiccup` uses the explicit stack of §3e.
+- **Coordinate cost.** Each expander's URL carries the printed source reference, typed path and offset:
+  O(fragment root depth + 1,000) characters per cut. This is page bytes, proportional to what the user explored,
+  and it is stated rather than hidden.
+- Delivery reuses Datastar replacement (`web.clj:3286`): the response patches exactly the target id.
 
-**HTML face.** `node->hiccup` renders the same tree:
-- a `<details>` per collection, summary `{} 7 keys`, as `close-frame` does today (`print.cljc:257–276`);
-- strings in `white-space: pre-wrap`;
-- **each cut as a lazy expander**:
-  `[:button {:id cut-id :class "seon-print-cut" :data-on:click "@get('/data?…')"} "…38"]`.
+**Debug view.** The outline unit (`transcript.clj:1574–1612`) toggles today. It becomes one two-column body. The
+left column is the **saved AI bytes**, unchanged (`web_debug_test.clj:1007`), never regenerated. The right column
+is the HTML of the same source **if it is still retained**, labelled with its source and basis (`live result/e12`,
+`artifact <digest>`, `entity at t`). Otherwise it shows the typed "live source gone" result. It is never presented
+as the original tree or the original B (review P1-10). `web/debug-value-html`'s raw `pr-str` (`web.clj:795`) and
+the toggle are deleted.
 
-Opening an expander fetches that cut's coordinates from the server. The server answers with the **next
-shell-order selection at that path and offset**, which is `prepare` at (path, offset) under the same B, and a
-Datastar patch replaces the button by id. This is Clerk's fetch-more: `present-elision*` re-presents at
-`path` from `offset` with a fresh budget (`viewer.cljc:1731–1734`), served by `serve-blob`
-(`webserver.clj:103–111`). It is also Orchard's paging, where each page is the next `page-size` members from
-`start-idx` (`inspect.clj:44, :113–152, :161–216`). Each fetched fragment's own cuts are expanders again, so
-nothing is ever lost, and HTML is never substring-clipped.
+### 3g. One continuation entrance, three sources
 
-**The expansion endpoint** reuses the existing `/data` route (`route.clj:25`, `web.clj:3511` `data-response`,
-which already reads `value`, `entity`, `path` and `offset` through `data/parse-cursor`, `data.clj:27–44`).
-- Request: `GET /data?value=<blob digest>|entity=<lookup>&path=<EDN vector>&offset=<n>&cut=<element id>`, with
-  Datastar's `datastar-request: true` header.
-- Response: when `cut` is present, `data-response` returns only the fragment, as the debug responses already do
-  (`debug-response`, `web.clj:3281–3302`, `datastar-mode replace`).
-- **Custody is the server's:** the service's connection and database value, and its SCI context for declared
-  renderers. The browser supplies only coordinates, never a form.
-- The path goes through `parse-cursor`, whose EDN read is finite, and then through the §3a coordinate rule.
-- A live, unsaved value has no expander. Its root says “not retrievable: no stored artifact”.
+A cut's coordinates are **source reference + typed path + absolute offset** into the represented value, plus the
+producer chain when a declared renderer returned the represented value. `get_value` and `/data` are adapters:
+they validate wire input, call `(seon.render/units {:seon.render/source-ref r :seon.render.data/path p
+:seon.render.data/offset n …custody})`, and encode the common result. The source table, the stale-producer rule
+and `:seon.render/continuation-error` with reason `[:enum :stale :gone :unavailable :malformed]` are the building
+block's (§3e there). This section only fixes what the floor contributes.
 
-**Historical validity.** A cut's requery stays valid because it names a **content digest**. A blob is
-immutable, so the same digest is the same value forever. Two sources exist today:
-- MCP values already store `artifact-edn` blobs (`cluster.clj:445–479`).
-- Agent evaluations do not. `shown-result` (`sci/eval.clj:3186–3232`) keeps only `:seon.eval/shown`.
+- **Wire validation before parsing** (P1-9). The `path` parameter is bounded to 4,096 bytes before
+  `edn/read-string`. The parse is then checked against the Malli schema of typed steps
+  (`:seon.render.data/step`, new). A malformed, oversized or untyped cursor is a `:malformed` continuation error.
+  `parse-cursor`'s default-to-root and default-to-zero branches (`data.clj:27–44`) are deleted. A browser never
+  supplies a form: custody (connection, database value at the basis, SCI context) is the server's.
+- **Live results** are the agent's `result-objects` (`sci/eval.clj:620`, `repl/live-response` `repl.clj:465`).
+  They are reselected under the current program; `:gone` after eviction or restart.
+- **Artifacts** stay only where MCP writes them today. MCP no longer calls `admit/admit-value` before the floor
+  (P1-1: that call runs `Throwable->map` and Java collection admission ahead of any safe step). When the B-sized
+  selection has a cut and a connection exists, MCP writes an artifact made by **a second safe selection of the same
+  value at the admission allowance** A (the existing `:seon.config.eval.result/blob-threshold`). It is written as
+  EDN, with opaque faces and cuts as tagged literals (`#seon/object "…"`, `#seon/cut {:total …}`). Reading it back
+  gives plain data plus exact `TaggedLiteral`s, both rows of §3a. Continuing it is ordinary selection, and its
+  own cuts are terminal `:unavailable` ("beyond admission"). `admit/semantic-value` reconstruction (`admit.clj:584`)
+  leaves the MCP path. Cost per expansion: one O(artifact bytes) parse plus selection, measured per slice; no
+  cache is claimed.
+- **Entity queries** at a branch and basis follow the building block's `as-of` rule; current-entity pages say
+  "current".
+- **Realization is an explicit, bounded evaluation** (row 9.5). A pending cut's continuation returns
+  `:seon.render.continuation/realize`, carrying the derived form `(take n (drop offset (seon.render.data/at
+  result/e12 path)))`. Only an explicit request runs it: the expander button, or the agent's own REPL call. It runs
+  as an ordinary evaluation in the owning SCI context, under that evaluation's time limit and admission caps, and
+  records its own evaluation and saved text. The printer never realizes.
+- **Historical cuts** (review P1-10): **option 1, live object plus exact saved text,** with no new durable
+  write. After the live subject disappears, a historical cut answers `:gone`. The first pass's per-evaluation
+  artifact blob is withdrawn. Options 2 (a durable bounded snapshot) and 3 (indexed durable results) are the
+  review's, priced there, and they are the owner's to choose if post-restart exploration is wanted.
+- **Pre-floor reads found while probing.** `shown-result` reads `(:seon.instrument/check value)` on the raw result
+  (`sci/eval.clj:3274`). `RT/get` sends a `java.util.Map` to its own `.get` (`RT.java:778–789`), so a
+  hostile Map runs code before the floor. Slice 2(i) moves that check after `classify` (exact persistent maps
+  only).
 
-The cut therefore adds one durable write, which is a **data decision for root/owner review**: store the admitted
-value's artifact through that same `artifact-edn` + `blob/put!` pair at settlement, and record `:seon.blob/digest`
-(an existing attribute) on the evaluation. When a blob has been swept, the expander shows the existing
-value-not-found diagnostic (`web.clj:3530–3538`) in its place: missing-artifact evidence, not silence.
-Entity cuts (`entity=`) show the **current** entity, and they say so. Only a digest pins history.
+### 3h. Regressions
 
-**Bounds per expansion** are query-work bounds, not clips:
-- One `prepare` under B: O(V log V + opened N log n).
-- One blob read: `read-artifact` parses the whole blob, O(blob size) per expansion. This is measured (§3h);
-  if it is over 50 ms, key the parsed artifact by digest in an existing cache, never a new one.
-- The existing request deadline.
+**Ordinary** (focused, on a branch, real SCI, armed contracts; root runs them through `bin/test-check`):
 
-The fragment's own cuts carry the rest.
+1. The owner's three-branch probe at 128 tokens: every branch shows `:sample/text` with a prefix, and
+   text ≤ charge ≤ B.
+2. A huge first sibling, `{:a (vec (range 100000)) :b {:c 1} :d "x"}`, at B = 300. `:b`, `:c 1` and `"x"`
+   survive, and `:a`'s cut is at `[:a]` with an absolute offset and total 100000.
+3. An oversized first key (`(keyword (apply str (repeat 5000 "k")))`) followed by `:ok 1`: `:ok 1` is shown after
+   the key's chunk.
+4. Composite keys: in `(array-map :a 1 [2] :hidden :z 3)`, all three entries show, and continuing at entry 1
+   reaches `[2]`.
+5. Deep-first `{:a {:b {:c {:d {:e 1}}}} :z 2}` keeps `:z 2`. Fifty 1,000-character strings each show a prefix.
+6. Exact charge on every §3d value: text ≤ charge ≤ B, and the legend appears once, only with cuts.
+7. Typed navigation: nil versus missing; `entry`/`key`/`val`/`nth`/`char` steps; empty and beyond-end are
+   distinct; strict progress (every successful expansion shows a new member).
+8. One tree across faces: every AI-visible leaf is in the HTML, and every AI cut is exactly one expander whose
+   fetched fragment equals `units` at its coordinates, identically through MCP `get_value` and `/data`.
+9. The MCP value text equals the shared AI text, keeping the exact-shown bypass (`cluster.clj:414–422`).
+10. Retained: `background-poll-keeps-identity-while-payloads-grow` and `fit-preserves-breadth-and-long-strings`,
+    converted to `prepare`.
+11. Debug side by side: exact saved bytes on the left; a labelled live source or the typed gone result on the
+    right.
+12. Layout: width-100 text, a scalar vector fills, depth 20,000 lays out, and indentation is capped.
 
-**`get_value` is `prepare` at a path and offset.** `mcp-get-value` (`cluster.clj:555–597`) keeps its blob read
-and `render.data/at`. Its string-window branch and `render.value/window` call (`:575–594`) become one `prepare`
-with the cursor path and offset. Its reply is the prepared text plus each cut's node coordinates.
-Preserved evidence: total, next offset, beyond-end (offset ≥ total yields a declared beyond-end result), and
-the missing-digest errors (`:599–614`).
-Deleted: `window`, `stable-entries` and its `pr-str` sort, `counted-size`, `display-value`, `pager`, and the
-page-size cut from `:seon.render.value/max-collection`.
+**Hostile** (review "Required implementation evidence"). These run **only** as isolated fixture-observation
+members (`^{:seon.test/fixture-observation "…"}`, `seon.test.edn:12`), never in default's JVM. Each has a declared
+1 s bound and asserts a finite, cut or opaque face with **no call** into the hostile object, proved by a counter
+the object increments:
 
-**Debug view: side by side.** The outline unit (`transcript.clj:1574–1612`) today *toggles* between “As the
-model saw it” (`pre.seon-outline-ai`, the exact `:seon.render.history/bytes`) and “Rendered”. It becomes one
-two-column body:
-- left: the **saved AI bytes**, unchanged, still byte for byte (`web_debug_test.clj:1007`);
-- right: the **explorable HTML** of the same evaluation's stored value, from its digest, at the same B.
+- a user `IChunk` in a `ChunkedCons`; a `StringSeq` over a hostile `CharSequence`; a `KeySeq` over a hostile seq;
+  an unrealized `LazySeq`; `(range)`, `(iterate …)` and `(cycle …)` at root, as a member, a key, a set member and a
+  path step;
+- a metadata-dispatched Symbol; a Ratio and a BigInt with million-digit components;
+- a two-link cause cycle; a Throwable overriding `getMessage` with a blocking body (never called); a
+  `CompilerException` (opaque);
+- a host `Counted`, a `java.util.Map` at `shown-result`, and a `deftype` implementing `IPersistentMap`;
+- a sorted map with a counting comparator, never called after construction;
+- carried path, root, agent id and source reference: malformed, oversized, a list form and a lazy seq, each
+  refused before any digest or refusal text touches it;
+- depth-5,000 text **and** HTML; actual emitted bytes ≤ B; a 10⁶-key map at root and at offset 900,000.
 
-The toggle signal and button are deleted. Historical units use the saved shown text and the stored digest.
-Expansion uses live retrieval through `/data`. The agent debug page and the namespace debug page
-(`/ns/{ns}/debug`, `debug-found-value`, `web.clj:1278`) use the same pair wherever they show a value.
+### 3i. Cost, measured and to measure
 
-### 3g. Regressions
+**Today's floor** (`prepare` at 150 / 600 / 15,000 tokens, same JVM, milliseconds): agent row 8.0 / 20.7 / 29.4;
+projection forms 5.7 / 4.6 / 5.6; stored error 2.2 / 1.8 / 1.3; Throwable chain 4.6 / 3.8 / 3.2; test run
+3.6 / 3.4 / 3.5. Every text was a single line. The profile's `max-children 32` caps the forms map at 4,116
+characters even at 45,000 (9% of B), and the agent row at 36,134.
 
-**Ordinary regressions** are finite, focused, and run on a branch with real SCI and armed contracts:
-1. The owner's three-branch probe at B = 128 tokens: every branch shows its `:sample/deep`/`:sample/text` and a
-   prefix of its string, flat ≤ B.
-2. Huge first sibling (§3b).
-3. Deep-first: `{:a {:b {:c {:d {:e 1}}}} :z 2}` at small B keeps `:z 2`.
-4. Fifty 1,000-character strings: every string shows a prefix.
-5. The retained `background-poll-keeps-identity-while-payloads-grow` and `fit-preserves-breadth-and-long-strings`,
-   converted to `prepare`.
-6. Carried string/children totals and carried custody (the `preserve-requery` intent).
-7. Exact charge: flat width = Σ charges ≤ B.
-8. Identity-first order; scalar-key ordered head; composite-key entries elided with their count; a composite set
-   shown by `nth` steps that `value-at` reads back.
-9. Throwable: a three-link ex-data chain shares B; a throwing `getMessage` is contained to its slot.
-10. `get_value` paging reconstructs a vector, a map and a string exactly from successive (path, offset)
-    fragments; beyond-end; missing digest.
-11. The legend appears exactly once and only with cuts; the refusal text when there is no handle.
-12. Page parity: every AI-visible leaf is in the HTML, and every AI cut is exactly one expander whose fetched
-    fragment equals `prepare` at its coordinates.
-13. Debug side by side: the saved bytes and the explorable HTML render together for one unit.
-14. Layout: width-100 text; a scalar vector fills; flat and text lengths are recorded.
+**Prototype** (complete-shell search, which reruns selection once per shell, so an upper bound on the queue's
+work). First run: selection 0–43 ms and layout 0–31 ms for every value at every budget, except the forms map at
+45,000, which took 123 ms of selection over 200 shell passes. Second run: selection ≤ 13 ms and layout ≤ 10 ms,
+with the forms map at 68 ms. The queue does one pass.
 
-**Hostile shapes** run **only** as tests carrying `^{:seon.test/fixture-observation "…"}`. That makes them
-isolated platform-host members (`seon.test.edn:12`, clojure-testing skill). Root runs them; they never run in
-default's JVM (PROBE SAFETY). Each has a declared bound of 1 s and asserts a finite, cut or opaque face.
-- `(range)` and `(filter (constantly false) (range))`, placed as: root, vector member, map value, `array-map`
-  key, set member, path step, requery id, cursor path, root address and identity value.
-- A host `Counted` whose `count` throws or never returns; a `java.util.Map` and a `Collection` whose iterator
-  never ends.
-- A custom-`print-method` record whose printing throws; a `deftype` implementing `IPersistentMap`.
-- A two-Throwable cause cycle; a Throwable whose `getMessage` throws.
-- A 5 MB string key and value; a 1 MB keyword; `BigInteger` 10¹⁰⁰⁰⁰⁰.
-- A singleton-vector key chain 10⁵ deep; a singleton-map value chain 5,000 deep at default B.
-- A 10⁶-key map; a `Number` subclass and a `Date` subclass with throwing `toString`.
+**Targets:** selection O(V log V) over admitted nodes, plus O(offset) navigation charged as query work; layout
+O(V + text); both sub-second at the default B. The slices' clock rows record, on parent and change: elapsed time,
+allocation, visited nodes, queue maximum, navigation steps, floor hits, and flat, text and charge characters,
+through MCP and `/data`. A regression over 20% or 50 ms is fixed first. Any case over 1 s names its collection.
 
-### 3h. Cost, measured and to measure
+### 3j. Four live values: today and the prototype
 
-Current floor, measured 2026-09-25 on default (pid 35446) in MCP JVM mode, read-only, on the values in §3i:
-- agent row (155,340 flat characters): 6.7 ms at 150 tokens, 18.9 ms at 600;
-- fault: 5.2 / 3.1 ms;
-- owner probe: 1.6 / 0.4 ms;
-- test report: 0.7 ms.
+Both columns are **measured** at B = 450 characters (150 tokens). The prototype shows complete shells only; the
+queue's partial shell adds members up to B. The probe printed map cuts with the withdrawn `:… N` face; they are
+shown here in §3e's `…N` face, one character shorter each.
 
-`fipp.edn/pprint` of the 1,573-character pruned agent value took 6.1 ms including JIT warm-up. That was fipp
-running on finite data, not new code.
+1. **Root agent row.** Today (399 characters, one line): `{:db/id 42410, :seon.agent/branch :cluster-default,
+   :seon.agent/id "root", :seon.agent/namespace #:db{:id 42404}, :seon.print/elision {…:omitted 3…}}`. The
+   plan, runtime and settings are gone. Prototype (188 characters, shell 5, pull order kept):
+   ```clojure
+   {:db/id 42410,
+    :seon.agent/branch :cluster-default,
+    :seon.agent/id "root",
+    :seon.agent/namespace {:db/id 42404},
+    :seon.agent/plan {:db/id 42411, :my.plan/agent {:db/id 42410}},
+    …2}
+   ```
+2. **Projection forms, 3,435 keys.** Today (323 characters): one key, then a 290-character elision map. Prototype
+   (224 characters):
+   ```clojure
+   {:seon.sci.eval/evaluation [:map, [:seon.test.accretion/candidate-ctx, …2], …14],
+    :seon.issue.citation/citation [:map, {:seon.db/attributes true, …1}, …4],
+    :seon.error.occurrence/id [:string, {:max 12, …3}],
+    …3432}
+   ```
+3. **Throwable chain.** Today: `#error {<elision of the whole throwable>}` (291 characters); at 600 tokens it opens
+   with REPL frames before `:via`. Prototype (245 characters, shell 5, declared type/message/data order). At
+   1,800 characters (shell 12) every `:data` map shows, including the real `seon.db/q` refusal's keys:
+   ```clojure
+   #error {:via
+   [{:type clojure.lang.ExceptionInfo, :message "Agent run failed", …1},
+    {:type clojure.lang.ExceptionInfo, :message "Datahike refused"…+19, …1},
+    {:type java.lang.IllegalStateException, :message "connection relea"…+3}]}
+   ```
+4. **Test run.** Today (434 characters): four of 16 keys, then an elision map. Prototype (269 characters, shell 7):
+   `:db/id` and `:seon.test.run/id` first, then `at`, `basis-t`, `branch`, `change-basis-t` and `cluster`, then
+   `…9`.
 
-Target: selection O(V log V) plus opened-collection passes, layout O(output), both sub-second at default B
-(15,000 tokens = 45,000 characters). The folded cut records on parent and change:
-- elapsed time and allocation;
-- visited nodes, queue maximum, opened-collection iterations and floor hits;
-- flat and text characters.
+The legend (§3d) follows each of these once. It is omitted above because the probe had no source reference.
 
-Rules: fix a regression over 20% or 50 ms first. Any case over 1 s names its opened collection.
+### 3k. Unproven parts
 
-### 3i. Four live values: today and under this design
-
-Today's text below is **measured**; values are abbreviated with `…`. The design's text is **derived by hand**
-from §3b–§3e, and its layout was checked with `fipp.edn` at width 100 except for the nest/flow indentation. It
-is illustrative until the regression runs.
-
-1. **Owner probe** (`{:sample/a {:sample/deep {:sample/text <500 a>}} …b …c}`).
-   - Today, 128 tokens: `{:sample/a {<250-char elision map>}, :seon.print/elision {<elision>…omitted 2}}`
-     (570 characters, over budget). No leaf survives.
-   - Design, 128 tokens:
-     ```clojure
-     #:sample{:a {:sample/deep {:sample/text "aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa…+452"}},
-              :b {:sample/deep {:sample/text "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb…+468"}},
-              :c {:sample/deep {:sample/text "cccccccccccccccccccccccccccccccc…+468"}}}
-     {:seon.print/cuts "…N = N more", :seon.print/requery-refusal "the value has no result handle"}
-     ```
-   - At 600 tokens both floors show the whole value (1,632 flat characters). The design wraps each string onto
-     its own line.
-2. **Root agent row** (a live `(db/pull db '[*] [:seon.agent/id "root"])`: 7 keys, 155,340 characters, of which
-   `:seon.agent/runtime` holds 42 turns).
-   - Today: the same 399 characters at **both** 150 and 600 tokens:
-     `{:db/id 42410, :seon.agent/branch :cluster-default, :seon.agent/id "root", :seon.agent/namespace #:db{:id 42404}, :seon.print/elision {…:omitted 3…}}`.
-     Plan, runtime and settings are gone.
-   - Design, 150 tokens: `:seon.agent/id "root"` first, then `:db/id`, `:branch`, `:namespace {:db/id 42404}`,
-     `:plan {:db/id 42411, :my.plan/agent {:… 1}}`, and
-     `:runtime {:db/id 42413, :seon.runtime/agent {…}, :seon.runtime/trigger {…}, :seon.runtime/turns [{:… 8} ×6 …36]}`.
-     `:settings` is shell 7, so it is the map's `:… 1`.
-     **Observed trade-off, for review:** at this budget shell order prefers six empty turn shells to the seventh
-     root key.
-   - Design, 600 tokens: all seven keys; runtime's four keys; the first seven turns with seven of their eight keys
-     each, `:… 1` apiece; turns closed by `…35`. That is about 1,573 flat characters.
-3. **A fault with an ex-data chain** (`ex-info` → `ex-info` → `IllegalStateException`).
-   - Today, 150 tokens: `#error {<elision of the whole throwable>}`. Nothing is shown.
-   - Today, 600 tokens: 1,772 characters that open with **16 REPL frames** (`[user$eval1359338 invokeStatic …]`)
-     before `:via`.
-   - Design, 150 tokens:
-     ```clojure
-     #error {:via [{:type clojure.lang.ExceptionInfo,
-                    :message "Agent run failed",
-                    :data {:seon.error/operation seon.turn/call-turn, :… 3}}
-                   {:type clojure.lang.ExceptionInfo, :message "Datahike refused the…+15", :data {:… 3}}
-                   {:type java.lang.IllegalStateException, :message "connection released"}]}
-     ```
-   - Design, 600 tokens: all three messages and all ex-data. `:trace` is absent because there are no
-     first-party frames.
-4. **A test report** (`#:seon.test{:run-id … :failures [2 maps] …}`, 370 characters).
-   - Today, 40 tokens: `{:seon.test/elapsed-ms 3812.4, :seon.print/elision {…omitted 5…}}`.
-   - Design, 60 tokens:
-     `#:seon.test{:elapsed-ms 3812.4, :failed 2, :failures [#:seon.test{:… 4} #:seon.test{:… 5}], :passed 41, :… 2}`
-     plus the legend.
-   - Design, 200 tokens: the whole report laid out, with no legend.
-
-### 3j. Unproven parts
-
-1. Shell fairness has no shipped precedent (research §4.2). The regressions above are its only proof.
-2. fipp nesting depth. `serialize` recurses through lazy `mapcat` once per document level, and a 5,000-deep
-   selected chain may overflow the stack in layout. The hostile member measures it; if it overflows, the depth
-   limit belongs to the document builder's iteration, never to a clip.
-3. The nest/flow layout's whitespace overhead is not yet measured; only bracket-align's 2.4× is.
-4. That an agent's top-level lazy result is realized by its evaluation's admission before `shown-result`
-   renders it. If that is not the current order, agents will see `(…?)` for `(map inc xs)` until the evaluation
-   owner realizes the value under its own bound. This needs a probe before integration.
-5. The per-evaluation artifact blob (§3f) is a new durable write whose storage cost is unmeasured, and it needs a
-   root/owner ruling.
-6. The 16-character chunk, the 64-character order window and C = 256 are constants chosen here without
-   measurement.
+1. The queue's partial-shell behaviour and its single-pass cost; only complete shells were measured.
+2. The allocation and memory of selection and layout; only elapsed time was measured.
+3. The constants S = 32, w = 16, the 64-entry sort bound, nest depth 6, F = 1,000 and the 4,096-byte cursor bound
+   were chosen here. F and nest depth 6 have the measurements above; the others do not.
+4. The per-class Throwable check has not been run against the JDK exception classes Seon actually raises. Classes
+   that fail it lose their message and show only their class.
+5. The artifact second selection's cost at the admission allowance, and the realization request's route in the
+   browser (it needs the one-REPL evaluation entrance).
 
 ## 4. Re-adjudication of all 21 audit sites
 
@@ -673,7 +654,7 @@ writing, not a partial switch. Shared `value.clj` slices run sequentially; there
 | 0a schema | Declare missing identity owners with `:seon.program/row-schema`; prepare owned-key sets without changing dispatch. Probe agent-id envelope, two identities agreeing/conflicting, partial entity and non-program row classification. | 55 / 0 |
 | 0b schema/render | Add cached error-operation and contracted head-Var alternative lookup without switching dispatch. Probe nested specific error, uncontracted base, ambiguous/no-match alternatives, direct report and `let` floor. | 60 / 0 |
 | 1 render/SCI/MCP + explicit owners | Activate all three lookups; carry head Var into shown-result/MCP. In this same cut convert `oversight/unit`, `seon.run/render-namespace-ai`, four fixtures and walk/bootstrap/web owners. Only then remove old stages/specificity matching. Probe every converted entrance and no paired-error/report loss. | 75 / 260 |
-| 2 floor/print/MCP/web (folds old 2, 3, 5; owner 2026-09-25) | §3 in three loadable commits. **(i) Selection:** `classify`, shell-order loop, Throwable projection, coordinate rule, compact cuts + one legend on the existing emitter; `get_value` = `prepare` at path/offset (convert `cluster.clj:575–594`). **(ii) Layout:** `node->doc` over `fipp.engine`, `node->hiccup`; delete the Sink family. **(iii) Page:** cut expanders on `/data`, side-by-side outline unit, evaluation artifact digest (root ruling first). **Delete** — `print.cljc`: `preserve-requery`, `fit-entry`, `fit-children`, `projected-text`, `fit-text`, `structural-elision`, `fit-node`, `fit` (`:1054–1299`); `requery-fields`, `elision-node` (`:974–980`, `:1013–1052`); `emit-node` re-sort (`:856–871`); `structural-cut?`, `visible-items` and the `::length`/`::level` `...` cuts; `Sink`, `TextSink`, `HiccupSink`, `TeeSink`, `append-chunk!`, `soft-separator`, `append-hiccup!`, `sink-result`, `text-sink`, `hiccup-sink`, `tee-sink`, `sink?`, `sink-generator` and the `emit` multimethod family (`:18–30`, `:192–338`, `:559–790`); table emission (`:496–557`); `render-elision-ai`'s EDN-map face; the `seon.ai.tokens` require. `value.clj`: `text-limits`, `text-full`, `datum`, `causes`, `link-lines` and the bodies of `bounded-text`/`floor` (`:38–131`, entries kept for boot/flow/store/test callers); `stable-entries`, `counted-size`, `window`, `display-value` (`:297–366`); `value-node*`, `value-node` (`:446–585`); `pager` (`:597–609`); `attribute-value`'s `pr-str` tie-break. `cluster.clj`: the string window branch. `transcript.clj`: the outline toggle. **Convert:** `eval/drive.clj:135` (reads emitted text back with default `::length 32`, a hidden cut), `instrument_test.clj:1418` (uses `text-sink`/`sink?` as its reload subject), `cluster/prompt.clj:280` and the four `print/fit` tests. **Probes:** §3g ordinary 1–14 by root via `bin/test-check`; hostile list as fixture-observation members only; §3h clock rows on parent and change; the lazy-result realization order (§3j.4) before (i) integrates. **Unproven:** §3j. **Estimate vs research +100/−480:** research priced the allocator alone. This row also moves Throwables, the emitter and the page: source **+310 / −1,150** (planning range +260–400 / −950–1,200), net about −840; plus about 10 schema lines and about +150 test lines. `print.cljc` 1,307 → ~635 lines, `value.clj` 741 → ~560. Over the 100-line law: needs the owner's waiver extended from old slice 2 to this fold; the smallest alternative is commit (i) alone, about +190 / −560. | 310 / 1,150 |
+| 2 floor/print/MCP/web (folds old 2, 3, 5; owner 2026-09-25; revised after Astra `6e9deea71`) | §3, split by proof boundary, never two live pipelines. **(i) Safe shared selection and continuation, one activation:** the §3a table (scalar encoder, seq cells, lazy Throwable links), entry skeletons, the shell-order queue, the §3d charge on the existing emitter, the typed-step navigator in `render.data/at`, and the floor's share of `units` continuations (the building block's S3 books the entrance itself, +38 there). In the same cut convert **every** caller: `mcp-project` stops calling `admit/admit-value`, `artifact`/`artifact-edn` on the raw value and `admit/semantic-value`, returns the shared AI text plus cut coordinates, and writes its artifact from the second safe selection (§3g); `mcp-get-value` and `/data` `data-response` become adapters; `shown-result`'s raw key read moves after `classify`. **Delete** in (i): `value.clj` `text-limits`, `text-full`, `datum`, `causes`, `link-lines` and the bodies of `bounded-text`/`floor` (`:38–131`, entry names kept as calls into `prepare` for boot/flow/store/test callers); `stable-entries`, `counted-size`, `window`, `display-value` (`:297–366`); `attribute-value`'s `pr-str` tie-break; `ordered-head` (`:425–445`); `value-node*`, `value-node` (`:446–596`); `pager` (`:607–620`); `print.cljc` `value-at` (`:403`), `requery-fields`, `elision-node` (`:974–1052`), `preserve-requery` and the fit family (`:1054–1299`); `render.data/parse-cursor`'s root/zero defaults; the `mcp-get-value` string and collection windows (`cluster.clj:575–594`); the `mcp-project` admission/reconstruction body (`:423–494`). **(ii) Layout, after the deep and byte proofs:** `tree->ops` over fipp's own stages, `node->hiccup` with F-deep fragments; delete `Sink`, `TextSink`, `HiccupSink`, `TeeSink` and the sink helpers (`print.cljc:18–30`, `:192–338`), the `emit` multimethod family and `emit-node` re-sort (`:559–871`), table emission (`:496–557`), `render-elision-ai`'s EDN-map face, `visible-items`/`structural-cut?`, `repl/pretty-response`'s read-back and `clojure.pprint` (`repl.clj:457–463`, `:493–501`) and `web/debug-value-html`'s `pr-str` (`web.clj:795–798`). The selection contract does not change in (ii). **(iii) Page:** cut expanders and deeper-fragment expanders through the one entrance, the realization offer (§3g, row 9.5), and the side-by-side outline unit (delete the toggle). No durable historical capture (option 1); options 2–3 wait for the owner. **Convert:** `eval/drive.clj:135` (reads emitted text back with `::length 32`), `instrument_test.clj:1418` (`text-sink`/`sink?` as reload subject), `cluster/prompt.clj:280`, and the four `print/fit` tests. **Proof:** §3h ordinary 1–12 by root via `bin/test-check`; the hostile list as fixture-observation members only; §3i clock rows on parent and change through MCP and `/data`. **Unproven:** §3k. **Estimate** (planning, not measured; source lines only): (i) **+200 / −800**, (ii) **+90 / −420**, (iii) **+45 / −30**, total **+335 / −1,250**, net about −915. Separately: declarations about +35 (`:seon.render.data/step`, the tree node schema, `insufficient-floor-budget-error`, `allocator-charge-error`; `continuation-error` is the building block's); tests about +190 (i 120, ii 40, iii 30), with the deleted fit tests' lines counted when the conversion lands. `print.cljc` 1,307 → about 560 lines, `value.clj` 751 → about 480. Every sub-slice exceeds or approaches the 100-line law: (i) needs the owner's waiver extended to this activation, and there is no smaller cut that converts every caller at once. | 335 / 1,250 |
 | 4 render/problems | Retire `project-node*` redispatch; accept smaller data/final text using merged units without profile. Convert `ai-prose` to data. Probe nested problems uses one share, text-overage diagnostic, no defaults fallback and no repeated producer. | 30 / 140 |
 | 6 cluster/operator | Shared runtime/branch-error renderers (9,10,20). Probe >20 faults: complete counts, identities/requery, same terminal/MCP face. | 40 / 75 |
 | 7 transcript/walk/web | Render declared history/connection query pages; remove walk presentation min (5,12,14). Probe membership, count/link and exact historical AI/HTML bytes. | 30 / 70 |
@@ -682,7 +663,7 @@ writing, not a partial switch. Shared `value.clj` slices run sequentially; there
 | 10 scripts/config | Remove dev clipping and max-depth/max-children/max-string-length from profile schema/config and all readers; keep only floor B and real query/storage bounds (3,21). Audit all 21 sites. | 20 / 80 |
 | 11 prompt | Own §5 capacity behavior: include frame/separators/notice, retain whole units, diagnose an oversized newest unit or explicitly invoke existing compaction. Probe exact saved bytes and no silent overrun. | 20 / 35 |
 
-Repriced estimate: **600 added, 1,865 deleted, net ~1,265 lines deleted** (the folded row 2 replaces old rows 2, 3 and 5 at 250 / 550), including schema/contract/regression edits; not measured implementation. Compared with 670/1,150, this removes migration/frontier/path/leaf-face machinery and
+Repriced estimate: the rows sum to **725 added, 2,065 deleted, net ~1,340 lines deleted**. Row 2 is source only, with its declarations (+35) and tests (+190) priced beside it; the other rows keep their earlier mixed estimates, which include their own declarations and regressions. The first pass's stated 600 / 1,865 did not match its own rows (700 / 1,965; Astra `6e9deea71` P2). None of this is measured implementation. Compared with 670/1,150, this removes migration/frontier/path/leaf-face machinery and
 prices identity declarations, emitter charging, offset consolidation and prompt admission explicitly. Slice 1's atomic
 caller sweep is the main sizing uncertainty; no claim that 89 producers change within 75 lines.
 Must-pass retained regressions: `value-test/background-poll-keeps-identity-while-payloads-grow`, `fit-preserves-breadth-and-long-strings`, carried string/children totals and `preserve-requery`. Add producer overage,
