@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed 44e7ad4b0 76d644bd2 b95676d59 e62d8489c 88099feb0 08a9d70e1; tests owed to root
+status: landed 44e7ad4b0 76d644bd2 b95676d59 e62d8489c 88099feb0 08a9d70e1 66a35ae86; tests owed to root
 lane: fix-unbounded-capture-opus
 created: 2026-09-25
 ---
@@ -285,3 +285,47 @@ attributed to this lane.
 
 See `git log -- src/seon/render/value.clj docs/prds/agent-platform/landing/lane-fix-unbounded-capture-2026-09-25.md`.
 Net source lines: round 1 +6/−3; round 2 about +125/−22 source and +65 tests.
+
+## Round 4: reds on adopted HEAD 6ab6f5fb (verify-reds 019, 020, 007), classified
+
+Baselines compared: `verify-6ab6ae2a-results.txt.d/063.txt` (error-test) and `060.txt` (schema-test).
+
+- **CAUSED, fixed in `66a35ae86`.** Every red below comes from one of three defects.
+  - **The scalar-leaf guard.** `leaf-edn` used `if-some` over an `(and …)` guard, so a
+    non-scalar leaf took `false` as its prefix and threw `ClassCastException` in `failed-node!`. The
+    fix is `if-let`. It caused:
+    - `admit-test/a-projection-failure-obeys-the-one-dial`
+    - `admit-test/one-print-node-owns-semantic-value-and-result-edn`
+    - `admit-test/every-value-projects-bounded-and-reads-back`
+    - `error-test/normalization-never-throws`
+  - **The projection reference predicate.** It required a stored fingerprint, which declaration
+    projections lack, so those projections were still walked (3.5 MB, 170 ms). It caused
+    `admit-test/a-value-carrying-its-world-admits-references-not-copies`.
+    - The predicate is now registry plus forms. The identity is the stored fingerprint, otherwise
+      the content fingerprint, derived once on the projection's holder (38 ms once).
+    - The generator gains `:forms`. Root's `[:= {} {}]` repair (`db51da2e7`) is kept; my other
+      generators are `:gen/gen` Vars and were unaffected.
+  - **`prepare-result` requires a storage bound**, and `sci.eval/shown-result` did not pass one. It
+    caused `admit-test/an-absent-storage-bound-refuses-and-names-the-key-it-wanted`.
+    - The fix is one hunk in `src/seon/sci/eval.clj:3679`, forwarding the evaluation's caps.
+    - That file is held by fix-one-reader-errors for its one-event hunk only, so this hunk is
+      disjoint. Root: please record it in the ledger.
+- **PRE-EXISTING (red in 063 on `6ab6ae2a`):**
+  - `error-test/complete-error-children-validate-through-the-writer`
+  - `error-test/error-declared-schemas-persist-through-the-real-occurrence-owner`
+  - `error-test/error-identity-and-occurrences-are-owned-by-the-writer`
+  - `error-test/row-acquisition-observations-have-no-program-digest-promise`
+- **Not a code defect, as far as I can tell.** `error-test/a-contract-violations-fault-keeps-the-value-that-broke-it`
+  reports "Worker-global state changed: snapshot-instrumented drift-added my.agent/…". That is the
+  instrumented set changing mid-run, consistent with hook publication loading namespaces during the
+  run. Re-run it on a quiet HEAD. If it stays red, it goes to the runner and instrument owners.
+- **schema-test (007): all PRE-EXISTING.** The same four members are red in 060. None of them
+  touches identity-only or `projection-reference`.
+
+## Root runs (round 4, on HEAD ≥ 66a35ae86, serially)
+
+1. `bin/test-check default --ns seon.sci.admit-test`
+2. `bin/test-check default --ns seon.error-test`
+3. `bin/test-check default --ns seon.error-result-test`
+4. `bin/test-check default --ns seon.render-test`
+5. `bin/test-check default --ns seon.schema-test`: expect only the pre-existing four.
