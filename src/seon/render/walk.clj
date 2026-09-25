@@ -770,8 +770,7 @@
                                           [output member-lookup render-distance])
                              (scoped-attribute member)
                              (assoc :seon.render.walk/attribute
-                                    (scoped-attribute member))
-                             owner (assoc :seon.render/namespace owner))
+                                    (scoped-attribute member)))
                            rendered (render/render-call render-request)
                            failure (when (or (:seon.render/refused-member rendered) (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered)) rendered)
                            failure-outcome

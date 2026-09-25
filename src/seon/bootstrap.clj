@@ -315,13 +315,11 @@
                    value (:seon.render/value member)
                    rendered
                    (render/render-call
-                    (cond-> (assoc request
-                                   :seon.render/value value
-                                   :seon.render/output :seon.render/form
-                                   :seon.render.call/id
-                                   [:seon.render/form lookup])
-                      (:seon.ns/name value)
-                      (assoc :seon.render/namespace (:seon.ns/name value))))
+                    (assoc request
+                           :seon.render/value value
+                           :seon.render/output :seon.render/form
+                           :seon.render.call/id
+                           [:seon.render/form lookup]))
                    rendered-entries
                    (let [rendered-entries (entries rendered)]
                      (if (and own-results?

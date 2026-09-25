@@ -2,9 +2,9 @@
   "The one typed projection selector and guarded SCI invocation boundary.
 
   AI and HTML each follow the same ordered chain: an explicit producer on the
-  value, the unique contract-fitting function in the value's explicitly owned
-  namespace, a matching schema's declared property, then the prepared value
-  floor. Zero matches is ordinary. Multiple matches are one deterministic flat
+  value or request, the value's declared identity (its error operation's
+  returns, the root call's contracted returns, its owning row schema), a
+  matching schema's declared property, then the prepared value floor. Zero matches is ordinary. Multiple matches are one deterministic flat
   error. Selected failures do not fall through to another producer.
 
   Every selected qualified symbol resolves to the live SCI Var in the cluster
@@ -292,40 +292,6 @@
                  projection selected arguments)]
     (and (seq outputs) (every? source-return? outputs))))
 
-(defn- namespace-candidates
-  "Ordered public-function evidence from the explicit owning namespace.
-
-  The acquired database snapshot bounds candidates by explicit namespace and
-  public-function facts. The immutable schema projection then validates the
-  complete input and typed output contracts against the actual render argument.
-  Results are sorted so database insertion order cannot decide ambiguity."
-  [{ctx :seon.sci.eval/ctx
-    namespace-name :seon.render/namespace
-    output-schema :seon.render/output-schema
-    :as request}]
-  (if-not namespace-name
-    []
-    (let [projection (request-projection request)
-          argument (producer-argument request)
-          symbols (sci.kernel/public-functions-in ctx namespace-name)]
-      (into []
-            (comp
-             (filter #(= namespace-name (symbol (namespace %))))
-             (distinct)
-             (map
-              (fn [candidate]
-                (if (or (schema/function-accepts-and-returns-in?
-                         projection candidate [argument] output-schema)
-                        (and (= :seon.render/ai output-schema)
-                             (source-producer? projection candidate [argument])))
-                  {:seon.render.selection.candidate/producer candidate
-                   :seon.render.selection.candidate/status :compatible}
-                  {:seon.render.selection.candidate/producer candidate
-                   :seon.render.selection.candidate/status :rejected
-                   :seon.render.selection.candidate/reason
-                   :no-same-arity-match}))))
-            (sort-by str symbols)))))
-
 (defn- ambiguity
 
   {:malli/schema [:=> [:cat [:maybe :seon.render/namespace] :seon.render/output [:sequential :qualified-symbol]] :seon.render/ambiguous-error]}
@@ -592,7 +558,7 @@
       :else (schema-producer projection request value output))))
 
 (def ^:private selection-stage-order
-  [:explicit-value :explicit-request :namespace :declared :schema :floor])
+  [:explicit-value :explicit-request :declared :schema :floor])
 
 (defn- selection-candidate
   [producer]
@@ -657,32 +623,6 @@
     {:seon.render.selection/stage
      (selection-stage :explicit-request :no-match)}))
 
-(defn- namespace-stage
-  [request output output-schema]
-  (let [evidence
-        (namespace-candidates
-         (assoc request :seon.render/output-schema output-schema))
-        compatible
-        (into []
-              (comp
-               (filter #(= :compatible
-                           (:seon.render.selection.candidate/status %)))
-               (map :seon.render.selection.candidate/producer))
-              evidence)
-        selection-error (when (> (count compatible) 1)
-                          (ambiguity (:seon.render/namespace request) output
-                                     compatible))
-        status (cond selection-error :ambiguous
-                     (seq compatible) :selected
-                     :else :no-match)
-        stage (if selection-error
-                (selection-stage :namespace status evidence selection-error)
-                (selection-stage :namespace status evidence))]
-    (cond
-      selection-error (selected-stage stage selection-error)
-      (= 1 (count compatible)) (selected-stage stage (first compatible))
-      :else {:seon.render.selection/stage stage})))
-
 (defn- schema-stage
   [request projection value output]
   (let [producers
@@ -717,12 +657,11 @@
                         selection-error)))))
 
 (defn- selection-stage-result
-  [stage-name request projection value output output-schema]
+  [stage-name request projection value output]
   (case stage-name
     :declared (declared-stage request projection value output)
     :explicit-value (explicit-value-stage request output)
     :explicit-request (explicit-request-stage request output)
-    :namespace (namespace-stage request output output-schema)
     :schema (schema-stage request projection value output)
     :floor (let [selected (floor-producer request output)]
              (selected-stage
@@ -742,17 +681,12 @@
       (finish-selection [] profile selection-stage-order)
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
-            projection (request-projection request)
-            output-schema (case output
-                            :seon.render/ai :seon.render/ai
-                            :seon.render/html :seon.render/hiccup
-                            :seon.render/form :seon.render/form)]
+            projection (request-projection request)]
         (loop [stage-names selection-stage-order
                stages []]
           (let [stage-name (first stage-names)
                 result (selection-stage-result
-                        stage-name request projection value output
-                        output-schema)
+                        stage-name request projection value output)
                 stages (conj stages (:seon.render.selection/stage result))]
             (if-let [selected (find result :seon.render.selection/selected)]
               (finish-selection stages (val selected) (rest stage-names))
@@ -772,15 +706,10 @@
       (let [request (assoc request :seon.render/profile profile)
             value (render-value request)
             projection (request-projection request)
-            output-schema (case output
-                            :seon.render/ai :seon.render/ai
-                            :seon.render/html :seon.render/hiccup
-                            :seon.render/form :seon.render/form)
             stages (mapv (fn [stage-name]
                            (:seon.render.selection/stage
                             (selection-stage-result
-                             stage-name request projection value output
-                             output-schema)))
+                             stage-name request projection value output)))
                          selection-stage-order)
             actual-stages (:seon.render.selection/stages decision)]
         (assoc decision :seon.render.selection/stages
