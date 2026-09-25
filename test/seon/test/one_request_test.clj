@@ -17,7 +17,8 @@
         store (:seon.store/store handle)]
     (is (= :isolated (:seon.agent/mode handle)))
     (is (true? (:seon.agent/owns-branch? handle)))
-    (is (nil? db/*conn*) "a host test body inherits no cluster custody")
+    (is (identical? (:seon.db/connection handle) db/*conn*)
+        "a host test body runs under its own member branch's custody, never an inherited one")
     (is (contains? (registry/roster store) (:seon.agent/branch handle))
         "the member's branch is on the store roster while its body runs")))
 

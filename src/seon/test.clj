@@ -120,11 +120,15 @@
   member body; an agent (SCI) body reaches its branch through custody instead."
   nil)
 
+(def ^:private acquire-context!
+  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
+
 (defn- apply-seeds!
   "Apply the test Var's ordered `:seon.test/seed` to the member's connection.
   Maps are tx-data; a function maps the previous entry's database to `:seon.test.seed/value`
   (manifest via `config/apply!`, tx-data via the checked writer). The first refusal stops
-  entry; else the member moves to the prepared commit canonical fixtures branch from."
+  entry; else the member reacquires its own branch head through the agent entrance, so the
+  held handle, its program and the commit canonical fixtures branch from are the prepared ones."
   {:malli/schema [:=> [:cat [:maybe :seon.agent/execution-handle] :seon.test/sym :seon.test/var]
                   [:or [:maybe :seon.agent/execution-handle] :seon.test.seed/preparation-error]]}
   [member test-symbol test-var]
@@ -137,11 +141,13 @@
       (empty? seeds) member
       (nil? member) (refusal :no-member nil (str test-symbol " declares seeds but runs without a member.") seeds)
       :else
-      (reduce-kv
-       (fn [member ordinal entry]
+      (or
+       (reduce-kv
+       (fn [_ ordinal entry]
+         ;; Each entry reads the head the previous one left on the member branch.
          (let [value (cond (map? entry) {:seon.test.seed/tx-data [entry]}
                            (vector? entry) {:seon.test.seed/tx-data entry}
-                           :else (entry {:seon.db/db (:seon.db/db member)}))
+                           :else (entry {:seon.db/db (db/db connection)}))
                refuse #(reduced (refusal %1 ordinal (str "Seed entry " ordinal " of " test-symbol " could not prepare its world: " %2) %3))
                {manifest :seon.config/manifest tx-data :seon.test.seed/tx-data} value
                applied (delay (when manifest (config/apply! {:seon.db/connection connection :seon.config/manifest manifest
@@ -152,9 +158,9 @@
              (refuse :invalid-value "it does not return :seon.test.seed/value." value)
              (:seon.error/at @applied) (refuse :write-refused (:seon.error/message @applied) @applied)
              (:seon.error/at @written) (refuse :write-refused (:seon.error/message @written) @written)
-             :else (let [database (db/db connection)]
-                     (assoc member :seon.db/db database :seon.source/commit-id (db/commit-id database))))))
-       member seeds))))
+             :else nil)))
+       nil seeds)
+       (@acquire-context! member nil {:seon.agent/branch (:seon.agent/branch member)})))))
 
 (defn- bounded-result
   "Observe the body thread's exit under the request bound; cancellation is not exit.
@@ -196,12 +202,11 @@
                           :else
                           (with-test-loader
                            (fn [] (if (var? test-var)
-                              ;; A host body runs unarmed, with no inherited cluster
-                              ;; custody, as a JVM test body always has: it may
-                              ;; evaluate its own SCI contexts, which another arm on
-                              ;; this thread would refuse.
+                              ;; A host body runs unarmed (it may evaluate its own SCI
+                              ;; contexts, which another arm on this thread would
+                              ;; refuse), under the custody of its member branch only.
                               (binding [*member* member]
-                                (runner/run-var! test-var {}))
+                                (runner/run-var! test-var (select-keys member [:seon.db/connection])))
                               ;; The SCI arm interrupts interpreted bodies at the
                               ;; declared per-test bound; `duration-failures` fails
                               ;; any body that completes over it.
@@ -1476,10 +1481,7 @@
 
 ;;; LOAD-CYCLE BOUNDARY. `seon.cluster.agent` requires `seon.turn`, which
 ;;; requires `seon.plan`, which requires this namespace. One resolution per
-;;; entrance Var, realized at first use.
-(def ^:private acquire-context!
-  (delay (requiring-resolve 'seon.cluster.agent/acquire-context!)))
-
+;;; entrance Var, realized at first use (`acquire-context!` sits above `apply-seeds!`).
 (def ^:private release-context!
   (delay (requiring-resolve 'seon.cluster.agent/release-context!)))
 
@@ -1869,11 +1871,10 @@
                      (vreset! handed? true)
                      (schema/call-with-projection
                       (:seon.schema/projection child)
-                      ;; An agent (SCI) test is the member branch's own work,
-                      ;; so its elided `seon.db` arities reach that branch. A
-                      ;; host test body inherits no custody, as a JVM test body
-                      ;; always has; its fixtures find the member through
-                      ;; `*member*`.
+                      ;; A test body is the member branch's own work, so its
+                      ;; elided `seon.db` arities reach that branch: an SCI body
+                      ;; through this custody, a host body through the custody
+                      ;; `bounded-result` hands `run-var!`.
                       #(bounded-result
                         sci.eval/loaded-identity since test-symbol resolve! remaining-ms
                         {:seon.sci.eval/ctx ctx :seon.db/connection (:seon.db/connection child)

@@ -1010,7 +1010,8 @@
                                 (when-not isolated? (:seon.agent/routing handle))
                                 (routing))
                             :seon.agent/branch branch
-                            :seon.agent/mode (if isolated? :isolated :live)
+                            ;; Reacquiring an isolated handle through itself keeps its mode.
+                            :seon.agent/mode (or (:seon.agent/mode previous) (if isolated? :isolated :live))
                             :seon.agent/owns-connection?
                             (boolean (or @allocated (:seon.agent/owns-connection? previous)))
                             :seon.agent/owns-branch?

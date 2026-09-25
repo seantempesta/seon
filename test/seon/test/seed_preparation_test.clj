@@ -11,9 +11,11 @@
      (let [handle (support/execution-handle connection)
            owned (create-ns (gensym "seon.test.seed-preparation-test.probe-"))
            probe (intern owned (with-meta 'probe {:test body :seon.test/seed seeds}) nil)]
-       (try (#'sut/bounded-result (atom {}) {} (symbol probe) (constantly probe) 5000
-                                  {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.test/member handle}
-                                  (fn [_] nil))
+       ;; As in `member-result`, the caller hands the body no custody of its own.
+       (try (db/call-without-custody
+             #(#'sut/bounded-result (atom {}) {} (symbol probe) (constantly probe) 5000
+                                    {:seon.sci.eval/ctx (:seon.sci.eval/ctx handle) :seon.test/member handle}
+                                    (fn [_] nil)))
             (finally (remove-ns (ns-name owned))))))))
 
 (defn- reasons [database] (set (db/q '[:find [?r ...] :where [_ :seon.test/skip-reason ?r]] database)))
@@ -28,6 +30,17 @@
     (is (zero? (:seon.test/error-count result)) (:seon.test/failure-message result))
     (is (every? (first @seen) ["seed-0" "saw 1"]) "each entry reads the database the previous one left")
     (is (true? (second @seen)) "fixtures branch from the prepared commit")))
+
+(deftest a-host-body-and-its-held-handle-read-the-prepared-member
+  (let [seen (atom nil)
+        result (run-seeded [{:seon.test/skip-reason "custody"}]
+                           #(let [head (db/db)]
+                              (reset! seen [(reasons head) (db/commit-id head)
+                                            (:seon.source/commit-id (support/execution-handle db/*conn*))])))
+        [seeded head held] @seen]
+    (is (zero? (:seon.test/error-count result)) (:seon.test/failure-message result))
+    (is (contains? seeded "custody") "a bare (db/db) in a host body reads its seeded member branch")
+    (is (= head held) "the handle held for that connection is the prepared one, so fixtures branch with the seeds")))
 
 (deftest a-refused-seed-prevents-body-entry
   (doseq [[seeds rule] [[[{:seon.test/skip-reason 42}] "Seed entry 0"]
