@@ -85,3 +85,53 @@
            (is (contains? attributes :seon.task/tasks))
            (is (not-any? attributes [:seon.task/id :seon.task/intent]))))
        (is (:seon.error/at (issue/open-tasks @connection '[:seon.no-such/attribute x])) "a refused read returns whole")))))
+
+(deftest two-edits-from-one-basis-the-second-refuses-and-the-winner-stays
+  (test-support/with-database
+   (fn [connection]
+     (let [basis (issue/task-basis @connection {task-path "[]"})]
+       (is (:seon.task/changed? (ingest! connection (task-text "First." "") basis)))
+       (is (= :revision-conflict (refusal #(ingest! connection (task-text "Second." "") basis))))
+       (is (= "First." (:seon.task/intent (db/pull @connection [:seon.task/intent] [:seon.task/id handle]))))))))
+
+(deftest malformed-task-files-refuse-by-name-without-writing
+  (test-support/with-database
+   (fn [connection]
+     (let [before (db/basis-t @connection)]
+       (doseq [[rule text] {:not-one-vector "[] [#:seon.task{:name \"x\" :kind :function :intent \"i\"}]"
+                            :unreadable-file "[{"
+                            :invalid-entry "[#:seon.task{:name \"x\" :kind :function :intnet \"i\"}]"
+                            :handle-mismatch "[#:seon.task{:id \"000000000000\" :name \"x\" :kind :function :intent \"i\"}]"
+                            :duplicate-id "[#:seon.task{:name \"x\" :kind :function :intent \"i\"} #:seon.task{:name \"x\" :kind :function :intent \"j\"}]"}]
+         (is (= rule (refusal #(ingest! connection text))) text))
+       (is (= :unreadable-file (refusal #(ingest! connection "#=(+ 1 2)"))))
+       (is (= :not-one-vector (refusal #(ingest! connection "{}"))))
+       (is (= :misplaced-file (refusal #(issue/index-tasks! {:seon.db/connection connection :seon.task/files {"tmp/tq.a.edn" "[]"}}))))
+       (is (= before (db/basis-t @connection)) "no refusal writes")))))
+
+(deftest annotation-placement-is-positional-and-body-usage-stays-legal
+  (let [head "(ns tq.a (:require [clojure.test :refer [deftest is]] [tq.b :as-alias b]))\n"]
+    (is (= :metadata-after-test-name (refusal #(rows-of (str head "(deftest t {:seon/tasks #{\"x\"}} (is true))\n")))))
+    (is (nil? (refusal #(rows-of (str head "(deftest t (is (:seon/tasks {:seon/tasks #{::b/x}})))\n")))))
+    (is (= :malformed-annotation (refusal #(rows-of (str head "(defn f {:seon/tasks #{::b/x}} [v] v)\n")))))
+    (is (= :malformed-annotation (refusal #(rows-of (str head "(defn ^:seon/tasks f [v] v)\n")))))
+    (is (= :malformed-annotation (refusal #(rows-of (str head "(defn f {:seon/must-read [clojure.core/inc]} [v] v)\n")))))))
+
+(deftest publication-ingests-tasks-and-refuses-a-dangling-handle
+  ;; The destination is a branch of the live program, so the checkout's own task
+  ;; files ride along: only this fixture's handle may dangle.
+  (let [publish-tasks! #'seon.cluster.source/index-tasks!
+        checkout (issue/task-files "." nil)
+        dangling #(try (% ) nil (catch clojure.lang.ExceptionInfo e (keys (:seon.task/dangling (ex-data e)))))]
+    (test-support/with-database
+     (fn [connection]
+       (admit! connection (rows-of subject-source))
+       (is (= [handle] (with-root checkout (fn [root] (dangling #(publish-tasks! connection "d" (.getPath root) nil)))))
+           "an annotation whose task is absent at the destination refuses with its holders")
+       (with-root (assoc checkout task-path (task-text "Prove ingestion." ""))
+         (fn [root]
+           (is (:seon.task/changed? (publish-tasks! connection "d" (.getPath root) nil)) "coherent task and annotation admission")
+           (is (= {:seon.task/changed? false} (publish-tasks! connection "d" (.getPath root) [task-path])) "repeat is a no-op")
+           (io/delete-file (io/file root task-path))
+           (is (= [handle] (dangling #(publish-tasks! connection "d" (.getPath root) [task-path])))
+               "a removed task file retracts its task, leaving its annotations dangling")))))))
