@@ -1,6 +1,6 @@
 ---
 type: evidence
-status: 5 code commits (81f78faa3..fc5ea0890); shell.jvm-test 5 CAUSED reds fixed, rerun awaits root
+status: 7 code commits (81f78faa3..35f8c4131); shell and dependency-cache reds classified and fixed, rerun awaits root
 ---
 # Lane impl-seams-s-scripts-opus: lost-error seams cut S-scripts (2026-09-25)
 
@@ -9,6 +9,23 @@ S-scripts, correction 7 (bootstrap and operator scripts stay on JDK primitives).
 No Seon runtime import was added to a script.
 
 ## Broken or unproved first
+
+- **Run 015 at 23:50: shell.jvm-test had 6 fails. All were CAUSED by `fc5ea0890`.** `task-outcomes` and
+  `finish-evidence` declared their tasks as `[:vector :map]`, but each task is a `[member task]` pair. The armed
+  contract refused the test row, and it would have refused production shell runs too.
+  - Fixed in `1a0c359e4` with `[:vector [:tuple :qualified-keyword :map]]`. At default, the new schema accepts the
+    real vector and the old one refuses it.
+  - Lesson: a scratch copy of a namespace doesn't arm its contracts, so contract shapes need their own validation
+    probe.
+- **Run 023: dependency-cache-test had 3 pass, 3 fail and 2 errors. All were PRE-EXISTING, not `e98de259c`.**
+  - The test looked up `dependency-pins` and `git-dependency-pins` in `dev-cache`. Those seams moved to
+    `seon.dev.dependency-digest` in `4133085b3`, a retired assumption.
+  - `pins-unavailable` nested a copied error map under `:seon.error/data`, where the test and the flat-error law
+    expect top-level `member`, `expected` and `offending`.
+  - Both fixed in `35f8c4131` and probed with bb in a scratch root: the git query is silent (nil), and the refusal is
+    flat with `recorded-pins-present` false.
+- **Out of scope:** `dev_cache.clj:25` keeps its own copy of `dependency-pins-file` beside the digest's. That is a
+  duplicate, and `dev_cache.clj` is not this lane's file.
 
 - **Root's run 018 at `6ab6f5fb`: shell.jvm-test had 12 pass and 5 fail. All 5 were CAUSED, and all came from my new
   row.** The armed `finish-evidence` contract refused the row's nil connection. The fix, `fc5ea0890`:
