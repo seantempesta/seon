@@ -262,6 +262,12 @@
         (is (false? (::md/valid? result)))
         (is (= ["docs/archive/issue.md"]
                (mapv ::md/file-path (::md/violations result)))))
+      (testing "one file checks its own pins, as the edit hook asks"
+        (is (some #{:dependency-pin-current}
+                  (map ::md/rule
+                       (::md/violations
+                        (md/validate-file {::md/file-path (str destination)
+                                           ::md/repository-root (str root)}))))))
       (Files/delete (.toPath destination))
       (spit (io/file (str root) "docs/remaining.md") "No dependency citation.\n")
       (is (= ["docs/issue.md"] (::md/deleted-paths (validate!)))

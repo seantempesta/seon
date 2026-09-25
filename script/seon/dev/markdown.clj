@@ -84,7 +84,8 @@
 (def ^:private validate-file-request-schema
   [:map
    [::file-path [:string {:min 1}]]
-   [::vault-root {:optional true} [:string {:min 1}]]])
+   [::vault-root {:optional true} [:string {:min 1}]]
+   [::repository-root {:optional true} [:string {:min 1}]]])
 
 (def ^:private validate-repository-pins-request-schema
   [:map [::repository-root [:string {:min 1}]]])
@@ -806,7 +807,9 @@
     :blanks-around-headings :blanks-around-fences
     :trailing-newline :fenced-code-style :list-style
     :has-frontmatter :required-fields :valid-tags :valid-type
-    :wikilink-target-exists :no-bare-urls})
+    :wikilink-target-exists :no-bare-urls
+    ;; runs only when the request supplies gitlinks
+    :dependency-pin-current})
 
 (defn- run-rules
   "Run selected rules against parsed data. Returns vector of violations."
@@ -1088,8 +1091,10 @@
   "Read file and validate its markdown content.
 
    Request keys:
-     ::file-path  - Path to markdown file
-     ::vault-root - Optional vault root for wikilink resolution
+     ::file-path       - Path to markdown file
+     ::vault-root      - Optional vault root for wikilink resolution
+     ::repository-root - Optional checkout whose reference-code gitlinks
+                         this one file's dependency pins must cite
 
    Response keys:
      Same as validate
@@ -1099,12 +1104,14 @@
                      ::vault-root \"docs\"})"
   {:malli/schema
    [:=> [:cat #'validate-file-request-schema] #'validate-response-schema]}
-  [{::keys [file-path vault-root]}]
+  [{::keys [file-path vault-root repository-root]}]
   (let [f (io/file file-path)]
     (if (.exists f)
       (let [content (slurp f)]
         (validate (cond-> {::content content ::file-path file-path}
-                    vault-root (assoc ::vault-root vault-root))))
+                    vault-root (assoc ::vault-root vault-root)
+                    repository-root
+                    (assoc ::gitlinks (repository-gitlinks repository-root)))))
       {::valid? false
        ::violations [{::rule :file-not-found
                       ::severity :error

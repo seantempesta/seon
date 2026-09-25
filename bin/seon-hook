@@ -1166,36 +1166,45 @@
       (load-direct-check! 'seon.dev.markdown)
       (let [file-path (absolute-file-path (get-file-path event))
             validate-file (requiring-resolve 'seon.dev.markdown/validate-file)
-            validate-repository-pins
-            (requiring-resolve 'seon.dev.markdown/validate-repository-pins)
             fix (requiring-resolve 'seon.dev.markdown/fix)
             format-violations (requiring-resolve 'seon.dev.markdown/format-violations)
+            ;; this file's own pins only: the repository-wide pin walk cost
+            ;; 1.55 s per edit and put 66 other files' stale pins ahead of
+            ;; the edited file's findings, which the budget then elided
             request {:seon.dev.markdown/file-path file-path
-                     :seon.dev.markdown/vault-root (str (root-file "docs"))}
+                     :seon.dev.markdown/vault-root (str (root-file "docs"))
+                     :seon.dev.markdown/repository-root repo-root}
             initial (validate-file request)
-            _ (when-not (:seon.dev.markdown/valid? initial)
-                (let [fixed (fix {:seon.dev.markdown/content (slurp file-path)})]
-                  (when (pos? (:seon.dev.markdown/fixed-count fixed))
-                    (spit file-path (:seon.dev.markdown/content fixed)))))
-            final-file (if (:seon.dev.markdown/valid? initial)
-                         initial
-                         (validate-file request))
-            pin-result
-            (validate-repository-pins
-             {:seon.dev.markdown/repository-root repo-root})
-            violations
-            (into (:seon.dev.markdown/violations final-file)
-                  (:seon.dev.markdown/violations pin-result))]
-        (when (seq violations)
-          (clip-feedback
-           config
-           (:seon.dev.markdown/formatted
-            (format-violations
-             {:seon.dev.markdown/violations violations
-              :seon.dev.markdown/max-length Long/MAX_VALUE})))))
+            fixed-count
+            (if (:seon.dev.markdown/valid? initial)
+              0
+              (let [fixed (fix {:seon.dev.markdown/content (slurp file-path)})]
+                (when (pos? (:seon.dev.markdown/fixed-count fixed))
+                  (spit file-path (:seon.dev.markdown/content fixed)))
+                (:seon.dev.markdown/fixed-count fixed)))
+            final-file (if (pos? fixed-count) (validate-file request) initial)
+            violations (:seon.dev.markdown/violations final-file)]
+        (clip-feedback
+         config
+         (str/join
+          "\n"
+          (remove nil?
+                  ;; the hook rewrote the agent's file; saying so is what
+                  ;; keeps the agent's next exact edit from missing
+                  [(when (pos? fixed-count)
+                     (str "Markdown auto-fix rewrote " (display-path file-path)
+                          " (" fixed-count " formatting rule(s): whitespace, "
+                          "blank lines, final newline). Re-read it before "
+                          "the next exact edit."))
+                   (when (seq violations)
+                     (:seon.dev.markdown/formatted
+                      (format-violations
+                       {:seon.dev.markdown/violations violations
+                        :seon.dev.markdown/max-length Long/MAX_VALUE})))]))))
       (catch Exception e
         (log! "MARKDOWN_LINT_ERROR" (.getMessage e))
-        nil))))
+        (str "ADVISORY — Markdown lint failed and checked nothing: "
+             (:message (failure-cause e)))))))
 
 (defn- docstring-feedback [event config]
   (when (and (= (:hook_event_name event) "PostToolUse")
@@ -1217,7 +1226,8 @@
               :seon.dev.docstring/max-length Long/MAX_VALUE})))))
       (catch Exception e
         (log! "DOCSTRING_LINT_ERROR" (.getMessage e))
-        nil))))
+        (str "ADVISORY — docstring lint failed and checked nothing: "
+             (:message (failure-cause e)))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Rate-limited Gemini review
