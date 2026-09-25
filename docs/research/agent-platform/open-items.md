@@ -23,6 +23,13 @@ declares no source attribute". A --changed request ran full_source_refresh! (rea
 0a's program.cljc with its resources once render-dispatch-opus commits 1a. Live faults: StackOverflowError in
 cluster.agent-test/fixture-evaluate (x11); schema/call-with-projection max 115.9 s.
 
+**OWNER RULING 2026-09-25: floor allocator REDESIGN as one folded cut (slices 2+3+5)** around one bounded descriptor per
+reached value, after three review rounds (2d9f3641a, 59649109e, 9f839573e: net +203 lines, static JVM-exhaustion paths
+still open). Attempt parked as tmp/render-floor-opus/slice2c-worktree-reference.patch. Astra rewrites design §3/§6 in place
+(design-floor-descriptor-astra); a fresh Opus lane implements; hostile shapes run only as platform members. Meanwhile
+render-dispatch lands the child-identity carriage + 1c on the current floor. Default adopted HEAD (6ab5ec54; my.turn
+deletion re-landed 84f5a9fe2); 132-command verification running.
+
 **INCIDENT 2026-09-25 03:09Z: default OOM-killed** by render-floor-opus's scratch probe (an infinite `(range)` map key hashed
 by its new identity-first ordering; 17.8 GB dump data/heap/java_pid67823.hprof — owner to delete). Recovery: floor slice
 parked at tmp/render-floor-opus/slice2b-worktree.patch, dispatch 1c parked at tmp/render-dispatch-opus/inflight.patch;
