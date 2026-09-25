@@ -1,6 +1,6 @@
 ---
 type: landing
-status: committed, awaiting root publication and tests
+status: S1 revised after diff review; awaiting root publication and tests
 lane: impl-repl-m1-opus
 created: 2026-09-25
 design: docs/research/agent-platform/one-repl-language-2026-09-25.md §2.2, §6 row S1 (42308d868)
@@ -18,40 +18,95 @@ restores the whole change at each failure point.
 
 ## Broken or unproven, first
 
-- **Nothing here has run on the published default yet.** Proof so far is REPL-only (below):
-  - a scratch copy of the edited `eval.clj`, loaded as `m1probe.evalcopy` with its keywords
-    rewritten to `:seon.sci.eval/…`, ran against the real SCI context of branch
-    `impl-repl-m1-opus`;
-  - the schema entries compiled into a projection of that branch.
+- **The revision commits (bbbdbd5bd, 51dda24e9, a9c74ad46) are not yet green on default.**
+  - P0-A/C and P0-B were published at 6ab6bdc1. Entry-gate then ran 6 executed, 2 fail, 1 error.
+    - The two fails were this lane's test expectations: `:declarations` became a vector. They are
+      corrected in a9c74ad46.
+    - The error was "Worker-global state changed": 83 `seon.sci.eval` instrumented functions were
+      removed mid-run. My working-copy `eval.clj` was published while the test ran, so it
+      reflects that publication, not a behaviour.
+  - a9c74ad46 (P0-D, P1-A/B/C) is proven only on a scratch copy (`m1probe.evalcopy`) against
+    the real branch context.
+- **Armed cost is unmeasured (P1-D).** All numbers below come from the unarmed scratch copy.
+  Root measures the installed, armed cost.
+- **Batch refusal is proven at the restore member, not by a provoked `settle-batch!` refusal.**
+  The new regression drives the ordinary path's pieces directly:
+  - it runs `evaluate-for-install` and `accept-candidate!`;
+  - it then calls the evaluation's `:seon.sci.eval/restore`, which is exactly what
+    `turn/restore-evaluations!` calls on a refusal.
+- **Still refused, to be indexed next (P2-A, owner-agreed):** point-free function `def`s and
+  macro-generated `defn`s. They are refused by name as unindexed changes; they are not accepted
+  as indexed rows. That is the next slice: extend the analyzer's declaration classification.
+  `eval`'d definitions stay refused.
+- **Only the first row of a host-bound declaration is carried.** A record's `map->R` row rides
+  behind `->R` in `:seon.program/row`, as before S1.
+- **`(defn same.ns/f …)` is refused** as an unindexed change. The analyzer names it
+  `same.ns/same.ns/f`, which is `seon.fn`'s defect. R1 (spec 1.10) is still open.
+- **Classes are not restored.** A refused `defrecord` or `deftype` form still defined its JVM
+  class; only the Vars are put back.
+- **Operator slip.** I ran `(require 'seon.issue :reload)` once in default's JVM; it loaded root's
+  committed file.
 
-  Root still has to publish and run the tests listed under "Root runs".
-- **The contracts on the new private helpers are not measured armed.** The +5% timing below is
-  the scratch copy, which is unarmed. Armed, `program-definitions` and `program-restoration`
-  validate `turn-interns` maps (only generation-owned Vars) on every form. Root measures the
-  armed cost.
-- **Settlement refusal (failure point d)** is wired: `turn/restore-evaluations!` calls each
-  evaluation's `:seon.sci.eval/restore`, last form first. It is proven only through the restore
-  member (the new test calls it directly); no turn-level settlement refusal was provoked.
-- **Known remaining leak at (d).** `gate-function-install` → `accept-candidate!` transfers an
-  accepted candidate's roots into the base context before batch settlement. A later settlement
-  refusal restores the candidate fork, not that transfer. The design scopes the candidate path
-  outside S1; recorded here.
-- **These changes are now refused, which is behavior change:**
-  - `(def f (comp …))`, `(def xf (map inc))` and every other point-free function-valued `def` the
-    analyzer gives no row. Each is now an unindexed change: define it with `defn`.
-  - defn-generating macros and `eval`, also unindexed changes.
-  - `alter-meta!` on a function Var.
+## Revision after the diff review (repl-s1-diff-review-2026-09-25.md, ef099dccf)
 
-  `(defmacro …)` itself, `defrecord` and `deftype` stay admitted. So do protocol and multimethod
-  objects, whose values are not `fn?`.
-- **`(defn same.ns/f …)` is refused for now** as an unindexed change. The analyzer names it
-  `same.ns/same.ns/f`, a doubled qualified symbol that is `seon.fn`'s defect. Before S1 it was
-  admitted with no row, no contract and with its attribute map dropped (probe below). R1 (spec
-  1.10, qualified definitions) is the next slice; it is **not in this commit**.
-- **Operator slip.** While looking up the task handle I ran `(require 'seon.issue :reload)` in
-  default's JVM. That reloaded the committed `src/seon/issue.clj`, root's commit, into default.
-  No other default Var was redefined; every other probe ran in `m1probe.*` scratch namespaces or
-  on the branch context.
+**P0-A and P0-C (bbbdbd5bd): provenance-matched definitions.**
+- SCI stamps a defined Var with the `:line` and `:column` of the declaration that ran. A
+  definition is matched only when exactly one analyzed row names it and that row's source starts
+  at that position. REPL check on 10 declaration shapes: every Var position equalled its row's
+  position, and the `eval` overwrite differed (row `[1 5]`, Var `[2 9]`).
+- A Var whose prior root was a function or test counts as a definition. So `(def kept 42)` and
+  `(def kept nil)` refuse as unindexed and restore `kept`.
+- Two records in one form are two declarations. `(do (defrecord P …) (eval '(defn hidden …)))`
+  refuses `hidden`: a record exempts only helpers defined at its own position.
+- A repeated name refuses with `:declarations [twin twin]`.
+
+**P0-B (51dda24e9, SCI e663d9e2 on seantempesta/sci seon-env-hook).**
+- Before the fix, `alter-meta!` on the inherited `seon.note/render-notes-ai` in my branch's fork
+  mutated the shared base context's Var; the probe restored it at once.
+- `sci-alter-meta!` and `sci-reset-meta!` now copy a non-built-in inherited Var into the context
+  before writing (`utils/owned-var`, extracted from `bind-root!`), and keep `:sci/generation`.
+- The logic was proven in a throwaway `sci/init` context using scratch copies. SCI's own suite was
+  not run, because that needs another JVM.
+- Root refilled the dependency analysis cache before the restart (checklist:
+  `(seon.fn.analyzer/analyze-dependencies!)` after any dependency bump).
+
+**P0-D (a9c74ad46).** `context-restoration` holds a context's program state:
+- its namespace maps and owned interns;
+- the program snapshot, installed functions and environment state.
+
+`evaluate` and `accept-candidate!` each carry that restoration for the context they change.
+Scratch proof: accepting `base-f` `(* 100 x)` gives `(caller 1)` = 100. After restore, it gives
+2, and the Var, snapshot, installed set and environment are `identical?` to before. `(base-f "a")`
+still refuses at `:input`.
+
+**P1-A.**
+- A Var redefined in place and then removed gets its captured root back. On scratch SCI,
+  `(g 1)` = 2 after restoration.
+- Top-level unmap forms keep a failure observation.
+- The throw path reads the request's database when no connection is given.
+
+**P1-B.**
+- Planning and applying a restoration share one failure boundary.
+- The unavailable error is answered and kept across `regenerate-agent-context!`.
+- It is fenced before acquisition and delivered through the context's `commit-fault!`.
+- Admission throws it, with the original failure as its cause.
+- Proven on scratch contexts: a planning failure, a reacquisition, a no-op, and delivery.
+
+**P1-C.** The reader keeps an unmatched closer as a reader error after the forms before it, as
+Clojure's `UnmatchedDelimiterReader` does, and evaluation refuses the whole input. Scratch reader
+results:
+
+| Input | Events |
+|---|---|
+| `(+ 1 2))` | `[:form :error]` |
+| `(let [x 1]\n(f x)\n}` | `[:error :form :error]` |
+
+The retired regression `closer-only-recovery-artifacts-are-dropped` is replaced.
+
+**P2-B.**
+- `restoration-step` is three closed alternatives, and `{}` is refused.
+- The refusal constructors require at least one member.
+- `:declarations` keeps order and repeats.
 
 ## What the REPL showed before the change (branch `impl-repl-m1-opus`, default pid 35446)
 
@@ -168,15 +223,18 @@ delimiter", whereas the reader here silently drops it. The fix above does not ch
 
 ## Root runs
 
-1. Publish and adopt `resources/seon/schemas/seon.sci.eval.edn` and `src/seon/sci/eval.clj`
-   together: the new `seon.sci.eval/sci-var?` predicate must register before the schema compiles.
+1. Publish `src/seon/sci/eval.clj`, `src/seon/sci/reader.cljc` and
+   `resources/seon/schemas/seon.sci.eval.edn` together, because `sci-var?` and `context-state?`
+   register before the schema compiles. Default already runs SCI e663d9e2.
 2. `bin/test-check default --ns seon.sci.entry-gate-test`
-3. `bin/test-check default --ns seon.sci.eval-test`
-4. `bin/test-check default --ns seon.sci.definition-digest-test`
-5. `bin/test-check default --ns seon.sci.program-change-test`
-6. `bin/test-check default --ns seon.cluster.turn-test` (settlement branch of `restore-evaluations!`)
-7. Time a one-line contracted `defn` and `(+ 1 2)` on a branch, armed, against the parent
-   (22.4 / 2.41 ms above).
+3. `bin/test-check default --ns seon.sci.restoration-test`
+4. `bin/test-check default --ns seon.sci.reader-test`
+5. `bin/test-check default --ns seon.cluster.reply-test` and `--ns seon.cluster.evaluate-sources-test`:
+   stray closers in replies are now reader errors.
+6. `bin/test-check default --ns seon.sci.eval-test`
+7. `bin/test-check default --ns seon.cluster.turn-test`
+8. P1-D: time a one-line contracted `defn`, `(+ 1 2)`, and a form after about 200 private defs,
+   armed, parent against change, with allocation.
 
 ## Out-of-scope findings (no issue file written: `docs/seon/issues/` is not on this lane's row)
 
