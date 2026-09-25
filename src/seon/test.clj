@@ -1434,7 +1434,9 @@
   read and replaced (`seon.fn/reconcile-tx`) with their program-partition
   attributes, an identity absent from the candidate retracting, and with any
   row they name by lookup that the world lacks (a new file). Callers of a changed
-  definition interpret it at acquisition. Equal programs answer `[]`; a refused read answers its refusal."
+  definition interpret it at acquisition. Attributes the candidate installed
+  and the world lacks come first. Equal programs and attributes answer `[]`;
+  a refused read answers its refusal."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/database-value]
                   [:or :seon.db/tx-data :seon.error/value]]}
   [world candidate]
@@ -1447,6 +1449,14 @@
                                       database)]
                       (if (:seon.error/at found) found (into {} found))))
         [held offered :as maps] (mapv by-digest [world candidate])
+        ;; Attributes the candidate installed that the world lacks (an agent's
+        ;; or fixture's new schema): schema-on-write needs them installed before
+        ;; a carried row or a member writes them. Sub-millisecond on 2,452.
+        attributes (into [] (keep (fn [[attribute declaration]]
+                                    (when (and (qualified-keyword? attribute)
+                                               (not (get (:schema world) attribute)))
+                                      declaration)))
+                         (sort-by key (filter (comp keyword? key) (:schema candidate))))
         named (fn [database digests other]
                 (let [rows (db/pull-many database families
                                          (into [] (keep (fn [[digest e]] (when-not (get other digest) e)))
@@ -1482,14 +1492,14 @@
       (some :seon.error/at maps) (some #(when (:seon.error/at %) %) maps)
       (not (set? present)) present
       (not (set? changed)) changed
-      (empty? (into present changed)) []
+      (empty? (into present changed)) attributes
       :else
       (loop [extra #{}]
         (let [[rows tx] (overlay extra)
               absent (when (vector? tx) (missing tx rows))]
           (cond
             (not (vector? tx)) tx
-            (empty? absent) tx
+            (empty? absent) (into attributes tx)
             (and (empty? (remove extra absent)) (seq extra))
             (throw (ex-info (str "The test world's overlay names " (count absent)
                                  " identities its candidate cannot supply.")
