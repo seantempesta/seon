@@ -1,8 +1,8 @@
 ---
 type: design
-status: "Opus revision 4: owner answers of 2026-09-25 (standing root task; references become real refs; the debug page at a selectable N comes first; evaluate deleting :seon.render/units) and Astra round-3 review 67a0358ab (seven corrections) folded in place; awaiting Astra re-review; no source edited"
+status: "Opus revision 4, amended for the owner's ruling that renderers may read the supplied database value (§4.4): owner answers of 2026-09-25 (standing root task; references become real refs; the debug page at a selectable N comes first; evaluate deleting :seon.render/units) and Astra round-3 review 67a0358ab (seven corrections) folded in place; awaiting Astra re-review; no source edited"
 created: 2026-09-25
-scope: The agent's context is the rendering of the agent entity. One walk follows references level by level with set-at-a-time index joins, and presence of a render pair decides inclusion. Nodes are ordered definitions-first and chronologically. Each node renders once through its own pure pair. The reads re-checked before a turn are those whose captured subjects touch the graph or are unknown. Slice 1 is the walk plus the owner's debug page.
+scope: The agent's context is the rendering of the agent entity. One walk follows references level by level with set-at-a-time index joins, and presence of a render pair decides inclusion. Nodes are ordered definitions-first and chronologically. Each node renders once through its own pair, reading the supplied database value when it needs to. The reads re-checked before a turn are those whose captured subjects touch the graph or are unknown. Slice 1 is the walk plus the owner's debug page.
 source-pin: 2d23029cb, with Astra's recounts at dc4f71d67 (the counted files were unchanged at 54c550e4c); Datahike 4157916b; Malli befcd302a
 aligned-with: language-requirements-2026-09-24.md §§1.9, 1.13, 5, 5a, 7, 11, 12; query-render-building-block-2026-09-25.md (this design is its acquisition half for entity graphs); one-render-path-design-2026-09-25.md §§1-3, 5; reviews 595048666 and 67a0358ab
 depends-on: design-references-as-refs-opus (refs replace the interim value joins, §4.1)
@@ -30,7 +30,7 @@ The owner, 2026-09-25:
 - That walk takes one entity at a time: `acquired-tree` pulls each entity and then follows its declared concerns
   (`walk.clj:483-533`). It follows only ref attributes (`walk.clj:103-122`), so it never reaches a task's
   functions, tests or schemas. Those links are stored as values: handles, symbols and keywords.
-- Renderers read the database themselves: agent AI and HTML, namespace AI and HTML.
+- Renderers read the database themselves: agent AI and HTML, namespace AI and HTML. That is lawful (owner 2026-09-25, §4.4). The defects are what they read (§0.3).
 - The refresh before a turn re-checks every retained read-only evaluation.
 
 ## Data flow after this design
@@ -45,7 +45,7 @@ The owner, 2026-09-25:
    expansion but keeps dependency evidence. It stops at depth N, an input the caller can override.
 3. **Order.** Definition edges are sorted definitions-first, and turns follow `:seon.turn/opened-tx`. Membership
    edges carry no order. A cycle renders once, with a back-reference.
-4. **Render.** Each node renders once through its own pure pair, over its acquired value and its remaining distance.
+4. **Render.** Each node renders once through its own pair. The pair is handed the node's lookup, its remaining distance, and the stable database value as a contract-declared default, and it may read that value.
 5. **Compose.** `seon.render/units` renders the complete ordered list under one floor budget. The AI face is the
    prompt; the HTML face is the debug page.
 6. **Refresh.** Retained reads are selected against the membership of the graph just acquired.
@@ -63,11 +63,15 @@ declarations are ones the registry already has. No mode keyword, registry, cache
    is not the root.
    - `seon.render.ns/schema-form` is **not** a schema renderer. It returns a `(doc <key>)` form (`ns.clj:726-730`,
      Astra correction 3). Real pairs are slice S2.
-3. **Two renderers read the database.**
-   - The namespace AI and HTML faces call `render-data`, which acquires the namespace's functions and schemas and
-     prints the whole page at distance ≥ 1 (`ns.clj:349-386, :732-773`).
-   - The agent's HTML face pulls identity and calls cluster status (`agent.clj:312-350`).
-   - Neither is fixed on HEAD.
+3. **Two renderers read the wrong things, not the database as such.** Reading the supplied database value is lawful
+   (owner 2026-09-25, §4.4). The defects are these:
+   - The namespace AI and HTML faces call `render-data`, which acquires every function and schema of the namespace
+     and prints the whole page at distance ≥ 1 (`ns.clj:349-386, :732-773`). That is a namespace dump, and it
+     duplicates what the walk already reached.
+   - The agent's AI face re-derives the opening by walking concerns and issues inside the renderer. Graph traversal
+     belongs to the walk, for cost and ordering (§4.4), not because reading is banned.
+   - The agent's HTML face (`agent.clj:312-350`) pulls identity and cluster status. That is lawful and stays.
+   - Neither the dump nor the duplicated traversal is fixed on HEAD.
 4. **Choosing refresh candidates costs about 3.3 s per system turn for root.** `latest-evaluations`
    (`turn.clj:1925-1957`) pulls all 18,673 read-evidence rows it retains. It took 3,254 ms and then 3,369 ms, under
    test load. The same query without evidence took 3.1 ms.
@@ -285,15 +289,12 @@ materialized. When a query refuses, or the visited set reaches `max-nodes`:
 - `:cut` names the bound, the level, the visited count and the frontier left unexpanded, with a requery form;
 - a partially completed level is reported as partial, never counted as complete.
 
-**Acquisition per node** comes from the selector its pair's contract declares, one `pull-many` per node schema:
-
-- task rows: intent and handle;
-- schema rows: `:seon.schema/form`;
-- functions: the function-face selector;
-- namespaces: doc plus bounded counts, or `:unknown` at a cut;
-- turns: their saved units.
-
-A node at distance 0 needs only its identity, which the join already bound.
+**Acquisition per node.** The walk hands each node its lookup, its distance and the held database value. Its pair
+reads what its face needs from that value: a task row, a `:seon.schema/form`, a function's source, a namespace's doc
+and bounded counts, a turn's saved units. A node at distance 0 renders its name from the identity the join already
+bound. Only the nodes rendered at distance ≥ 1 read anything, about 2–10 per task at the default N (§2.3's
+level-one sets), so batching them into one `pull-many` per schema is an optimization to take only if S1 measures a
+cost. It is not machinery in the walk.
 
 ### 4.3 N and order (Astra correction 2)
 
@@ -333,7 +334,23 @@ back-references.
 
 The whole ordering costs O(V + E log V).
 
-### 4.4 Render: pure pairs over acquired values (Astra correction 3)
+### 4.4 Render: each node's own pair, reading the supplied database (owner ruling 2026-09-25)
+
+**The ruling.** Renderers MAY read the database. Each is handed a stable database value, a contract-declared input
+supplied as a default by schema name (requirement 1.13; one-render-path §2), and reads it. The rule "renderers make no
+database reads" is **withdrawn**. Earlier rounds cited it: revision 2's objection to a walk inside the agent pair, and
+Astra's corrections 7 (round 2) and 3 (round 3), "pure inputs". Those citations no longer hold.
+
+**Why the walk still sits outside the render functions:**
+
+1. **Cost.** Set-at-a-time level joins took 10 queries for task 132fee. A walk from inside each node's renderer is
+   the per-node walk: 3,823 queries (§2.2).
+2. **Ordering.** Placing definitions before uses, and turns in time, needs the whole edge set before the first node
+   is emitted (§4.3). A renderer sees only its own node.
+3. **Render-once.** Deduplicating across the whole context needs one visited set per request.
+
+A renderer's own reads of its node's details are ordinary. They run against the same held value and are captured as
+evidence of the evaluation that shows them.
 
 **Pairs added in S2:**
 
@@ -342,10 +359,10 @@ The whole ordering costs O(V + E log V).
 - `:seon.schema/schema`: AI and HTML over `:seon.schema/form`. The definition itself is printed by the floor. The
   `doc` form is not executed.
 
-**Rewritten pure in S3:**
+**Rewritten in S3** (what they read changes; that they read does not):
 
-- the agent pair, both faces: identity, the task handle, and turns left from the frame's value;
-- the namespace pair, both faces: doc, bounded counts, and `(dir ns)` at every distance.
+- the agent pair, both faces: identity, the task handle and turns left. It no longer walks concerns or issues itself; the graph is the walk's;
+- the namespace pair, both faces: doc, bounded counts and `(dir ns)` at every distance, read from the supplied value, instead of `render-data`'s whole page.
 
 **Presence and selection are separate questions.**
 
@@ -509,7 +526,7 @@ stops and reports. The proofs S1 must record:
 | Slice | Change | Prerequisites |
 |---|---|---|
 | S2 | task and schema pairs, both faces; the task entry, a data file; pairs and their functions in one commit | S1 |
-| S3 | the opening switches to `(help)` + the walk form; agent and namespace faces become pure; situation AI and the `declared-sources` walk retire | building block S2/S3 (composition, shared floor) and Q2 (`my.*` adapter); the standing root task; `:seon.agent/task` assigned to every agent; unmigrated issue workers keep one ordinary opening acquisition (their `issue.opening/source` call, moved out of the renderer) until T3 (Astra correction 7) |
+| S3 | the opening switches to `(help)` + the walk form; agent and namespace faces stop duplicating the walk (namespace: no page dump); situation AI and the `declared-sources` walk retire | building block S2/S3 (composition, shared floor) and Q2 (`my.*` adapter); the standing root task; `:seon.agent/task` assigned to every agent; unmigrated issue workers keep one ordinary opening acquisition (their `issue.opening/source` call, moved out of the renderer) until T3 (Astra correction 7) |
 | T0 | delete the bootstrap candidates and `ordered-episode` with their tests | none |
 | T2 | evidence-scoped refresh (§4.7) | the effect-producer fix; S3 |
 | T3 | delete `seon.issue.opening` and its require and caller | issue → task migration (requirement 7.11) |
@@ -574,7 +591,7 @@ stops and reports. The proofs S1 must record:
 |---|---|
 | 1 Walk implements the declared graph, with real bounds | **Applied.** The final parameterized query families (§4.2) include ordinary reverse refs, see-also, forward task handles and schema references. There is a component rule. `reference-to` is not reused. Bounds pass into `seon.db/q`, with a partial-level cut. The AVET cost claim is withdrawn pending S1's recorded plans |
 | 2 Traversal edges separate from definition order | **Applied.** The definition relation only, reversed; membership edges are traversal only; Tarjan components; `:seon.turn/opened-tx`; transitive must-reads at distance 0 stated; agent-root counts measured in S1 |
-| 3 Real task and schema pairs; pure inputs for both faces | **Applied.** S2 pairs over acquired rows; `schema-form` withdrawn; namespace and agent HTML included in S3; per-kind acquisition; presence and selection separated |
+| 3 Real task and schema pairs; pure inputs for both faces | **Applied** for the pairs: S2 adds real pairs over the task row and `:seon.schema/form`; `schema-form` withdrawn; presence and selection separated. **Superseded** for "pure inputs" by the owner's 2026-09-25 ruling that renderers may read the supplied database value (§4.4). The walk-side per-kind acquisition is dropped: pairs read their own rows. The namespace dump and the agent's re-walk are still fixed in S3 |
 | 4 Retention keeps all inputs; complete context | **Applied** (§4.5) |
 | 5 Evidence refresh without reconstruction | **Applied.** Membership comes from the newly acquired graph, reacquired after a restart; every dependency must be positively outside; the additional cases are in §9.6 |
 | 6 Gate the opening on the complete graph | **Applied.** S1 changes nothing on the agent path; S2 publishes pairs with their implementation; S3 depends on building block S2/S3 and Q2; configured lookup |
@@ -584,7 +601,7 @@ stops and reports. The proofs S1 must record:
 
 As dispositioned in round 3:
 
-- fixes 2, 5, 6 and 7 are closed;
+- fixes 2, 5 and 6 are closed; fix 7's "renderer-side reads" objection is withdrawn by the owner's ruling (§4.4), though its callable-expansion half stands;
 - fix 1's remedy is superseded by captured-evidence refresh (now completed by correction 5);
 - fix 3's taught-tool policy is superseded by the owner's distance model, with its coverage completed by correction 1;
 - fix 4's task walker is superseded by the one walk, with its bounds completed by correction 1;
@@ -603,7 +620,7 @@ This lane writes one file, so root files these. Existing issues were not searche
    `docs/seon/issues/task-must-read-links-are-not-resolved.md`.
 3. **`latest-evaluations` pulls all history evidence** (§0.4), over 1 s per system turn until T2. Suggested issue:
    `docs/seon/issues/system-plan-pulls-every-retained-read.md`.
-4. **Renderers read the database** (§0.3): namespace AI and HTML, agent HTML. S3 fixes them.
+4. **The namespace faces dump the page, and the agent AI face re-walks concerns** (§0.3). S3 fixes both. Reading the database in a renderer is lawful and is not itself the defect.
 5. **`web.clj` is 3,811 lines.** S1 adds about 30. A shrink assignment for that file is outside this lane.
 6. **The probes called `datahike.api/q` directly.** Production goes through `seon.db/q`, whose evidence and decoding
    cost for these queries is unmeasured. Timings are single samples under test load.
