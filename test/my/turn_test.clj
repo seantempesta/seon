@@ -9,9 +9,6 @@
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [seon.run :as run]
-            [seon.config :as config]
-            [seon.db :as db]
-            [seon.render :as render]
             [seon.schema]
             [seon.test-support :as support]))
 
@@ -66,54 +63,24 @@
                "and the loop cannot mistake it for a disposition")))))))
 
 (deftest the-lifecycle-surface-has-two-actions-and-its-own-presentation
-  (is (= #{'wait 'complete 'render-namespace-ai 'usage-form}
+  (is (= #{'wait 'complete 'usage-form}
          (set (keys (ns-publics 'my.turn)))))
   (is (str/includes? (:doc (meta (the-ns 'my.turn)))
                      "Return explicit completion or waiting data for my session."))
   (is (str/includes? (:doc (meta #'run/complete)) "Use `complete` when"))
-  (is (str/includes? (:doc (meta #'run/wait)) "Use `wait` when"))
-  (let [rendered
-        (run/render-namespace-ai
-         {:seon.ns/name 'my.turn
-          :seon.ns/doc "Every run ends with a disposition."})]
-    (is (< (.indexOf rendered "complete") (.indexOf rendered "wait")))))
+  (is (str/includes? (:doc (meta #'run/wait)) "Use `wait` when")))
 
-(deftest my-run-namespace-selects-its-declared-protocol-renderer
+(deftest the-usage-test-renders-the-lifecycle-walkthrough
+  ;; The my.turn namespace row renders through the one :seon.ns/ns pair; its
+  ;; teaching lives in the usage test, whose unit declares usage-form.
   (support/with-database
     (fn [connection]
-      (let [database @connection
-            ctx (support/fork-cluster-ctx connection)
-            namespace-entity
-            (db/pull database '[*] [:seon.ns/name 'my.turn])
-            selected
-            (#'render/producer
-             {:seon.db/db database
-              :seon.sci.eval/ctx ctx
-              :seon.render/namespace 'my.turn
-              :seon.render/value namespace-entity
-              :seon.render/output :seon.render/ai
-              :seon.sci.admit/caps
-              (config/result-caps config/defaults)
-              :seon.sci.eval/time-limit-ms 5000
-             :seon.config/on-core-error :record}
-             :seon.render/ai :seon.render/ai)]
-        (is (= 'my.turn/render-namespace-ai selected))
-        (is (= 'my.turn/usage-form
-               (#'render/producer
-                {:seon.db/db database
-                 :seon.sci.eval/ctx ctx
-                 :seon.render/namespace 'my.turn
-                 :seon.render/value namespace-entity
-                 :seon.render/output :seon.render/form
-                 :seon.sci.admit/caps
-                 (config/result-caps config/defaults)
-                 :seon.sci.eval/time-limit-ms 5000
-                 :seon.config/on-core-error :record}
-                :seon.render/form :seon.render/form)))
-        (let [entries (run/usage-form
-                       (assoc namespace-entity :seon.db/db database))]
-          (is (= '(dir 'my.turn) (:seon.repl/form (first entries))))
-          (is (= 6 (count entries))))))))
+      (let [entries (run/usage-form
+                     {:seon.test/sym 'my.turn-test/the-lifecycle-walkthrough-is-executable-data
+                      :seon.test/usage true
+                      :seon.db/db @connection})]
+        (is (= '(dir 'my.turn) (:seon.repl/form (first entries))))
+        (is (= 6 (count entries)))))))
 
 (deftest ^{:seon.test/usage true} the-lifecycle-walkthrough-is-executable-data
   (let [entries (run/walkthrough)

@@ -8,13 +8,6 @@
          :delivered-to [:or :seon.agent/id [:= :outside]],
          :disposition [:enum :wait :completed],
          :note [:string {:min 1}],
-         :namespace-unit
-         [:map
-          {:seon.render/ai my.turn/render-namespace-ai,
-           :seon.render/form my.turn/usage-form}
-          [:seon.ns/name [:= my.turn]]
-          [:seon.db/db {:optional true} :seon.db/database-value]
-          [:seon.ns/doc {:optional true} :seon.ns/doc]],
          :usage-unit
          [:map
           {:description "A usage-test render request, not an additional entity constraint on every test."
