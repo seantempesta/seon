@@ -100,7 +100,7 @@
                 {:optional true}
                 :seon.render/selection-candidate-reason]],
               :selection-stage-name
-              [:enum :declared :floor],
+              [:enum :explicit-value :declared :floor],
               :selection-stage-status
               [:enum :selected :no-match :ambiguous :not-consulted],
               :selection-stage
@@ -109,6 +109,9 @@
                 :seon.render/selection-stage-name]
                [:seon.render.selection.stage/status
                 :seon.render/selection-stage-status]
+               [:seon.render.selection.stage/value
+                {:optional true}
+                :seon.render/inline]
                [:seon.render.selection.stage/candidates
                 {:optional true}
                 [:vector :seon.render/selection-candidate]]
@@ -118,10 +121,11 @@
               :selection
               [:map
                [:seon.render.selection/stages
-                [:vector {:min 2 :max 2} :seon.render/selection-stage]]
+                [:vector {:min 3 :max 3} :seon.render/selection-stage]]
                [:seon.render.selection/selected
                 [:or :qualified-symbol :seon.render/rendered
-                 :seon.render/ambiguous-error :seon.render/request-error :seon.config/error]]],
+                 :seon.render/ambiguous-error :seon.render/request-error :seon.config/error
+                 :seon.render/inline]]],
               :distance [:int {:min 0}],
               :unknown-reason [:enum :time-limit :refused :unselected],
               :unknown-request
@@ -248,6 +252,12 @@
  :request-error [:and :seon.error/base [:map {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} [:seon.render/refused-member :seon.render/refused-member] [:seon.render/selection-observation {:optional true} :seon.render/selection-observation]]]
 
  :walk-operation :qualified-symbol
+
+ :inline
+ [:any {:description "A value's own inline render for one face (:seon.render/ai or :seon.render/html): rendered data its face's emitter renders at the display edge. Any value may be one."
+        :seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary
+        :seon.schema.admission/reason "An inline render is whatever data its value supplies for the face; the face's emitter renders it."
+        :gen/elements [nil "" :k [] {}]}]
 
  :error-result [:or :seon.render/request-error :seon.render/ambiguous-error :seon.render/invalid-output-error :seon.render/unknown :seon.render.transcript/request-error :seon.config/error :seon.db/error-result]
 }

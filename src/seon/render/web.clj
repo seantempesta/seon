@@ -1108,7 +1108,12 @@
   (let [selection (:seon.render/selection experiment)
         selected (:seon.render.selection/selected selection)
         previews (:seon.render/previews experiment)
-        rendered (get previews selected)]
+        selected-stage
+        (some #(when (= :selected (:seon.render.selection.stage/status %)) %)
+              (:seon.render.selection/stages selection))
+        rendered (if (contains? selected-stage :seon.render.selection.stage/value)
+                   (:seon.render.selection.stage/value selected-stage)
+                   (get previews selected))]
     (cond
       (or (:seon.render/refused-member selection) (:seon.render/candidates selection)) (error/render-html selection)
       (or (:seon.render/refused-member selected) (:seon.render/candidates selected)) (error/render-html selected)

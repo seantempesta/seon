@@ -329,8 +329,9 @@
   (let [{rows ::identity-rows owned ::owned-keys} (entity-owners projection)
         named (into #{} (keep rows) (keys value))
         row (first named)]
+    ;; A value's inline face keys are render data, not entity attributes.
     (when (and (= 1 (count named))
-               (every? (get owned row #{}) (keys value)))
+               (every? #(or ((get owned row #{}) %) (#{:seon.render/ai :seon.render/html} %)) (keys value)))
       row)))
 
 (defn- named-alternatives
@@ -527,7 +528,7 @@
       (seq declared) (ambiguity nil output declared))))
 
 (def ^:private selection-stage-order
-  [:declared :floor])
+  [:explicit-value :declared :floor])
 
 (defn- selection-candidate
   [producer]
@@ -567,6 +568,38 @@
       'seon.render/render-default-ai-source
       'seon.render.value/render-ai)))
 
+(defn- explicit-value
+  "A map's own inline render for OUTPUT's face: a renderer symbol, or the
+  rendered data itself. Each face is independent; nil when the value names none."
+  {:malli/schema [:=> [:cat :seon.schema/value :seon.render/output]
+                  [:maybe [:tuple :seon.render/output :seon.schema/value]]]}
+  [value output]
+  (when (map? value) (find value output)))
+
+(defn- explicit-value-stage
+  [request output]
+  (if-let [explicit (explicit-value (render-value request) output)]
+    (selected-stage
+     (if (qualified-symbol? (val explicit))
+       (selection-stage :explicit-value :selected [(selection-candidate (val explicit))])
+       (assoc (selection-stage :explicit-value :selected)
+              :seon.render.selection.stage/value (val explicit)))
+     (val explicit))
+    {:seon.render.selection/stage (selection-stage :explicit-value :no-match)}))
+
+(defn- inline-rendered
+  "Inline rendered data at its face's edge: AI text or HTML Hiccup as given,
+  any other data through that face's own floor emitter."
+  {:malli/schema [:=> [:cat :map :seon.render/output :seon.schema/value]
+                  [:or :seon.render/rendered :seon.render/error-result]]}
+  [request output rendered]
+  (cond
+    (and (= :seon.render/ai output) (string? rendered)) rendered
+    (and (= :seon.render/html output) (hiccup/hiccup? rendered)) rendered
+    (= :seon.render/form output) rendered
+    :else ((if (= :seon.render/html output) render.value/render-html render.value/render-ai)
+           (assoc (render-argument request) :seon.render/value rendered))))
+
 (defn- declared-stage
   [request projection value output]
   (let [producers (declared-producers projection request value output)
@@ -581,6 +614,7 @@
 (defn- selection-stage-result
   [stage-name request projection value output]
   (case stage-name
+    :explicit-value (explicit-value-stage request output)
     :declared (declared-stage request projection value output)
     :floor (let [selected (floor-producer request output)]
              (selected-stage
@@ -642,7 +676,7 @@
 
 (defn- producer
 
-  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :qualified-symbol :seon.render/rendered :seon.render/error-result]]}
+  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :qualified-symbol :seon.render/rendered :seon.render/error-result :seon.render/inline]]}
   [request output _output-schema]
   (:seon.render.selection/selected
    (selection (assoc request :seon.render/output output))))
@@ -1137,7 +1171,9 @@
         ;; explicitly is a `:seon.render/call-request`, which declares its
         ;; ctx.
         selected (when (and projection (map? value))
-                   (declared-producer projection request value output))
+                   (if-let [explicit (explicit-value value output)]
+                     (val explicit)
+                     (declared-producer projection request value output)))
         selected (when-not (or (contains? rendering selected)
                                (and (= output :seon.render/ai)
                                     selected
@@ -1154,6 +1190,11 @@
                    selected)]
     (cond
       (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected)) (bounded-error-node request selected)
+
+      (and selected (not (qualified-symbol? selected)))
+      {:seon.print/face :seon.print/projected
+       :seon.render/output output
+       :seon.print/value (inline-rendered (assoc request :seon.render/value value) output selected)}
 
       selected
       ;; A NESTED PRODUCER THAT DID NOT RETURN SAYS SO. Falling back to the
@@ -1213,9 +1254,11 @@
   [request output output-schema]
   (let [selected (or (:seon.render.call/selected-producer request)
                      (producer request output output-schema))]
-    (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
+    (cond
+      (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
       selected
-      (invoked request output selected))))
+      (qualified-symbol? selected) (invoked request output selected)
+      :else (inline-rendered request output selected))))
 
 (defn- raw-output
   {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :qualified-symbol]
