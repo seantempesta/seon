@@ -329,3 +329,19 @@ Baselines compared: `verify-6ab6ae2a-results.txt.d/063.txt` (error-test) and `06
 3. `bin/test-check default --ns seon.error-result-test`
 4. `bin/test-check default --ns seon.render-test`
 5. `bin/test-check default --ns seon.schema-test`: expect only the pre-existing four.
+
+## Round 5: reds on verify-2350 (017, 018)
+
+- **admit-test**: 80 passed, 0 failed (root). The world-reference regression is green.
+- **error-test (017)**: every red member is one of the four PRE-EXISTING members listed in round 4.
+  Their 13 failures and 1 error are assertions inside those four members. Nothing is left that
+  this lane caused. `a-contract-violations-fault-keeps-the-value-that-broke-it`, the
+  worker-global drift red, passed on the quiet re-run, which supports the concurrent-publication
+  reading. The 50,000-entry regression is green.
+- **error-result-test (018)**: `passed? false` with 19 passed and 0 failed is by design.
+  `agent-contract-refusal-retains-its-live-offending-result` declares `:seon.test/long`
+  (`long-ms` 60000). It was therefore excluded, and `seon.test/run` counts every exclusion as an
+  unfulfilled obligation (`src/seon/test.clj:2352-2374`, `(empty? excluded)`). That member is the
+  one that exercises `prepare-result` end to end through a real agent contract refusal, so it
+  must run:
+  `bin/test-check default --test seon.error-result-test/agent-contract-refusal-retains-its-live-offending-result --include-long`
