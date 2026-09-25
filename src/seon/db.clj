@@ -2919,11 +2919,11 @@
                           :seon.config.db/keep-history? false} {:seon.error/layer :database-read :seon.error/source {:seon.config.db/keep-history? false}})}))
 
     :else
+    ;; Building a view reads no datom: each read on the view records its own
+    ;; evidence against it. Recording `:all` on the argument made a form that
+    ;; opened an as-of view stale on every later commit of its branch.
     (try
-      (let [result (vary-meta (apply operation database arguments)
-                              merge (meta database))]
-        (append-database-evidence! database :all)
-        result)
+      (vary-meta (apply operation database arguments) merge (meta database))
       (catch Throwable cause
         (append-database-evidence! database :all)
         (dependency-error 'seon.db/temporal-read cause)))))
