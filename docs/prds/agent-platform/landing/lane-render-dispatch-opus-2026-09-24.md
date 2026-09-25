@@ -38,7 +38,7 @@ Net: **+133 source/declaration/test lines, 0 deleted**. Dispatch is unchanged, a
 
 ## What landed
 
-- **0a.** A scripted sweep, `tmp/render-dispatch-opus/declare-owners.py` (one line per attribute, refuses on ambiguity),
+- **0a.** A disposable scripted sweep (one line per attribute, refused on ambiguity; its file/line/owner table is exactly the 39 lines of `git show 9b4a7522f -- resources`)
   added `:seon.program/row-schema <owner>` to 39 data identity attributes. Each owner is the attribute's only
   partition-declaring entity schema. For `:seon.agent/id`, the owner is `:seon.agent/agent` rather than `:my.plan/agent-state`.
   Two attributes were skipped because no entity holds them: `:seon.config/agent` and `:seon.source/digest`.
@@ -57,8 +57,8 @@ Net: **+133 source/declaration/test lines, 0 deleted**. Dispatch is unchanged, a
 ## Evidence
 
 All MCP calls used JVM mode, root `/Users/sean/src/seon`, cluster `default` (PID 67823, faulted, 15 open faults) and `read_only`.
-The probes ran in throwaway namespaces `render-dispatch-opus.probe-0a` and `render-dispatch-opus.probe-0b`, loaded from
-`tmp/render-dispatch-opus/probe-0{a,b}.clj`. No default Var was redefined.
+The probes ran in throwaway namespaces `render-dispatch-opus.probe-0a` and `render-dispatch-opus.probe-0b`;
+disposable probe files were removed after the run. No default Var was redefined.
 
 **Census.** 48 identity attributes. Only the 6 program families carried row-schema before this change. Each data identity has
 exactly one entity schema that declares a partition, except `:seon.agent/id` (2) and `:seon.fn/sym` (2, already declared). 261 ms.
