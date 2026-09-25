@@ -50,7 +50,7 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 | `2e42564f5` | 1b | `src/seon/oversight.clj`, `src/seon/error.clj`, `seon.oversight.edn`, `seon.error.edn` | +29 / −21 |
 | `959f14142` | 1b | `src/seon/sci/eval.clj` (shown-result carriage), `src/seon/render.clj` (`head-function` public) | +8 / −2 |
 
-Net: **+225 / −37 = +188 lines** across the eight code/test commits; nothing is deleted yet (1c deletes ~260).
+Net: **+273 / −85 = +188 lines** (39 of the additions are in-place EDN edits) across the eight code/test commits; nothing is deleted yet (1c deletes ~260).
 
 ## What landed
 
