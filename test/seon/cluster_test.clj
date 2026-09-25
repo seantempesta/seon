@@ -125,7 +125,7 @@
                              :seon.error/source
                              {::seon.flow/pid :seon.cluster-test/probe
                               ::seon.flow/op :step
-                              ::seon.flow/ex (ex-info "probe core fault" {})}})
+                              :clojure.core.async.flow/ex (ex-info "probe core fault" {})}})
             stored (committed-fault-ids @connection)]
         (is (int? (:seon.config.error/max-evidence-bytes dials))
             "the cluster's effective config genuinely carries the dial, so
