@@ -13,6 +13,21 @@ render/web.clj and the six namespace-stage tests: `test/seon/render_simplificati
 `test/my/turn_test.clj`, `test/seon/schema/datahike_parity.edn`. Only three fixtures exist
 (`test/seon/render_simplification/fixture_{a,b,ambiguous}.clj`), not four.
 
+## Ninth follow-up
+
+- `0336ec323` (ruling 2, value.clj granted for this only, now **released**): the floor's identity projection passes the
+  projected value with `:seon.render.call/function` = the schema's `:seon.schema/identity-projection` symbol, so a
+  nested database value renders `render-database-identity-ai` (probed on default: `seon.db/database-value-identity`'s
+  declared return selects it). +11/−1, clipping unchanged.
+- `57b3ddb7e` source-provenance refusal names `:seon.error/member :seon.render.value/root` and a host object by class
+  (the E-constructor conversion 9bf22ecd9 had dropped the member and kept the whole unit; render-source :210/:212).
+- `7593a1d89` render-call's output contract is `:seon.render/error-result` (the "expected nil, got a map" refusal at
+  web.clj:1444; callers already branch on unknown/invalid-output/candidates).
+- Still unattributed (my files): render-source preview reuse :108/:125 and authored-source :776–:781 (second presentation
+  re-evaluates; plausibly the invocation cache's `::private-callable` identity changing across the first install —
+  re-check after fix-harness-fallout-opus's eval.clj:785 change); walk distance :601 (distance 1 omits the required
+  namespace); web coalesce :1790/:1794 and next-turn :2447.
+
 ## Eighth follow-up: recorded actuals (seon.test.runner/latest-results, read-only)
 
 Fixed: `51af4a328` a top-level `:seon.render.walk/attribute` request selects that attribute's pair again (1c had
