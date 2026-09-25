@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: resolved
 severity: friction
 created: 2026-09-25
 tags: [issue, reader, sci, mcp]
@@ -39,3 +39,7 @@ bridge's exact request keys on branch `delete-mcp-bridge-opus`:
 - `src/seon/sci/reader.cljc` prose recovery: numeric-only multi-token text.
 - `:seon.cluster.eval/source` contract: an empty string should refuse with the
   reader's "no form" message, not "expected a string, got a string".
+
+## Resolution
+
+37df70b03 (fix-one-reader-errors-opus) fixed the multi-form refusal and the `1 2` crash; R7 then deleted the bridge reader (2828bc808). The `""` message belongs to the error.clj bounded-string issue that lane filed.
