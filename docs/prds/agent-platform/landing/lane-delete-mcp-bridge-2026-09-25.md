@@ -84,6 +84,9 @@ shadowing `name`, test futures).
 
 ## Root runs
 
+Root's run on adopted HEAD gave 161 pass and 2 fail (tmp/orchestrator/verify-2055.out.d/012.txt). Both fails were in the branch fixture: its `defn` had no contract, so the entry gate refused it. b82d6374d gives it `{:malli/schema [:=> [:cat :int] :int]}`. Proved live on a disposable branch: the def returns `#'user/lane-mcp-probe` and `(lane-mcp-probe 1)` returns `42`. That trivial call allocated 515,823,848 bytes in 199 ms and the defn allocated 653,931,880 bytes, an owner cost defect in SCI evaluation.
+
+
 - `bin/test-check default --ns seon.dev.mcp-bridge-test`
 
 ## Verification limits
