@@ -46,7 +46,11 @@
                  [:seon.store/destroy? {:optional true} :boolean]
                  [:seon.boot/prepl-server
                   {:optional true}
-                  [:fn seon.cluster/socket-server?]]],
+                  [:fn
+                   {:error/message
+                    "must be a java.net.ServerSocket serving the cluster io-prepl"
+                    :gen/gen seon.cluster/socket-server-generator}
+                   seon.cluster/socket-server?]]],
                 :operation-observation
                 [:and
                  #:seon.db{:component true,
