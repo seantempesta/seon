@@ -140,13 +140,13 @@ Edge cases:
 
 | Path | Change |
 |---|---|
-| `resources/seon/tasks/seon.sci.eval.edn` | +8 (new) |
-| `resources/seon/tasks/seon.schema.edn` | +9 (new) |
+| `resources/seon/tasks/seon.sci.eval.edn` | +7 (new) |
+| `resources/seon/tasks/seon.schema.edn` | +8 (new) |
 | `src/seon/schema.clj` | +1 (ns attribute map) |
 | `test/seon/issue/task_ingestion_test.clj` | +20 |
 | `docs/research/agent-platform/language-requirements-2026-09-24.md` §6 | +4/−3 |
 
-All five are within budget: 17 of 36 EDN lines, 1 of 6 annotation lines, 0 of 20 production lines, 20 of
+All five are within budget: 15 of 36 EDN lines, 1 of 6 annotation lines, 0 of 20 production lines, 20 of
 30 regression lines. Net source is +1 line and net test is +20. There is no deletion credit.
 
 ## Root runs (serially, after adopting the committed paths; the task files first or together with `schema.clj`)
