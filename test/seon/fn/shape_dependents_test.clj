@@ -8,6 +8,7 @@
   hand the environment's schema row and every arity consuming it one
   fingerprint, or call preparation refuses a supplier as incoherent."
   (:require [clojure.test :refer [deftest is]]
+            [seon.db :as db]
             [seon.fn]
             [seon.schema.edn :as schema.edn]
             [seon.test-support :as support]))
@@ -47,3 +48,25 @@
            (environment-fingerprints (:seon.fn/arities supplier))
            (environment-fingerprints (:seon.fn/arities consumer)))
         "the supplier's argument matches the consumer's environment")))
+
+(deftest a-publication-re-derives-shapes-an-earlier-one-left-stale
+  ;; An earlier publication's drift: the environment's schema row holds a shape
+  ;; whose fingerprint is not the environment's definition fingerprint.
+  (support/with-database
+   (fn [connection]
+     (let [before @connection
+           foreign (:db/id (:seon.schema/shape (db/pull before [{:seon.schema/shape [:db/id]}]
+                                                        [:seon.schema/key :seon.flow/work-launcher])))
+           _ (support/transacted! connection [[:db/add [:seon.schema/key :seon.env/environment]
+                                               :seon.schema/shape foreign]])
+           rows (#'seon.fn/desired-rows
+                 {:seon.source/previous-database @connection
+                  :seon.fn/changed-paths #{}
+                  :seon.program/rows []}
+                 (constantly nil))
+           environment (some #(when (= :seon.env/environment (:seon.schema/key %)) %) rows)
+           supplier (some #(when (= 'seon.db/supplied-connection (:seon.fn/sym %)) %) rows)]
+       (is (some? environment) "the drifted schema row is re-derived without an edit")
+       (is (= (environment-fingerprints (:seon.schema/shape environment))
+              (environment-fingerprints (:seon.fn/arities supplier)))
+           "its consumers are re-derived to the same fingerprint")))))

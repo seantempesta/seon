@@ -83,3 +83,42 @@ Then run the census J list in lane-fix-sci-zero-arg-and-names-2026-09-25.md.
   composition is proven only piecewise, by REPL calls to the same owners.
 - The regression's bound is untested. The old `desired-rows` alone takes 255 ms on
   default.
+
+## Follow-up: stored drift converges without a reset (second commit)
+
+- **Root's hypothesis was refuted.** Root adopted a0d2db39a with a full
+  `init --dev`, and default kept `:seon.env/environment` on eb3694….
+  - Reconciliation does write a shape-only change. `reconcile-tx-in` over the
+    re-derived environment row retracts the eb3694… ref and adds 9a103b… (6 tx
+    operations, read-only probe).
+  - The cause is upstream of it. Even an `:all` reanalysis publishes partially, with
+    every file as a changed path (cluster.clj:1999-2066). `desired-rows` then keeps
+    only rows whose authored content changed. A row whose only stale part is derived is
+    never re-derived.
+- **Fix:** the new private `drifted-schema-keys` gives the stored schema rows whose
+  shape fingerprint differs from the projection's definition fingerprint
+  (`:seon.fn.schema-shape/reference-fingerprints` on `prepare-forms`). Those keys seed
+  the same closure as a changed schema.
+  - `prepare-forms` is now computed once and handed to `add-contract-facts` (new
+    arity), so the steady state adds only the 0.3 ms query.
+- **Convergence publication on default** (composed read-only from the same owners):
+  - 25 drifted keys, a closure of 27, and 70 functions, giving 97 rows and 688 tx
+    operations.
+  - Every row carries one environment fingerprint, 9a103b…, and
+    `seon.db/supplied-connection` is among them.
+  - Time: canonical rows 49 ms, read 10 ms, facts 111 ms, reconcile 37 ms.
+- **Residue, not healed:** 39 still-referenced named shapes carry stale fingerprints.
+  Some belong to keys whose own schema row is fresh, for example
+  `:seon.flow/work-launcher`. Their function consumers heal only when a row reaching
+  them is re-derived. Detecting them needs a liveness check over the shape-ref
+  attributes: `:seon.fn.argument/schema`, `:seon.fn.arity/return-schema`,
+  `.child/schema`, `.entry/schema` and more. That would be a hand-listed set, so it
+  is left for root to rule on.
+  - 13 stale named shapes are orphans (unreferenced).
+- **Regression:** `a-publication-re-derives-shapes-an-earlier-one-left-stale`. It points
+  the environment row at another shape, publishes with no change, and asserts the row
+  and its supplier converge.
+
+Root runs: `bin/test-check default --ns seon.fn.shape-dependents-test`, then
+`bin/seon init --dev default` (any publication converges the drift), then
+`bin/test-check default --ns seon.call-preparation-test`.

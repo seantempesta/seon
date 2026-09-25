@@ -2857,6 +2857,8 @@
 (defn- add-contract-facts
   ([rows progress!] (add-contract-facts rows progress! nil))
   ([rows progress! supplied-projection]
+   (add-contract-facts rows progress! supplied-projection nil))
+  ([rows progress! supplied-projection prepared-forms]
   (let [schema-forms
         (or (:seon.schema.projection/forms supplied-projection)
         (into (sorted-map)
@@ -2883,7 +2885,7 @@
              schema-forms function-contracts
              {:seon.schema/validate-render-contracts? true}))
         _ (report-index-progress! progress! "contract projection complete")
-        schema-forms (schema-shape/prepare-forms projection)
+        schema-forms (or prepared-forms (schema-shape/prepare-forms projection))
         compile-options (:seon.schema.projection/compile-options projection)
         predicate-functions (schema/predicate-functions-in projection)
         schema-keys (set (keys schema-forms))
@@ -3068,6 +3070,23 @@
           {:seon.schema/predicate-functions (schema/predicate-functions-in prior)
            :seon.schema/validate-render-contracts? true})))))
 
+;; A stored schema row's shape fingerprint is its key's definition fingerprint;
+;; one that differs from this projection's is drift an earlier publication left.
+(defn- drifted-schema-keys
+  {:malli/schema [:=> [:cat :seon.db/database-value [:map-of :qualified-keyword :string]]
+                  [:set :qualified-keyword]]}
+  [database definition-fingerprints]
+  (let [stored (db/q '[:find ?key ?fingerprint
+                       :where [?row :seon.schema/key ?key]
+                              [?row :seon.schema/shape ?shape]
+                              [?shape :seon.schema.shape/fingerprint ?fingerprint]]
+                     database)]
+    (when (:seon.error/at stored) (throw (ex-info (:seon.error/message stored) stored)))
+    (into #{} (keep (fn [[schema-key fingerprint]]
+                      (when (some-> (get definition-fingerprints schema-key) (not= fingerprint))
+                        schema-key)))
+          stored)))
+
 ;; A shape's fingerprint carries its references' definition fingerprints
 ;; (seon.fn.schema-shape/reference-fingerprints), so a changed schema changes
 ;; every shape reaching it. Unchanged stored rows in that closure are re-derived
@@ -3110,10 +3129,18 @@
           source-rows)
         projection (or (when partial? (incremental-projection request source-rows))
                        (schema/build-projection packaged-forms))
+        prepared-forms (when partial? (schema-shape/prepare-forms projection))
+        previous-database (when partial? (:seon.source/previous-database request))
         dependent-keys (when partial?
                          (schema/dependent-schema-keys
-                          projection (into (changed-schema-keys request)
-                                           (keep :seon.schema/key) changed-rows)))
+                          projection
+                          (cond-> (into (changed-schema-keys request)
+                                        (keep :seon.schema/key) changed-rows)
+                            previous-database
+                            (into (drifted-schema-keys
+                                   previous-database
+                                   (:seon.fn.schema-shape/reference-fingerprints
+                                    (meta prepared-forms)))))))
         selected-forms (if partial? (select-keys packaged-forms dependent-keys) packaged-forms)
         canonical-schemas
         (if (seq selected-forms)
@@ -3125,10 +3152,10 @@
                   (contains? canonical-keys (:seon.schema/key row)))
                 changed-rows)
         source-only
-        (if-let [database (when partial? (:seon.source/previous-database request))]
+        (if previous-database
           (into (vec source-only)
                 (shape-dependent-rows
-                 database projection dependent-keys
+                 previous-database projection dependent-keys
                  (into #{} (map program/row-identity) (concat canonical-schemas changed-rows))))
           source-only)
         desired-identities (into #{} (map program/row-identity) (concat source-only canonical-schemas))]
@@ -3149,7 +3176,8 @@
                                 (not (desired-identities (program/row-identity %)))))
                   source-rows))
       progress!
-      (when partial? projection)))))
+      (when partial? projection)
+      prepared-forms))))
 
 (defn- commit-index-phase!
   [connection process progress! phase tx-data]
