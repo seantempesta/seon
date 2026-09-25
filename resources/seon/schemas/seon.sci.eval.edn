@@ -64,6 +64,7 @@
                  [:seon.sci.eval/bindings
                   {:optional true}
                   :seon.sci.eval/bindings]
+                 [:seon.sci.eval/restore {:optional true} :seon.sci.eval/restore]
                  [:seon.print/options :seon.print/options]
                  [:seon.sci.admit/record :seon.sci.admit/record]],
                 ,
@@ -307,4 +308,70 @@
  [:map [:seon.sci.eval/missing-declaration :seon.sci.eval/missing-declaration]]]
 
 :installation-member [:or :symbol :qualified-keyword :string]
+
+; The one definition authority (S1, one-repl-language-2026-09-25.md §2.2).
+:sci-var [:fn {:error/message "must be an SCI Var" :gen/gen seon.sci.eval/sci-var-generator} seon.sci.eval/sci-var?]
+:intern
+[:map
+ [:seon.sci.eval/var :seon.sci.eval/sci-var]
+ [:seon.sci.eval/metadata :map]
+ [:seon.sci.eval/value
+  [:any
+   {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
+    :seon.schema.admission/reason "A Var root is any Clojure value; it is compared by identity, never traversed.",
+    :gen/elements [nil true 0 "" :k [] {} #{}]}]]]
+:interns [:map-of :qualified-symbol :seon.sci.eval/intern]
+:namespaces [:map-of :symbol :map]
+:restoration-step
+[:map {:description "One step restoring a refused program change: a Var's root and metadata, or a namespace-map path set to its held prior value or removed."}
+ [:seon.sci.eval/var {:optional true} :seon.sci.eval/sci-var]
+ [:seon.sci.eval/root {:optional true}
+  [:any
+   {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
+    :seon.schema.admission/reason "A Var root is any Clojure value; it is restored by identity, never traversed.",
+    :gen/elements [nil true 0 "" :k [] {} #{}]}]]
+ [:seon.sci.eval/metadata {:optional true} :map]
+ [:seon.sci.eval/path {:optional true} [:vector :symbol]]
+ [:seon.sci.eval/prior {:optional true}
+  [:any
+   {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary,
+    :seon.schema.admission/reason "The held Var or namespace map a path had before the form.",
+    :gen/elements [nil {}]}]]]
+:restore
+[:function {:description "Restore this form's program change in its execution; with a selector, only the named Vars. A restoration that fails leaves the execution unavailable."}
+ [:=> [:cat] :nil]
+ [:=> [:cat [:=> [:cat :qualified-symbol] :any]] :nil]]
+:current-db :seon.db/database-value
+:reader-row :map
+:namespace-row :map
+:admission-request
+[:map
+ [:seon.sci.eval/ctx :seon.sci.eval/ctx]
+ [:seon.db/db :seon.db/database-value]
+ [:seon.sci.eval/current-db :seon.sci.eval/current-db]
+ [:seon.schema/projection :seon.schema/projection]
+ [:seon.cluster.eval/source :seon.cluster.eval/source]
+ [:seon.sci.eval/before-owned :seon.sci.eval/interns]
+ [:seon.sci.eval/before-namespaces :seon.sci.eval/namespaces]
+ [:seon.sci.eval/reader-row {:optional true} :seon.sci.eval/reader-row]
+ [:seon.sci.eval/namespace-row :seon.sci.eval/namespace-row]
+ [:seon.sci.eval/settled-namespaces {:optional true} :seon.sci.eval/settled-namespaces]
+ [:seon.sci.eval/restore :seon.sci.eval/restore]
+ [:seon.sci.eval/namespace-unmap? :boolean]]
+:program-name [:or :symbol :qualified-keyword]
+:unindexed [:set {:min 1 :description "Function or test Vars a form changed, or stored rows' Vars it removed, that its analysis declares no definition for."} :qualified-symbol]
+:unindexed-change-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/unindexed :seon.sci.eval/unindexed]]]
+:declarations [:set {:min 1 :description "The program declarations one form made: definitions, schema, namespace or deletion identities."} :seon.sci.eval/program-name]
+:removals [:set {:min 1 :description "Stored rows' Vars the same form removed beside its declarations."} :qualified-symbol]
+:multiple-declarations-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map
+  [:seon.sci.eval/declarations :seon.sci.eval/declarations]
+  [:seon.sci.eval/removals {:optional true} :seon.sci.eval/removals]]]
+:unavailable [:enum {:description "Why an execution became unavailable: its restoration threw, or its program was reacquired before a refused change could be restored."} :restore-failed :program-reacquired]
+:execution-unavailable-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html}
+ :seon.error/base
+ [:map [:seon.sci.eval/unavailable :seon.sci.eval/unavailable]]]
 }

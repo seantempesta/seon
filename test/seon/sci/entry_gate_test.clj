@@ -83,28 +83,83 @@
        (is (= 64 (:seon.sci.admit/bound-bytes refusal)))
        (is (= 70 (:seon.sci.admit/bytes refusal)))))))
 
-(deftest every-definition-a-form-makes-is-gated-and-armed
+(deftest ^{:seon/tasks #{"132fee0467c8"}} every-definition-a-form-makes-is-gated-and-armed
   (support/with-database
    (fn [connection]
-     (let [ctx (support/fork-cluster-ctx connection)]
+     (let [ctx (support/fork-cluster-ctx connection)
+           absent? #(= 'absent (:seon.sci.admit/value
+                                (evaluate-in ctx (str "(if (resolve '" % ") 'present 'absent)"))))]
        (evaluate-in ctx (str "(defn twice \"Double x.\" "
                              "{:malli/schema [:=> [:cat :int] :int]} [x] (* 2 x))"))
        (doseq [source ["(do (defn nested \"No contract.\" [x] x))"
                        "(let [k 3] (defn nested \"No contract.\" [x] (* k x)))"
-                       "(def nested (fn [x] x))"
-                       "(do (defn nested \"No contract.\" [x] x) (defn twice \"No contract.\" [x] (* 3 x)))"]]
+                       "(def nested (fn [x] x))"]]
          (let [refusal (:seon.sci.admit/value (evaluate-in ctx source))]
            (is (= :seon.fn/spec (:seon.sci.eval/missing-declaration refusal)) source)
-           (is (= 'absent (:seon.sci.admit/value
-                           (evaluate-in ctx "(if (resolve 'nested) 'present 'absent)")))
-               source)
+           (is (absent? "nested") source)
            (is (= 4 (:seon.sci.admit/value (evaluate-in ctx "(twice 2)"))) source)))
        (is (= :ok (get-in (evaluate-in ctx "(defrecord Pair [a b])")
                           [:seon.sci.admit/record :seon.eval/outcome]))
-           "record factories are host-bound, not gated")
-       (evaluate-in ctx (str "(do (defn one \"Inc.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
-                             " (defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x)))"))
+           "a record is one host-bound declaration, not gated")
+       (let [refusal (:seon.sci.admit/value
+                      (evaluate-in ctx (str "(do (defn one \"Inc.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                                            " (defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x)))")))]
+         (is (= '#{scratch.entry-gate/one scratch.entry-gate/two}
+                (:seon.sci.eval/declarations refusal))
+             "two declarations in one form refuse, naming both, rather than keep one row")
+         (is (and (absent? "one") (absent? "two"))))
+       (doseq [source ["(defn one \"Inc.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
+                       "(defn two \"Dec.\" {:malli/schema [:=> [:cat :int] :int]} [x] (dec x))"]]
+         (evaluate-in ctx source))
        (doseq [call ["(one \"a\")" "(two \"a\")"]]
          (is (= :input (:seon.instrument/check
                         (:seon.sci.admit/value (evaluate-in ctx call))))
              call))))))
+
+(deftest ^{:seon/tasks #{"132fee0467c8"}} a-form-changes-the-program-by-one-indexed-declaration
+  ;; The edge cases the S1 REPL probes exposed (landing lane-impl-repl-m1-2026-09-25.md).
+  (support/with-database
+   (fn [connection]
+     (let [ctx (support/fork-cluster-ctx connection)
+           value #(:seon.sci.admit/value (evaluate-in ctx %))
+           absent? #(= 'absent (value (str "(if (resolve '" % ") 'present 'absent)")))
+           contract "{:malli/schema [:=> [:cat :int] :int]}"
+           stored "seon.note/render-notes-ai"]
+       (doseq [[source changed] [[(str "(eval '(defn quoted \"D.\" " contract " [x] x))") 'quoted]
+                                 ["(def point-free (comp inc inc))" 'point-free]
+                                 [(str "(defmacro make [n] (list 'defn n \"D.\" '" contract " '[x] 'x))") nil]
+                                 ["(make generated)" 'generated]
+                                 [(str "(defn scratch.entry-gate/same-ns \"D.\" " contract " [x] x)") 'same-ns]]
+               :let [refusal (value source)]
+               :when changed]
+         (is (= #{(symbol "scratch.entry-gate" (str changed))}
+                (:seon.sci.eval/unindexed refusal))
+             (str source " is an unindexed change: " (pr-str refusal)))
+         (is (absent? (str changed)) source))
+       (value (str "(defn kept \"D.\" " contract " [x] (inc x))"))
+       (is (:seon.sci.eval/unindexed (value "(alter-meta! #'kept assoc :doc \"changed\")"))
+           "a metadata-only change is a definition change too")
+       (is (= "D." (value "(:doc (meta #'kept))")))
+       (is (:seon.error/message (value "(defn kept \"D.\" {:malli/schema [:=> :int]} [x] x)"))
+           "a contract that fails validation refuses")
+       (is (= 2 (value "(kept 1)")) "and restores the prior root")
+       (value (str "(def held (var " stored "))"))
+       (is (= #{(symbol stored)}
+              (:seon.sci.eval/unindexed (value (str "(do (ns-unmap 'seon.note 'render-notes-ai) 1)"))))
+           "a nested unmap of a stored row's Var refuses as unindexed")
+       (let [refusal (value (str "(do (defn fresh \"D.\" " contract " [x] x) "
+                                 "(ns-unmap 'seon.note 'render-notes-ai))"))]
+         (is (= '#{scratch.entry-gate/fresh} (:seon.sci.eval/declarations refusal)))
+         (is (= #{(symbol stored)} (:seon.sci.eval/removals refusal))
+             "a definition beside a removal refuses, naming both")
+         (is (absent? "fresh")))
+       (is (:seon.error/message
+            (value (str "(do (intern 'seon.note 'render-notes-ai (fn [x] x)) "
+                        "(throw (ex-info \"boom\" {})))"))))
+       (is (true? (value (str "(identical? held (var " stored "))")))
+           "every refusal and a later throw leave the stored row's Var as it was")
+       (let [admitted (evaluate-in ctx (str "(defn kept \"D.\" " contract " [x] (* 5 x)))"))]
+         (is (= 5 (value "(kept 1)")))
+         ((:seon.sci.eval/restore admitted))
+         (is (= 2 (value "(kept 1)"))
+             "a settlement refusal restores the admitted change through its evaluation"))))))

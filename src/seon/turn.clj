@@ -4820,6 +4820,18 @@
              :seon.ns/name namespace-name
              :seon.cluster.reply/sources sources}) :seon.agent/id agent-id :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/opened-tx "datomic.tx" :seon.turn/closed-tx "datomic.tx" :seon.db/db database}))))
 
+(defn- restore-evaluations!
+  "Settlement refused the batch, so none of its program changes was admitted:
+  restore each evaluation's change through its own `:seon.sci.eval/restore`,
+  last form first."
+  {:malli/schema [:=> [:cat [:sequential [:map [:seon.sci.eval/evaluation :seon.sci.eval/evaluation]]]]
+                  :nil]}
+  [evaluated]
+  (doseq [{evaluation :seon.sci.eval/evaluation} (rseq (vec evaluated))
+          :let [restore! (:seon.sci.eval/restore evaluation)]
+          :when restore!]
+    (restore!)))
+
 (defn- resume-turn
   "Evaluate an intent-frozen turn in memory, then settle the whole batch once."
   {:malli/schema
@@ -4916,6 +4928,7 @@
             ;; carries the ordinal through `refusal-terminal-data`, which
             ;; records the refusal as this evaluation's shown text and
             ;; error before closing.
+            (when (vector? evaluated) (restore-evaluations! evaluated))
             (settle! {:seon.turn.loop/cluster cluster
                       :seon.turn.loop/now now
                       :seon.agent/id agent-id
@@ -4962,7 +4975,8 @@
                 prepared (:prepared settlement)
                 last-prepared (peek prepared)]
             (if-let [refusal (:refused-outcome settlement)]
-              (report :error (count gated) refusal)
+              (do (restore-evaluations! gated)
+                  (report :error (count gated) refusal))
               (let [installations
                     (into []
                           (keep
