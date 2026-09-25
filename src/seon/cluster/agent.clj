@@ -1258,10 +1258,13 @@
         connection (:seon.db/connection (:seon.turn.loop/cluster entry))
         run-id (open-turn! connection agent-id)]
     (when run-id
-      (let [result (db/transact!
-                    connection
-                    (turn/recover-tx {:seon.turn/id run-id
-                                      :seon.turn/now (Date.)}))]
+      ;; The graph's own branch, never the releasing caller's custody.
+      (let [result (db/call-with-custody
+                    {:seon.db/connection connection}
+                    #(db/transact!
+                      connection
+                      (turn/recover-tx {:seon.turn/id run-id
+                                        :seon.turn/now (Date.)})))]
         (when (or (:seon.error/at result)
                   (:seon.db.write.attempt/request-id result)
                   (:seon.db/invalid-read result)

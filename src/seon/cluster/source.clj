@@ -454,7 +454,8 @@
                            :seon.error/offending missing
                            :seon.error/data {:seon.source/commit-id expected}
           :seon.test.run/branch current-branch})
-                         (schema/call-with-projection
+                         (db/call-with-custody {:seon.db/connection connection} ; the scratch's own write
+                        (fn [] (schema/call-with-projection
                         projection
                         #(if (contains? completion :seon.test.runner/results)
                            ((requiring-resolve 'seon.test.runner/commit-results!)
@@ -484,7 +485,7 @@
                                      :seon.error/message "Matching snapshot work is already admitted and has no recorded terminal result."
                                      :seon.error/expected expected
                                      :seon.error/offending reserved
-                                     :seon.error/data {:seon.test.run/provenance (:seon.test.run/provenance admission)}})))))))]
+                                     :seon.error/data {:seon.test.run/provenance (:seon.test.run/provenance admission)}})))))))))]
             (if (:seon.error/at result)
               (assoc result :seon.source/refused-test-run
                      (get-in completion [:seon.test.run/provenance :seon.test.run/id]))
@@ -636,7 +637,8 @@
         (let [outcome
               (let [connection (store/open-branch! store scratch)]
           (try
-            (let [previous-database
+            (db/call-with-custody {:seon.db/connection connection} ; the scratch's own work
+            (fn [] (let [previous-database
                   (when expected-commit
                     (or (:seon.source/previous-database populate-request)
                         (d/db connection)))]
@@ -723,7 +725,7 @@
                                                  ::publish-readback-failed
                                                  "Issue report identities could not be read." {}))))
               (nil? expected-commit)
-              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection)))))))))
+              (assoc :seon.program/unresolved-report (unresolved-report! (db/db connection)))))))))))
             (finally
               (d/release connection))))]
         (do

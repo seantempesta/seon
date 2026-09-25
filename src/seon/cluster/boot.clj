@@ -58,20 +58,27 @@
   (schema/call-with-projection-state
    projection-state
    (fn []
-     (let [recovery (cluster/recover-runs! connection)
-           _ (when (and (map? recovery)
-                        (contains? recovery :seon.error/at)
-                        (contains? recovery :seon.error/layer)
-                        (contains? recovery :seon.error/operation))
-               (throw (ex-info (:seon.error/message recovery) recovery)))
-           instance (publish! (merge instance recovery))
-           process (cluster/process-identity (:seon.boot/advertisement instance))
-           instance (publish!
-                     (assoc instance
-                            :seon.boot/config-result
-                            (cluster/seed-cluster-facts!
-                             connection cluster-name compiled-config process)))
-           _ (cluster/seed-root-agent! connection cluster-name process)
+     (let [;; Recovery and seeding are this cluster's own writes, never an
+           ;; enclosing evaluation's custody.
+           [instance process]
+           (db/call-with-custody
+            {:seon.db/connection connection}
+            (fn []
+              (let [recovery (cluster/recover-runs! connection)
+                    _ (when (and (map? recovery)
+                                 (contains? recovery :seon.error/at)
+                                 (contains? recovery :seon.error/layer)
+                                 (contains? recovery :seon.error/operation))
+                        (throw (ex-info (:seon.error/message recovery) recovery)))
+                    instance (publish! (merge instance recovery))
+                    process (cluster/process-identity (:seon.boot/advertisement instance))
+                    instance (publish!
+                              (assoc instance
+                                     :seon.boot/config-result
+                                     (cluster/seed-cluster-facts!
+                                      connection cluster-name compiled-config process)))]
+                (cluster/seed-root-agent! connection cluster-name process)
+                [instance process])))
            boot-dials (config/effective (db/db connection) cluster-name)
            arm-request {:seon.flow/commit-fault!
                         #(fault/record! connection cluster-name process
@@ -237,11 +244,14 @@
         (sci.eval/projection-state initial-database initial-projection cluster-name)
         _ (schema/call-with-projection-state
            initial-projection-state
-           #(do
-              (cluster/require-coherent-program!
-               provisional-connection cluster-name)
-              (cluster/accrete-schema-population!
-               provisional-connection cluster-name)))
+           ;; The provisional connection's own schema accretion.
+           #(db/call-with-custody
+             {:seon.db/connection provisional-connection}
+             (fn []
+               (cluster/require-coherent-program!
+                provisional-connection cluster-name)
+               (cluster/accrete-schema-population!
+                provisional-connection cluster-name))))
         database @provisional-connection
         projection
         (if (= (db/basis-t initial-database) (db/basis-t database))

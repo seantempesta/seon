@@ -101,8 +101,9 @@
   [body]
   (let [projection (schema/handed-projection)]
   (test-support/with-database
-   (fn [_canonical]
-     (let [root (str "tmp/source-test/" (random-uuid))
+   (fn [custody]
+     (let [before (db/basis-t (db/db custody))
+           root (str "tmp/source-test/" (random-uuid))
            dir (str root "/data/store")]
        (.mkdirs (io/file root))
        (try
@@ -126,9 +127,12 @@
                  (finally (d/release connection))))
              (schema/call-with-projection
               projection
-              #(body (assoc opened
-                            :seon.schema/projection projection
-                            :seon.fn/manifest (fixture-program! (str root "/program")))))
+              #(let [result (body (assoc opened
+                                         :seon.schema/projection projection
+                                         :seon.fn/manifest (fixture-program! (str root "/program"))))]
+                 ;; Publication under this outer custody writes its own scratch and head.
+                 (is (= before (db/basis-t (db/db custody))) "the enclosing custody's branch is unchanged")
+                 result))
              (finally (store/release-store! opened))))
          (finally (test-support/delete-recursively! root))))))))
 
@@ -327,8 +331,10 @@
       (let [gate (cluster/candidate-gate!
                   target held-store s
                   (fn [execution]
-                    (let [c (:seon.db/connection execution)]
-                      (test-support/transacted! c [(row c '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 2)")])
+                    ;; The real writer, never the fixture writer that binds its own custody.
+                    (let [c (:seon.db/connection execution)
+                          written (db/transact! c [(row c '[:seon.fn/sym scratch.gate-class/f] "(defn f [] 2)")])]
+                      (is (:db-after written) (pr-str (select-keys written [:seon.error/message])))
                       #{[:seon.fn/sym 'scratch.gate-class/f]}))
                   (constantly #{}))]
         (is (true? (:seon.test/passed? gate)) (:seon.source/tally gate))

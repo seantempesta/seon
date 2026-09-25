@@ -849,7 +849,7 @@
           (not [?run :seon.turn/closed-tx])]
         @connection agent-id))
 
-(deftest ^{:seon.test/long "Measured 7,431-8,373 ms on a HEAD snapshot (2026-09-22): arming 1,495 ms, the turn's prelude before prompt acquisition 5,400 ms (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md), the interrupted disarm itself 1,405 ms."
+(deftest ^{:seon.test/long "Measured 7,431-8,373 ms on a HEAD snapshot (2026-09-22): arming 1,495 ms, the turn's prelude before prompt acquisition 5,400 ms (docs/seon/issues/a-turn-spends-seconds-before-its-provider-call.md), the interrupted disarm itself 1,405 ms; the disarm now runs inside one nested fixture branch, whose acquisition is not yet measured here."
            :seon.test/long-ms 12000}
   disarm-interrupts-an-in-flight-turn-and-records-it-interrupted
   ;; Interrupted execution never resumes: an orderly stop while the turn is
@@ -891,10 +891,18 @@
                prelude-entered ::interruptible-prelude-entered)
               (let [run-id (open-run-id connection agent-id)
                     _ (is (string? run-id) "the turn is open before stop")
-                    started (System/nanoTime)
-                    result (agent/disarm! {:seon.agent/id agent-id
-                                           :seon.agent/routing routing})
-                    elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+                    ;; Stopped under another branch's custody: recording the
+                    ;; interruption is the graph's own write, not the caller's.
+                    [result elapsed-ms]
+                    (test-support/with-database
+                     (fn [other]
+                       (let [before (db/basis-t (db/db other))
+                             started (System/nanoTime)
+                             result (agent/disarm! {:seon.agent/id agent-id
+                                                    :seon.agent/routing routing})
+                             elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+                         (is (= before (db/basis-t (db/db other))) "the caller's branch is unchanged")
+                         [result elapsed-ms])))]
                 (is (nil? result))
                 (is (< elapsed-ms turn-completion-backstop-ms)
                     "stop observes exit inside its declared bound")
@@ -1030,7 +1038,7 @@
                               (handle child (test-support/fork-cluster-ctx child "release-join")
                                       "release-join")
                               :seon.agent/id % :seon.agent/routing routing})]
-        (db/call-with-custody {:seon.db/connection child} (fn []
+        ;; Release runs under the parent's custody: it owns its graphs' writes.
         (test-support/transacted!
          child (-> (created-agent-tx child "release-join" "stuck")
                    (into (created-agent-tx child "release-join" "idle"))
@@ -1066,7 +1074,7 @@
           (finally
             (.release release-provider 1000)
             (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
-              (agent/release-context! attempt))))))))))
+              (agent/release-context! attempt))))))))
 
 (deftest ^{:seon.test/long "Two isolated-attempt arms as the release test above (arming measured 1,495 ms there), then a release that joins both idle graphs."
            :seon.test/long-ms 15000}
@@ -1088,10 +1096,9 @@
                               (try (arm agent-id)
                                    (catch clojure.lang.ExceptionInfo refusal
                                      (:seon.error/expected (ex-data refusal))))))]
-        (db/call-with-custody {:seon.db/connection child}
-          #(test-support/transacted!
-            child (into (created-agent-tx child "arm-release" "racer-a")
-                        (created-agent-tx child "arm-release" "racer-b"))))
+        (test-support/transacted!
+         child (into (created-agent-tx child "arm-release" "racer-a")
+                     (created-agent-tx child "arm-release" "racer-b")))
         (try
         (let [arms (mapv outcome ["racer-a" "racer-b" "racer-a"])
               release (future (test-support/await-event! start ::start)

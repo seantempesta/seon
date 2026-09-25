@@ -143,9 +143,9 @@
             digest (blob/put! connection content)]
         (try
           (let [report
-                (db/transact! connection
-                            [{:seon.registry.test/marker "historical payload"
-                              :seon.registry.test/archive-blob digest}])
+                (test-support/transacted! connection
+                                          [{:seon.registry.test/marker "historical payload"
+                                            :seon.registry.test/archive-blob digest}])
                 entity-id
                 (:db/id
                  (db/pull (:db-after report) [:db/id]

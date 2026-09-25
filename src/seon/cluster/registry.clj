@@ -248,18 +248,21 @@
             projection (or supplied-projection (db/carried-projection database)
                            (schema/handed-projection)
                            (schema/projection-from-database database))]
-        (schema/call-with-projection
-         projection
-         (fn []
-           (let [compiled (config/compile-manifest {:seon.boot/cluster-name cluster-name})
-                 result (db/transact!
-                         connection
-                         {:tx-data [(:seon.config/desired-row compiled)
-                                    {:seon.cluster/name cluster-name
-                                     :seon.cluster/config [:seon.config/cluster cluster-name]
-                                     :seon.source/commit-id source-commit}]})]
-             (when-not (:db-after result)
-               (throw (ex-info "The fork's source commit could not be recorded." result)))))))
+        ;; The new branch's own write, never the caller's custody.
+        (db/call-with-custody
+         {:seon.db/connection connection}
+         #(schema/call-with-projection
+           projection
+           (fn []
+             (let [compiled (config/compile-manifest {:seon.boot/cluster-name cluster-name})
+                   result (db/transact!
+                           connection
+                           {:tx-data [(:seon.config/desired-row compiled)
+                                      {:seon.cluster/name cluster-name
+                                       :seon.cluster/config [:seon.config/cluster cluster-name]
+                                       :seon.source/commit-id source-commit}]})]
+               (when-not (:db-after result)
+                 (throw (ex-info "The fork's source commit could not be recorded." result))))))))
       (finally (store/release-branch! connection))))
   nil)
 
