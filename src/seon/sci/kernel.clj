@@ -676,6 +676,9 @@
                  :seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.error/message
                   :seon.error.evidence/value (or (ex-message admission-failure) "Failure admission failed.")}
                  :seon.error/throwable admission-failure
-                 :seon.error/offending failure
+                 ;; the failure could not be admitted, so it is named by its
+                 ;; classifying base, never carried whole past admission
+                 :seon.error/offending (select-keys failure [:seon.error/at :seon.error/layer
+                                                             :seon.error/operation :seon.error/message])
                  :seon.error/expected :seon.sci.eval/invocation-result})
                :seon.sci.admit/record record-value})))))))
