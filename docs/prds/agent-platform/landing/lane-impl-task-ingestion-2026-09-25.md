@@ -1,121 +1,147 @@
 ---
 type: landing
-status: "slice 1 (7.9) written and committed; unverified until root runs the commands below; over the line ceiling"
+status: "slice 1 revised for review 03bf7d6cb and slice 1b; committed but unverified until root runs the commands below"
 created: 2026-09-25
 ---
 
-# Lane impl-task-ingestion-opus: slice 1 (7.9), ingestion plus reverse lookup (2026-09-25)
+# Lane impl-task-ingestion-opus: task ingestion (7.9), review revision and slice 1b (2026-09-25)
 
-## Broken or unproven first
+## Broken, unproven or stopped first
 
-- **Over the ceiling.** Production code adds 129 lines: `seon.fn` +53/−8, including the 2 annotation lines, and
-  `seon.issue` +76. Schema adds 27 lines. The total is **156 against the 112 allowed** (100 + 12). Regressions add 62
-  lines against 60. Root rules on whether this growth stands. The smaller cut, if it doesn't, is listed at the end.
-- **Nothing has run.** Under the LOAD RULE the lane loaded no changed namespace and ran no tests. Only these ran:
-  - `clj-kondo`: 0 errors on `fn.clj`, `issue.clj` and the test;
-  - read-only REPL probes of the assumptions (below).
-- **The program gate does not refuse dangling ids yet.** `seon.issue/task-findings` returns the `:dangling` set as
-  data. Wiring it into the merge or write-back gate needs the gate owner's file, so a dangling id is reported, not
-  refused.
-- **Publication does not ingest task files yet.** `index-tasks!` exists, but publication's `index-issues!` seam in
-  `src/seon/cluster/source.clj:512-559` is not owned. Ingestion runs only when called.
-- **Adopt schema and code together.** The seed annotations on `seon.fn/gate-set` and `seon.fn/tests-reaching`
-  validate against `:seon.task/tasks`. If `fn.clj` is adopted before the four schema files, indexing refuses.
-- **`:seon.task/needs` is omitted.** No current task uses it (grow by accretion).
+- **The dangling gate on program merge is not wired: named and stopped.** The gate is
+  `seon.cluster.source/accept-merge!` (`src/seon/cluster/source.clj`, the `accept-merge!` defn after
+  `prepare-merge!`). My grant covers that file only for publication beside `index-issues!`, so I did not edit it.
+  - To do: call `seon.issue/task-findings` on the tested program with the destination's tasks, and refuse
+    `:dangling-id` before `db/transact!`.
+  - Because of this, the review's case "program-gate failure leaving admitted task data" has no test.
+  - Merge isolation is covered only by the regression that `seon.program/program-attributes` holds
+    `:seon.task/tasks` and never `:seon.task/id` or `:seon.task/intent`.
+- **Development and adoption clusters do not receive tasks.** Publication does not add task identities to
+  `:seon.reconcile/adopt-identities`: `adopt-tx` and the cluster adoption path are another owner's. A cluster that
+  adopts from current-src therefore gets the annotations without the task entities. Publication is the only place
+  that refuses on dangling handles, so this reports rather than breaks.
+- **Nothing has run.** Under the LOAD RULE I loaded no changed namespace and ran no tests. What ran:
+  - clj-kondo: 0 errors on every touched file;
+  - read-only REPL probes (below).
+- **Publication tests call the private seam `#'seon.cluster.source/index-tasks!`, not `publish!`.** A full `publish!`
+  run on a store is root's platform tier.
+- **Still later work, as before:** schema-attribute annotations (7.1c), runtime task creation (7.8) and seed edges
+  (7.9b) are neither changed nor proved.
+- **Stale skill claim, relayed from the review and not fixed here.** The testing skill says `seon.test/run` does not
+  arm, but `src/seon/test.clj:2060` calls `instrument/apply!`. The owner of `.agents/skills/clojure-testing` should
+  fix it.
 
-## What landed (data flow)
+## The review's findings, each fixed at its owner
 
-**Annotations.** `var-row` and `namespace-row` now call `task-links` before the definition digest. REPL-authored
-rows (`source-rows`) and file rows therefore carry the same facts and digests.
-- It stores `:seon/tasks` as `:seon.task/tasks`, a set of keyword values that are never refs. The holder decides the
-  role: a test row means proof, a function or namespace row means subject.
-- It stores `:seon/must-read` and `:seon/see-also` as typed native symbol sets, `:seon.fn/must-read` and
-  `:seon.fn/see-also`. It reuses `capability-symbol`, which unquotes, and `seed-symbol`, which resolves aliases.
+1. **Identity (owner clarification 2026-09-25).** The handle is `seon.issue/task-handle`, which is `seon.id/id` over
+   `[ns name kind]`: a 12-hex string such as `"300aca1ad57c"`.
+   - It is written literally in task EDN and `:seon/tasks`.
+   - `:seon.task/name` and `:seon.task/kind` are declared data; `:seon.task/ns` comes from the file name.
+   - Admission computes the handle and refuses a supplied `:seon.task/id` that differs (`:handle-mismatch`, with
+     `:seon.error/expected`).
+   - Intent never enters the handle. A regression changes the intent and keeps the handle.
+   - The seed was updated.
+   - Because ids are now strings, a `::alias` id refuses through the annotation schema, and the keyword-position
+     machinery was deleted.
+2. **Revision conflict (7.16).** `index-tasks!` takes `:seon.task/basis` (the declarations the caller read) or reads
+   it now through `task-basis`.
+   - `tasks-tx` runs as `[:db.fn/call …]` in the writer. For each touched handle it compares the current declaration
+     with the basis.
+   - A mismatch refuses `:revision-conflict` with `:seon.task/base`, `/current` and `/proposed`. Equal proposals are
+     no-ops.
+   - A regression makes two edits from one basis: the second refuses, and the first value stays.
+3. **Reading the file.** `edamame/parse-string-all` requires exactly one vector (`:not-one-vector`).
+   - Reader failures refuse as `:unreadable-file`, with the edamame exception as cause. Its location sits in the
+     `:seon.error/chain` data.
+   - `:invalid-entry` keeps the authored value in `:seon.error/offending` and the humanized explanation in
+     `:seon.task/explanation`.
+   - Tested: trailing form, `[{`, `#=`, `{}`, unknown member, handle mismatch, duplicate. Each refusal is asserted to
+     leave `basis-t` unchanged.
+4. **Placement.** The analyzer's own kondo parse (`parsed-facts`) records lists whose first attribute map, after the
+   name and an optional docstring, holds `:seon/tasks`. The var entry carries `:task-map-after-name?`, and the row
+   producer refuses it only on a deftest. Body usage of `:seon/tasks` and `::x` stays legal; the positive and negative
+   cases are paired.
+5. **Empty sets.** Admission turns empty optional sets into absence, so an `:evidence #{}` re-ingest writes nothing.
+   Clearing `:must-read` retracts it; both are tested.
+6. **Declared errors.** `read-error` passes `db/q`, `db/pull` and `db/transact!` refusals through whole.
+   - `open-tasks`, `task-edges`, `task-findings`, `task-basis` and `index-tasks!` name their alternatives in their
+     result contracts.
+   - A real `db/pull` refusal (an uninstalled lookup attribute) is tested. The probe returned
+     `:seon.db/invalid-read true`.
+7. **Stage and result schemas.**
+   - Named: `:seon.task/annotation`, `/entry`, `/file`, `/files`, `/declaration`, `/basis`, `/links`, `/edges`,
+     `/findings`, `/request` and `/report`.
+   - `:seon.task/refused-error` is `[:and :seon.error/base …]`, and `:seon.task/conflict-error` extends it. They are
+     built by `seon.fn/task-refused!` through `seon.error.refusal/diagnostic`, which keeps the value until render.
+   - Contracts were added to `var-row`, `namespace-row`, every new helper and the test helpers.
 
-Each malformed annotation refuses by name through `seon.fn/task-refused!`, whose error schema is
-`:seon.task/refused-error`:
+P2 items:
+- **Namespace referrers.** `task-edges` includes `:seon.ns/name` referrers. The test covers them, alias-resolved
+  see-also (`` `s/join `` → `clojure.string/join`), and namespace subjects.
+- **Linear comparison.** Stored rows are indexed once by handle. Owned attributes come from `:seon.task/declaration`,
+  not a hand list, and each link is computed once.
+- **Explicit file set.** A deleted file enters as `"[]"`, an empty declaration: `task-files` produces it for a changed
+  path that is gone. Duplicates are checked across the whole input, and a path outside `resources/seon/tasks/`
+  refuses (`:misplaced-file`).
 
-| Written | Refusal |
-|---|---|
-| `^:seon/tasks`, which stores `true`, or any non-set value | `:not-a-set-of-ids`, checked against the attribute's own schema |
-| A `::alias` id, found from clj-kondo's `:auto-resolved` keyword entries inside the form | `:auto-resolved-id` |
-| `(deftest name {:seon/tasks …} …)`, where the map is a body keyword with a `:from-var` | `:metadata-after-test-name` |
-| A bare, unquoted link symbol | `:unquoted-link` |
+## Slice 1b: publication
 
-**Task data** lives in `resources/seon/tasks/<owning-ns>.edn`.
-- `seon.issue/task-entries` reads a file with edamame (nothing is evaluated; `#=` refuses) and validates it against
-  `:seon.task/file`, a vector of closed `:seon.task/entry` maps. It refuses `:invalid-entry` (with the humanized
-  member), `:misplaced-id` (an id outside `<owning-ns>.task`) and `:duplicate-id`.
-- `tasks-tx` reconciles by `:seon.task/id` through the existing `replacement-tx`. Unchanged input gives an empty
-  delta. An entry removed from its file retracts its task.
-- `index-tasks!` writes nothing when the delta is empty. Otherwise it commits `[:db.fn/call #'tasks-tx files]`, so
-  the writer re-decides the transaction.
+`src/seon/cluster/source.clj` gains `index-tasks!` beside `index-issues!`.
+- `publish!` selects changed task paths with `seon.issue/task-path?`, or all task files on a full publication, then
+  calls the task writer.
+- It then refuses any dangling handle through `task-findings`, with every handle's holders in
+  `:seon.task/dangling`, before the head advances.
+- `:seon.task/changed?` joins the no-op decision, so a task-only change publishes.
+- Schema installation already precedes this step (the scratch `missing` transaction), and `resources/` is a declared
+  input root (`deps.edn :paths`).
 
-**Lookups** are functions of a held database value:
-- `task-edges` returns subjects, proofs, and the must-read referrers of the task's subjects;
-- `open-tasks` answers function → open ids;
-- `task-findings` returns `:dangling` and `:triage`.
+Integration cases on the seam:
+- coherent task and annotation admission;
+- a no-op repeat;
+- an annotation whose task is absent at the destination, which refuses naming only that handle;
+- a removed task file, which retracts the task, leaving its annotations dangling so publication refuses.
 
-**Identity (3b.6).** For an authored task the id keyword *is* the identifying aspect, component plus name, written
-literally. No separate digest is minted. A generated task (producer plus subject) would need `seon.id`; that is not
-in this slice.
+## Probe evidence (read-only, default JVM pid 35446)
 
-**Seed.** The file is `resources/seon/tasks/seon.fn.edn`. It holds `:seon.fn.task/tests-reaching-saturates`, from
-"Defects the runs exposed" (reach saturates: 1.9 s, 6.5 GB, 1,720 tests). Its subjects `seon.fn/gate-set` and
-`seon.fn/tests-reaching` carry the id. It is raised, with no proof yet.
+- **Parse shape.** In kondo's parse, `^{…}` metadata sits in the name node's `:meta` vector, not in `:children`. An
+  attribute map after the name is `(nth children 2)`, or 3 after a string node with `:lines`. `::a/z` is a keyword
+  node with `:namespaced? true`.
+- **Stage schemas.** All new schemas compiled in a lazy registry over default's projection (0.59 ms for the samples).
+  The one exception was `:seon.task/links`, which needs the `:seon.fn/must-read` declared in `seon.fn.edn`.
+  Validation results:
+  - `^:seon/tasks true` refuses as "invalid type";
+  - a keyword id refuses as "should be a string";
+  - `[:intnet]` refuses as "disallowed key".
+- **Handles.** `seon.id/id` gives `"300aca1ad57c"` for `['seon.fn "tests-reaching-saturates" :function]` and
+  `"043df611d179"` for the fixture.
+- **Refused read.** `seon.db/pull` on an uninstalled lookup attribute returns `{:seon.db/invalid-read true …}`.
 
-## Evidence (read-only probes in default's JVM, pid 35446)
-
-1. `seon.program/canonical-row` drops an attribute the family map does not declare (1.24 ms). That is why the three
-   entity maps gained member lines.
-2. `seon.fn.analyzer/analyze` on a 4-line source took 8.6 ms and showed:
-   - `^{:seon/tasks …}` on a deftest gives meta with no `:from-var` on the keyword;
-   - the attribute-map-after-name form gives keyword entries with `:from-var bad` and no meta;
-   - `::a/z` under `:as-alias` gives meta `#{:pq.a/z}` and a keyword entry `{:auto-resolved true}` with no
-     `:from-var`;
-   - var and ns entries carry `row`/`col`/`end-row`/`end-col`;
-   - must-read `'pq.t/good` arrives as `(quote pq.t/good)`.
-3. The three datalog shapes were run on literal datoms:
-   - subject/proof with `ground` → `#{[a/f false] [a/t true]}`;
-   - referrers with `or`/`and` → `[a/g :a.task/y]`;
-   - dangling with `not` → `[:a.task/x]`.
-4. edamame:
-   - `#=` → "Read-eval not allowed";
-   - `'a/f` → `(quote a/f)`, which `:seon.program/edge-symbol` refuses as `:invalid-entry`;
-   - a bare `#{a/f}` reads as symbols.
-
-## Root runs (serially, after adopting all committed paths together)
+## Root runs (serially, after adopting all committed paths together; schemas first)
 
 ```
 bin/test-check default --ns seon.issue.task-ingestion-test
 bin/test-check default --ns seon.fn-test
 bin/test-check default --ns seon.issue-test
+bin/test-check default --ns seon.cluster.source-test
 ```
 
-The regressions assert the wanted behaviour:
-- ingest → lookups both ways;
-- index-tasks and reconcile both return zero writes on re-ingest;
-- removing `g`'s annotation drops only that subject, while proofs and `f` stay;
-- each annotation refusal by rule;
-- duplicate, invalid and misplaced EDN;
-- a dangling id appears in `:dangling`.
+Then run one publication with a task-only edit and one with no change, and record the wall time for each run.
+Timings are not measured. Record `seon.fn/rows` over `src` on the parent and on the change, because `task-links` now
+validates every holder's annotation.
 
-Timings are not measured. Record the three runs' wall time, and `seon.fn/rows` on the fixture root, parent against
-this change.
+## Sizes and commits
 
-## Smaller cut if root holds the ceiling (about 30 lines less)
+For this lane's paths, from `1de64b45b^` to HEAD:
 
-Defer the typed link edges (`:seon.fn/must-read`, `:seon.fn/see-also`, `:seon.task/must-read`, the referrers
-lookup and `:unquoted-link`) to slice 3. What remains is ingesting `:seon/tasks` plus task intent and evidence.
+| Area | Lines |
+|---|---|
+| `seon.issue` | +166 |
+| `seon.fn` | +47/−6 |
+| analyzer | +19/−3 |
+| `source.clj` | +24/−1 |
+| schemas | +58 |
+| seed | +6 |
+| tests | +137 |
 
-## Commits
-
-See `git log --oneline -- resources/seon/schemas/seon.task.edn src/seon/fn.clj src/seon/issue.clj
-test/seon/issue/task_ingestion_test.clj`. They are not pushed.
-
-**Paths to release** once root accepts the slice:
-- `resources/seon/schemas/seon.fn.edn`, `seon.test.edn` and `seon.ns.edn`;
-- `resources/seon/schemas/seon.task.edn`;
-- `resources/seon/tasks/`;
-- `src/seon/fn.clj` and `src/seon/issue.clj`;
-- the test.
+The owner accepted the size. Every commit is ≤100 added lines. Revision commits: d7139e8e5, 24cc5eebb, 1552a2d3a,
+31cf5360f, ca5a385c8, 1405b7a13 and 438d402eb, plus this note. None is pushed.
