@@ -434,7 +434,8 @@
             (let [report (instrument/apply!
                           {:seon.config/on-core-error :panic
                            :seon.schema/projection projection})]
-              (is (:db-after report) (pr-str report)))))))))
+              (is (pos-int? (:seon.instrument/instrumented report)) (pr-str report))
+              (is (nil? (:seon.error/at report)) (pr-str report)))))))))
 
 (deftest isolated-one-off-evaluations-do-not-share-definitions
   (run "(def leaked 1)")
