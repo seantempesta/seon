@@ -245,3 +245,29 @@ exactly one commit.
 - the hand-built prompt refusal → task `1bf47dae6f04`.
 
 After the next restart I re-run `seon.turn-test` and `seon.turn-loop-test` once.
+
+### Root's runs on pid 36107 at b32060df4, and `27a1c85ce`
+
+| namespace | pass / fail / error | notes |
+|---|---|---|
+| `seon.turn-test` | 415 / 7 / 3 | was 415 / 15 / 3 |
+| `seon.turn-loop-test` | 0 / 0 / 1 | the namespace stopped at its first error |
+
+**turn-loop: the stop was my own fixture.** `a-clean-last-form…` stopped the namespace. It was not host-world
+custody: the error came from `seon.sci.eval/carried-cluster-name` refusing `["default" "undisposed"]`, and the
+second cluster was the one my `d231c5f7c` seeded. `27a1c85ce` fixes it: fixtures that only need a handle now name
+the world's own cluster, `(:seon.cluster/name (test-support/execution-handle connection))`, which already holds
+its config row, instead of seeding a second cluster.
+
+**turn-test: config visibility is not fixed at b32060df4.** b32060df4 includes `b6913c392`, yet three turn-test
+reds still get "requires a matching cluster row" with `:seon.config/available ["default"]`:
+- `a-forms-read-evidence…`
+- `generated-read-evidence…`
+- `a-refused-generated-form…`
+
+Each of those tests seeds its own named cluster through `config/apply!` and `seed-cluster!`, and the seeded row
+never reaches `config/effective`. I left these tests as they are, so they keep showing the defect to the cache
+lane.
+
+**turn-test timeouts.** `recovery-preserves…` (7.3 s), `transitions-agree…` (11.9 s) and `virtual-turns…` (7.9 s)
+all ran past their 5 s bound.
