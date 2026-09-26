@@ -243,6 +243,9 @@
             [:or :nil [:sequential :seon.schema/value]]]],
           :process [:and #:seon.db{:index true} :seon.db/ref],
           :receipt [:and #:seon.db{:index true} :seon.db/ref],
+          :pending-open
+          [:and {:description "An evaluation request's run open (seon.turn/submission-open-tx), carried first by every write the evaluation makes until the run exists."}
+           :seon.store/transaction-data],
           ;; A caller-named :schema-key enables selector-derived validation.
           ;; Reads without it return the dependency's pulled value directly.
           :pulled-entity

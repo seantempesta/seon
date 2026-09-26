@@ -4435,6 +4435,7 @@
                        (some-> (:seon.db/db turn-environment)
                                (db/carry-projection-state projection-state))
                        #'db/*receipt* receipt
+                       #'db/*open* (when receipt (:seon.db/pending-open request))
                        #'effect/*request-context*
                        (when (and run-id (some? form-ordinal) cluster-name)
                          {;; The environment the ctx carries, scoped to this turn.

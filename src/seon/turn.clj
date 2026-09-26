@@ -741,11 +741,14 @@
 
 (declare receipt-start-tx)
 
-(defn system-run-call
-  "Open a system-authored turn and freeze its sources at the writer."
-  {:malli/schema [:=> [:cat :seon.db/database-value
-                       :seon.turn/system-run-request]
-                  :seon.store/transaction-data]}
+(defn- system-run-plan
+  "The writer's decision on one system-authored run: its open and frozen
+  source rows and the namespace it starts in, or the refusal thrown as
+  `system-run-call` throws it. The agent's pass asks it once, on its value,
+  before evaluating a submission; the writer asks again inside the
+  transaction that opens the run."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/system-run-request]
+                  [:map [::rows :seon.store/transaction-data] [:seon.ns/name :seon.ns/name]]]}
   [database request]
   (let [{agent-id :seon.agent/id
          ::keys [id starting-ns sources trigger]} request
@@ -765,12 +768,22 @@
                            agent-namespace)]
     (when-not namespace-name
       (refuse! `system-run-call ::starting-namespace-missing request))
-    (into [(merge opened
-                  (select-keys request [::reply ::reply-blob ::reply-size])
-                  {::starting-ns (str "namespace:" namespace-name)
-                   ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})]
-          (concat (rest open-rows) (source-rows database id (:db/id opened) 0 namespace-name
-                       :system (current-transaction-instant database) sources)))))
+    {:seon.ns/name namespace-name
+     ::rows
+     (into [(merge opened
+                   (select-keys request [::reply ::reply-blob ::reply-size])
+                   {::starting-ns (str "namespace:" namespace-name)
+                    ::reply-size (long (or (::reply-size request) (count (or (::reply request) (str/join "\n" (map :seon.cluster.eval/source sources))))))})]
+           (concat (rest open-rows) (source-rows database id (:db/id opened) 0 namespace-name
+                        :system (current-transaction-instant database) sources)))}))
+
+(defn system-run-call
+  "Open a system-authored turn and freeze its sources at the writer."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       :seon.turn/system-run-request]
+                  :seon.store/transaction-data]}
+  [database request]
+  (::rows (system-run-plan database request)))
 
 (defn system-run-tx
   "Open, plan, and start every evaluation of one system-authored run.
@@ -783,6 +796,14 @@
                   :seon.store/transaction-data]}
   [_database request]
   [[:db.fn/call #'system-run-call request]])
+
+(defn- submission-open-tx
+  "A submitted run's open, written by whichever write reaches the writer first:
+  a durable write the form makes (custody prepends it, `seon.db/*open*`) or the
+  run's settlement. The writer applies it once (`seon.db/absent-call`)."
+  {:malli/schema [:=> [:cat :seon.turn/system-run-request] :seon.store/transaction-data]}
+  [request]
+  [[:db.fn/call #'db/absent-call [::id (::id request)] [[:db.fn/call #'system-run-call request]]]])
 
 (defn append-generated-call
   "Append exactly one system-authored form to an open generated turn.
@@ -4916,7 +4937,11 @@
                              ;; around the form and its shown result only, so
                              ;; install, identity, profile and gate reads stay out.
                              :seon.db/read-evidence-sink captured)
-                handle (assoc :seon.repl/handle handle))
+                handle (assoc :seon.repl/handle handle)
+                ;; the run's open rides the form's first durable write
+                (:seon.turn.loop/submission cluster)
+                (assoc :seon.db/pending-open
+                       (get-in cluster [:seon.turn.loop/submission :seon.db/tx-data])))
               evaluation
               (render/call-with-walk-context
                {:seon.db/db database
@@ -5091,12 +5116,19 @@
                   :seon.error/value failure})
         (report :error 0))
       (let [{ctx :seon.sci.eval/ctx} forked
-            ;; A submitted run is read where its settlement will write it: on
-            ;; the value its open leaves (`with-submission`).
-            database (or (get-in cluster [:seon.turn.loop/submission :seon.db/db])
-                         (db/db connection))
+            database (db/db connection)
+            submission (:seon.turn.loop/submission cluster)
             first-ordinal (:seon.cluster.eval/ordinal work)
-            evaluations (fold-evaluations database run-id)
+            ;; A submitted run's rows may not be written yet: its sources and
+            ;; starting namespace are the submission's, as its open writes them.
+            evaluations (if submission
+                          (into [] (map-indexed
+                                    (fn [ordinal form]
+                                      {:seon.cluster.eval/ordinal ordinal
+                                       :seon.cluster.eval/source (:seon.cluster.eval/source form)
+                                       :seon.cluster.eval/ns {:seon.ns/name (or (:seon.ns/name form) (:seon.ns/name submission))}}))
+                                (:seon.turn/sources submission))
+                          (fold-evaluations database run-id))
             evaluated
             (phase
              #(evaluate-sources
@@ -5108,8 +5140,9 @@
                 ;; its handles are minted now, as for any written run
                 :seon.turn/write? (contains? cluster :seon.turn.loop/submission)
                 :seon.cluster.eval/ordinal first-ordinal
-                :seon.ns/name (or (fold-namespace database run-id evaluations
-                                                 first-ordinal)
+                :seon.ns/name (or (:seon.ns/name submission)
+                                  (fold-namespace database run-id evaluations
+                                                  first-ordinal)
                                   (sci.eval/agent-namespace database agent-id))
                 :seon.cluster.reply/sources
                 (into []
@@ -5819,15 +5852,26 @@
                       request {:seon.agent/id agent-id
                                :seon.db.process/id process}
                       database (db/db connection)
-                      ;; A SUBMISSION IS ITS OWN WORK: its run's open is applied
-                      ;; to this one value by the writer's own functions, and a
-                      ;; refusal (a run already open, admission closed) answers
-                      ;; its caller. The open commits with the settlement.
-                      basis (when submission
-                              (db/with database (:seon.db/tx-data submission)))
+                      ;; A SUBMISSION IS ITS OWN WORK. The writer's own decision
+                      ;; (`system-run-plan`) on this one value refuses a busy or
+                      ;; closed agent to its caller and names the starting
+                      ;; namespace; the open itself rides the form's first durable
+                      ;; write or the settlement (`submission-open-tx`).
+                      run-request (:seon.agent/run-request submission)
+                      plan (when submission
+                             (try (system-run-plan database run-request)
+                                  (catch clojure.lang.ExceptionInfo refused (ex-data refused))))
+                      ;; A reply large enough to be a staged blob opens its run
+                      ;; in its own commit, publishing the blob with it.
+                      opened (when (and plan (not (:seon.error/at plan))
+                                        (seq (:seon.blob/staged-writes submission)))
+                               (blob/with-publication!
+                                connection (:seon.blob/staged-writes submission)
+                                #(db/transact! connection (submission-open-tx run-request))))
+                      refusal (some #(when (:seon.error/at %) %) [plan opened])
                       next (cond
                              (nil? submission) (next-agent-work database request)
-                             (:seon.error/at basis) nil
+                             refusal nil
                              :else {:seon.turn.work/situation :resume
                                     :seon.turn/id (:seon.turn/id submission)
                                     :seon.agent/id agent-id
@@ -5845,17 +5889,18 @@
                       _ (when-let [derived (:seon.turn/id next)]
                           (reset! (:seon.agent/run-id turn-bound) derived))]
                   (if (nil? next)
-                    (do (some->> basis (async/offer! reply))
+                    (do (some->> refusal (async/offer! reply))
                         [(dissoc state :seon.turn/id)
                          {::flow/report [{:seon.agent/id agent-id
                                          :seon.turn.loop/idle? true}]}])
                     (let [report (turn
                                   {:seon.turn.loop/cluster
                                    (cond-> cluster
-                                     submission
+                                     (and submission (not opened))
                                      (assoc :seon.turn.loop/submission
-                                            (assoc (select-keys submission [:seon.db/tx-data :seon.blob/staged-writes])
-                                                   :seon.db/db basis)))
+                                            {:seon.db/tx-data (submission-open-tx run-request)
+                                             :seon.turn/sources (::sources run-request)
+                                             :seon.ns/name (:seon.ns/name plan)}))
                                    :seon.turn.work/next next}
                                   now)
                           _ (when reply (async/offer! reply report))

@@ -147,18 +147,19 @@
                       [:seon.turn/id :seon.turn/id]
                       [:seon.agent/reply {:optional true} :seon.agent/reply]],
                      ;; A source submission as the value its agent's turn proc
-                     ;; receives on its bounded request port: the run's open
-                     ;; and frozen sources, its staged reply, and the port the
-                     ;; pass answers once the run has settled. Replaceable: the
-                     ;; caller holds it and awaits, so nothing durable is lost
-                     ;; when a stop drops it (the caller's await answers).
+                     ;; receives on its bounded request port: the run request
+                     ;; (`seon.turn/system-run-call`'s input), its staged reply,
+                     ;; and the port the pass answers once the run has settled.
+                     ;; Replaceable: the caller holds it and awaits, so nothing
+                     ;; durable is lost when a stop drops it.
                      :request
                      [:map
                       [:seon.turn/id :seon.turn/id]
-                      [:seon.db/tx-data :seon.store/transaction-data]
+                      [:seon.agent/run-request :seon.agent/run-request]
                       [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]
                       [:seon.agent/reply :seon.agent/reply]],
                      :reply :seon.flow/channel,
+                     :run-request :seon.turn/system-run-request,
                      :requests :seon.flow/channel,
                      ;; The live value returned by `(help)`. These are
                      ;; projections of current facts, never attributes stored

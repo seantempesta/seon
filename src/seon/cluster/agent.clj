@@ -664,10 +664,11 @@
   "Submit system-authored source as one run of the agent, delivered as a value.
 
   Parsing, delimiter repair, evaluation, result bindings, and settlement are
-  the same owners used for a model reply. The run's open and frozen sources
-  (`seon.turn/system-run-tx`) and its staged reply travel to the armed agent's
-  request port; its turn proc applies the open, evaluates, and commits open
-  and settlement as ONE transaction, then answers the returned reply port.
+  the same owners used for a model reply. The run request (the input of
+  `seon.turn/system-run-call`) and its staged reply travel to the armed agent's
+  request port; its turn proc asks the writer's decision, evaluates, and the
+  run's open is written once, by the form's first durable write or else by
+  the settlement, then answers the returned reply port.
   Nothing is written here. The writer decides at the pass whether the agent is
   busy or its admission closed; a full request port refuses as busy. A
   supplied starting namespace is the caller's parse-time decision; the open
@@ -737,11 +738,9 @@
                 {:seon.turn/id run-id
                  :seon.agent/reply reply
                  :seon.blob/staged-writes (:seon.blob/staged-writes staged-reply)
-                 :seon.db/tx-data
-                 (turn/system-run-tx
-                  database
-                  (merge (dissoc staged-reply :seon.blob/staged-writes)
-                         {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources}))}
+                 :seon.agent/run-request
+                 (merge (dissoc staged-reply :seon.blob/staged-writes)
+                        {:seon.agent/id agent-id :seon.turn/id run-id :seon.db.process/id (:seon.db.process/id handle) :seon.turn/opened-tx "datomic.tx" :seon.turn/starting-ns [:seon.ns/name namespace-name] :seon.turn/reply-size (count (pr-str sources)) :seon.turn/sources sources})}
                 ;; the request port is the armed graph's; arming is idempotent
                 requests (:seon.agent/requests
                           (arm! {:seon.turn.loop/cluster handle :seon.agent/id agent-id

@@ -285,15 +285,15 @@
                   [:seon.turn.loop/submission
                    {:optional true}
                    :seon.turn.loop/submission]],
-                 ; The run a source submission opens, carried by the pass
-                 ; that evaluates it: its open and frozen sources ride that
-                 ; pass's one settlement transaction, and `:seon.db/db` is the
-                 ; value that open leaves, never committed on its own.
+                 ; The run a source submission opens, carried by the pass that
+                 ; evaluates it: its open (written once, by the form's first
+                 ; durable write or the settlement), its frozen sources and the
+                 ; namespace the writer decided it starts in.
                  :submission
                  [:map
                   [:seon.db/tx-data :seon.store/transaction-data]
-                  [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]
-                  [:seon.db/db :seon.db/database-value]],
+                  [:seon.turn/sources :seon.cluster.reply/sources]
+                  [:seon.ns/name :seon.ns/name]],
                  :now :inst,
                  :failure-settlement
                  [:map

@@ -156,6 +156,14 @@
   "The current evaluation receipt lookup ref, bound with connection custody."
   nil)
 
+(def ^:dynamic ^:private *open*
+  "Transaction data opening the current evaluation's run when that run is not
+  written yet, bound with connection custody: every write the evaluation makes
+  carries it first, and the writer applies it once (`absent-call`), so the
+  run, its evaluation rows and the receipt they name exist before any
+  reference to them."
+  nil)
+
 (def ^:dynamic *read-evidence-sink*
   "An optional invocation-local atom collecting Datahike read evidence."
   nil)
@@ -403,7 +411,8 @@
   [request f]
   (binding [*conn* (:seon.db/connection request)
             *read-database* nil
-            *receipt* (when (identical? (:seon.db/connection request) *conn*) *receipt*)]
+            *receipt* (when (identical? (:seon.db/connection request) *conn*) *receipt*)
+            *open* (when (identical? (:seon.db/connection request) *conn*) *open*)]
     (f)))
 
 (defn call-without-custody
@@ -3220,11 +3229,23 @@
   [transaction]
   (if (nil? *receipt*)
     transaction
-    (if (map? transaction)
-      (update transaction :tx-data
-              #(conj (vec %) [:db/add "datomic.tx" ::receipt *receipt*]))
-      {:tx-data (conj (vec transaction)
-                      [:db/add "datomic.tx" ::receipt *receipt*])})))
+    (let [stamp #(-> (into (vec *open*) %)
+                     (conj [:db/add "datomic.tx" ::receipt *receipt*]))]
+      (if (map? transaction)
+        (update transaction :tx-data stamp)
+        {:tx-data (stamp transaction)}))))
+
+(defn absent-call
+  "`tx-data` when `lookup-ref` names no entity in `database`, else nothing.
+
+  Invoked as `[:db.fn/call #'absent-call lookup-ref tx-data]`, so the writer
+  decides on its own mid-transaction value: data that several writes may carry
+  (a run's open that the first of them writes) is applied exactly once."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:tuple :qualified-keyword :seon.schema/value]
+                       :seon.store/transaction-data]
+                  :seon.store/transaction-data]}
+  [database lookup-ref tx-data]
+  (if (db.utils/entid database lookup-ref) [] (vec tx-data)))
 
 (defn- write-entity-schemas
   "Identity attribute -> every entity schema requiring that attribute."

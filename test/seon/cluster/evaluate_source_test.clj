@@ -11,7 +11,8 @@
             [seon.eval.drive :as drive]
             [seon.flow :as flow]
             [seon.id :as id]
-            [seon.test-support :as support]))
+            [seon.test-support :as support]
+            [seon.turn :as turn]))
 
 (defn- shown
   "Each settled evaluation's shown text; a result with no run is asserted, never read."
@@ -21,9 +22,14 @@
     (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
           (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))
 
+(defn- receipt-id-of
+  "The evaluation id of a one-form run's only form."
+  [result]
+  (turn/receipt-identity (:seon.turn/id result) 0))
+
 (deftest ^{:seon.test/long "Eight ordinary agent runs, each one Flow pass and its one settlement commit (measured 184-229 ms warm each on default under two commits, 2026-09-26), plus the agent's arming and one stopped run."
            :seon.test/long-ms 20000
-           :seon/tasks #{"d741e6812a31" "62c45543598c"}}
+           :seon/tasks #{"d741e6812a31" "62c45543598c" "c9e0cde3edb3"}}
   code-evaluates-as-one-ordinary-run-of-its-agent
   (let [target (support/execution-handle nil)
         connection (:seon.db/connection target)
@@ -92,6 +98,29 @@
             ;; committed; the bridge read the connection and returned no event
             ;; for (inc 1) (default pid 70849, 2026-09-26). Deleted whole.
             (is (= ["2"] (shown connection (code "(inc 1)")))))
+          (testing "a form's own durable write opens its run first, so its provenance names a written evaluation"
+            ;; Under one commit per form the run's rows were written only at
+            ;; settlement, and every write a form made refused "Nothing found
+            ;; for entity id [:seon.cluster.eval/id ...]" (task c9e0cde3edb3).
+            (let [note-id (str "one-commit-note-" (id/id))
+                  result (code (pr-str (list 'seon.db/transact!
+                                             {:tx-data [{:my.note/id note-id
+                                                         :my.note/agent [:seon.agent/id agent-id]
+                                                         :my.note/content "written by a form"}]})))
+                  receipts (drive/run-receipts (db/db connection) [(:seon.turn/id result)])]
+              (is (not-any? :seon.cluster.eval/error receipts) (pr-str receipts))
+              (is (= (receipt-id-of result)
+                     (db/q '[:find ?receipt-id . :in $ ?note-id
+                             :where [?note :my.note/id ?note-id] [?note :my.note/content _ ?tx]
+                             [?tx :seon.db/receipt ?receipt] [?receipt :seon.cluster.eval/id ?receipt-id]]
+                           (db/db connection) note-id))
+                  "the write's transaction names the form's evaluation")))
+          (testing "a fault recorded during a form names its run without refusing: the value is answered"
+            ;; A renderer that throws is a later stage's failure: recorded as a
+            ;; fault attributed to the run, beside the value, never a panic.
+            (let [result (code "{:seon.render/ai (fn [_] (throw (ex-info \"render probe\" {}))) :probe 1}")]
+              (is (:seon.turn/id result) (pr-str result))
+              (is (= 1 (count (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))))
           (testing "the run is written in the one transaction that settles it; submission commits nothing"
             (let [before (db/db connection)
                   result (code "(+ 1 2)")
