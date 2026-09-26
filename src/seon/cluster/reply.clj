@@ -94,16 +94,18 @@
                    (assoc ::ns (:seon.sci.reader/ns event)))))
              events)))))
 
-(defn- standalone-symbol?
-  "True when an event is a bare symbol occupying its whole source line."
-  [whole-source {form ::form form-source ::source}]
-  (when (symbol? form)
-    (let [line (:line (meta form))
-          source-line (when line
-                        (nth (str/split-lines whole-source) (dec line) nil))
+(defn- standalone-token?
+  "True when an event is one bare token (a symbol, keyword, number, string or
+  character) occupying its whole source line: clojure.main evaluates each of
+  them, and a prose line holding several tokens stays prose. The line is the
+  one the reader's span ends on; a keyword or number carries no metadata."
+  [whole-source {form ::form form-source ::source end ::end}]
+  (when (and (not (coll? form)) (pos? end))
+    (let [line-start (inc (.lastIndexOf ^String whole-source "\n" (int (dec end))))
+          line-end (.indexOf ^String whole-source "\n" (int end))
+          source-line (subs whole-source line-start (if (neg? line-end) (count whole-source) line-end))
           form-line (last (str/split-lines form-source))]
-      (and source-line
-           (= (str/trim source-line) (str/trim form-line))))))
+      (= (str/trim source-line) (str/trim form-line)))))
 
 (defn- form-start
   "Absolute source offset of an event's form, excluding leading comments."
@@ -167,7 +169,7 @@
     (map-indexed vector events))))
 
 (defn- code-event-indexes
-  "Indexes of structured forms and established standalone-symbol forms."
+  "Indexes of structured forms and established standalone-token forms."
   [source events]
   (let [structured-indexes (structured-code-indexes source events)
         structured? (seq structured-indexes)]
@@ -175,7 +177,7 @@
           (keep-indexed
            (fn [index event]
              (when (and structured?
-                        (standalone-symbol? source event))
+                        (standalone-token? source event))
                index)))
           events)))
 
@@ -257,7 +259,7 @@
                          (some (comp coll? ::form) events)
                          (every? (fn [event]
                                    (or (coll? (::form event))
-                                       (standalone-symbol? suffix event)))
+                                       (standalone-token? suffix event)))
                                  events))
                 suffix))))
         (keep-indexed (fn [index character]
