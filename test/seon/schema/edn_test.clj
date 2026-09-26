@@ -8,6 +8,7 @@
   The valid fixture is a classpath resource. Negative EDN is written beneath
   `tmp/` during each test so malformed inputs never enter publication."
   (:require [seon.schema.internal] [malli.core] [clojure.java.io :as io]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
             [clojure.test.check :as tc]
@@ -143,6 +144,18 @@
             valid? (schema/projection-validator projection :seon.schema.edn.fixture/name)]
         (is (valid? "alpha"))
         (is (not (valid? "")))))))
+
+(deftest every-packaged-schema-resource-reads-as-edn
+  ;; THE CLASS: a resource that clojure.edn refuses (a duplicate map key,
+  ;; 260fed262's second `:seon.render.walk/node`) cannot be adopted, so
+  ;; default cannot boot at HEAD. Every packaged file reads, by name.
+  (let [files (->> (file-seq (io/file (io/resource "seon/schemas")))
+                   (filter #(str/ends-with? (.getName ^java.io.File %) ".edn")))]
+    (is (seq files))
+    (doseq [^java.io.File file files]
+      (is (map? (try (edn/read-string (slurp file))
+                     (catch RuntimeException failure (ex-message failure))))
+          (str (.getName file) " must read as one EDN map")))))
 
 (deftest duplicates-across-sections-refuse
   (with-temporary-resources

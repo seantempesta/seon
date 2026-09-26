@@ -837,13 +837,13 @@
   {:malli/schema [:=> [:cat :seon.render.walk/continue-request]
                   [:or :seon.render.value/projection :seon.render.value/missing-root-identity-error
                    :seon.render.walk/continuation-error :seon.render.data/no-such-path-error :seon.db/error-result]]}
-  [{node :seon.render.walk/node cursor :seon.render.data/cursor database :seon.db/db ctx :seon.sci.eval/ctx
+  [{node :seon.render.walk/continuation-node cursor :seon.render.data/cursor database :seon.db/db ctx :seon.sci.eval/ctx
     :as request}]
   (let [refusal (fn [reason message]
                   (assoc (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/continue 'seon.render.walk/continue
-                          {:seon.error/message message :seon.error/member :seon.render.walk/node
+                          {:seon.error/message message :seon.error/member :seon.render.walk/continuation-node
                            :seon.error/expected "a retained walk node" :seon.error/offending node})
-                         :seon.render.walk/continuation-reason reason :seon.render.walk/node node))
+                         :seon.render.walk/continuation-reason reason :seon.render.walk/continuation-node node))
         resolved
         (cond
           (qualified-symbol? node)
@@ -862,7 +862,7 @@
         (if-not (contains? found :seon.render.data/value)
           found
           (render.value/prepare
-           (assoc (dissoc request :seon.render.walk/node)
+           (assoc (dissoc request :seon.render.walk/continuation-node)
                   :seon.render/value (:seon.render.data/value found)
                   :seon.render.value/root node)))))))
 

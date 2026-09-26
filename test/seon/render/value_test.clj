@@ -946,7 +946,7 @@
   ;; that is no longer retained answers :gone rather than an empty value.
   (let [ctx {:seon.sci.eval/result-objects (atom {"0123456789ab" {:rows (vec (range 100))}})}
         request (fn [node path offset]
-                  {:seon.render.walk/node node :seon.sci.eval/ctx ctx :seon.sci.admit/caps caps
+                  {:seon.render.walk/continuation-node node :seon.sci.eval/ctx ctx :seon.sci.admit/caps caps
                    :seon.render/profile (render/agent-render-profile (support/effective-config))
                    :seon.render.data/cursor {:seon.render.data/path path :seon.render.data/offset offset}})
         first-page (value/prepare (assoc (unit {:rows (vec (range 100))}) :seon.repl/handle 'result/e0123456789ab))
