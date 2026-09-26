@@ -189,3 +189,43 @@ The columns are pass / fail / error.
 - **UNKNOWN.** `committed-ending-namespace-seeds-a-resumed-fold` (`nil` ending namespace), as in the triage.
 
 After the next restart I run both namespaces once more.
+
+### After the restart: pid 32187 at fa4e4bccf, which includes `d231c5f7c`
+
+| namespace | pid 29853 (before the test fixes) | pid 32187 |
+|---|---|---|
+| seon.turn-test | 409 / 22 / 8 | **415 / 15 / 3** (40.4 s) |
+| seon.turn-loop-test | 52 / 3 / 7 | **57 / 5 / 5** (20.8 s) |
+
+The columns are pass / fail / error.
+
+**Now green:**
+- `evaluation-ai-is-only-the-repl-session`
+- `a-fired-turn-bound-…`
+- `an-agent-dial-read-that-refuses…`
+- `a-refused-settlement-keeps-each-evaluated-value`
+- `a-refused-batch-whose-restoration-fails…`
+- `a-refused-turn-write-is-bounded…`
+- `settlement-claims-covered-messages…`
+
+**Remaining reds on 32187, by class:**
+- **CONFIG, with the cache lane.** The seeded row is invisible to `config/effective`. This affects turn-test
+  `a-forms-read-evidence…`, `generated-read-evidence…` and `a-refused-generated-form…`, and turn-loop
+  `committed-ending-namespace…`, which seeds its cluster and still gets "matching cluster row".
+- **AMBIGUOUS CLUSTER, fixed in the follow-up commit.** Once a fixture seeds its own cluster beside default, a
+  handle without `:seon.env/environment` names no single cluster, and `seon.sci.eval/carried-cluster-name`
+  refuses. This hit `a-clean-last-form…`. The follow-up commit gives every seeded handle its environment. It needs
+  a restart to prove.
+- **UNKNOWN, error owner.** `a-refused-phase-escalates…` could finally run once its cluster was seeded:
+  - the first refusal already mails, where the test expects the mail at the recurrence limit of 3;
+  - a worker is mailed about its own refusal.
+
+  The recorder decides both (`seon.error/recording` with the cluster's dials), not turn.clj.
+- **FIXTURE, turn-loop `refused-generated-opening…`.** Its hand-built prompt refusal carries no
+  `:seon.error/declared-schema`, so `seon.error/recording` refuses its input. The refusal must come from its
+  producer. This matches task `1bf47dae6f04` (refusal schemas are guessed by key).
+- **FOREIGN.** `install-gate-failure…` failed on "Worker-global state changed" (`seon.render.walk/neighborhood`
+  instrumentation drift): the test runner, shrink-test.
+- **TIMEBOUND.** `recovery-preserves-terminal-receipts-exactly` (7.8 s), `transitions-agree-with-the-model`
+  (13.3 s) and `prompt-and-call-resolve-once…` (7.6 s), all against a 5 s bound.
+- **STALE, needs a ruling.** `virtual-turns-…` has per-transaction datom counts from before `55b5b580f`.
