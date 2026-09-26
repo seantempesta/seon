@@ -36,6 +36,7 @@ re-filed; they are listed at the end.
 | 15 | A run in which one form's program change is refused (`ns-unmap` of a called function) shows that refusal as **every** form's result, including `doc` and `breaks`, the refactoring data the refusal exists for. It is stored as a core fault and carries a writer stack trace. | A run settles as one transaction, so a refused effect erases the other forms' shown values; declared agent refusals are recorded as faults. | [a-refused-run-settlement-replaces-every-forms-shown-result](../../seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md) |
 | 16 | `breaks` proposes `(my.program/launch! …)`, which does not exist. `ns-unmap!`'s documented call refuses with "got nil nil" instead of naming the caller. Its `doc` example sits in `:body` and mentions "seam B". | Plan forms are written by hand and never resolved at the producer. | [breaks-plans-name-a-launch-function-that-does-not-exist](../../seon/issues/breaks-plans-name-a-launch-function-that-does-not-exist.md) |
 | 17 | `seon.schema/register!` works only as a top-level form. Inside `let` it refuses "Schema declarations require an isolated registration delta". The first run of three `register!` calls took 1,786 ms. | The registration delta is opened by syntactic recognition of a top-level form instead of being an effect of every evaluation. | [schema-registration-works-only-as-a-top-level-form](../../seon/issues/schema-registration-works-only-as-a-top-level-form.md) |
+| 18 | `doc`'s `:in` prints every map entry as `[<schema form> <schema form>]`: request keys vanish, and supplied members (`:seon.db/connection`, `:seon.agent/id`) are not removed. `my.issue/add!` (empty `:example`) cannot be called from its `doc`. This is design D9, not filed before. | A hand-written `postwalk-replace` substitutes every keyword, including entry keys, instead of walking Malli's own structure (`m/walk`, `m/entries`). Cause verified at `sci/eval.clj:2234-2263`. | [doc-replaces-every-schema-keyword-so-request-keys-disappear](../../seon/issues/doc-replaces-every-schema-keyword-so-request-keys-disappear.md) |
 
 ## Smaller findings (not yet filed; one line each)
 
@@ -114,6 +115,17 @@ snapshot.
   `missing-layers []` while SCI still refuses "Development adoption … changed loaded definitions without
   recording their agreement", so readiness does not cover adoption. Turn times: 3× `register!` 1,786 ms
   (first run on the branch); `transact!` of 2 books plus the refused `defn` 483 ms; reads 93–168 ms.
+
+- **Cycle 5** (03:20–03:26Z, branch `dogfood-repl-opus-11`, archive 04f3a159b). The hosted agent is now named
+  after its branch (`mcp/dogfood-repl-opus-11`), so the earlier "one host per branch ignores `session_id`"
+  finding is moot. The `my.plan` docstring example ran exactly as written (`add!` then `complete!`) and
+  answered `:my.plan/state :completed`. But `(my.plan/plan)`'s rendered `:seon.plan/update-example` then
+  proposed `(my.plan/current! {:my.plan.item/id "verify-arithmetic"})` for that **completed** step, which
+  refuses "an open step … is required". The render suggests an action its own function refuses. The
+  refusal also carried the writer's stack trace into the reply (evidence on
+  [expected-refusal-logs-raw-datom-error-twice](../../seon/issues/expected-refusal-logs-raw-datom-error-twice.md)).
+  `:example` strings lose their indentation. `my.issue/add!` has no example, and its `doc` is unreadable
+  (#18). The branch is retired.
 
 ### Cycle 1 change (unmerged): coverage for `my.plan/current`
 

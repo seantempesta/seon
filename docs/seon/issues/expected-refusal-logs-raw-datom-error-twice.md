@@ -172,3 +172,14 @@ call. This is dependency/direct-runtime evidence, not the pending canonical
 [B3 landing note](../../prds/agent-platform/landing/lane-b3-kind-cut-2026-09-21.md).
 The older double-log `log/raise` issue remains open; this closes the scalar-evidence
 callback-loss defect within it.
+
+## Evidence 2026-09-26 (dogfood-repl-opus): the writer's trace now reaches the agent's MCP reply
+
+The writer's `:error datahike.writer [158 39] :datahike/write-error {… :trace [[…] … ]}` line, 3–5 KB each time, now
+arrives in the **agent's MCP SCI reply** as an `out` event before the declared refusal. It was seen on four
+ordinary agent refusals on 2026-09-26 (default archives 33ea69298, 10d6fdff5 and 04f3a159b):
+`run transition refused: starting-namespace-changed` (branch `dogfood-repl-opus-2`), "Program deletion leaves surviving
+referrers" (`-8`), and `(my.plan/current! {:my.plan.item/id "verify-arithmetic"})` on a completed step, "Plan request
+refused; an open step in this plan is required" (`-11`). The refusal is ordinary, returned data. The trace is JVM log
+noise captured by the prepl stream and shown to the agent as its own printed output. The agent's `:out` should
+contain only what the agent's forms printed.
