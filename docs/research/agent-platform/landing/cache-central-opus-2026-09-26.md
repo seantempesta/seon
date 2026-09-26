@@ -11,6 +11,32 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
+- **Fixed in `af7ba85b7`: the per-call cost of `558446356`.** Measured armed on pid 86089 at `c029d48cb`, with 200
+  calls per probe:
+
+  | call | before | after (estimated from components) |
+  |---|---|---|
+  | `seon.schema.edn/packaged-forms` | **2,309 µs**, of which `declaration-stamp` is 210 file stats (1.3 ms) | about 21 µs: `io/resource` 14 µs plus a URL-keyed cache hit |
+  | `config/effective` | 1,250–3,260 µs (load varied) | about 250 µs: the `effective-in` body (`pull '[*]`) is 222 µs, and the population-keyed `declared-projection` hit is 4 µs |
+
+  - **Why it is correct:**
+    - Every JVM runs a committed archive, `data/source/<sha>`. Its `io/resource "seon/schemas"` is
+      `…/data/source/c029d48cb…/resources/seon/schemas` (observed), and the files there never change while it runs.
+    - So the packaged population is keyed by that URL.
+    - `config/declared-projection` and `program/authored-shapes` are keyed by the population map itself, so a
+      different population is a miss by construction.
+    - This also removes the 2.3 ms from every other `packaged-forms` caller: `program/shapes` and each opened
+      branch's schema accretion.
+  - **Remaining:** task `68490518e186`, marked `:seon/tasks` on `seon.schema.edn/declaration-stamp`. The stamp has
+    no source caller left. The held file `test/seon/program_test.clj` still redefines it;
+    `tmp/cache-central-opus/program-test-stamp.patch` removes that. After the patch is applied, delete the stamp.
+  - **Not yet measured on the new code.** Default runs `c029d48cb`. After the restart, root measures `effective` on
+    default.
+  - **My probes added two stray cache kinds on pid 86089** (`:probe/k`, `:probe/url`, 1 B each, visible in
+    status). They vanish on restart.
+  - **The editor's post-edit hook ran clj-kondo automatically** on my `edn.clj`, `program.cljc` and `config.clj`
+    edits, using the shared cache. My own lint runs used `--cache false`.
+
 - **Fixed in `558446356`, the root cause of both boot refusals: `config/effective` read the row by the branch's
   carried projection.**
   - `apply-compiled!` writes the row from this JVM's packaged declarations, and installs any attribute the branch
