@@ -1,15 +1,286 @@
 ---
 type: design-review
 date: 2026-09-27
-status: complete; design revision required
+status: complete; slice 1 accepted with bounded fixes
 reviewer: Astra
-design-commit: 21e3a70682ee012376c0ceb2e2113cc5605fe85c
-source-baseline: 21e3a70682ee012376c0ceb2e2113cc5605fe85c
-verdict: REVISE
+design-commit: 5ae2c30acbfa4408a89c4024b10752008c5fc039
+source-baseline: 5ae2c30acbfa4408a89c4024b10752008c5fc039
+verdict: ACCEPT-AFTER-FIXES
 task: 12913e5cd6b0
 ---
 
 # Review: contracts outside the schema projection
+
+## Fourth-round verdict — ba711c08c + root sizing ruling 5ae2c30ac
+
+**ACCEPT-AFTER-FIXES. Slice 1 is safe to implement with the conditions below.** The selected separation,
+construction provenance, compile-world/reference pairing, stored-fact gate and outer-entry ownership are
+accepted. Keep production retention disabled through S1–S3. The remaining corrections are bounded: exclude
+unaccounted callable captures from eligibility, carry both compiled values and references through the S1 legacy
+bridge, and specify how an inner hit returns its value under eviction. These do not require another architecture
+round; implement and review them with S1. This accepts a design and its implementation boundary, not installed
+behavior or measured cache bounds.
+
+Here **D** means `docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md` at
+`5ae2c30acbfa4408a89c4024b10752008c5fc039`, incorporating `ba711c08c`. **P** means the inspected
+`tmp/defn-scan-opus/scoped-refs-probe.clj` (115 lines). Source citations use that same HEAD; Malli is pinned at
+`43c6dca8d2d8df3162b13725939954807be4a4ed`, and core.cache is 1.1.234. Earlier verdicts below are historical.
+
+### The five requested dispositions
+
+| Item | Disposition | Evidence |
+|---|---|---|
+| Registry provenance (T1) | Resolved as a design boundary | D:112–140 records actual constructor inputs separately from overlays, owns one held base, and bypasses retention until S4 or when provenance is unavailable. D:141–157 puts contract bindings in the inner key and excludes environmental owners from products. The witness at P:67–89 and D:121–128 demonstrates why the distinction is necessary; it does not install the constructor record. |
+| Canonical-reference pairing (T2) | Resolved in §4; one S1 instruction needs correction | D:213–244 derives references against the compilation world's exact targets, returns them with the compiled value, and converts every caller, including preflight sentinels. D:343 still asks legacy callers for only the registry entry. Carry the pair as specified in F2 below. |
+| Stored-fact verification (T2 migration) | Resolved for the reported reference-fact observation and the planned gate | P:91–115 actually pulls stored input/output/guard sets, normalizes absent many-valued sets, and reports missing compiled/arity evidence. D:259–279 distinguishes that observation from old/new walker agreement and requires canonical-fact derivation and repair before S3 trusts the index. Independently confirmed below: 2,358/2,358 equal. Full stored-field integrity remains the S3 obligation at D:281–288, not a claim proved by this reference-only check. |
+| Concurrent eviction and policy lifetime (T3) | Resolved at the ownership level; complete hit-return semantics in S1 | D:437–465 owns the holder only in the outer entry, compiles outside the swap, publishes into the acquired entry, allows duplicate concurrent work, distinguishes cache roots from active owners, and keys entries by the acquired dial. D:486–493 names the pressure/eviction cases. F3 supplies the missing hit-return rule. |
+| Slot sizing (T4) | Tool and measurement boundary resolved; eligibility still needs F1 | D:467–479,495–507 follows root's dev-only `:measure` alias, clj-memory-meter 0.3.0, separate offline JVM and copied store; it covers keys, held base, incremental slots and post-use size. D:480–483's three-variable formula cannot bound bindings/captures that do not appear in the EDN. Calibration remains an S1 deliverable, not existing evidence. |
+
+The named landing file still ends at lines 249–280 with the digest-refusal investigation. Neither revision
+commit changes it. The revised witness and stored-fact summary is in D:121–128,228–233,259–279, and the probe is
+in P. This location discrepancy does not block implementation; the observations are stated and independently
+reproduced here.
+
+### F1 — Eligibility must include what a resolved callable retains
+
+D:145–148 explicitly retains resolved branch callables; D:474–479 includes their captures in the measurement
+boundary. But D:480–483 estimates only printed form length, arity count and local-registry count. For fixed
+`[:=> [:cat [:fn 'review/p]] :int]`, an inner binding can be a closure over a small vector or a much larger
+vector without changing any of those three inputs. The authored form is still EDN, so D:151–152's non-EDN
+bypass does not exclude it. Fitting larger constants or a margin on a finite corpus cannot establish that bound.
+
+**S1 correction:** the fitted rule applies only to an explicitly measured/accounted input class. A resolved
+binding or capture whose incremental retention is not covered returns its product uncached. This includes
+`:error/fn` bindings, not just predicates. If the unaccounted object belongs to the population key/base, bypass
+retention of that outer entry too; skipping its slots alone would still retain that object. Do not add runtime
+heap walking or another capture registry. Bound eligibility conservatively, and report the resulting bypass
+rate. This is a retention decision, not refusal of a valid contract.
+
+The incremental measurement at D:474 is useful for aggregate calibration, but division by k is an average,
+not an individual-slot bound. Include k=1/adversarial individual slots and post-use maxima. Account for base
+growth after forcing consumers too: Malli's derived products can be installed later
+(`reference-code/malli/src/malli/core.cljc:345–360`). A slot/base that cannot be assigned a supported charge
+remains uncached. Record estimated versus observed sizes; do not label fitted estimates an unconditional heap
+upper bound. Root's 16 KB ceiling and selected measurement tool remain unchanged.
+
+### F2 — Make the S1 legacy bridge carry the complete product
+
+D:224–242 is authoritative: stored references travel with the compiled schema. Revise the narrower instruction
+at D:343 accordingly. `program/contract-facts`, `with-contract-facts` and `arity-row` must receive the exact
+compiled value **and its per-arity reference sets**, with ordering aligned to that value's Malli arities.
+`arity-row` currently recomputes the three roles (`src/seon/program.cljc:1033–1038`), and its call uses Malli
+arity order (`:1126–1133`); replacing only the compile at `:1096–1099` does not implement the pairing rule.
+
+For S1's already compiled legacy registry entries, derive the product once with explicit targets from that
+registry, and pass it onward. Use the same reference owner; do not recompile a registry entry merely to wrap it
+in the new result shape. Constructor dependency derivation likewise already holds compiled contracts
+(`src/seon/schema.clj:2181–2185,2208–2214,2682–2691`); it must not recursively acquire a seam population while
+constructing that population. These are local plumbing changes, not a second compiler or reference index.
+The preflight callers continue to use their exact reference sentinels as D:235–239 specifies.
+
+Construction provenance must describe the bindings actually captured by both constructors, including reused
+compiled children, rather than copy an overlaid projection member. The compiler resolves bindings at
+`schema.clj:2149–2150` and `:2605–2619`, and incremental construction retains compiled objects at
+`:2679–2683`. Preserve D's unknown-provenance bypass whenever that guarantee cannot be established.
+At S4, a base must be transitively shape-only before enabling retention: retained children keep their original
+registry options (`schema.clj:2550–2556`), so merely removing top-level symbol entries or changing a fingerprint
+does not establish release. This is enforcement of D:129–140's closed-base rule, not an added S1 producer cut.
+
+### F3 — Return a hit from a held immutable table value
+
+D:444 says a hit is `(swap! table cache/hit k)`. That expression returns an LRU value, not the product.
+In core.cache 1.1.234, `clojure/core/cache.clj:213–226` implements `lookup` separately; `hit` on a missing
+key does not restore it. A prior membership check followed by the swap and a fresh `@table` lookup can lose
+the key to another insertion.
+
+Capture the product from one held immutable table value and return it while updating recency, or look it up
+in the immutable value returned by the swap and treat absence there as a miss. Do not answer nil merely because
+the key was concurrently evicted. The publish-if-present branch must likewise return a product from its held
+snapshot or the completed compile, never from a later dereference that may have evicted it. Keep compilation
+outside CAS retries and publication attached to E1, as already specified. Add the hit/eviction interleaving to
+the listed T3 regressions.
+
+### Exactly what S1 must carry
+
+**Code:**
+
+1. The explicit, symbol-free compile/admission product with complete resolved inputs, normalization before
+   binding, moved predicate/`:error/fn` binder and converted instrumentation caller (D:90–110).
+   Declare the retention-policy input promised by D:461–462 in the seam's contract; the example at D:74–80
+   currently omits it. Preserve host compiled-schema options and the uncached host path.
+2. Constructor-owned provenance and one scoped reference walker; convert every old caller and delete
+   `compiled-references`. Complete F2 through program facts and constructor dependency derivation, with exact
+   preflight sentinels and no new namespace load cycle.
+3. The central-cache population table, explicit config dial/default, held-base ownership, atomic eligible
+   publication, F3 hit handling and F1 conservative eligibility. **All production seam calls remain uncached
+   through S3.** Exercise the table with explicit eligible shape-only inputs in its regressions; no hidden
+   production activation. Products never hold the table.
+4. `db/function-contract-row` with same-row admission provenance and ordinary read/refusal handling, and the
+   schema-scoped admission reader as an unused helper. Leave existing producer population, acquisition,
+   content-key scope and final-writer behavior in place until their assigned S3/S4 cuts.
+5. The dev-only `:measure` alias and committed offline measurement script/results under root's ruling.
+   Declare new data members/contracts in their owning schema resources, account for all touched paths, and
+   report the actual source/test size rather than treating D:381–397's estimates as proof.
+
+**Regressions (behavior classes, retaining existing coverage where sufficient):**
+
+- Seam/legacy parity for the stored contract population, both shape/armed semantics, normalization and
+  `:error/fn`; agent/core admission; malformed/unresolved refusals; historical deleted-predicate diagnostics.
+- Actual constructor provenance under overlays, independently rebuilt equal populations, incremental reuse,
+  distinct branch callables, same predicate Var with changed root versus unmap/recreate, and uncached
+  Var-schema/compiled-schema host forms. Exercise the real constructors, not only P's illustrative maps.
+- The full D:248–257 traversal cases plus unions, canonical alias chains, input/output/guard roles, preflight
+  cycle/sentinel behavior, and paired reference reuse after independently equal population reconstruction.
+  Program facts consume those paired sets and preserve source signature/arity ordering.
+- Same-key misses and counted duplicate work; distinct-key capacity pressure; hit racing eviction; outer E1
+  eviction during compile; dial changes/differing cluster policies; refusal, oversize, non-EDN and unaccounted
+  callable-capture nonretention. Active compiled callers remain usable after cache eviction.
+- Many versions, large forms and multiple populations, including equal-form bindings with different capture
+  sizes. Release probe/wrapper owners and perform cache maintenance before checking cache-owned release.
+
+**Measurements:**
+
+- Commit the reproducible corpus and counts, selected JVM/tool options, population/key/base/holder size,
+  individual and aggregate incremental slot size, and both population and slot sizes after forcing actual
+  consumer products. Distinguish shared objects and active owners from cache-owned retention.
+- Commit fitted constants and their eligibility domain, estimates, observed maxima, margin against 16 KB,
+  bypass counts/rate, compile counts by mode, duplicate concurrent compile counts, measurement time and
+  eligibility/`pr-str` cost. Include construction, cold acquisition and warm operations; no heap tool on default.
+- Record focused installed S1 timings and parent/change cost for the changed paths, allocation/memory,
+  publication/adoption/arming evidence and verification limits under the ordinary project rules.
+  A result over one second needs its responsible operation and explanation; over ten seconds needs root's
+  explicit authorization. The full contracted-defn projection-churn replay remains S4 (D:409–419).
+  Neither the stored-fact probe below nor an offline sizing run substitutes for installed S1 proof.
+
+No additional design finding was established in the unchanged final-writer selection, renderer closure,
+schema-admission scoping or S2–S4 ordering. Their previously required regressions and S3 migration gate remain.
+
+### Fourth-round evidence and limits
+
+`bin/seon status` and MCP `runtime_status` selected default pid **25122**, start instant
+**2026-09-26T22:35:36.998Z**, archive **21e3a70682ee012376c0ceb2e2113cc5605fe85c**. All readiness layers were
+present; health was **faulted**, with **2 open faults**, **85 failed-test records**, and **3 unowned namespaces**.
+These pre-existing observations neither establish nor refute the proposed change. No foreign breakage blocked
+this review.
+
+Two serial read-only MCP JVM forms used explicit root `/Users/sean/src/seon`, cluster `default`, session
+`contracts-review-4`. Both complete envelopes returned ordinary values with no diagnostic event:
+
+- Stored reference facts at basis **536872032**: **2,358 rows, 2,358 equal, no differences, no missing compiled
+  schemas and no missing arity roots**. Acquisition took **3.528 ms**, comparison **9.201 ms**, MCP event **18 ms**.
+  The proposed `seon.schema/function-contract` Var was absent.
+- T1/T2 witnesses: member keys equal **true**, construction keys equal **false**, overlay/rebuilt acceptance
+  **[true false] / [false true]**, own targets **#{:review/value}**, foreign targets **#{}**.
+  Body **0.960 ms**, MCP event **14 ms**. The construction record is an illustrative local map, not installed
+  provenance code.
+
+No tests, restarts, branches, source/schema edits, publication, adoption, arming changes, concurrency runs,
+allocation measurements or heap measurements were performed. The only edited/committed file is this review.
+Memory and concurrency guarantees remain implementation evidence obligations. Exact review forms follow;
+they create no Vars or stored rows.
+
+```clojure
+(let [started (System/nanoTime)
+      database @(seon.cluster.boot/connection "default")
+      projection (seon.db/carried-projection database)
+      registry (:seon.schema.projection/registry projection)
+      canonical (into {} (map (fn [k] [k (malli.registry/schema registry k)]))
+                      (keys (:seon.schema.projection/forms projection)))
+      rows (seon.db/q
+            '[:find ?sym (pull ?f [{:seon.fn/arities
+                                   [:seon.fn.arity/order :seon.fn.arity/input-refs
+                                    :seon.fn.arity/output-refs :seon.fn.arity/guard-refs]}])
+              :where [?f :seon.fn/spec _] [?f :seon.fn/sym ?sym]]
+            database)
+      acquired (System/nanoTime)]
+  (letfn [(children [node]
+            (keep (fn [c] (cond (malli.core/schema? c) c
+                               (and (vector? c) (malli.core/schema? (peek c))) (peek c)))
+                  (malli.core/children node)))
+          (refs [targets node seen acc]
+            (if (malli.core/-ref-schema? node)
+              (let [k (malli.core/-ref node)
+                    scope (:registry (malli.core/options node))]
+                (cond
+                  (nil? k) (reduce #(refs targets %2 seen %1) acc (children node))
+                  (and (contains? targets k)
+                       (identical? (malli.registry/schema scope k) (get targets k))) (conj acc k)
+                  (contains? seen [scope k]) acc
+                  :else (refs targets (malli.core/deref node) (conj seen [scope k]) acc)))
+              (reduce #(refs targets %2 seen %1) acc (children node))))]
+    (let [result
+          (reduce
+           (fn [acc [sym row]]
+             (let [compiled (malli.registry/schema registry sym)
+                   stored (mapv
+                           (fn [a] (mapv #(set (get a %))
+                                        [:seon.fn.arity/input-refs :seon.fn.arity/output-refs
+                                         :seon.fn.arity/guard-refs]))
+                           (sort-by :seon.fn.arity/order (:seon.fn/arities row)))]
+               (cond
+                 (nil? compiled) (update acc :missing-compiled conj sym)
+                 (empty? (:seon.fn/arities row)) (update acc :missing-arities conj sym)
+                 :else
+                 (let [derived
+                       (mapv
+                        (fn [arity]
+                          (let [info (malli.core/-function-info arity)]
+                            (mapv #(if-let [s (get info %)] (refs canonical s #{} #{}) #{})
+                                  [:input :output :guard])))
+                        (malli.core/-function-schema-arities compiled))]
+                   (if (= stored derived)
+                     (update acc :equal inc)
+                     (update acc :different conj sym))))))
+           {:equal 0 :different [] :missing-compiled [] :missing-arities []} rows)]
+      (assoc result :basis (:max-tx database) :rows (count rows)
+             :acquisition-ms (/ (- acquired started) 1e6)
+             :comparison-ms (/ (- (System/nanoTime) acquired) 1e6)
+             :proposed-seam-installed? (boolean (ns-resolve 'seon.schema 'function-contract))))))
+```
+
+```clojure
+(let [started (System/nanoTime)
+      forms {:review/value [:fn 'review/p]}
+      mk (fn [p]
+           {:forms forms :predicate-functions {'review/p p}
+            :construction-inputs [forms {} #{} {'review/p p}]
+            :registry (malli.registry/composite-registry
+                       {:review/value (malli.core/schema [:fn p])}
+                       (malli.core/default-schemas))})
+      a (mk int?) b (mk string?)
+      overlay (assoc a :predicate-functions {'review/p string?})
+      compile-in (fn [p]
+                   (malli.core/function-schema [:=> [:cat :review/value] :int]
+                                               {:registry (:registry p)}))
+      accepts (fn [c]
+                (let [v (malli.core/validator (:input (malli.core/-function-info c)))]
+                  [(v [1]) (v ["x"])]))
+      ca {:review/value (malli.core/schema :int)}
+      cb {:review/value (malli.core/schema :int)}
+      registry (malli.registry/composite-registry ca (malli.core/default-schemas))
+      c (malli.core/function-schema [:=> [:cat :review/value] :int] {:registry registry})]
+  (letfn [(children [node]
+            (keep (fn [v] (cond (malli.core/schema? v) v
+                               (and (vector? v) (malli.core/schema? (peek v))) (peek v)))
+                  (malli.core/children node)))
+          (refs [targets node seen acc]
+            (if (malli.core/-ref-schema? node)
+              (let [k (malli.core/-ref node) scope (:registry (malli.core/options node))]
+                (cond
+                  (nil? k) (reduce #(refs targets %2 seen %1) acc (children node))
+                  (and (contains? targets k)
+                       (identical? (malli.registry/schema scope k) (get targets k))) (conj acc k)
+                  (contains? seen [scope k]) acc
+                  :else (refs targets (malli.core/deref node) (conj seen [scope k]) acc)))
+              (reduce #(refs targets %2 seen %1) acc (children node))))]
+    {:member-key-equal (= (:predicate-functions overlay) (:predicate-functions b))
+     :construction-key-equal (= (:construction-inputs overlay) (:construction-inputs b))
+     :overlay-inputs (accepts (compile-in overlay))
+     :rebuilt-inputs (accepts (compile-in b))
+     :own-targets (refs ca c #{} #{})
+     :foreign-targets (refs cb c #{} #{})
+     :ms (/ (- (System/nanoTime) started) 1e6)}))
+```
 
 ## Third-round verdict — a760a6d08 + retention ruling 21e3a7068
 
