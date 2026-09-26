@@ -118,3 +118,29 @@ The title's 18-object/five-fsync premise is stale and must not be scheduled as
 the current defect. What remains open is the measured coalescing tradeoff and
 its explicit acquisition/reconnect design, not adoption of the already-live
 fusion/diff settings.
+
+## Re-grounded evidence — 2026-09-26 (fix-write-cost)
+
+The writer-wait candidate is **refuted for Seon's workload**. Konserve is on per-key writes again
+(fork `5b39fdd`, Seon `20d317e19`, owner ruling 2026-09-23). An empty commit therefore makes two ordered
+durable writes of the fused root record: the commit record, awaited, then the branch head
+(`reference-code/datahike/src/datahike/writing.cljc:560-571`). That is four forces, about 19 ms. Default's
+real 241 KB head record costs 8-11 ms per write with forces on and 1.6-2.1 ms with them off.
+
+Scratch file stores, 100k datoms, measured in default's JVM:
+
+| store | median serial single-row commit | 24 concurrent transactions |
+|---|---:|---|
+| `:branching-factor 4096` | 19.1 ms | 34.7 ms, 2 commits |
+| `:branching-factor 512` | 20.8 ms | 59.8 ms, 2 commits |
+| 4096 with `:commit-wait-time 5` | 25.9 ms | 37.0 ms, 2 commits |
+
+Readings:
+- The commit loop already drains the queue into one commit (`reference-code/datahike/src/datahike/writer.cljc:224-230`).
+- A wait only adds serial latency.
+- The branching factor changes serialization, not the force count.
+
+What remains is the force floor of two ordered writes per commit. Removing a force without weakening
+durability needs a dependency change (a head that points to the durable commit record, or one barrier
+for the ordered pair), so it is not a configuration setting. Evidence:
+`docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md`.

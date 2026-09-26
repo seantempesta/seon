@@ -133,30 +133,125 @@ Commit floor:
 - `seon.schema/declaration-projection` over `packaged-forms` (the build `refresh-source!` makes on every
   publication): 72 ms. It is not the adoption cost.
 
-## Floor for the trivial run, and what would move it (root's choice)
+## Floor for the trivial run, and what moves it (root ruled 2026-09-26)
 
-About 75 ms is three durable commits, 10-35 ms is ~105 armed reads, and the rest is evaluation, print and
-the Flow hand-off. The options below are cheapest first:
+About 75 ms of the run is three durable commits and 10-35 ms is about 105 armed reads. The rest is
+evaluation, print and the Flow hand-off.
 
-1. **Fold the close into the settlement transaction (`seon.turn`, not owned here).** This makes 2
-   commits per run instead of 3, saving ~25-30 ms. The run still opens durably before evaluation. Cost:
-   one turn.clj slice. Nothing is given up.
-2. **Recommended with 1: coalesce the writer's forces.** This is the open issue
-   `docs/seon/issues/file-store-commits-pay-five-times-the-fsyncs-they-need.md` (writer
-   `:commit-wait-time`, a Konserve batch with one directory force). The fused root record is 238 KB per
-   commit because of `:branching-factor 4096` (`src/seon/cluster/store.clj:185-191`), which is
-   create-time fixed; a smaller factor needs a new store. Cost: a fork change or a store rebuild.
-   Nothing on durability is given up.
-3. `:sync-blob? false` would remove most of the floor, but the issue above rules it inadmissible: out-of-order
-   loss.
+### Option 2, coalescing the writer's forces: measured, and refuted as a latency lever. No change; no RESET NEEDED
 
-## Out-of-scope finding
+Root granted this option. I measured it on scratch Datahike file stores created in default's JVM under
+`tmp/fix-write-cost-opus/` (deleted afterwards). Each store held a 20,000-entity population (100k datoms)
+with `:keep-history? true`, fused roots and `:diff-buf-size 256`.
 
-seon.profile's growth window is JVM-wide, and binding wrappers
-(`seon.schema/call-with-projection[-state]`, `seon.db/call-with-custody`) enclose whole operations. They
-therefore rank first and absorb concurrent threads' work: P3a and the adoption issue both named them as
-the cost. This landing records the evidence. An issue should be filed by the `src/seon/profile.clj`
-holder (per-thread windows or excluding pure binding wrappers); no issue file was added here.
+| store | median serial single-row commit | 24 concurrent transactions |
+|---|---:|---|
+| `:branching-factor 4096` (current) | 19.1 ms | 34.7 ms, **2 commits** |
+| `:branching-factor 512` | 20.8 ms | 59.8 ms, 2 commits |
+| 4096 with `:commit-wait-time 5` | 25.9 ms | 37.0 ms, 2 commits |
+
+Where one commit's time goes, measured on default's own head record (241 KB) written into a scratch
+Konserve file store:
+- with `:sync-blob? true` (the real setting): 8.0-10.8 ms per value;
+- with forces off: 1.6-2.1 ms.
+
+So serialization and write cost about 1.6 ms, and the blob force plus the directory force cost about 8 ms.
+
+The Datahike writer commits each value in turn on the per-key filestore path the owner ruled on
+2026-09-23 (konserve fork `5b39fdd`, Seon `20d317e19`):
+1. the index nodes, written concurrently (`reference-code/datahike/src/datahike/writing.cljc:423-434`);
+2. the immutable commit record `[cid db-to-store]`, awaited;
+3. only then the mutable branch head `[branch db-to-store]` (`writing.cljc:560-571`).
+
+That is two ordered durable writes of the same record, four forces, about 19 ms, and the ordering is what
+keeps branch history intact after a crash.
+
+Conclusions:
+- **The writer already coalesces concurrent work.** Its commit loop drains every queued report into one
+  commit (`reference-code/datahike/src/datahike/writer.cljc:224-230`, `poll!`), so 24 concurrent
+  transactions took 2 commits with no wait. `:commit-wait-time` only delays the next commit
+  (`writer.cljc:285`): +6.8 ms serial, with no burst gain.
+- **The branching factor does not buy latency.** Force cost is independent of size (a 512 B and a 140 KB
+  fsync both measured 3-4 ms), so a smaller root saves at most about 1 ms of serialization per value. It
+  made bursts slower (60 vs 35 ms), and it re-opens the publication flush amplification that chose 4096
+  (`src/seon/cluster/store.clj:185-191`).
+- I therefore changed no configuration and no store creation default. Default needs no reset from this
+  lane.
+- Fewer forces per commit, with durability unchanged, would need one of these; none is within this grant:
+  - a Datahike change that writes the head as a pointer to the already-durable commit record. The record
+    must still be written, so this saves only the serialization, not a force;
+  - Konserve's ordered batch with one directory barrier, which the owner reverted on 2026-09-23. The
+    2026-08-02 issue measured it slower on APFS.
+
+  I recorded these results in the open issue's disposition rather than adding a new mechanism.
+
+### Option 1, folding the close into the settlement: the hunk (turn.clj is held by the seams lane for R1; not applied)
+
+A run of agent-authored source (the reply-size case, `fold-or-close`, `turn.clj:2800-2815`) settles its
+last form in `settle-batch!`. The next pass then derives `:close` and commits `close-turn`
+(`turn.clj:5081-5100`) as a third transaction. The close can be decided at the writer inside the
+settlement instead, on the mid-transaction value after the receipts. This removes one commit and one Flow
+pass, about 30-36 ms (`close-turn` measured 32-36 ms inclusive).
+
+Two cases keep the separate `:close` pass:
+- an issue-bearing agent, because `plan/run-issue-tests!` must see the settled rows before the close;
+- a generated system turn (no `:seon.turn/reply-size`), because its next opening form is generated only
+  after this one settles.
+
+```clojure
+;; after next-ordinal (turn.clj ~2345)
+(defn close-folded-call
+  "Close a replied run in the settlement that gave its last form a terminal
+  fact, decided at the writer after the batch's receipts. An agent holding an
+  issue keeps the separate close pass: its tests must see the settled rows."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [::id ::id] [:seon.agent/id :seon.agent/id]]]
+                  :seon.store/transaction-data]}
+  [database {run-id ::id agent-id :seon.agent/id}]
+  (let [run (db/pull database [:seon.turn/reply-size :seon.turn/closed-tx] [::id run-id])]
+    (if (or (not (:seon.turn/reply-size run))
+            (:seon.turn/closed-tx run)
+            (next-ordinal database run-id)
+            (db/q '[:find ?issue . :in $ ?id :where [?agent :seon.agent/id ?id]
+                    [?issue :seon.issue/agent ?agent]] database agent-id))
+      []
+      (close-call database {::id run-id :seon.turn/closed-tx "datomic.tx"}))))
+
+;; settle-batch!: the close precedes plan/settle-call, as in close-turn
+         :seon.db/tx-data
+         (-> (into (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared))
+                   (mapcat :seon.db/tx-data)
+                   prepared)
+             (into (when-not (some closing-settlement? prepared)
+                     (map (fn [[agent-id run-id]]
+                            [:db.fn/call #'close-folded-call {::id run-id :seon.agent/id agent-id}]))
+                     (distinct (map (juxt :seon.agent/id :seon.turn/id) requests))))
+             (into (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
+                   (distinct (map :seon.agent/id requests))))
+
+;; resume-turn: a folded close reports :closed, so episode-exhausted! and the pass see it
+                (if (or (:seon.turn.loop/settled last-prepared)
+                        (:seon.turn.loop/undisposed? last-prepared)
+                        (:seon.turn/closed-tx (db/pull (:db-after outcome) [:seon.turn/closed-tx]
+                                                       [:seon.turn/id run-id])))
+                  (report :closed (count gated))
+                  (report :released (count gated)))
+```
+
+Needed before landing it: `close-call`'s own contract accepts the two-key request (`turn.clj:455-460`),
+and the proof on default is a trivial root run showing 2 transactions and a closed run, plus the existing
+turn tests. The `(if (some? close-tx) …)` refusal arm in `settle-batch-refusal!` is unchanged: a refused
+batch never reached the close.
+
+The third option, `:sync-blob? false`, stays inadmissible (out-of-order loss).
+
+## Out-of-scope finding (filed)
+
+`docs/seon/issues/profile-explanations-charge-other-threads-and-binding-wrappers.md`. seon.profile's
+growth window is JVM-wide, a call that completes inside the window contributes its whole duration, and
+binding wrappers (`seon.schema/call-with-projection[-state]`, `seon.db/call-with-custody`) enclose whole
+operations. They rank first and absorb concurrent threads' work. No earlier issue covered this
+(`rg seon.profile docs/seon/issues`).
 
 ## Root runs (lanes run no tests)
 
