@@ -259,6 +259,9 @@ Private experiments remain possible; local green never implies shared acceptance
 - **Recover facts, not execution.** Close interrupted turns and mark unfinished evaluations;
   never resume interrupted execution or serialize private objects/live results. Persist
   exact shown text; settle its durability contract before deleting other durable evidence.
+  Optimize for the 99%, not the crash (owner 2026-09-26): a form's result is returned as soon as its settlement is
+  applied in order; durability follows asynchronously (one commit per form). A crash may lose the newest not-yet-durable
+  forms — acceptable, because recovery closes what was lost and the agent redoes it; never slow every form to guard it.
 - **Derive wakes and completion.** Use listened datoms and a qualifying ordinary reply's
   basis; openings/system-only turns answer nothing. Handling is separate, message subject
   is literal, `:seon.message/from` marks inside wakes. Refresh each distinct changed read
