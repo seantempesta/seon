@@ -117,15 +117,28 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | Turns | local-provider turn 5/0 in bound; batched turn 3 fails (deletion lane); episode-limit loud fault green |
 | Concurrency | long suites not yet run; concurrency-test "Agent creation refused" unassigned |
 
-### Running lanes (read their landing notes; ledger rows are current)
+### Running lanes and the ranked plan (rewritten in place 2026-09-26 ~21:45Z; live: c029d48cb, pid 86089)
+Fix first — correctness of the agent's REPL path, then its cost, then boot:
+1. **Agent path correct** (one-commit-a-opus): `(do (defn …) (call …))` faults inside Seon (program-value? got no Var); prove a writing form
+   works under option 2; merge-cut1's three host-test regressions pass. Nothing else outranks this.
+2. **Today's landings green** (root): focused regressions for option 2, program-change, node cache, P1, cache S1, do/defn, merge cut 1;
+   each red goes to its owner lane, never triaged in bulk.
+3. **Per-form cost** — `(inc 1)` 144 ms p50 of which the settlement commit is 118 ms; first call of a new contracted fn 448 ms; config
+   read 1.3 ms (cache-central removing the file-stat stamp). Research lane on the commit floor (below).
+4. **defn cost** — 182k armed calls per defn, `seon.program/source-family?` ×38k (task 400bcf52dd53): whole-program scan per call.
+5. **Boot** — ready 89 s at c029d48cb (28 s at 8e4ac24c9) → perf-boot-opus.
+Research (answers, not code): why one Datahike commit costs ~118 ms (flushes/fsyncs/konserve writes per tx; the 55 writer-side queries);
+the three cache rulings (projection digest for projection-cache-value; the test runner's reach-index atom; render cache vs read evidence).
+Then: cache slice 2 (db.clj caches), apply the 44 subject-mark patches when files free, verify and close ~30 fixed tasks, the dogfood
+merge loop end to end (branch → defn → task → proof → propose → root merge).
+
 | Lane | Doing |
 |---|---|
-| one-commit-a-opus | measure A on e405f51be; commit B (reply when applied); blob permit gap; RESET NEEDED before B's numbers; keep B only if faster |
-| perf-boot-opus | restart/adoption cost, the 755 s projection-state row, the ClassCastException fault, move-to-head! catch |
-| fix-do-defn-opus | top-level `do` children as top-level forms; a def that escapes admission is loud |
-| eval-feedback-design-opus | design: general perf + loud misuse diagnostics in every agent eval reply (owner ask) |
-| cache-central-design-opus | design: one central cache for every cache (owner ask) |
-| merge-cut1-opus | merge-task-design slice 1: seon.task/create!, assignment, proposal gate |
+| one-commit-a-opus | #1, then first-call 448 ms, then probes |
+| cache-central-opus | config read stamp → loaded program identity; then slice 2 when db.clj frees |
+| perf-boot-opus | boot ready 89 s |
+| commit-floor-research-opus | #3 research: the 118 ms commit |
+| defn-scan-opus | #4 source-family? ×38k |
 
 ### Designs (authorities; each revised in place)
 | Design | Verdict |
