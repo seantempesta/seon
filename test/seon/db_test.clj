@@ -2417,6 +2417,25 @@
         (is (identical? first-read second-read))
         (is (= 1 derivations) "repeated reads of one in-transaction value derive once")))))
 
+;; Class: the projection reads schema forms and function contracts, never a
+;; function's source text. A write changing only `:seon.fn/source` (adoption of
+;; every edited body) re-derived the whole projection, 51 ms, to the identical value.
+(deftest a-function-body-write-reads-its-basis-projection
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)
+            committed (db/carried-projection database)
+            function (:e (first (d/datoms database :avet :seon.fn/sym 'seon.blob/digest)))
+            source (:v (first (d/datoms database :eavt function :seon.fn/source)))
+            edited (:db-after (d/with database [[:db/add function :seon.fn/source (str source "\n")]]))
+            started (System/nanoTime)
+            projection (db/carried-projection edited)
+            elapsed-ms (/ (- (System/nanoTime) started) 1e6)]
+        (is (string? source) "the fixture holds the function's source row")
+        (is (identical? committed projection))
+        (is (< elapsed-ms 10.0)
+            (str "a body-only write keeps every declaration revision, so it hits (" elapsed-ms " ms)"))))))
+
 (deftest an-as-of-view-of-an-in-transaction-value-reuses-its-population
   ;; The writer's `:db.fn/call` argument is uncommitted; the test recorder reads
   ;; it as of the run's basis on every pull. Each such read re-read every

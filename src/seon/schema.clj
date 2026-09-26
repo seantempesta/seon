@@ -917,7 +917,7 @@
 
 (defn- projection-fingerprint
   [forms function-contracts schema-admissions function-admissions
-   function-source-admissions artifact-exports pure-predicate-symbols]
+   artifact-exports pure-predicate-symbols]
   (letfn [(entry-fingerprint [section identity value]
             (portable-string-hash
              (canonical-data-string [section identity value])))
@@ -937,17 +937,15 @@
              values))]
     (reduce
      bit-xor
-     (portable-string-hash "seon.schema.projection/fingerprint-v2")
+     (portable-string-hash "seon.schema.projection/fingerprint-v3")
      [(map-fingerprint :forms forms)
       (map-fingerprint :function-contracts function-contracts)
       (map-fingerprint :schema-admissions schema-admissions)
       (map-fingerprint :function-admissions function-admissions)
-      (map-fingerprint :function-source-admissions
-                       function-source-admissions)
       (set-fingerprint :artifact-exports artifact-exports)
       (set-fingerprint :pure-predicate-symbols pure-predicate-symbols)])))
 
-(def ^:private projection-fingerprint-version 2)
+(def ^:private projection-fingerprint-version 3)
 
 (defn- replace-fingerprint-entry
   [fingerprint section identity before after]
@@ -2215,12 +2213,11 @@
     forms function-contracts {}))
   ([forms function-contracts
     {:seon.schema/keys [schema-admissions function-admissions
-                        function-source-admissions artifact-exports
+                        artifact-exports
                         pure-predicate-symbols predicate-functions
                         validate-render-contracts?]
      :or {schema-admissions {}
           function-admissions {}
-          function-source-admissions {}
           artifact-exports #{}
           pure-predicate-symbols #{}
           predicate-functions {}}
@@ -2359,7 +2356,7 @@
         fingerprint
         (projection-fingerprint
          forms function-contracts schema-admissions function-admissions
-         function-source-admissions artifact-exports pure-predicate-symbols)
+         artifact-exports pure-predicate-symbols)
         projection
         (with-predicate-functions
          {:seon.schema.projection/forms forms
@@ -2367,8 +2364,6 @@
           :seon.schema.projection/compile-options options
           :seon.schema.projection/schema-admissions schema-admissions
           :seon.schema.projection/function-admissions function-admissions
-          :seon.schema.projection/function-source-admissions
-          function-source-admissions
           :seon.schema.projection/artifact-exports artifact-exports
           :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
           :seon.schema.projection/schema-dependencies schema-dependencies
@@ -2398,7 +2393,6 @@
    (:seon.schema.projection/function-contracts projection)
    (:seon.schema.projection/schema-admissions projection)
    (:seon.schema.projection/function-admissions projection)
-   (:seon.schema.projection/function-source-admissions projection)
    (:seon.schema.projection/artifact-exports projection)
    (:seon.schema.projection/pure-predicate-symbols projection)))
 
@@ -2590,8 +2584,6 @@
    (get projection :seon.schema.projection/schema-admissions {})
    :seon.schema/function-admissions
    (get projection :seon.schema.projection/function-admissions {})
-   :seon.schema/function-source-admissions
-   (get projection :seon.schema.projection/function-source-admissions {})
    :seon.schema/artifact-exports
    (get projection :seon.schema.projection/artifact-exports #{})
    :seon.schema/pure-predicate-symbols
@@ -2621,12 +2613,11 @@
    [:=> [:cat :seon.error/operation :map :map :map :map] :map]}
   [operation projection forms function-contracts
    {:seon.schema/keys [schema-admissions function-admissions
-                       function-source-admissions artifact-exports
+                       artifact-exports
                        pure-predicate-symbols predicate-functions
                        validate-render-contracts?]
     :or {schema-admissions {}
          function-admissions {}
-         function-source-admissions {}
          artifact-exports #{}
          pure-predicate-symbols #{}
          predicate-functions {}}}]
@@ -2637,16 +2628,12 @@
         [changed-fns removed-fns] (declaration-changes old-contracts function-contracts)
         old-schema-admissions (:seon.schema.projection/schema-admissions projection {})
         old-function-admissions (:seon.schema.projection/function-admissions projection {})
-        old-source-admissions
-        (:seon.schema.projection/function-source-admissions projection {})
         old-exports (:seon.schema.projection/artifact-exports projection #{})
         old-pure (:seon.schema.projection/pure-predicate-symbols projection #{})
         schema-admission-changes
         (apply set/union (declaration-changes old-schema-admissions schema-admissions))
         function-admission-changes
         (apply set/union (declaration-changes old-function-admissions function-admissions))
-        source-admission-changes
-        (apply set/union (declaration-changes old-source-admissions function-source-admissions))
         export-changes (set-changes old-exports artifact-exports)
         pure-changes (set-changes old-pure pure-predicate-symbols)
         old-predicates (predicate-functions-in projection)
@@ -2682,7 +2669,7 @@
       (and (empty? changed-keys) (empty? removed-keys)
            (empty? changed-fns) (empty? removed-fns)
            (empty? schema-admission-changes) (empty? function-admission-changes)
-           (empty? source-admission-changes) (empty? export-changes)
+           (empty? export-changes)
            (empty? pure-changes) (= predicate-functions old-predicates))
       projection
 
@@ -2690,7 +2677,6 @@
       (build-projection forms function-contracts
                         {:seon.schema/schema-admissions schema-admissions
                          :seon.schema/function-admissions function-admissions
-                         :seon.schema/function-source-admissions function-source-admissions
                          :seon.schema/artifact-exports artifact-exports
                          :seon.schema/pure-predicate-symbols pure-predicate-symbols
                          :seon.schema/predicate-functions predicate-functions
@@ -2780,8 +2766,6 @@
                                   schema-admissions schema-admission-changes)
                 (fingerprint-with :function-admissions old-function-admissions
                                   function-admissions function-admission-changes)
-                (fingerprint-with :function-source-admissions old-source-admissions
-                                  function-source-admissions source-admission-changes)
                 (fingerprint-with :artifact-exports (zipmap old-exports (repeat true))
                                   (zipmap artifact-exports (repeat true)) export-changes)
                 (fingerprint-with :pure-predicate-symbols (zipmap old-pure (repeat true))
@@ -2795,8 +2779,6 @@
                      :seon.schema.projection/compile-options {:registry registry}
                      :seon.schema.projection/schema-admissions schema-admissions
                      :seon.schema.projection/function-admissions function-admissions
-                     :seon.schema.projection/function-source-admissions
-                     function-source-admissions
                      :seon.schema.projection/artifact-exports artifact-exports
                      :seon.schema.projection/pure-predicate-symbols pure-predicate-symbols
                      :seon.schema.projection/schema-dependencies schema-dependencies
@@ -2921,10 +2903,9 @@
   ([projection-input]
    (projection-from-rows projection-input {}))
   ([{:seon.schema/keys [database-value schema-rows function-contract-rows
-                        function-source-rows artifact-exports
+                        artifact-exports
                         pure-predicate-symbols]
-     :or {function-source-rows []
-          artifact-exports #{}
+     :or {artifact-exports #{}
           pure-predicate-symbols #{}}}
     reusable-projection]
    (let [recorded-admissions
@@ -3014,38 +2995,6 @@
                                        :seon.schema/malformed-projection-identity true}))))
                    "function contract" :seon.fn/sym
                    (:seon.schema.projection/function-contracts reusable-projection {}))
-          source-admissions
-          (reduce
-           (fn [admissions row]
-             (when-not (and (sequential? row) (= 3 (count row)))
-               (throw (ex-info "Malformed committed function source row."
-                               {:seon.schema/error
-                                :seon.schema/malformed-projection-row
-                                :seon.schema/row row
-                                :seon.schema/malformed-projection-row true})))
-             (let [[raw-identity source _asserting-tx-eid] row
-                   identity (cond
-                              (qualified-symbol? raw-identity) raw-identity
-                              (string? raw-identity) (symbol raw-identity)
-                              :else raw-identity)]
-               (when-not (and (qualified-symbol? identity) (string? source))
-                 (throw (ex-info "Malformed committed function source row."
-                                 {:seon.schema/error
-                                  :seon.schema/malformed-projection-row
-                                  :seon.schema/row row
-                                  :seon.schema/malformed-projection-row true})))
-               (when (contains? admissions identity)
-                 (throw (ex-info (str "Duplicate committed function source "
-                                      identity ".")
-                                 {:seon.schema/error
-                                  :seon.schema/duplicate-projection-row
-                                  :seon.schema/duplicate-projection-row identity
-                                  :seon.schema/identity identity
-                                  })))
-               (assoc admissions identity
-                      (admission-for-identity :seon.fn/sym raw-identity))))
-           {}
-           function-source-rows)
           artifact-exports
           (into #{}
                 (map (fn [export]
@@ -3093,7 +3042,7 @@
                      (not (incremental-base? reusable-projection)))
             (projection-fingerprint
              forms function-contracts schema-admissions function-admissions
-             source-admissions artifact-exports pure-predicate-symbols))
+             artifact-exports pure-predicate-symbols))
           projection
           (if (and fingerprint
                    (= fingerprint
@@ -3105,7 +3054,6 @@
              {:seon.schema/schema-admissions schema-admissions
               :seon.schema/projection reusable-projection
               :seon.schema/function-admissions function-admissions
-              :seon.schema/function-source-admissions source-admissions
               :seon.schema/artifact-exports artifact-exports
               :seon.schema/pure-predicate-symbols pure-predicate-symbols
               :seon.schema/predicate-functions
@@ -3158,8 +3106,7 @@
   projection depends on (`seon.db`'s memo key), so a new range cannot be read
   without also invalidating."
   {:seon.schema/schema-rows [:seon.schema/key :seon.schema/form true]
-   :seon.schema/function-contract-rows [:seon.fn/sym :seon.fn/spec false]
-   :seon.schema/function-source-rows [:seon.fn/sym :seon.fn/source false]})
+   :seon.schema/function-contract-rows [:seon.fn/sym :seon.fn/spec false]})
 
 (def projection-attributes
   "Every attribute a projection derivation reads: its ranges plus admissions."
@@ -3546,9 +3493,7 @@
    (assoc (get projection :seon.schema.projection/function-contracts {})
           function-symbol definition)
    (-> (population-options projection)
-       (update :seon.schema/function-admissions assoc function-symbol admission)
-       (update :seon.schema/function-source-admissions
-               assoc function-symbol admission))))
+       (update :seon.schema/function-admissions assoc function-symbol admission))))
 
 (defn current-projection
   "The evaluation-local disposable projection, or nil outside one delta."
