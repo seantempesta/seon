@@ -211,3 +211,34 @@
         (is (some? (:seon.turn/closed-tx (db/pull (branch-db handle branch) [:seon.turn/closed-tx]
                                                   [:seon.turn/id (:seon.turn/id first-run)])))
             "retirement returned only after the run exited")))))
+
+(deftest a-namespace-switch-declares-nothing
+  ;; SCI's in-ns only switches the namespace. Before the fix an agent's
+  ;; (in-ns 'seon.id) settled a declaration row replacing seon.id's file row,
+  ;; retracting its file, doc and source (default, tx 536871848).
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/switcher")
+            database #(db/db (get-in hosted [:seon.turn.loop/cluster :seon.db/connection]))
+            file-row #(db/pull (database) [:seon.ns/source :seon.ns/doc :seon.program/definition-digest
+                                           {:seon.fn/file [:seon.fn.file/relative-path]}]
+                               [:seon.ns/name 'seon.id])
+            namespace-of #(get-in (db/pull (database) [{:seon.fn/ns [:seon.ns/name]}] [:seon.fn/sym %])
+                                  [:seon.fn/ns :seon.ns/name])
+            before (file-row)]
+        (is (= "src/seon/id.clj" (get-in before [:seon.fn/file :seon.fn.file/relative-path])) (pr-str before))
+        (is (= "#'seon.id/switch-probe"
+               (last (hosted-run! hosted "(in-ns 'seon.id)\n(defn switch-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"))))
+        (is (= before (file-row)) "the file namespace's row is unchanged")
+        (is (= 'seon.id (namespace-of 'seon.id/switch-probe)) "the definition references the namespace")
+        (testing "a namespace the switch brings into being exists for the definitions made in it"
+          (is (= "#'my.agents.switch-fresh/fresh-probe"
+                 (last (hosted-run! hosted "(in-ns 'my.agents.switch-fresh)\n(defn fresh-probe \"Add two.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 2))"))))
+          (is (= 'my.agents.switch-fresh (namespace-of 'my.agents.switch-fresh/fresh-probe)))
+          (is (nil? (:seon.ns/source (db/pull (database) [:seon.ns/source] [:seon.ns/name 'my.agents.switch-fresh])))
+              "the switch's text is not the namespace's source"))
+        (testing "an ns form declares its namespace with its requires and aliases"
+          (hosted-run! hosted "(ns my.agents.switch-declared (:require [clojure.string :as str]))")
+          (is (= [#:seon.ns.alias{:local 'str :target-ns 'clojure.string}]
+                 (:seon.ns/aliases (db/pull (database) [{:seon.ns/aliases [:seon.ns.alias/local :seon.ns.alias/target-ns]}]
+                                            [:seon.ns/name 'my.agents.switch-declared])))))))))

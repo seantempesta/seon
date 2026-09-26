@@ -14,7 +14,9 @@
             :seon.render/html seon.render.ns/render-html,
             :seon.render/form seon.render.ns/namespace-form :seon.program/partition :seon.program}
            [:seon.ns/name :seon.ns/name]
-           [:seon.program/definition-digest :seon.program/definition-digest]
+           ;; A namespace the program's declarations name exists whether or not
+           ;; a form declared it; only a declared one has a definition digest.
+           [:seon.program/definition-digest {:optional true} :seon.program/definition-digest]
            [:seon.fn/file {:optional true} :seon.fn/file]
            [:seon.ns/context-relevant? {:optional true} :seon.ns/context-relevant?]
            [:seon.schema.admission/source

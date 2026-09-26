@@ -586,31 +586,22 @@
 (defn- namespace-rows
   "One row per distinct namespace a plan's sources run in, keyed by the
   `namespace:` tempid. An existing namespace is only referenced. An absent one
-  is declared through `program/declaration-row`: its evaluation's own digested
-  row when one is supplied, else the source that moved into it. With neither,
-  the identity alone remains and the writer refuses it by name."
+  is its evaluation's own declared row when an `ns` form declared it, else its
+  identity alone: a namespace the plan's declarations reference exists whether
+  or not a form declared it, and a namespace switch declares nothing."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.ns/name
                        [:sequential :map] [:sequential :map]]
                   [:vector :map]]}
   [database starting-namespace sources program-rows]
-  (let [in-ns-of #(or (:seon.ns/name %) starting-namespace)
-        declaring (into {} (map (fn [[before after]]
-                                  [(in-ns-of after) (:seon.cluster.eval/source before)]))
-                        (reverse (partition 2 1 sources)))]
-    (into []
-          (comp (map in-ns-of) (keep identity) (distinct)
-                (map (fn [namespace-name]
-                       (assoc (or (when-not (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]]
-                                                  database namespace-name)
-                                    (or (some #(when (= namespace-name (:seon.ns/name %)) %) program-rows)
-                                        (when-let [source (declaring namespace-name)]
-                                          (program/declaration-row
-                                           (db/carried-projection database)
-                                           {:seon.ns/name namespace-name :seon.ns/source source}
-                                           :contracted :agent))))
-                                  {:seon.ns/name namespace-name})
-                              :db/id (str "namespace:" namespace-name)))))
-          (cons {:seon.ns/name starting-namespace} sources))))
+  (into []
+        (comp (map #(or (:seon.ns/name %) starting-namespace)) (keep identity) (distinct)
+              (map (fn [namespace-name]
+                     (assoc (or (when-not (db/q '[:find ?n . :in $ ?name :where [?n :seon.ns/name ?name]]
+                                                database namespace-name)
+                                  (some #(when (= namespace-name (:seon.ns/name %)) %) program-rows))
+                                {:seon.ns/name namespace-name})
+                            :db/id (str "namespace:" namespace-name)))))
+        (cons {:seon.ns/name starting-namespace} sources)))
 
 (defn- source-rows
   "The shared namespace rows and the ordered evaluation entities of one plan.
