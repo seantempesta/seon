@@ -1482,11 +1482,17 @@
           rows)))
 
 (defn- overridden-row?
+  "Whether `row` is this program's own change to the loaded program: a row an
+  agent authored (`:seon.schema.admission/source :agent`) that the loaded
+  program lacks or holds at another digest. A file-derived row that differs
+  was published, not authored here: the branch is behind the loaded program,
+  whose compiled Var it runs."
   {:malli/schema [:=> [:cat [:maybe :seon.db/database-value] :map] :boolean]}
   [loaded row]
   (let [previous (when loaded (db/pull loaded '[*] [:seon.fn/sym (:seon.fn/sym row)]))]
-    (or (nil? (:seon.fn/sym previous))
-        (not= (row-definition-digest row) (row-definition-digest previous)))))
+    (and (= :agent (:seon.schema.admission/source row))
+         (or (nil? (:seon.fn/sym previous))
+             (not= (row-definition-digest row) (row-definition-digest previous))))))
 
 (defn- host-bound-row?
   "Whether the indexer's per-declaration host-binding fact holds for this row.
@@ -2583,9 +2589,13 @@
                    (loaded-program db))
         loaded-digests (function-digests loaded)
         branch-digests (function-digests db)
+        ;; Only what an agent authored overrides (`overridden-row?`): a
+        ;; file-derived row the loaded program moved past is not the branch's.
+        authored (into #{} (keep (fn [[sym _ _ admission]] (when (agent-authored? admission) (symbol sym))))
+                       all-function-rows)
         overridden
         (into #{} (keep (fn [[sym digest]]
-                          (when (not= digest (get loaded-digests sym)) sym)))
+                          (when (and (authored sym) (not= digest (get loaded-digests sym))) sym)))
               branch-digests)
         closure (if (seq overridden)
                   (seon.fn/reverse-closure {:seon.db/db db :seon.fn/seeds overridden})

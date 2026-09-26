@@ -329,3 +329,28 @@
           (is (re-find #"surviving referrers" (str (second shown))) "the refusal is the deleting form's")
           (is (= "7" (last shown)) "the other forms keep their own results"))
         (is (= ["2"] (hosted-run! hosted "(refused-caller 1)")) "the run closed and the next run is admitted")))))
+
+(deftest a-branch-behind-the-loaded-program-runs-the-loaded-definitions
+  ;; Before, every file-derived row a branch held at another digest than the
+  ;; loaded program counted as the branch's override, so a branch forked before
+  ;; an adoption refused every form ("Host-bound declaration … must change
+  ;; through the loaded source files"). Only an agent-authored row overrides.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [branch (branch!)
+            execution (agent/acquire-context! handle nil {:seon.agent/branch branch})
+            connection (:seon.db/connection execution)]
+        (try
+          ;; The file row as a publication the loaded program has moved past left it.
+          (db/call-with-custody {:seon.db/connection connection}
+            #(support/transacted!
+              connection
+              [(support/program-fn-row
+                (db/db connection) 'seon.id/digest
+                "(defn digest \"An older digest.\" {:malli/schema [:=> [:cat [:int {:min 1, :max 64}] [:sequential :any]] [:string {:min 1, :max 64}]]} [length parts] \"stale\")"
+                {:seon.schema.admission/source :core :seon.fn/host-bound? true})]))
+          (finally (agent/release-context! execution)))
+        (let [hosted (host-on! handle branch "mcp/behind")]
+          (is (= ["3"] (hosted-run! hosted "(+ 1 2)")))
+          (is (= [(pr-str (seon.id/digest 8 [:x]))] (hosted-run! hosted "(seon.id/digest 8 [:x])"))
+              "the row the branch did not author runs the loaded Var"))))))
