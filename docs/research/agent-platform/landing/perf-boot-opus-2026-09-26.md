@@ -112,7 +112,7 @@ recovery path.
 
 ## Commits, sizes
 
-- `<commit>` — src/seon/cluster.clj +90/−31, src/seon/cluster/boot.clj +5, script/seon/operator.clj +3/−3,
+- `fa6f8e8b0` — src/seon/cluster.clj +90/−31, src/seon/cluster/boot.clj +5, script/seon/operator.clj +3/−3,
   test/seon/cluster/program_change_test.clj +19; tasks appended to seon.profile/seon.cluster/seon.schema EDN; issue
   sightings in `a-three-file-changed-path-publication-takes-a-minute.md` and
   `move-to-head-takes-a-minute-or-more-not-seconds.md`. The source is net +64 lines. It deletes a reload, a re-arm
