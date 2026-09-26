@@ -3,7 +3,6 @@
   (:require [clojure.string :as str]
             [seon.id :as id]
             [seon.db :as db]
-            [clojure.edn :as edn]
             [seon.print :as print]
             [seon.schema.edn :as schema.edn]
             [seon.schema :as schema]
@@ -12,7 +11,8 @@
             [seon.sci.admit :as admit]
             [seon.ai.tokens :as tokens]
             [seon.sci.reader :as reader]
-            [sci.lang]))
+            [sci.lang]
+            [sci.impl.records]))
 
 (schema.edn/load! {})
 
@@ -489,6 +489,21 @@
         (if (identical? (class n) clojure.lang.Symbol)
           (scalar ::print/symbol n (str "#namespace[" n "]"))
           {:kind :scalar :node {::print/face ::print/object ::print/class (.getName c)}}))
+      ;; An agent's record prints as clojure.main prints it (#user.Card{...}):
+      ;; SciRecord's final rec-name and ext-map fields (sci/impl/records.cljc),
+      ;; the fields classified as the exact map they are; no method is called.
+      (identical? c sci.impl.records.SciRecord)
+      (let [record-name (.-rec-name ^sci.impl.records.SciRecord x)
+            row (classify (.-ext-map ^sci.impl.records.SciRecord x) identity-attributes limit)]
+        (if (and (identical? (class record-name) clojure.lang.Symbol) (= ::print/map (:face row)))
+          (assoc row :face ::print/record :name (str record-name) :open (str "#" record-name "{"))
+          {:kind :scalar :node {::print/face ::print/object ::print/class (.getName c)}}))
+      ;; An agent's type prints as its name (user.Card), from SCI's own box.
+      (identical? c sci.lang.Type)
+      (let [type-name (:sci.impl/type-name (.getVal ^sci.lang.Type x))]
+        {:kind :scalar :node (if (identical? (class type-name) clojure.lang.Symbol)
+                               {::print/face ::print/class ::print/name (str type-name)}
+                               {::print/face ::print/object ::print/class (.getName c)})})
       (identical? c Class) {:kind :scalar :node {::print/face ::print/class ::print/name (.getName ^Class x)}}
       (and (instance? Throwable x) (throwable-safe c))
       (assoc (classify (throwable-value x) identity-attributes limit) :prefix "#error " :face ::print/throwable)
@@ -700,7 +715,7 @@
                    :string (let [shown (min chunk-width (:total c) (:max-string context))]
                              (assoc base :kind :string :value (:value c) :total (:total c)
                                     :shown shown :shown-width (escaped-width (:value c) 0 shown)))
-                   (merge base (select-keys c [:kind :face :open :close :total :pending? :prefix :ordered?])
+                   (merge base (select-keys c [:kind :face :name :open :close :total :pending? :prefix :ordered?])
                           {:pending (:members c) :outside (:prefix c)}))))
         node (if (= :leaf (:kind node)) (assoc node :width (leaf-width (:node node) depth)) node)]
     (assoc node :flat (flat-width node))))
@@ -894,6 +909,7 @@
                   (let [children (cond-> kids cut (conj cut))
                         collection (cond-> {::print/face (if (= ::print/throwable (:face node)) ::print/map (:face node))}
                                      (= :map (:kind node)) (assoc ::print/entries children)
+                                     (:name node) (assoc ::print/name (:name node))
                                      (= :coll (:kind node)) (assoc ::print/items children)
                                      (:ordered? node) (assoc ::print/ordered? true)
                                      (:total node) (assoc :seon.render.data/total (:total node)))]

@@ -41,7 +41,12 @@
                        [?function :seon.fn/private? false]
                        (not [?function :seon.fn/internal? true])]
               database agent-id)]
-    {:seon.help/lines
+    ;; `help` is a macro, so its call names no producer; the value carries
+    ;; its own pair, the render law's master override (issue
+    ;; help-shows-its-map-because-a-macro-call-names-no-producer, option 1).
+    {:seon.render/ai 'seon.bootstrap/render-help-ai
+     :seon.render/html 'seon.bootstrap/render-help-html
+     :seon.help/lines
     [(str "The prompt shows your namespace " namespace-name
           " and is drawn for you. Send only ;; thinking comments and forms.")
      "Results are data: chain them with ->>, sort-by, filter, map, and get-in. Functions are callable by their fully qualified symbols."

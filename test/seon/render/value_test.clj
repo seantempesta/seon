@@ -970,6 +970,16 @@
     (is (= "#namespace[user]" (text (sci/eval-string "*ns*"))))
     (is (= "#namespace[clojure.core]" (text (the-ns 'clojure.core))))))
 
+(deftest agent-records-and-types-print-as-clojure-prints-them
+  ;; An agent's record prints #user.Card{…} and its type user.Card, from
+  ;; SCI's own fields, as `pr-str` prints them (dogfood cycle 9, #19).
+  (let [text #(:seon.render.value/text (value/prepare (unit %)))
+        [card card-type] (sci/eval-string "(defrecord Card [rank suit]) [(->Card 1 :s) Card]")]
+    (is (= (pr-str card) (text card)))
+    (is (= "#user.Card{:rank 1, :suit :s}" (text card)))
+    (is (= "user.Card" (text card-type)))
+    (is (= "{:hand [#user.Card{:rank 1, :suit :s}]}" (text {:hand [card]})))))
+
 (deftest a-cut-continues-from-its-node-path-and-absolute-offset
   ;; One-render-path §3g: a cut's coordinates are the walk node, the path and
   ;; the absolute offset; the same selection answers from there, and a node
