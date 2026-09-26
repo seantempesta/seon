@@ -422,3 +422,55 @@ schema file outside my ledger row, but no other row holds it.
 - `bin/test-check default --ns seon.cluster.boot-timeline-test`
 - `bin/test-check default --ns seon.fn.caller-lint-test`
 - Time an unchanged `start --head` and check that its stdout is small.
+
+## Resume 9 — host test bodies run as their member (patch); class cache sized, stopped for the >100-line rule
+
+**`seon.boot.edn`:** removed the `:seon.problems/problems` entry from `:seon.boot/readiness` (fd3eda0d1). Root has
+accepted it.
+
+**JVM test bodies run as their member's agent: patch `tmp/perf-boot-opus/host-world.patch` (apply with
+`git apply -p0`).** src/seon/test.clj is held by shrink-test, so this is a patch.
+- `seon.sci.kernel/*host-world*` is a dynamic context that `world-ctx` answers when no arm governs the thread.
+- `seon.test/bounded-result` binds it to the member's `:seon.sci.eval/ctx` for host bodies.
+- Supplied defaults then reach a plain call in a JVM deftest through the same `instrument/calling-environment` an
+  evaluation uses. An arm, including an SCI evaluation the body starts, still governs over it.
+- The same patch reverts `program-change-test/a-booted-wrapper-supplies-its-declared-defaults` to a plain
+  `(my.program/breaks {...})` call.
+- Size: kernel +10/−2, test +4/−1, test file −12.
+
+**Root runs after applying it and restarting:**
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --ns seon.sci.kernel-test`
+- `bin/test-check default --ns seon.test-runner-test`
+
+**Compiled-class cache for our code: stopped before writing, >100 lines.** This is the ruled option 1.
+- `dev_cache.clj` builds one dependency closure behind a manifest, a rebuild lock, per-process references and
+  `reap`. It explicitly refuses first-party classes (`validate!`: "The dependency cache contains first-party classes").
+- A per-commit program layer on the same mechanism needs:
+  - a second key (commit/source digest) and directory;
+  - a child compile of the first-party namespaces, with the dependency classes on the classpath, via `compile-form`;
+  - manifest and loader-class validation;
+  - reference recording and reaping for the new directories;
+  - operator selection, fill-before-stop, and a two-directory classpath.
+- Estimate: ~120–160 lines across dev_cache.clj and operator.clj.
+- Priced effects:
+  - **Unchanged restart:** capture 4.9 s → ~1 s (class loading), total ~11.4 → ~7.5 s.
+  - **Changed restart:** plus one child-JVM compile of the program before the old JVM stops, about 10–20 s (JVM
+    start plus compiling ~250 first-party namespaces). This is paid on every new commit, and new commits are most
+    restarts today.
+  - **AOT hazards:** Clojure prefers a class that is newer than its source. Archive sources are immutable, so a
+    `require :reload` in adoption reloads the same class. Protocol and record identity across later SCI or dev
+    reloads needs one regression.
+
+Options:
+1. The ruled design above. It meets 10 s for unchanged restarts and makes changed restarts ~10–20 s slower.
+2. **Fill as a byproduct of the boot's own load (recommended).** Boot's `require` of the program binds
+   `*compile-files*` into a per-commit directory, so the JVM that compiles anyway writes the classes, and the next
+   restart on that commit hits.
+   - Zero extra JVMs and no changed-restart penalty.
+   - ~60–80 lines.
+   - Departs from "fill before the old JVM stops": the first restart on a commit misses once, then every later one
+     hits.
+3. **Lazy arming** (~1–1.5 s), leaving compilation as is. Smallest diff, but it touches arming timing.
+
+Say 1 or 2 and I'll build it on a scratch copy and measure the unchanged restart before and after.
