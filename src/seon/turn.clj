@@ -3404,8 +3404,9 @@
      :seon.blob/staged-writes (into [] (mapcat :seon.blob/staged-writes) recordings)}))
 
 (defn- phase
-  "Return one phase's value, translating a host failure to flat data.
-  An InterruptedException propagates unchanged.
+  "Return one phase's value, translating its declared refusal carrier, an
+  ExceptionInfo, to flat data. Every other throwable, the stop's interrupt
+  included, propagates unchanged to the turn step that owns it.
 
   Callback results are polymorphic and unchecked here; the callback's own
   contract owns them. This boundary does not promise a phase-failed member
@@ -3418,11 +3419,7 @@
   [operation]
   (try
     (operation)
-    ;; An interrupt is the stop's sentinel, not a phase failure: it passes
-    ;; through before anything is recorded, so the stopping owner observes it.
-    (catch InterruptedException interrupted
-      (throw interrupted))
-    (catch Throwable failure
+    (catch clojure.lang.ExceptionInfo failure
       (with-meta
        (merge {:seon.error/at (java.util.Date.)
               :seon.error/layer :seon.turn/phase
@@ -3448,9 +3445,7 @@
   [cluster agent-id database requests]
   (try
     (seon.fn/analyze-forms database requests)
-    (catch InterruptedException interrupted
-      (throw interrupted))
-    (catch Throwable failure
+    (catch clojure.lang.ExceptionInfo failure
       (when (= :seon.fn/dependency-analysis-missing-error
                (:seon.error/declared-schema (meta (ex-data failure))))
         (fault/fault! (env/of cluster) failure
