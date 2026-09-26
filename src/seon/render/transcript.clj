@@ -778,13 +778,13 @@
   {:malli/schema [:=> [:cat :seon.render/unit :map] :seon.render.transcript/request-error]}
   [unit identities]
   (let [observation
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/missing-selected-run
+        (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/missing-selected-run
          {:seon.error/message "The selected run is unavailable because its run, agent, or database identity is missing."
          :seon.error/fix "Supply the expected member and repeat the requested operation."
          :seon.render.transcript/refused-member :seon.turn/turn
          :seon.error/expected [:seon.db/db :seon.turn/id :seon.agent/id]
          :seon.error/offending unit
-         :seon.render.transcript/selection-identities identities})]
+         :seon.render.transcript/selection-identities identities}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
     observation))
 
 (defn render-run-ai
@@ -1035,13 +1035,13 @@
                      (:seon.agent/id unit))]
     (or agent-id
         (let [observation
-              (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/runtime-owner
+              (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/runtime-owner
                {:seon.error/message "The runtime component's owner could not be resolved."
                :seon.error/fix "Supply the expected member and repeat the requested operation."
                :seon.render.transcript/refused-member :seon.agent/runtime
                :seon.error/member :seon.runtime/agent
                :seon.error/expected :seon.agent/id
-               :seon.error/offending unit})]
+               :seon.error/offending unit}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
           observation))))
 
 (defn render-runtime-ai
@@ -1625,10 +1625,10 @@
                    (catch clojure.lang.ExceptionInfo failure
                      (let [refusal (ex-data failure)]
                        (if (or (:seon.instrument/check refusal) (:seon.render/refused-member refusal) (:seon.render.web/refused-member refusal))
-                         (assoc refusal :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
+                         (vary-meta (assoc refusal :seon.cluster.prompt/error-agent-id (:seon.agent/id request)
                        :seon.cluster.prompt/derivation-observation
                        {:seon.error.evidence/attribute :seon.error/message
-                        :seon.error.evidence/value (:seon.error/message refusal)})
+                        :seon.error.evidence/value (:seon.error/message refusal)}) assoc :seon.error/declared-schema :seon.cluster.prompt/error)
                          (throw failure)))))
         refusal (:seon.cluster.prompt/error-agent-id composed)]
     [:details {:class "seon-outline-everything" :data-preserve-attr "open"}
@@ -2444,12 +2444,12 @@
       (or (db/read-refusal? row) (:seon.render.transcript/refused-member row)) row
       (nil? (:seon.agent/runtime row))
       (let [observation
-            (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/render-runtime-html
+            (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/render-runtime-html
              {:seon.error/message "The agent's runtime component is unavailable."
              :seon.error/fix "Supply the expected member and repeat the requested operation."
              :seon.render.transcript/refused-member :seon.agent/runtime
              :seon.error/expected :seon.runtime/entity
-             :seon.error/offending agent-id})]
+             :seon.error/offending agent-id}) assoc :seon.error/declared-schema :seon.render.transcript/request-error)]
         observation)
       :else
         (let [runtime (:seon.agent/runtime row)

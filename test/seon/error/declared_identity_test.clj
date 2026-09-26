@@ -1,0 +1,34 @@
+(ns seon.error.declared-identity-test
+  "The producer declares an error's identity; settlement and recording read it
+  (`:seon.error/declared-schema` on the value's metadata) and guess nothing
+  from its members (agent-path root-cause audit M3/E6)."
+  (:require [clojure.test :refer [deftest is]]
+            [seon.db :as db]
+            [seon.render :as render]
+            [seon.schema :as schema]
+            [seon.test-support :as support]))
+
+(defn- declared-and-valid?
+  "The value names its declared schema, and that schema accepts it."
+  [projection expected value]
+  (let [declared (:seon.error/declared-schema (meta value))]
+    (and (= expected declared)
+         ((schema/projection-validator projection declared) value))))
+
+(deftest ^{:seon/tasks #{"1bf47dae6f04"}}
+  producers-declare-the-identity-settlement-records
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           projection (db/carried-projection database)
+           read-refusal (db/q '[:find ?e . :where [?e :no.such/declared-identity-probe _]] database)
+           ambiguous (#'render/ambiguity 'declared-identity.fixture :seon.render/ai
+                                         ['declared-identity.fixture/a 'declared-identity.fixture/b])]
+       (is (declared-and-valid? projection :seon.db/invalid-read-error read-refusal)
+           (pr-str [(meta read-refusal) read-refusal]))
+       (is (declared-and-valid? projection :seon.render/ambiguous-error ambiguous)
+           (pr-str [(meta ambiguous) ambiguous]))
+       (is (= :seon.render/request-error
+              (:seon.error/declared-schema
+               (meta (render/request-profile {:seon.render/profile read-refusal}))))
+           "a relabelling producer declares the identity it relabels to")))))

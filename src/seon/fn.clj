@@ -1229,7 +1229,7 @@
              (if-let [namespace-name (:seon.ns/name namespace-row)]
                (assoc request :namespace-name namespace-name
                               :form-source source)
-               {:seon.error/at (java.util.Date.)
+               (vary-meta {:seon.error/at (java.util.Date.)
                  :seon.error/layer :seon.fn/analysis
                  :seon.error/operation 'seon.fn/analyze-forms
                  ::namespace-unresolvable true
@@ -1240,7 +1240,7 @@
                  :seon.error/expected :seon.ns/name
                  :seon.error/offending namespace-ref
                  :seon.error/data {:seon.fn/namespace-ref namespace-ref
-                  :seon.fn/namespace-row namespace-row}})))
+                  :seon.fn/namespace-row namespace-row}} assoc :seon.error/declared-schema :seon.fn/namespace-unresolvable-error))))
          requests)
         refusal (some #(when (::namespace-unresolvable %) %) resolved)]
     (if refusal

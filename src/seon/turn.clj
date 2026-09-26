@@ -330,10 +330,10 @@
   [transition rule request]
   (let [message (str "run transition refused: " (name rule))]
     (throw (ex-info message
-                    (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
+                    (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) ::transition transition
                      {:seon.error/message message
                      ::rule rule
-                     :seon.error/data {::request request}})))))
+                     :seon.error/data {::request request}}) assoc :seon.error/declared-schema :seon.turn/refused-error)))))
 
 (defn- refuse-closed-admission!
   "Refuse, inside the writer, a run for an agent whose admission is closed."
@@ -2170,13 +2170,13 @@
                    (declared-sources handle database agent-id namespace-name))]
     (cond
       (nil? namespace-name)
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.turn/system `system-turn
+      (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.turn/system `system-turn
        {:seon.turn/rule ::agent-namespace-missing
         :seon.turn/refused-system-agent agent-id
         :seon.error/message "The system turn requires the agent's assigned namespace."
         :seon.error/member :seon.agent/id
         :seon.error/expected :seon.agent/id
-        :seon.error/data {:seon.error/layer :seon.turn}})
+        :seon.error/data {:seon.error/layer :seon.turn}}) assoc :seon.error/declared-schema :seon.turn/refused-error)
 
       (:seon.turn/refused-system-agent declared)
       (assoc declared :seon.turn/refused-system-agent agent-id)

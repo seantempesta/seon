@@ -726,14 +726,14 @@
              :seon.render.walk/found-depth 0
              :seon.error/value
              (let [observation
-                   {:seon.error/at (java.util.Date.)
+                   (vary-meta {:seon.error/at (java.util.Date.)
                     :seon.error/layer :seon.render.walk/render
                     :seon.error/operation 'seon.render.walk/neighborhood
                     :seon.error/message "The requested lookup has no entity in this database."
                     :seon.error/fix "Supply the expected member and repeat the requested operation."
                     :seon.render.walk/missing-lookup lookup
                     :seon.error/member :seon.render.walk/lookup
-                    :seon.error/expected "an existing entity"}]
+                    :seon.error/expected "an existing entity"} assoc :seon.error/declared-schema :seon.render.walk/no-such-entity-error)]
                observation)}]
            (into []
                  (comp
@@ -867,9 +867,9 @@
         evaluations (cond
                       (:seon.db/invalid-read agent) agent
                       (nil? agent-id)
-                      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/history 'seon.render.walk/history
+                      (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/history 'seon.render.walk/history
                        {:seon.error/message "The history lookup does not name an agent."
-                       :seon.render/refused-member :seon.render.walk/lookup})
+                       :seon.render/refused-member :seon.render.walk/lookup}) assoc :seon.error/declared-schema :seon.render/request-error)
                       :else
                       (if-let [selector (:seon.db/pull-selector request)]
                         (evaluation/of-agent database agent-id selector)
@@ -882,7 +882,7 @@
                                   (:seon.agent/no-such-agent evaluations)
                                   (:seon.render/refused-member evaluations))
                           evaluations))]
-      (assoc refusal :seon.render/refused-member :seon.render.history/entries)
+      (vary-meta (assoc refusal :seon.render/refused-member :seon.render.history/entries) assoc :seon.error/declared-schema :seon.render/request-error)
       (reduce
        (fn [entries saved]
          (let [lookup [:seon.cluster.eval/id (:seon.cluster.eval/id saved)]
@@ -893,7 +893,7 @@
                                         :seon.render/output :seon.render/ai
                                         :seon.render.call/id [lookup]))]
            (if (:seon.render/refused-member rendered)
-             (reduced (assoc rendered :seon.render/refused-member :seon.render.history/entries))
+             (reduced (vary-meta (assoc rendered :seon.render/refused-member :seon.render.history/entries) assoc :seon.error/declared-schema :seon.render/request-error))
              (conj entries
                    {:seon.render.history/call-id [lookup]
                     :seon.render/value saved
@@ -1048,9 +1048,9 @@
         bounds {:max-work max-nodes :max-results max-nodes :max-result-weight max-nodes}
         root (:db/id (db/pull db [:db/id] lookup))]
     (if-not root
-      (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/render 'seon.render.walk/graph
+      (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.walk/render 'seon.render.walk/graph
        {:seon.error/message "The requested lookup has no entity in this database."
-        :seon.render.walk/missing-lookup lookup :seon.error/member :seon.render.walk/lookup})
+        :seon.render.walk/missing-lookup lookup :seon.error/member :seon.render.walk/lookup}) assoc :seon.error/declared-schema :seon.render.walk/no-such-entity-error)
       (loop [level 0 frontier [root] edges [] skipped {} cuts []
              nodes {root {::node-level 0 ::node-schema (get (owning-schemas db bounds structure [[root nil root]]) root)}}]
         (let [step (when (and (< level (get request :seon.render/distance 3)) (seq frontier))

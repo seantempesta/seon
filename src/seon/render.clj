@@ -138,7 +138,8 @@
   (if-let [carried (:seon.render/profile request)]
     (cond-> carried
       (and (:seon.error/at carried) (not (:seon.render/refused-member carried)))
-      (assoc :seon.render/refused-member :seon.render/profile))
+      (-> (assoc :seon.render/refused-member :seon.render/profile)
+          (vary-meta assoc :seon.error/declared-schema :seon.render/request-error)))
       (if-let [projection (or (:seon.schema/projection request)
                               (some-> (:seon.db/db request) db/carried-projection)
                               (schema/handed-projection))]
@@ -161,16 +162,16 @@
                                  projection #(config/effective database cluster-name)))]
           (cond
             (nil? effective) @default-agent-profile
-            (:seon.error/at effective) (assoc effective :seon.render/refused-member :seon.render/profile)
+            (:seon.error/at effective) (vary-meta (assoc effective :seon.render/refused-member :seon.render/profile) assoc :seon.error/declared-schema :seon.render/request-error)
             :else (agent-render-profile effective)))
         (let [observation
-              (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/request-profile
+              (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/request-profile
                {:seon.error/message "Rendering requires a carried profile or handed projection."
                :seon.error/fix "Supply the expected member and repeat the requested operation."
                :seon.render/refused-member :seon.schema/projection
                :seon.error/expected [:or :seon.render/profile :seon.schema/handed-projection]
                ;; the members the request HAS, never the request (it carries its world)
-               :seon.error/offending (vec (sort (keys request)))})]
+               :seon.error/offending (vec (sort (keys request)))}) assoc :seon.error/declared-schema :seon.render/request-error)]
           observation))))
 
 (defn- target-profile
@@ -291,7 +292,7 @@
   {:malli/schema [:=> [:cat [:maybe :seon.render/namespace] :seon.render/output [:sequential :qualified-symbol]] :seon.render/ambiguous-error]}
   [namespace-name output candidate-symbols]
   (let [observation
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/ambiguity
+        (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/ambiguity
          {:seon.error/message (str "More than one function in " namespace-name
                              " accepts this value and returns " output ".")
          :seon.error/fix "Supply the expected member and repeat the requested operation."
@@ -301,7 +302,7 @@
          :seon.error/offending candidate-symbols
          :seon.error/data {:seon.render/namespace namespace-name
                            :seon.render/candidates (vec candidate-symbols)
-                           :seon.render/output output}})]
+                           :seon.render/output output}}) assoc :seon.error/declared-schema :seon.render/ambiguous-error)]
     observation))
 
 (defn transacted
@@ -1005,7 +1006,7 @@
                 :seon.error/expected :seon.render/rendered
                 :seon.error/offending (:seon.error/value request)
                 :seon.error/data stable}))]
-    observation))
+    (vary-meta observation assoc :seon.error/declared-schema :seon.render/unknown)))
 
 (defn- unknown-evidence-of
   [unit]
@@ -1255,7 +1256,7 @@
                 (valid-projection? projection :seon.render/source-blocks rendered))
           rendered
           (let [observation
-                {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+                (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
                  :seon.error/at (Date.)
                  :seon.error/layer :seon.render/output
                  :seon.error/operation 'seon.render/raw-output
@@ -1263,7 +1264,7 @@
                  :seon.error/message "The selected AI renderer did not return text."
                  :seon.error/data {:seon.render/output rendered}
                  :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered}]
+                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
             observation))
 
         :seon.render/html
@@ -1271,7 +1272,7 @@
                 (hiccup/hiccup? rendered))
           rendered
           (let [observation
-                {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+                (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
                  :seon.error/at (Date.)
                  :seon.error/layer :seon.render/output
                  :seon.error/operation 'seon.render/raw-output
@@ -1279,14 +1280,14 @@
                  :seon.error/message "The selected HTML renderer did not return Hiccup."
                  :seon.error/data {:seon.render/output rendered}
                  :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered}]
+                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
             observation))
 
         :seon.render/form
         (if (valid-projection? projection :seon.render/form rendered)
           rendered
           (let [observation
-                {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
+                (vary-meta {:seon.error/fix "Return a value satisfying the renderer's declared output contract."
                  :seon.error/at (Date.)
                  :seon.error/layer :seon.render/output
                  :seon.error/operation 'seon.render/raw-output
@@ -1294,7 +1295,7 @@
                  :seon.error/message "The selected form renderer did not return a form."
                  :seon.error/data {:seon.render/output rendered}
                  :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered}]
+                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
             observation))))))
 
 (defn render-ai
@@ -1348,7 +1349,7 @@
   [unit]
   (let [value (:seon.render/value unit)
         observation
-        (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/source-provenance-error
+        (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/source-provenance-error
          {:seon.error/message "Default AI source requires an entity identity or stored evaluation result reference."
          :seon.error/fix "Supply the expected member and repeat the requested operation."
          :seon.render/refused-member :seon.render.value/root
@@ -1359,7 +1360,7 @@
          :seon.error/offending (if (or (nil? value) (coll? value) (string? value) (number? value)
                                        (keyword? value) (symbol? value) (boolean? value))
                                  value
-                                 (.getName (class value)))})]
+                                 (.getName (class value)))}) assoc :seon.error/declared-schema :seon.render/request-error)]
     observation))
 
 (defn render-form
@@ -1404,7 +1405,7 @@
         (if (valid-projection? projection :seon.render/form rendered)
           rendered
           (let [observation
-                {:seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
+                (vary-meta {:seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
                  :seon.error/at (Date.)
                  :seon.error/layer :seon.render/output
                  :seon.error/operation 'seon.render/render-form-value
@@ -1412,7 +1413,7 @@
                  :seon.error/message "The selected form renderer did not return a form."
                  :seon.error/data {:seon.render/output rendered}
                  :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered}]
+                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
             observation))))))
 
 (defn render-call
@@ -1470,17 +1471,17 @@
                                                        requested-candidate)
                     requested-candidate
                     (let [observation
-                          (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/render-call
+                          (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render/render 'seon.render/render-call
                            {:seon.error/message "The requested renderer is not an applicable candidate."
                            :seon.error/fix "Supply the expected member and repeat the requested operation."
                            :seon.render/refused-member :seon.render.call/selected-producer
                            :seon.error/expected :compatible
                            :seon.error/offending requested-candidate
-                           :seon.render/selection-observation decision})]
+                           :seon.render/selection-observation decision}) assoc :seon.error/declared-schema :seon.render/request-error)]
                       observation))
                   (:seon.render.selection/selected decision))]
             (if (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
-              (assoc selected :seon.render/refused-member :seon.render.call/selected-producer)
+              (vary-meta (assoc selected :seon.render/refused-member :seon.render.call/selected-producer) assoc :seon.error/declared-schema :seon.render/request-error)
               (let [static-evidence (call-static-evidence request decision
                                                           selected)
                     cache-evidence (call-cache-evidence request selected)
@@ -1530,7 +1531,7 @@
                     raw (if (or (:seon.render/refused-member raw)
                                 (:seon.render.unknown/reason raw)
                                 (:seon.render/invalid-output raw))
-                          (assoc raw :seon.render/refused-member :seon.render/output)
+                          (vary-meta (assoc raw :seon.render/refused-member :seon.render/output) assoc :seon.error/declared-schema :seon.render/request-error)
                           raw)
                     source-blocks (when source-output? (:seon.render/source-blocks raw))
                     raw (if source-blocks
