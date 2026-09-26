@@ -21,9 +21,6 @@
  [:map [:seon.db/db :seon.db/database-value]
   [:seon.program/subject :seon.program/subject]
   [:seon.db/tx {:optional true} :seon.db/tx]]
- :my.program/proposal
- [:map [:seon.message/id :seon.message/id] [:seon.issue/id :seon.issue/id]
-  [:seon.store/branch :seon.store/branch] [:seon.agent/id :seon.agent/id]]
  :my.program/merge-proposal
  [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
   [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
