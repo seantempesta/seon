@@ -1,11 +1,18 @@
 (ns seon.fault
-  "The one core-fault route (AGENTS.md \"The error policy\").
+  "The one core-fault route (AGENTS.md \"The error policy\"): a producer calls
+  `fault!` on its own thread and gets a receipt beside its result. There is no
+  fault channel or committer.
 
-  `record!` commits one escaped failure through `seon.error`'s recording
-  (signature, occurrence identity and the writer-decided wake are its own);
-  `fault!` returns its receipt beside the caller's result, and stops the
-  execution owner only when storage fails. Every producer
-  calls `fault!` on its own thread: there is no fault channel or committer."
+  ## Recommendations
+
+  - Call [[fault!]] from the failing boundary itself; call [[record!]] only when
+    you need the raw recording tuple.
+  - Whether a fault is still open is not stored here: ask
+    [[seon.problems/open-faults]]; a fix elsewhere is recorded with
+    [[seon.problems/resolve!]].
+  - Declared agent mistakes are returned to the agent, never faulted; see
+    [[seon.error.refusal/diagnostic]]. The wake is the writer's decision,
+    [[seon.error/commit-call]]."
   (:require [clojure.core.async.flow :as-alias flow.core]
             [seon.blob :as blob]
             [seon.cluster.branch :as cluster.branch]
@@ -57,27 +64,38 @@
 (defn record!
   "Commit one escaped Throwable as one durable fact per delivery.
 
-  TOTAL, never throws. Returns `[fact outcome occurrence delivered-to]`
-  (`:seon.fault/recording`), deriving
-  `fact` and its content signature before the transaction attempt. Every
-  delivery reaches the writer. `outcome` is `:seon.flow/committed` or the
-  transaction failure value.
+  Total: it never throws. `fact` and its content signature are derived before the
+  transaction is attempted, and recurrence is the query-derived count of
+  committed facts.
 
-  Everything it needs is read fresh: the dials from the config
-  singleton, the attribution from the database value at the fault's
-  own basis. A fault from an agent graph carries its agent as a
-  structural tag (F1 §6) and attributes through `tagged-run`. An
-  UNTAGGED fault — the cluster graph's own, from the armer or the
-  render proc — attributes to NO run, and that is correct rather than
-  missing: it is not a run's fault. The serial-era fallback query is
-  gone (F2 §3.3). It goes through
-  `db/transact!`, which never throws, once on the branch where the fault
-  happened and, when that is not the cluster branch and this process holds the
-  cluster branch open, once more there naming its origin; `outcome` is the
-  first write that did not commit.
-  So every committer passing the cluster connection still records on the
-  agent's own branch. Recurrence is the query-derived count of
-  committed facts; whether a fault is open is `seon.problems/open-faults`."
+  ## Edge cases
+
+  - An untagged fault (the cluster graph's own, from the armer or the render
+    proc) attributes to no run. That is correct, not missing: it is not a
+    run's fault.
+  - When the fault's agent branch is not the cluster branch and this process
+    holds the cluster branch open, it writes twice: once on the origin, once on
+    the cluster branch naming the origin, so the record outlives the branch's
+    retirement. A cluster this process does not run (a fixture's name) gets no
+    copy.
+  - An unreadable agent branch records on the connection's own branch; the
+    fault is not lost.
+  - `outcome` is the first write that did not commit, even if the second did.
+  - A failure before the fact exists returns a message-only fact with no
+    signature, so Flow cannot collapse repeats of it.
+
+  ## Costs
+
+  - At most two transactions (origin, then the cluster copy), each preceded by
+    a blob publication when the evidence exceeds
+    `:seon.config.error/max-evidence-bytes`; it reads the effective config and
+    one run query per call. Not timed: default's profiler held no cells for it
+    on 2026-09-26.
+
+  ## Errors
+
+  - A refused or failed write ([[:seon.db/transaction-refused]]) is returned as
+    `outcome`, never thrown; the caller, [[fault!]], decides to stop."
   {:malli/schema [:=> [:cat :seon.db/connection :seon.boot/cluster-name :seon.db.process/id
                        :seon.sci.admit/caps :seon.error/recording-observation]
                   :seon.fault/recording]}
@@ -188,8 +206,23 @@
 
 
 (defn carried-receipt
-  "The receipt an unrecorded fault's throw already carries anywhere in
-  `failure`'s cause chain."
+  "The receipt `failure`'s cause chain already carries, if any.
+
+  An unrecorded fault's throw carries its receipt; a later `fault!` finds it
+  anywhere in the chain.
+
+  ## Costs
+
+  - 3.2 µs unarmed and 4.1 µs armed on a 13-link `ex-info` chain with no
+    receipt (default, 2026-09-26); linear in the chain length.
+
+  ## Known issues
+
+  - A cyclic cause chain (`(.initCause a b)` where `b`'s cause is `a`, legal in
+    the JDK) never returns and cannot be cancelled: the walk has no identity
+    check or bound. A two-link cycle held one core for about seven minutes on
+    2026-09-26. [[seon.render.value/floor]] walks the same chain safely. Task
+    [[task:465ff60ccda0]]."
   {:malli/schema [:=> [:cat [:or :seon.error/throwable :map]] [:or :nil :seon.fault/recorded]]}
   [failure]
   (when (instance? Throwable failure)
@@ -197,21 +230,38 @@
           (take-while some? (iterate ex-cause failure)))))
 
 (defn fault!
-  "Record one core fault on the caller's thread and wake its responsible
-  agent. Returns the `:seon.fault/recorded` receipt when the write committed:
-  the fault is data beside the caller's result, and the caller continues.
-  When storage fails (a refused, thrown or outcome-unknown write) the
-  execution owner's declared `:seon.fault/stop-request!` runs and an
-  `ex-info` is thrown whose data carries the receipt and whose cause is
-  `failure` itself: the one case in which a graph stops. A failure already
-  carrying a receipt was recorded by this propagation: it is rethrown,
-  never recounted.
+  "Record one core fault on the caller's thread and wake its agent.
 
-  The wake is the writer's decision (`seon.error/commit-call`): the
-  namespace steward, else the configured `:seon.config.error/escalate-to`.
-  The receipt names, as `:seon.fault/delivered-to`, the recipients of the
-  notifications the writer selected for the fault's current opening, read from
-  the transaction's own report. No write is retried."
+  The caller continues with the receipt beside its result. When storage
+  fails (a refused, thrown or outcome-unknown write) the execution owner's
+  `:seon.fault/stop-request!` runs and the fault is thrown: the one case in
+  which a graph stops. No write is retried.
+
+  ## Edge cases
+
+  - A failure already carrying a receipt ([[carried-receipt]]) was recorded by
+    this propagation: it is rethrown, never recounted.
+  - An execution environment without admission caps gets them derived from the
+    cluster's effective config, as boot does.
+  - The declared schema falls back: the context's, then the throwable's
+    `ex-data` metadata, then `:seon.flow/exception-error`.
+  - If `:seon.fault/stop-request!` throws too, that failure is added to the
+    thrown fault as suppressed.
+  - `:seon.fault/delivered-to` names the recipients the writer selected for
+    the fault's current opening, read from the transaction's own report.
+
+  ## Recommendations
+
+  - Pass `:seon.fault/stop-request!` from the execution owner that must stop
+    when the fault cannot be stored; without it nothing stops.
+  - Do not retry around it.
+
+  ## Errors
+
+  - Storage failure throws an `ex-info` whose data holds the
+    `:seon.fault/recorded` receipt; its cause is `failure` when that is a
+    Throwable, else `failure` rides as `:seon.error/base`. No error schema
+    declares this throw yet."
   {:malli/schema [:=> [:cat :seon.env/environment [:or :seon.error/throwable :seon.error/base]
                        :seon.fault/context]
                   :seon.fault/recorded]}

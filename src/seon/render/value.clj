@@ -1,5 +1,10 @@
 (ns seon.render.value
-  "One structural value renderer: profile-bounded AI and complete HTML."
+  "One structural value renderer: profile-bounded AI and complete HTML.
+
+  ## Recommendations
+
+  - When the projection, profile or admission may be what broke, print with
+    [[bounded-text]] or [[floor]]: they read no database and no config."
   (:require [clojure.string :as str]
             [seon.id :as id]
             [seon.db :as db]
@@ -65,12 +70,29 @@
                     (set? x) (set members) :else (apply list members))))))
 
 (defn bounded-text
-  "`value` as at most `limit` characters (rule 3 over `datum`); `…` marks the
-  limit, `#unprintable[value-class failure-class]` a value whose printing throws.
+  "`value` as at most `limit` characters.
 
-  The projection-free core for when the projection, profile or admission is
-  what broke; kept beside the selection by root ruling 2026-09-26, with
-  `floor`, because diagnosis must survive the renderer failing."
+  Rule 3 over `datum`: `…` marks the limit, `#unprintable[value-class failure-class]` a value whose printing throws.
+  The projection-free core, kept beside the selection with [[floor]] (root
+  ruling 2026-09-26) because diagnosis must survive the renderer failing.
+
+  ## Edge cases
+
+  - A 200-deep map prints as `{:k 199, :v {:k 198, :v {:k 197, :v ...}}}`: the
+    walk stops at `:depth` levels whatever the value's depth.
+  - A host object prints as `#object[Class 0xhash]`, never through its
+    `toString`, print-method or `deref`.
+
+  ## Costs
+
+  - `(vec (range 100000))`: 4.4 µs unarmed, 474 µs armed (default, 2026-09-26).
+    The walk is bounded by `limit`, but the armed input contract validates the
+    whole value first, so the armed call is linear in the value's size.
+
+  ## Recommendations
+
+  - Use it for diagnostics that must survive renderer failure; an agent's
+    result goes through [[prepare]], which honours the render profile."
   {:malli/schema [:function [:=> [:cat :seon.schema/value] :string]
                   [:=> [:cat :seon.schema/value [:int {:min 1}]] :string]]}
   ([value] (bounded-text value (:chars text-limits)))
@@ -123,13 +145,23 @@
         [(str (.getName (class link)) " #unprintable[" (.getName (class failure)) "]")]))))
 
 (defn floor
-  "An unhandled Throwable as bounded text from the Throwable alone, one block
-  of `link-lines` per cause. The leaf an error's rendering degrades to, never a
-  stored member.
+  "An unhandled Throwable as bounded text from the Throwable alone.
 
-  It keeps Seon's first-party frames: panics and test failures must keep the
-  whole cause (AGENTS.md, root ruling 2026-09-26). The one-render-path rule
-  that acquires no frames governs only the generic floor's selection."
+  One block of `link-lines` per cause. The leaf an error's rendering degrades to, never a
+  stored member. It keeps Seon's first-party frames
+  ([[seon.error.refusal/first-party-frame?]]): panics and test failures keep the
+  whole cause (AGENTS.md, root ruling 2026-09-26).
+
+  ## Edge cases
+
+  - A cyclic cause chain terminates: each link is walked once, by identity,
+    unlike [[seon.fault/carried-receipt]] (task [[task:465ff60ccda0]]), whose
+    walk should copy this one.
+
+  ## Costs
+
+  - A 13-link `ex-info` chain with a 50-item payload per link (714 characters
+    out): 783 µs unarmed, 977 µs armed (default, 2026-09-26)."
   {:malli/schema [:=> [:cat :seon.error/throwable] :string]}
   [throwable]
   (let [chain (causes throwable)
@@ -205,13 +237,24 @@
        " commit " (:datahike/commit-id unit)))
 
 (defn keyword-lookup?
-  "May `value` be asked for a keyword key? Only where the lookup can neither
-  run foreign code nor refuse the keyword: an exact array or hash map (keys
+  "May `value` be asked for a keyword key?
+
+  Only where the lookup can neither run foreign code nor refuse the keyword: an exact array or hash map (keys
   compared by hash and identity), or a tree map ordered by Clojure's default
   comparator whose keys are keywords (`Keyword/compareTo`). This row of the
   permitted-operation table is the one gate for a value's render attachment,
-  identity and entity shape: a symbol-keyed sorted map, a custom comparator,
-  a record or a host Map declares none, so it prints as the data it is."
+  identity and entity shape.
+
+  ## Edge cases
+
+  - False for a `java.util.HashMap`, a record, a symbol-keyed `sorted-map` or
+    a custom comparator: such a map prints as the data it is, with no render
+    attachment, identity or entity renderer.
+  - An empty default-comparator `sorted-map` is true.
+
+  ## Costs
+
+  - 45 ns unarmed, 0.22 µs armed on `{:a 1}` (default, 2026-09-26)."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
   (let [c (class value)]
