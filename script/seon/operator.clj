@@ -905,24 +905,30 @@
   (owner 2026-09-23: nuking a root wipes that root's derived state; nuking the
   repository's own root wipes the shared caches, which are its own)."
   [root]
-  (let [deleted (volatile! []) unlinked (volatile! #{})]
-    (doseq [relative nuke-derived-paths
-            :let [file (io/file root relative)
-                  linked (linked-component root relative)]]
-      (cond
-        linked (vswap! unlinked conj linked)
-        (fs/exists? file {:nofollow-links true})
-        (do (fs/delete-tree file) (vswap! deleted conj relative))))
-    (doseq [directory (or (.listFiles (io/file root "data/clusters")) [])
-            :let [file (io/file directory "prepl.edn")]
-            :when (.isFile file)]
-      (fs/delete file)
-      (vswap! deleted conj (str "data/clusters/" (.getName directory) "/prepl.edn")))
+  (let [{:keys [deleted kept-shared]}
+        (reduce (fn [outcome relative]
+                  (let [file (io/file root relative)
+                        linked (linked-component root relative)]
+                    (cond
+                      linked (update outcome :kept-shared conj linked)
+                      (fs/exists? file {:nofollow-links true})
+                      (do (fs/delete-tree file) (update outcome :deleted conj relative))
+                      :else outcome)))
+                {:deleted [] :kept-shared #{}}
+                nuke-derived-paths)
+        advertisements
+        (into []
+              (keep (fn [directory]
+                      (let [file (io/file directory "prepl.edn")]
+                        (when (.isFile file)
+                          (fs/delete file)
+                          (str "data/clusters/" (.getName directory) "/prepl.edn")))))
+              (or (.listFiles (io/file root "data/clusters")) []))]
     {:seon.operator/root root
      :seon.operator/repository-root? (= (.getCanonicalPath (io/file root))
                                         (.getCanonicalPath (io/file (repository-root))))
-     :seon.operator/deleted @deleted
-     :seon.operator/kept-shared (vec (sort @unlinked))}))
+     :seon.operator/deleted (into deleted advertisements)
+     :seon.operator/kept-shared (vec (sort kept-shared))}))
 
 (def ^:private nuke-fallback-boots
   "Distinct older programs a nuke boots after HEAD fails twice (plan §7, B)."
