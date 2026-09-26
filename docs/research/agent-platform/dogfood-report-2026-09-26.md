@@ -144,6 +144,14 @@ snapshot.
     (`accept-merge!`'s report"). An agent cannot preview write-back, because it is root's step after
     `accept-merge!`.
 
+- **Cycle 7** (03:27–03:30Z, branch `dogfood-repl-opus-13`, retired). `my.fs/stat`, `read` and `glob` behave
+  exactly as their docs say. A glob that omits `:my.fs/root` refuses with a good example.
+  Printing budgets differ by shape. `(vec (range 5000))` shows 32 members (`max-children`, about 100
+  characters), while `(apply str (repeat 300000 "x"))` shows about 48,000 characters (`…+252144`), roughly
+  12k tokens of `x` in the agent's context. A nested map 8 levels deep printed whole. This is consistent
+  with one token budget and a separate child bound, but a lone large string costs the agent the whole
+  budget. I did not file it; it is for the floor lane to judge.
+
 ### Cycle 1 change (proposed in cycle 6 from `dogfood-repl-opus-12`, message `276dd9433eb3`, issue `7bae492de6db`): coverage for `my.plan/current`
 
 ```clojure
