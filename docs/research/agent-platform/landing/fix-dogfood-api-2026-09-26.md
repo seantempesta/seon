@@ -1,8 +1,8 @@
 ---
 type: landing
-lane: fix-dogfood-api-opus
+lane: fix-dogfood-api-opus, resumed by fix-dogfood-api-opus-2
 created: 2026-09-26
-status: 16 commits landed; breaks slice held on a schema grant; reach executor (2) awaiting ruling
+status: 18 commits landed; root merge entrances committed (5f53079fc), unadopted; reach executor (2) awaiting ruling
 ---
 # fix-dogfood-api: the agent-facing my.* API on the dogfood path
 
@@ -32,6 +32,100 @@ status: 16 commits landed; breaks slice held on a schema grant; reach executor (
   (`a-renderer-refusal-renders-through-the-same-renderer-until-the-depth-bound.md`); seqs print as
   `#object[...KeySeq]`; the hosted agent stays `agent-already-running` after a JVM replacement interrupts
   a run (branch had to be retired).
+
+## Resumed by fix-dogfood-api-opus-2 (2026-09-26 ~14:40Z)
+
+### Broken or unverified first
+- **Default died of OutOfMemoryError at ~14:25Z** (`data/clusters/default/logs/seon.log` ends: "Testing
+  seon.cluster.registry-test … java.lang.OutOfMemoryError: Java heap space"), while a test request was
+  running in it. Seconds before, this lane's SCI probe `(defn ctx-keys … {:malli/schema [:=> [:cat [:map
+  [:my.program/context :my.program/context]]] …]} …)` on branch `fdao2-probe` timed out at 30 s: its
+  auto-check generates `:my.program/context` values (SCI contexts, connections). Whether it contributed is
+  unproven; a contracted function whose input is a context should not be generated at all (the declared
+  default supplies it). Root restarted default (pid 7000, 14:29Z). Filed here, not yet as an issue.
+- **Nothing below ran through the new entrances on default**: default runs archive 5bed888d0, older than
+  5f53079fc. Proven at the REPL instead (JVM mode, scratch ns `fdao2.scratch`, read-only, the entrances'
+  bodies on real data); validated real values against the new schemas; contracts compile.
+- **Unverified member supply**: root's SCI context must carry `:seon.store/store` and
+  `:seon.agent/routing` (read by `my.program/supplied-context` from the environment); `prepare-merge!`
+  needs both (`:seon.agent/context-source`). If root's first `prepare-merge!` refuses on either, that is
+  the supply gap to fix in `supplied-context`.
+- **Task 2 is live-verified as already fixed by 266b52353** (probe branch, five forms: `doc` summary,
+  `breaks` plan with its issue, the `ns-unmap` refusal on its own form, `(fc 1)` → `2`). Still open from
+  that issue: the refusal is **stored as a core fault** (branch-errors signature `6e0c6d4e…`,
+  `seon.db/transact!`) and its text carries "Contract finding: seon.db/transact! returned this error, and
+  none of its declared error alternatives matches it." Model fix, not landed: the run's working value in
+  `evaluate-sources` already settles each form's row (`with-settled`) and silently drops a refusal; decide
+  there instead — a row `settled-value` refuses becomes that form's refusal through
+  `sci.eval/refuse-install` and never reaches `settle-batch!`, so settlement is never refused by a
+  declaration and `settle-batch-refusal!`'s ordinal search (`refused` reduce, `own?` cases) is deleted.
+  Needs `refuse-install`'s input contract (sci/eval.clj:4543, hunks via root) widened from
+  `:seon.test.accretion/install-refused-error` to also admit the writer's refusal.
+- **Custody from root's row vs. cluster name**: `my.issue`'s home and `message/send!` conjure another
+  branch's connection (`db/branch-connection`), which the 2026-09-26 law "Authority comes only from held
+  custody" forbids. Not this lane's files.
+- The 60 KB rendering of an ordinary JVM-mode refusal (`seon.db/db refused connection … got nil`) is ugly
+  output (every explanation nested into requery forms).
+
+### What landed
+| Commit | What | ± |
+|---|---|---|
+| 5f53079fc | `my.program/proposals`, `prepare-merge!`, `accept-merge!`, `write-back!`; `seon.cluster.source/prepare-merge!` selection arity; `:my.program/{proposal,merge-proposal,accept-request,held-branch,custody-refused-error}`; propose-merge! content is a sentence | src+schema +159/−13, tests +25/−2 |
+| 78f9d9802 | `evaluation-facts`: an `:error` outcome settles its shown refusal as the receipt's error (root's unapplied `tmp/turn-evaluation-facts-refusal-error.patch`, judged sound: one rule over the record's outcome, not an install case) | +6 |
+
+Over the ~100-line guide with no deletions: about half is docstrings and contracts (prepare-merge!'s
+output schema is inlined twice because `seon.source.edn` is not this lane's). The smaller alternative:
+drop `proposals` (root reads `my.message/inbox` and the sender's row by hand) and the selection arity
+(−45); both were asked for.
+
+Authority: `accept-merge!` and `write-back!` refuse unless the context's connection holds
+`(seon.cluster.branch/cluster-branch (:seon.cluster/name context))`; a branch agent gets
+`:my.program/custody-refused-error` naming `:my.program/context` and the branch it holds.
+`prepare-merge!` is not guarded: it prepares onto the head the caller holds, within its own custody.
+Pending proposals = messages whose proposing branch is still linked in the roster; `:seon.turn/handled`
+cannot say it, since root's wake turn marked 276dd9433eb3 handled without merging it.
+Selection design: refusal, not automatic closure — a selected declaration reaching an unselected change
+refuses naming the reachers and the unselected changes, so root sees exactly what merges.
+
+### REPL evidence (default pid 7000, archive 5bed888d0, JVM mode, scratch ns)
+- proposals query + roster filter on the live db: 0.74 ms →
+  `[{:seon.message/id "276dd9433eb3", :seon.issue/id "7bae492de6db", :seon.store/branch :dogfood-repl-opus-12, :seon.agent/id "mcp/dogfood-repl-opus-12"}]`.
+- three-way on `:dogfood-repl-opus-12` against the head: 691 ms; delta exactly
+  `#{[:seon.test/sym my.plan-test/current-refuses-an-unknown-agent-by-name]}`, no conflict; its reach with
+  that selection `#{}` (0.08 ms).
+- probe branch (`fc` calls `fh`): delta `#{fc fh}`; selection `#{fc}` → reach `#{fc}` (refuses, 269 ms
+  cold); `#{fh}` → `#{}` (7 ms); `#{absent/x}` → not a change (refuses).
+- `seon.contracts-compile-test/check` over the five touched files against the checkout projection: 0
+  findings, 518 ms (it first caught an unregistered error member, fixed with `:my.program/held-branch`).
+  `valid-candidate-value?` true for a real proposal, a custody refusal, a selection refusal and a
+  merge proposal.
+
+### Root types, at its own REPL (MCP `eval_clj` mode `sci`, no branch), after adopting 5f53079fc
+```clojure
+(my.program/proposals)
+(def proposal (my.program/prepare-merge! {:seon.store/branch :dogfood-repl-opus-12 :seon.issue/id "7bae492de6db"}))
+(select-keys proposal [:seon.test/passed? :seon.source/tally :seon.test.run/id])
+(def accepted (my.program/accept-merge! proposal))
+(my.program/write-back! {:seon.source/accepted accepted :seon.fn/root "/Users/sean/src/seon"})
+```
+Then unlink the proposing branch with the MCP `branch` tool (`retire dogfood-repl-opus-12`); a REPL
+entrance for retiring a hosted branch does not exist yet. To merge only part of a branch, add
+`:seon.program/identities #{[:seon.test/sym my.plan-test/current-refuses-an-unknown-agent-by-name]}` to
+the `prepare-merge!` map. Expected risks: `accept-merge!` refuses if the merged test names a task the
+cluster has not admitted (`seon.issue/candidate-dangling`; issue 7bae492de6db was authored on the
+branch); write-back refuses `:file-changed` if `test/my/plan_test.clj` differs from the analyzed bytes.
+
+### Root runs (this resumption)
+```
+bin/test-check default --test seon.cluster.host-test/root-reads-a-branch-agents-proposal-and-only-roots-custody-accepts
+bin/test-check default --test seon.cluster.host-test/a-refused-install-is-its-receipts-error
+bin/test-check default --test seon.cluster.write-back-test/an-agent-addition-merges-and-writes-back-both-declarations
+bin/test-check default --ns seon.cluster.merge-test
+bin/test-check default --ns seon.cluster.source-test
+bin/test-check default --test seon.contracts-compile-test/every-declared-contract-compiles-against-the-packaged-projection
+bin/test-check default --test seon.schema.edn-test/every-packaged-schema-resource-reads-as-edn
+```
+Branch `fdao2-probe` retired.
 
 ## Before (MCP SCI, branch of default, exact shown text)
 
