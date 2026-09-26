@@ -133,6 +133,13 @@ Astra reviews the diff, then root batches ONE restart. No restart to find out wh
    slow paths first; Astra audits each plan; execute slow-first slices ≤3 lanes at a time. Target: 92.8k → 10k lines.
 4. **Then:** dogfood merge loop end to end (branch → defn → task → proof → propose → root merge); cache slice 2 (db.clj caches);
    apply the 44 subject-mark patches; verify and close ~30 fixed tasks; stale-kondo-dependency task 547fc42c47a5.
+**Astra audit of today's landings (afb449f0c) — queued correctness, after the diagnosis:** F1 batched report advances the acquired
+program (one-commit lane, now); F2 parent-head red is a test artifact, not custody (one-commit lane fixes the test + auto-check nil
+explanation); F7 first-write preflight erases unexpected ExceptionInfo (one-commit); F10 boot shortcut identity (perf-boot); F3 zero-weight
+contract projections in seon.cache (schema/cache owner); F4 Malli fast path vs registry alias to :ref (malli fork); F5 effective applies the
+JVM's config vocabulary to every retained branch (config owner); F6/F9 reply timing semantics + reload-keyed reply-bounds cache (repl owner).
+**Owner 2026-09-27 ~00:10Z: "understand wtf is going on" before small fixes** — astra-eval-trace (every ms of (inc 1) and a defn),
+eval-regression-history-opus (when evals were fast), defn-scan (why a defn changes the projection identity), derive-once design.
 **Research running:** web-research-opus (Datahike/konserve commit latency, clojure-lsp/kondo incremental analysis, Clerk/Clay/nREPL
 eval pipelines, Malli instrumentation cost, Caffeine weighers); astra-review-eval-audit; astra-audit-today.
 
