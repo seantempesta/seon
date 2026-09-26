@@ -5,12 +5,12 @@
 ;; holds the run (under A it equals :ms; under B it is when durability lands,
 ;; i.e. what A would have answered at on the same JVM).
 (let [cluster "default"
-      branch :one-commit-a
+      branch (deref (resolve 'user/oc-branch))
       instance (get @@(requiring-resolve 'seon.operator.runtime/running-instances) cluster)
       handle (:seon.turn.loop/cluster instance)
       host ((requiring-resolve 'seon.cluster.host/host!)
             {:seon.turn.loop/cluster (assoc handle :seon.store/store (:seon.store/store instance))
-             :seon.agent/branch branch :seon.agent/id "mcp/one-commit-a" :seon.ns/name 'user})
+             :seon.agent/branch branch :seon.agent/id (str "mcp/" (name branch)) :seon.ns/name 'user})
       custody (select-keys host [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
       conn (:seon.db/connection (:seon.turn.loop/cluster custody))
       run! (requiring-resolve 'seon.cluster.agent/evaluate-source!)
