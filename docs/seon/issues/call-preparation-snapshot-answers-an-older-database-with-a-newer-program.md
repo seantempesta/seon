@@ -57,3 +57,31 @@ call) must be proven within 20% before landing. Consumer conversion sits outside
 `sci/eval.clj:293`, and the reuse of `:seon.call-preparation/state` as `:seon.render/cache`'s type
 in `seon.render.edn:1,44,51`. The regression is the reproduction above, asserting the older
 value's own snapshot and the branch's own supplier.
+
+## Evidence 2026-09-26: the hook supplies the connection's head, not the evaluation's value
+
+This was observed live by design lane design-repl-entry-renders
+(`docs/research/agent-platform/repl-entry-renders-design-2026-09-26.md` §0 D7 and §2.3), on
+archive 052552039, from a JVM scratch namespace. The test forked a branch agent's held context
+with `seon.sci.eval/fork-for-turn`, removed `:seon.db/connection` from both the fork's
+`::custody` and its environment, and ran `seon.turn/evaluate-sources` with an explicit `:seon.db/db`:
+
+```
+(seon.db/q '[:find (count ?n) . :where [?n :my.note/id]])   ;=> 3   (explicit read works)
+(my.agent/identity {})  ;=> my.agent/identity refused request at [:seon.db/db]: … missing :seon.db/db
+                        ;   … refused request at [:seon.agent/id]: … missing :seon.agent/id
+```
+
+`hook` (`src/seon/call_preparation.clj:1201-1205`) derives `database` only from
+`(:seon.db/connection environment)`, as `(db/db connection)`. It never reads the scoped
+environment's `:seon.db/db`, which `evaluate` sets from the request (`sci/eval.clj:3977`). So:
+
+1. With a connection present, a call is prepared and supplied against the connection's **current
+   head**, not the value the evaluation holds. That is the same wrong-value class as above, now
+   from the live hook.
+2. With no connection (a read-only fork), nothing is supplied, not even `:seon.agent/id` from the
+   turn layer.
+
+A read-only render or preview therefore needs the fix here: supply `:seon.db/db` from the
+environment's turn-layer value, with the connection only where a callee declares
+`:seon.db/connection`.
