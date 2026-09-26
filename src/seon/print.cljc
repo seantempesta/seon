@@ -16,33 +16,6 @@
             *print-length* nil *print-level* nil *print-meta* false]
     (pr-str value)))
 
-(defprotocol Sink
-  "RETAINED ONLY as the measured subject of
-  `seon.instrument-test/restoring-instrumentation-state-never-reinstalls-a-replaced-definition`
-  (`test/seon/instrument_test.clj:1404`). Emission uses no sink: delete this
-  protocol, `text-sink`, `sink?` and `:seon.print/sink` with that assertion."
-  (-options [sink] "The print options the sink was made with."))
-
-(deftype ^:private TextSink [options]
-  Sink
-  (-options [_] options))
-
-(defn sink?
-  "True when a value satisfies the retained sink protocol."
-  {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
-  [value]
-  (satisfies? Sink value))
-
-(defn text-sink
-  "The retained sink over explicit print options."
-  {:malli/schema [:=> [:cat :seon.print/options] :seon.print/sink]}
-  [options]
-  (TextSink. options))
-
-(def sink-generator
-  "A concrete sink for opaque sink-schema generation."
-  (gen/fmap (fn [_] (text-sink {})) (gen/return nil)))
-
 (defn print-number?
   "True for a number with a stock Clojure printed form."
   {:malli/schema [:=> [:cat [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A total predicate accepts arbitrary objects, including nil, and returns false when they do not satisfy its declared shape.", :gen/elements [nil false 0 "" :k [] {}]}]] :boolean]}
@@ -423,17 +396,39 @@
 
 (declare flat-text)
 
+(def ^:private valued-kinds
+  #{::nil ::boolean ::number ::keyword ::symbol ::char ::string ::inst ::uuid})
+
+(defn- node-order
+  "Canonical order of two child nodes: nodes carrying a scalar value in
+  `compare-values` order (the order the value walk selects by), then every
+  other node by its flat text."
+  [left right]
+  (let [left-value? (contains? valued-kinds (::face left))
+        right-value? (contains? valued-kinds (::face right))]
+    (cond
+      ;; `compare-values`'s own scalar order, without an armed call per pair:
+      ;; its category is the value's type, then `compare` within it.
+      (and left-value? right-value?)
+      (let [category #(let [value (::value %)] (if (nil? value) "nil" (str (type value))))]
+        (compare [(category left) (::value left)] [(category right) (::value right)]))
+      left-value? -1
+      right-value? 1
+      :else (compare (flat-text left) (flat-text right)))))
+
 (defn- ordered-children
-  "A node's children in canonical order: map keys and unordered set members
-  by their flat text, elisions last."
+  "A node's children in canonical order, elisions last: map entries by key,
+  unordered set members by themselves (`node-order`)."
   [node]
-  (case (::face node)
-    (::map ::record)
-    (sort-by #(if (vector? %) [0 (flat-text (first %))] [1 ""]) (::entries node))
-    ::set (if (::ordered? node)
-            (::items node)
-            (sort-by #(if (= ::elided (::face %)) [1 ""] [0 (flat-text %)]) (::items node)))
-    (::items node)))
+  (let [ordered (fn [elided? key-of children]
+                  (let [{cuts true members false} (group-by elided? children)]
+                    (into (vec (sort-by key-of node-order members)) cuts)))]
+    (case (::face node)
+      (::map ::record) (ordered (complement vector?) first (::entries node))
+      ::set (if (::ordered? node)
+              (::items node)
+              (ordered #(= ::elided (::face %)) identity (::items node)))
+      (::items node))))
 
 (defn- summary
   [node path]
@@ -450,8 +445,20 @@
         shown (if (and length (< length (count children))) (into [] (take length) children) children)
         cut? (< (count shown) (count children))
         map-like? (contains? #{::map ::record} (::face node))
+        ;; A cut among map entries is read back as an entry: it takes the
+        ;; first `:seon.print/elision[-n]` key no shown entry already uses.
+        shown (if map-like?
+                (let [used (into #{} (keep #(when (vector? %) (::value (first %)))) shown)
+                      free (remove used (map #(keyword "seon.print" (str "elision" (when (pos? %) (str "-" %))))
+                                             (range)))]
+                  (first (reduce (fn [[entries free] entry]
+                                   (if (vector? entry)
+                                     [(conj entries entry) free]
+                                     [(conj entries [{::face ::keyword ::value (first free)} entry]) (rest free)]))
+                                 [[] free] shown)))
+                shown)
         lifted (when (and (= ::map (::face node)) (::namespace-maps? options))
-                 (same-key-namespace (filterv vector? shown)))
+                 (same-key-namespace shown))
         shown (if lifted (mapv #(if (vector? %) (update % 0 unqualified-key-node) %) shown) shown)
         open (case (::face node)
                ::vector "[" ::list "(" ::set "#{"
@@ -923,18 +930,8 @@
 (defn- fit-node
   [node profile depth path child-limit string-limit]
   (let [node (case (::face node)
-               (::map ::record)
-               (update node ::entries
-                       #(vec (sort-by (fn [entry]
-                                        (if (vector? entry)
-                                          [0 (emit-text (first entry) generated-item-options)]
-                                          [1 ""])) %)))
-               ::set
-               (if (::ordered? node) node
-                 (update node ::items
-                       #(vec (sort-by (fn [item]
-                                        (if (= ::elided (::face item))
-                                          [1 ""] [0 (emit-text item generated-item-options)])) %))))
+               (::map ::record) (assoc node ::entries (ordered-children node))
+               ::set (assoc node ::items (vec (ordered-children node)))
                node)
         face (::face node)
         path (or (:seon.render.data/path node) path)]
@@ -960,10 +957,29 @@
         (update node ::value fit-node profile (inc depth)
                 (conj path ::throwable) child-limit string-limit)
 
-        (::string ::truncated-string ::projected)
+        ::projected
+        (if (= :seon.render/ai (:seon.render/output node))
+          (fit-text node (assoc profile ::bound-by ::rendered-token-ceiling)
+                    path (::rendered-chars profile))
+          (fit-text node profile path string-limit))
+
+        (::string ::truncated-string)
         (fit-text node profile path string-limit)
 
         node))))
+
+(defn- rendered-text-chars
+  "Characters of declared AI renderer text in a node tree: the text the raw
+  budget does not pay for."
+  [node]
+  (loop [pending [node] chars 0]
+    (if-some [current (peek pending)]
+      (recur (into (pop pending) (child-nodes current))
+             (cond-> chars
+               (and (= ::projected (::face current))
+                    (= :seon.render/ai (:seon.render/output current)))
+               (+ (count (projected-text current)))))
+      chars)))
 
 (defn fit
   "Fit one admitted node to one declared presentation profile.
@@ -973,6 +989,11 @@
   HTML is not bounded; the AI projection is bounded HERE, by the render profile the request
   carried. A caller that is not generating AI context does not call this —
   a request with no presentation decision must not make one.
+
+  THE BUDGET IS CHOSEN BY PROVENANCE (owner 2026-09-26). Raw values spend
+  the profile's token budget, children and depth. Text a declared AI render
+  function produced is not charged to that budget and is never halved: it is
+  cut only beyond `:seon.print/rendered-token-ceiling`.
 
   Token size is measured only through `seon.ai.tokens/estimate`. Structural
   cuts remain ordinary elision nodes carrying their count, path and requery
@@ -995,7 +1016,15 @@
         initial-children (:seon.render.profile/max-children profile)
         initial-depth (:seon.render.profile/max-depth profile)
         ;; Measured on the text the caller will save: the same width and cuts.
-        options (assoc options ::length nil ::level nil)
+        options (assoc (effective-options options) ::length nil ::level nil)
+        ;; Chosen at entry by provenance: renderer text is bounded only by
+        ;; the ceiling and is not charged to the raw value's budget.
+        profile (assoc profile ::rendered-chars
+                       (tokens/estimate-chars (::rendered-token-ceiling options)))
+        raw-tokens (fn [candidate]
+                     (tokens/estimate-of-characters
+                      (max 0 (- (count (emit-text candidate options))
+                                (rendered-text-chars candidate)))))
         initial-strings (or (:seon.render.profile/max-string-length profile)
                             (tokens/estimate-chars budget))]
     (loop [child-limit initial-children
@@ -1011,7 +1040,7 @@
                                                     :seon.render.profile/token-budget))
                                 0 [] child-limit string-limit)]
         (cond
-          (<= (tokens/estimate (emit-text candidate options)) budget)
+          (<= (raw-tokens candidate) budget)
           candidate
 
           ;; BREADTH AND TEXT DEGRADE TOGETHER. Spending one dimension to its
@@ -1036,7 +1065,6 @@
 
           :else candidate))))))
 
-(schema/register-core-predicate! 'seon.print/sink? sink?)
 (schema/register-core-predicate! 'seon.print/node? node?)
 (schema/register-core-predicate! 'seon.print/node-child? node-child?)
 (schema/register-core-predicate! 'seon.print/print-number? print-number?)

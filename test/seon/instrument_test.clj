@@ -1401,8 +1401,6 @@
                  "the restore reports the Vars it left to the loader")
              (is (emits-a-value-its-own-protocol-accepts?)
                  "the replaced definition is left as the loader left it")
-             (is (print/sink? (print/text-sink {:seon.print/width 72}))
-                 "the class this regression exists for, at its measured Var")
              (is (contains? (instrument/instrumented) #'db/transact!)
                  "every unreplaced root round-trips through the restore")
              (is (= (dec entering) (count (instrument/instrumented)))

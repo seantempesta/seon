@@ -103,7 +103,7 @@
     (m/schema :seon.print/node {:registry registry})))
 
 (defn- lexical-hiccup-text
-  "Text tokens in a hiccup sink result, excluding structural chrome."
+  "Text tokens in an emitted hiccup result, excluding structural chrome."
   [hiccup]
   (cond
     (string? hiccup) hiccup
@@ -293,7 +293,7 @@
   absent face is not one — under the armed contracts every cluster runs
   under (and the gate now runs under) that call is refused before the
   emitter is reached. The floor being asserted here is the emitter's own:
-  whatever face arrives, both sinks answer with the same flat diagnostic
+  whatever kind arrives, text and hiccup answer with the same flat diagnostic
   rather than a second exception."
   [node options]
   (let [ops (#'print/node-ops node options)]
@@ -539,6 +539,45 @@
     (is (str/starts-with? text "#error "))
     (is (= (Throwable->map failure)
            (edn/read-string {:readers {'error identity}} text)))))
+
+(deftest the-budget-is-chosen-by-provenance
+  ;; Owner 2026-09-26: text a declared AI render function produced is its
+  ;; deliberate first bound, laid out whole under the ceiling; raw values
+  ;; keep the profile's token budget.
+  (let [rendered (apply str (repeat 2000 "w"))
+        node {:seon.print/face :seon.print/map
+              :seon.print/entries
+              [[{:seon.print/face :seon.print/keyword :seon.print/value :a/rendered}
+                {:seon.print/face :seon.print/projected :seon.render/output :seon.render/ai
+                 :seon.print/value rendered}]
+               [{:seon.print/face :seon.print/keyword :seon.print/value :b/raw}
+                {:seon.print/face :seon.print/string :seon.print/value (apply str (repeat 2000 "r"))}]]}
+        profile (assoc (render/agent-render-profile (test-support/effective-config))
+                       :seon.render.profile/token-budget 50)
+        fitted (print/fit node profile (print/default-options))
+        [[_ kept] raw] (:seon.print/entries fitted)
+        ceiling (print/fit node profile (assoc (print/default-options)
+                                               :seon.print/rendered-token-ceiling 10))]
+    (is (= rendered (:seon.print/value kept)) "renderer text is not charged to the raw budget")
+    (is (not= 2000 (count (get-in raw [1 :seon.print/value] "")))
+        "the raw string is cut to the profile's budget")
+    (is (= :seon.print/rendered-token-ceiling
+           (get-in ceiling [:seon.print/entries 0 1 :seon.print/bound-by]))
+        "beyond the ceiling renderer text is cut, naming the ceiling")))
+
+(deftest a-cut-among-map-entries-reads-back-as-an-entry
+  (let [node {:seon.print/face :seon.print/map
+              :seon.print/entries
+              [[{:seon.print/face :seon.print/keyword :seon.print/value :seon.print/elision}
+                {:seon.print/face :seon.print/number :seon.print/value 1}]
+               (print/elision {:seon.print/omitted 3 :seon.print/elision-unit :children
+                               :seon.render.data/path [] :seon.render.data/next-offset 1
+                               :seon.print/requery-refusal "fixture"})]}]
+    (doseq [width [0 20 72]]
+      (let [shown (edn/read-string (print/emit-text node (assoc no-cuts :seon.print/width width)))]
+        (is (= 1 (:seon.print/elision shown)) "a real key keeps its entry")
+        (is (= 3 (get-in shown [:seon.print/elision-1 :seon.print/omitted]))
+            "the cut takes the first free elision key")))))
 
 (deftest whole-value-elision-preserves-count-and-requery
   (let [text (apply str (repeat 512 "z"))

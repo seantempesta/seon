@@ -278,6 +278,9 @@
                         :gen/elements [nil 0 1 8 32]}
                :seon.print/level]]
               [:seon.print/width {:optional true} :seon.print/width]
+              [:seon.print/rendered-token-ceiling
+               {:optional true}
+               :seon.print/rendered-token-ceiling]
               [:seon.print/namespace-maps?
                {:optional true}
                :seon.print/namespace-maps?]
@@ -380,11 +383,6 @@
                [:seon.print/prefix {:optional true} :string]
                [:seon.print/requery-refusal
                 :seon.print/requery-refusal]]],
-             :sink
-             [:fn
-              {:error/message "must satisfy seon.print/Sink"
-               :gen/gen seon.print/sink-generator}
-              seon.print/sink?],
              :table?
              [:enum
               #:seon.print{:default :derived}
@@ -392,4 +390,10 @@
               true
               false],
              :width [:int {:min 0, :seon.print/default 72}],
+             ;; THE BUDGET IS CHOSEN BY PROVENANCE (owner 2026-09-26). Text a
+             ;; declared AI render function produced is its deliberate first
+             ;; bound: the floor lays it out whole and cuts it only beyond this
+             ;; ceiling. Raw values keep the profile's token budget, length and
+             ;; level. Unit: estimated tokens (`seon.ai.tokens/estimate`).
+             :rendered-token-ceiling [:int {:min 1, :seon.print/default 50000}],
              :unknown-kind [:maybe :keyword]}
