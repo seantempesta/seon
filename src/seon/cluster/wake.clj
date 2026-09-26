@@ -66,6 +66,7 @@
   (:require [seon.error.refusal]
             [clojure.core.async :as async]
             [datahike.api :as d]
+            [datahike.db.interface :as dbi]
             [datahike.db.utils :as db.utils]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -205,11 +206,11 @@
   {:malli/schema [:=> [:cat :seon.db/database-value]
                   :seon.cluster.wake/attributes]}
   [database]
-  (let [schema (d/schema database)]
-    (into #{}
-          (remove (fn [attribute]
-                    (true? (:db/index (get schema attribute)))))
-          (wake-attributes database))))
+  ;; Datahike's reverse schema holds the indexed attributes as a set
+  ;; (`dbi/-attrs-by`, reference-code/datahike/src/datahike/db.cljc:338);
+  ;; `d/schema` rebuilt the whole schema map, ~50 MB per call on default.
+  (let [indexed (or (dbi/-attrs-by database :db/index) #{})]
+    (into #{} (remove indexed) (wake-attributes database))))
 
 (defn declarations-refusal
   "The refusal that says the wake declarations cannot carry a cluster, or nil.

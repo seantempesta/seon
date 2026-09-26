@@ -99,31 +99,41 @@
   [root]
   (.getCanonicalPath (io/file (or root project-root))))
 
-(defn- discovery-rows
+(defn- advertised-rows
+  "Each live advertisement under `root`, unprobed. An evaluation's endpoint
+  needs only the advertised prepl; asking the JVM for health on every call cost
+  a whole runtime observation (~180 ms, ~585 MB allocated on default,
+  perf-profile 2026-09-26), and every advertised state was eligible anyway."
   [root]
   (require 'seon.operator)
-  (let [root (canonical-root root)
-        advertisements ((ns-resolve 'seon.operator 'advertisements) root)]
+  (let [root (canonical-root root)]
     (mapv
      (fn [advertisement]
-       (let [cluster (:seon.boot/cluster-name advertisement)
-             ;; Discovery needs only health; the whole observation stays in the JVM.
-             health
-             (try
-               ((ns-resolve 'seon.operator 'prepl-value!) advertisement
-                (pr-str `(do
-                           (~'seon.cluster/project-next-prepl-value!
-                            {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
-                           (:seon.dev.mcp/health
-                            (~'seon.cluster/mcp-runtime-observation ~cluster)))))
-               (catch Exception _ nil))]
+       (let [cluster (:seon.boot/cluster-name advertisement)]
          {:seon.dev.mcp/root root :seon.dev.mcp/cluster cluster
           :seon.dev.mcp/path (str (io/file root "data/clusters" cluster "prepl.edn"))
-          :seon.dev.mcp/state (if health
-                               (if (#{:observed :faulted} health) :alive :degraded)
-                               :unknown)
+          :seon.dev.mcp/state :advertised
           :seon.dev.mcp/advertisement advertisement :seon.dev.mcp/source :advertisement}))
-     advertisements)))
+     ((ns-resolve 'seon.operator 'advertisements) root))))
+
+(defn- discovery-rows
+  [root]
+  (mapv
+   (fn [{cluster :seon.dev.mcp/cluster advertisement :seon.dev.mcp/advertisement :as row}]
+     (let [;; Discovery needs only health; the whole observation stays in the JVM.
+           health
+           (try
+             ((ns-resolve 'seon.operator 'prepl-value!) advertisement
+              (pr-str `(do
+                         (~'seon.cluster/project-next-prepl-value!
+                          {:seon.dev.mcp/read-only? true :seon.dev.mcp/project? false})
+                         (:seon.dev.mcp/health
+                          (~'seon.cluster/mcp-runtime-observation ~cluster)))))
+             (catch Exception _ nil))]
+       (assoc row :seon.dev.mcp/state (if health
+                                        (if (#{:observed :faulted} health) :alive :degraded)
+                                        :unknown))))
+   (advertised-rows root)))
 
 (defn- start-remedy
   [root cluster]
@@ -155,11 +165,8 @@
                     {:seon.dev.mcp/failure :invalid-cluster
                      :seon.dev.mcp/cluster cluster})))
   (let [root (canonical-root root)
-        rows (discovery-rows root)
-        candidates (filterv #(and (= cluster (:seon.dev.mcp/cluster %))
-                                  (contains? #{:alive :degraded :unknown}
-                                             (:seon.dev.mcp/state %)))
-                            rows)]
+        rows (advertised-rows root)
+        candidates (filterv #(= cluster (:seon.dev.mcp/cluster %)) rows)]
     (case (count candidates)
       1 (let [{state :seon.dev.mcp/state
                source :seon.dev.mcp/source
