@@ -163,6 +163,10 @@ Private experiments remain possible; local green never implies shared acceptance
 
 ## Laws for data and contracts
 
+- **Authority comes only from held custody** (owner 2026-09-26). Agent code, render entries and tests obtain a
+  connection or capability only as the custody their caller already holds: no function conjures another branch's
+  connection, the process connection, or an effect handler outside admission. Every program function is callable, with
+  authority only from its custody. Renders evaluate on a throwaway fork (no connection, the run's working value).
 - **Pass the world explicitly.** Carry database/connection, projection, environment,
   render profile, proc and settlement inputs, including profiling/test ownership.
   Custody elides agent db/conn only; it does not authorize more ambient services.
