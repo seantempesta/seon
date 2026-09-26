@@ -40,11 +40,15 @@
                                                                      flow/flow-workload-attributes)})
                              flow/stop-work-launcher!)]
          (let [handle (support/cluster-handle
+                       (merge
                        {:seon.env/environment environment :seon.db/connection connection
                         :seon.cluster/name cluster-name :seon.sci.eval/ctx ctx
                         :seon.flow/work-launcher @launcher :seon.store/store store
                         :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))
-                        :seon.db.process/id cluster/boot-process-identity})
+                        :seon.db.process/id cluster/boot-process-identity}
+                       ;; A host inherits its cluster handle's dials; the manifest's
+                       ;; evaluation bound reaches the hosted agent through it.
+                       (select-keys manifest [:seon.config.eval/time-limit-ms])))
                branch! (fn []
                          (let [branch (keyword (str "host-test-" (id/id)))]
                            (registry/branch! {:seon.store/store store :seon.store/branch branch
@@ -155,9 +159,12 @@
                                  [?run :seon.turn/agent ?agent] [?run :seon.turn/closed-tx _]]
                                %)]
         (is (= ["1"] (hosted-run! hosted "1")) "the first run arms the agent through the host's armer")
+        ;; A test member's world holds no agents but the ones it creates, so the
+        ;; sender is created on the branch too.
+        (as-host hosted #(support/transacted! connection (support/agent-tx @connection "listener-sender")))
         (let [before (or (closed-runs @connection) 0)
-              sent (db/call-with-custody {:seon.db/connection connection}
-                     #(message/send! {:my.message/to "mcp/listener" :my.message/content "hello"} connection "root"))]
+              sent (as-host hosted
+                     #(message/send! {:my.message/to "mcp/listener" :my.message/content "hello"} connection "listener-sender"))]
           (is (:seon.message/id sent) (str (:seon.error/message sent) " " (vec (sort (keys sent)))))
           (support/await-event! connection ::message-answered
                                 (fn [_] (< before (or (closed-runs @connection) 0))))
