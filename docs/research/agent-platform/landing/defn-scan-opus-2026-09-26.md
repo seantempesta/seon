@@ -139,3 +139,109 @@ In `tmp/defn-scan-opus/`:
 - `test-digest-before.txt`.
 
 Branch `defn-scan-opus` is retired, and the scratch namespaces were removed from default.
+
+## Follow-up (root's second and third asks): why a defn changes the projection at all
+
+**Stopped before production edits: the cause is clear, but the fix is a cross-owner decision.** Three priced options
+follow. The working tree carries none of my changes; the prototypes are saved as patches (see the end of this
+section).
+
+### Measured: the contract, not the defn, costs the time
+
+4 defns of each kind on branch `defn-scan-opus-2`, default pid 89341, quiet machine, `sym-counts`. The last three
+columns are armed calls per defn.
+
+| form | p50 | allocated | armed calls | `load-projection` | `content-projection` | `source-family?` |
+|---|---:|---:|---:|---:|---:|---:|
+| `(defn f [x] (inc x))` | **134 ms** | 157 MB | 26,300 | 0 | 0 | 7,100 (2 × `shapes-in`, fixed by 9b6df1ff4) |
+| `(defn f "doc" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))` | **757 ms** | 1.21 GB | 189,900 | 1.75 | 5.75 | 40,800 |
+
+A contract adds about 620 ms, 1.05 GB and 164,000 armed calls per defn.
+
+### (1) Where `:seon.fn/spec` enters the projection
+
+- `schema.clj:3054-3061` `projection-ranges`: `:seon.schema/function-contract-rows [:seon.fn/sym :seon.fn/spec false]`.
+- `projection-attributes` (`schema.clj:3063`) therefore includes `:seon.fn/sym`, `:seon.fn/spec` and
+  `:seon.schema.admission/source`. `seon.db/projection-cache-key` (`db.clj:1303`) and `declaration-content-key`
+  (`db.clj:1328`) are keyed on those attributes.
+- `build-projection` and `projection-with-declarations` compile each contract into the ONE registry
+  (`projection-registry`, schema.clj:524). They index `function-dependencies` and `reverse-function-dependencies`,
+  and fingerprint `:function-contracts` and `:function-admissions`.
+- So a contracted defn produces a new projection value with a fresh, empty `:compiled` holder. That triggers:
+  - `load-projection`, 36-50 ms and ~94 MB per load, 16 ms and 79 MB of it `deleted-predicate-functions`
+    walking every form;
+  - every derivation keyed on the projection. A first call on the new projection cost:
+    `cluster/declared-attributes` 43 ms, `error/observation-selector` 30 ms, `program-attributes` 9.6 ms,
+    `db/write-entity-schemas` 7.2 ms, `db/write-attribute-plans` 5 ms, `call-preparation/contract-arities` 4.5 ms,
+    `identity-only-descriptors` 2.5 ms, `declared-schema-keys` 1.4 ms, `retention-rules` 1.1 ms.
+
+  An uncontracted defn changes none of this: 0 loads were measured.
+
+### (2) What reads function contracts from the projection
+
+The 15 sites outside schema.clj, all 4 slow tables above excluded:
+- test.clj:2154-2155;
+- fn.clj:3264;
+- turn.clj:1350;
+- render.clj:475, 863, 888;
+- instrument.clj:596, 729, 769 (arming);
+- call_preparation.clj:169;
+- sci/eval.clj:943, 2049, 4800;
+- render/web.clj:965.
+
+Inside schema.clj, function contracts appear in about 100 lines: registry, dependencies, fingerprint,
+`validate-declarations`, `function-arities-in` and render-contract assertions.
+
+The one thing that needs contracts *beside* the data shapes is the unbreakable-graph refusal: a schema change that
+breaks a contract referencing it is refused (`reverse-function-dependencies`). Nothing that reads data shapes needs
+the contracts.
+
+### (3) Options
+
+1. **Recommended: contracts leave the projection.**
+   - What changes:
+     - `projection-ranges` drops `:function-contract-rows`, so the projection is the data shapes alone.
+     - A contract compiles on demand against the unchanged projection:
+       `(seon.cache/lookup ::contract [contract-form forms] …)`, using `m/schema` with the projection's registry
+       options. Malli owns the compile; the cache key is the form plus the population identity.
+     - The 15 readers take the contract from the fn row they already hold (`:seon.fn/spec`) or from that cache.
+     - The schema-change refusal compiles only the contracts that the stored `:seon.fn.contract` facts name for the
+       changed keys. That is a rare path, proportional to the change.
+   - Guarantee: a defn leaves the projection identical, so there are 0 loads and 0 table re-derivations. The
+     expected contracted defn is about the plain defn's 134 ms plus the contract's own compile and arming.
+   - Cost: 1-2 days. It crosses the owners of instrument, sci/eval, turn, test, render, fn, call-preparation and db
+     (the projection-attributes key). Net deletion is likely: the function branches of build, replace, fingerprint
+     and validate, about 150-250 lines in schema.clj.
+   - Sacrifice: a projection no longer answers "which functions break if this schema changes"; that becomes one
+     query at schema admission.
+2. **Contracts stay in the projection; data-shape derivations are keyed by the forms they read.**
+   - What changes: `schema/projection-derivation`, which is `projection-cache-value` backed by
+     `seon.cache/lookup [key code-class (members read)]`, and the replacement keeps the identity of the forms map
+     when no form changed. `load-projection` walks only re-read definitions for deleted predicates.
+   - Prototype: `tmp/defn-scan-opus/projection-derivation-mine.patch`, about +60 lines, with the 4 sites I own
+     converted.
+   - Guarantee: a contract-only change reuses every converted table. The load still runs (about 20 ms after the
+     predicate fix), and contract-reading derivations recompute.
+   - Cost: about half a day, plus one-line patches to about 20 derivation sites across 6 owners.
+   - Expected result: roughly 100-200 ms and a few hundred MB off a contracted defn. It does not remove the
+     projection churn.
+   - Sacrifice: each converted site asserts "reads only forms", and a wrong assertion answers stale data.
+3. **Smallest: share the holder on a contract-only replacement.**
+   - What changes: `projection-with-declarations` hands the base's `:compiled` holder to a candidate whose forms,
+     admissions of schemas and predicate bindings are unchanged. The contract-reading entries key on the contract
+     form: `[::function-arities sym]`, output alternatives, declared output validators, `contract-arities`.
+   - Cost: about 2 hours and about 30 lines; patches for call_preparation, render and error.
+   - Guarantee: derivations do not churn. The load and the new projection value remain.
+   - Sacrifice: correctness rests on auditing every holder key. A missed contract-reading entry answers stale
+     contracts silently, so this is the kind of invalidation-by-convention the owner rejected.
+
+### State
+
+- Prototypes, reverted from the tree:
+  - `tmp/defn-scan-opus/projection-derivation-mine.patch`: option 2, plus the `load-projection` deleted-predicate
+    walk over re-read definitions only, which applies to any option;
+  - `tmp/defn-scan-opus/db-program-shapes.patch`, still pending for db.clj.
+- **Foreign hunk in schema.clj.** schema.clj holds an uncommitted hunk that is not mine: `canonical-value-string` as a
+  local `letfn`, presumably perf-boot's. My WIP revert briefly checked the whole file out; I restored that hunk
+  byte-exact from `tmp/defn-scan-opus/projection-derivation-wip.patch`, and it is intact.
+- Branches `defn-scan-opus` and `defn-scan-opus-2` are retired, and the scratch namespaces were removed.
