@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -250,9 +250,43 @@ archive 65bf078ec (the archive's copy of the file has no `replacement-tx`). It c
 | turn-test `a-refused-generated-form-records-its-refusal` :331 | surviving-owner defect, error render pair | The shown text is a render diagnostic: `seon.error/render-undeclared-ai` → `undeclared-alternative-finding` refused its argument (`:seon.fn.arity/input`, expected `:map`), so the refusal's message never shows. Blob 36afb1d2… on default. | src/seon/error.clj (lost-error-seams) |
 | turn-test `a-replaced-result-is-shown-by-the-one-print-owner` :2292 | terminal-refusal half of the print owner | d3ecb9333 fixed the disposition half. The recorded-error half still differs; not probed this round. | pipeline lane (turn.clj) |
 | turn-test recovery / transitions / virtual (duration) | design cost | unchanged from class E above (28.7 s transitions, 17.4 s recovery, 13.6 s virtual) | fast-harness lane |
-| web-debug `outline-origin-survives-the-issues-deletion` :1073 | rule versus fixture: decide | The fixture `retractEntity`s an issue created by `issue/add!`. `seon.db/retention-check` (db.clj:4509) refuses any change of a created issue's authority (`(and (:seon.db/creator prior) changed-authority?)`), even with zero tests and even by its creator, so a created issue can never be deleted. Either the rule is too strict (the creator should delete its own issue) or the test's deletion leg is a retired assumption. | root ruling, then db.clj or the test |
+| web-debug `outline-origin-survives-the-issues-deletion` :1073 | RULED (root): the rule was too strict. Fixed in d421b6e1a, see Round 5. Earlier finding kept for reference: | The fixture `retractEntity`s an issue created by `issue/add!`. `seon.db/retention-check` (db.clj:4509) refuses any change of a created issue's authority (`(and (:seon.db/creator prior) changed-authority?)`), even with zero tests and even by its creator, so a created issue can never be deleted. Either the rule is too strict (the creator should delete its own issue) or the test's deletion leg is a retired assumption. | root ruling, then db.clj or the test |
 | test-runner-test `result-recording-is-total-under-concurrent-test-retraction` | surviving-owner defect | `seon.test.runner/record-tx` throws "Test completion has no surviving test definition" (transaction outcome unknown), where the test requires recording to be total. | src/seon/test/runner.clj |
-| fn-test `declared-function-values…`, `re-index-replaces…`, `the-indexer-emits-no-attribute…` | dependency analysis | "clj-kondo holds no analysis of seon.db / seon.effect" (first-party namespaces absent from the analysis these fixtures read) | root routes (dependency-analysis class) |
+| fn-test `declared-function-values…`, `re-index-replaces…`, `the-indexer-emits-no-attribute…` | dependency analysis | "clj-kondo holds no analysis of seon.db / seon.effect" (first-party namespaces absent from the analysis these fixtures read) | routed to root (dependency-analysis class), acknowledged |
+
+## Round 5 (root ruling: a creator's whole-issue retraction is a deletion)
+
+`d421b6e1a`:
+- `seon.db/retention-check` now takes the set of entities the write left with no datoms. When the writer
+  (tx-meta `:seon.db/user`) is the entity's authority, it admits that entity's key. Every other clause is
+  unchanged, so another writer's deletion or authority change is still refused.
+- Regression: `db-test/an-issue-deletion-by-its-creator-is-not-an-authority-change`. An issue made by
+  `issue/add!` with a real test: another writer's `retractEntity` and its `:seon.issue/created-by` change are
+  both refused on `:seon.issue/tests`; the creator's `retractEntity` commits and the issue is gone.
+- web-debug `outline-origin-…` now deletes its issue with `:seon.db/user` as its creator.
+
+REPL: the edited check, evaluated in a scratch namespace over real snapshots from `d/with` reports on an
+isolated branch:
+
+| Case | Before | After |
+|---|---|---|
+| creator deletes | refused | admitted |
+| other writer deletes | refused | refused |
+| other writer changes authority | refused | refused |
+| creator removes tests from an unstarted issue | admitted | admitted |
+
+Pre-commit static checks (preamble "PRE-COMMIT STATIC CHECKS", REPL form for uncommitted work):
+`seon.contracts-compile-test/check` over db.clj, db_test.clj and web_debug_test.clj found 0 problems in
+258 ms. A malformed probe contract finds 1, so the check is live. Every `resources/seon/schemas/*.edn` reads
+as EDN.
+
+Root runs:
+
+```sh
+bin/test-check default --test seon.db-test/an-issue-deletion-by-its-creator-is-not-an-authority-change
+bin/test-check default --test seon.render.web-debug-test/outline-origin-survives-the-issues-deletion
+bin/test-check default --ns seon.issue-deletion-test
+```
 
 ## Deleted / net lines
 
@@ -268,6 +302,7 @@ archive 65bf078ec (the archive's copy of the file has no `replacement-tx`). It c
 | 374e918b7 | program_test | 20 | 14 |
 | 29abfed1a | test_support, error_test, db_test, web_debug_test | 43 | 25 |
 | 4e703c93a | fn_test | 2 | 3 |
+| d421b6e1a | db.clj, db_test, web_debug_test | 47 | 11 |
 
 Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
