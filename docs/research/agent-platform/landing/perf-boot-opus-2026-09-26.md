@@ -372,3 +372,53 @@ line and `:seon.boot/layers`. The fix for piece 1 is a ruling, not a clear fix, 
 numbers are in. The candidates are an AOT class cache for first-party namespaces keyed by the archive commit (the
 dependency-class cache already works this way), or lazy loading of namespaces no boot layer needs. I made no code
 change in this resume.
+
+## Resume 8 — unchanged restart ranked; start reply bounded (fd3eda0d1); the two reds explained and fixed; RESET NEEDED
+
+**Unchanged `start --head` (21e3a7068, pid 25122): total 11,401 ms, ready 4,090 ms, classes hit.**
+
+| piece | ms | cause |
+|---|---|---|
+| capture | 4,868 | `require seon.cluster`: compiling the first-party program from source in the new JVM (the head read is ~70 ms) |
+| boot to ready | 4,090 | store 414 → branch 747 → config-result 1,822 (+1,062) → ctx 3,477 (+1,655: `arm-host-program!` arming ~2,170 contracts, plus `name-loaded-program!`) → graph 4,075 (+598) |
+| JVM start → callback | ~1,150 | launch 10,107 − capture − ready |
+| down | 707 | stopping the old JVM |
+| adopt | 395 | converged; `refresh-source!` measured 269 ms warm |
+| source | 86 | the archive already existed |
+
+To reach ≤ 10 s, 1.4 s must go. Nothing left is repeated work. The two large pieces are cold compilation (4.9 s) and
+cold arming (~1.7 s). Options, simplest first:
+1. **Compiled-class cache for first-party namespaces, keyed by the archive commit.** It reuses the
+   dependency-class mechanism (`target/dev-dependency-classes`): an unchanged restart loads classes instead of
+   compiling, saving most of the 4.9 s; a changed commit compiles once. Cost: operator/dev-cache work, ~50–80 lines,
+   plus a cache-invalidation rule (commit id).
+2. **Arm lazily.** Arm a namespace's contracts when first called instead of all ~2,170 at boot. That saves ~1–1.5 s
+   but changes arming timing, a correctness surface after today's arming bug.
+3. **Overlap the old JVM's stop with the new JVM's start.** At most ~0.7 s; there is a store-lock handoff risk.
+
+Recommended: 1.
+
+**Start printed ~259–316 KB (fixed at the producer).** `boot/readiness` embedded
+`(problems/problems database {})`: every failed test run with its `:seon.test.failure/reports`, 255 run records in
+start-unchanged. Every start and reset reply carried it across the prepl and the operator printed it. Readiness now
+holds only the boot's own facts; its one reader, `cluster/mcp-runtime-observation`, reads the problems from their
+owner. The `:seon.problems/problems` entry was removed from `:seon.boot/readiness` in `seon.boot.edn`. That is a
+schema file outside my ledger row, but no other row holds it.
+
+**The two reds on 9bbc3568e:**
+- `instrument-test/boot-arming-arms-every-loaded-contract-with-its-definition-digest` passed no `:seon.db/db` to
+  `arm-host-program!`, whose contract requires it. It now passes the fixture database.
+- `program-change-test/a-booted-wrapper-supplies-its-declared-defaults` called `my.program/breaks` as a bare host
+  call. `call-preparation/preparing` supplies defaults only from a calling evaluation's world; a host call with no arm
+  context gets none, by design. The regression now evaluates the call through `sci.eval/evaluate` in the member's
+  context. Live proof on pid 25122 with the cluster ctx: it answers the breakage map, with no error.
+  Question for root: should a host test body's arm name the member's ctx? A host deftest calling a prepared function
+  currently gets no supplied default.
+
+**Root runs:**
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --test seon.instrument-test/boot-arming-arms-every-loaded-contract-with-its-definition-digest`
+- `bin/test-check default --ns seon.cluster.mcp-test`
+- `bin/test-check default --ns seon.cluster.boot-timeline-test`
+- `bin/test-check default --ns seon.fn.caller-lint-test`
+- Time an unchanged `start --head` and check that its stdout is small.
