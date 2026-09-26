@@ -1920,7 +1920,8 @@
         :seon.error/operation 'seon.db/q
         :seon.error/expected [:entity :attribute :value :transaction :added]
         :seon.error/offending offending
-        :seon.error/data {:seon.error/member offending :seon.error/source request}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))))
+        ;; the query form, never the request: its arguments carry the database
+        :seon.error/data {:seon.error/member offending ::query (:query request)}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))))
 
 (defn- query-source-databases
   [query-form arguments]
@@ -2339,7 +2340,10 @@
     :seon.error/layer :database-read
     :seon.error/operation 'seon.db/q
     :seon.error/expected (get query-form :in '[$])
-    :seon.error/offending arguments
+    ;; a database (or any other world) among the arguments is its reference
+    :seon.error/offending (error.refusal/references
+                           (some-> (some #(when (db.utils/db? %) %) arguments) carried-projection)
+                           (vec arguments))
     :seon.error/data (merge {::query query-form} {:seon.error/member :in})}) assoc :seon.error/declared-schema :seon.db/invalid-read-error))
 
 (defn- query-input-position
@@ -4973,7 +4977,7 @@
             (dependency-error
              'seon.db/transact!
              (ex-info "The explicit transaction connection is not live."
-                      {::connection connection}))
+                      {::connection (connection-identity connection)}))
 
             (not (db.utils/db? database)) database
 
