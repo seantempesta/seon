@@ -556,7 +556,9 @@
 (deftest reverse-blocks-do-not-depend-on-the-graph-page
   (support/with-database
    {::support/extra-schema
-    [{:db/ident ::left :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
+    [{:db/ident ::id :db/valueType :db.type/string :db/cardinality :db.cardinality/one
+      :db/unique :db.unique/identity}
+     {:db/ident ::left :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:db/ident ::right :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}
      {:db/ident ::hidden :db/valueType :db.type/ref :db/cardinality :db.cardinality/one}]}
    (fn [connection]
@@ -566,9 +568,11 @@
                                               [:seon.agent/id :seon.agent/id]]]])
      (support/transacted! connection
                           (into (support/agent-tx @connection "relationships")
-                            [{::left [:seon.agent/id "relationships"]}
-                             {::right [:seon.agent/id "relationships"]}
-                             {::hidden [:seon.agent/id "relationships"]}]))
+                            ;; Each relationship entity has an identity: the writer
+                            ;; refuses an identity-less entity with no owner.
+                            [{::id "left" ::left [:seon.agent/id "relationships"]}
+                             {::id "right" ::right [:seon.agent/id "relationships"]}
+                             {::id "hidden" ::hidden [:seon.agent/id "relationships"]}]))
      (let [database @connection
            projection (schema/projection-from-database database)
            result (schema/call-with-projection

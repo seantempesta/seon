@@ -2041,10 +2041,17 @@
         opened (store/open-store! {:seon.store/dir (str root "/store")})]
     (try
       (let [connection (:seon.store/connection-object opened)]
-        (test-support/transacted! connection [{:db/ident :seon.config.eval.result/blob-threshold
+        ;; An identity-less entity must have an owner, so the dial is written
+        ;; under an identity the store also installs.
+        (test-support/transacted! connection [{:db/ident :sample.schemaless/id
+                                               :db/valueType :db.type/string
+                                               :db/cardinality :db.cardinality/one
+                                               :db/unique :db.unique/identity}
+                                              {:db/ident :seon.config.eval.result/blob-threshold
                                                :db/valueType :db.type/long
                                                :db/cardinality :db.cardinality/one}])
-        (test-support/transacted! connection [{:seon.config.eval.result/blob-threshold 4096}])
+        (test-support/transacted! connection [{:sample.schemaless/id "dial"
+                                               :seon.config.eval.result/blob-threshold 4096}])
         (is (= [4096] (d/q '[:find [?v ...] :where [_ :seon.config.eval.result/blob-threshold ?v]]
                            @connection))))
       (finally
