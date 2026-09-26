@@ -145,22 +145,9 @@
   [throwable]
   (filterv first-party-frame? (stack-frames throwable)))
 
-(defn called-frames
-  "`throwable`'s first-party frames inside the host code an interpreted form
-  called, innermost first: its stack up to the first frame of SCI's
-  interpreter (`sci.impl.*`). Every frame past that one is the evaluator
-  that ran the author's form, never the author's; the author's own location
-  is SCI's stacktrace. A throw from the interpreted code itself calls no
-  first-party host code and has none."
-  {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :seon.error/frame]]}
-  [throwable]
-  (into [] (comp (take-while (fn [[class-name]] (not (.startsWith (str class-name) "sci.impl."))))
-                 (filter first-party-frame?))
-        (stack-frames throwable)))
-
 (defn- link
-  [project frames-of ^Throwable throwable relation]
-  (let [frames (frames-of throwable)
+  [project ^Throwable throwable relation]
+  (let [frames (first-party-frames throwable)
         message (ex-message throwable)
         data (ex-data throwable)]
     (cond-> (merge {:seon.error/throwable-class (.getName (class throwable))} relation)
@@ -179,17 +166,13 @@
   link it caused (`:seon.error/cause-of`). A throwable seen once is not linked
   again, so a cause cycle ends at its first repeat. The projection
   recognizes worlds; the one-argument form uses the operation's handed one.
-  `frames-of` selects each link's frames: by default every first-party frame
-  (a core fault's evidence); an agent's own exception passes `called-frames`."
+  Each link keeps every first-party frame: which of them an agent sees is its
+  error schema's render pair's selection."
   {:malli/schema [:function
                   [:=> [:cat :seon.error/throwable] :seon.error/chain]
-                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]
-                  [:=> [:cat :seon.error/throwable [:maybe :map]
-                        [:=> [:cat :seon.error/throwable] [:vector :seon.error/frame]]]
-                   :seon.error/chain]]}
+                  [:=> [:cat :seon.error/throwable [:maybe :map]] :seon.error/chain]]}
   ([throwable] (chain throwable (operation-projection)))
-  ([throwable projection] (chain throwable projection first-party-frames))
-  ([throwable projection frames-of]
+  ([throwable projection]
    (let [project (identity-projector projection)]
      (loop [pending [[throwable nil]] seen #{} links []]
        (if-let [[head relation] (first pending)]
@@ -198,7 +181,7 @@
                links (into links
                            (map-indexed
                             (fn [i t]
-                              (link project frames-of t (when relation
+                              (link project t (when relation
                                                 (if (zero? i) relation
                                                     {:seon.error/cause-of (+ start i -1)})))))
                            own)

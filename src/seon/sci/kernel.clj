@@ -701,11 +701,9 @@
   way `clojure.main` reports it (`ex-triage`/`ex-str`, main.clj:219-300):
   the class and message the author's code threw, never SCI's location
   wrapper; the whole cause chain once, each link's message and `ex-data`
-  (worlds referenced); the author's source location as
-  `:seon.sci.eval/stacktrace` (SCI's own). This producer declares every
-  failure it sees an agent's own exception or refusal, so a link keeps only
-  the frames of first-party host code the form called
-  (`seon.error.refusal/called-frames`), never the evaluator that ran it.
+  (worlds referenced) and first-party frames, kept whole; the author's
+  source location as `:seon.sci.eval/stacktrace` (SCI's own). What an agent
+  is shown is the schema pair's selection (`render-ai`), never a trim here.
   The evaluation's duration, allocation and outcome stay on its record.
   The value is a `:seon.sci.kernel/execution-error`; a fired deadline also
   names its guard observation (`:seon.sci.kernel/error`). An existing
@@ -726,7 +724,7 @@
         ;; The whole cause chain, read once, without SCI's location copies.
         links (error.refusal/without-links
                (mapv without-interrupt-marker
-                     (error.refusal/chain author (schema/handed-projection) error.refusal/called-frames))
+                     (error.refusal/chain author (schema/handed-projection)))
                sci-location?)
         failing-symbol (:sci.impl/symbol (ex-data author))
         location (stacktrace throwable)

@@ -125,6 +125,8 @@
         thrown (failure ctx "(throw (ex-info \"boom\" {:a 1}))")
         source (kernel/render-ai {:seon.render/value divide :seon.repl/handle handle})
         {:keys [results tokens]} (shown source handle divide)]
+    (testing "the value keeps its first-party frames: nothing is trimmed for presentation"
+      (is (seq (mapcat :seon.error/frames (:seon.error/chain divide))) (pr-str divide)))
     (testing "the pair: clojure.main's message, then the author's location read from the held value"
       (is (= [";; Execution error (ArithmeticException) at (REPL:1:1)." ";; Divide by zero"]
              (take 2 (str/split-lines source))) source)

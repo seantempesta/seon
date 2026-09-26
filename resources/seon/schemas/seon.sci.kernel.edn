@@ -23,8 +23,8 @@
 
  ; An agent's own exception, as seon.sci.kernel/failure-value reports it the
  ; way clojure.main does: the class the author's code threw, its message, the
- ; chain with ex-data per link, and SCI's author stacktrace; its pair
- ; (seon.sci.kernel/render-ai) selects what an agent sees. No bookkeeping:
+ ; chain with ex-data and first-party frames per link, kept whole, and SCI's
+ ; author stacktrace; its pair selects what an agent sees. No bookkeeping:
  ; duration, allocation and outcome stay on the evaluation record.
  :seon.sci.kernel/execution-error
  [:and
