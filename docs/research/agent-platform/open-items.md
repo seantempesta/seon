@@ -148,50 +148,11 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | floor §3, function face, query+render block, derived contracts | older; floor/face/block now converge on the graph render — re-read before starting |
 
 ### Queued (root's ordered backlog, rewritten 2026-09-26 ~17:40Z; lanes take the top ready item on free files)
-**NEXT (root 2026-09-26 22:00Z, launch in order as lanes free; ≤3 editing lanes):** (1) merge cut 1 — runtime task writer
-seon.task/create! (7.8), assignment, proposal gate on the task's tests; (2) arity rule — declared form wins (call_preparation);
-(3) docs experiment — parser + stored structure + surfacing on 2–3 namespaces being worked, measured for usefulness; (4) error
-slices 2/5/6/7/8 as files free; (5) M1 remainder (namespace meaning from SCI state; fork-point diff) + M5 eval follow-ups.
-**A. Dogfood milestone (primary).**
-1. Green the path: host-test, mcp-bridge (operator discovery via archive root → seams), write-back (merge gate "named run
-   not recorded on the tested branch"), agent-test's 8 pre-existing reds, custody-stability (stale, fixture lane).
-2. Agent API blockers (fix-dogfood-api lane): `my.test/check`, `my.test/run`, REPL `deftest` reach, in-run ungated
-   redefinition, merge proposal as a thin my.* wrapper over the existing merge owner.
-3. First real change end to end through MCP (branch → forms → tests → root merge → write-back, file bytes equal, reindex).
-4. Then convert lanes to REPL-first work (one lane first, preamble updated), keeping the standing dogfood lane cycling;
-   its ranked report (dogfood-report-2026-09-26.md) feeds fix lanes.
-**B. Context agents can understand.**
-5. REPL-entry renders: Astra review → owner ruling on §6 history (recommend A: never recorded) → slice 1 (+60/−80) →
-   agent/task/namespace renders; retire text AI pairs and the transcript renderer's parallel path (~640 lines).
-6. Curated namespaces via `:seon.ns/aliases`; shrink `dir` (10–35 KB) and the own-agent pull (78 KB); Var prints `#'ns/v`.
-7. Task-focused context: the agent's context is its task graph render (N levels); verify on the debug page.
-8. Printer/render defects: render-coverage (50 fails, `unknown-output`), help as map, `admit-chunk` nil, raw pull inlining
-   (D11), P3m (MCP errors through the one path).
-**C. Correctness.**
-9. `seon.schema` reload leak (`converged-predicate-var` reloads + swallows) — eval-schema lane.
-10. Call-preparation snapshot staleness (D7): commit-identity memo, hook within 20%.
-11. `preview-sources` commits writes (D6); reload-overlap detection absent (a376a6985).
-12. Agent code reaches every held context of its execution; adoption leaves retired graphs running; two loaded-identity
-    answers; generator http-kit server; unowned `seon.db/q` refusal in loop-proof (now printed on next run).
-13. Operator: failed-move headline + exit code; a focused route for long members (merge-test cannot run today).
-14. Storage GC reclaims nothing (store +1–2 GB/10 min under tests).
-**D. Performance.**
-15. Commit floor: Datahike/Konserve fork change so the branch head points at the durable commit record (one barrier).
-16. Adoption 11–27 s (`refresh-source!`); boot 28–39 s vs the 10 s target; hosted MCP run 165 ms warm.
-17. Test design: turn-test ~100 s, agent-test/web-test 120 s, loop-proof 39 s → fast-harness next slices (in-memory
-    branches of one prepared commit); `program-fn-row` one-arg manifest (~15 s/call).
-18. seon.profile window misattribution (per-thread windows or JFR).
-**E. Shrink (≥1 lane always).**
-19. Atom bundles in order: R8 wake, R11 MCP, R12 provider, R6 runner, R7 sequential IO, R3 rendering, R1 SCI context,
-    R5 lifecycle, R13 fault idempotence at the writer.
-20. C5 projection-as-a-read sweep (72+ sites) and read-refusal residue (~33 sites) as files are released; C2 after test
-    confinement; dead window-* schema declarations (two-step retirement).
-21. Face-concept elimination from the Astra audit (face-concept-audit-2026-09-26.md) as a scripted rename.
-22. Largest files: cluster.clj (~3.7k), sci/eval.clj, schema.clj, turn.clj — shrink assignments by responsibility.
-**E2. Agent-centric audit (agent-centric-audit-2026-09-26.md, 21 findings, ~1,474 net lines):** F06 transcript (−350) with
-the REPL-entry design; F01/F14/F03/F12 (deletion lane); F07–F09 with the test-request cost lane; F04/F05/F02 MCP transport
-after the REPL-entry stage; F10/F11 prompt regeneration with the render design; F18 write-back installer; F19/F20 operator.
-**F. Review debt (Astra).** P3b diff; 2(i) diff; R1 diff; roster slice; references-as-refs re-review status; harness S1.
+**NEXT (root, rewritten 2026-09-27 ~03:30Z; launch in order as lanes free; ≤3 editing lanes):** running: one-commit-a-opus (variant A
+then B — reply when applied, durability async, no in-between-state plumbing), render-specificity-audit-astra. Then: (1) merge cut 1
+(seon.task/create! 7.8, assignment, proposal gate; merge-task-design 91ba2e3f0); (2) arity rule (declared form wins); (3) docs parser
+slice (nextjournal/markdown in deps 9ce20359e; pilots 8d321a8ec); (4) render pairs per the audit (contract refusal first); (5) error
+slices 5–8 + leftover producers; (6) M1 remainder; (7) cold-start and adoption-write cost tasks; (8) JFR waste hunt. Live: 36a3714b4.
 
 ### Operating checklist
 - ONE PERSPECTIVE (owner, repeated): root acts as an agent at root's REPL (MCP SCI) — merges, proposal review, task
