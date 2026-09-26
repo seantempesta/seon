@@ -335,3 +335,40 @@ measured them.
 - `bin/test-check default --ns seon.cluster.program-change-test`
 - `bin/test-check default --test seon.cluster.publication-delta-test/schema-referrers-are-selected-for-arming-without-a-namespace-reload`
 - `bin/test-check default --ns seon.fn.analyzer-test`
+
+## Resume 7 — the operator's end-to-end restart, by phase (no code change; stopped for a measurement only a restart gives)
+
+`start.txt` (9bbc3568e) is **not an unchanged restart**. It did a full republication: total 41,988 ms, ready 28,348 ms.
+
+| phase | ms | what it is |
+|---|---|---|
+| source (archive 937 + classpath 563 + share 26) | 1,526 | `git archive` of a new commit and `clojure -Spath`; an already-built commit skips the archive |
+| down | 702 | stopping the old JVM |
+| launch | 34,541 | JVM start → callback, then capture 5,113 (store read 69 ms; the rest is `require seon.cluster`, i.e. compiling the first-party program), then boot to ready 28,348 |
+| adopt | 4,606 | after a publication: `adopt-rows!` 3,478 (one 3.5 s transaction), `development-source-refresh!` 4,280 |
+
+Recent failed moves (`operator-start-*.edn`) show the same shape, with capture at 12.6–14.8 s when classes missed.
+
+**Unchanged-restart pieces I could time read-only (warm, live default):**
+- Adoption `refresh-source!` with no changed paths: **269 ms** (the program converged; nothing written).
+- `sci.eval/cluster-ctx`: 6 ms. `config/effective`: 0 ms. Both are warm cache hits.
+
+The boot-layer costs root saw on an unchanged boot are therefore cold-JVM costs, not repeated work:
+- config +0.6–1.6 s;
+- ctx +1.3–2.1 s, which includes `arm-host-program!` arming ~2,170 contracts;
+- graph +0.6–1.2 s.
+
+A warm replay cannot reproduce them.
+
+**Ranked estimate for an unchanged `start --head`** (≈ 12–14 s; the target is ≤ 10 s):
+1. Compiling the first-party namespaces in the new JVM: capture 5 s with the dependency classes hit. First-party
+   code compiles from source by design.
+2. The boot layers: ~3–4 s cold.
+3. The operator: source ~1.5 s (0 when the archive exists), down 0.7 s, JVM start ~1 s.
+4. Adoption: ~0.3 s warm; unmeasured cold.
+
+**What I need from root:** one unchanged `bin/seon start --head` (HEAD equal to the running commit) with its phases
+line and `:seon.boot/layers`. The fix for piece 1 is a ruling, not a clear fix, so I'll bring options once the cold
+numbers are in. The candidates are an AOT class cache for first-party namespaces keyed by the archive commit (the
+dependency-class cache already works this way), or lazy loading of namespaces no boot layer needs. I made no code
+change in this resume.
