@@ -2612,3 +2612,29 @@
               "neither row is refused at acquisition")
           (is (= 2 (sci/eval-string* ctx "(seon.sci.eval-test/aa-order-caller 1)"))
               "the caller named first calls its callee")))))))
+
+(deftest an-unavailable-execution-starts-its-next-run-from-the-branch-head
+  ;; Issue a-refused-run-leaves-the-agents-context-unavailable: the refusal
+  ;; belongs to the run that failed. The next run's fork regenerates the same
+  ;; agent context from the acquired base, without the unrestored private layer.
+  (test-support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           base (test-support/fork-cluster-ctx connection)
+           agent-ctx (:seon.sci.eval/ctx (eval/fork-for-turn {:seon.sci.eval/ctx base
+                                                             :seon.db/db database}))
+           _ (sci/eval-string* agent-ctx "(def kept 7)")
+           carried (eval/fork-for-turn {:seon.sci.eval/ctx base :seon.db/db database
+                                        :seon.sci.eval/agent-ctx agent-ctx})]
+       (is (= :preserved-in-memory (:seon.sci.eval/private-state carried)))
+       (is (= 7 (sci/eval-string* agent-ctx "kept")))
+       (swap! (:env agent-ctx) assoc :seon.sci.eval/unavailable-execution
+              {:seon.error/message "unrestored"})
+       (let [next-run (eval/fork-for-turn {:seon.sci.eval/ctx base :seon.db/db database
+                                           :seon.sci.eval/agent-ctx agent-ctx})]
+         (is (identical? (:env agent-ctx) (:env (:seon.sci.eval/ctx next-run)))
+             "the agent's retained handle is the one regenerated")
+         (is (= :absent (:seon.sci.eval/private-state next-run)))
+         (is (not (contains? @(:env agent-ctx) :seon.sci.eval/unavailable-execution)))
+         (is (nil? (sci/resolve agent-ctx 'user/kept)))
+         (is (= 2 (sci/eval-string* agent-ctx "(+ 1 1)"))))))))

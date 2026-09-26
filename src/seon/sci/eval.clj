@@ -704,7 +704,8 @@
                  (case kind
                    :restore-failed "restoring a refused program change threw"
                    :program-reacquired "its program was reacquired before a refused change could be restored")
-                 "; release and reacquire the context.")
+                 "; the rest of this run is refused, and your next run starts from the branch head"
+                 " without this run's private definitions.")
             ::unavailable kind}
      (or restoration refused)
      (assoc :seon.error/throwable
@@ -2941,17 +2942,19 @@
 
   Owned private Vars keep their roots, including captured values. Inherited
   program bindings are replaced. A JVM restart has no entering context and
-  consequently preserves no private objects. No database read restores them."
+  consequently preserves no private objects. No database read restores them.
+  An unavailable execution's private layer is the unrestored one, so it
+  carries nothing: the context is the base acquired at the branch head."
   [ctx base]
   (let [generation (:sci/generation @(:env ctx))
-        unavailable (::unavailable-execution @(:env ctx))
+        layer (if (::unavailable-execution @(:env ctx)) {} (sci/namespace-state ctx))
         previous @(::base-bindings ctx)
         current (base-bindings base)
         changed? #(seq (replaced-definitions @(::kernel/program-snapshot ctx)
                                              @(::kernel/program-snapshot base)
                                              [(symbol (str %1) (str %2))]))
         private-bindings
-        (for [[namespace-name entries] (sci/namespace-state ctx)
+        (for [[namespace-name entries] layer
               [local-name entry] entries
               :when (sci.utils/var? entry)
               :let [path [namespace-name local-name]
@@ -2984,7 +2987,7 @@
     (swap! (:env regenerated) assoc :sci/generation generation)
     (doseq [[namespace-name local-name entry] private-bindings]
       (sci/add-namespace! regenerated namespace-name {local-name entry}))
-    (doseq [[namespace-name entries] (sci/namespace-state ctx)
+    (doseq [[namespace-name entries] layer
             [local-name entry] entries
             :let [prior (first (get previous [namespace-name local-name]))]
             :when (and (not (sci.utils/var? entry)) (not= entry prior))]
@@ -2997,9 +3000,6 @@
     ;; Agent graphs retain the entering handle. Preserve its owned atoms while
     ;; replacing the environment with the regenerated fork's environment.
     (reset! (:env ctx) @(:env regenerated))
-    ;; An unavailable execution stays unavailable until its context is
-    ;; released: the private layer this carries is the unrestored one.
-    (when unavailable (swap! (:env ctx) assoc ::unavailable-execution unavailable))
     (reset! (::base-bindings ctx) current)
     (reset! (::kernel/installed-functions ctx)
             @(::kernel/installed-functions regenerated))
@@ -3015,7 +3015,8 @@
     agent-ctx :seon.sci.eval/agent-ctx
     db :seon.db/db
     agent-id :seon.agent/id}]
-  (let [ctx (if agent-ctx
+  (let [carried? (and agent-ctx (not (::unavailable-execution @(:env agent-ctx))))
+        ctx (if agent-ctx
               (regenerate-agent-context! agent-ctx base-ctx)
               (env/carry-state
                (assoc (sci/fork base-ctx)
@@ -3039,7 +3040,7 @@
       (sci/add-namespace! ctx assigned-namespace {}))
     {:seon.sci.eval/ctx ctx
      :seon.sci.eval/private-state
-     (if agent-ctx :preserved-in-memory :absent)}))
+     (if carried? :preserved-in-memory :absent)}))
 
 (def program-cache-policy
   "Bound the memoized program identities and base contexts independently of commits."
