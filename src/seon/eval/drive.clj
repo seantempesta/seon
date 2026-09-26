@@ -11,6 +11,7 @@
             [seon.cluster.registry :as registry]
             [seon.turn :as turn]
             [seon.config :as config]
+            [seon.operator.runtime :as operator.runtime]
             [seon.render.transcript :as transcript])
   (:import [java.util Date UUID]))
 
@@ -398,7 +399,7 @@
             (catch Throwable failure
               ;; A boot that fails partway leaves its partial instance in the
               ;; one instance roster; the failure references it by name.
-              (some-> (get @seon.operator.runtime/running-instances
+              (some-> (get @operator.runtime/running-instances
                            (:seon.boot/cluster-name (ex-data failure)))
                       (release! nil))
               (throw failure)))
