@@ -3795,25 +3795,39 @@
          declared)))
 
 (def ^:private call-edges-queries
-  ;; One plain join per caller family. One `or` over both families cost
-  ;; 1,208 ms cold on a speculative value of default (102,063 edges); these
-  ;; two cost 87 ms together with the identical union (2026-09-26).
-  (mapv (fn [family]
-          [:find '?caller-symbol '?call
-           :where ['?caller :seon.fn/call-arities '?call] ['?caller family '?caller-symbol]])
-        [:seon.fn/sym :seon.test/sym]))
+  ;; One plain join per caller family, whole program then bound to named
+  ;; callers. One `or` over both families cost 1,208 ms cold on a speculative
+  ;; value of default (102,063 edges), these two 87 ms with the identical
+  ;; union; bound to one caller, 12 ms against 1.3 ms (2026-09-26).
+  {:all (mapv (fn [family]
+                [:find '?caller-symbol '?call
+                 :where ['?caller :seon.fn/call-arities '?call] ['?caller family '?caller-symbol]])
+              [:seon.fn/sym :seon.test/sym])
+   :callers (mapv (fn [family]
+                    [:find '?caller-symbol '?call :in '$ '[?caller-symbol ...]
+                     :where ['?caller family '?caller-symbol] ['?caller :seon.fn/call-arities '?call]])
+                  [:seon.fn/sym :seon.test/sym])})
 
 (defn- call-edges
   "Every `[caller-symbol call]` edge of `database`'s functions and tests, or
-  the first read refusal `query-fn` answered."
-  {:malli/schema [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]]
-                       :seon.db/database-value]
-                  [:or [:set :seon.schema/value] :seon.db/error-result]]}
-  [query-fn database]
-  (reduce (fn [edges query]
-            (let [rows (query-fn query database)]
-              (if (read-refusal? rows) (reduced rows) (into edges rows))))
-          #{} call-edges-queries))
+  only those of `callers`, or the first read refusal `query-fn` answered."
+  {:malli/schema [:function
+                  [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value] [:or :seon.schema/value :seon.db/error-result]]
+                        :seon.db/database-value]
+                   [:or [:set :seon.schema/value] :seon.db/error-result]]
+                  [:=> [:cat [:=> [:cat :seon.db/query :seon.db/database-value [:set :symbol]] [:or :seon.schema/value :seon.db/error-result]]
+                        :seon.db/database-value [:set :symbol]]
+                   [:or [:set :seon.schema/value] :seon.db/error-result]]]}
+  ([query-fn database]
+   (reduce (fn [edges query]
+             (let [rows (query-fn query database)]
+               (if (read-refusal? rows) (reduced rows) (into edges rows))))
+           #{} (:all call-edges-queries)))
+  ([query-fn database callers]
+   (reduce (fn [edges query]
+             (let [rows (query-fn query database callers)]
+               (if (read-refusal? rows) (reduced rows) (into edges rows))))
+           #{} (:callers call-edges-queries))))
 
 (def ^:private arity-attributes
   "Every attribute the arity gate reads."
@@ -3941,13 +3955,7 @@
                                               (mapcat (::by-callee base) callee-symbols)))
                     after-callers
                     (when (seq caller-symbols)
-                      (d/q '[:find ?caller-symbol ?call
-                             :in $ [?caller-symbol ...]
-                             :where
-                             (or [?caller :seon.fn/sym ?caller-symbol]
-                                 [?caller :seon.test/sym ?caller-symbol])
-                             [?caller :seon.fn/call-arities ?call]]
-                           after caller-symbols))
+                      (call-edges d/q after caller-symbols))
                     after-bounds
                     (when (seq callee-symbols)
                       (reduce
