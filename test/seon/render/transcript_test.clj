@@ -1353,12 +1353,12 @@
                ;; what the one-clipping-spot ruling retired: the value
                ;; renderer nulls it before emitting
                ;; (`src/seon/render/value.clj:448`) and the cut it does make
-               ;; is an elision value naming its own bound, never `...`.
+               ;; is the one cut face `…N` (one-render-path §3e); its bound
+               ;; and coordinates stay on the tree node, never `...`.
                (is (not (str/includes? clipped "..."))
                    (str "a second, unnamed elision mechanism: " clipped))
-               (is (str/includes? clipped ":seon.render.profile/max-children")
-                   (str "the cut must name the bound that made it: "
-                        clipped))))
+               (is (re-find #"…\d+\]" clipped)
+                   (str "the cut shows the one cut face: " clipped))))
 
            (testing "ruling 45: nothing emitted is comment-shaped"
              (doseq [line (str/split-lines (str/join "\n" stored-bytes))]
