@@ -245,3 +245,36 @@ the contracts.
   local `letfn`, presumably perf-boot's. My WIP revert briefly checked the whole file out; I restored that hunk
   byte-exact from `tmp/defn-scan-opus/projection-derivation-wip.patch`, and it is intact.
 - Branches `defn-scan-opus` and `defn-scan-opus-2` are retired, and the scratch namespaces were removed.
+
+## 2026-09-27: digest refusals on default (root's report)
+
+**Question:** do two producers of the definition digest disagree since 9b6df1ff4?
+
+**Refuted.** On pid 17853 (15e6a31c4), the digest the writer derives (`seon.db/definition-digest-of` over
+`declaration-value` rows and their stored namespace rows) equals the stored, file-indexed digest:
+- `seon.id/id`, `seon.id/digest` and `seon.program/shapes-in` all match;
+- a sample of 450 function rows (every 12th) had **0 mismatches** in 337 ms.
+
+**What the refused writes are.**
+- `seon.fn.caller-lint-test` transacts `{:seon.fn/doc …}`, then `:seon.fn/inline? true`, onto `seon.id/digest`
+  without re-digesting.
+- `seon.test-test/admission-refuses-stale-program-and-records-empty-selection` does the same with
+  `[:db/add [:seon.fn/sym seon.id/id] :seon.fn/doc …]`.
+
+Doc and inline status are digested attributes under both the old and the new resolver-context rule. The writer check
+that refuses them is `79b6d9abd` (2026-09-25). These fixtures therefore refuse independently of 9b6df1ff4. They must
+write the digest their canonical writer produces (`db/definition-digest-of`), or edit through the agent path.
+
+**The other failures are unrelated.**
+- `seon.test-test/recording-distinguishes-run-replay-from-a-new-event` fails on a read-refusal shape.
+- `seon.program-test/indexed-and-evaluated-declarations-are-the-same-entities` fails on its 5 s bound (5.6 s), and
+  its row difference is `:seon.fn/calls`: the evaluated `sample.s1/left` lacks its forward call to `right`. Its
+  digests are equal (`e5a83afa…`).
+
+My two new program tests passed in that run (397 pass, 2 fails, both in that one test).
+
+**New fragility, noted.** The digest's resolver context now follows `:seon.fn/calls`, `:seon.fn/references` and
+`:seon.fn/keywords`. So an evaluated row that misses a forward call *into another namespace through an alias* would
+digest differently from its indexed twin. Each row still agrees with its writer, so this is extra "changed", not a
+refusal. It applies only when the calls differ, as in this failing test. The fix for that belongs to the call
+analysis (the evaluated form's forward reference), not the digest.
