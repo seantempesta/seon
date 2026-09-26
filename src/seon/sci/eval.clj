@@ -242,6 +242,27 @@
       (.bindRoot ^sci.lang.Var copied (.getRawRoot host-var)))
     copied))
 
+
+(def ^:private java-lang-throwables
+  "Every public `java.lang` class assignable to Throwable, under its short and
+  its full name, read once from the running JDK's `java.base` module (the
+  `jrt:` file system). SCI grants a class to interpreted code only through
+  its `:classes` option (`sci/impl/opts.cljc:68`), so this is that option's
+  value; deriving it keeps agent `catch` clauses in step with the JDK."
+  (delay
+   (let [file-system (java.nio.file.FileSystems/getFileSystem (java.net.URI/create "jrt:/"))
+         directory (.getPath file-system "/modules" (into-array String ["java.base" "java" "lang"]))
+         loader (ClassLoader/getSystemClassLoader)]
+     (with-open [paths (java.nio.file.Files/list directory)]
+       (into {}
+             (comp (map #(str (.getFileName ^java.nio.file.Path %)))
+                   (filter #(and (str/ends-with? % ".class") (not (str/includes? % "$"))))
+                   (map #(Class/forName (str "java.lang." (subs % 0 (- (count %) 6))) false loader))
+                   (filter #(and (java.lang.reflect.Modifier/isPublic (.getModifiers ^Class %))
+                                 (.isAssignableFrom Throwable ^Class %)))
+                   (mapcat (fn [^Class c] [[(symbol (.getSimpleName c)) c] [(symbol (.getName c)) c]])))
+             (iterator-seq (.iterator paths)))))))
+
 (defn build-base-ctx
   "Build the minimal interpreter from the projection supplied by its caller."
   {:malli/schema [:=> [:cat :seon.schema/projection] :seon.sci.eval/ctx]}
@@ -298,13 +319,10 @@
          (merge {'clojure.core sci.interrupt/clojure-core
                  'clojure.string sci.interrupt/clojure-string}
                 injected-namespaces)
-         ;; two broad roots rather than an enumeration of exception
-         ;; subclasses — an agent needs to catch things, not to be given
-         ;; a curated taxonomy
-         :classes {'Throwable Throwable
-                   'java.lang.Throwable Throwable
-                   'Error Error
-                   'java.lang.Error Error}})
+         ;; every public java.lang Throwable, derived from the running JDK
+         ;; (`java-lang-throwables`): an agent names them in `catch` as
+         ;; clojure.main code does, and no other host class is granted
+         :classes @java-lang-throwables})
         help-var (get-in injected-namespaces ['seon.bootstrap 'help])
         dir-var (get-in injected-namespaces ['seon.bootstrap 'dir])
         doc-var (get-in injected-namespaces ['seon.bootstrap 'doc])]
