@@ -114,6 +114,12 @@
   ;; reader of the stored receipt could never recover it.
   (let [error (or (:seon.cluster.eval/error evaluation)
                   (:seon.cluster.eval/error form-problem)
+                  ;; A refused install settles its refusal as the value
+                  ;; (`seon.sci.eval/refuse-install`), and its admitted record
+                  ;; says the outcome is an error: the stored error is that
+                  ;; refusal's shown text, so every reader sees a refusal.
+                  (when (= :error (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome]))
+                    (:seon.eval/shown evaluation))
                   (when (unbound-value? (:seon.sci.admit/value evaluation))
                     "The admitted result contains an unbound var."))]
     (cond-> {:seon.turn/id id
