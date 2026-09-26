@@ -17,7 +17,7 @@ A computation receives its environment, immutable database value,
 schema projection, and render profile. Capture one database value for
 one pure derivation; don't reread a connection at each leaf. The public
 database functions accept explicit inputs and return boundary errors
-(`q`, `src/seon/db.clj:2292`; `pull`, `:2515`; `transact!`, `:4537`).
+(`q`, `src/seon/db.clj:2438`; `pull`, `:2661`; `transact!`, `:4912`).
 
 Use `seon.db` for first-party database work. Agent elision is an
 evaluation service, not permission for a JVM caller to omit custody.
@@ -30,27 +30,27 @@ Prefer immutable transformations and explicit ordering. A set expresses
 membership; it cannot supply semantic order or a tie-break. Stable
 identities derive through `seon.id/digest`; evaluations use
 `seon.id/evaluation`, not another generator
-(`src/seon/id.clj:40`, `:55`).
+(`src/seon/id.clj:52`, `:67`).
 
 ## Declare the shape once
 
 First-party schema resources form one population. Duplicate keys refuse
-at `src/seon/schema/edn.clj:216-228` and `:307-330`; `packaged-forms` exposes
-the population at `:415`. The bridge derives storage attribute declarations
-from the supplied projection (`src/seon/schema/datahike.clj:141-180`).
+at `src/seon/schema/edn.clj:218-230` and `:309-332`; `packaged-forms` exposes
+the population at `:398`. The bridge derives storage attribute declarations
+from the supplied projection (`src/seon/schema/datahike.clj:147-186`).
 
 Model attributes and refs, not entity-kind stamps. Identity, cardinality,
 and component ownership are properties of those attributes.
 Optional stored values are absent; stored nilable shapes refuse at
-`src/seon/schema/datahike.clj:131`. Use the data-modeling skill for
+`src/seon/schema/datahike.clj:137`. Use the data-modeling skill for
 shape choices and datahike for transaction/query mechanics.
 
 Every function, private included, requires a complete Malli contract
-(`AGENTS.md:271`). `collect-contracts!` (`src/seon/instrument.clj:847-857`)
+(`AGENTS.md:205-208`). `collect-contracts!` (`src/seon/instrument.clj:770-780`)
 walks every loaded namespace's `ns-interns`, so private declarations are armed
 too. Authored incomplete slots and predicate-contract omissions are checked by
-`assert-complete-schema!` (`src/seon/schema/internal.cljc:300`); live
-instrumentation's owner is `apply!` (`src/seon/instrument.clj:876`). Named schemas describe genuinely
+`assert-complete-schema!` (`src/seon/schema/internal.cljc:329`); live
+instrumentation's owner is `apply!` (`src/seon/instrument.clj:799`). Named schemas describe genuinely
 polymorphic values; do not use an undefined contract to suppress a refusal.
 Map keys are fully namespaced. Failures at agent boundaries are flat
 error values, not a second success/failure envelope.
@@ -69,7 +69,7 @@ Open/closed work, unanswered wakes, history, and routed faults are queries
 over facts. A component holds an owned concern; it is not a copied query
 result. Read dependencies already have an owner:
 `seon.db/read-evidence` retains plans and revisions without database
-values or result payloads by default (`src/seon/db.clj:914`).
+values or result payloads by default (`src/seon/db.clj:920`).
 
 The §15 target deliberately stores shown text: an observation of what
 the value renderer produced at evaluation time, not derived current
@@ -78,9 +78,9 @@ object or applying a changed profile.
 
 Actual results and private defs/atoms remain in memory. `base-ctx` derives
 the program base from one database value, memoized by program identity
-(`src/seon/sci/eval.clj:2475`); `fork-for-turn` forks it and carries those
-private objects while preserving the agent's context handle (`:2287`,
-`regenerate-agent-context!` at `:2224`). Installed functions, schemas, and tests remain durable program rows.
+(`src/seon/sci/eval.clj:3350`); `fork-for-turn` forks it and carries those
+private objects while preserving the agent's context handle (`:3156`,
+`regenerate-agent-context!` at `:3082`). Installed functions, schemas, and tests remain durable program rows.
 Restart loses private objects while saved shown text survives.
 
 ## Render as a function of the data — target
