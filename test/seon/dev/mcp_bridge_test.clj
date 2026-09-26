@@ -652,7 +652,7 @@
         sci (fn [source & [on-branch]]
               ;; The prepl evaluates the bridge's form with no custody bound; a test
               ;; member's custody would refuse the hosted branch's writes.
-              (let [form ((bridge-var 'run-form) source cluster nil false on-branch "bridge-test")
+              (let [form ((bridge-var 'run-form) source cluster nil false on-branch)
                     result (try ((requiring-resolve 'seon.db/call-with-custody) {} #(eval (read-string form)))
                                 (finally (consume)))]
                 (or (-> result :seon.dev.mcp/evaluations last :seon.eval/shown)

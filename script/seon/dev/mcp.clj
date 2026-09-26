@@ -390,11 +390,11 @@
   (`seon.cluster.agent/evaluate-source!`), segmented as code, and answers the
   settled run with its receipts in order. Without a branch the agent is root on
   the cluster's own branch; with one it is the branch's hosted agent
-  (`seon.cluster.host/host!`, created as `mcp/<session-id>` on first use). The
+  (`seon.cluster.host/host!`, created as `mcp/<branch>` on first use). The
   run starts in the agent's assigned namespace; the run writer refuses an
   explicit other one by name, so code moves with `in-ns`, as at a REPL."
-  {:malli/schema [:=> [:cat :string :string [:maybe :symbol] :boolean [:maybe :string] :string] :string]}
-  [source cluster namespace-symbol read-only? branch session-id]
+  {:malli/schema [:=> [:cat :string :string [:maybe :symbol] :boolean [:maybe :string]] :string]}
+  [source cluster namespace-symbol read-only? branch]
   ;; One syntax-quote builds the custody branch and its body, so `handle#` and
   ;; `instance#` name the same bindings in both.
   (pr-str
@@ -415,7 +415,7 @@
                             ((requiring-resolve 'seon.cluster.host/host!)
                              {:seon.turn.loop/cluster (assoc handle# :seon.store/store (:seon.store/store instance#))
                               :seon.agent/branch ~(some-> branch keyword)
-                              :seon.agent/id ~(str "mcp/" session-id)
+                              :seon.agent/id ~(str "mcp/" branch)
                               :seon.ns/name '~(or namespace-symbol 'user)})
                             [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
                            {:seon.turn.loop/cluster handle# :seon.agent/routing (:seon.agent/routing handle#)
@@ -448,10 +448,10 @@
         (:seon.error/at value) (mapv #(if (identical? % terminal) (assoc % :exception true) %))))))
 
 (defn- remote-evaluation-form
-  [{:seon.dev.mcp/keys [source read-only? branch namespace? session-id]} mode cluster namespace-symbol]
+  [{:seon.dev.mcp/keys [source read-only? branch namespace?]} mode cluster namespace-symbol]
   (case mode
     "jvm" (jvm-evaluation-form source namespace-symbol (true? read-only?))
-    "sci" (run-form source cluster (when namespace? namespace-symbol) (true? read-only?) branch session-id)))
+    "sci" (run-form source cluster (when namespace? namespace-symbol) (true? read-only?) branch)))
 
 (defn- branch-name!
   "A lane names its branch; blank, non-string or colon-led names refuse."
@@ -631,7 +631,6 @@
                (assoc (:seon.dev.mcp/evaluation validation)
                       :seon.dev.mcp/read-only? (true? (:read_only request))
                       :seon.dev.mcp/branch (:branch request)
-                      :seon.dev.mcp/session-id session-id
                       :seon.dev.mcp/namespace? (some? (:namespace request)))
                mode cluster namespace-symbol)
               {:keys [writer endpoint] :as session}
@@ -816,7 +815,7 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program row on the cluster. The run starts in root's own namespace (the run writer refuses another), so move with (in-ns ...) in the code. With a branch (made by the `branch` tool), SCI is one ordinary run of that branch's hosted agent (seon.cluster.host/host!, created as mcp/<session_id> on the branch at first use, in this call's namespace, default user), answered the same way; its defs are rows on the branch, never on the cluster, until `branch` retire closes its admission and releases it. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program row on the cluster. The run starts in root's own namespace (the run writer refuses another), so move with (in-ns ...) in the code. With a branch (made by the `branch` tool), SCI is one ordinary run of that branch's hosted agent (seon.cluster.host/host!, created as mcp/<branch> on the branch at first use, in this call's namespace, default user), answered the same way; its defs are rows on the branch, never on the cluster, until `branch` retire closes its admission and releases it. Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Clojure code. JVM mode and SCI with a branch evaluate exactly one form (wrap a sequence in (do ...)); SCI without a branch evaluates every form in order as one run."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}
