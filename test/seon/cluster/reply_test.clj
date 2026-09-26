@@ -31,6 +31,21 @@
   [source]
   (sci/parse-string (sci/init {}) source))
 
+(deftest a-bare-token-on-its-own-line-is-a-form-as-clojure-main-reads-it
+  ;; REPL parity (clojure.main 1.12.5): every top-level form a line holds is
+  ;; read and evaluated, a keyword, number, string or auto-resolved keyword
+  ;; after the `require` that makes its alias as much as a list. Each reads in
+  ;; the context the previous form left, because the plan defers alias
+  ;; resolution to the evaluator's sequential read. Prose lines stay prose.
+  (is (= ["(require '[clojure.string :as parity-s])" "::parity-s/k" "(+ 1 2)"]
+         (mapv :seon.cluster.eval/source
+               (reply/sources "(require '[clojure.string :as parity-s])\n::parity-s/k\n(+ 1 2)" 'user))))
+  (is (= ["(+ 1 2)" "42" "\"a string\"" ":plain"]
+         (mapv :seon.cluster.eval/source (reply/sources "(+ 1 2)\n42\n\"a string\"\n:plain" 'user))))
+  (is (= ["(+ 1 2)"]
+         (mapv :seon.cluster.eval/source (reply/sources "I will now compute.\n(+ 1 2)\nThat was easy." 'user)))
+      "a line of several tokens is prose, not forms"))
+
 (deftest prompt-markers-are-removed-only-at-top-level-line-starts
   (let [sources (reply/sources
                  ";; I should query next.\nmy.agents.juniper=> (inc 1)\n  another.ns=> (dec 3)"
