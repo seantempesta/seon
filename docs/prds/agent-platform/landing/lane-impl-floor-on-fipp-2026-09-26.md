@@ -396,3 +396,16 @@ resources/seon/schemas/seon.cluster.eval.edn, src/seon/render/walk.clj,
 src/seon/render.clj, src/seon/print.cljc,
 resources/seon/schemas/seon.print.edn, config/default.edn,
 test/seon/cluster/mcp_test.clj, this note.
+
+## Round 4: `47cfeacfa`, `eeb335064`
+
+- `47cfeacfa`: `seon.sci.eval/directory-value` now returns `:seon.repl/directory`.
+  On default, 450 of 461 namespaces return a valid directory. The other 11
+  throw `Invalid token: ::…` on arglists: that is the existing issue
+  `documentation-arglists-with-auto-keywords-are-not-edn`.
+- `eeb335064`: deleted `:seon.eval/entity`'s duplicate REPL pair.
+  **`test/seon/render_coverage_test.clj:229-232` still asserts it**, and the
+  file is not this lane's. It must name `:seon.cluster.eval/receipt`.
+- Row 2(i) has not started. Its file list and prerequisites are in the reply
+  to root. Nothing prerequisite exists yet: `seon.render/units` (building
+  block S3) is not in the tree.
