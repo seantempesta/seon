@@ -54,7 +54,7 @@ callers to an existing component/function/test that does the same thing better (
   in Datahike so docs are integrated with code and refs (language plan §1/§5a/§7; 7.11 issues→tasks). Out-of-date external docs are
   triaged (migrate / evidence / delete), not hand-updated. Design + options: docs-in-code-design-2026-09-26.md (owner decides).
 - **Rulings 2026-09-26 evening (owner):** (1) *Arity clash*: the declared form wins whenever its own contract accepts the call;
-  defaults are supplied only when it does not (reverses #41's first-argument shortcut). (2) *Structured docstrings*: do NOT roll
+  defaults are supplied only when it does not (reverses #41's first-argument shortcut). (2) *Docs stay docs, linked by data* (owner): not everything moves into code files — a doc lives where it reads best (function-specific knowledge in the docstring; cross-cutting knowledge in Markdown pages); what matters is that every doc is parsed, indexed and LINKED to the code, schemas, tests and tasks it concerns, so relevance comes from database links, not file location; unlinked prose is dead and is linked up or deleted. *Structured docstrings*: do NOT roll
   out at once — experiment on the namespaces we are working in, verify the indexing is right, the content is useful and not
   repetitive of the code, and it pulls relevant context where no direct reference (require / call) already links it; settle a
   workable format before telling agents; everything migrates eventually. Pages (vocabulary, cross-cutting prose) use the same
