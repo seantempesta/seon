@@ -324,6 +324,31 @@
           (finally
             (flow/stop graph)))))))
 
+;; Class: a stopped graph is an observation, never a failed status. Flow's
+;; ping throws on a stopped graph (flow/impl.clj:70); root's graph stopped on a
+;; core fault and `bin/seon status` failed whole (2026-09-26 16:15Z).
+(deftest a-stopped-graph-is-observed-as-stopped
+  (support/with-database
+    (fn [connection]
+      (let [db @connection
+            graph (doto (probe-graph) flow/stop)
+            routing (doto (agent/routing)
+                      (swap! assoc :seon.flow/graph graph :seon.agent/armed {}))
+            built (oversight/unit {:seon.db/db db
+                                   :seon.sci.eval/ctx (support/fork-cluster-ctx connection)
+                                   :seon.agent/routing routing})]
+        (is (= [{:seon.oversight/proc :probe/idle :seon.oversight/ping :stopped}]
+               (:seon.oversight/plumbing (:seon.render/value built))))
+        (is (str/includes? (hiccup/->string (oversight/html-table built)) "probe/idle stopped"))
+        (is (= "stopped"
+               (#'oversight/agent-story-text
+                {:seon.agent/id "root"
+                 :seon.turn/id "0123456789ab"
+                 :seon.turn.work/episode-runs 1
+                 :seon.oversight/procs [{:seon.oversight/proc :seon.agent/turn
+                                         :seon.oversight/ping :stopped}]}))
+            "a stopped graph's open turn is not work in progress")))))
+
 (deftest every-consumer-reads-the-cluster-its-caller-names
   ;; THE CLASS: a forked branch carries its parent's cluster and config rows,
   ;; so `[:find ?name .]` picked one of several. Each consumer now reads the

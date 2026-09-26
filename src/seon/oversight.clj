@@ -90,16 +90,29 @@
     {:seon.oversight/proc proc-id
      :seon.oversight/ping :unknown}))
 
+(defn- graph-procs
+  "Every proc in `graph`, observed through one bounded ping: `:stopped` for
+  each proc of a stopped graph, which holds no channels (datafy's `:chans`,
+  flow/impl.clj:91) and whose ping throws (impl.clj:70). One stopped graph
+  is an observation of that graph, never a failure of the whole status."
+  {:malli/schema [:=> [:cat :seon.flow/graph :seon.config.flow/ping-timeout-ms]
+                  [:tuple [:maybe [:map-of :keyword :seon.oversight/flow-reply]]
+                   :seon.oversight/procs]]}
+  [graph timeout-ms]
+  (let [data (datafy/datafy graph)
+        pids (sort (keys (:procs data)))]
+    (if (seq (:chans data))
+      (let [ping (flow/ping graph :timeout-ms timeout-ms)]
+        [ping (mapv #(proc-ping % (get ping %)) pids)])
+      [nil (mapv #(hash-map :seon.oversight/proc % :seon.oversight/ping :stopped) pids)])))
+
 (defn- agent-story
   "One armed agent's current story, including every declared proc."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.config.flow/ping-timeout-ms
                        :seon.agent/id :seon.agent/armed]
                   :seon.oversight/agent]}
   [db timeout-ms agent-id entry]
-  (let [graph (:seon.flow/graph entry)
-        ping (flow/ping graph :timeout-ms timeout-ms)
-        pids (sort (keys (:procs (datafy/datafy graph))))
-        procs (mapv #(proc-ping % (get ping %)) pids)
+  (let [[ping procs] (graph-procs (:seon.flow/graph entry) timeout-ms)
         mailbox (get ping :seon.agent/mailbox)
         turn (get ping :seon.agent/turn)
         run-id (current-run-id db agent-id)
@@ -136,15 +149,10 @@
   {:malli/schema [:=> [:cat :seon.flow/graph :seon.config.flow/ping-timeout-ms]
                   :seon.oversight/plumbing]}
   [graph timeout-ms]
-  (let [ping (flow/ping graph :timeout-ms timeout-ms)
-        pids (sort (keys (:procs (datafy/datafy graph))))]
-    (mapv
-     (fn [pid]
-       ;; The render proc observes itself as unknown during a feed pass: it
-       ;; cannot answer until the projection returns. Presence in the graph
-       ;; plus absence of a pong never becomes a health claim.
-       (proc-ping pid (get ping pid)))
-     pids)))
+  ;; The render proc observes itself as unknown during a feed pass: it
+  ;; cannot answer until the projection returns. Presence in the graph
+  ;; plus absence of a pong never becomes a health claim.
+  (second (graph-procs graph timeout-ms)))
 
 (defn- live-state
   "Read the routing entry once: its live state, or the members it lacks.
@@ -227,10 +235,12 @@
     (str n suffix)))
 
 (defn- agent-story-text
-  "An open turn proves work; no turn plus a pong proves parked; else unknown."
-  {:malli/schema [:=> [:cat :seon.oversight/agent] [:enum "mid-turn" "parked" "unknown"]]}
+  "A stopped graph is stopped, whatever turn it left open; an open turn
+  proves work; no turn plus a pong proves parked; else unknown."
+  {:malli/schema [:=> [:cat :seon.oversight/agent] [:enum "stopped" "mid-turn" "parked" "unknown"]]}
   [agent]
   (cond
+    (some #(= :stopped (:seon.oversight/ping %)) (:seon.oversight/procs agent)) "stopped"
     (:seon.turn/id agent) "mid-turn"
     (some? (:seon.oversight/turn-passes agent)) "parked"
     :else "unknown"))
@@ -336,5 +346,5 @@
                (str (:seon.oversight/proc proc)
                     " "
                     (or (:seon.oversight/passes proc)
-                        "unknown")))
+                        (name (:seon.oversight/ping proc)))))
              plumbing))]]])))

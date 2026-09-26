@@ -33,7 +33,7 @@
                   [:clojure.core.async.flow/count [:int {:min 0}]]
                   [:clojure.core.async.flow/ins :seon.oversight/flow-ports]
                   [:clojure.core.async.flow/outs {:optional true} :seon.oversight/flow-ports]],
-                 :ping [:enum :reply :unknown],
+                 :ping [:enum :reply :unknown :stopped],
                  :passes :int,
                  :count [:int {:min 0}],
                  :capacity [:int {:min 0}],
