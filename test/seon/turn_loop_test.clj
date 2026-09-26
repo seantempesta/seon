@@ -582,10 +582,12 @@
 ;;; That copy is deleted. The wanted behavior is stated here over both
 ;;; directions of the one surviving derivation, because asserting only the
 ;;; self case would leave the fix indistinguishable from switching escalation
-;;; off: a refused phase escalates to ANOTHER agent, ONCE per signature per
-;;; process at the recurrence limit, and never to the agent whose run was
-;;; refused. The bound is the part that makes the class unrepresentable — a
-;;; hundred refusals cannot become a hundred wakes for anyone.
+;;; off: a refused phase escalates to ANOTHER agent, ONCE per signature (on
+;;; its first occurrence of an opening: D13, 9c9b50e3c, 2026-09-19, which
+;;; retired the recurrence limit from delivery), and never to the agent whose
+;;; run was refused. The bound is the part that makes the class
+;;; unrepresentable — a hundred refusals cannot become a hundred wakes for
+;;; anyone.
 (defn- refuse-phase!
   "Settle one refused `:prompt` phase and return who the transaction mails.
   COMMITS, because the recurrence fence is a query over committed facts:
@@ -630,11 +632,11 @@
        (test-support/seed-cluster! connection "refused-phase")
        (test-support/transacted! connection
                                  (test-support/agents-tx @connection ["worker" "supervisor"]))
-       (is (= [[] [] ["supervisor"] [] [] []]
+       (is (= [["supervisor"] [] [] [] [] []]
               (mapv (fn [_] (refuse-phase! connection "supervisor" "worker"))
                     (range 6)))
-           "silent below the recurrence limit, one escalation AT it, silence
-            past it — the same fence every other failure passes through")
+           "one escalation on the signature's first occurrence, silence after
+            it — the same once-per-opening fence every fault passes through")
        (is (= 6 (committed-error-count connection))
            "every occurrence is still evidence; only the mailing is bounded"))))
   (testing "the failing agent is never mailed about its own refusal"

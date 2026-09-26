@@ -1459,11 +1459,15 @@
         ;; says how it escaped, not who fixes it): the steward of its function,
         ;; else the escalation owner the producer names. A producer recording
         ;; an agent's own mistake, already returned to that agent, names none.
-        ;; The agent a fault happened to reads it through `for-agent`.
+        ;; The agent a fault happened to reads it through `for-agent`, so it
+        ;; is never a recipient: a message is a wake, and mailing the failing
+        ;; agent woke the same unfixed cause (2026-08-08: nine paid calls in
+        ;; twenty minutes when escalate-to named the only agent).
         recipients (when (some? opened)
-                     (cond steward-present #{steward-id}
-                           escalation-present #{escalate-to}
-                           :else #{}))
+                     (disj (cond steward-present #{steward-id}
+                                 escalation-present #{escalate-to}
+                                 :else #{})
+                           agent-id))
         messages (mapv #(message-tx fact (or agent-id steward-id %) % opened) recipients)]
     (if (and (:seon.error/obligation request) (:seon.error.occurrence/id old))
       ;; ONE OBLIGATION, ONE DISPOSITION: this occurrence already answers it
