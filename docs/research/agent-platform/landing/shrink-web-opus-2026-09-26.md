@@ -153,3 +153,48 @@ In web-test, expect green on `transaction-refusals-map-to-http-without-success` 
     fleet must omit volatile counters.
   - The code is old (9c0ecae86, 2026-09-22), so what changed the test's outcome today is probably the fixture (the
     test handle now carries routing), not render. This is unverified.
+
+## 5441487fc: the fleet view omits the render proc; 7ba894703: attribute-bounded reads
+
+**Files taken** (no ledger row held them): `src/seon/oversight.clj`, `src/seon/note.clj`, `src/seon/cluster/status.clj`.
+Root records them in the ledger. I touched `src/seon/config.clj` and restored my own edit to HEAD (it had no other
+diff); its change is a patch.
+
+- **5441487fc (`seon.oversight/unit`).** The page's fleet value drops the `:seon.render.web/render` plumbing entry:
+  a view never shows the proc that renders it. Its pass count moved on every pass, and its ping answers only when it
+  is not mid-pass, so every join repainted. `flow-status` (MCP `runtime_status`) keeps the entry. Regression:
+  `render.web-test/two-tabs-each-get-their-own-complete-paint`.
+- **7ba894703.** Probe on default (pid 32187), read-evidence attributes per read shape:
+
+  | read | attributes |
+  |---|---|
+  | `[*]` pull, notes | `[:all]` |
+  | named `note-selector` pull | the named attributes |
+  | status `(pull ?c [...])` inside `:find` | `[:all]` |
+  | status id `q`, then named pull | `#{:seon.cluster/name}`, `#{:seon.cluster/name :seon.source/commit-id}` |
+  | `config/effective` (`[*]` pull of the config row) | `[:all]` |
+  | named-dial pull | 103 attributes; same `select-keys` result (checked) |
+  | `error/for-agent` (find-pull) | `[:all]` |
+  | id `q`, then `pull-many` with the selector | 534 attributes; same fault set (checked) |
+
+  - Notes and status land.
+  - New regression `render.web-context-test/root-page-blocks-read-attribute-bounded`: every retained root-page
+    call has named read attributes, with faults and settings excepted until their patches land.
+- **Patches for root:**
+  - `tmp/shrink-web-opus/error-faults-bounded.patch` (error.clj, held by shrink-schema). It trades a 1.4 ms
+    find-pull for a 6.3 ms pull-many (2026-09-24 numbers), paid only when a read attribute changed.
+  - `tmp/shrink-web-opus/config-bounded-dials.patch` (config.clj). **Not landed:** the named-dial pull measured
+    73 → 310 µs per read (200 runs), and `config/effective` runs 3× per agent form. A hot-path regression over 20%
+    needs a cheaper form first; I could not split pull cost from filter cost before default went down.
+- **`unrelated-adoption`'s last assertion (the page lacks the new commit though status ran twice): hypothesis, not
+  verified.**
+  - The status read was `:all`. `render-call` invokes the producer and then returns the *previous* output when
+    `reusable?` holds, and `reusable?` rests on `read-evidence-current?`.
+  - If `:all` evidence compares equal on revision (conservative revision unchanged), a stale output is served though
+    the producer ran.
+  - With the bounded status read, the revision includes `:seon.source/commit-id`, so the assertion should pass.
+  - If it still fails, `db/read-evidence-current?` on `:all` plans is the owner to examine (db.clj).
+- **RESET NEEDED** (HEAD does not boot yet: defn-scan is fixing `schema_test.clj`). After restart, root runs:
+  1. `bin/test-check default --ns seon.render.web-test` (two-tabs expected green)
+  2. `bin/test-check default --ns seon.render.web-context-test`
+  3. `bin/test-check default --ns seon.oversight-test`
