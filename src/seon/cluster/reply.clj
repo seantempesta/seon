@@ -393,11 +393,11 @@
                  (let [forms (plan-sources source events)]
                    (if (seq forms)
                      (vec forms)
-                     (refused {::no-forms true}
+                     (vary-meta (refused {::no-forms true}
                               (if (empty? text)
                                 "Your reply began with a response; send a form."
                                 "Your reply had no form; only comments/prose. Send a form.")
-                              {::text text}))))))))))))
+                              {::text text}) assoc :seon.error/declared-schema :seon.cluster.reply/no-forms-error))))))))))))
 
 (defn code-sources
   "Every form the one reader reads from `text`, each as one source, in order.
@@ -418,7 +418,7 @@
   (let [events (parsed-events text namespace-name max-source)]
     (cond
       (map? events) [{:seon.cluster.eval/source text :seon.ns/name namespace-name}]
-      (empty? events) (refused {::no-forms true} "Your evaluation had no form. Send a form." {::text text})
+      (empty? events) (vary-meta (refused {::no-forms true} "Your evaluation had no form. Send a form." {::text text}) assoc :seon.error/declared-schema :seon.cluster.reply/no-forms-error)
       :else (mapv (fn [{::keys [ns] :as event}]
                     (cond-> {:seon.cluster.eval/source (subs text (form-start text event) (::end event))}
                       ns (assoc :seon.ns/name ns)))

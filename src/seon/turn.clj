@@ -3783,32 +3783,7 @@
   (let [recording
         (error/recording cluster database
                   (or (:seon.error/declared-schema source)
-                      (:seon.error/declared-schema (meta source))
-                      (cond
-                        (:seon.turn/rule source) :seon.turn/refused-error
-                        (:seon.db.write.attempt/request-id source) :seon.db.write/validation-refusal
-                        (:seon.db/invalid-read source) :seon.db/invalid-read-error
-                        (:seon.schema/expected-value source) :seon.schema/validation-refusal
-                        (:seon.cluster.reply/no-forms source) :seon.cluster.reply/no-forms-error
-                        (:seon.render.walk/missing-lookup source) :seon.render.walk/no-such-entity-error
-                        (:seon.render/refused-member source) :seon.render/request-error
-                        (:seon.render/candidates source) :seon.render/ambiguous-error
-                        (:seon.render/invalid-output source) :seon.render/invalid-output-error
-                        (:seon.render.unknown/reason source) :seon.render/unknown
-                        (:seon.render.transcript/refused-member source) :seon.render.transcript/request-error
-                        (:seon.config/error-key source) :seon.config/error
-                        (:seon.fn/namespace-unresolvable source) :seon.fn/namespace-unresolvable-error
-                        (:seon.ai/unreadable-response-member source) :seon.ai/unparseable-body-error
-                        (:seon.ai/unanswered-reasoning-count source) :seon.ai/reasoning-without-answer-error
-                        (:seon.ai/exhausted-finish-reason source) :seon.ai/token-starvation-error
-                        (:seon.ai/interrupted-text-count source) :seon.ai/stream-truncated-error
-                        (:seon.ai/provider-error source) :seon.ai/provider-error-error
-                        (:seon.ai/timeout source) :seon.ai/timeout-error
-                        (:seon.ai/transport-failure source) :seon.ai/transport-failure-error
-                        (:seon.ai/extra-body-edn source) :seon.ai/invalid-extra-body-error
-                        (:seon.ai/protected-keys source) :seon.ai/extra-body-conflict-error
-                        (:seon.ai/missing-credential-variable source) :seon.ai/no-credential-error
-                        (:seon.cluster.prompt/error-agent-id source) :seon.cluster.prompt/error))
+                      (:seon.error/declared-schema (meta source)))
                   source now
                   (cond-> {:seon.agent/id agent-id}
                     run-id (assoc :seon.turn/id run-id)))
@@ -3858,12 +3833,7 @@
         (first requests)
         process (:seon.db.process/id cluster)
         recording (error/recording cluster (db/db connection)
-                            (or (:seon.error/declared-schema (meta refusal))
-                                (cond
-                                  (:seon.turn/rule refusal) :seon.turn/refused-error
-                                  (:seon.db.write.attempt/request-id refusal) :seon.db.write/validation-refusal
-                                  (:seon.db/invalid-read refusal) :seon.db/invalid-read-error
-                                  (:seon.schema/expected-value refusal) :seon.schema/validation-refusal))
+                            (:seon.error/declared-schema (meta refusal))
                             refusal now
                             {:seon.agent/id agent-id
                              :seon.turn/id run-id})
@@ -4174,19 +4144,7 @@
                      :seon.turn/id run-id}
         failure-recording (when failure
                             (error/recording cluster db
-                              (or (:seon.error/declared-schema (meta failure))
-                                  (cond
-                                    (:seon.ai/unreadable-response-member failure) :seon.ai/unparseable-body-error
-                                    (:seon.ai/unanswered-reasoning-count failure) :seon.ai/reasoning-without-answer-error
-                                    (:seon.ai/exhausted-finish-reason failure) :seon.ai/token-starvation-error
-                                    (:seon.ai/interrupted-text-count failure) :seon.ai/stream-truncated-error
-                                    (:seon.ai/provider-error failure) :seon.ai/provider-error-error
-                                    (:seon.ai/timeout failure) :seon.ai/timeout-error
-                                    (:seon.ai/transport-failure failure) :seon.ai/transport-failure-error
-                                    (:seon.ai/extra-body-edn failure) :seon.ai/invalid-extra-body-error
-                                    (:seon.ai/protected-keys failure) :seon.ai/extra-body-conflict-error
-                                    (:seon.ai/missing-credential-variable failure) :seon.ai/no-credential-error
-                                    (:seon.cluster.prompt/error-agent-id failure) :seon.cluster.prompt/error))
+                              (:seon.error/declared-schema (meta failure))
                               failure now attribution))
         truncation-recording
         (cond
