@@ -484,32 +484,24 @@
       (finally
         (swap! running-instances dissoc cluster-name)))))
 
-(deftest ^{:seon.test/fixture-observation
-           "Artifact blobs are store-global: identity, paging and the zero-transaction blob store require a private physical store."}
-  artifact-lifecycle-preserves-identity-paging-and-retraction
-  (let [fresh-stores (atom 0)
-        executed (atom [])
-        acquire @#'support/with-fresh-database
-        scenarios
+(deftest artifact-lifecycle-preserves-identity-paging-and-retraction
+  ;; Every scenario configures and seeds its cluster, which a program-less
+  ;; fresh store cannot take (config resolves the functions it names to program
+  ;; rows), so they run on the member's branched world. No assertion needs a
+  ;; private store: digests are content identities, the zero-transaction check
+  ;; reads this branch's commit, and the absent digest is absent everywhere.
+  (let [scenarios
         [[:exception jvm-exceptions-keep-the-whole-cause]
          [:identity oversized-values-share-one-digest-across-storeless-and-stored-modes]
          [:string stored-strings-page-by-character-offset]
          [:nested ordinary-value-artifacts-drill-from-the-result-root]
-         [:blob-only retrievable-artifacts-commit-no-transaction]]]
-    (with-redefs-fn
-      {#'support/with-fresh-database
-       (fn [& args] (swap! fresh-stores inc) (apply acquire args))}
-      (fn []
-        (support/with-database
-         {:seon.test-support/fresh-store? true}
-         (fn [connection]
-           (doseq [[scenario verify!] scenarios]
-             (verify! connection)
-             (swap! executed conj scenario))))))
-    (is (= [:exception :identity :string :nested :retraction] @executed)
-        "All five artifact cases execute, with root retraction last.")
-    (is (= 1 @fresh-stores)
-        "Blob-global isolation requires exactly one fresh physical store.")))
+         [:blob-only retrievable-artifacts-commit-no-transaction]]
+        executed (support/with-database
+                  (fn [connection]
+                    (into [] (map (fn [[scenario verify!]] (verify! connection) scenario))
+                          scenarios)))]
+    (is (= (mapv first scenarios) executed)
+        "All five artifact cases execute, with the blob-only case last.")))
 
 (deftest only-an-evaluation-that-changed-loaded-code-drops-cached-pages
   ;; 24z: the page-cache signal follows evidence after the evaluation
