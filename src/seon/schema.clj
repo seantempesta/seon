@@ -387,21 +387,16 @@
    The holder is installed FRESH at every construction and never inherited: a
    projection derived by changing forms would otherwise carry its parent's
    compiled answers for definitions it no longer has. It needs no key,
-   because its key is the value it hangs on."
-  ([projection] (with-compiled-cache projection {}))
-  ([projection compiled-contracts]
-   (assoc projection
-          :seon.config.db/validation-node-limit
-          (:seon.config/default
-           (some-> (mr/schema (:seon.schema.projection/registry projection)
-                              :seon.config.db/validation-node-limit)
-                   m/properties))
-          :seon.schema.projection/compiled
-          (atom (into {}
-                      (map (fn [[sym compiled]]
-                             [[::function-arities sym]
-                              (delay (compiled-function-arities compiled))]))
-                      compiled-contracts)))))
+   because its key is the value it hangs on. It starts empty: a function's
+   arities derive on first use from the registry (`function-arities-in`)."
+  [projection]
+  (assoc projection
+         :seon.config.db/validation-node-limit
+         (:seon.config/default
+          (some-> (mr/schema (:seon.schema.projection/registry projection)
+                             :seon.config.db/validation-node-limit)
+                  m/properties))
+         :seon.schema.projection/compiled (atom {})))
 
 (defn- projection-cache
   "The holder [[with-compiled-cache]] installed, or nil.
@@ -2372,7 +2367,7 @@
          predicate-functions)]
     (when validate-render-contracts?
       (assert-render-contracts! projection (keys forms)))
-    (with-compiled-cache projection compiled-function-contracts)))))
+    (with-compiled-cache projection)))))
 
 (defn- projection-fingerprint-from-data
   [projection]
