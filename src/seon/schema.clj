@@ -3523,13 +3523,6 @@
   [delta schema-key]
   (get @(:seon.schema.delta/candidate-forms delta) schema-key))
 
-(defn commit-registration-delta!
-  "Return the identities changed in one isolated registration delta."
-  {:malli/schema
-   [:=> [:catn [:seon.schema/registration-delta :map]] [:set :keyword]]}
-  [delta]
-  (changed-keys delta))
-
 (defn restore!
   "Revert only the schema delta represented by `before`.
 
