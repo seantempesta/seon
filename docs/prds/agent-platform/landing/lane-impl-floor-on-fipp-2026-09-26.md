@@ -577,3 +577,94 @@ bin/test-check default --ns seon.instrument-test
 bin/test-check default --ns seon.test.runner-test
 bin/test-check default --ns seon.test-runner-test
 ```
+
+## Round 7 (lane impl-floor-fipp-opus-2, resuming after the usage limit): `0c748bcd5`, `272a02eab`
+
+### Broken or open first
+
+1. **Two parked edits were discarded, not committed.** The copy is at
+   `tmp/orchestrator/parked/20260926-0808-floor-fipp/floor-fipp.patch`.
+   - `sci/admit.clj` `readable-name?`: this refused a keyword or symbol that
+     does not read back, and stored a `::print/failed` leaf in its place. It
+     checked with `clojure.edn`, but the artifact reader is `seon.sci.reader`.
+     It also added a per-keyword character scan on the admission hot path, and
+     it lost the value. The unreadable name is a producer defect
+     (`fixture-branch-keywords-are-not-readable-edn`: the fixture names a
+     branch `:…fixture/1`). `read-artifact` already refuses such content by
+     name (`unreadable-artifact-error`).
+   - `test/runner.clj` failure location: this rewrote `:file`/`:line` from
+     the first JVM frame in the test's own file basename. An agent's SCI
+     deftest has no JVM frames in its file. There the edit only deletes the
+     location, and the `AFn.java:154` report (dogfood cycle 2) remains. The
+     real location for an SCI test is in SCI's own stack. Owner: the
+     SCI-test reporting path. The runner heuristic would be a patch at the
+     wrong seam.
+2. **Help still renders prose, not REPL entries.** `0c748bcd5` takes option 1
+   of `help-shows-its-map-because-a-macro-call-names-no-producer`: the value
+   carries its own pair. `render-help-ai` still returns bare lines. Whether
+   those become `;;` entries is part of the REPL-entry render design, as that
+   issue records.
+3. **Not done here, because the remaining 2(i) and §4 rows need files outside
+   the ledger row:**
+   - `print/value-at` → `render.data/at` needs `db.clj:3067/3080`;
+   - the stored selection tree needs `cluster.clj`;
+   - site 12, the transcript history page, needs `:seon.config.render.agent/max-children`
+     removed from config (row 10);
+   - the four dead `window-*` declarations in `seon.render.value.edn` are
+     installed `:seon.db/attributes` schemas. Deleting them is a live-store
+     schema change that needs a branch proof, and
+     `test/schema/datahike_parity.edn` (not mine) records them.
+4. **Nothing was run.** Only static checks were run: clj-kondo, and
+   `seon.contracts-compile-test/check` over the five touched sources, which
+   gave `[]` in 502 ms at the REPL. The new classify row was proved only on
+   SCI's own fields in a scratch `sci/init` context (below). It has not been
+   proved armed through `prepare`.
+
+### What changed
+
+- **`0c748bcd5`** (value.clj +19/−3, bootstrap.clj +7/−1, value-test +10):
+  - An agent's record prints `#user.Card{:rank 1, :suit :s}`. A SciRecord's
+    final `ext-map` is classified as the exact map it is, and faced
+    `::print/record` with its `rec-name`. No method is called. The earlier
+    duplicate of the map row was collapsed into a recursive `classify`.
+  - A `sci.lang.Type` prints `user.Card`.
+  - This fixes dogfood #19, where records showed `#object[SciRecord]`.
+  - The `help-value` map carries `:seon.render/ai`/`:html`.
+  - The unused `clojure.edn` require is deleted.
+- **`272a02eab`** (+35/−116 source, runner-test +12). Three presentation cuts
+  outside the floor go (§4 sites 5, 14 and 19):
+  - site 5: the walk's `min width query-width` and its two-bound
+    observation (−14 net);
+  - site 14: web `generic-entity`'s dead reverse-ref branch with its `take
+    width` and hand-built elision, the unused `reverse-attribute` and the
+    unused `Date` import (−54 net);
+  - site 19: runner drift's take-10 string cut and `-count` keys, so the whole
+    native sets now travel (−13 net).
+
+Net for the round: source +61/−120 (−59). Tests: +22.
+
+### Evidence
+
+Scratch probe on default PID 95668, JVM mode, read-only: `(sci.core/init {})`,
+then `(defrecord Card [rank suit])`. It read back `:rec-name user.Card`
+(a Symbol), `:ext {:rank 1, :suit :s}` (a PersistentArrayMap),
+`:type-name user.Card`, and `(pr-str rec)` = `"#user.Card{:rank 1, :suit :s}"`,
+in 9 ms. The regression asserts that the floor's text equals `pr-str`.
+
+### Root runs
+
+```
+bin/test-check default --ns seon.render.value-test
+bin/test-check default --test seon.render.value-test/agent-records-and-types-print-as-clojure-prints-them
+bin/test-check default --ns seon.render.walk-test
+bin/test-check default --ns seon.render.web-test
+bin/test-check default --ns seon.test.runner-test
+bin/test-check default --ns seon.test-reaching-test
+bin/test-check default --ns seon.loop-proof-test
+bin/test-check default --test seon.contracts-compile-test/every-declared-contract-compiles-against-the-packaged-projection
+```
+
+Adopt: `src/seon/render/value.clj`, `src/seon/bootstrap.clj`,
+`src/seon/render/walk.clj`, `src/seon/render/web.clj`, `src/seon/test/runner.clj`.
+
+Released: the `sci/admit.clj` edit was discarded, and the file is unchanged at HEAD.
