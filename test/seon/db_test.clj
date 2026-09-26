@@ -1518,6 +1518,27 @@
        (binding [db/*conn* connection]
          (is (= fixture-count (db/q exam-query))))))))
 
+(deftest a-read-classifies-only-declared-refusals
+  ;; Datahike and its parser refuse a read with an ExceptionInfo; that is the
+  ;; declared case a read classifies. Anything else a read meets — the
+  ;; orderly stop's interrupt, a host failure — propagates unchanged, whole.
+  (test-support/with-database
+   (fn [connection]
+     (let [query '[:find ?e :in $ ?f :where [?e :seon.agent/id ?v] [(?f ?v)]]
+           throwing (fn [throwable] (fn [_] (throw throwable)))
+           interrupt (InterruptedException. "the stop's interrupt")
+           host (IllegalStateException. "a host failure")]
+       (test-support/transacted! connection (test-support/agent-tx @connection "classify" 'my.agents.classify))
+       (is (identical? interrupt
+                       (try (db/q query @connection (throwing interrupt)) nil
+                            (catch InterruptedException thrown thrown)))
+           "an interrupt is the stop's sentinel, never a refused read")
+       (is (identical? host
+                       (try (db/q query @connection (throwing host)) nil
+                            (catch IllegalStateException thrown thrown))))
+       (is (true? (:seon.db/invalid-read (db/q @connection '[:find])))
+           "a Datahike parser refusal is still a flat, typed refusal")))))
+
 (deftest malformed-reads-return-flat-errors
   (test-support/with-database
    (fn [connection]

@@ -219,6 +219,12 @@
     :seon.error/data (merge evidence {:seon.error/layer :database-read})}))
 
 (defn- dependency-error
+  "Classify one declared read refusal: an `ExceptionInfo`, the one carrier of
+  Datahike's `log/raise` (`replikativ/logging.cljc:82`, data carrying its
+  `:error` member, e.g. `:query/where`, `:lookup-ref/unique`), the Datalog
+  parser's `raise` (`datalog/parser/impl/util.cljc:10`) and Seon's codec.
+  Reads catch only that carrier; every other throwable — the stop's
+  interrupt, a host failure — propagates unchanged with its whole cause."
   {:malli/schema [:=> [:cat :qualified-symbol :seon.error/throwable] :seon.db/error-result]}
   [operation error]
   (if (:seon.schema/expected-value (ex-data error))
@@ -303,7 +309,7 @@
                                (schema/handed-projection))]
         (vary-meta database assoc :seon.schema/projection projection)
         database))
-    (catch Throwable cause
+    (catch clojure.lang.ExceptionInfo cause
       (dependency-error 'seon.db/db cause))))
 
 (defn- missing-connection-error
@@ -2288,7 +2294,7 @@
                   (unsupplied-custody-error "a database value")
                   (try
                     (d/db connection)
-                    (catch Throwable cause
+                    (catch clojure.lang.ExceptionInfo cause
                       (dependency-error 'seon.db/db cause))))))
           state (or (:seon.sci.eval/projection-state environment)
                     (:seon.sci.eval/projection-state (meta database))
@@ -2482,7 +2488,7 @@
                                       (:datahike.query/result response))]
                           (append-query-evidence! request response result)
                           result))))))))
-        (catch Throwable cause
+        (catch clojure.lang.ExceptionInfo cause
           (when explicit-database?
             (append-database-evidence! query-or-database :all))
           (dependency-error 'seon.db/q cause))))))
@@ -2637,7 +2643,7 @@
                          result)]
             (append-pull-evidence! database arguments operation-key response result)
             checked)))
-      (catch Throwable cause
+      (catch clojure.lang.ExceptionInfo cause
         (append-database-evidence! database :all)
         (if (:datahike/budget-exceeded (ex-data cause))
           (pull-budget-error public-operation cause)
@@ -2858,7 +2864,7 @@
              (instance? DB database)
              (assoc :seon.db/read-index-patterns [pattern])))
           result)))
-      (catch Throwable cause
+      (catch clojure.lang.ExceptionInfo cause
         (append-database-evidence! database :all)
         (dependency-error 'seon.db/datoms cause)))))
 
@@ -2915,7 +2921,7 @@
                                      :seon.db/index-page-options options}
               :seon.db/read-result page})
             page)))
-       (catch Throwable cause
+       (catch clojure.lang.ExceptionInfo cause
          (append-database-evidence! database :all)
          (dependency-error 'seon.db/index-page cause))))))
 
@@ -2952,7 +2958,7 @@
     ;; opened an as-of view stale on every later commit of its branch.
     (try
       (vary-meta (apply operation database arguments) merge (meta database))
-      (catch Throwable cause
+      (catch clojure.lang.ExceptionInfo cause
         (append-database-evidence! database :all)
         (dependency-error 'seon.db/temporal-read cause)))))
 
@@ -2965,7 +2971,7 @@
       (let [result (operation database)]
         (append-database-evidence! database :all)
         result)
-      (catch Throwable cause
+      (catch clojure.lang.ExceptionInfo cause
         (append-database-evidence! database :all)
         (dependency-error operation-name cause)))))
 
