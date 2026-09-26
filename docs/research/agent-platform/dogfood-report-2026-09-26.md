@@ -37,6 +37,7 @@ re-filed; they are listed at the end.
 | 16 | `breaks` proposes `(my.program/launch! …)`, which does not exist. `ns-unmap!`'s documented call refuses with "got nil nil" instead of naming the caller. Its `doc` example sits in `:body` and mentions "seam B". | Plan forms are written by hand and never resolved at the producer. | [breaks-plans-name-a-launch-function-that-does-not-exist](../../seon/issues/breaks-plans-name-a-launch-function-that-does-not-exist.md) |
 | 17 | `seon.schema/register!` works only as a top-level form. Inside `let` it refuses "Schema declarations require an isolated registration delta". The first run of three `register!` calls took 1,786 ms. | The registration delta is opened by syntactic recognition of a top-level form instead of being an effect of every evaluation. | [schema-registration-works-only-as-a-top-level-form](../../seon/issues/schema-registration-works-only-as-a-top-level-form.md) |
 | 18 | `doc`'s `:in` prints every map entry as `[<schema form> <schema form>]`: request keys vanish, and supplied members (`:seon.db/connection`, `:seon.agent/id`) are not removed. `my.issue/add!` (empty `:example`) cannot be called from its `doc`. This is design D9, not filed before. | A hand-written `postwalk-replace` substitutes every keyword, including entry keys, instead of walking Malli's own structure (`m/walk`, `m/entries`). Cause verified at `sci/eval.clj:2234-2263`. | [doc-replaces-every-schema-keyword-so-request-keys-disappear](../../seon/issues/doc-replaces-every-schema-keyword-so-request-keys-disappear.md) |
+| 19 | `(letfn [(f [] :ok)] (f))` fails with "No implementation of method: :getName of protocol HasName … for class: nil". `defrecord` with an inline protocol method fails with "SciUnbound cannot be cast to Associative". Plain SCI in the same JVM runs both. Records print as `#object[sci.impl.records.SciRecord]`, and `Math/abs` is unresolved. | Seon's evaluation drives SCI analysis without SCI's namespace bindings (hypothesis, unverified); the floor allowlist; `:classes` lacks `java.lang.Math`. | [letfn-and-defrecord-with-an-inline-protocol-fail-in-the-agent-repl](../../seon/issues/letfn-and-defrecord-with-an-inline-protocol-fail-in-the-agent-repl.md) |
 
 ## Smaller findings (not yet filed; one line each)
 
@@ -163,6 +164,11 @@ snapshot.
   - **Design question for root:** `my.edit/form!`, `exact!` and `lines!` let an agent edit source
     *files*, which contradicts "files are the write-back of accepted rows, not the working medium" and
     "product agents … never shell self-modification". I did not call them.
+
+- **Cycle 9** (03:44–03:48Z, branch `dogfood-repl-opus-15`, retired). A Clojure breadth sweep: atoms,
+  multimethods, protocols with `extend-protocol`, `deftype`, transducers, `format`, regex and metadata work.
+  `letfn` and `defrecord` with inline protocol methods fail (#19). Default stayed on 04f3a159b for 25
+  minutes, so the committed fixes are not yet verifiable live.
 
 ### Cycle 1 change (proposed in cycle 6 from `dogfood-repl-opus-12`, message `276dd9433eb3`, issue `7bae492de6db`): coverage for `my.plan/current`
 
