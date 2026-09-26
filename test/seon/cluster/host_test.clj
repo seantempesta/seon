@@ -377,3 +377,17 @@
         (let [hosted (host-on! handle branch "mcp/dropped")
               shown (first (hosted-run! hosted "(let [r (my.test/check {:seon.test/changed ['my.agents.host-probe/dropped-callee]})] [(:seon.test/selection-refusal r) (:seon.error/offending r)])"))]
           (is (= "[:seon.test/coverage-unknown [my.agents.host-probe/dropped-check]]" shown) shown))))))
+
+(deftest a-refused-deletion-names-its-surviving-caller-and-a-plan-proposes-only-installed-forms
+  ;; Before, breaks' plan proposed (my.program/launch! …), which does not exist,
+  ;; and a refused ns-unmap! answered "expected a map (:seon.program/change), got nil nil".
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/deleter")]
+        (hosted-run! hosted "(defn breaks-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+        (hosted-run! hosted "(defn breaks-caller \"Call the helper.\" {:malli/schema [:=> [:cat :int] :int]} [x] (breaks-helper x))")
+        (is (= ["[]"] (hosted-run! hosted "(vec (remove #(resolve (first %)) (filter seq? (tree-seq coll? seq (:seon.program/plan (my.program/breaks {:seon.program/subject 'my.agents.host-probe/breaks-helper}))))))"))
+            "every form the plan proposes resolves")
+        (is (= ["{:seon.program/callers #{my.agents.host-probe/breaks-caller}}"]
+               (hosted-run! hosted "(:seon.error/offending (my.program/ns-unmap! 'my.agents.host-probe/breaks-helper))"))
+            "the refusal names the surviving caller")))))

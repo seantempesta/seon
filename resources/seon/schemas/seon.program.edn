@@ -235,7 +235,8 @@
  [:map
   [:seon.program/issues [:vector :seon.issue/issue]]
   [:seon.program/launch
-   [:sequential {:description "Unevaluated launch form. The read's unknowns state why launch is unavailable before value-edge admission."}
+   {:optional true}
+   [:sequential {:description "Retiring (no producer since the breaks fix; delete at the next adoption): it named my.program/launch!, which does not exist."}
     :seon.schema/value]]]
  :seon.program/breakage
  [:map {:description "Pure program-fact read. Empty relation groups are absent; unknown coverage is always explicit."

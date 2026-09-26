@@ -270,17 +270,14 @@
                :seon.issue/detector [:seon.fn/sym detector]}
                (seq (get gates value))
                (assoc :seon.issue/tests (into #{} (map #(vector :seon.test/sym %)) (get gates value)))))
-           names stored)
-     :seon.program/launch
-     (list 'my.program/launch!
-           {:seon.program/subject (list 'quote subject) :seon.issue/budget 8})}))
+           names stored)}))
 
 (defn breaks
   "Read the referrers a retraction would strand, with a prospective plan.
 
   Callers, references and test subjects block; stored test reach is advisory.
   Plans contain one detected issue per caller and its current gate set.
-  Nothing is written or launched. Unknown dispatch, apply, macro and external
+  Nothing is written. Unknown dispatch, apply, macro and external
   callers are reported explicitly. A supplied contract is advisory: argument
   shapes require the existing candidate test gate.
 
@@ -337,9 +334,7 @@
                     {:seon.program/gap :macro-mediated
                      :seon.program/message "Macro expansions can introduce calls absent from the indexed caller relation."}
                     {:seon.program/gap :unresolvable-callers
-                     :seon.program/message "Runtime-computed targets cannot be attributed to this subject by static analysis."}
-                    {:seon.program/gap :launch-unavailable
-                     :seon.program/message "This is a prospective plan. Ref-valued calls cannot report unresolved names after a sweep; generate reads actual detector subjects, not a refused deletion's proposed subjects. Nothing was launched."}]
+                     :seon.program/message "Runtime-computed targets cannot be attributed to this subject by static analysis."}]
                     (:seon.program/contract request)
                     (conj {:seon.program/gap :contract-shapes-unknown
                            :seon.program/message "The proposed contract has not run through the candidate test gate; these referrers are suspects, not proven contract violations."})))))))
@@ -477,31 +472,34 @@
                     (throw (ex-info (:seon.error/message result) result))
                     result))))
 
+(def ^:private blocking-relations
+  "The breakage relations that block a retraction."
+  [:seon.program/callers :seon.program/references
+   :seon.program/subject-of :seon.program/render-declared-by
+   :seon.program/capability-of :seon.program/schedule-tasks
+   :seon.program/contract-refs :seon.program/schema-references
+   :seon.program/writes-of :seon.program/requiring-namespaces
+   :seon.program/data-in-use])
+
 (defn- refusal
   {:malli/schema [:=> [:cat :qualified-symbol :seon.program/breakage :seon.program/affected]
                   :seon.program/mutation-refused-error]}
   [operation report affected]
   (merge
-   (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write 'my.program/refusal
+   (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write operation
     {:seon.program/blocked-subject (:seon.program/subject report)
      :seon.error/message (str "Cannot perform " operation " on " (:seon.program/subject report)
                               "; repair the named referrers first.")
      :seon.error/data report
-     :seon.error/expected :seon.program/change})
+     :seon.error/expected "no surviving referrer"
+     ;; The referrers that block it: the refactoring data the refusal exists to give.
+     :seon.error/offending (into {} (filter (comp seq val)) (select-keys report blocking-relations))})
    {:seon.program/affected affected
     :seon.program/plan (:seon.program/plan report)
     :seon.program/unknown (:seon.program/unknown report)}))
 
 (defn- blocking? [report]
-  (boolean
-   (some seq
-         (vals (select-keys report
-                            [:seon.program/callers :seon.program/references
-                             :seon.program/subject-of :seon.program/render-declared-by
-                             :seon.program/capability-of :seon.program/schedule-tasks
-                             :seon.program/contract-refs :seon.program/schema-references
-                             :seon.program/writes-of :seon.program/requiring-namespaces
-                             :seon.program/data-in-use])))))
+  (boolean (some seq (vals (select-keys report blocking-relations)))))
 
 (defn- deletion-report [database subject]
   (let [root (let [result (breaks {:seon.db/db database :seon.program/subject subject})]
@@ -574,10 +572,12 @@
 (defn ns-unmap!
   "Retract a declaration, then unmap its Var in the executing fork and base.
 
-  Calls breaks first; a refusal changes neither facts nor SCI. Until seam B
-  lands, deletion refuses from breaks alone; :seon.program/unknown records
-  dispatch, apply and macro callers the analyzer cannot see.
-  Example: (my.program/ns-unmap! 'seon.turn/open?)"
+  Calls breaks first; a refusal changes neither facts nor SCI and names the
+  surviving referrers. :seon.program/unknown records dispatch, apply and
+  macro callers the analyzer cannot see.
+
+  Example:
+  (my.program/ns-unmap! 'user/helper)"
   {:malli/schema [:=> [:cat :my.program/context :qualified-symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context subject]
@@ -588,12 +588,14 @@
 (defn remove-ns!
   "Retract a namespace and its owned declarations, then remove it from SCI.
 
-  Calls breaks first and writes the entire affected set in one transaction.
-  Until seam B lands, deletion refuses from breaks alone; the returned
-  :seon.program/unknown retains dispatch, apply and macro coverage limits.
-  Namespaces owning schema declarations refuse until the existing schema
-  retraction seam can be shared; declaration-only deletion would leave DB attributes.
-  Example: (my.program/remove-ns! 'my.scratch)"
+  Calls breaks first and writes the entire affected set in one transaction; a
+  refusal names the surviving referrers. The returned :seon.program/unknown
+  retains dispatch, apply and macro coverage limits. A namespace owning
+  schema declarations refuses: declaration-only deletion would leave its
+  database attributes.
+
+  Example:
+  (my.program/remove-ns! 'my.scratch)"
   {:malli/schema [:=> [:cat :my.program/context :symbol]
                   [:or :seon.program/change :seon.program/read-refused-error :seon.program/not-found-error :seon.program/mutation-refused-error]]}
   [context namespace-name]
