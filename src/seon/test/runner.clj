@@ -1524,10 +1524,22 @@
                       :seon.error/data {:seon.test.run/id run-id
                        :seon.db/basis-t (db/basis-t database)}}) :seon.test.run/immutable run-id)]
         (throw (ex-info (:seon.error/message failure) failure))))
+    ;; A result needs its test row: recording must never recreate a retracted
+    ;; definition. The writer decides from its own value and refuses the whole
+    ;; completion as a declared value, so seon.db/transact! returns it verbatim
+    ;; and changes nothing, instead of reporting an unknown outcome.
     (let [missing (into [] (comp (map :seon.test/sym) (remove current-by-symbol)) results)]
       (when (seq missing)
-        (throw (ex-info "Test completion has no surviving test definition."
-                        {:seon.test/symbols missing}))))
+        (let [failure (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/recording 'seon.test.runner/record-tx
+                        {:seon.error/message (str "Test completion names " (count missing)
+                                                  " test definition(s) retracted before recording; nothing was recorded.")
+                         :seon.test/symbols missing
+                         :seon.error/member :seon.test/sym
+                         :seon.error/expected "a surviving test definition for every recorded result"
+                         :seon.error/offending missing
+                         :seon.error/data {:seon.test.run/id run-id
+                                           :seon.db/basis-t (db/basis-t database)}})]
+          (throw (ex-info (:seon.error/message failure) failure)))))
     (into [(assoc run :db/id "test-run")]
      (mapcat
       (fn [{test-symbol :seon.test/sym :as result}]
