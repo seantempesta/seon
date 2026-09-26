@@ -16,10 +16,10 @@ and `~/.codex/models_cache.json`.
 | Command | What it does |
 |---|---|
 | `bin/codex-agent run <name> <<'SPEC' … SPEC` | launch; streams the transcript to stdout AND `tmp/orchestrator/<name>-stdout.log`; the final summary lands in `tmp/orchestrator/<name>-summary.txt` (`bin/codex-agent:9-13`) |
-| `bin/codex-agent stop <name>` | PAUSE: stops the codex process, verifies every pid exited, preserves the session (`:456`) |
+| `bin/codex-agent stop <name>` | PAUSE: stops the codex process, verifies every pid exited, preserves the session (`:451`) |
 | `bin/codex-agent resume <name> <<'SPEC' … SPEC` | continue with full prior context; the session id is read from the launcher's retained record `lanes/<name>/sid`, never from transcript text (`:14-19`; a lane once printed a fake id); `LANE_SID=<id>` overrides |
-| `bin/codex-agent status` | running lanes with pid and elapsed, plus summaries landed in the last hour (`:541`) |
-| `bin/codex-agent summary <name>` / `watch <name>` | read the summary; follow a live transcript (`:513`, `:527`) |
+| `bin/codex-agent status` | running lanes with pid and elapsed, plus summaries landed in the last hour (`:536`) |
+| `bin/codex-agent summary <name>` / `watch <name>` | read the summary; follow a live transcript (`:508`, `:522`) |
 
 Launch as a harness-tracked background command, BARE (never piped, no
 redirect), one lane per shell. Confirm the launch with `status` before
