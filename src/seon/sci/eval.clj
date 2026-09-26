@@ -5006,7 +5006,10 @@
           ;; Auto-check is deliberately realized above this expression:
           ;; the seeded contract probe precedes every example test.
           :seon.test.accretion/results
-          (mapv (partial run-candidate-test! ctx copy-database request)
+          ;; A gate test's declaration is read from the run's working value
+          ;; (`database`), where a test an earlier form of this run defined
+          ;; exists before its settlement; it runs in the copy.
+          (mapv (partial run-candidate-test! ctx database request)
                 test-symbols)}
           check (assoc :seon.test.accretion/auto-check check)))
       (finally

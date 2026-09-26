@@ -102,9 +102,11 @@
 (deftest a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged
   (with-host-world {}
     (fn [{:keys [handle connection branch!]}]
+      ;; Hosting writes the agent's home row on the cluster by design
+      ;; (dba08a8ab); the runs must not move the parent head after it.
       (let [branch (branch!)
-            parent-commit (db/commit-id (db/db connection))
             hosted (host-on! handle branch "mcp/solo")
+            parent-commit (db/commit-id (db/db connection))
             probe [:seon.fn/sym (symbol (str host-ns) "host-probe")]]
         (is (= ["#'my.agents.host-probe/host-probe"]
                (hosted-run! hosted "(defn host-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")))

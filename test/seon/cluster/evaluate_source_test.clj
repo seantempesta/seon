@@ -66,10 +66,10 @@
                 "the run's own later form reads the namespace its earlier form entered")
             (is (= [(pr-str (str "my.agents." agent-id))] (shown connection (code "(str *ns*)")))
                 "the next run starts in the assigned namespace again")
-            (is (= :seon.turn/starting-namespace-changed
-                   (:seon.turn/rule (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
-                                                                   :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))
-                "the run writer refuses another starting namespace by name"))
+            (is (= ["\"seon.id\""]
+                   (shown connection (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
+                                                                    :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))
+                "a requested starting namespace is where the run starts (85b459845: no starting-namespace refusal)"))
           (testing "a defn then a require in one run settles: its row digests against the namespace row the run stores"
             (let [namespace-name (str "my.agents." agent-id)
                   defn-source "(defn run-inc \"Adds one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))"
@@ -129,9 +129,9 @@
                               :where [?run :seon.turn/id ?id ?opened] [?e :seon.cluster.eval/run ?run]
                               [?e :seon.eval/shown _ ?shown] [?run :seon.turn/closed-tx ?closed]]
                             after (:seon.turn/id result))
-                  [[opened shown closed]] (vec txs)]
+                  [[opened settled closed]] (vec txs)]
               (is (= ["3"] (shown connection result)))
-              (is (= opened shown) "the run opens in the settlement transaction")
+              (is (= opened settled) "the run opens in the settlement transaction")
               (is (= opened closed) "and closes in it")
               (is (= 1 (- (db/basis-t after) (db/basis-t before))) "one commit per form")))
           (testing "a submission is a value on the agent's request port; a pass stopped before settlement leaves no half-written run"
