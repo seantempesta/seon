@@ -2042,6 +2042,28 @@
                (db/transact! connection [[:db/add [:seon.test/sym test-symbol] :seon.test/long "An owned attribute."]])))
            "an owned attribute is still checked")))))
 
+(deftest a-custody-switch-to-another-connection-carries-no-receipt
+  ;; An evaluation's receipt is a lookup ref valid only on its own branch
+  ;; (`seon.sci.eval` binds it); a switch to another connection's custody must
+  ;; not stamp it onto that branch's transactions.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/with-database
+      (fn [other]
+        (let [receipt [:seon.cluster.eval/id "custody-receipt"]
+              stamp #(#'db/stamp-receipt [])]
+          (is (not (identical? connection other)))
+          (with-bindings {#'db/*conn* connection #'db/*receipt* receipt}
+            (is (= {:tx-data [[:db/add "datomic.tx" ::db/receipt receipt]]} (stamp))
+                "the evaluation's own custody stamps its receipt")
+            (is (= {:tx-data [[:db/add "datomic.tx" ::db/receipt receipt]]}
+                   (db/call-with-custody {:seon.db/connection connection} stamp))
+                "the same connection keeps it")
+            (is (= [] (db/call-with-custody {:seon.db/connection other} stamp))
+                "another connection's custody carries none")
+            (is (= [] (db/call-with-custody {} stamp))
+                "no custody carries none"))))))))
+
 (deftest an-issue-deletion-by-its-creator-is-not-an-authority-change
   ;; Issue authority is retained (`seon.db/retention-check`): no writer changes
   ;; it. Retracting the whole issue as its creator is a deletion, so it

@@ -385,6 +385,9 @@
 
   A read basis is never inherited: `*read-database*` is scoped by ONE
   evaluation, so a scope that switches custody starts from the connection.
+  An evaluation's receipt travels only with its own connection's custody: its
+  lookup ref names an evaluation on that branch alone, so a switch to another
+  connection stamps no receipt.
 
   `seon.test.runner/run-var!` is the caller this exists for. An agent running
   its own tests inside its evaluation is doing that cluster's work; a host
@@ -395,7 +398,9 @@
                          :seon.schema.admission/reason "A scope wrapper returns its body's arbitrary result unchanged."
                          :gen/elements [nil false 0 "" :k [] {}]}]]]}
   [request f]
-  (binding [*conn* (:seon.db/connection request) *read-database* nil]
+  (binding [*conn* (:seon.db/connection request)
+            *read-database* nil
+            *receipt* (when (identical? (:seon.db/connection request) *conn*) *receipt*)]
     (f)))
 
 (defn call-without-custody
