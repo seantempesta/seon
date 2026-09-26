@@ -506,3 +506,39 @@ Say 1 or 2 and I'll build it on a scratch copy and measure the unchanged restart
 4. `bin/test-check default --ns seon.dev.publication-launch-test`
 5. The operator's own bb tests: `seon.operator-move-test`. The launch-form test passed locally in bb.
 6. The regular program-change, caller-lint and boot-arming tests from resume 8.
+
+## Resume 11 — hit restart read (116d229c0); binding widened (8cdac7294); RESET NEEDED ×2
+
+**Hit restart (pid 29853):** total 12,888 ms, ready 7,602 ms, capture 3,084 ms, `program-classes? true`. Layers,
+against the previous unchanged restart (21e3a7068):
+
+| layer | before | hit |
+|---|---|---|
+| store → branch | +333 | +471 |
+| commit-id → config-result | +1,062 | +1,760 |
+| config → ctx | +1,655 | +3,448 |
+| ctx → graph | +598 | +1,292 |
+
+- **Why ready doubled.** Every layer grew by about 1.4–2.1×, including store→branch and config, which neither the
+  class change nor anything else in this cut touches. An Astra lane was writing at the time
+  (`astra-rereview-contracts-3-stdout.log`, modified in the window). I read this as machine load, not the classes.
+  Loading a class from disk runs the same bytecode as compiling it in memory. I have not ruled out load
+  independently; a quiet re-measure is needed.
+- **What the cache missed.** Only 78 first-party namespaces were cached. 42 more loaded namespaces compiled from
+  source on every launch: `my.*`, `seon.agent`, `seon.artifact`, `seon.cluster.host`, … . `arm-host-program!`
+  requires them inside `request!`, which was outside the binding, so their compile sat in the ctx layer.
+  **Fixed (8cdac7294):** the `*compile-files*` binding now spans the capture, the boot require and `request!`, and
+  staging is promoted only when boot answered without an error. The next fill should cache all ~120.
+- **What remains in the 3.1 s capture:** loading and initializing the 78 cached namespaces. That is class loading and
+  verification, plus top-level side effects (`schema.edn/load!`, `register-core-predicate!`, defs). I have not
+  split it further; it needs a profiler in the child, which I didn't run (no extra JVM on default).
+- **program-classes-test** was 8/8 pass with 1 error: "Worker-global state changed: drift-added
+  seon.test-support/…". The drift names `seon.test-support` Vars armed during the run. This test neither requires
+  nor arms test-support, so I believe the first test run after a restart gets the runner's own lazy test-support
+  arming attributed to it. Please re-run it after another test has run; if it is still red, I'll look.
+
+**Root runs:**
+1. `start --head` onto 8cdac7294 or later: the fill.
+2. `start --head` again with nothing changed, **in a quiet window**. Send phases, capture-ms, the layers and
+   `program-classes?`.
+3. Re-run `seon.cluster.program-classes-test` after another test has run.
