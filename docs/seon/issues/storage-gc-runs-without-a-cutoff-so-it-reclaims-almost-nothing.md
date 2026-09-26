@@ -7,6 +7,20 @@ tags: [issue, database, class/n14, wave/store-perf]
 
 # Give storage GC the cutoff that makes it actually reclaim
 
+## Re-diagnosed 2026-09-26 (lane fix-eval-schema-reds-opus)
+
+At HEAD the growth is not a missing cutoff: **collection never runs.** Its one runtime caller
+is the weekly `root/maintenance/compact` schedule, which refused because
+`:seon.config.maintenance/collect?` was absent. Default had no collection receipts. Unlinked
+test branches are unreachable and the plain collection reclaims them whole. On a scratch store,
+10 retired member branches × 20 commits took the store from 8 to 218 files; the plain
+(epoch-cutoff) collection swept 210 and left 8. A dry run on default found 971 of 2,363 keys
+reclaimable (41 %), with an 850 ms mark. Ruling: the plain collection (`registry/plain-cutoff`,
+no ancestry pruning) runs after each `seon.test/run` request releases its branches
+(`seon.maintenance/collect-released!`), gated by the dial, which now defaults to true.
+Retention pruning (a real `remove-before`) stays a separate policy, out of scope.
+
+
 ## Problem
 
 Seon calls Datahike's storage GC in its weakest form. `d/gc-storage` with no

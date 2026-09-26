@@ -752,7 +752,7 @@
   (let [inventory
         (registry/collect!
          operation-store
-         (java.util.Date.)
+         registry/plain-cutoff
          {:seon.operator.collect/dry-run? true})
         retained (:seon.cluster.registry/retained-files inventory)
         candidates (:seon.cluster.registry/candidate-files inventory)
@@ -823,7 +823,7 @@
          :seon.operator.collect/complete? false}]
     (try
       (let [inventory
-            (registry/collect! operation-store (java.util.Date.) {})
+            (registry/collect! operation-store registry/plain-cutoff {})
             swept (:seon.cluster.registry/swept inventory)
             after-first (collection-observation operation-store)
             first-result
@@ -840,7 +840,7 @@
                               (:seon.operator.collect/bytes after-first)))))]
         (try
           (let [verification-swept
-                (registry/collect! operation-store (java.util.Date.))
+                (registry/collect! operation-store registry/plain-cutoff)
                 after (collection-observation operation-store)
                 evidence (collection-evidence operation-store)
                 verification
@@ -953,6 +953,20 @@
             (if (:seon.operator.collect/dry-run? request)
               (dry-run-store! root held)
               (collect-store! root held))))))))
+
+(defn collect-released!
+  "The plain collection a test request runs after it unlinks its branches.
+
+  Only objects no roster branch reaches are swept — the unlinked branches'
+  commits and nodes — with every live branch's ancestry kept
+  (`registry/plain-cutoff`), under Datahike's safe point against in-flight
+  writers. Runs only when `effective` carries
+  `:seon.config.maintenance/collect? true`; answers nil when collection is off."
+  {:malli/schema [:=> [:cat :seon.store/store :seon.config/effective]
+                  [:or :nil :seon.cluster.registry/inventory]]}
+  [store effective]
+  (when (true? (:seon.config.maintenance/collect? effective))
+    (registry/collect! store registry/plain-cutoff {})))
 
 (defn observe-footprint!
   "Measure only this managed data directory; the schedule records the result."

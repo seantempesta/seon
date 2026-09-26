@@ -1,8 +1,8 @@
 #:seon.config.maintenance{:collect?
                           [:boolean
-                           {:seon.config/optional true,
-                            :seon.config/dial true,
-                            :description "Whole-store collection runs only when true; absent means off. Off until a collection is proven to keep every node an open branch, a held database value or an in-flight transaction reads (docs/seon/issues/published-head-references-never-written-index-nodes.md)."}],
+                           {:seon.config/dial true,
+                            :seon.config/default true,
+                            :description "Whole-store collection runs only when true. The plain collection keeps every roster branch's whole ancestry and sweeps only what no roster branch reaches; proven against a held value, a non-head adopted commit and a concurrent writer (docs/research/agent-platform/landing/fix-eval-schema-reds-2026-09-26.md, round 6)."}],
                           :log-max-bytes
                           [:int {:min 1, :seon.config/dial true}],
                           :log-retained-files

@@ -1,12 +1,32 @@
 ---
 type: issue
-status: open
+status: closed (2026-09-26, fixed at the owners; evidence below)
 severity: critical
 created: 2026-09-23
 tags: [issue, datahike, store, write-path, durability]
 ---
 
 # A published head references index nodes that were never written
+
+## Closed 2026-09-26 (lane fix-eval-schema-reds-opus)
+
+Both producers are fixed at their owners, and the reproductions pass at HEAD on scratch file
+stores with Seon's configuration (history, fused roots, branching factor 4096); the probe is
+`tmp/fix-durability/probe.clj`.
+- **Swallowed `Error`:** the superv.async fork (`deps.edn:43-46`, `seantempesta/superv.async`
+  `501b4294`) catches and rethrows every `Throwable` (`superv/async.cljc:116`
+  `throw-if-exception-`). An `AssertionError` thrown inside one konserve write of a commit (from
+  a write hook, which runs in konserve's go block, `core.cljc:372`) now fails the commit loudly
+  (`:datahike/writer-shutdown`). The connection stays at the prior commit `6ab73614-6ed9…`,
+  the disk head is unchanged, and a fresh connection reads all six indexes (20,006 datoms in
+  eavt). `-XX:+ExitOnOutOfMemoryError` and the heap dump flags are set (`deps.edn:162-163`).
+- **Softly held fused roots:** see
+  `a-committed-database-holds-its-fused-roots-only-softly.md` (Datahike fork `fa0cc1a7`).
+- **Collection:** the plain collection (`registry/plain-cutoff`) keeps a held value, a non-head
+  adopted commit and a concurrent writer's commits
+  (`seon.cluster.registry-test/the-plain-collection-keeps-held-values-adopted-commits-and-concurrent-writes`),
+  so `:seon.config.maintenance/collect?` now defaults to true.
+
 
 The 2026-09-24 occurrences of `Node not found in storage.` (18:07:30Z, 21:14:14Z, 21:19:42Z)
 have a different cause, and no on-disk data was lost. A committed database holds its fused

@@ -458,6 +458,15 @@
   [started-ns]
   (quot (- (System/nanoTime) started-ns) 1000000))
 
+(def plain-cutoff
+  "The `remove-before` of the plain collection: the epoch, so Datahike marks
+  every roster branch's whole commit ancestry (`gc.cljc` `reachable-in-branch`
+  keeps every commit newer than it) and sweeps only what no roster branch
+  reaches: an unlinked branch's commits and nodes. No commit a live branch, a
+  held value on it or an adopted source commit names is pruned; retention
+  pruning is a separate policy (`retention-cutoff`)."
+  (java.util.Date. 0))
+
 (defn- collect-and-inventory!
   "Use Datahike's reachability and konserve's candidate selection for either mode."
   {:malli/schema [:=> [:cat :seon.store/store :inst :map]

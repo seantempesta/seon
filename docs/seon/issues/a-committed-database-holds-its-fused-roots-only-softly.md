@@ -1,12 +1,25 @@
 ---
 type: issue
-status: open
+status: closed (2026-09-26, Datahike fork fa0cc1a7; evidence below)
 severity: high
 created: 2026-09-24
 tags: [issue, datahike, persistent-sorted-set, read-path, memory]
 ---
 
 # A committed database holds its fused index roots only softly
+
+## Closed 2026-09-26 (lane fix-eval-schema-reds-opus)
+
+The smallest fix below landed in the Datahike fork as `fa0cc1a7` ("Pin fused index roots
+strongly in the flushed live db value"): `db->stored`'s fusion block pins each flushed set's
+root with `-seed-root!` (`reference-code/datahike/src/datahike/writing.cljc:153-172`). The
+fork carries its regression, `test/datahike/test/fusion_root_pin_test.clj`. At HEAD (fork
+`f3a3cb59`, classpath `:local/root`), on a scratch file store with Seon's configuration
+(`tmp/fix-durability/probe.clj` `soft-root`), a committed live value's six fused roots are
+held strongly (not `java.lang.ref.Reference`) and none is written as its own object. With any
+Reference cleared and the indexes read through a fresh storage (an empty node cache), all six
+read the same counts as before (eavt 2,007, avet 2,001, temporal-eavt 2,006).
+
 
 ## Observation
 

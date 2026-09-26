@@ -499,6 +499,46 @@
           (is (nil? (registry/retire-branch! {:seon.store/store opened
                                               :seon.store/branch doomed}))))))))
 
+(deftest the-plain-collection-keeps-held-values-adopted-commits-and-concurrent-writes
+  ;; The claim `:seon.config.maintenance/collect?` waited on: a collection
+  ;; loses no node an open branch, a held database value or an in-flight
+  ;; transaction reads. The plain collection (`registry/plain-cutoff`) keeps
+  ;; every roster branch's whole ancestry, so a held value and a non-head
+  ;; commit named as an adopted source stay whole while a retired branch goes.
+  (with-source-store
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "live"))
+      (registry/ensure-cluster! (cluster-request opened "doomed"))
+      (let [live (store/open-branch! opened (registry/cluster-branch "live"))]
+        (try
+          (dotimes [n 5] (write-marker! live (str "held-" n)))
+          (let [held @live
+                adopted (:datahike/commit-id (:meta held))
+                held-markers (markers live)]
+            (dotimes [n 5] (write-marker! live (str "later-" n)))
+            (let [doomed (store/open-branch! opened (registry/cluster-branch "doomed"))]
+              (try (dotimes [n 5] (write-marker! doomed (str "doomed-" n)))
+                   (finally (d/release doomed))))
+            (registry/retire-branch! {:seon.store/store opened
+                                      :seon.store/branch (registry/cluster-branch "doomed")})
+            (let [writer (future (dotimes [n 10] (write-marker! live (str "during-" n))) :done)
+                  collected (registry/collect! opened registry/plain-cutoff {})]
+              (is (= :done (deref writer 30000 :timeout)) "the concurrent writer finished")
+              (is (pos? (:seon.cluster.registry/swept collected)) "the retired branch was reclaimed")
+              (let [cold (fn [database]
+                           (set (d/q '[:find [?marker ...] :where [_ :seon.registry.test/marker ?marker]]
+                                     database)))]
+                (is (= held-markers (cold held)) "the held value still reads")
+                (is (= held-markers (cold (d/commit-as-db (:seon.store/connection-object opened) adopted)))
+                    "a non-head adopted commit is still readable")
+                (d/release live)
+                (let [fresh (store/open-branch! opened (registry/cluster-branch "live"))]
+                  (try
+                    (is (= 21 (count (markers fresh)))
+                        "a fresh connection reads the ancestral, held, later and concurrent markers")
+                    (finally (d/release fresh)))))))
+          (finally (try (d/release live) (catch Throwable _))))))))
+
 ;;; ---------------------------------------------------------------------------
 ;;; Refusals
 ;;; ---------------------------------------------------------------------------

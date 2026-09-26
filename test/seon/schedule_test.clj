@@ -389,16 +389,15 @@
                          :where [_ :seon.error/operation ?operation]]
                        @connection))))))))
 
-(deftest a-scheduled-collection-without-the-flag-records-its-disabled-outcome
-  ;; Collection is off until proven safe (issue
-  ;; published-head-references-never-written-index-nodes): the trigger fires,
-  ;; no store is opened, and the receipt carries the typed refusal.
+(deftest a-scheduled-collection-with-the-flag-off-records-its-disabled-outcome
+  ;; The dial defaults to true; a cluster that sets it false gets no
+  ;; collection: the trigger fires, no store is opened, and the receipt
+  ;; carries the typed refusal.
   (test-support/with-database
     (fn [connection]
       (seed-task! connection "schedule-test/collect"
                   (quote seon.maintenance/collect!))
-      (let [context (execution-context)]
-        (is (not (contains? context :seon.config.maintenance/collect?)))
+      (let [context (assoc (execution-context) :seon.config.maintenance/collect? false)]
         (is (= 1 (schedule/fire-due! connection "root" (observed-after-seed)
                                      context))))
       (is (= 1 (count-with @connection :seon.maintenance.receipt/error)))
