@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: STOPPED for a root decision — A breaks every durable write a form makes that names its run or evaluation (task c9e0cde3edb3); three priced options below
+status: option 2 committed (55b5b580f): a form's first durable write opens its run; the speculative open deleted; RESET NEEDED, then measure
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -23,6 +23,32 @@ refusals, e.g. `agent-already-running`, answer the caller), evaluates on that va
 commits open + evaluations + close as ONE transaction (`with-submission` prepends the open; the
 run-dependent writer calls after it see the run mid-transaction, `datahike/db/transaction.cljc:1171`).
 The pass answers the reply port with its report; a pass that ends without settling closes the port.
+
+## Option 2 landed (55b5b580f) — unmeasured until the restart
+
+- **One mechanism at the writer.** Custody binds the run's open beside the receipt (`seon.db/*open*`);
+  `stamp-receipt` puts it first in every write the evaluation makes, and the settlement carries it too.
+  The new general `seon.db/absent-call` makes the writer apply it once, deciding on its own
+  mid-transaction value. This covers all four sites (receipt, effect open, fault recording, context
+  capture) when they write on the evaluation's custody. A write on another thread or outside custody is
+  not covered.
+- **The speculative open is deleted.** The pass asks the writer's decision once (`system-run-plan`, split
+  out of `system-run-call`) for a refusal and the starting namespace. It folds the submission's own sources.
+  A reply large enough to stage a blob opens its run in its own commit.
+- **Proven on the live writer path** with `seon.db/with` on default's value: open + note write + receipt, applied
+  twice, gives one run and the receipt resolves to the evaluation the open wrote.
+- Regressions: `evaluate_source_test` (a form's `seon.db/transact!` names its evaluation; a form whose
+  renderer throws still answers) and `settlement_receipt_provenance_test` (the first write opens the run; a
+  second write and the settlement skip it). The fault-case regression asserts the answer, not a recorded
+  fault: I did not find a form-level trigger of a run-attributed core fault.
+- src +111/−45 (turn.clj +75/−30 from the plan split and submission fold, db.clj +27/−6).
+
+**Next, prepared but not committed:** task 361088de3d56 (the program-change check scans history). The patch
+`tmp/one-commit-a/program-change-from-report.patch` derives the changed entities from the settlement's own
+report and treats a value acquired before another commit as not covered. Seven test callers of
+`install-evaluated-rows!` pass no report and would stop advancing the snapshot; `test_test.clj:68`
+would then read a program mismatch. Those callers need converting, and the files are not mine.
+Task 4bb788513862 (a branch's first write misses the writer's caches) is not started.
 
 ## Broken / open first — STOP: A breaks writes made during a form (task c9e0cde3edb3)
 
