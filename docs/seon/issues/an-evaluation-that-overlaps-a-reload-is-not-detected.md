@@ -20,6 +20,22 @@ tags: [issue, sci, reload, agent, adoption]
   existing adoption detection still refuses an overlapping evaluation". No such detection exists, so the sixth
   finding-6 regression (reload overlap refuses by name) has nothing to exercise.
 
+## Correction 2026-09-26 (lane inv-lifecycle-storage-opus)
+
+The evidence above is wrong for one evaluation: since e81cb51dc (2026-09-24, before this issue) `seon.sci.eval/evaluate`
+runs read, eval and admit inside `trusted-evaluation` → `call-detecting-program-change` (`src/seon/sci/eval.clj`,
+present at 07a03cdd4:3889), which refuses by name when `loaded-identity` changed. `program_change_test.clj` covers it.
+
+What is undetected is the run: a reload between two forms of one run, or between the last admission and the run's
+settlement commit, changes nothing any comparison reads, so a run whose forms ran under two programs settles as one.
+
+Design (detect, don't lock; one place): the run writer's caller already holds the run from admission to settlement
+(the agent's turn step in `seon.turn`). Capture `@loaded-identity` when the run is admitted and call the whole
+evaluate-and-settle through `call-detecting-program-change loaded-identity 'seon.turn/run since work` — the `since`
+arity exists for exactly this (an admitted request's identity) and nested evaluations already advance their own
+expectations. On a change the run settles closed with the declared `:seon.cluster/adoption` refusal as its receipt's
+error instead of its values. No new state, no lock; turn.clj is inv-agent-run-stability-opus's file.
+
 ## Owner and acceptance
 
 The owner is the evaluation stage (`seon.sci.eval/evaluate`) or its settlement.

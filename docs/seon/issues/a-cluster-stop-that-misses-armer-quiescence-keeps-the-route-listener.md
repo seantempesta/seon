@@ -24,6 +24,21 @@ A stop that fails keeps custody for diagnosis, which is correct. But the listene
 of agents that are being joined, and it offers unknown recipients to an armer that did not answer. That work goes to
 execution the caller already asked to stop.
 
+## Investigated 2026-09-26 (lane inv-lifecycle-storage-opus): not reproduced; the fix is a ruling
+
+Confirmed from source at 61d207c3e (`seon.cluster/disarm-agents!`, cluster.clj: `refuse! ::armer-quiesced` precedes
+`flow.core/stop`). Not reproduced live: it needs an armer that never answers, which only a wedged step makes.
+A wedged armer also cannot run its own `::flow/stop` transition, so "the route stays owned by the proc" and "no
+listener survives a missed quiescence" conflict whenever the proc cannot run. Options for root:
+1. (simplest) Keep it: a missed quiescence is a panic that needs RESET NEEDED; status names the unanswered armer
+   (`status-reads-only-the-root-roster-and-a-stopped-hosted-graph-stays-armed`). No code.
+2. (recommended) On a missed quiescence still queue the cluster graph's `flow/stop`, then throw: the armer's own
+   stop transition removes the listener whenever the step returns; a later stop reads the armer's exit (ping
+   unknown/not running) instead of re-awaiting quiescence. ~15 lines in `disarm-agents!`.
+3. The route's delivery checks its armer-channel closure and retires itself (Datahike retires a listener that
+   throws, `store/listen-failures!` records it); stop closes the channel on a miss. Listener lifetime moves to the
+   channel, a second owner beside the proc.
+
 ## Owner and acceptance
 
 The owner is the armer proc's lifecycle (`armer-step`) together with `disarm-agents!`.

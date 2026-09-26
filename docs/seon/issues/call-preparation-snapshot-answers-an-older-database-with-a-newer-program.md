@@ -57,6 +57,15 @@ connection's head, not the evaluation's `:seon.db/db`. Changing it decides
 read-your-writes inside one evaluation, which belongs to the repl-entry-renders
 design (§2.3).
 
+## Verified at HEAD 61d207c3e (2026-09-26, lane inv-lifecycle-storage-opus)
+
+On branch `:inv-lifecycle-storage-opus` of default (pid 13262), after an agent run defined
+`user/probe-basis [:=> [:cat :seon.db/database-value :int] :int]`: `seon.call-preparation/snapshot` at the head
+prepared it; at `as-of` the fork basis and at the fork commit (`commit-as-db`) it did not. The older-value half is
+fixed (a44538acc). d62d32bf7 does not touch the remainder: `hook` still derives its plan database from
+`(:seon.db/connection environment)` (`src/seon/call_preparation.clj:1145-1147`), not the run's working value, so the
+issue stays open for that half only.
+
 ## Reproduction plan (needs SCI; default was degraded when this was filed)
 
 1. On a disposable branch of default, capture `db0`. Transact a supplied-default row for a new

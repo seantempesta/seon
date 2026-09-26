@@ -1,6 +1,6 @@
 ---
 type: issue
-status: open
+status: fixed-unproven
 severity: cleanup
 created: 2026-09-26
 tags: [issue, agent, custody, isolation]
@@ -22,6 +22,13 @@ tags: [issue, agent, custody, isolation]
 
 Only a first acquisition of a branch can fail this way, and an isolated branch name is fresh (`agent-<id>`), so a
 concurrent same-branch acquisition needs a named branch that is racing its own first failure.
+
+## Fixed 45833be3e (lane inv-lifecycle-storage-opus's patch, applied by root)
+
+The failed first acquisition decides emptiness in the child's own `swap!`, marking an empty child released; a
+released roster refuses reservations by name (`::roster-released`) and `child-roster!` replaces a released child, so
+the concurrent acquisition retries once in a fresh recorded child. Unproven: a deterministic race regression needs a
+seam to hold the first acquisition between its failure and its detach, which no Var redefinition may provide.
 
 ## Owner and acceptance
 

@@ -7,6 +7,28 @@ tags: [issue, database, class/n14, wave/store-perf]
 
 # Give storage GC the cutoff that makes it actually reclaim
 
+## Re-measured 2026-09-26 16:00Z (lane inv-lifecycle-storage-opus, default pid 13262, HEAD 61d207c3e)
+
+Collection now reclaims what is unlinked. Around one `bin/test-check default --ns seon.cluster.host-test`
+request the store went 1.2 GB / 7,563 files → 1.6 GB / 10,502 files (request in flight, 186 roster branches) →
+1.2 GB / 7,379 files, konserve keys 8,795 → 7,352, roster 186 → 99. A dry run afterwards found 1 candidate.
+
+What it cannot reclaim is what nothing unlinks. 90 of the 99 roster branches were `agent-*` (48) and `host-test-*`
+(42) branches last written 14:16–14:20Z by an earlier JVM, with no connection in this one: execution-owned branches
+whose process died before `release-context!`/`retire-branch!` ran. Marked separately, 2,624 of 7,352 keys (36 %)
+are reachable only from them. Nothing ever retires them, so every later mark walks them too.
+
+The mark grows with branches × ancestry: the dry run took 6,550 ms at 99 branches (850 ms at the first
+measurement). `datahike.gc/reachable-in-branch` (`reference-code/datahike/src/datahike/gc.cljc:22-81`) keeps its
+`visited` set per branch, and the plain cutoff walks every branch's whole ancestry, so shared commits are marked
+once per branch; `referenced-blobs` (1,724 ms) repeats a history query per branch.
+
+The request's collection (`seon.maintenance/collect-released!`, handed to the launcher at `src/seon/test.clj:2485`)
+returns its inventory to a `complete!` that discards it on success: no receipt records swept keys or mark time.
+
+Retirement of dead-process branches needs a claim rule; root options are in
+`docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md` §1.
+
 ## Re-diagnosed 2026-09-26 (lane fix-eval-schema-reds-opus)
 
 At HEAD the growth is not a missing cutoff: **collection never runs.** Its one runtime caller
