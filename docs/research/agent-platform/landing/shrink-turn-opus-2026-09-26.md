@@ -129,3 +129,30 @@ which was 13 ms per call.
 ## Sizes
 
 turn.clj: 5,990 → 5,988 after P1 → 5,974 after P2 → 5,975 after the gate patch.
+
+## Red triage: `d231c5f7c`
+
+These are the rows in my files from `docs/research/agent-platform/red-triage-2026-09-27.md`.
+
+**Fixed in the tests:**
+- `turn-test/evaluation-ai-is-only-the-repl-session`: the printer is right. It prints the same map in
+  namespaced-map form, `:error #:seon.error{:message …}` (checked live at the REPL), so the expectation now matches.
+- `turn-test/a-fired-turn-bound-…`: the terminal's `:seon.error/operation` is its producer,
+  `seon.turn/turn-completion-error`, and has been since `f8861b66e`. The missed event `:seon.agent/turn-transform`
+  sits in `:seon.error/data`, as the producer declares (checked live). The test now asserts both.
+- FIXTURE rows: since `4d163db4b`, `cluster-handle` reads the named cluster's effective config.
+  - `an-agent-dial-read-that-refuses…` now builds its handle from the shipped decisions and then names the missing
+    cluster, so the refusal it tests is the dial read's own.
+  - turn-loop `refused-generated-opening…`, `prompt-and-call-resolve-once…`, `a-refused-phase-escalates…`,
+    `a-clean-last-form…` and `install-gate-failure…` now call `seed-cluster!`, the canonical builder, before they
+    build the handle.
+
+**Not touched, because none of them is clear:**
+- `a-forms-read-evidence-is-only-what-the-form-read` (UNKNOWN): the evaluation now reads the agent's namespace.
+  That is an eval-path change owned by shrink-eval or the M2 commits.
+- `committed-ending-namespace-seeds-a-resumed-fold` (UNKNOWN).
+- `virtual-turns-use-the-proc…`: its per-transaction datom counts are STALE after `55b5b580f` folded the open into
+  the settlement. It also runs 10 s against a 5 s bound. Rewriting the counts to whatever the code produces now
+  would prove nothing, so it needs its owner's decision on what the test should assert.
+- TIMEBOUND `recovery-preserves-terminal-receipts-exactly` (12.9 s) and `transitions-agree-with-the-model`
+  (20.6 s).
