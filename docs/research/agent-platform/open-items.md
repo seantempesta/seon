@@ -128,7 +128,7 @@ Astra reviews the diff, then root batches ONE restart. No restart to find out wh
    (re-analysis writes only changed rows; ready 89 s → target ≤10 s). commit-floor-research-opus: why one commit is ~118 ms.
 2. **The one eval path (after 0 and the Astra review of the audit):** eval-path-audit-2026-09-26.md option B — clj-kondo before
    evaluation is the single authority (root ruled: a data def is a program row at the REPL exactly as in files), gate before running,
-   one wrap/projection/handle, reply from the settlement report; slices S1–S7 one at a time, each Astra-reviewed. ~−1,080 net lines.
+   one wrap/projection/handle, reply from the settlement report; Astra REVISE (f6cefab39): follow review-eval-path-audit-2026-09-26.md's corrected order — 1 reply from the settlement outcome, 2 common outcome + dead cleanup, 3 events/analysis artifacts, 4 kondo authority + static gate together, 5 test owner consumes the candidate world, 6 projection/arming by input identity, 7 acquisition before fork, 8 decomposition, 9 doc moves; S8 (persistent world) deferred; each cut with the regressions the review lists.
 3. **Shrink the large files (PLAN ONLY until reviewed):** six shrink-plan docs (turn, sci/eval, db, schema+error, render, test/issue/plan),
    slow paths first; Astra audits each plan; execute slow-first slices ≤3 lanes at a time. Target: 92.8k → 10k lines.
 4. **Then:** dogfood merge loop end to end (branch → defn → task → proof → propose → root merge); cache slice 2 (db.clj caches);
