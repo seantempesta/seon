@@ -4,4 +4,10 @@
              :intent "The bridge kept its own error cursor (window-bases), a second occurred-since query per evaluation and a top-20 summary, lost on restart and shared across sessions. A run's reply now carries each evaluation's :seon.repl/response from seon.render.transcript/history-entries, the bytes its agent's next context reads; it stays open until that observation holds the error as complete data (value, chain, location) rather than triage prose."
              :must-read #{seon.dev.mcp/run-form seon.dev.mcp/run-events}
              :evidence #{"docs/research/agent-platform/error-delivery-audit-2026-09-26.md"
-                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/err-s4-observation-opus-2026-09-26.md"}}
+ #:seon.task{:id "2cd1f9deb10c"
+             :name "mcp-failure-answers-carry-a-babashka-stack-trace"
+             :kind :function
+             :intent "A declared bridge failure answers with the whole Throwable->map printed, trace included: the repl-unavailable and session-lost answers (default restarting, 2026-09-26) each carried about 9,000 characters (about 2,800 tokens) of the bridge's own babashka interpreter frames around a one-line ex-info whose ex-data already names the failure, the cluster and the remedy. The frames are the bridge's, never the agent's or Seon's. A declared failure is its ex-data; the trace belongs only to an undeclared throwable."
+             :must-read #{seon.dev.mcp/failure seon.dev.mcp/mcp-error}
+             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}]

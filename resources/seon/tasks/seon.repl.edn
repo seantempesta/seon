@@ -1,0 +1,6 @@
+[#:seon.task{:id "18c37812b5bc"
+             :name "reply-map-is-not-edn-when-elided-or-rendered"
+             :kind :function
+             :intent "seon.repl/response splices shown text into the reply map verbatim. (vec (range 3000)) answered #:seon.repl{:value [0 1 … …2968] then a newline and the floor's ';; …N = N more … (seon.print/value-at result/e7b3b69b578ae [...]).' legend, so ', :result result/e7b3b69b578ae, :ms 711}' sits on the comment line: read as EDN the reply loses its handle, its time and its closing brace. A declared renderer's response keeps only diagnostics and errors (a pull of a turn answered prose alone), so every rendered value loses :result and :ms. One composer: the reply map must read back as data for every value, and a rendered value keeps its handle and time."
+             :must-read #{seon.repl/response seon.repl/value-text}
+             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}]

@@ -1,0 +1,9 @@
+;; (inc 1) first on a new branch -> 1 finding(s) in 2576 µs
+#:seon.eval.finding{:measure :seon.eval/seon-ms, :observed 1305, :bound [:<= 250], :level :loud, :owner :seon, :fix "Platform overhead: recorded as a fault for root; not your defect."}
+;; (inc 1) warm -> 0 finding(s) in 553 µs
+;; (vec (range 3000)) -> 2 finding(s) in 964 µs
+#:seon.eval.finding{:measure :seon.eval/seon-ms, :observed 690, :bound [:<= 250], :level :loud, :owner :seon, :fix "Platform overhead: recorded as a fault for root; not your defect."}
+#:seon.eval.finding{:measure :seon.eval/unshown-tokens, :observed 4620, :bound [:<= 2000], :level :note, :owner :agent, :fix "Most of the value was not shown: select what you need instead of returning it whole."}
+;; (d/q '[:find ?e ?a ?v :where [?e ?a ?v]] db) -> 1 finding(s) in 645 µs
+#:seon.eval.finding{:measure :seon.eval/unbounded-reads, :observed 1, :bound [:= 0], :level :loud, :owner :agent, :fix "A query read every attribute of the store: bind the attribute."}
+;; compiled explainer: 6.90 µs per evaluation (bb, interpreted)

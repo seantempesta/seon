@@ -1,0 +1,6 @@
+[#:seon.task{:id "c7bc0c506aa4"
+             :name "slow-explanation-blames-the-agent-for-platform-time"
+             :kind :function
+             :intent "explain-slow tells the agent 'this is your defect' from a JVM-wide counter delta. The first (inc 1) on a new branch answered :ms 1307 with the OVER ONE SECOND text while its lines named seon.sci.eval/acquire! 1290 ms and derive-base-ctx 1075 ms: Seon's program acquisition inside the arm, not the agent's form. The window is every cell in the JVM (a 4.5 s window around one form held 35 evaluations and 57 transactions of other lanes), so no per-operation attribution is correct under concurrency; the evaluation path appends the lines to :seon.cluster.eval/output, so the reply's :out shows text the form never printed. The same begin/explain duplicate serves MCP JVM mode, test members and publication. Attribute per operation (a window carried by the kernel arm), judge the agent on its own time only, and deliver platform time as a fault to root."
+             :must-read #{seon.profile/begin seon.profile/explain seon.profile/explain-slow}
+             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}]

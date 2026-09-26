@@ -1,0 +1,17 @@
+;; For root: append to resources/seon/tasks/seon.sci.eval.edn (held uncommitted by another lane at the time,
+;; so this lane did not edit it). Also replace the intent of existing task "c088e4367dc5" as below.
+[#:seon.task{:id "f5e49bfa4e85"
+             :name "evaluation-duration-mixes-acquisition-and-omits-render"
+             :kind :function
+             :intent ":seon.eval/duration-ms (the reply's :ms) runs from arm start to (record :ok) (eval.clj:4674 at a34078273): it includes program acquisition (acquire! runs inside with-arm, eval.clj:4488) and excludes admission and rendering (shown-result, eval.clj:4683). (inc 1) answered :ms 1307 of which acquisition was 1290; (vec (range 3000)) answered :ms 711 against 229 for (inc 1); the whole run that answered :ms 229 took 408 ms inclusive. It is neither the agent's time nor the reply's: split it into the form's own evaluation and Seon's phases."
+             :must-read #{seon.sci.eval/evaluate seon.sci.kernel/record}
+             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}
+ #:seon.task{:id "611637cf8634"
+             :name "form-read-evidence-includes-platform-reads"
+             :kind :function
+             :intent "The stored receipt of (inc 1), a form that reads nothing, holds one read of #{:seon.agent/id :seon.agent/namespace :seon.ns/name} with pattern value \"mcp/eval-feedback-design-opus\" (branch eval-feedback-design-opus, 2026-09-26). The form's read sink is bound around admission and rendering too (eval.clj:4683 at a34078273), so the platform's own agent/namespace lookups are recorded as the agent's reads and wakes and refresh treat them as the agent's. Bind the form sink around the form's evaluation only."
+             :must-read #{seon.sci.eval/evaluate seon.sci.eval/shown-result}
+             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}]
+
+;; Replacement :intent for "c088e4367dc5" (forms-just-after-boot-cost-hundreds-of-ms), and add the design doc to :evidence:
+;; "smoke-6 (default b4b90d405, about one minute after readiness) recorded :seon.eval/duration-ms 284-495 ms for each trivial form of a fresh branch run; perf-eval-overhead measured 0-3 ms 30 minutes later. On 2026-09-26 (pid 59671, ~7 min after readiness; pid 70054, ~1 min) warm (inc 1) answered :ms 135, 150, 229, 332 and 539 on one branch, so it is not only cold. One warm (inc 1) run (a window holding exactly one seon.sci.eval/evaluate) made about 31,000 armed calls across 288 functions: seon.db/database-value? 7,456, seon.sci.eval/copy-host-var 3,852, seon.sci.kernel/mark-installed! 3,810, seon.db/with-declarations 1,101 (285 ms inclusive), seon.db/pull-call 518. Per-form work tracks the host namespace count, not the form; name what each call recomputes per turn and delete it."
