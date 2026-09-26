@@ -324,3 +324,75 @@ bin/test-check default --test seon.instrument-test/restoring-instrumentation-sta
 Released: src/seon/render/walk.clj, src/seon/print.cljc,
 resources/seon/schemas/seon.print.edn, test/seon/print_test.clj,
 test/seon/instrument_test.clj, this note.
+
+## Round 3: commits `a33382621`, `595bac7f6`, `0f54105f5`, `225b23639`
+
+### Open first
+
+1. **(4) Directory selection is not fixed: it needs `src/seon/sci/eval.clj`.**
+   `seon.sci.eval/directory-value` declares `[:or :map :seon.db/error-result
+   …]`. Its value validates as `:seon.repl/directory` on default, but an
+   anonymous `:map` names no schema, so `satisfied-alternatives` finds no pair
+   and selection falls to the floor. The fix belongs to the producer's
+   contract: return `:seon.repl/directory`. A special case in render.clj
+   would be a patch at the wrong owner. Request: grant sci/eval.clj, one
+   contract line.
+2. **Two walk.clj atoms remain.** `captured` is the `db/*read-evidence-sink*`
+   binding protocol, owned by seon.db. `cache` is the shared render cache,
+   owned by seon.render. Neither is walk's to change. The three local atoms
+   in `acquired-tree` are gone.
+3. **The same pair is declared twice.** `:seon.eval/entity` and the receipt
+   row both carry `seon.repl/render-ai`. Selection picks the owner (the
+   receipt). The `:seon.eval/entity` copy can go once seon.eval.edn is
+   granted, if nothing else selects it structurally.
+
+### What changed
+
+- **(1) `a33382621` render/ns.clj.** Members are one unlimited reverse pull,
+  measured at 0.2 ms for an empty namespace and 1.8 ms for `seon.db`
+  (230 rows) on default. The old query exceeded the read budget even for
+  `my.agents.root`. The AI face shows the first max-collection names, the
+  total, and `(dir ns)`; HTML shows all of them. The ns-test that asserted
+  the refusal was replaced by a continuation test.
+- **(2) `595bac7f6`.** The `:seon.cluster.eval/receipt` row declares the REPL
+  pair. `walk/history` hands the row without the read's `:t` basis, so the
+  owner and its pair are found. Probed with the edited projection: the
+  prompt's text equals `seon.repl/render-ai`'s, and the HTML selects the
+  `seon-eval-entry` article. The walk's pulled/visited/evidence state is a
+  threaded value; its output equals the atom version's for root (root map
+  and 57 evidence entries).
+- **(3) + (5) `0f54105f5` render.clj.** An identity owner's pair claims only
+  a root value (empty path). Nested values take only their reaching
+  attribute's component pair: `:seon.agent/runtime` → `:seon.runtime/entity`
+  still renders, while `:seon.agent/namespace` has none and keeps its pulled
+  shape. `:seon.print/rendered-token-ceiling` is now a config dial
+  (config/default.edn 50000). `agent-render-profile` carries it when
+  effective config has it, and `fit` prefers the profile's value.
+- **mcp-test `225b23639`**, classified by the provenance ruling:
+  - `nested-bulk` and `sci-top-level-strings` were retired assumptions: an
+    8,192-byte window that predates the one budget. Measured: 25,130
+    characters, about 8,400 tokens, under the 15,000-token profile. They now
+    assert the profile bound.
+  - `ordinary-mcp-results` relied on budget pressure that the default budget
+    no longer creates: at 15,000 tokens, 32 whole rows fit. At a 1,000-token
+    budget the nested rows are cut with paths `[0]`…`[3]` plus `[]`, and the
+    36-character strings stay readable (probed on default).
+
+### Root runs
+
+```
+bin/test-check default --ns seon.render.ns-test
+bin/test-check default --ns seon.render.transcript-test
+bin/test-check default --ns seon.render.value-test
+bin/test-check default --ns seon.render.walk-test
+bin/test-check default --ns seon.render.walk-graph-test
+bin/test-check default --ns seon.cluster.mcp-test
+bin/test-check default --ns seon.render-test
+bin/test-check default --ns seon.config-test
+```
+
+Released: src/seon/render/ns.clj, test/seon/render/ns_test.clj,
+resources/seon/schemas/seon.cluster.eval.edn, src/seon/render/walk.clj,
+src/seon/render.clj, src/seon/print.cljc,
+resources/seon/schemas/seon.print.edn, config/default.edn,
+test/seon/cluster/mcp_test.clj, this note.
