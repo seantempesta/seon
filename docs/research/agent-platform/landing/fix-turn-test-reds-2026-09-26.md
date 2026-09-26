@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1; round 7 f81a22cd8, 9a21c6cc1); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -382,6 +382,16 @@ bin/test-check default --test seon.fn-test/arity-mismatch-refuses-the-final-writ
 bin/test-check default --test seon.publication-validation-test/changed-call-facts-still-refuse-an-invalid-arity
 ```
 
+### Round 7b: receipt custody (the dogfood-API lane's hunk, its own slice, `9a21c6cc1`)
+
+`db/call-with-custody` kept `*receipt*` across a custody switch. The receipt is an evaluation lookup ref valid
+only on the agent's branch (bound by sci/eval), so `stamp-receipt` stamped it onto another branch's
+transaction. The receipt is now kept only when the request's connection is the caller's. REPL, the new binding
+in a scratch function over two isolated branches: the same connection stamps the receipt; another connection
+and no custody stamp nothing (HEAD stamped the other branch). Regression:
+`db-test/a-custody-switch-to-another-connection-carries-no-receipt`. Contracts-compile over db.clj and
+db_test finds 0 problems.
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
@@ -399,6 +409,7 @@ bin/test-check default --test seon.publication-validation-test/changed-call-fact
 | d421b6e1a | db.clj, db_test, web_debug_test | 47 | 11 |
 | 48a345bc1 | web_debug_test | 1 | 0 |
 | f81a22cd8 | db.clj (arity gate) | 73 | 63 |
+| 9a21c6cc1 | db.clj, db_test (receipt custody) | 28 | 1 |
 
 Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
