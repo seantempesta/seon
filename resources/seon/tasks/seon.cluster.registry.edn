@@ -1,0 +1,6 @@
+[#:seon.task{:id "4e824da5bfb7"
+             :name "each-connection-decodes-its-own-index-nodes"
+             :kind :function
+             :intent "Datahike's CachedStorage is one per connection: at idle 347 MB + 24 MB + 1.2 MB, each a 1,000-node LRU of ~347 KB decoded leaves; a branch decodes its own copy of shared nodes, so under load each test branch can grow toward ~350 MB, the likely mechanism of the ~10 GB OOMs. Node addresses are store-global: make the node cache one per physical store in the Datahike fork (~20 lines; port upstream d2b9e525)."
+             :must-read #{seon.cluster.registry/active-branch-connection seon.db/branch-connection}
+             :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"}}]

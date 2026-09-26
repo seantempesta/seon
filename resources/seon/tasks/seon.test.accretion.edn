@@ -1,0 +1,8 @@
+[#:seon.task{:id "62a5644dd469"
+             :name "the-auto-check-writes-into-the-agents-branch"
+             :kind :function
+             :intent "The auto-check calls a writing function with generated arguments in the agent's own custody: after (defn add-note! ...) 42 of 45 notes on the branch were generated junk (22 and 23 more on 6a8e46ec6); install-gate test bodies write there too (note t1 at tx 536871459). A contract whose input is :my.program/context also generates SCI contexts and connections (a 30 s timeout just before the 14:25Z OOM). Run generated calls on a fork or d/with, and supply declared defaults instead of generating them."
+             :must-read #{seon.sci.eval/auto-check-candidate seon.test.accretion/auto-check}
+             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
+                         "docs/seon/issues/an-agents-auto-check-of-a-writing-function-commits-generated-entities-to-its-branch.md"}}]

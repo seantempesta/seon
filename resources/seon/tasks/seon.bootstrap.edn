@@ -1,0 +1,7 @@
+[#:seon.task{:id "2c66ac931003"
+             :name "help-teaches-the-wrong-tools"
+             :kind :function
+             :intent "(help) lists 'Tools: my.message, my.turn, seon.bootstrap, seon.db', derived from user's requires, omitting my.program, my.test, my.issue, my.plan and my.agent, and still teaches :out/:result and 'results arrive in your NEXT turn', which the MCP entrance does not show; apropos and find-doc are not referred in user as at clojure.main."
+             :must-read #{seon.bootstrap/help-value}
+             :evidence #{"docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}]

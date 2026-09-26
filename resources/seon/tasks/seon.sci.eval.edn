@@ -2,6 +2,103 @@
              :name "definitions-bypass-entry-gate"
              :kind :function
              :intent "Every definition an evaluation makes passes the entry gate and is armed, not only a top-level clojure.core/defn the reader matched: (do (defn …)), (let [..] (defn …)), (def f (fn …)) and defn-expanding macros must be refused when uncontracted. Keep an unindexed change distinct from an absent contract. A call inside the defining form still runs before the check."
-             :must-read #{seon.sci.eval/evaluate seon.sci.eval/definition-rows}
+             :must-read #{seon.sci.eval/evaluate seon.sci.eval/definition-row}
              :evidence #{"docs/research/agent-platform/language-requirements-2026-09-24.md"
-                         "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}]
+                         "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}
+ #:seon.task{:id "25cc3e2db48d"
+             :name "requiring-a-dependency-is-refused"
+             :kind :function
+             :intent "(require '[malli.core :as m]) at an agent REPL is refused as an unindexed change naming all ~300 malli.core Vars ('This form changed malli.core/-->-schema ... which its analysis declares no definition for'), because the Vars load-host-namespace copies count as program definitions. Reproduced at HEAD 013e12924 as root (smoke 16:48Z) and on a fresh branch (16:55Z). The :load-fn of 2cae09887 is therefore unusable, (m/validate int? 1) stays unresolved, and agents still cannot validate a value. A dependency namespace's copied Vars are not program rows and must not be diffed as definitions."
+             :must-read #{seon.sci.eval/copy-host-var seon.sci.eval/load-host-namespace seon.sci.eval/unindexed-change}
+             :evidence #{"docs/research/agent-platform/landing/fix-agent-path-2026-09-26.md"
+                         "docs/research/agent-platform/landing/task-log-2026-09-26.md"
+                         "docs/research/agent-platform/landing/unrestrict-sci-2026-09-26.md"}}
+ #:seon.task{:id "f548d10ecb69"
+             :name "evaluate-declares-too-few-refusals"
+             :kind :function
+             :intent "seon.sci.eval/evaluate returns refusals its contract does not declare: the unindexed-change refusal (seen on every rejected require above) ends with 'Contract finding: seon.sci.eval/evaluate returned this error, and none of its declared error alternatives matches it.' Declare each refusal evaluate returns as its own named alternative."
+             :must-read #{seon.sci.eval/evaluate seon.sci.eval/unindexed-change}
+             :evidence #{"docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md"
+                         "docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
+ #:seon.task{:id "a4f403e8c826"
+             :name "in-ns-inside-do-is-refused"
+             :kind :function
+             :intent "(do (in-ns 'my.issue) (defn f ...)) is refused as an unindexed change ('This form changed my.issue/f, which its analysis declares no definition for'), because analysis attributes the do to the run's starting namespace. At clojure.main in-ns inside do works. Top-level in-ns then defn in one run already works. Still open in dogfood cycle 10 (#12)."
+             :must-read #{seon.sci.eval/definition-row seon.sci.eval/unindexed-change}
+             :evidence #{"docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"
+                         "docs/seon/issues/dynamic-in-ns-cannot-persist-definition-namespace.md"}}
+ #:seon.task{:id "e5af812dbf95"
+             :name "doc-and-dir-erase-request-keys"
+             :kind :function
+             :intent "The agent doc/dir contract view replaces every schema keyword with its form by postwalk-replace (agent-documentation-contract, eval.clj:2370), including map entry keys, so request keys disappear and supplied members are not removed; my.issue/add! cannot be called from its doc. (dir my.program) and (dir seon.schema) are about 25 KB each and list plumbing (native-call-refusal, supplied-context, *-generator functions, begin-registration-delta); my.test/run shows 'The program row lacks a declaration ... :seon.fn/spec' as :in and :out. Walk Malli's own structure (m/walk, m/entries) and leave internal functions out of dir."
+             :must-read #{seon.sci.eval/agent-documentation-contract seon.sci.eval/documentation-schemas seon.sci.eval/documentation-value}
+             :evidence #{"docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"
+                         "docs/seon/issues/doc-replaces-every-schema-keyword-so-request-keys-disappear.md"}}
+ #:seon.task{:id "d653ed4b633f"
+             :name "install-gate-interprets-file-tests-in-sci"
+             :kind :function
+             :intent "The install gate re-evaluates every reaching file test's source in the candidate's SCI (run-candidate-test!), where the test's own requires do not resolve: a docstring-only defn of my.note/add! gated 4 tests, 0 passed, each 'Unable to resolve symbol: support/with-database'; an arity change of my.fs/write! failed 3 of 3, while my.test/check ran the same 3 tests green in 7,165 ms. It also runs compiled host test bodies under an SCI arm that cannot interrupt them, which drove the 14:20Z recursion to 10.2 GB. Needs the owner's reach-executor ruling (loose-threads section 11 Q1: run unchanged file tests as compiled Vars with the branch definition bound, interpret only differing rows, or gate only branch tests and leave file tests to merge)."
+             :must-read #{seon.sci.eval/evaluate-for-install seon.sci.eval/run-candidate-test! seon.turn/gate-function-install}
+             :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
+                         "docs/research/agent-platform/landing/inv-heap-stuck-members-opus-2026-09-26.md"
+                         "docs/seon/issues/a-first-party-redefinition-gates-on-saturated-reach-interpreted-in-sci-and-is-refused.md"}}
+ #:seon.task{:id "fc812316b5da"
+             :name "a-registration-lets-a-later-redefinition-skip-its-gate"
+             :kind :function
+             :intent "A breaking defn installs without its gate when a seon.schema/register! came earlier in the same run; the same defn alone is refused by its gating test (952 ms run). A bad normalize-tags with two gating tests installed the same way. A skipped gate and a passing gate both print #'ns/name. A gate that cannot run must refuse, never admit."
+             :must-read #{seon.schema/register! seon.sci.eval/evaluate seon.sci.eval/evaluate-for-install}
+             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
+                         "docs/seon/issues/a-schema-registration-earlier-in-a-run-lets-a-later-redefinition-install-ungated.md"}}
+ #:seon.task{:id "85bb0e44a4b9"
+             :name "a-contract-predicate-is-refused-both-ways"
+             :kind :function
+             :intent "A contract naming a predicate is refused both quoted and unquoted: [:=> [:cat] inst?] is refused because 'contracts are data; use ... a quoted symbol', and [:=> [:cat] 'inst?] is refused by canonical-definition as '(quote inst?)'. Two admission stages read two different values (evaluated metadata and authored source); only a registered schema key works."
+             :must-read #{seon.schema/canonical-definition seon.sci.eval/definition-row}
+             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
+                         "docs/seon/issues/a-contract-predicate-is-refused-both-quoted-and-unquoted.md"}}
+ #:seon.task{:id "c5f80919df38"
+             :name "incremental-install-leaves-callers-on-the-jvm-definition"
+             :kind :function
+             :intent "install-row! installs an override's one row and does not interpret its affected callers, while regeneration (base-ctx on the changed database) does: with seon.id/valid? overridden, the affected closure has 11 members and regeneration binds 701 names incremental installation does not. Compiled callers direct-link the JVM definition, so after an incremental install they still call it, not the override."
+             :must-read #{seon.sci.eval/base-ctx seon.sci.eval/install-row!}
+             :evidence #{"docs/research/agent-platform/landing/fix-eval-schema-reds-2026-09-26.md"}}
+ #:seon.task{:id "60fa86de1b8c"
+             :name "repl-namespace-changes-drift-from-the-ns-text"
+             :kind :function
+             :intent "alias, refer and import at the REPL change a namespace row's facts but keep its stored ns text, so write-back's equivalence proof refuses :not-equivalent; a REPL-evaluated ns form also drops the row's :seon.fn/file. require was fixed (5ced0160b). Splice every namespace-table change into the stored ns form, and keep the file."
+             :must-read #{seon.sci.eval/namespace-context-row seon.sci.eval/namespace-source}
+             :evidence #{"docs/research/agent-platform/landing/merge-ns-rows-2026-09-26.md"
+                         "docs/seon/issues/a-require-at-the-repl-records-the-require-form-as-its-namespaces-source.md"}}
+ #:seon.task{:id "d215b1ebde7c"
+             :name "acquisition-rebuilds-the-whole-program"
+             :kind :function
+             :intent "Acquiring a context re-derives the whole program: a base-ctx cache miss is 2,925 ms, dominated by acquire-program!; acquisition measured 1,467-3,376 ms; the first agent evaluation on a new branch allocated 11.2 GB and took 3.6 s JVM-wide; the base-context memo is keyed by program identity per commit, so every test-request commit misses (414-450 ms of the ~1 s clean-request-handle). The 16:10Z OOM died inside derive-base-ctx -> acquire-program! -> reverse-closure. Cost must follow the changed rows, not the program."
+             :must-read #{seon.sci.eval/acquire! seon.sci.eval/acquire-program! seon.sci.eval/base-ctx seon.sci.eval/derive-base-ctx}
+             :evidence #{"docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
+                         "docs/research/agent-platform/landing/inv-agent-run-stability-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/stability-guard-2026-09-26.md"
+                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
+ #:seon.task{:id "07317379b8ae"
+             :name "copied-vars-pin-old-wrapper-generations"
+             :kind :function
+             :intent "copy-host-var copies each JVM Var root into an sci.lang.Var, so a context alive across a reload pins a whole generation of instrument wrappers (2,070 of 2,072 old wrappers were held by one in-flight prepl evaluation, about 85 MB per generation). A copied dynamic Var's binding also never reaches the compiled library code that reads it. SCI can expose the clojure.lang.Var itself: reference instead of copy."
+             :must-read #{seon.sci.eval/copy-host-var seon.sci.eval/load-host-namespace}
+             :evidence #{"docs/research/agent-platform/landing/mem-idle-2026-09-26.md"
+                         "docs/research/agent-platform/landing/unrestrict-sci-2026-09-26.md"}}
+ #:seon.task{:id "c088e4367dc5"
+             :name "shown-result-ignores-the-floor-refusal"
+             :kind :function
+             :intent "shown-result (eval.clj ~3858) and seon.repl (repl.clj:483) recognise a render refusal only by :seon.render.value/root-description, so the new declared :seon.render.value/insufficient-floor-budget-error would be refused by render-ai-data's contract. Test :seon.error/at instead (one line each)."
+             :must-read #{seon.sci.eval/shown-result}
+             :evidence #{"docs/research/agent-platform/landing/fix-floor-review-2026-09-26.md"}}
+ #:seon.task{:id "349ec82bd051"
+             :name "clojure-test-parity-residue"
+             :kind :function
+             :intent "After the agent clojure.test fix (agent-repl-gaps), a FAIL line still names SCI's frame (FAIL in (fails) (lang.cljc:217)) instead of the test's line; test-ns-hook is not honoured; a custom :begin-test-ns report is bypassed; run-all-tests walks the host's namespaces; an install refusal's failure location reads 'fail AFn.java:154'."
+             :must-read #{seon.sci.eval/evaluate}
+             :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"
+                         "docs/research/agent-platform/landing/agent-repl-gaps-2026-09-26.md"}}]

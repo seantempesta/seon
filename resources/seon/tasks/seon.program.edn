@@ -1,0 +1,13 @@
+[#:seon.task{:id "0798a2fb94f3"
+             :name "a-docstring-edit-changes-the-definition-digest"
+             :kind :function
+             :intent "definition-digest includes the docstring and the source text carrying it, so a docstring-only edit selects its callers' tests (my.note/add!'s doc edit gated 4 unrelated tests) and invalidates reuse through the reach digest's leaf. Owner ruling: docstring edits select nothing. Recommended option 1: an executable digest derived from the row without doc and with the source read without its docstring (~40 + 15 lines)."
+             :must-read #{seon.db/definition-digest-of seon.program/definition-digest seon.test.runner/reach-row}
+             :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"}}
+ #:seon.task{:id "e457c998969e"
+             :name "program-attributes-trust-any-partition"
+             :kind :function
+             :intent "program-attributes takes every partitioned schema's entries, not only :seon.db/attributes entities; a report schema marked with a partition put four uninstalled attributes into root's reads and stopped root's graph (fixed at the schema in 367871c45). Read only entity schemas, as seon.schema/assert-entity-partition! does."
+             :must-read #{seon.program/program-attributes}
+             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}]

@@ -1,0 +1,13 @@
+[#:seon.task{:id "57f97689b302"
+             :name "storage-edn-is-print-nodes"
+             :kind :function
+             :intent "The admitted :seon.sci.admit/edn is a print-node tree, not value EDN: nil is stored as '#:seon.print{:face :seon.print/nil, :value nil}'. error/project-observation stores that string for write-attempt and schema observations and for occurrence :seon.error/data-edn (seen at HEAD on signature 3ee1d7a90eaf: a 15,779-byte datum of print nodes). Stored evidence must be readable value EDN."
+             :must-read #{seon.error/project-observation seon.sci.admit/admit-partitioned}
+             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"
+                         "docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
+ #:seon.task{:id "6af99d6bdb94"
+             :name "large-printed-output-refuses-the-evaluation"
+             :kind :function
+             :intent "Printed output over :seon.config.eval.result/max-bytes refuses the evaluation (admit.clj:117-135) instead of spilling into the blob tier as oversized values already do. Only the floor printer clips (AGENTS 'Apply presentation limits once'). Low evidence: no dogfood hit recorded."
+             :must-read #{seon.sci.admit/admit seon.sci.admit/refuse-over-bound!}
+             :evidence #{"docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md"}}]

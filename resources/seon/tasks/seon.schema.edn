@@ -5,4 +5,35 @@
              :must-read #{seon.schema/valid-candidate-value? seon.schema/explain-candidate-value seon.schema/projection-from-database}
              :evidence #{"docs/research/agent-platform/experiments/tasks-v02/seon.schema.edn"
                          "docs/research/agent-platform/language-requirements-2026-09-24.md"
-                         "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}]
+                         "docs/prds/agent-platform/landing/lane-impl-task-slice2-2026-09-25.md"}}
+ #:seon.task{:id "6c1b8083edbe"
+             :name "validation-throws-on-non-keyword-sorted-maps"
+             :kind :function
+             :intent "valid-candidate-value? throws ClassCastException (Keyword.compareTo) on a sorted map with symbol or string keys, because Malli's map validation calls get with a keyword on it. At the agent REPL the throw escapes settlement: the run never closes and every later form answers agent-already-running until the branch is retired (maintainer #5; analyst probe 5 timed out at 60,258 ms). Symbol- and String-to-Keyword casts in seon.cluster.agent/turn-step were recorded as core faults at 16:02-16:10Z. Validate without a keyword lookup on foreign sorted maps, and settle any throw as the run's failure."
+             :must-read #{seon.schema/valid-candidate-value?}
+             :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/stability-guard-2026-09-26.md"
+                         "docs/seon/issues/armed-error-validation-throws-on-non-keyword-sorted-maps.md"}}
+ #:seon.task{:id "b9163458502a"
+             :name "register-works-only-top-level"
+             :kind :function
+             :intent "seon.schema/register! inside let or any nested form refuses 'Schema declarations require an isolated registration delta' (schema.clj:1279): the delta opens only for a syntactically top-level register!. The first run of three register! took 1,786 ms and eight took 3,681 ms. Open the delta around any register! reached during a form."
+             :must-read #{seon.schema/begin-registration-delta seon.schema/register!}
+             :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"
+                         "docs/seon/issues/schema-registration-works-only-as-a-top-level-form.md"}}
+ #:seon.task{:id "c87892f697b8"
+             :name "the-projection-travels-ambiently"
+             :kind :namespace
+             :intent "The projection still travels in dynamic Vars (*projection*, *projection-state*, *packaged-forms*, *candidate-forms-overlay*) plus a registration-delta candidate atom: 18 handed-projection, 42 call-with-projection (16 files), 12 call-with-projection-state and 5 call-with-forms call sites. db/carried-projection already answers the same value in 0.01 ms. The current JVM's profile shows call-with-projection-state inclusive 229,243 ms, max 55,673 ms, x97, which also hides real costs from profiles. Convert readers to the carried projection and delete the ambient Vars (C5); C2 waits on this."
+             :must-read #{seon.db/carried-projection seon.schema/call-with-projection seon.schema/call-with-projection-state seon.schema/handed-projection}
+             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
+                         "docs/research/agent-platform/landing/task-log-2026-09-26.md"
+                         "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
+ #:seon.task{:id "b2e2909e662d"
+             :name "a-declaration-write-reloads-the-whole-projection"
+             :kind :function
+             :intent "Every declaration-touching write (a new function, a spec or schema change) pays load-projection from an identical base: 35-42 ms, O(program) even when nothing else differs. Derive the projection incrementally from the changed declarations."
+             :must-read #{seon.db/carried-projection seon.schema/load-projection}
+             :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"}}]

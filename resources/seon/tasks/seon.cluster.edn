@@ -1,0 +1,34 @@
+[#:seon.task{:id "5188bb532195"
+             :name "status-casts-a-keyword-to-a-symbol-during-boot"
+             :kind :function
+             :intent "bin/seon status during boot threw ClassCastException Keyword -> Symbol in instrument/replaced-roots, reached from mcp-runtime-observation's program-function-files rows (diagnostic data/clusters/default/logs/operator-status-20260926T103046.142.edn). Not investigated."
+             :must-read #{seon.cluster/mcp-runtime-observation seon.instrument/replaced-roots}
+             :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md"}}
+ #:seon.task{:id "1d92b52b2470"
+             :name "adoption-readopts-what-the-jvm-loaded"
+             :kind :function
+             :intent "A move to HEAD spends 6.4-9.9 s adopting after readiness (development-source-refresh! 5,171 ms, adopt-rows! 2,761 ms) re-adopting what the fresh JVM already loaded; boot's store->branch layer is 27-32 s whenever the commit touches analyzer reach (full-source-refresh! :all: lint ~8 s, analysis ~8 s, three transactions ~10 s); today's nuke was ready in 43 s. Both are over the 10-second start law."
+             :must-read #{seon.cluster/adopt-rows! seon.cluster/development-source-refresh! seon.cluster/full-source-refresh!}
+             :evidence #{"docs/research/agent-platform/landing/inv-boot-operator-opus-2026-09-26.md"
+                         "docs/research/agent-platform/perf-profile-2026-09-26.md"
+                         "docs/seon/issues/move-to-head-takes-a-minute-or-more-not-seconds.md"}}
+ #:seon.task{:id "e7be95eac7cd"
+             :name "mcp-io-prepl-serves-only-tests"
+             :kind :function
+             :intent "seon.cluster/mcp-io-prepl's only callers are test/seon/mcp_test.clj:22 and test/seon/dev/mcp_bridge_test.clj:588,609 (agent-centric F03). Move those tests to the ordinary entrance and delete it."
+             :must-read #{seon.cluster/mcp-io-prepl}
+             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"
+                         "docs/research/agent-platform/landing/standing-deletion-2026-09-26.md"}}
+ #:seon.task{:id "0b3f443d1d94"
+             :name "the-mcp-value-is-a-converted-tree"
+             :kind :function
+             :intent "The MCP :seon.dev.mcp/value is the selected print tree converted back to data (admit/semantic-value) with elision maps inline, not the shared AI text the one-render-path design names (its 3h item 9); a stored backing also reads a sorted map back in hash order."
+             :must-read #{seon.cluster/mcp-project}
+             :evidence #{"docs/research/agent-platform/landing/fix-floor-review-2026-09-26.md"}}
+ #:seon.task{:id "5786fd38774b"
+             :name "a-missed-quiescence-keeps-the-route-listener"
+             :kind :function
+             :intent "A stop that misses armer quiescence keeps the route listener: a wedged proc cannot run its own stop transition. Recommended option 2 queues flow/stop even on a miss (about 15 lines in disarm-agents!)."
+             :must-read #{seon.cluster/disarm-agents!}
+             :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
+                         "docs/seon/issues/a-cluster-stop-that-misses-armer-quiescence-keeps-the-route-listener.md"}}]

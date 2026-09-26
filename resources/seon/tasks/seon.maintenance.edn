@@ -1,0 +1,8 @@
+[#:seon.task{:id "534966f34876"
+             :name "collection-marks-slowly-and-records-nothing"
+             :kind :function
+             :intent "collect-released! runs after every test request; its mark took 6,550 ms at 99 branches because Datahike's gc keeps its visited set per branch (gc.cljc:22-81), so shared commits are marked once per branch; it holds the exclusive sweep gate, so every roster publication (MCP branch create/retire, prepare's branch!) waits up to ~6 s; and its inventory is discarded on success (test.clj ~2485). Share one visited set in the fork, and record the inventory as a maintenance receipt."
+             :must-read #{seon.maintenance/collect-released!}
+             :evidence #{"docs/research/agent-platform/landing/fix-merge-basis-2026-09-26.md"
+                         "docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
+                         "docs/seon/issues/storage-gc-runs-without-a-cutoff-so-it-reclaims-almost-nothing.md"}}]

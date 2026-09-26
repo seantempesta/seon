@@ -1,0 +1,14 @@
+[#:seon.task{:id "68dd03f5e3a2"
+             :name "issue-references-read-the-cluster"
+             :kind :function
+             :intent "require-test-refs! checks an issue's test references against the issue's destination, so my.issue/add! from a branch refuses the branch's own new tests ([:seon.test/sym dogfood.wc2/c-frequencies-counts-words] 'expected ... test entities'). Check against the caller's custody database."
+             :must-read #{seon.issue/require-test-refs!}
+             :evidence #{"docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-report-2026-09-26.md"}}
+ #:seon.task{:id "dea15d688116"
+             :name "the-issue-render-hides-its-problem"
+             :kind :function
+             :intent "The issue AI render shows status and test text ('0 turns remaining') and hides the problem body and its requery form; a newcomer had to (vec ...) the issue to read its problem."
+             :must-read #{seon.issue/render-ai seon.issue/status-text}
+             :evidence #{"docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
+                         "docs/seon/issues/the-issue-ai-render-no-longer-teaches-its-requery-form.md"}}]

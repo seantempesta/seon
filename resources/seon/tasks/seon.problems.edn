@@ -1,0 +1,6 @@
+[#:seon.task{:id "41a8e43ce5a4"
+             :name "a-status-observation-costs-half-a-gigabyte"
+             :kind :function
+             :intent "problems costs 150 ms and 502 MB per call (deferred-agents 108 ms / 363 MB over 44 agents x deferred-triggers, failed-tests 37 ms / 102 MB), and runtime_status observes twice (discovery health, then the observation). Derive status once and make deferred-agents follow changed agents."
+             :must-read #{seon.problems/deferred-agents seon.problems/problems seon.turn/deferred-triggers}
+             :evidence #{"docs/research/agent-platform/perf-profile-2026-09-26.md"}}]

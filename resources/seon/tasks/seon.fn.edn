@@ -3,4 +3,43 @@
              :kind :function
              :intent "Reach for a core function saturates: seon.fn/tests-reaching took 1.9 s and 6.5 GB and reported 1,720 tests for one function. The gate set must follow real reach and stay sub-second."
              :must-read #{seon.fn/reverse-closure seon.fn/gate-sets}
-             :evidence #{"docs/research/agent-platform/language-requirements-2026-09-24.md"}}]
+             :evidence #{"docs/research/agent-platform/language-requirements-2026-09-24.md"}}
+ #:seon.task{:id "4a5523d8ab90"
+             :name "call-reach-refuses-every-gate"
+             :kind :function
+             :intent "Every armed test selection refuses. call-reach hands identity-names a set of caller entities (seed-callers and reaching are sets), and identity-names declares [:sequential :int], so gate-set, the map arity of gate-sets, tests-reaching and reverse-closure all answer 'seon.fn/identity-names :malli.core/invalid-input: the refusal could not be built.' Measured at HEAD 013e12924 after the nuke: (seon.fn/gate-set db 'my.plan/current) refuses in 8.8 ms, and a fully contracted (defn tlo-inc ...) on a fresh MCP branch refuses the same way (error signature 3ee1d7a90eaf). No agent can install a contracted function, and my.test/check and the install gate cannot select tests."
+             :must-read #{seon.fn/call-reach seon.fn/gate-set seon.fn/identity-names seon.fn/reverse-closure}
+             :evidence #{"docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/task-log-2026-09-26.md"}}
+ #:seon.task{:id "46513360f817"
+             :name "a-used-class-makes-a-row-host-bound"
+             :kind :function
+             :intent "host-bound-callers marks a body host-bound when it uses a class outside sci.opts/default-classes (fn.clj:1049-1055, plus a Throwable/Error special case), although the agent interpreter now resolves every classpath class ({:classes {:allow :all}}, 2cae09887). 926 of 5,264 function rows on default were host-bound; the usual trigger is (java.util.Date.) in an error map. An agent-only function using (java.util.Date.) evaluates once, then refuses on every later call as 'host-bound ... load its source files'. Recommended (audit #1; fix-root-graph-panic option b, which needs a ruling on the branch interpretation cost): delete the java-class clause, re-derive the host-bound facts, then re-check whether adopt-then-test! and host-bound-declarations (about 80 lines) are still needed."
+             :must-read #{seon.fn/host-bound-callers seon.sci.eval/install-row!}
+             :evidence #{"docs/research/agent-platform/agent-restrictions-and-rollback-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"
+                         "docs/seon/issues/an-agent-function-using-java-interop-is-host-bound-and-cannot-run-on-its-branch.md"}}
+ #:seon.task{:id "56e90b0bf6b7"
+             :name "agent-mistakes-read-as-missing-dependency-analysis"
+             :kind :function
+             :intent "An agent's unresolved alias or namespace is refused as a platform fault: 'clj-kondo holds no analysis of X ... fill the cache' (fn.clj:1011). It happens for a call into a namespace that does not exist, and for (do (ns x (:require [seon.effect :as effect])) (defn f [] (effect/request! ...))) in one form. On 2026-09-26 this was recorded as a CORE FAULT (panic) at seon.turn/analyze-submitted minutes before the 16:10Z OOM. The analysis must return the agent's own mistake naming the unresolved alias or namespace, and analyze a form after the ns form it follows."
+             :must-read #{seon.fn/analyze-forms seon.fn/host-bound-callers}
+             :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
+                         "docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"
+                         "docs/seon/issues/a-call-into-a-namespace-that-does-not-exist-refuses-as-missing-dependency-analysis.md"
+                         "docs/seon/issues/an-alias-required-by-an-earlier-form-of-a-batch-refuses-later-forms-as-unanalyzed.md"}}
+ #:seon.task{:id "8c53e4176def"
+             :name "dependency-analysis-error-is-not-an-error"
+             :kind :schema
+             :intent ":seon.fn/dependency-analysis-missing-error is a plain :map that does not extend :seon.error/base, so seon.error/validate-declaration! refuses every recording of it, and the fn.clj comment that seon.turn stores and delivers it is false. The platform fault is lost instead of stored."
+             :must-read #{seon.error/validate-declaration! seon.fn/host-bound-callers}
+             :evidence #{"docs/research/agent-platform/landing/inv-agent-run-stability-opus-2026-09-26.md"}}
+ #:seon.task{:id "e4c8eac6a69a"
+             :name "mention-closure-survives-beside-call-reach"
+             :kind :function
+             :intent "Selection is call reach (20a87b1d1), but the positional gate-sets arity and gate-sets-in's union mode still walk calls, references and file mentions to full depth, only because seon.test/destructive-reach reads them; the analyst's documented bulk positional gate-sets over all function symbols timed out at 60,265 ms. test-reach-rules (currently-failing-functions, functions-without-tests) still reach through references transitively, so coverage and selection disagree. Move destructive-reach to reverse-closure, delete the positional arity and the union branch (about -15 lines), and align the coverage rules."
+             :must-read #{seon.fn/gate-sets seon.fn/gate-sets-in seon.fn/test-reach-rules seon.test/destructive-reach}
+             :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
+                         "docs/research/agent-platform/landing/inv-test-selection-cost-opus-2026-09-26.md"
+                         "docs/seon/issues/gate-set-rederives-the-declared-reference-population-on-every-call.md"}}]

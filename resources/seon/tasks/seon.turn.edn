@@ -1,0 +1,39 @@
+[#:seon.task{:id "023acee5f88d"
+             :name "a-refused-settlement-is-stored-as-a-core-fault"
+             :kind :function
+             :intent "A run whose settlement is refused by a declared writer refusal is stored as a core fault (signature 6e0c6d4e..., seon.db/transact!), shows 'Contract finding: seon.db/transact! returned this error ...' and carries a datahike.writer stack trace into the MCP reply, although it is the agent's mistake. Decide it in evaluate-sources, where the run's working value already settles each form's row: a row settled-value refuses becomes that form's refusal through refuse-install, and settle-batch-refusal!'s ordinal search is deleted."
+             :must-read #{seon.sci.eval/refuse-install seon.turn/evaluate-sources seon.turn/settle-batch!}
+             :evidence #{"docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
+                         "docs/seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md"
+                         "docs/seon/issues/expected-refusal-logs-raw-datom-error-twice.md"}}
+ #:seon.task{:id "1bf47dae6f04"
+             :name "refusal-schemas-are-guessed-by-key"
+             :kind :function
+             :intent "refusal-terminal-data (and the settle-batch! refusal and provider-failure recordings: three copies) chooses an error schema with a ~15-arm key-presence cond, because producers attach no :seon.error/declared-schema: seon.db write refusals and invalid-read, seon.schema validation, reply no-forms, render walk/request/ambiguous/invalid-output/unknown, transcript, config, fn namespace-unresolvable, eleven seon.ai refusals, cluster.prompt and turn rules. A missed producer gave a nil schema and panicked root's graph at every boot (fixed for one producer in e2d1690d4). One scripted sweep adds the metadata at each producer, then the three conds go."
+             :must-read #{seon.error/recording seon.turn/refusal-terminal-data}
+             :evidence #{"docs/research/agent-platform/landing/fix-root-refusal-schema-2026-09-26.md"}}
+ #:seon.task{:id "f491f58f9973"
+             :name "a-preview-reparses-retained-source"
+             :kind :function
+             :intent "The preview path (system-turn with write? false, used by the page) re-parses retained source through planned-sources and parses root's retained bare symbol 'accepted' as no forms, so the whole preview is refused. The write path does not re-parse."
+             :must-read #{seon.turn/planned-sources seon.turn/system-turn}
+             :evidence #{"docs/research/agent-platform/landing/fix-root-refusal-schema-2026-09-26.md"}}
+ #:seon.task{:id "0e9208e52dea"
+             :name "close-turn-is-a-third-commit"
+             :kind :function
+             :intent "A replied run commits close-turn as a separate third transaction after settlement: a trivial root run costs 122-136 ms warm, about 75 ms of it three file-store commits (24-31 ms each), and close-turn is 32-36 ms. Fold the close into the settlement at the writer (hunk in the fix-write-cost landing), keeping the separate pass for issue-bearing agents and generated system turns."
+             :must-read #{seon.turn/close-turn seon.turn/settle-batch!}
+             :evidence #{"docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"}}
+ #:seon.task{:id "9fb12ed97bb2"
+             :name "a-reload-between-forms-is-undetected"
+             :kind :function
+             :intent "A reload between the forms of one run, or between admission and settlement, is undetected; only a reload inside one evaluation is (call-detecting-program-change since e81cb51dc). Wrap the run's evaluate-and-settle in call-detecting-program-change with since captured at admission."
+             :must-read #{seon.sci.eval/call-detecting-program-change seon.turn/evaluate-sources}
+             :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
+                         "docs/seon/issues/an-evaluation-that-overlaps-a-reload-is-not-detected.md"}}
+ #:seon.task{:id "ffb23155d2a0"
+             :name "a-blind-cross-branch-writer-is-promoted-to-a-read"
+             :kind :function
+             :intent "read-only-evaluation? (fixed for writers that read other branches in 90c542fd0) still promotes a form that writes another branch without reading it and reads only its own database, so a system turn may re-run a writer. A positive proof records every transaction the evaluation made."
+             :must-read #{seon.turn/read-only-evaluation?}
+             :evidence #{"docs/research/agent-platform/landing/fix-root-graph-panic-2026-09-26.md"}}]

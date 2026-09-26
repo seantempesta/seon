@@ -1,0 +1,6 @@
+[#:seon.task{:id "6a6e13871530"
+             :name "file-edit-tools-bypass-write-back"
+             :kind :namespace
+             :intent "my.edit/form!, exact! and lines! let an agent edit source files, against 'files are the write-back of accepted rows, not the working medium' (dogfood c8b; root decided removal). Retire my.edit, seon.edit, seon.edit.jvm and their schemas (bundle B4, delete-only)."
+             :must-read #{my.edit/exact! my.edit/form! my.edit/lines!}
+             :evidence #{"docs/research/agent-platform/dogfood-report-2026-09-26.md"}}]

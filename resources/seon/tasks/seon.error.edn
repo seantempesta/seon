@@ -1,0 +1,13 @@
+[#:seon.task{:id "3d1e36226ec4"
+             :name "a-deleted-functions-fault-never-resolves"
+             :kind :function
+             :intent "resolution needs the fault's function row, so a fault naming a deleted function can never resolve: the seon.flow/release-admission! ClassCastException fault stays open after 69229772b deleted the function and its cause."
+             :must-read #{seon.error/resolution}
+             :evidence #{"docs/research/agent-platform/landing/inv-lifecycle-storage-opus-2026-09-26.md"
+                         "docs/seon/issues/a-fault-whose-function-is-deleted-never-resolves.md"}}
+ #:seon.task{:id "a4b6cdcf40d6"
+             :name "a-missing-key-message-reads-badly"
+             :kind :function
+             :intent "A missing key whose schema carries :error/message reads 'the required key :seon.db/db with must be ...' (error.clj:867)."
+             :must-read #{seon.error/explain-problem}
+             :evidence #{"docs/research/agent-platform/landing/error-text-2026-09-26.md"}}]

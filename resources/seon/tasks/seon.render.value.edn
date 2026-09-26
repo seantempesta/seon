@@ -1,0 +1,14 @@
+[#:seon.task{:id "785acaa52916"
+             :name "continuations-cannot-navigate-derived-nodes"
+             :kind :function
+             :intent "A cut under a declared identity projection, a reference replaced by its lookup ref, or a Throwable names a path in the derived value, so continuing it over the raw value refuses no-such-path."
+             :must-read #{seon.render.data/at seon.render.value/prepare}
+             :evidence #{"docs/research/agent-platform/landing/fix-floor-review-2026-09-26.md"}}
+ #:seon.task{:id "0e6dc884b838"
+             :name "nested-renders-bypass-the-floor"
+             :kind :function
+             :intent "A wildcard self pull returned 181,252 characters (about 45k tokens), embedding earlier turns' shown text, because nested declared render text is inlined past the one budget. Only the floor clips, with one budget over the whole shape."
+             :must-read #{seon.render.value/prepare seon.render.value/select-nodes}
+             :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
+                         "docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
+                         "docs/seon/issues/a-raw-pull-inlines-nested-declared-render-text-past-the-floor.md"}}]
