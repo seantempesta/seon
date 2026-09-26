@@ -1,28 +1,46 @@
 (ns seon.publication-validation-test
   (:require [clojure.test :refer [deftest is]]
             [seon.db :as db]
+            [seon.profile :as profile]
             [seon.test-support :as support]))
 
+(defn- armed-calls
+  "Calls of `symbols` so far, summed over their armed wrappers' profile cells."
+  {:malli/schema [:=> [:cat [:vector :qualified-symbol]] [:map-of :qualified-symbol :int]]}
+  [symbols]
+  (into {} (map (fn [sym]
+                  [sym (transduce (comp (filter #(= sym (:seon.profile/sym %)))
+                                        (map #(:seon.profile/calls (profile/observation %))))
+                                  + 0 (profile/cells))]))
+        symbols))
+
 (deftest documentation-writes-do-not-check-unrelated-arities-or-renderers
+  ;; The armed wrappers' call counters are the observation: no Var is replaced.
+  ;; The refused arity write is the positive control that the counters see the
+  ;; arity check at all. The counters are JVM-wide, so concurrent writers on
+  ;; other threads can only make the doc-write delta larger, never hide a call.
   (support/with-database
    (fn [connection]
-     (let [calls (atom [])
-           vars [#'db/arity-mismatches-with #'db/write-render-target-error]
-           wrappers (into {} (map (fn [v]
-                                   (let [original @v]
-                                     [v (fn [& args]
-                                          (swap! calls conj (:name (meta v)))
-                                          (apply original args))]))) vars)
-           report (with-redefs-fn
-                    wrappers
-                    #(support/transacted!
-                      connection
-                      ;; A doc is an owned attribute: the revision carries the
-                      ;; digest of the row it leaves.
-                      [(support/revision (db/db connection) '[:seon.fn/sym seon.id/id]
-                                         {:seon.fn/doc "Publication validation documentation edit."})]))]
+     (let [checks '[seon.db/report-arity-comparison seon.db/write-render-target-error]
+           before (armed-calls checks)
+           ;; A doc is an owned attribute: the revision carries the digest of
+           ;; the row it leaves.
+           report (support/transacted!
+                   connection
+                   [(support/revision (db/db connection) '[:seon.fn/sym seon.id/id]
+                                      {:seon.fn/doc "Publication validation documentation edit."})])
+           after-doc (armed-calls checks)
+           refused (db/transact! connection [[:db/add [:seon.fn/sym 'seon.id/id]
+                                              :seon.fn/call-arities ['seon.id/id 99]]])
+           after-arity (armed-calls checks)]
        (is (:db-after report))
-       (is (empty? @calls))
+       (is (= {'seon.db/report-arity-comparison 0 'seon.db/write-render-target-error 0}
+              (merge-with - after-doc before))
+           "a documentation write runs neither the arity nor the renderer check")
+       (is (:seon.db/transaction-refused refused))
+       (is (pos? (- (get after-arity 'seon.db/report-arity-comparison)
+                    (get after-doc 'seon.db/report-arity-comparison)))
+           "a call-arity write does run the arity check the counters observe")
        (is (= #{:seon.fn/doc :seon.program/definition-digest :db/txInstant}
               (set (map :a (:tx-data report)))))))))
 
