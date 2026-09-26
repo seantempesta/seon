@@ -178,10 +178,7 @@
 (defn begin
   "Mark the start of an operation: its clock and every cell's calls and total.
 
-  The snapshot is keyed by each cell's call counter, by IDENTITY: a Clojure map
-  compares Number keys by value (`clojure.lang.Util/equiv`), so LongAdders with
-  equal counts would collide and rehash as they count. Each value is an
-  immutable `[calls nanos]`. It is built here in one
+  The snapshot is keyed by each cell's call counter. It is built here in one
   pass over the live cells, calling no other armed function, so its cost is
   proportional to the number of cells and nothing else."
   {:malli/schema [:=> [:cat] :seon.profile/mark]}
@@ -191,7 +188,8 @@
       (doseq [member live]
         (let [^LongAdder calls (:seon.profile/call-counter member)]
           (.put snapshot calls
-                [(.sum calls) (.sum ^LongAdder (:seon.profile/total-counter member))]))))
+                (long-array [(.sum calls)
+                             (.sum ^LongAdder (:seon.profile/total-counter member))])))))
     {:seon.profile/started-ns (System/nanoTime)
      :seon.profile/snapshot snapshot}))
 
@@ -216,13 +214,13 @@
         growth (into []
                      (comp
                       (keep (fn [member]
-                              (let [[prior-calls prior-total]
-                                    (or (.get ^IdentityHashMap before (:seon.profile/call-counter member))
-                                        [0 0])
+                              (let [^longs prior (or (.get ^IdentityHashMap before
+                                                           (:seon.profile/call-counter member))
+                                                     (long-array 2))
                                     calls (- (.sum ^LongAdder (:seon.profile/call-counter member))
-                                             prior-calls)
+                                             (aget prior 0))
                                     total (- (.sum ^LongAdder (:seon.profile/total-counter member))
-                                             prior-total)]
+                                             (aget prior 1))]
                                 (when (pos? calls)
                                   (merge (select-keys member [:seon.profile/sym :seon.profile/digest
                                                             :seon.profile/scope :seon.profile/context])
