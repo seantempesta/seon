@@ -41,10 +41,13 @@
   "Show an assertion's exact claim, ordered contexts, and known source site."
   {:malli/schema [:=> [:cat [:or :seon.test.failure/value :seon.test.failure/report]] :string]}
   [failure]
-  (let [field (fn [inline blob]
-                (or (get failure inline)
-                    (when-let [digest (get failure blob)]
-                      (pr-str (list 'seon.blob/get digest)))))
+  (let [;; Shown text inline, and the stored whole value's retrieval form
+        ;; when there is one (a thrown actual keeps both).
+        field (fn [inline blob]
+                (let [shown (get failure inline)
+                      whole (some->> (get failure blob) (list 'seon.blob/get) pr-str)]
+                  (cond (and shown whole) (str shown "\n  whole: " whole)
+                        :else (or shown whole))))
         path (or (:seon.test.failure/reported-file failure)
                  (get-in failure [:seon.test.failure/file :seon.fn.file/relative-path]))]
     (str/join "\n"

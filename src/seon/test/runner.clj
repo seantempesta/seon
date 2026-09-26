@@ -168,7 +168,12 @@
   report for the blob tier; the whole values stay on the event in memory."
   {:malli/schema [:=> [:cat :map :map] :seon.test.failure/report]}
   [options event]
-  (cond-> {:seon.test.failure/type (:type event)}
+  (cond-> (with-meta {:seon.test.failure/type (:type event)}
+            ;; The whole thrown value rides as metadata, in memory only: it is
+            ;; no part of the report's value (equality, printing, identity),
+            ;; and recording stores it as its error value in the blob tier
+            ;; (`prepare-failures!`); `actual` is only its shown text.
+            (when (instance? Throwable (:actual event)) {::actual-throwable (:actual event)}))
     (find event :expected) (assoc :seon.test.failure/expected (report-value options (:expected event)))
     (find event :actual) (assoc :seon.test.failure/actual (report-value options (:actual event)))
     (:message event) (assoc :seon.test.failure/message (str (:message event)))
@@ -1206,6 +1211,16 @@
                       (assoc size-key size blob-key (:seon.blob/digest write))))
                 (assoc failure size-key size)))
             failure))
+        whole-actual
+        (fn [failure thrown]
+          (let [write (blob/stage! connection
+                                   (pr-str (seon.error.refusal/diagnostic
+                                            (java.util.Date.) :seon.test/execution `failure-report
+                                            {:seon.error/throwable thrown})))]
+            (vswap! staged conj write)
+            (-> failure
+                (with-meta nil)
+                (assoc :seon.test.failure/actual-blob (:seon.blob/digest write)))))
         results
         (mapv
           (fn [{test-symbol :seon.test/sym :as result}]
@@ -1243,8 +1258,12 @@
                                                          :seon.test.failure/line line))
                             failure (-> failure
                                         (stage-field :seon.test.failure/message :seon.test.failure/message-size :seon.test.failure/message-blob)
-                                        (stage-field :seon.test.failure/expected :seon.test.failure/expected-size :seon.test.failure/expected-blob)
-                                        (stage-field :seon.test.failure/actual :seon.test.failure/actual-size :seon.test.failure/actual-blob))]
+                                        (stage-field :seon.test.failure/expected :seon.test.failure/expected-size :seon.test.failure/expected-blob))
+                            failure (if-let [thrown (::actual-throwable (meta failure))]
+                                      ;; A thrown actual is stored whole, as its error value;
+                                      ;; its shown text stays inline beside the reference.
+                                      (whole-actual failure thrown)
+                                      (stage-field failure :seon.test.failure/actual :seon.test.failure/actual-size :seon.test.failure/actual-blob))]
                         [(assoc ordinals site (inc ordinal)) (conj failures failure)]))
                     [{} []] reports)]
               ;; The staged failures ARE the claim; the joined text beside

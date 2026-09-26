@@ -6,6 +6,7 @@
             [clojure.test.check :as tc]
             [clojure.test.check.generators :as gen]
             [clojure.test.check.properties :as prop]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.cluster :as cluster]
             [seon.cluster.process :as process]
@@ -15,6 +16,7 @@
             [malli.instrument :as mi]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
+            [seon.render.value :as value]
             [seon.test-support :as test-support]
             [seon.test.runner :as runner]))
 
@@ -94,14 +96,13 @@
 
 (deftest ^{:seon.test/platform
            "Moving part: the one test bracket every other test forks through."}
-  a-long-refusal-reaches-the-failure-message-whole
-  ;; A TEST DIAGNOSTIC IS NOT AN AGENT PROJECTION. The AI profile's token
-  ;; budget is shared across the rendered value, so write admission's refusal
-  ;; — whose `ex-data` carries the entity schema it was read against — used to
-  ;; arrive in the gate log as
-  ;; `{:seon.print/omitted 3458 :seon.print/prefix "Fixture write was refused
-  ;; at the write: …"}`. The report named less than the runner knew, which is
-  ;; the absence-as-health class wearing the reporter's clothes (AGENTS §2.4).
+  a-long-refusal-is-stored-whole-and-shown-bounded
+  ;; The original value stays whole; only the shown text is clipped, by the
+  ;; floor (CLAUDE.md "three points"; root ruling 2026-09-27). Write
+  ;; admission's refusal carries the entity schema it was read against, so it
+  ;; is longer than any display bound: the stored failure keeps the whole
+  ;; refusal as its error value in the blob tier, and the reporter shows the
+  ;; floor's bounded text beside that reference.
   (test-support/with-database
    (fn [connection]
      (let [failure (try
@@ -110,14 +111,37 @@
                       [{:seon.cluster/name "unclipped-refusal-fixture"}])
                      nil
                      (catch clojure.lang.ExceptionInfo error error))
-           reported (#'runner/report-value (#'runner/report-options) failure)]
+           options (#'runner/report-options)
+           reported (#'runner/report-value options failure)
+           report (#'runner/failure-report options {:type :error :actual failure})
+           shown (:seon.test.failure/actual report)
+           database (db/db connection)
+           test-symbol (first (sort (db/q '[:find [?symbol ...] :where [_ :seon.test/sym ?symbol]] database)))
+           run (runner/provenance database)
+           committed (runner/commit-results!
+                      connection
+                      {:seon.test.run/provenance run
+                       :seon.test/run-basis-t (:seon.test.run/basis-t run)
+                       :seon.test/run-at (:seon.test.run/at run)
+                       :seon.test.run/branch :current-src
+                       :seon.db/db database
+                       :seon.test.runner/results
+                       [{:seon.test/sym test-symbol :seon.test/pass-count 0
+                         :seon.test/fail-count 0 :seon.test/error-count 1
+                         :seon.test.failure/reports [report]}]})
+           digest (db/q '[:find ?digest . :in $ ?shown
+                          :where [?f :seon.test.failure/actual ?shown]
+                                 [?f :seon.test.failure/actual-blob ?digest]]
+                        (db/db connection) shown)
+           whole (some->> digest (blob/get connection))]
        (is (some? failure) "the fixture write is refused")
-       (is (< 204 (count (ex-message failure)))
-           "the refusal is longer than the profile's string bound, or this proves nothing")
-       (is (str/includes? reported (ex-message failure))
-           "the reporter carries write admission's complete refusal")
-       (is (not (str/includes? reported ":seon.print/omitted"))
-           "no elision value stands in for a test diagnostic")))))
+       (is (vector? committed) (pr-str committed))
+       (is (= reported shown) "the stored shown text is the reporter's text")
+       (is (<= (count reported) (inc (:floor-chars @#'value/text-limits)))
+           "the shown text is bounded by the floor")
+       (is (string? digest) "the stored failure references its whole value")
+       (is (str/includes? (str whole) (pr-str (ex-message failure)))
+           "the whole refusal is retrievable from the stored failure")))))
 
 
 (deftest ^{:seon.test/platform
