@@ -3334,7 +3334,6 @@
                                      :seon.render.web/registration
                                      :seon.render.web/latest-packages
                                      :seon.render.web/render-channel
-                                     :seon.render.web/fault-channel
                                      :seon.db.process/id
                                      :seon.sci.eval/ctx
                                      :seon.config.eval/time-limit-ms
@@ -3655,9 +3654,7 @@
      :seon.render.web/view
      (assoc view
             :seon.agent/routing routing
-            :seon.render.web/pages-mult pages-mult
-            :seon.render.web/fault-channel
-            (:seon.flow/fault-channel fanout))}))
+            :seon.render.web/pages-mult pages-mult)}))
 
 (defn disarm-agents!
   "Unwind the armed layers of ONE instance, newest first.

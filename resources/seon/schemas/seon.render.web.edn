@@ -18,8 +18,7 @@
                    [:seon.render.web/latest-packages
                     :seon.render.web/latest-packages]
                    [:seon.render.web/render-channel :seon.flow/channel]
-                   [:seon.render.web/fault-channel
-                    :seon.flow/channel]],
+                   [:seon.sci.eval/ctx {:optional true} :seon.sci.eval/ctx]],
                   :http-server
                   [:fn
                    {:error/message "must be an http-kit server"
@@ -114,7 +113,6 @@
                    [:seon.render.web/latest-packages
                     :seon.render.web/latest-packages]
                    [:seon.render.web/render-channel :seon.flow/channel]
-                   [:seon.render.web/fault-channel :seon.flow/channel]
                    [:seon.render.web/port
                     {:optional true}
                     :seon.render.web/port]],

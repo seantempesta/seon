@@ -1220,14 +1220,7 @@
             :seon.flow/graph-definition
             (graph-definition
              {:seon.turn.loop/cluster agent-handle
-              :seon.agent/id agent-id})
-            :seon.flow/joins
-            {:seon.agent/error-fanout
-             (fn [{started :seon.flow/started}]
-               (seon.flow/join-error-fanout!
-                {:seon.flow/started started
-                 :seon.flow/fault-channel (:seon.agent/fault-channel @routing)
-                 :seon.flow/tag {:seon.agent/id agent-id}}))}})
+              :seon.agent/id agent-id})})
           entry {:seon.agent/id agent-id
                  :seon.agent/eid eid
                  :seon.turn.loop/cluster agent-handle

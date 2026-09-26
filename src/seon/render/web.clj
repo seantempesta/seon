@@ -54,6 +54,7 @@
             [seon.await :as await]
             [seon.blob :as blob]
             [seon.cluster.agent :as cluster.agent]
+            [seon.cluster.process :as process]
             [seon.cluster.message :as message]
             [seon.turn :as turn]
 
@@ -62,6 +63,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.fault :as fault]
             [seon.oversight :as oversight]
             [seon.render :as render]
             [seon.render.block :as block]
@@ -2299,6 +2301,20 @@
                  (dissoc ::page-results ::calls ::fragments ::page-databases))))
     state))
 
+(defn- entrance-fault!
+  "Record one core fault from a web entrance whose thread is its own execution
+  owner (a feed writer, one HTTP request): there is no graph to stop, and the
+  entrance ends with its declared response. A panic carrying its receipt is
+  therefore disposed here; any other throw propagates."
+  {:malli/schema [:=> [:cat :seon.env/environment :seon.error/throwable :qualified-keyword :qualified-symbol]
+                  [:or :nil :seon.fault/recorded]]}
+  [environment failure layer operation]
+  (try (fault/fault! environment failure
+                     {:seon.error/layer layer :seon.error/operation operation
+                      :seon.db.process/id (process/id (process/current-identity))})
+       (catch clojure.lang.ExceptionInfo panic
+         (when-not (fault/carried-receipt panic) (throw panic)))))
+
 (defn- failed-page-result
   "One page whose derivation threw: a committed fault and a visible section.
 
@@ -2306,23 +2322,18 @@
   which every page returned its shell and no feed ever painted (the silent
   wedge filed as a blocker on 2026-09-07). The fault still rides the one
   committer inbox; the page shows the flat diagnostic where its content would
-  have been; and the proc goes on to the next page.
+  have been; and the proc goes on to the next page. The fault is recorded on
+  the render proc's own thread through `seon.fault/fault!`, which delivers it;
+  under `:panic` its throw reaches `var-process`, which stops the graph.
 
   ONE FAULT PER FAILURE, NOT ONE PER PASS. A page that throws every pass used
   to commit an identical fault every pass — six in ninety seconds, observed
   live on 2026-09-07 — which is the overloaded-queue shape, not information.
   `last-signature` is what this proc offered for THIS page on the previous
   pass, carried in the proc's own state map; an unchanged signature offers
-  nothing. The returned `::fault-signature` is what the pass folds back.
-
-  A REFUSED `offer!` IS AN EVENT, NOT SILENCE. The fault channel is bounded,
-  and a drop inside the machinery that exists to make failures visible is the
-  absence-reads-as-health class; it says so through the logging owner, naming
-  the page and the diagnostic that will otherwise reach no database fact."
+  nothing. The returned `::fault-signature` is what the pass folds back."
   ([state registration-key failure last-signature]
-   (let [fault-channel (:seon.agent/fault-channel
-                        @(:seon.agent/routing state))
-         debug? (and (vector? registration-key)
+   (let [debug? (and (vector? registration-key)
                      (= ::debug-tab (first registration-key)))
          message (str "Deriving this page threw " (.getName (class failure))
                       ": " (.getMessage ^Throwable failure))
@@ -2334,15 +2345,11 @@
           :seon.render.web/page :seon.render.web/page
           registration-key ::page-derivation-failed
           {:seon.render.web/page-exception-class (symbol (.getName (class failure)))})]
-     (when (and fault-channel (not= signature last-signature))
-       (when-not (async/offer!
-                  fault-channel
-                  {:clojure.core.async.flow/pid :seon.render.web/render
-                   :clojure.core.async.flow/ex
-                   (ex-info "A page derivation threw." diagnostic failure)})
-         (log/warn (str "seon.render.web: the fault channel refused a page "
-                        "derivation failure, so it reaches no database fact"
-                        " — page " (pr-str registration-key) ": " message))))
+     (when (not= signature last-signature)
+       (fault/fault! (env/of state) (ex-info "A page derivation threw." diagnostic failure)
+                     {:seon.error/layer :seon.render.web/page
+                      :seon.error/operation 'seon.render.web/render-pass
+                      :seon.db.process/id (process/id (process/current-identity))}))
      {:seon.render.web/page
       {(if debug? "debug-units" (str "seon-page-" registration-key))
        (hiccup/->string
@@ -2862,7 +2869,6 @@
             pages-mult :seon.render.web/pages-mult
             registration :seon.render.web/registration
             render-channel :seon.render.web/render-channel
-            fault-channel :seon.render.web/fault-channel
             backstop-ms :seon.config.eval/time-limit-ms
             :as service}]
   (let [query (query-params request)
@@ -2932,17 +2938,16 @@
                                (throw (ex-info (:seon.error/message written) written)))
                              (when written (recur revision))))))))))
              (catch Throwable failure
+               ;; a closed tab ends painting first: that close is declared,
+               ;; every other writer failure is a delivered core fault
                (when @painting
-                 (async/offer!
-                  fault-channel
-                  {:clojure.core.async.flow/pid :seon.render.web/feed
-                   :seon.agent/id id
-                   :clojure.core.async.flow/ex
-                   (ex-info "The browser feed writer failed."
-                            {:seon.render.web/tab-id tab-id
-                             :seon.render.web/page registration-key
-                             :seon.render/output :seon.render/html}
-                            failure)})))
+                 (entrance-fault! (env/of (:seon.sci.eval/ctx service))
+                                  (ex-info "The browser feed writer failed."
+                                           {:seon.render.web/tab-id tab-id
+                                            :seon.render.web/page registration-key
+                                            :seon.render/output :seon.render/html}
+                                           failure)
+                                  :seon.render.web/feed 'seon.render.web/feed-response)))
              (finally (datastar/close-sse! generator))))))
       datastar.http-kit/on-close
       (fn [_generator _status]
@@ -3630,19 +3635,13 @@
                      :seon.error/expected "a stored value at the requested digest"})]
                 observation))
             (catch Throwable failure
-              ;; The complete throwable goes to the cluster's fault
-              ;; committer, the one normalizer of cause chains; the page
+              ;; The complete throwable is a delivered core fault; the page
               ;; shows the declared unreadable-value error.
-              (if-let [fault-channel (:seon.render.web/fault-channel service)]
-                (async/offer!
-                 fault-channel
-                 {:clojure.core.async.flow/pid :seon.render.web/data
-                  :seon.agent/id id
-                  :clojure.core.async.flow/ex
-                  (ex-info "A stored value could not be read."
-                           {:seon.blob/digest value-digest}
-                           failure)})
-                (throw failure))
+              (entrance-fault! (env/of (:seon.sci.eval/ctx service))
+                               (ex-info "A stored value could not be read."
+                                        {:seon.blob/digest value-digest}
+                                        failure)
+                               :seon.render.web/data 'seon.render.web/data-response)
               (let [observation
                     (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/data-response
                      {:seon.error/message (or (ex-message failure)
