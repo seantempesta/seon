@@ -1338,37 +1338,29 @@
                                 :seon.ns/name 'my.agents.program-parity
                                 :seon.cluster/name "program-parity"}))
            (let [ctx (test-support/fork-cluster-ctx connection "program-parity")
+                 routing (test-support/attempt-routing connection)
                  handle (test-support/cluster-handle
                          {:seon.env/environment (test-support/environment "program-parity" connection)
                           :seon.db/connection connection :seon.cluster/name "program-parity"
                           :seon.db.process/id cluster/boot-process-identity
-                          :seon.sci.eval/ctx ctx})
+                          :seon.sci.eval/ctx ctx
+                          :seon.flow/executor (cluster/projection-executor (:seon.sci.eval/projection-state ctx))})
+                 request {:seon.turn.loop/cluster handle :seon.agent/routing routing :seon.agent/id "program-parity"}
                  events (reader/read {:seon.sci.reader/text source
                                       :seon.sci.reader/ns 'my.agents.program-parity
                                       :seon.config.eval.result/max-source (count source)})
                  sources (mapv :seon.sci.reader/source events)
                  registration (pr-str (list 'seon.schema/register! :sample.s1/value
                                              (:sample.s1/value fixture-forms)))
+                 ;; the agent's own graph runs the submission (a submitted run is
+                 ;; a value on its request port until its one settlement)
                  submitted (turn/virtual-turn!
-                            {:seon.turn.loop/cluster handle :seon.agent/routing (test-support/attempt-routing connection)
-                             :seon.agent/id "program-parity"
-                             :seon.cluster.reply/text
-                             (str/join "\n" (into [(first sources) registration] (rest sources)))})
+                            (assoc request :seon.cluster.reply/text
+                                   (str/join "\n" (into [(first sources) registration] (rest sources)))))
                  turn-id (:seon.turn/id submitted)]
              (try
                (is (string? turn-id) (pr-str submitted))
                (when-not turn-id (throw (ex-info "Parity turn refused" submitted)))
-               (loop [pass 0]
-                 (when-not (:seon.turn/closed-tx
-                            (db/pull (db/db connection) [:seon.turn/closed-tx]
-                                     [:seon.turn/id turn-id]))
-                   (when (<= 24 pass)
-                     (throw (ex-info "Parity turn did not close" {:seon.turn/id turn-id})))
-                   (when-let [work (turn/next-agent-work
-                                    (db/db connection) {:seon.agent/id "program-parity"})]
-                     (turn/turn {:seon.turn.loop/cluster handle :seon.turn.work/next work}
-                                (java.util.Date.)))
-                   (recur (inc pass))))
                (let [evaluations (seon.eval/of-agent (db/db connection) "program-parity")]
                  (is (seq evaluations))
                  (is (empty? (filter :seon.cluster.eval/error evaluations))
@@ -1376,6 +1368,7 @@
                                                    :seon.cluster.eval/error]) evaluations))))
                (rows-from connection)
                (finally
+                 (agent/disarm! request)
                  (doseq [channel [(:seon.cluster.wake/channel handle)
                                   (:seon.render/context-channel handle)
                                   (:seon.turn.loop/completion handle)]]
