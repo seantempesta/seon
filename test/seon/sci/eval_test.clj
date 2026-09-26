@@ -614,7 +614,7 @@
               refusal (:seon.sci.admit/value evaluation)
               instrumentation-read
               (#'instrument/violation
-               nil :malli.core/invalid-arity
+               (schema/handed-projection) :malli.core/invalid-arity
                {:fn-name 'seon.sci.eval-test/compiled-runtime-victim
                 :arity 9})]
           (is (failed? evaluation) source)

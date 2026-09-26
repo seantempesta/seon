@@ -707,8 +707,9 @@
   (when (fault/carried-receipt throwable) (throw throwable))
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
         ;; The whole cause chain, read once, without SCI's location copies.
-        links (into [] (comp (map without-interrupt-marker) (remove sci-location?))
-                    (error.refusal/chain throwable))
+        links (error.refusal/without-links
+               (mapv without-interrupt-marker (error.refusal/chain throwable))
+               sci-location?)
         throwable-data (:seon.error/data (first links))
         location (stacktrace throwable)
         evidence (cond-> {:seon.sci.eval/throwable (.getName (class throwable))
