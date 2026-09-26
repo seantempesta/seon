@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: A committed (1df3d5769), RESET NEEDED, unmeasured; B written and held uncommitted until A is measured
+status: A (1df3d5769 + fix c672188e6) and B (fcee85161) committed; RESET NEEDED onto fcee85161 to measure the fix and B
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -26,10 +26,17 @@ The pass answers the reply port with its report; a pass that ends without settli
 
 ## Broken / open first
 
-1. **Measurement pending a restart.** Default was still pid 32075 at source 36a3714b4 when this lane
-   committed A; the probe `tmp/one-commit-a/probe.clj` is ready (20 trivial forms through
-   `evaluate-source!` on a branch's hosted agent, p50/p95, commits at answer). Numbers: see
-   "Measurements"; rows marked pending were not run.
+1. **A as first committed was a 5.5x regression.** Measured on default (pid 59671, e405f51be), probe
+   `docs/research/agent-platform/landing/one-commit-probe-2026-09-26.clj` (20 trivial forms through
+   `evaluate-source!` on branch `one-commit-a`'s hosted agent): **p50 856 ms, p95 1028 ms** (min 701), one
+   commit at every answer (the one-commit property held). Cause, measured: `evaluate-sources` read the
+   `seon.db/with` value holding the run's open; a with'd value has no program identity
+   (`seon.sci.eval/program-identity` → nil), so `base-ctx` missed its cache and re-derived the SCI base on
+   every form: **241 ms per derivation against 8.6 ms cached** (same JVM, same probe form); the profile
+   showed `derive-base-ctx` 645 ms over 3 forms. Fix c672188e6: evaluation reads the committed value; the
+   open serves only the pass's fold reads and the writer's refusal; a submitted run mints its handles as a
+   written run (`:seon.turn/write?`) and binds at the one site in `evaluate-sources` (system-turn's
+   post-commit bind loop deleted). **Unmeasured until the restart.**
 2. **Tests not run** (load cap; root runs them). Reds root should expect and how to read them:
    - `test/seon/program_test.clj:1352` drives a submitted run by hand (`next-agent-work` + `turn/turn`
      without a graph). Under A a submission exists only as a value on the armed graph's port, so that
@@ -50,17 +57,21 @@ The pass answers the reply port with its report; a pass that ends without settli
    - The pass no longer re-derives `more-agent-work?` after its turn: it rewakes once and the next
      pass's single derivation finds the rest or reports idle, after the caller was answered
      (task 62c45543598c).
-4. **B: blob reachability permit.** `blob/with-publication!` (`src/seon/blob.clj:296`) releases its
-   permit when the applied write returns, before the commit is durable. A GC that runs in that window
-   could reclaim a staged blob the pending settlement references. `blob.clj` is not my file; the fix is
-   to hold the permit until the durable outcome (`durable-watch!` is the seam).
+4. **B's blob permit gap: fixed in fcee85161.** `seon.blob/with-publication!` holds its reachability
+   permit until an applied write's pending commit (`:seon.db/durable` on the applied report) resolves;
+   regression `a-blob-permit-is-held-until-an-applied-write-commits` (a sweep is not admitted while the
+   commit is pending, and is once it resolves).
+5. **B's size.** fcee85161 is +174/−49 across db.clj (mostly the `transact-through` extraction, a move),
+   blob.clj, turn.clj and two schema files: over the ~100-line presumption. It stays only if measured
+   clearly faster than A; otherwise the next slice deletes it whole (fork seam included).
 
-## B: reply once the settlement is applied (held, not committed)
+## B: reply once the settlement is applied (fcee85161)
 
-Held in the working tree so a restart at HEAD measures A alone; committed only after A's numbers, and
-deleted if it is not clearly faster (owner).
+Kept only if clearly faster than A (owner). One restart measures both: the probe's `:ms` is B's answer
+and `:durable-ms` is when the branch's committed value holds the run, i.e. when A would have answered on
+the same JVM and code.
 
-- **Datahike fork** `c6c0f80d` (pushed to origin; gitlink not yet bumped in seon): `transact!` takes an
+- **Datahike fork** `c6c0f80d` (pushed to origin; gitlink bumped in fcee85161): `transact!` takes an
   optional `applied` port; the processing loop puts the applied report (or the invocation's failure)
   on it right after `op-fn`, before the batch commits (`writer.cljc`, ~12 lines). Committed callback,
   listeners and terminal commit failure unchanged.
@@ -72,14 +83,16 @@ deleted if it is not clearly faster (owner).
 - **One caller, opt-in at the site**: `settle-batch!`'s success commit. `settlement-lost!` names the lost
   run(s) and calls `seon.fault/fault!`, which cannot store (the writer is stopped), so it runs the agent's
   stop and throws. Refusal arms (`settle!`, `settle-batch-refusal!`) stay synchronous.
+- **The applied report carries its pending commit** as `:seon.db/durable` (declared in `seon.db.edn`).
 - **The agent's next form sees its previous writes**: the pass keeps the last applied value in its proc
   state (`:seon.turn.loop/applied`, stripped from the Flow report and the reply) and starts from the
   newer of it and the connection's committed value. No reader plumbing elsewhere (owner).
 - **Other qualifying callers (not converted)**: writes nobody needs durable before the answer, e.g.
   profile samples and evaluation read evidence refreshes. Everything with consequences (merge,
   write-back, tasks, config, schema adoption, boot, faults, branches, messages to root) stays `transact!`.
-- Regression `test/seon/db_applied_write_test.clj`: an ordinary write answers after its commit; an
-  applied write answers with the writer's value and a later durable write commits after it.
+- Regressions `test/seon/db_applied_write_test.clj`: an ordinary write answers after its commit; an
+  applied write answers with the writer's value, its `:seon.db/durable` resolves to the committed report,
+  and a later durable write commits after it; the blob permit is held until the commit resolves.
 
 ## Evidence
 
