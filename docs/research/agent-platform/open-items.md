@@ -50,6 +50,9 @@ callers to an existing component/function/test that does the same thing better (
 - **Caches** (owner 2026-09-26): every cache is `clojure.core.cache` (or another highly regarded library — Datahike's own
   cache for Datahike), never hand-rolled; bounded with an eviction policy (LRU by default); its size is a configuration dial,
   not a code constant. A cached SCI context is worth only the eval tax it saves — evict it rather than grow.
+- **Docs live in the codebase and the database** (owner 2026-09-26): move away from external docs; parse, store and link doc data
+  in Datahike so docs are integrated with code and refs (language plan §1/§5a/§7; 7.11 issues→tasks). Out-of-date external docs are
+  triaged (migrate / evidence / delete), not hand-updated. Design + options: docs-in-code-design-2026-09-26.md (owner decides).
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
   agent's SCI world (disposable fork, cached by content digest) and prints form + result — the context is a `clojure.main`
