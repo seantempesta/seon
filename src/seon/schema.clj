@@ -4210,26 +4210,25 @@
 (defn- contract-inner-bindings
   "The callables `form` binds beyond the population's own compiled bindings, by
    symbol: `[:fn sym]` predicates and (armed) `:error/fn` symbols, resolved the
-   way `mode` compiles them. Nil when one of them is not accounted (F1)."
+   way `mode` compiles them. [[retained-contract]] retains only when every one
+   is accounted ([[accounted-callable?]], F1)."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value [:enum :shape :armed]]
-                  [:maybe [:map-of :symbol [:fn clojure.core/ifn?]]]]}
+                  [:map-of :symbol [:fn clojure.core/ifn?]]]}
   [base form mode]
   (let [bound (predicate-functions-in base)
         named (into #{}
                     (concat (predicate-symbols-in form)
                             (when (= :armed mode)
                               (keep #(when (map? %) (let [f (:error/fn %)] (when (qualified-symbol? f) f)))
-                                    (tree-seq coll? seq form)))))
-        resolved (into {}
-                       (keep (fn [symbol]
-                               (when-not (contains? bound symbol)
-                                 (when-let [callable (if (= :armed mode)
-                                                       (predicate-callable base symbol)
-                                                       (loaded-predicate-var symbol))]
-                                   [symbol callable]))))
-                       named)]
-    (when (every? (fn [[symbol callable]] (accounted-callable? symbol callable)) resolved)
-      resolved)))
+                                    (tree-seq coll? seq form)))))]
+    (into {}
+          (keep (fn [symbol]
+                  (when-not (contains? bound symbol)
+                    (when-let [callable (if (= :armed mode)
+                                          (predicate-callable base symbol)
+                                          (loaded-predicate-var symbol))]
+                      [symbol callable]))))
+          named)))
 
 (defn- contract-size-estimate
   "The conservative retained-size estimate of one slot, bytes, from the authored
@@ -4243,27 +4242,34 @@
         local-entries (reduce + 0 (keep #(when (map? %) (count (:registry %))) nodes))]
     (long (+ (* 24 (count (pr-str form))) (* 2048 arities) (* 1024 local-entries)))))
 
-(defn- population-base
-  "The closed base one population entry holds: the members contract compilation
-   and admission read, nothing environmental. Nil when the projection is not a
-   transitively shape-only construction with accounted bindings: no construction
-   record, function contracts in its registry, or an unaccounted binding (F1)."
-  {:malli/schema [:=> [:cat :seon.schema/projection] [:maybe :map]]}
+(defn- provable-population?
+  "Whether `projection` is a transitively shape-only construction whose bindings
+   are all accounted: it records its construction inputs, its registry holds no
+   function contract, and every construction binding is a Var or Var root (F1)."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :boolean]}
   [projection]
   (let [[_ _ _ bindings :as inputs] (:seon.schema.projection/construction-inputs projection)]
-    (when (and inputs
-               ;; A registry compiled from forms alone holds no function
-               ;; symbol, so its retained children carry no contract world.
-               (empty? (:seon.schema.projection/function-contracts projection))
-               (every? (fn [[predicate callable]] (accounted-callable? predicate callable)) bindings))
-      (select-keys projection [:seon.schema.projection/registry
-                               :seon.schema.projection/forms
-                               :seon.schema.projection/canonical-keys
-                               :seon.schema.projection/schema-dependencies
-                               :seon.schema.projection/schema-admissions
-                               :seon.schema.projection/pure-predicate-symbols
-                               :seon.schema.projection/predicate-functions
-                               :seon.schema.projection/construction-inputs]))))
+    (boolean
+     (and inputs
+          ;; A registry compiled from forms alone holds no function symbol,
+          ;; so its retained children carry no contract world.
+          (empty? (:seon.schema.projection/function-contracts projection))
+          (every? (fn [[predicate callable]] (accounted-callable? predicate callable)) bindings)))))
+
+(defn- population-base
+  "The closed base one population entry holds: the members contract compilation
+   and admission read, nothing environmental."
+  {:malli/schema [:=> [:cat :seon.schema/projection] :map]}
+  [projection]
+  (with-predicate-functions
+   (select-keys projection [:seon.schema.projection/registry
+                            :seon.schema.projection/forms
+                            :seon.schema.projection/canonical-keys
+                            :seon.schema.projection/schema-dependencies
+                            :seon.schema.projection/schema-admissions
+                            :seon.schema.projection/pure-predicate-symbols
+                            :seon.schema.projection/construction-inputs])
+   (predicate-functions-in projection)))
 
 (defn- population-entry
   "The one process-cache entry of `base`'s population under `capacity` slots:
@@ -4329,9 +4335,11 @@
   [projection {form :seon.schema/form mode :seon.schema/mode admission :seon.schema/admission
                :as request} retention]
   (let [capacity (:seon.config.cache/contract-table-capacity retention)
-        base (when capacity (population-base projection))
+        base (when (and capacity (provable-population? projection)) (population-base projection))
         inner (when (and base (edn-value? form)) (contract-inner-bindings base form mode))]
-    (if (and base inner (<= (contract-size-estimate form) contract-slot-bytes))
+    (if (and base inner
+             (every? (fn [[predicate callable]] (accounted-callable? predicate callable)) inner)
+             (<= (contract-size-estimate form) contract-slot-bytes))
       (table-product (population-entry base capacity)
                      [mode form (:seon.schema.admission/source admission :agent) inner]
                      map?

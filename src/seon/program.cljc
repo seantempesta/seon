@@ -1097,9 +1097,10 @@
         ;; derived in the same world (contracts-out §4, pairing rule).
         {compiled :seon.schema/compiled references :seon.schema/references}
         (schema/contract-product
-         {:seon.schema.projection/registry (:registry compile-options)
-          :seon.schema.projection/predicate-functions predicate-functions
-          :seon.schema.projection/canonical-keys canonical-keys}
+         (schema/with-predicate-functions
+          {:seon.schema.projection/registry (:registry compile-options)
+           :seon.schema.projection/canonical-keys canonical-keys}
+          predicate-functions)
          {:seon.schema/form (read-edn spec) :seon.schema/mode :shape})
         arities (m/-function-schema-arities compiled)
         {source-signatures :seon.fn.signature/signatures
