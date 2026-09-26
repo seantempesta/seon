@@ -331,7 +331,7 @@ acceptance path is added.
 
 ## 6. Slices (HEAD loads after each; producers and acquisition change last, R6, N5)
 
-- **S1, additive (schema.clj, instrument.clj for the moved binder, program.cljc, db.clj, config dial resource + default, `:measure` alias and script if decided).**
+- **S1, additive (schema.clj, instrument.clj for the moved binder, program.cljc, db.clj, config dial resource + default, `:measure` alias and measurement script).**
   - Adds the symbol-free seam (§1) with **retention disabled until S4** (T1 bridge): the table code, the eligibility
     rule and their regressions land here, but lookups compile uncached.
   - Adds the `:seon.schema.projection/construction-inputs` record, written by the two constructors.
@@ -386,7 +386,7 @@ These are estimates from source, ±25%. The final count comes with the diffs.
 | schema.clj seam, construction-inputs record, walker with explicit targets (callers converted), scoped admissions | +95 |
 | schema.clj population table: holder, eligibility rule, dial input | +45 |
 | config dial (schema resource + default) | +8 |
-| measurement script + alias (if option 1 of the §10 tool decision) | +120 script, +1 alias |
+| measurement script + `:measure` alias (root ruling, §10) | +120 script, +1 alias |
 | db.clj `function-contract-row`, `program-relation-error` (the renderer coherence and replacement recheck move here from schema.clj), scoped content key | +90 / −10 |
 | instrument (#1-#4) | −15 / +10 |
 | call_preparation (#5-#7) | −10 / +15 |
@@ -464,9 +464,9 @@ together.
      no table grows under its old weight.
    - Clusters sharing a population with different dial values hold separate entries, each charged.
 
-**Slot sizing and eligibility (T4).** This needs a decision on the measurement tool (below).
-- **Tool.** clj-memory-meter 0.3.0, which is JOL-based and already in `~/.m2` but not on seon's classpath. It runs
-  from a committed script in a `:measure` alias JVM against a copied store. The alternatives are below.
+**Slot sizing and eligibility (T4).**
+- **Tool (root ruling, below).** clj-memory-meter 0.3.0 in a dev-only `:measure` alias, run offline in its own
+  measurement JVM against a copied store.
 - **Object boundary.**
   - **Population root, measured once:** the key, base registry, canonical targets, validation base and holder
     overhead, over populations with different form sizes and bindings. Objects shared with the projection's own
@@ -492,24 +492,22 @@ together.
   - many versions, large forms and several populations measured as retained roots after the probe references are
     dropped.
 
-**Needs a decision: the retained-size measurement tool (T4).**
-1. **Recommended: clj-memory-meter in a `:measure` alias.**
-   - It runs in its own measurement JVM over a copied store, from a committed script. It needs
-     `-Djdk.attach.allowAttachSelf`.
-   - Guarantee: exact object-graph sizes with shared-graph subtraction.
-   - Cost: 1 alias line, about 120 script lines, and one isolated JVM run per measurement. This is a declared
-     measurement JVM, not a test or probe JVM on default.
-   - Sacrifice: a new dev-only dependency.
-2. **Heap histogram differences on default.**
-   - `jcmd GC.class_histogram` before and after inserting N contracts into a scratch table.
-   - Cost: no dependency; about 60 script lines.
-   - Sacrifice: each histogram forces a full GC pause on the shared default; resolution is per class, not per graph;
-     shared-object attribution is approximate.
-3. **Estimate only.**
-   - Fix the slot charge at the 16 KB ceiling and use the printed-length rule with conservative constants from the
-     existing projection weight calibration.
-   - Cost: no measurement.
-   - Sacrifice: no retained-memory evidence, so the guarantee rests on an estimate. Astra's T4 would stay open.
+**Ruling (root, 2026-09-27): the retained-size measurement tool (T4) is clj-memory-meter in a dev-only `:measure`
+alias.**
+- clj-memory-meter 0.3.0 (JOL-based) is declared only in a `:measure` alias in `deps.edn`. It is never on a runtime
+  classpath and **never attached to default**.
+- A committed script runs it **offline, in its own measurement JVM, against a copied store**, with
+  `-Djdk.attach.allowAttachSelf`. This is the tool web research §5 recommends for fitting weight factors.
+- Outputs, each committed beside the script:
+  - the population-root size;
+  - the incremental slot size, with the held base subtracted from the same object graph;
+  - the size after use;
+  - the fitted eligibility constants `a`, `b` and `c`;
+  - the safety margin against the 16 KB ceiling.
+- Default is never measured by this tool.
+- Declined:
+  - heap-histogram diffs on default (full-GC pauses on the shared JVM, class-level resolution only);
+  - estimate only (no retained-memory evidence).
 
 ## 11. Composition with derive-once (`derive-once-design-2026-09-26.md`)
 
