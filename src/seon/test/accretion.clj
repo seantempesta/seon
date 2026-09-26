@@ -9,7 +9,10 @@
             [malli.error :as me]
             [malli.generator :as mg]
             [malli.registry :as mr]
+            [seon.call-preparation :as call-preparation]
+            [seon.db :as db]
             [seon.effect :as effect]
+            [seon.env :as env]
             [seon.error.refusal :as refusal]
             [seon.schema :as schema]
             [seon.sci.kernel :as kernel]))
@@ -129,14 +132,55 @@
           :seon.config/on-core-error
           (:seon.config/on-core-error request)})
         returned (:seon.sci.admit/value invocation)
-        actual (or (:seon.error/offending returned) returned)
-        explanation (m/explain output-schema actual)]
+        ;; A call that threw returned nothing to check: its whole error is the
+        ;; actual. Only the armed output check's refusal carries the returned
+        ;; value, as its offending member.
+        returned? (or (= :ok (get-in invocation [:seon.sci.admit/record :seon.eval/outcome]))
+                      (= :output (:seon.instrument/check returned)))
+        actual (if (= :output (:seon.instrument/check returned)) (:seon.error/offending returned) returned)
+        explanation (when returned? (m/explain output-schema actual))]
     {:seon.test.accretion/arguments arguments
      :seon.test.accretion/actual actual
      :seon.test.accretion/expected (pr-str (m/form output-schema))
      :seon.test.accretion/explanation
      (when explanation (pr-str (me/humanize explanation)))
-     :seon.test.accretion/pass? (nil? explanation)}))
+     :seon.test.accretion/pass? (and returned? (nil? explanation))}))
+
+(defn- supplied-registry
+  "Generators for the supplied defaults this candidate's world holds.
+
+  An argument whose declared schema names a supplied default is not
+  generated: call preparation's supplier produces it from the candidate's
+  own environment, as at the REPL, so a database argument is the agent's
+  database with its installed schema. A default the environment cannot
+  supply keeps its schema's generator. A place (a connection, or the
+  program context holding one) keeps its generator too: seeded cases never
+  write into the agent's world. Matching is by declared value schema name
+  wherever it occurs, a superset of call preparation's slot and map-entry placement;
+  every supplied value is an instance of its schema."
+  {:malli/schema [:=> [:cat :seon.test.accretion/auto-check-request]
+                  [:map-of :qualified-keyword [:fn malli.core/schema?]]]}
+  [{ctx :seon.sci.eval/ctx database :seon.db/db projection :seon.schema/projection row :seon.program/row}]
+  (let [registry (:seon.schema.projection/registry projection)
+        current (call-preparation/snapshot database projection)
+        environment (some-> (env/of ctx) (env/scope {:my.program/executing-ctx ctx}))
+        ;; A database value (also a map) or a scalar such as the agent id. A
+        ;; connection, the program context (a map of live members) and a
+        ;; refusal map (an unavailable or invalid default) are not supplied.
+        supplied? (fn [value] (or (db/database-value? value)
+                                  (not (or (db/connection-object? value) (map? value)))))]
+    (if (or (db/read-refusal? current) (not (env/environment? environment)))
+      {}
+      (into {}
+            (keep (fn [[_ {schema-key :seon.call-preparation/schema-key :as default}]]
+                    ;; `supply` names the slot only in the unavailable
+                    ;; diagnostic, which falls back to generation here.
+                    (let [value (call-preparation/supply current environment
+                                                         (assoc default :seon.fn.argument/index 0) (:seon.fn/sym row))]
+                      (when (supplied? value)
+                        [schema-key (m/-update-properties (m/deref (m/schema schema-key {:registry registry}))
+                                                          assoc :gen/gen (gen/return value))]))))
+            (:seon.call-preparation/supplied-defaults current)))))
 
 (defn- arity-generators
   [function-schema options]
@@ -177,8 +221,11 @@
       (assoc base-result
              :seon.test.accretion/status :skipped-effectful
              :seon.test.accretion/executed-count 0)
-      (let [options
-            {:registry (:seon.schema.projection/registry projection)}
+      (let [registry (:seon.schema.projection/registry projection)
+            options
+            {:registry (mr/composite-registry
+                        (supplied-registry request)
+                        registry)}
             function-schema
             (m/function-schema (edn/read-string (:seon.fn/spec row))
                                options)
@@ -283,10 +330,12 @@
     (conj (str "Auto-check skipped: "
                (:seon.test.accretion/skip-reason check)))
 
-    (qualified-symbol? (get-in check
-                      [:seon.test.accretion/failure
-                       :seon.test.accretion/actual
-                       :seon.error/operation]))
+    ;; A returned error value, never a throw: only a return can be declared.
+    (and (get-in check [:seon.test.accretion/failure :seon.test.accretion/explanation])
+         (qualified-symbol? (get-in check
+                                    [:seon.test.accretion/failure
+                                     :seon.test.accretion/actual
+                                     :seon.error/operation])))
     (conj
      (str "Observed error from "
           (get-in check

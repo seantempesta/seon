@@ -419,6 +419,52 @@
           (is (= #{'fixture.auto-check/capability}
                  (:seon.test.accretion/capabilities effectful-check))))))))
 
+(deftest auto-check-calls-in-the-agents-world-and-keeps-a-throw-whole
+  ;; Dogfood cycle 4: a data-reading function was called with a generated
+  ;; empty database that lacked every installed attribute, so no such function
+  ;; could install; and a call that threw reported the callee symbol as its
+  ;; return value. The database argument is now the one call preparation
+  ;; supplies from the candidate's own environment, and a throw is reported
+  ;; as its whole error, never checked against the output schema.
+  (test-support/with-database
+    (fn [connection]
+      (admit! connection (test-support/agent-tx @connection "world-author" 'fixture.world))
+      (let [parent (test-support/fork-cluster-ctx connection)
+            check (fn [source]
+                    (let [candidate (sci.eval/evaluate-candidate
+                                     {:seon.sci.eval/ctx parent :seon.db/db @connection
+                                      :seon.db/connection connection :seon.agent/id "world-author"
+                                      :seon.cluster.eval/source source :seon.test.accretion/gate-set []
+                                      :seon.sci.eval/time-limit-ms 2000
+                                      :seon.sci.admit/caps (config/result-caps config/defaults)
+                                      :seon.config/on-core-error :panic})]
+                      (sci.eval/auto-check-candidate
+                       {:seon.sci.eval/ctx (:seon.test.accretion/candidate-ctx candidate)
+                        :seon.db/db @connection
+                        :seon.program/row (get-in candidate [:seon.test.accretion/evaluation :seon.program/row])
+                        :seon.config.test/auto-check-cases 25 :seon.test.accretion/seed 424242
+                        :seon.sci.eval/time-limit-ms 2000
+                        :seon.sci.admit/caps (config/result-caps config/defaults)
+                        :seon.config/on-core-error :panic})))
+            reader (check (str "(defn ^{:malli/schema [:=> [:cat :seon.db/database-value] [:int {:min 1}]]} "
+                               "agent-count [db] (count (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] db)))"))
+            entry (check (str "(defn ^{:malli/schema [:=> [:cat [:map [:seon.db/db :seon.db/database-value]]] [:int {:min 1}]]} "
+                              "request-count [{db :seon.db/db}] (count (seon.db/q '[:find [?id ...] :where [_ :seon.agent/id ?id]] db)))"))
+            thrower (check "(defn ^{:malli/schema [:=> [:cat :int] :int]} halve-by-zero [x] (quot x 0))")
+            failure (:seon.test.accretion/failure thrower)]
+        (testing "a data-reading function reads the agent's own database, positionally and as a map entry"
+          (is (= [:passed 25] ((juxt :seon.test.accretion/status :seon.test.accretion/executed-count) reader))
+              (pr-str reader))
+          (is (= [:passed 25] ((juxt :seon.test.accretion/status :seon.test.accretion/executed-count) entry))
+              (pr-str entry)))
+        (testing "a throwing call reports its exception, not the callee or an output mismatch"
+          (is (= :failed (:seon.test.accretion/status thrower)) (pr-str thrower))
+          (is (re-find #"ArithmeticException" (str (get-in failure [:seon.test.accretion/actual :seon.error/message])))
+              (pr-str failure))
+          (is (map? (:seon.test.accretion/actual failure)) "the whole error, never the callee symbol")
+          (is (nil? (:seon.test.accretion/explanation failure)) (pr-str failure))
+          (is (seq (:seon.test.accretion/arguments failure))))))))
+
 (deftest ^{:seon.test/long "Constructs a generator for every packaged schema (3,350): 2.5 s at the REPL, 7.4 s under a request on a scratch cluster at 0e53eb8b1."
            :seon.test/long-ms 12000}
   every-packaged-schema-answers-generatability-as-a-boolean
