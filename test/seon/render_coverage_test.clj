@@ -383,7 +383,8 @@
                face (:seon.render/output (first units))]
            (is (some? face))
            (is (str/includes? (str face) (str owner-symbol)))
-           (is (vector? face)
+           ;; AI render functions return text, HTML ones hiccup.
+           (is (if (= :seon.render/ai output) (string? face) (vector? face))
                "the walk's own request shape reaches a total render")))))))
 
 ;;; ---------------------------------------------------------------------------
@@ -484,8 +485,10 @@
 
 (defn- probe-render
   [database ctx value producer limit-ms]
+  ;; The render call's explicit hand-off of its producer; a request key named
+  ;; :seon.render/ai is not a selection stage (only the value's own key is).
   (render/render-ai (assoc (render-request database ctx value)
-                           :seon.render/ai producer
+                           :seon.render.call/selected-producer producer
                            :seon.render.call/id probe-call-id
                            :seon.sci.eval/time-limit-ms limit-ms)))
 
