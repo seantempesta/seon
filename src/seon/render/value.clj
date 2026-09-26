@@ -11,6 +11,7 @@
             [seon.error.refusal :as refusal]
             [seon.sci.admit :as admit]
             [seon.ai.tokens :as tokens]
+            [seon.sci.reader :as reader]
             [sci.lang]))
 
 (schema.edn/load! {})
@@ -1042,10 +1043,25 @@
   (admit/canonical-edn stored))
 
 (defn read-artifact
-  "Read one stored value artifact."
-  {:malli/schema [:=> [:cat :string] :seon.render.value/artifact]}
+  "Read one stored value artifact with the one reader (`seon.sci.reader`), or
+  refuse content that is not one by name: an unreadable text or a form that
+  is not `{:seon.sci.admit/print-node node}` (another blob's digest)."
+  {:malli/schema [:=> [:cat :string]
+                  [:or :seon.render.value/artifact :seon.render.value/unreadable-artifact-error]]}
   [content]
-  (edn/read-string content))
+  (let [events (reader/read {::reader/text content :seon.config.eval.result/max-source (count content)})
+        form (when (and (vector? events) (= 1 (count events))) (::reader/form (first events)))
+        reason (cond
+                 (not (vector? events)) (str "The stored content does not read: " (:seon.error/message events))
+                 (not= 1 (count events)) (str "The stored content holds " (count events) " forms, not one artifact.")
+                 (not (and (map? form) (print/node? (:seon.sci.admit/print-node form))))
+                 "The stored content is not a value artifact (no :seon.sci.admit/print-node); this digest names another kind of blob.")]
+    (if reason
+      (assoc (refusal/diagnostic (java.util.Date.) :seon.render.value/artifact 'seon.render.value/read-artifact
+                                 {:seon.error/message reason
+                                  :seon.error/expected :seon.render.value/artifact})
+             :seon.render.value/unreadable-artifact reason)
+      form)))
 
 (defn artifact-value
   "Derive semantic drill data from an artifact's sole print node."

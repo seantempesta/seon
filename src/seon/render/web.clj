@@ -3625,7 +3625,10 @@
           value?
           (try
             (if-let [content (blob/get connection value-digest)]
-              (value/artifact-value (value/read-artifact content))
+              (let [stored (value/read-artifact content)]
+                (if (:seon.render.value/unreadable-artifact stored)
+                  (assoc stored :seon.blob/digest value-digest)
+                  (value/artifact-value stored)))
               (let [observation
                     (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.web/render 'seon.render.web/data-response
                      {:seon.error/message "No stored value has this digest."

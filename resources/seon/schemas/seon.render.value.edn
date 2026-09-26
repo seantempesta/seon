@@ -53,6 +53,8 @@
                     :window-offset [:int {:min 0}]
                     :window-realization-failed-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/window-offset :seon.render.value/window-offset]]]
  :seon.render.value/root-description :string
+ :seon.render.value/unreadable-artifact [:string {:min 1 :description "Why stored content is not a value artifact: the one reader's refusal, or the shape it read."}]
+ :seon.render.value/unreadable-artifact-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/unreadable-artifact :seon.render.value/unreadable-artifact]]]
  :seon.render.value/missing-root-identity-error [:and {:seon.db/attributes true :seon.render/ai seon.error/render-ai :seon.render/html seon.error/render-html} :seon.error/base [:map [:seon.render.value/root-description :seon.render.value/root-description]]]
  ; Additive error declaration manifest, 2026-09-18.
 

@@ -500,12 +500,17 @@
                        (mcp-instance cluster-name))]
     (if-let [content (blob/get connection content-digest)]
       (let [stored (render.value/read-artifact content)
-            found (render.data/at
-                   (render.value/artifact-value stored)
-                   {:seon.render.data/path path
-                    :seon.render.data/offset offset})
+            found (when-not (:seon.render.value/unreadable-artifact stored)
+                    (render.data/at
+                     (render.value/artifact-value stored)
+                     {:seon.render.data/path path
+                      :seon.render.data/offset offset}))
             effective (mcp-effective cluster-name nil)]
         (cond
+          ;; Another kind of blob, or unreadable content: refused by name.
+          (:seon.render.value/unreadable-artifact stored)
+          (assoc stored :seon.blob/digest content-digest)
+
           (or (:seon.config/error-key effective)
               (:seon.db/invalid-read effective) (:seon.schema/expected-value effective))
           effective
