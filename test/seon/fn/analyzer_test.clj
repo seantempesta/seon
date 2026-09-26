@@ -1,5 +1,7 @@
 (ns seon.fn.analyzer-test
   (:require [clj-kondo.core :as kondo]
+            [clj-kondo.impl.cache :as kondo.cache]
+            [clj-kondo.impl.core :as kondo.core]
             [clojure.java.io :as io]
             [cognitect.transit :as transit]
             [clojure.test :refer [deftest is testing]]
@@ -297,3 +299,38 @@
         (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'seon.id))))
       (finally
         (test-support/delete-recursively! directory)))))
+
+(deftest a-directory-dependency-entry-older-than-its-source-is-rebuilt-not-deleted
+  ;; A submodule bump makes a `:local/root` directory's files newer than their
+  ;; shared cache entries. The analysis deleted such an entry without a
+  ;; rebuild (only checkout sources rebuilt), and a directory carries no skip
+  ;; mark to trigger the boot fill, so boot refused every call into the
+  ;; namespace (start --head 5bed888d0, 2026-09-26: sci.impl.namespaces,
+  ;; sci.impl.utils). Both the stale and the missing entry rebuild from the
+  ;; file the classpath loads. Runs over the checkout's own cache, which it
+  ;; leaves holding the namespace's current analysis.
+  (let [caller (.getCanonicalPath (io/file "src/seon/effect.clj"))
+        root (.getCanonicalPath ^java.io.File
+              (kondo.core/resolve-cache-dir ".clj-kondo" true ".clj-kondo/.cache"))
+        entry (kondo.cache/cache-file root :cljc 'sci.impl.utils)
+        original (when (.isFile entry) (java.nio.file.Files/readAllBytes (.toPath entry)))
+        analyze #(analyzer/analyze {::analyzer/paths [caller]})]
+    (try
+      (analyze)
+      (is (.isFile entry) "the caller's analysis holds sci.impl.utils")
+      (.setLastModified entry 0)
+      (let [analysis (analyze)
+            stale (::analyzer/stale (::analyzer/cache analysis))]
+        (is (= [[::analyzer/modified 'sci.impl.utils]]
+               (mapv (juxt ::analyzer/reason ::analyzer/namespace) stale)))
+        (is (every? ::analyzer/source stale) "the stale entry names the directory file to rebuild from")
+        (is (.isFile entry) "rebuilt, not deleted")
+        (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'sci.impl.utils))))
+      (.delete entry)
+      (let [analysis (analyze)]
+        (is (.isFile entry) "a missing directory entry is analyzed from its classpath file")
+        (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'sci.impl.utils))))
+      (finally
+        (when (and original (not (.isFile entry)))
+          (java.nio.file.Files/write (.toPath entry) ^bytes original
+                                     (make-array java.nio.file.OpenOption 0)))))))

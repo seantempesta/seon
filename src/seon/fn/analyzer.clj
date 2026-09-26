@@ -248,21 +248,20 @@
             (.getCanonicalPath (io/file (analyzed-source-path path))))))
 
 (defn- classpath-source
-  "The checkout file this JVM's classpath loads for `namespace-name`, outside
-  every `:local/root` dependency: first-party by the process's own classpath
-  (the `:test` alias's `.` puts `dev_cache.clj` there), never a list. The
-  system loader answers, not a thread's context loader (`seon.sci.eval`)."
+  "The directory file this JVM's classpath loads for `namespace-name`: a
+  first-party file (the `:test` alias's `.` puts `dev_cache.clj` there) or a
+  directory dependency's (`:local/root`, a git dep), never a list. A jar entry
+  answers nil: kondo's skip mark owns jars (`ensure-dependency-analysis!`),
+  while a directory carries no mark and is re-read from its current bytes
+  (clj_kondo/impl/core.clj:489-506 marks only `.jar` paths). The system loader
+  answers, not a thread's context loader (`seon.sci.eval`)."
   {:malli/schema [:=> [:cat :symbol] [:maybe :string]]}
   [namespace-name]
-  (let [checkout (.getCanonicalPath (io/file "."))
-        base (-> (str namespace-name) (str/replace "-" "_") (str/replace "." "/"))]
+  (let [base (-> (str namespace-name) (str/replace "-" "_") (str/replace "." "/"))]
     (some (fn [extension]
             (when-let [url (.getResource (ClassLoader/getSystemClassLoader) (str base extension))]
               (when (= "file" (.getProtocol url))
-                (let [path (.getCanonicalPath (io/file (.toURI url)))]
-                  (when (and (str/starts-with? path (str checkout java.io.File/separator))
-                             (not (under? (::dependency-roots (roots-of checkout)) path)))
-                    path)))))
+                (.getCanonicalPath (io/file (.toURI url))))))
           [".clj" ".cljc"])))
 
 (defn- stale-cache-entries
@@ -282,8 +281,8 @@
   coordinate; kondo names one `<jar>:<entry>` only under canonical paths
   (clj_kondo/impl/core.clj:289-291), so `seon.fn/dependency-analysis-command`
   writes them that way — a bare entry name reads as an absent source. Each stale entry names its checkout source when it has one, and a
-  first-party namespace this run does not define names the file this
-  classpath loads (`classpath-source`), so the caller can rebuild it.
+  namespace this run does not define (first-party or a directory dependency's)
+  names the file this classpath loads (`classpath-source`), so the caller can rebuild it.
 
   `shared?` is true for the checkout's own cache under `.clj-kondo/`. An
   explicitly supplied cache root belongs to its caller, whose every source
@@ -340,15 +339,16 @@
                                   (not (under? dependency-roots path))
                                   (not= path (classpath-source namespace-name))) ::foreign
                              (> (.lastModified source) (.lastModified file)) ::modified)
-                    ;; A first-party namespace rebuilds from the file this
-                    ;; classpath loads when its entry names another archive's,
-                    ;; a deleted mirror's or stdin's bytes: the shared cache
-                    ;; outlives the checkout that wrote it.
+                    ;; A namespace this run does not define rebuilds from the
+                    ;; file this classpath loads: the shared cache outlives the
+                    ;; checkout, mirror and dependency revision that wrote it.
+                    ;; A directory dependency's entry older than its source (a
+                    ;; submodule bump) was deleted unrebuilt before, so boot
+                    ;; refused every call into it (start --head 5bed888d0).
                     rebuilt (if (and (#{::modified ::moved} reason)
                                      (or (not shared?) (under? source-roots path)))
                               path
-                              (when (and (nil? current)
-                                         (#{::stdin ::source-absent ::foreign} reason))
+                              (when (nil? current)
                                 (classpath-source namespace-name)))]
               :when reason]
           (cond-> {::cache-file (.getPath file)
@@ -394,13 +394,14 @@
                       (stale-cache-entries root shared? result)))
                   {::examined 0 ::stale []}))
         first-run (clj-kondo/run! options)
-        ;; A first-party namespace kondo holds no entry for (one outside the
-        ;; publication roots) is analyzed from the file the classpath loads.
-        first-party (when root
+        ;; A namespace kondo holds no entry for (first-party outside the
+        ;; publication roots, or a directory dependency's) is analyzed from
+        ;; the file the classpath loads.
+        classpath-files (when root
                       (into [] (keep classpath-source)
                             (unanalyzed-namespaces root (:analysis first-run))))
-        result (if (seq first-party)
-                 (do (clj-kondo/run! (assoc options :lint first-party))
+        result (if (seq classpath-files)
+                 (do (clj-kondo/run! (assoc options :lint classpath-files))
                      (clj-kondo/run! options))
                  first-run)
         {::keys [examined stale]} (check result)]
@@ -499,8 +500,9 @@
   "Boot's fill of the dependency analysis program analysis reads: run
   `analyze-dependencies!` in this JVM when any classpath jar is unmarked (an
   empty cache after a nuke, a fresh root, a new coordinate); nil when every jar
-  is marked. A new `:local/root` directory carries no mark; its calls refuse
-  by name with `seon.fn/dependency-analysis-command`."
+  is marked. A directory entry carries no mark: an analysis reaching one of
+  its namespaces with no current entry rebuilds it from the file the classpath
+  loads (`classpath-source`)."
   {:malli/schema [:=> [:cat] [:maybe [:map [::unanalyzed-jars [:vector :string]] [:summary :map]]]]}
   []
   (let [missing (unanalyzed-jars cache-directory (dependency-entries))]
