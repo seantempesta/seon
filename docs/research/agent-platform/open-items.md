@@ -123,42 +123,44 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | `language-requirements-2026-09-24.md` (living spec, 125 rows: 31 met, 20 proposed, 15 open) | the parser already sees every link (parser-proves-the-spec); producers must emit them |
 | floor §3, function face, query+render block, derived contracts | older; floor/face/block now converge on the graph render — re-read before starting |
 
-### Queued (root-ruled; waiting on a held file or on the harness)
-- **C5 projection-as-a-read sweep** (duplicate-paths audit §11 C5; prerequisite refuted for a one-file cut, landing
-  delete-r8-r6-r10 §C5): convert every ambient projection reader to pass `seon.db/carried-projection` explicitly —
-  `handed-projection` 18 sites/10 files, `call-with-projection` 42/16, `call-with-projection-state` 12/7, plus
-  `call-with-forms`/`current-projection`/`registered-schemas` and the registration-delta atom (`schema.clj:3549`) — as one
-  scripted sweep once cluster.clj, sci/eval.clj, render/walk.clj and program.cljc are released; then delete the dynamic Vars.
-- **C2 test snapshot/restore deletion** waits on test confinement: instrumentation and Malli function-schema registration
-  local to each test member's context (instrument + harness owners), so no member can touch JVM-wide wrappers; then the
-  snapshot/drift/restore family (runner.clj, test.clj:1943-1963, test_support.clj:915-919) goes in one cut. The drift
-  detector stays until then: it catches real shared-Var damage (landing delete-r8-r6-r10 §C2).
-- **Commit floor (write-cost landing 2026-09-26):** a trivial run is 3 commits × ~20 ms, each 4 ordered fsyncs (commit
-  record, then branch head; Datahike already batches queued txs, `writer.cljc:224-230`). Next, in order: fold the turn close
-  into settlement (hunk in fix-write-cost landing; turn.clj after R1) saves ~30 ms; then a datahike/konserve fork change so
-  the branch head points at the already-durable commit record (one barrier for the ordered pair), durability unchanged.
-- **Boot's `loaded-builder` Object fault** on every start (`boot/stop!` marks running-instances with a bare Object; issue
-  filed): boot.clj after the seams lane releases it.
-- **State architecture (owner 2026-09-26, AGENTS.md):** one roster per scope for live objects; admission/retirement as
-  writer-checked facts; derived values memoized; folds for accumulation. Authorities: atom-audit-2026-09-26.md (Astra, 13
-  ranked file-disjoint bundles R1–R13, ~450–950 lines) and system-state-opinion-2026-09-26.md (Opus, hierarchy C). Order:
-  (1) merge the context-state atom into the routing roster (~+10/−35); (2) P3b option (b) on it; (3) bundles R2/R4/R9 first
-  (smallest, free), then R10, R6, R8, R11, R12, R7, R3 with the render path, R1 SCI context, R5 lifecycle; R13 at the writer.
-  Open disagreement: web tab registrations into the render proc's state (root rules when R3 starts).
-- Render-dispatch reds in web-debug-test (`repl/render-ai` returns the raw evaluation map), fault card nil kicker/message,
-  fixture writes refused (`unowned-entity`, "only the creator may remove tests"), `turn-details` 34 s.
-- seon.test-test: two stale fixtures (bare doc upsert; `with-redefs` on `db/pull`) and the runner/db question: should
-  `transact!` return or throw a completion refusal raised inside `:db.fn/call`.
-- A terminal provider refusal closes two turns instead of one (turn settlement); evaluate-sources :204 recorded-content-conflict (turn settlement).
-- `fn/reaches?` and `runner.clj:839-849` onto `db/call-reach`; library audit D6/D7; the ~40 request-copying error producers (one scripted sweep).
-- registry-test per-member store (harness); accretion source-harvest 16 s and gate-test 6.3 s (harness/cost); datahike parity
-  baseline weeks stale (own assignment); `seon.ai/complete` ignores no-provider; script namespaces loaded by path never reload.
-- Costs still open: publication of one file runs `full-source-refresh!` (2.4–14 s; adoption 12–30 s); a trivial SCI eval
-  allocated ~0.5 GB (not reproduced on the fresh JVM: 2.3 MB); turn renderer 13 queries/turn; render-call recomputes reach per node;
-  `canonical-value-string` armed recursion; `analyze-dependencies!` prints ~230 stderr lines.
-- SCI fork: 4 pre-existing sci.core-test failures (root-data metadata leaks onto fns).
-- Correctness questions: upserting a re-analyzed row onto a stored one keeps stale owned attributes unless the replacement path
-  (`reconcile-tx`/`exact-replacement-tx`) is used — verify every production redefinition path.
+### Queued (root's ordered backlog, rewritten 2026-09-26 ~17:40Z; lanes take the top ready item on free files)
+**A. Dogfood milestone (primary).**
+1. Green the path: host-test, mcp-bridge (operator discovery via archive root → seams), write-back (merge gate "named run
+   not recorded on the tested branch"), agent-test's 8 pre-existing reds, custody-stability (stale, fixture lane).
+2. Agent API blockers (fix-dogfood-api lane): `my.test/check`, `my.test/run`, REPL `deftest` reach, in-run ungated
+   redefinition, merge proposal as a thin my.* wrapper over the existing merge owner.
+3. First real change end to end through MCP (branch → forms → tests → root merge → write-back, file bytes equal, reindex).
+4. Then convert lanes to REPL-first work (one lane first, preamble updated), keeping the standing dogfood lane cycling;
+   its ranked report (dogfood-report-2026-09-26.md) feeds fix lanes.
+**B. Context agents can understand.**
+5. REPL-entry renders: Astra review → owner ruling on §6 history (recommend A: never recorded) → slice 1 (+60/−80) →
+   agent/task/namespace renders; retire text AI pairs and the transcript renderer's parallel path (~640 lines).
+6. Curated namespaces via `:seon.ns/aliases`; shrink `dir` (10–35 KB) and the own-agent pull (78 KB); Var prints `#'ns/v`.
+7. Task-focused context: the agent's context is its task graph render (N levels); verify on the debug page.
+8. Printer/render defects: render-coverage (50 fails, `unknown-output`), help as map, `admit-chunk` nil, raw pull inlining
+   (D11), P3m (MCP errors through the one path).
+**C. Correctness.**
+9. `seon.schema` reload leak (`converged-predicate-var` reloads + swallows) — eval-schema lane.
+10. Call-preparation snapshot staleness (D7): commit-identity memo, hook within 20%.
+11. `preview-sources` commits writes (D6); reload-overlap detection absent (a376a6985).
+12. Agent code reaches every held context of its execution; adoption leaves retired graphs running; two loaded-identity
+    answers; generator http-kit server; unowned `seon.db/q` refusal in loop-proof (now printed on next run).
+13. Operator: failed-move headline + exit code; a focused route for long members (merge-test cannot run today).
+14. Storage GC reclaims nothing (store +1–2 GB/10 min under tests).
+**D. Performance.**
+15. Commit floor: Datahike/Konserve fork change so the branch head points at the durable commit record (one barrier).
+16. Adoption 11–27 s (`refresh-source!`); boot 28–39 s vs the 10 s target; hosted MCP run 165 ms warm.
+17. Test design: turn-test ~100 s, agent-test/web-test 120 s, loop-proof 39 s → fast-harness next slices (in-memory
+    branches of one prepared commit); `program-fn-row` one-arg manifest (~15 s/call).
+18. seon.profile window misattribution (per-thread windows or JFR).
+**E. Shrink (≥1 lane always).**
+19. Atom bundles in order: R8 wake, R11 MCP, R12 provider, R6 runner, R7 sequential IO, R3 rendering, R1 SCI context,
+    R5 lifecycle, R13 fault idempotence at the writer.
+20. C5 projection-as-a-read sweep (72+ sites) and read-refusal residue (~33 sites) as files are released; C2 after test
+    confinement; dead window-* schema declarations (two-step retirement).
+21. Face-concept elimination from the Astra audit (face-concept-audit-2026-09-26.md) as a scripted rename.
+22. Largest files: cluster.clj (~3.7k), sci/eval.clj, schema.clj, turn.clj — shrink assignments by responsibility.
+**F. Review debt (Astra).** P3b diff; 2(i) diff; R1 diff; roster slice; references-as-refs re-review status; harness S1.
 
 ### Operating checklist
 - After `bin/seon start --head`, read its WHOLE result and then `bin/seon status` `:seon.operator/source-root`: a move
