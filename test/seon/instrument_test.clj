@@ -1615,7 +1615,9 @@
      (let [database (db/db connection)
            result (cluster/arm-host-program!
                    {:seon.profile/definition-digests (cluster/definition-digests database)
-                    :seon.cluster/program-namespaces []}
+                    :seon.cluster/program-namespaces []
+                    ;; The cluster's supplied-default rows the wrappers plan from.
+                    :seon.db/db database}
                    (test-support/effective-config)
                    nil)
            armed (instrument/instrumented)

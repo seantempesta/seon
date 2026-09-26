@@ -583,7 +583,8 @@
         ;; refusal (`:seon.error/at` present). A refusal is shown as the
         ;; problems being unavailable, with its cause; counting it would
         ;; count its keys, and an empty count would read as healthy.
-        problems (:seon.problems/problems ready)
+        problems (when (and ready (store/connection? connection))
+                   (problems/problems (db/db connection) {}))
         unavailable (when (:seon.error/at problems) problems)
         problem-counts
         (when (and ready (not unavailable))
@@ -612,7 +613,7 @@
         replaced-roots
         (when connection
           (instrument/replaced-roots (program-function-files (db/db connection))))
-        readiness-face (when ready (dissoc ready :seon.problems/problems))
+        readiness-face ready
         ;; A failed adoption leaves the JVM's loaded program unknown.
         unloaded (let [loaded @sci.eval/loaded-identity] (when (:seon.error/at loaded) loaded))]
     (cond-> {:seon.dev.mcp/cluster cluster-name

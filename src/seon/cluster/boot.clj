@@ -22,7 +22,6 @@
             [seon.flow :as flow]
             [seon.fs :as fs]
             [seon.operator.runtime :refer [running-instances]]
-            [seon.problems :as problems]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
@@ -533,7 +532,12 @@
           (throw (failed cause own)))))))
 
 (defn readiness
-  "Read each acquired layer; missing values are explicit, including partial boot."
+  "Read each acquired layer; missing values are explicit, including partial boot.
+
+  Readiness is the boot's own facts. The cluster's problems are read by their
+  owner where they are shown (`seon.cluster/mcp-runtime-observation`): carried
+  here they crossed every start reply whole, every stored failed test run
+  included."
   {:malli/schema [:=> [:cat :seon.boot/instance] :seon.boot/readiness]}
   [instance]
   (let [connection (:seon.boot/cluster-connection instance)
@@ -544,8 +548,7 @@
             :seon.agent/count (or (when database
                                      ;; Datalog's count over no bindings answers nil, not 0.
                                      (db/q '[:find (count ?a) . :where [?a :seon.agent/id _]] database))
-                                   0)
-            :seon.problems/problems (if database (problems/problems database {}) {})}
+                                   0)}
            (select-keys instance [:seon.boot/ready-ms :seon.boot/layers :seon.boot/recovered-runs])
            (select-keys (:seon.render.web/served instance) [:seon.render.web/url :seon.render.web/wanted-port]))))
 

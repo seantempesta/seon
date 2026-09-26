@@ -6,7 +6,7 @@
   identity atom; the JVM's `seon.sci.eval/loaded-identity` is never touched."
   (:require [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
-            [my.program]
+            [seon.config :as config]
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -172,11 +172,19 @@
 (deftest a-booted-wrapper-supplies-its-declared-defaults
   ;; Boot arms against the published commit's projection, which holds the
   ;; function contracts a call-preparation plan is read from; armed against the
-  ;; files' schema forms alone, every wrapper armed without a plan and callers
-  ;; were refused a supplied :seon.db/db (46ad08a41 with fa6f8e8b0's skipped
-  ;; post-boot re-arm).
+  ;; files' schema forms alone, every wrapper armed without a plan and an
+  ;; evaluation calling it was refused its supplied :seon.db/db. Supplied
+  ;; defaults come from the CALLING evaluation's world, so the call is made as
+  ;; an agent makes it: an evaluation in this member's context.
   (support/with-database
    (fn [_connection]
-     (let [result (my.program/breaks {:seon.program/subject 'seon.id/valid?})]
-       (is (map? result))
-       (is (not (:seon.error/at result)) (pr-str (select-keys result [:seon.error/message])))))))
+     (let [result (sci.eval/evaluate
+                   {:seon.schema/projection (schema/handed-projection)
+                    :seon.cluster.eval/source "(my.program/breaks {:seon.program/subject 'seon.id/valid?})"
+                    :seon.sci.admit/caps (config/result-caps config/defaults)
+                    :seon.sci.eval/time-limit-ms 5000
+                    :seon.sci.eval/ctx (:seon.sci.eval/ctx (support/execution-handle nil))})
+           value (:seon.sci.admit/value result)]
+       (is (not (:seon.cluster.eval/error result)) (pr-str (:seon.cluster.eval/error result)))
+       (is (map? value))
+       (is (not (:seon.error/at value)) (pr-str (select-keys value [:seon.error/message])))))))
