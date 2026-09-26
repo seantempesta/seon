@@ -1225,7 +1225,7 @@
                         bare function-symbol
                         (get contracts function-symbol) admission))))))
        (testing "the arm's own two readers are total"
-         (is (nil? (#'instrument/predicate-callable
+         (is (nil? (#'schema/predicate-callable
                     bare 'seon.schema-test/no-such-predicate)))
          (let [function-symbol (first (sort (keys contracts)))
                configuration (test-support/effective-config)]
