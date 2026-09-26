@@ -202,8 +202,10 @@
                      [:datahike.read/revision
                       :seon.db/dependency-revision]
                      [:seon.db/read-request
-                      {:optional true}
+                      {:optional true
+                       :description "Retiring: no longer produced (stored evidence references its read, never copies the request; seon.db/read-evidence). Deleted in the next adoption."}
                       :seon.db/read-request]
                      [:seon.db/read-result-digest
-                      {:optional true}
+                      {:optional true
+                       :description "Retiring: no longer produced for stored evidence (only process-local retained evidence replays). Deleted in the next adoption."}
                       :seon.db/read-result-digest]]}
