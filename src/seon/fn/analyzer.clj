@@ -281,8 +281,9 @@
   declared source and dependency root and this analysis does not define it. Jar entries are immutable by
   coordinate; kondo names one `<jar>:<entry>` only under canonical paths
   (clj_kondo/impl/core.clj:289-291), so `seon.fn/dependency-analysis-command`
-  writes them that way — a bare entry name reads as an absent source. Each stale entry names its checkout source when it has one, so
-  the caller can rebuild it.
+  writes them that way — a bare entry name reads as an absent source. Each stale entry names its checkout source when it has one, and a
+  first-party namespace this run does not define names the file this
+  classpath loads (`classpath-source`), so the caller can rebuild it.
 
   `shared?` is true for the checkout's own cache under `.clj-kondo/`. An
   explicitly supplied cache root belongs to its caller, whose every source
@@ -338,15 +339,23 @@
                                   (not (under? source-roots path))
                                   (not (under? dependency-roots path))
                                   (not= path (classpath-source namespace-name))) ::foreign
-                             (> (.lastModified source) (.lastModified file)) ::modified)]
+                             (> (.lastModified source) (.lastModified file)) ::modified)
+                    ;; A first-party namespace rebuilds from the file this
+                    ;; classpath loads when its entry names another archive's,
+                    ;; a deleted mirror's or stdin's bytes: the shared cache
+                    ;; outlives the checkout that wrote it.
+                    rebuilt (if (and (#{::modified ::moved} reason)
+                                     (or (not shared?) (under? source-roots path)))
+                              path
+                              (when (and (nil? current)
+                                         (#{::stdin ::source-absent ::foreign} reason))
+                                (classpath-source namespace-name)))]
               :when reason]
           (cond-> {::cache-file (.getPath file)
                    ::namespace namespace-name
                    ::language language
                    ::reason reason}
-            (and (#{::modified ::moved} reason)
-                 (or (not shared?) (under? source-roots path)))
-            (assoc ::source path))))}))
+            rebuilt (assoc ::source rebuilt))))}))
 
 (declare unanalyzed-namespaces)
 

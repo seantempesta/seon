@@ -1,6 +1,7 @@
 (ns seon.fn.analyzer-test
   (:require [clj-kondo.core :as kondo]
             [clojure.java.io :as io]
+            [cognitect.transit :as transit]
             [clojure.test :refer [deftest is testing]]
             [seon.fn.analyzer :as analyzer]
             [seon.schema :as schema]
@@ -269,3 +270,30 @@
       (is (= ["/m2/cheshire/cheshire/6.0.0/cheshire-6.0.0.jar"] (unanalyzed))
           "one mark names both coordinates sharing its jar name, whatever path it holds")
       (finally (test-support/delete-recursively! directory)))))
+
+(deftest a-first-party-entry-whose-source-is-gone-is-rebuilt-from-the-classpath
+  ;; The shared cache outlives the checkout that wrote it: an entry naming
+  ;; another archive's deleted mirror is stale (source absent). Deleting it
+  ;; without a rebuild left the namespace unanalyzed, so boot refused every
+  ;; call into it (start --head b605b2144, 2026-09-26).
+  (let [directory (fixture-directory (str (random-uuid)))
+        cache-root (.getPath (io/file directory "cache"))
+        caller (write-fixture! directory "gone_caller.clj"
+                               "(ns gone-caller (:require [seon.id :as id])) (id/valid? 1)")
+        entry (io/file cache-root "v1" "clj" "seon.id.transit.json")
+        analyze #(analyzer/analyze {::analyzer/paths [caller] ::analyzer/cache-root cache-root})]
+    (try
+      (analyze)
+      (is (.isFile entry) "the first-party pass wrote seon.id's entry")
+      (let [value (with-open [input (io/input-stream entry)]
+                    (transit/read (transit/reader input :json)))]
+        (with-open [output (io/output-stream entry)]
+          (transit/write (transit/writer output :json)
+                         (assoc value :filename (.getPath (io/file directory "gone" "id.clj"))))))
+      (let [analysis (analyze)
+            stale (::analyzer/stale (::analyzer/cache analysis))]
+        (is (= [::analyzer/source-absent] (mapv ::analyzer/reason stale)))
+        (is (every? ::analyzer/source stale) "the stale entry names the classpath file to rebuild from")
+        (is (not (contains? (::analyzer/unanalyzed-namespaces analysis) 'seon.id))))
+      (finally
+        (test-support/delete-recursively! directory)))))
