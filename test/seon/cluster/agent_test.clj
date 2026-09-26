@@ -1142,6 +1142,34 @@
             (when (contains? (registry/roster (:seon.store/store attempt)) (:seon.agent/branch attempt))
               (agent/release-context! attempt))))))))
 
+(deftest releasing-an-execution-releases-the-executions-acquired-through-it
+  ;; Astra roster E2: release detached A's roster while B, acquired through A,
+  ;; kept its connection and branch outside every reachable roster.
+  (test-support/with-database
+   (fn [connection]
+     (let [parent (test-support/execution-handle connection)
+           store (:seon.store/store parent)
+           a (agent/acquire-context! parent nil {:seon.agent/isolate? true
+                                                 :seon.cluster.registry/from (db/commit-id @connection)})
+           b (agent/acquire-context! a nil {:seon.agent/isolate? true
+                                            :seon.cluster.registry/from (db/commit-id @connection)})]
+       (try
+         (is (identical? (:seon.agent/routing b)
+                         (get-in @(:seon.agent/routing a) [:seon.agent/children (:seon.agent/branch b)])))
+         (is (nil? (agent/release-context! a)))
+         (is (not-any? (registry/roster store) [(:seon.agent/branch a) (:seon.agent/branch b)])
+             "both owned branches are retired")
+         (is (nil? (registry/active-branch-connection {:seon.store/store store :seon.store/branch (:seon.agent/branch b)}))
+             "the descendant's connection is released")
+         (is (= ::agent/roster-released
+                (::agent/refused (test-support/refusal-data
+                                  #(agent/acquire-context! a nil {:seon.agent/branch (:seon.agent/branch a)}))))
+             "a released execution claims nothing more")
+         (finally
+           (doseq [execution [b a]
+                   :when (contains? (registry/roster store) (:seon.agent/branch execution))]
+             (agent/release-context! execution))))))))
+
 (deftest concurrent-acquisitions-of-one-key-build-once
   ;; The first caller is held just after it reserves the key until the second
   ;; caller has observed that reservation, so the overlap is certain, not timed.

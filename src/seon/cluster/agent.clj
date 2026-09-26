@@ -618,12 +618,14 @@
   (atom {:seon.agent/armed {} :seon.agent/channels {} :seon.agent/contexts {}}))
 
 (defn- child-roster!
-  "The roster `roster` records for `branch`, recorded when absent. The child
-  names its parent, so the release that owns its branch removes the record."
+  "The roster `roster` records for `branch`, recorded when absent or released.
+  The child names its parent, so the release that owns its branch removes the
+  record; a released child still recorded is replaced, never reused."
   {:malli/schema [:=> [:cat :seon.agent/routing :seon.agent/branch] :seon.agent/routing]}
   [roster branch]
   (let [fresh (doto (routing) (swap! assoc :seon.agent/parent roster))]
-    (get-in (swap! roster update-in [:seon.agent/children branch] #(or % fresh))
+    (get-in (swap! roster update-in [:seon.agent/children branch]
+                   #(if (and % (not (:seon.agent/released? @%))) % fresh))
             [:seon.agent/children branch])))
 
 (defn armed
@@ -870,8 +872,11 @@
   {:malli/schema [:=> [:cat :seon.agent/routing] :nil]}
   [routing]
   (let [marked (second (swap-vals! routing assoc :seon.agent/released? true))]
-    ;; each arm's failure reaches its own caller through the shared delay
-    (doseq [arming (vals (::arming marked))] (try @arming (catch Throwable _ nil)))
+    ;; each arm's and acquisition's failure reaches its own caller through
+    ;; the shared delay; none can be claimed after the mark
+    (doseq [pending (concat (vals (::arming marked))
+                            (keep ::acquiring (vals (:seon.agent/contexts marked))))]
+      (try @pending (catch Throwable _ nil)))
     (let [causes (into [] (keep (fn [agent-id]
                                   (try (disarm! {:seon.agent/id agent-id :seon.agent/routing routing})
                                        nil
@@ -883,8 +888,11 @@
   "Release an execution handle once every graph it owns has exited.
 
   An owning handle first stops and joins every graph armed in its routing
-  (`stop-owned-graphs!`); a failed join throws before anything closes. Live
-  handles own nothing; borrowed branches persist. Then the connection release,
+  (`stop-owned-graphs!`, which marks it released and settles its in-flight
+  acquisitions), then releases every owning handle of each child roster it
+  records, through this same function; a failed join or a failed descendant
+  throws before anything closes, so the subtree stays reachable for a retry.
+  Live handles own nothing; borrowed branches persist. Then the connection release,
   the branch unlink and the removal of its roster from the parent's children are
   each attempted even when an earlier one throws; the first cause is then
   rethrown whole, carrying every later cause as suppressed."
@@ -892,9 +900,17 @@
   [handle]
   (let [owns-connection? (:seon.agent/owns-connection? handle)
         owns-branch? (:seon.agent/owns-branch? handle)
-        _ (when (or owns-connection? owns-branch?)
-            (stop-owned-graphs! (:seon.agent/routing handle)))
         attempt (fn [step] (try (step) nil (catch Throwable cause cause)))
+        _ (when (or owns-connection? owns-branch?)
+            (let [roster (:seon.agent/routing handle)]
+              (stop-owned-graphs! roster)
+              (throw-causes!
+               (into [] (keep (fn [execution] (attempt #(release-context! execution))))
+                     (for [child (vals (:seon.agent/children @roster))
+                           execution (vals (:seon.agent/contexts @child))
+                           :when (or (:seon.agent/owns-connection? execution)
+                                     (:seon.agent/owns-branch? execution))]
+                       execution)))))
         causes
         (into []
               (keep attempt)
@@ -919,8 +935,10 @@
   "Acquire `key` in `roster`'s contexts once per concurrent demand, holding no monitor.
   `swap-vals!` reserves the key with a delay of `(acquire previous)`; a caller
   finding one in flight derefs it, so same-key callers share one handle and
-  other keys run in parallel. Settling (the handle, or previous on failure)
-  applies only while this reservation holds the key, so a release wins."
+  other keys run in parallel. A released roster claims nothing: the
+  reservation refuses by name (`::roster-released`), and `release-context!`
+  settles every claim made before its mark. Settling (the handle, or previous
+  on failure) applies only while this reservation holds the key."
   {:malli/schema [:=> [:cat :seon.agent/routing
                        [:tuple :seon.agent/branch [:maybe :seon.agent/id]]
                        [:fn clojure.core/ifn?]]
@@ -929,6 +947,9 @@
   (let [path [:seon.agent/contexts key]
         reserve (fn [held]
                   (let [entry (get-in held path)]
+                    (when (:seon.agent/released? held)
+                      (throw (ex-info "This execution's roster is released; acquire through a live one."
+                                      {::refused ::roster-released :seon.agent/branch (first key)})))
                     (if (::acquiring entry)
                       held
                       (assoc-in held path (assoc entry ::acquiring (delay (acquire entry)))))))
@@ -994,7 +1015,8 @@
        (throw (ex-info "Isolation cannot borrow the live cluster branch."
                        {:seon.agent/branch branch})))
      (let [isolated? (not= branch live-branch)
-           roster (if isolated? (child-roster! parent-roster branch) parent-roster)]
+           acquire-in
+           (fn [roster]
      (try
      (acquire-once! roster [branch agent-id] (fn [previous]
        (let [;; An entry still acquiring its first handle holds no connection yet.
@@ -1108,12 +1130,27 @@
                      {:seon.store/store held-store :seon.store/branch branch})
                     (catch Throwable cleanup (.addSuppressed failure cleanup))))
              (throw failure))))))
-       ;; A failed first acquisition leaves no empty child recorded.
+       ;; A failed first acquisition leaves no empty child recorded. Emptiness is
+       ;; decided in the child's own swap, which marks it released, so a
+       ;; concurrent acquisition either reserved first (the child stays) or is
+       ;; refused and retries through `child-roster!`, which replaces it.
        (catch Throwable failure
-         (when (and isolated? (empty? (:seon.agent/contexts @roster)))
+         (when (and isolated?
+                    (:seon.agent/released?
+                     (swap! roster #(cond-> % (empty? (:seon.agent/contexts %))
+                                      (assoc :seon.agent/released? true)))))
            (swap! parent-roster update :seon.agent/children
                   #(cond-> % (identical? roster (get % branch)) (dissoc branch))))
-         (throw failure)))))))
+         (throw failure))))]
+       (if-not isolated?
+         (acquire-in parent-roster)
+         ;; A child released between `child-roster!` and the reservation is
+         ;; replaced once; a released parent refuses the retry by name too.
+         (try (acquire-in (child-roster! parent-roster branch))
+              (catch clojure.lang.ExceptionInfo refusal
+                (if (= ::roster-released (::refused (ex-data refusal)))
+                  (acquire-in (child-roster! parent-roster branch))
+                  (throw refusal)))))))))
 
 (defn arm!
   "Arm one agent's graph: stamp → start → resume → route → prime.
