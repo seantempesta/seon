@@ -26,7 +26,8 @@
             [seon.fault :as fault]
             [seon.schema :as schema]
             [seon.sci.admit :as admit])
-  (:import [java.lang.management ManagementFactory]
+  (:import [java.lang.management ManagementFactory MemoryNotificationInfo MemoryPoolMXBean MemoryType]
+           [javax.management Notification NotificationEmitter NotificationListener]
            [java.util.concurrent Future ScheduledThreadPoolExecutor TimeUnit]
            [java.util.concurrent.atomic AtomicBoolean AtomicLong]))
 
@@ -96,6 +97,103 @@
      ::built-in-call-observer built-in-call-observer}))
 
 (defonce ^:private process-guard (delay (new-guard)))
+
+;;; ---------------------------------------------------------------------------
+;;; Memory pressure: the JVM's own crossing notice closes arming
+;;; ---------------------------------------------------------------------------
+
+(def memory-bounds
+  "Tenured occupancy after a collection, as fractions of the pool's maximum:
+  new arms refuse from `::enter`, admit again below `::resume` (the gap stops
+  flapping). The JVM's heap bounds, shared by its clusters, not their config."
+  {::enter 0.70 ::resume 0.55})
+
+;;; Beside the guard (a `defonce` a reload never rebuilds). The JVM keeps no
+;;; state a volatile read could answer: `isCollectionUsageThresholdExceeded`
+;;; calls into the VM and allocates (`sun/management/MemoryPoolImpl.java`).
+(defonce ^:private memory-pressure-state (volatile! nil))
+
+(defn- tenured-pool
+  "The old generation: the one heap pool supporting a usage threshold, which
+  the JDK says eden-like pools do not suit (`MemoryPoolMXBean`)."
+  ^MemoryPoolMXBean []
+  (some (fn [^MemoryPoolMXBean pool]
+          (when (and (= MemoryType/HEAP (.getType pool))
+                     (.isUsageThresholdSupported pool)
+                     (.isCollectionUsageThresholdSupported pool))
+            pool))
+        (ManagementFactory/getMemoryPoolMXBeans)))
+
+(defn- collection-usage
+  "The tenured pool's occupancy after its most recent collection."
+  [^MemoryPoolMXBean pool]
+  (let [usage (.getCollectionUsage pool)]
+    {::pool (.getName pool) ::used-bytes (.getUsed usage) ::max-bytes (.getMax usage)}))
+
+(defn memory-pressure-error
+  "The refusal a new arm answers under `pressure`, naming work then in flight."
+  {:malli/schema [:=> [:cat ::memory-pressure] ::memory-pressure-error]}
+  [{::keys [pool used-bytes max-bytes enter-bytes resume-bytes in-flight] :as pressure}]
+  (error.refusal/diagnostic
+   (java.util.Date.) ::arming 'seon.sci.kernel/acquire-arm
+   (assoc pressure
+          :seon.error/message
+          (str "This JVM is under memory pressure: " pool " holds " used-bytes " of " max-bytes
+               " bytes after its last collection. New evaluations refuse from " enter-bytes
+               " and admit again below " resume-bytes ". In flight when it began: "
+               (if (seq in-flight) (pr-str in-flight) "no open run") ".")
+          :seon.error/expected ::resume-bytes)))
+
+(defn enter-memory-pressure!
+  "Close new arms: the tenured pool crossed `::enter` after a collection.
+  Answers the pressure entered, or nil when already under pressure."
+  {:malli/schema [:=> [:cat ::in-flight] [:maybe ::memory-pressure]]}
+  [in-flight]
+  (when-not @memory-pressure-state
+    (let [usage (collection-usage (tenured-pool))
+          bound #(long (* (% memory-bounds) (::max-bytes usage)))]
+      (vreset! memory-pressure-state
+               (assoc usage
+                      ::enter-bytes (bound ::enter)
+                      ::resume-bytes (bound ::resume)
+                      ::entered-at (java.util.Date.)
+                      ::in-flight in-flight)))))
+
+(defn memory-pressure
+  "The memory pressure `state` holds (this process's by default), or nil while
+  arms admit work. Ordinary admission pays one volatile read; a held pressure
+  re-reads the JVM and clears once usage is below its `::resume-bytes`."
+  {:malli/schema [:function [:=> [:cat] [:maybe ::memory-pressure]]
+                  [:=> [:cat [:fn clojure.core/volatile?]] [:maybe ::memory-pressure]]]}
+  ([] (memory-pressure memory-pressure-state))
+  ([state]
+   (when-let [pressure @state]
+     (let [used (::used-bytes (collection-usage (tenured-pool)))]
+       (if (< used (::resume-bytes pressure))
+         (vreset! state nil)
+         (assoc pressure ::used-bytes used))))))
+
+(defn watch-memory!
+  "Set the tenured pool's collection usage threshold at `::enter` and call
+  `on-crossing` for each `MEMORY_COLLECTION_THRESHOLD_EXCEEDED` the
+  `MemoryMXBean` emits (after a collection at or above it; again only after
+  falling below). Nothing polls. Once per process; answers the threshold."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] [:maybe :int]]}
+  [on-crossing]
+  (let [pool (tenured-pool)
+        maximum (.getMax (.getUsage pool))]
+    (when (pos? maximum)
+      (let [threshold (long (* (::enter memory-bounds) maximum))]
+        (.setCollectionUsageThreshold pool threshold)
+        (.addNotificationListener
+         ^NotificationEmitter (ManagementFactory/getMemoryMXBean)
+         (reify NotificationListener
+           (handleNotification [_ notification _]
+             (when (= MemoryNotificationInfo/MEMORY_COLLECTION_THRESHOLD_EXCEEDED
+                      (.getType ^Notification notification))
+               (on-crossing))))
+         nil nil)
+        threshold))))
 
 (defn context-options
   "SCI initialization options backed by the one process guard."
@@ -233,6 +331,12 @@
 
 (defn- own-arm
   [guard time-limit-ms]
+  ;; THE ONE ADMISSION: only an outer execution owns an arm (nested work
+  ;; inherits it), so pressure refuses new work and cuts none admitted. The
+  ;; unpressured path is one volatile read, before any contracted call.
+  (when-let [pressure (and @memory-pressure-state (memory-pressure))]
+    (let [refusal (memory-pressure-error pressure)]
+      (throw (ex-info (:seon.error/message refusal) refusal))))
   (let [^ThreadLocal thread-arm (::thread-arm guard)
         base (new-armed)
         ;; The deadline as a value ON the arm, so work that BLOCKS can honour

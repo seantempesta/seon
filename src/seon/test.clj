@@ -24,6 +24,7 @@
             [seon.profile :as profile]
             [seon.schema :as schema]
             [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]
             [seon.render.value :as value]
             [seon.test.runner :as runner])
   (:import [java.util.concurrent FutureTask]))
@@ -2218,7 +2219,8 @@
                    :seon.config/error :seon.db.write/error :seon.db/transaction-refused-error
                    :seon.db/invalid-read-error
                    :seon.schema/missing-projection-error :seon.instrument/registration-error
-                   :seon.sci.eval/interpretation-error :seon.test/not-runnable-error]]}
+                   :seon.sci.eval/interpretation-error :seon.test/not-runnable-error
+                   :seon.sci.kernel/memory-pressure-error]]}
   [{execution :seon.test/execution recording :seon.test/recording-connection
     policy :seon.test/policy identities :seon.test/identities
     namespaces :seon.test/namespaces write! :seon.test/recording-writer
@@ -2230,8 +2232,11 @@
         held-store (or (:seon.store/store execution) (:seon.store/store (env/of execution)))
         effective (config/effective database cluster)
         bound (or (:seon.test/check-time-limit-ms request)
-                  (:seon.test/check-time-limit-ms effective))]
+                  (:seon.test/check-time-limit-ms effective))
+        ;; The arms' own admission, asked before a world is built for them.
+        pressure (kernel/memory-pressure)]
     (cond
+      pressure (kernel/memory-pressure-error pressure)
       (:seon.error/at effective) effective
       (and (= :named policy) (empty? identities) (empty? namespaces)
            (empty? (:seon.test/changed request)))

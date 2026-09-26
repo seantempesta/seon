@@ -72,3 +72,27 @@
                          (fn [_] (evaluate nested "(loop [] (recur))" 600000)))]
         (is (= :time (get-in evaluation [:seon.sci.admit/record :seon.eval/outcome])) (pr-str evaluation))
         (is (< (quot (- (System/nanoTime) started) 1000000) 5000))))))
+
+(deftest memory-pressure-holds-until-usage-falls-below-its-resume-bound
+  ;; Both OOMs of 2026-09-26 admitted new work into a JVM already past most of
+  ;; its heap. A held pressure refuses by name, naming the work in flight when
+  ;; it began, and clears once the tenured pool's collection usage is below
+  ;; its resume bound. Bounds are data on the pressure value, so this world
+  ;; holds its own state and never pressures the process it runs in.
+  (let [pressure {::kernel/pool "G1 Old Gen" ::kernel/used-bytes 1 ::kernel/max-bytes 10
+                  ::kernel/enter-bytes 7 ::kernel/resume-bytes 0
+                  ::kernel/entered-at (java.util.Date.)
+                  ::kernel/in-flight [["root" "run-1"]]}
+        held (volatile! pressure)]
+    (testing "at or above its resume bound it holds"
+      (is (= "G1 Old Gen" (::kernel/pool (kernel/memory-pressure held))))
+      (is (some? @held)))
+    (testing "the refusal names the bound and the work in flight"
+      (let [refusal (kernel/memory-pressure-error (kernel/memory-pressure held))]
+        (is (= :seon.sci.kernel/arming (:seon.error/layer refusal)))
+        (is (= [["root" "run-1"]] (::kernel/in-flight refusal)))
+        (is (re-find #"memory pressure" (:seon.error/message refusal)))))
+    (testing "below its resume bound it clears and admits"
+      (vreset! held (assoc pressure ::kernel/resume-bytes Long/MAX_VALUE))
+      (is (nil? (kernel/memory-pressure held)))
+      (is (nil? @held)))))

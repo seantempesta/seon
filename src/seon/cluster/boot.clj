@@ -24,7 +24,8 @@
             [seon.problems :as problems]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
-            [seon.sci.eval :as sci.eval]))
+            [seon.sci.eval :as sci.eval]
+            [seon.sci.kernel :as kernel]))
 
 (defn- stand-cluster-runtime!
   {:malli/schema
@@ -386,6 +387,41 @@
 ;;; twice, and the handler calls `record-uncaught!` through its Var.
 (defonce ^:private uncaught-handler (delay (install-uncaught-handler!)))
 
+(defn- open-runs
+  "Every open run on `connection`'s branch, as `[agent-id run-id]` pairs."
+  {:malli/schema [:=> [:cat :seon.db/connection] :seon.sci.kernel/in-flight]}
+  [connection]
+  (vec (db/q '[:find ?agent-id ?run-id
+               :where [?run :seon.turn/agent ?agent] (not [?run :seon.turn/closed-tx])
+               [?run :seon.turn/id ?run-id] [?agent :seon.agent/id ?agent-id]]
+             (db/db connection))))
+
+(defn memory-pressure-crossed!
+  "Close new arms once per crossing, naming each running cluster's open runs,
+  and store it as one core fault on every running cluster. Called on the JVM's
+  notification thread (`kernel/watch-memory!`), so it prints what it cannot
+  store and never throws."
+  {:malli/schema [:=> [:cat] :nil]}
+  []
+  (try
+    (let [worlds (keep #(env/of (:seon.sci.eval/ctx %)) (vals @running-instances))]
+      (when-let [pressure (kernel/enter-memory-pressure!
+                           (into [] (mapcat #(open-runs (:seon.db/connection %))) worlds))]
+        (let [refusal (kernel/memory-pressure-error pressure)
+              failure (ex-info (:seon.error/message refusal) refusal)]
+          (binding [*out* *err*] (println "SEON MEMORY PRESSURE:" (:seon.error/message refusal)) (flush))
+          (doseq [{connection :seon.db/connection cluster-name :seon.boot/cluster-name
+                   caps :seon.sci.admit/caps} worlds]
+            (fault/record! connection cluster-name (cluster/process-identity (process/current-identity)) caps
+                           {:seon.error/source {:clojure.core.async.flow/ex failure}
+                            :seon.error/declared-schema :seon.flow/exception-error})))))
+    (catch Throwable failure
+      (uncaught-emergency! "memory-pressure" failure {:operation `memory-pressure-crossed!})))
+  nil)
+
+;;; Once per JVM, beside the uncaught handler; the JVM calls through the Var.
+(defonce ^:private memory-watch (delay (kernel/watch-memory! #(memory-pressure-crossed!))))
+
 (defn listening-instance
   "One instance's structural members: its bootstrap config, the listener it
   advertises, this process's identity and the root executors. Every layer is
@@ -432,6 +468,7 @@
   [request]
   (let [began (System/nanoTime)
         _ @uncaught-handler
+        _ @memory-watch
         config (cluster/resolve-bootstrap
                 (dissoc request :seon.config/manifest :seon.config/environment :seon.boot/prepl-server))
         name (:seon.boot/cluster-name config)
