@@ -357,7 +357,8 @@
 
   A resource served from a jar cannot change while this process runs, so it
   stamps once as its URL and that connection's last-modified."
-  {:malli/schema [:=> [:cat] [:vector [:tuple :string :int :int]]]}
+  {:seon/tasks #{"68490518e186"}
+   :malli/schema [:=> [:cat] [:vector [:tuple :string :int :int]]]}
   []
   (let [url (or (io/resource default-resource)
                 (unreadable-file! default-resource))]
@@ -370,15 +371,16 @@
       [[(.toExternalForm url) -1 (.getLastModified (.openConnection url))]])))
 
 (defn- packaged-population
-  "The population the resources declare, one per `[resource-url
-  declaration-stamp]` in the process cache: an edit changes the stamp, so it
-  misses by construction. Weight: 375 bytes per form (1.32 MB / 3,514 forms,
+  "The population the resources declare, one per resource URL in the process
+  cache. Every JVM runs a committed archive (`data/source/<sha>`), so the
+  resources on its classpath never change while it runs and the URL names
+  them. Stamping the 210 files cost 1.3 ms armed on every `packaged-forms`
+  (2026-09-26). Weight: 375 bytes per form (1.32 MB / 3,514 forms,
   cache-central design 2026-09-26)."
-  {:seon/tasks #{"f20577d4eb4c"}
-   :malli/schema [:=> [:cat] :map]}
+  {:malli/schema [:=> [:cat] :map]}
   []
   (seon.cache/lookup ::packaged-population
-                     [(str (io/resource default-resource)) (declaration-stamp)]
+                     (str (io/resource default-resource))
                      #(* 375 (count (::declared-forms %)))
                      #(resource-population default-resource)))
 

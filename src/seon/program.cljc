@@ -280,20 +280,20 @@
   active: a cluster whose stored schema predates a declaration must still index
   by it — the exact scope the literal table this replaced had.
 
-  THE CACHE KEY IS THE RESOURCES' OWN STAMP, never the process. A
+  THE CACHE KEY IS THE PACKAGED POPULATION ITSELF, never the process. A
   process-lifetime snapshot made an attribute declared after this JVM started
-  invisible to `canonical-row`, so `bin/seon init --dev` adopted a declaration
-  the next `seon.fn/artifact` then silently stripped
+  invisible to `canonical-row`
   (`program-shapes-cache-strips-attributes-declared-after-the-jvm-started`);
-  keying by `seon.schema.edn/declaration-stamp` makes that edit a MISS BY
-  CONSTRUCTION. Only a SUCCESS is remembered: a refusal throws out of the
-  derivation, so the reload that fixes the declaration derives again."
+  a different population is a MISS BY CONSTRUCTION, and a hit hashes the one
+  map `packaged-forms` answers per archive once. Only a SUCCESS is
+  remembered: a refusal throws out of the derivation."
   []
   #?(:clj
      ;; Weight: 4 KB per row family (a shape is a handful of attribute sets).
-     (seon.cache/lookup ::authored-shapes (schema.edn/declaration-stamp)
-                        #(* 4096 (count %))
-                        #(shapes-in (schema/build-projection (schema.edn/packaged-forms))))
+     (let [forms (schema.edn/packaged-forms)]
+       (seon.cache/lookup ::authored-shapes forms
+                          #(* 4096 (count %))
+                          #(shapes-in (schema/build-projection forms))))
      :cljs (shapes-in (schema/build-projection (schema/registered-schemas)))))
 
 (defn shapes

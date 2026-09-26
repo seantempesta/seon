@@ -375,15 +375,16 @@
   "The declaration projection of this JVM's schema resources: the one population
   config compiles rows from, writes them with and reads them by.
 
-  Retained in the process cache under the resources' declaration stamp, so an
-  edit misses by construction; a hit costs the stamp (210 file stats, ~1.3 ms
-  armed, measured 2026-09-26) where rebuilding the key walked every form
-  (~6.4 ms)."
+  Retained in the process cache under the packaged population itself (the one
+  map `packaged-forms` answers per archive, whose hash it caches), so a hit is
+  two lookups; rebuilding `declaration-projection`'s key walked every form
+  (~6.4 ms armed, 2026-09-26)."
   {:malli/schema [:=> [:cat] :seon.schema/projection]}
   []
-  (seon.cache/lookup ::declared-projection (schema.edn/declaration-stamp)
-                     #(* 1300 (count (:seon.schema.projection/forms %)))
-                     #(schema/declaration-projection (schema.edn/packaged-forms))))
+  (let [forms (schema.edn/packaged-forms)]
+    (seon.cache/lookup ::declared-projection forms
+                       #(* 1300 (count (:seon.schema.projection/forms %)))
+                       #(schema/declaration-projection forms))))
 
 (defn default-population
   "Read and admit the shipped initialization entity rows."
