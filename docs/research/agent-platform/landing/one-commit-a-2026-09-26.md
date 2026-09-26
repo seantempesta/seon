@@ -2,7 +2,7 @@
 type: landing
 lane: one-commit-a-opus
 date: 2026-09-26
-status: measured on c029d48cb (pid 86089); do/defn contract fix in HEAD via 715c23669; RESET NEEDED for it
+status: host/evaluate-source regressions triaged (5ac650725); RESET NEEDED; several reds are other owners' (below)
 ---
 
 # Landing: one durable commit per form (A), then reply-when-applied (B) (2026-09-26)
@@ -23,6 +23,30 @@ refusals, e.g. `agent-already-running`, answer the caller), evaluates on that va
 commits open + evaluations + close as ONE transaction (`with-submission` prepends the open; the
 run-dependent writer calls after it see the run mid-transaction, `datahike/db/transaction.cljc:1171`).
 The pass answers the reply port with its report; a pass that ends without settling closes the port.
+
+## Regressions on bb07fdf08 (host-test 37/15/3, evaluate-source-test 29/1/1): triage
+
+Each was reproduced on default (pid 89341) through `evaluate-source!` or `seon.turn/evaluate-sources`
+before being classified. Fixes are in 5ac650725; none is proven until the restart.
+
+| red | cause (evidence) | owner / fix |
+|---|---|---|
+| host_test:115 parent head moved | `host!` writes the agent's home row on the cluster, by design (dba08a8ab, fdd9926e8). A listener on default's cluster connection saw one transaction during `host!` (`:seon.agent/*`) and none during the hosted run. Not a custody leak. | test reads the head after hosting (5ac650725) |
+| host_test:300-303 earlier declarations | the install gate's disposable copy (1b77876af) is a branch of the committed head; a test an earlier form of the run defined exists only in the working value, so `run-candidate-test!` pulled a nil source and `evaluate` refused (reproduced via `seon.turn/evaluate-sources`) | `sci.eval/evaluate-candidate` reads gate declarations from the working value (5ac650725). The test world's auto-check also failed with a nil explanation, not reproduced here: root's rerun will tell |
+| evaluate_source_test:69 | 85b459845 deleted the starting-namespace refusal; the test still expected it | assertion now checks the requested start namespace |
+| evaluate_source_test:133 | my test shadowed its own `shown` helper with a local (ClassCastException) | fixed |
+| host_test:330-336, :464-466, :498 (`seon.task/create!`, `my.program/breaks`, `accept-merge!` refuse missing `:seon.db/db`/`:seon.db/connection`/`:seon.agent/id`/`:my.program/context`) | call preparation supplied no defaults. **Reproduced as root on default with no branch** (`(my.program/breaks {...})` refuses `:seon.db/db`), so it is not branch custody or option 2. Area: 1b77876af/ec0016c80 (call-time defaults from the arm's world). | **not mine**: root assigns the call-preparation owner |
+| host_test:404 refused settlement | the batch refusal marks every receipt with the refusal and keeps each form's shown text (`settle-batch-refusal!`); the test expects the deleting form's own refusal. **Not explained.** | open |
+| a-named-change…: fixture refused "Nothing found for entity id [:seon.ns/name my.agents.host-probe]" | the fixture writes a row naming the host namespace before `host-on!` creates it | open (test ordering or namespace seeding); not investigated |
+| a-hosted-agents-issue (EOF reading shown), one-identity-is-homed (did not exit), namespace switch (6.7 s > 5 s) | not investigated | open |
+
+Root runs after the restart, one at a time:
+`seon.cluster.evaluate-source-test` (--include-long),
+`seon.cluster.host-test/a-hosted-run-lands-on-its-branch-and-the-parent-head-is-unchanged`,
+`seon.cluster.host-test/a-run-reads-its-earlier-declarations`,
+`seon.cluster.host-test/an-unsettled-host-run-keeps-ownership-until-it-exits`,
+`seon.settlement-receipt-provenance-test`, `seon.sci.entry-gate-test/a-top-level-do-admits-each-child-before-the-next-runs`,
+`seon.program-test` (the parity run), `seon.test-test`.
 
 ## Measured on c029d48cb (pid 86089: option 2, program change from report, shared node cache, P1)
 
