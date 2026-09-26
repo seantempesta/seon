@@ -605,3 +605,27 @@ had them.
 - `bin/test-check default --ns seon.test-failure-facts-test`
 - `bin/test-check default --ns seon.call-preparation-test`
 - `bin/test-check default --ns seon.db-test`
+
+## Resume 14 — "only required inputs are supplied": implemented as a patch, NOT committed (blocker)
+
+- **Patch:** `tmp/perf-boot-opus/call-preparation-required-only.patch`.
+  - `arity-plan` joins only non-optional map entries.
+  - `prepare`'s declared-absence branch (`absent`, `:seon.call-preparation/optional?`) is deleted, together with its
+    schema entry in `seon.call-preparation.edn`.
+  - clj-kondo is clean.
+- **Blocker.** On live default, **138 contracted functions** currently get an optional entry filled; the list is in
+  `tmp/perf-boot-opus/optional-filled-entries.edn`. By entry: `:seon.db/db` 110, `:seon.db/connection` 23,
+  `:seon.agent/id` 13.
+  - 71 are renderers taking `:seon.render/unit`. That schema's own description says: "The database is a declared
+    input: omitted, call preparation supplies it". Render REPL entries such as `(x/render-ai {...})` rely on the fill.
+  - The rest include `seon.fn/analyze-rows`, `index!`, `rows` and `build-manifest`. For these, the fill from a test
+    or agent world is the same defect as `evaluate-sources`.
+  - Also `seon.error/*`, `seon.fault/fault!`, `seon.instrument/apply!`, `seon.problems/block`, `seon.oversight`,
+    `seon.render/call-with-walk-context`, and `seon.cluster.agent/identity-form` / `situation-form`.
+  - Committing the rule alone would leave every renderer without its database.
+- **Needs a ruling.** Should `:seon.render/unit`'s `:seon.db/db` become required? That is one schema edit in
+  `seon.render.edn`. Renderers would then be supplied as before, but a host call with no world and no db would be
+  refused instead of passing without one. The remaining non-render functions would be audited one by one for "the
+  function needs it → required".
+- **Also:** 299011465's `:seon.db/custody-connection` becomes redundant once this lands. The same patch commit
+  should delete it.
