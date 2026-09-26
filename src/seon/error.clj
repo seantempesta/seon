@@ -1853,10 +1853,17 @@
   [unit]
   (let [value (rendered-error-value unit)
         turn (:seon.error/run value)
-        turn-ref (if (map? turn)
-                   (if-let [id (:seon.turn/id turn)]
-                     [:seon.turn/id id] (:db/id turn))
-                   turn)]
+        ;; the observation selector keeps peer references as references, so a
+        ;; re-pulled turn is `{:db/id n}`: its identity is read from the unit's
+        ;; database, the declared render input
+        turn-id (when (map? turn)
+                  (or (:seon.turn/id turn)
+                      (when-let [database (:seon.db/db unit)]
+                        (let [pulled (db/pull database [:seon.turn/id] (:db/id turn))]
+                          (when (string? (:seon.turn/id pulled)) (:seon.turn/id pulled))))))
+        turn-ref (cond turn-id [:seon.turn/id turn-id]
+                       (map? turn) (:db/id turn)
+                       :else turn)]
     (into
      [:article {:class "seon-family-entry seon-error-entry"}
       [:p {:class "seon-kicker"} (some-> (:seon.error/operation value) str)]
