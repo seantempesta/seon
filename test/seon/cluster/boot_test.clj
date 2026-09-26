@@ -143,10 +143,10 @@
               (is (str/includes? (slurp input) "html"))))
           (is (= "default" (evaluate! root "(:seon.cluster/name (seon.db/pull (seon.db/db (seon.cluster.boot/connection \"default\")) [:seon.cluster/name] [:seon.cluster/name \"default\"]))")))
           (is (= 4 (evaluate! root "(+ 2 2)")))
-          (let [sci (client/prepl-value! early
-                                          (#'mcp/sci-evaluation-form "(+ 1 1)" "default" 'user true)
-                                          event-ms)]
-            (is (= "2" (get-in sci [:seon.dev.mcp/value :seon.dev.mcp/text]))))
+          ;; One ordinary run of root through the bridge's form: its settled shown text.
+          (let [sci (client/prepl-value! early (#'mcp/run-form "(+ 1 1)" "default" nil true nil "boot-test")
+                                         event-ms)]
+            (is (= "2" (-> sci :seon.dev.mcp/evaluations last :seon.eval/shown)) (pr-str sci)))
           (let [partial (evaluate! root
                          "(with-redefs [seon.cluster/serve! (fn [& _] (throw (ex-info \"injected web failure\" {})))] (try (seon.cluster.boot/start! {:seon.boot/root (get-in (get @seon.operator.runtime/running-instances \"default\") [:seon.boot/config :seon.boot/root]) :seon.boot/cluster-name \"partial\"}) (catch Throwable e (seon.cluster.boot/readiness (:seon.boot/instance (ex-data e))))))" 120000)]
             (is (some #{:seon.render.web/served} (:seon.boot/missing-layers partial)))
