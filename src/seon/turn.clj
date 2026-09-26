@@ -3369,10 +3369,11 @@
           check (:seon.test.accretion/auto-check candidate)
           report
           (accretion/gate-report
-           {:seon.fn/sym function-symbol
-            :seon.test.accretion/results
-            (:seon.test.accretion/results candidate)
-            :seon.test.accretion/auto-check check})
+           (cond-> {:seon.fn/sym function-symbol
+                    :seon.test.accretion/results
+                    (:seon.test.accretion/results candidate)}
+             ;; a gate that ran no seeded check has none: no key, never nil
+             check (assoc :seon.test.accretion/auto-check check)))
           evidence
           {:seon.test.accretion/gate-tests test-symbols
            :seon.test.accretion/gate-test-count
