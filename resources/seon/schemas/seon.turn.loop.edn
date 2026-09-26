@@ -293,7 +293,8 @@
                  [:map
                   [:seon.db/tx-data :seon.store/transaction-data]
                   [:seon.turn/sources :seon.cluster.reply/sources]
-                  [:seon.ns/name :seon.ns/name]],
+                  [:seon.ns/name :seon.ns/name]
+                  [:seon.agent/run-request {:optional true} :seon.agent/run-request]],
                  :now :inst,
                  :failure-settlement
                  [:map

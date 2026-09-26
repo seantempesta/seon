@@ -164,8 +164,8 @@
             [winner] (filter :seon.flow/graph outcomes)
             [loser] (remove :seon.flow/graph outcomes)
             home (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/twin"]))]
-        (is (some? winner) (pr-str outcomes))
-        (is (= :seon.agent/branch (:seon.error/member loser)) (pr-str loser))
+        (is (some? winner) (pr-str (mapv #(select-keys % [:seon.agent/id :seon.agent/branch :seon.error/member :seon.error/message]) outcomes)))
+        (is (= :seon.agent/branch (:seon.error/member loser)) (pr-str (#(select-keys % [:seon.agent/id :seon.agent/branch :seon.error/member :seon.error/message]) loser)))
         (is (= home (get-in winner [:seon.turn.loop/cluster :seon.agent/branch]))
             "the cluster row names the branch whose host was admitted")
         (is (= ["1"] (hosted-run! winner "1")))

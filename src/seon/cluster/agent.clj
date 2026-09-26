@@ -794,9 +794,12 @@
               ;; A pass whose settlement the writer refused before the run was
               ;; opened (admission closed at retirement) wrote no run: its
               ;; refusal is the answer, not an id that names nothing.
+              ;; (a retirement also releases the connection: no run to read)
               (and (:seon.turn.loop/refusal answer)
-                   (nil? (db/q '[:find ?run . :in $ ?id :where [?run :seon.turn/id ?id]]
-                               @(:seon.db/connection handle) run-id)))
+                   (let [connection (:seon.db/connection handle)]
+                     (or (not (db/connection? connection))
+                         (nil? (db/q '[:find ?run . :in $ ?id :where [?run :seon.turn/id ?id]]
+                                     (db/db connection) run-id)))))
               (assoc (:seon.turn.loop/refusal answer) :seon.agent/refused-source-agent agent-id)
 
               (:seon.turn.loop/outcome answer) {:seon.turn/id run-id}

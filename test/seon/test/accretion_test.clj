@@ -246,16 +246,18 @@
               :seon.sci.eval/time-limit-ms 2000
               :seon.sci.admit/caps (config/result-caps config/defaults)})
             gate (first (:seon.test.accretion/results result))]
+        ;; Messages name the few members read: a result holds SCI contexts
+        ;; and roster atoms, and clojure.test evaluates a message even on pass.
         (is (= 'fixture.custody/reads-its-own-cluster
                (:seon.test/sym gate))
-            (pr-str result))
+            (pr-str (mapv :seon.test/sym (:seon.test.accretion/results result))))
         (is (= 1 (:seon.test/pass-count gate))
             (str "the gate test's elided read reaches its author's cluster "
                  "instead of refusing with no connection bound: "
-                 (pr-str gate)))
+                 (pr-str (select-keys gate [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))
         (is (= 0 (+ (:seon.test/fail-count gate)
                     (:seon.test/error-count gate)))
-            (pr-str gate))))))
+            (pr-str (select-keys gate [:seon.test/sym :seon.test/pass-count :seon.test/fail-count :seon.test/error-count])))))))
 
 (deftest auto-check-is-seeded-shrunk-and-derived-pure
   (test-support/with-database

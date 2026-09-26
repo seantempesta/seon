@@ -414,6 +414,9 @@
          (:seon.test.accretion/expected-actual failure))
 
     :auto-check
+    ;; generated arguments and a returned actual are arbitrary values: printed
+    ;; under Clojure's own depth and length bounds, never through a whole world
+    (binding [*print-level* 4 *print-length* 8]
     (str "Auto-check seed " (:seon.test.accretion/seed failure)
          "\narguments: " (pr-str (:seon.test.accretion/arguments failure))
          "\nexpected: " (:seon.test.accretion/expected failure)
@@ -422,7 +425,7 @@
                             (str (:seon.error/operation actual) " — " (:seon.error/message actual))
                             (pr-str actual)))
          (when-let [explanation (:seon.test.accretion/explanation failure)]
-           (str "\nwhy: " explanation)))))
+           (str "\nwhy: " explanation))))))
 
 (defn render-ai
   "Render the grouped teaching face of an install refusal."
