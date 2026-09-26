@@ -152,12 +152,13 @@
 
   `return-key` is the supplier's declared success arm: passing the row's own
   value schema makes the row coherent, and passing anything else makes it the
-  incoherence falsifier."
-  [database return-key]
+  incoherence falsifier. `target-spec` redefines `sample/target`'s contract."
+  ([database return-key]
+   (synthetic-population database return-key [:=> [:cat :string :sample/marker] :string]))
+  ([database return-key target-spec]
   (let [forms (assoc (schema/declaration-population) :sample/marker :int)
         supplier-spec [:=> [:cat :seon.env/environment]
                        [:or return-key :seon.call-preparation/unresolved-supplier-error]]
-        target-spec [:=> [:cat :string :sample/marker] :string]
         contracts {'sample/supply-marker supplier-spec
                    'sample/target target-spec}
         built (schema/build-projection forms contracts)
@@ -195,7 +196,7 @@
                    "(defn target [label marker] label)" '([label marker]))
      {:seon.call-preparation/key :sample/marker
       :seon.call-preparation/schema [:seon.schema/key :sample/marker]
-      :seon.call-preparation/supplier [:seon.fn/sym 'sample/supply-marker]}]))
+      :seon.call-preparation/supplier [:seon.fn/sym 'sample/supply-marker]}])))
 
 (defn- slot-keys
   [plan supplied-count]
@@ -289,7 +290,7 @@
                 refused (cp/plan-for unreadable current 'seon.db/pull)]
             (is (true? (:seon.db/invalid-read refused))
                 "the read error is returned, never nil \"not contracted\"")
-            (is (= 'seon.db/datoms (:seon.db/refused-read-operation refused)))
+            (is (= 'seon.db/q (:seon.db/refused-read-operation refused)))
             (is (true? (:seon.db/invalid-read
                         (cp/plan call-state unreadable current 'seon.db/pull)))
                 "plan passes it on")
@@ -425,6 +426,33 @@
                 (cp/plan call-state next-database next-snapshot
                          'sample/target))
              "so the compiled plan survives unchanged"))))))
+
+(deftest a-redefined-contract-replaces-its-held-plan
+  ;; A contract change leaves the row basis where it was. The plan is held
+  ;; against the snapshot derivation, which that change replaces, so the next
+  ;; call plans from the new contract instead of the held one.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection (synthetic-population (db/db connection) :sample/marker))
+     (let [call-state (cp/state)
+           fixed-projection (projection)
+           inserted (fn [plan] (mapv :seon.fn.argument/index
+                                     (get-in plan [:seon.call-preparation/by-supplied-count 1
+                                                   :seon.call-preparation/inserts])))
+           first-snapshot (cp/current-snapshot call-state @connection fixed-projection)
+           first-plan (cp/plan call-state @connection first-snapshot 'sample/target)]
+       (is (= [1] (inserted first-plan)))
+       (test-support/transacted!
+        connection
+        (filterv #(= 'sample/target (:seon.fn/sym %))
+                 (synthetic-population (db/db connection) :sample/marker
+                                       [:=> [:cat :sample/marker :string] :string])))
+       (let [next-snapshot (cp/current-snapshot call-state @connection fixed-projection)]
+         (is (= (:seon.call-preparation/basis-t first-snapshot)
+                (:seon.call-preparation/basis-t next-snapshot))
+             "the row basis did not move")
+         (is (= [0] (inserted (cp/plan call-state @connection next-snapshot 'sample/target)))
+             "the redefined contract's slot is the one supplied"))))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The snapshot is a function of what it reads (schedule #24s)
@@ -784,7 +812,7 @@
          (testing "and a refusing supplier short-circuits the whole call"
            (reset! entered 0)
            ;; the plan is COMPILED, not hand-rostered: a declared plan carries
-           ;; its contract-t, basis-t and arities, and a stand-in missing them
+           ;; its identity, arities and count index, and a stand-in missing them
            ;; is refused by `prepare`'s own contract before the subject is
            ;; reached. Only the one thing under test — a slot whose supplier
            ;; cannot produce — is substituted into a real plan.

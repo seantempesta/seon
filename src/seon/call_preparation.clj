@@ -623,50 +623,6 @@
 ;;; Plan derivation — the contract's arities joined to the supplied defaults
 ;;; ---------------------------------------------------------------------------
 
-(defn- contract-transaction
-  "The newest transaction among the function entity's own current facts, or
-  nil when no function has this identity.
-
-  Two index ranges: the identity's AVET entry, then the entity's EAVT
-  datoms, so the work is proportional to one function. The former
-  `[?function _ _ ?tx]` Datalog pattern, variable in its attribute, cost
-  254-800 ms per call on default's program (2026-09-23) for the same answer."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.fn/sym]
-                  [:or :nil :seon.db/basis-t :seon.db/error-result]]}
-  [database sym]
-  ;; Like the supplied-default basis, this is cache coherence rather than a
-  ;; semantic read. The plan's queries capture the actual contract attributes.
-  (binding [db/*read-evidence-sink* nil]
-    (let [identity-datoms (db/datoms database :avet :seon.fn/sym sym)]
-      (if (:seon.db/invalid-read identity-datoms)
-        identity-datoms
-        (when-let [function (:e (first identity-datoms))]
-          (let [facts (db/datoms database :eavt function)]
-            (if (:seon.db/invalid-read facts)
-              facts
-              (transduce (map :tx) max 0 facts))))))))
-
-(defn supplied-map-entries
-  "Return [arity-order argument-index key] for declared supplied map entries.
-
-  An entry of a map argument, inline or named, whose key and value schema
-  name are one supplied-default row's, exactly as preparation requires.
-  Positional defaults are not map entries."
-  {:malli/schema
-   [:=> [:cat :seon.db/database-value :seon.fn/sym]
-    [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.db/error-result]]}
-  [database sym]
-  (let [rows (db/q database row-query)]
-    (or (refused-read [rows])
-        (let [declared (into #{} (map (fn [[entry-key schema-key _]] [entry-key schema-key])) rows)]
-          (->> (for [arity (get (contract-arities (db/carried-projection database)) sym)
-                     {index :seon.fn.argument/index entries ::map-entries} (::arity-arguments arity)
-                     [entry-key _ value] entries
-                     :when (contains? declared [entry-key value])]
-                 [(:seon.fn.arity/order arity) index entry-key])
-               sort
-               vec)))))
-
 (defn- candidate-indexes
   [candidates]
   (mapv (fn [candidate]
@@ -737,23 +693,65 @@
    :seon.call-preparation/supplier-symbol
    (:seon.call-preparation/supplier-symbol candidate)})
 
-(defn- arity-plan-rows
-  [arities slots-by-arity entries-by-arity]
-  (mapv (fn [arity]
-          (let [order (:seon.fn.arity/order arity)]
-            {:seon.fn.arity/order order
+(defn- arity-plan
+  "One compiled arity joined to the supplied defaults by declared schema name:
+  a slot by its schema name, a map entry by its key AND value schema name, and
+  a map whose required entries are all supplied as a slot of its own."
+  [index {arguments ::arity-arguments variadic? :seon.call-preparation/variadic? :as arity}]
+  (let [entries (vec (for [{position :seon.fn.argument/index map-entries ::map-entries} arguments
+                           [entry-key optional? value] map-entries
+                           :let [candidate (get index value)]
+                           :when (= entry-key (:seon.call-preparation/key candidate))]
+                       (cond-> (assoc (slot-of candidate position) :seon.call-preparation/entry-key entry-key)
+                         optional? (assoc :seon.call-preparation/optional? true))))
+        slots (vec (for [{position :seon.fn.argument/index rest? :seon.fn.argument/rest?
+                          schema-key :seon.call-preparation/schema-key map-entries ::map-entries} arguments
+                         :let [candidate (get index schema-key)
+                               required (into #{} (keep (fn [[entry-key optional? _]] (when-not optional? entry-key)))
+                                              map-entries)
+                               own (filterv #(= position (:seon.fn.argument/index %)) entries)]
+                         slot [(when (and candidate (not rest?)) (slot-of candidate position))
+                               (when (and (seq required) (= required (set (map :seon.call-preparation/entry-key own))))
+                                 {:seon.fn.argument/index position :seon.call-preparation/entries own})]
+                         :when slot]
+                     slot))]
+    (cond-> {:seon.fn.arity/order (:seon.fn.arity/order arity)
              :seon.fn.arity/min (long (:seon.fn.arity/min arity))
              :seon.fn.arity/argument-count (:seon.fn.arity/argument-count arity)
-             :seon.call-preparation/variadic? (:seon.call-preparation/variadic? arity)
+             :seon.call-preparation/variadic? variadic?
              :seon.call-preparation/rest-slot?
-             (true? (get-in slots-by-arity [order :rest-slot?]))
-             :seon.call-preparation/slots
-             (vec (sort-by :seon.fn.argument/index
-                           (get-in slots-by-arity [order :slots] [])))
-             :seon.call-preparation/entries
-             (vec (sort-by :seon.fn.argument/index
-                           (get entries-by-arity order [])))}))
-        arities))
+             (boolean (some #(and (:seon.fn.argument/rest? %) (get index (:seon.call-preparation/schema-key %)))
+                            arguments))
+             :seon.call-preparation/slots slots
+             :seon.call-preparation/entries entries}
+      (and (not variadic?) (> (count slots) 1))
+      (assoc :seon.call-preparation/argument-validators (mapv (comp m/validator ::argument-schema) arguments)))))
+
+(defn- planned-arities
+  "`sym`'s carried contract arities planned against `current`, or nil."
+  [database current sym]
+  (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))]
+    (some->> (get (contract-arities (db/carried-projection database)) sym)
+             (mapv #(arity-plan index %)))))
+
+(defn supplied-map-entries
+  "Return [arity-order argument-index key] for declared supplied map entries.
+
+  The entries `plan-for` fills: a map argument's entry, inline or named,
+  whose key and value schema name are one admitted supplied-default row's.
+  Positional defaults are not map entries."
+  {:malli/schema
+   [:=> [:cat :seon.db/database-value :seon.fn/sym]
+    [:or [:vector [:tuple :int :int :qualified-keyword]] :seon.db/error-result]]}
+  [database sym]
+  (let [rows (db/q database row-query)
+        current (when-not (refused-read [rows]) (snapshot database (db/carried-projection database)))]
+    (or (refused-read [rows current])
+        (->> (for [{order :seon.fn.arity/order entries :seon.call-preparation/entries} (planned-arities database current sym)
+                   {index :seon.fn.argument/index entry-key :seon.call-preparation/entry-key} entries]
+               [order index entry-key])
+             sort
+             vec))))
 
 (defn plan-for
   "Compile one function identity's invocation plan from its contract.
@@ -761,94 +759,25 @@
   The database value's carried projection holds the compiled contract
   (`contract-arities`); its slots and map entries, inline or named, are
   joined to the acquired supplied-default rows by declared schema name.
-  Returns nil when the identity is not a function in this cluster's program
-  graph, and the database owner's read error when its identity could not be
+  Returns nil when the identity has no contract in this cluster's program
+  graph, and the database owner's read error when its rows could not be
   read: an unreadable program graph is never \"not contracted\"."
   {:malli/schema
    [:=> [:cat :seon.db/database-value :seon.call-preparation/snapshot
          :seon.fn/sym]
     [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [database current sym]
-  (let [contract-t (contract-transaction database sym)
-        ;; The plan is a function of the supplied-default rows and this
-        ;; contract. The snapshot memo and the projection's index record no
-        ;; read, so these two reads are what enter the caller's evidence.
-        reads (when (number? contract-t)
-                [(db/q database row-query)
-                 (db/q database '[:find ?spec . :in $ ?sym
-                                  :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
-                       sym)])]
-    (cond
-      (not (number? contract-t)) contract-t
-      (refused-read reads) (refused-read reads)
-      :else
-      (let [index (by-schema-key (:seon.call-preparation/supplied-defaults current))
-            arities (get (contract-arities (db/carried-projection database)) sym)
-            arguments (for [arity arities argument (::arity-arguments arity)]
-                        [(:seon.fn.arity/order arity) argument])
-            positional (for [[order {position :seon.fn.argument/index rest? :seon.fn.argument/rest?
-                                     schema-key :seon.call-preparation/schema-key}] arguments
-                             :when (get index schema-key)]
-                         [order position rest? schema-key])
-            entries (for [[order {position :seon.fn.argument/index entries ::map-entries}] arguments
-                          [entry-key optional? value] entries
-                          :when (get index value)]
-                      [order position entry-key value optional?])
-            required (for [[order {position :seon.fn.argument/index entries ::map-entries}] arguments
-                           [entry-key optional? _] entries
-                           :when (not optional?)]
-                       [order position entry-key])
-            positional-slots-by-arity
-            (reduce (fn [acc [order position rest? schema-key]]
-                      (let [candidate (get index schema-key)]
-                        (cond-> acc
-                          (and candidate (not rest?))
-                          (update-in [(long order) :slots]
-                                     (fnil conj [])
-                                     (slot-of candidate position))
-                          (and candidate rest?)
-                          (assoc-in [(long order) :rest-slot?] true))))
-                    {}
-                    positional)
-            entries-by-arity
-            (reduce (fn [acc [order position entry-key schema-key optional?]]
-                      (let [candidate (get index schema-key)]
-                        ;; Both halves of the ruled join: declared key AND
-                        ;; value schema name.
-                        (if (and candidate
-                                 (= entry-key
-                                    (:seon.call-preparation/key candidate)))
-                          (update acc (long order) (fnil conj [])
-                                  (cond-> (assoc (slot-of candidate position)
-                                                 :seon.call-preparation/entry-key entry-key)
-                                    optional? (assoc :seon.call-preparation/optional? true)))
-                          acc)))
-                    {}
-                    entries)
-            slots-by-arity
-            (reduce-kv
-             (fn [acc [order position] required]
-               (let [entries (filterv #(= position (:seon.fn.argument/index %))
-                                      (get entries-by-arity order))]
-                 (if (= (set (map #(nth % 2) required))
-                        (set (map :seon.call-preparation/entry-key entries)))
-                   (update-in acc [order :slots] (fnil conj [])
-                              {:seon.fn.argument/index position
-                               :seon.call-preparation/entries entries})
-                   acc)))
-             positional-slots-by-arity
-             (group-by (fn [[order position _]] [order position]) required))
-            arguments-by-order (into {} (map (juxt :seon.fn.arity/order ::arity-arguments)) arities)
-            arity-plans
-            (mapv (fn [arity]
-                    (cond-> arity
-                      (and (not (:seon.call-preparation/variadic? arity))
-                           (> (count (:seon.call-preparation/slots arity)) 1))
-                      (assoc :seon.call-preparation/argument-validators
-                             (mapv (comp m/validator ::argument-schema)
-                                   (get arguments-by-order (:seon.fn.arity/order arity))))))
-                  (arity-plan-rows arities slots-by-arity entries-by-arity))
-            fixed (remove :seon.call-preparation/variadic? arity-plans)
+  ;; The plan is a function of the supplied-default rows and this contract.
+  ;; The snapshot memo and the projection's index record no read, so these
+  ;; two reads are what enter the caller's evidence.
+  (let [reads [(db/q database row-query)
+               (db/q database '[:find ?spec . :in $ ?sym
+                                :where [?function :seon.fn/sym ?sym] [?function :seon.fn/spec ?spec]]
+                     sym)]
+        arity-plans (when-not (refused-read reads) (planned-arities database current sym))]
+    (if (or (refused-read reads) (nil? arity-plans))
+      (refused-read reads)
+      (let [fixed (remove :seon.call-preparation/variadic? arity-plans)
             exact-by-count
             (reduce (fn [acc arity]
                       (update acc (:seon.fn.arity/argument-count arity)
@@ -893,9 +822,6 @@
             variadic (first (filter :seon.call-preparation/variadic?
                                     arity-plans))]
         (cond-> {:seon.fn/sym sym
-                  :seon.call-preparation/contract-t (long contract-t)
-                  :seon.call-preparation/basis-t
-                  (long (:seon.call-preparation/basis-t current))
                   :seon.call-preparation/arities arity-plans
                   :seon.call-preparation/by-supplied-count by-supplied-count
                   :seon.call-preparation/empty?
@@ -940,49 +866,24 @@
 (defn plan
   "The cached invocation plan for one function identity in this cluster.
 
-  Cache key is `[function-identity contract-t supplied-default-basis-t]`,
-  held one entry per identity so a redefinition REPLACES its plan rather
-  than accumulating generations. A newly acquired context starts empty.
-
-  The contract transaction is re-read at most ONCE PER BASIS, not once
-  per call: a redefinition necessarily commits, so a database value whose
-  basis this entry was already verified against cannot be hiding a newer
-  contract. Without that fence the warm path ran an aggregating Datalog
-  query on every single prepared call. A read error is returned and never
-  cached, so the next call reads again."
+  Held one entry per identity against the snapshot derivation it read (its
+  `prepared-symbols` object, replaced by any row, contract or schema change),
+  and only when compiled at the snapshot's own basis. A read error is
+  returned and never cached, so the next call reads again."
   {:malli/schema
    [:=> [:cat :seon.call-preparation/state :seon.db/database-value
          :seon.call-preparation/snapshot :seon.fn/sym]
     [:or :seon.call-preparation/plan :nil :seon.db/error-result]]}
   [call-state database current sym]
-  (let [held (get-in @call-state [:seon.call-preparation/plans sym])
-        basis (long (:seon.call-preparation/basis-t current))
-        through (long (:seon.call-preparation/checked-through-t current))
-        usable? (and held
-                     (= basis (:seon.call-preparation/basis-t
-                               (:seon.call-preparation/plan held))))]
-    (cond
-      (and usable?
-           (= through (:seon.call-preparation/verified-through-t held)))
+  (let [derivation (:seon.call-preparation/prepared-symbols current)
+        held (get-in @call-state [:seon.call-preparation/plans sym])]
+    (if (identical? derivation (::derivation held))
       (:seon.call-preparation/plan held)
-
-      (and usable?
-           (= (:seon.call-preparation/contract-t held)
-              (contract-transaction database sym)))
-      (do (swap! call-state assoc-in
-                 [:seon.call-preparation/plans sym
-                  :seon.call-preparation/verified-through-t]
-                 through)
-          (:seon.call-preparation/plan held))
-
-      :else
       (let [compiled (plan-for database current sym)]
-        (when (and compiled (not (refused-read [compiled])))
+        (when (and compiled (not (refused-read [compiled]))
+                   (= (db/basis-t database) (:seon.call-preparation/checked-through-t current)))
           (swap! call-state assoc-in [:seon.call-preparation/plans sym]
-                 {:seon.call-preparation/contract-t
-                  (:seon.call-preparation/contract-t compiled)
-                  :seon.call-preparation/verified-through-t through
-                  :seon.call-preparation/plan compiled}))
+                 {::derivation derivation :seon.call-preparation/plan compiled}))
         compiled))))
 
 ;;; ---------------------------------------------------------------------------

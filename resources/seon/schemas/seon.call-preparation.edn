@@ -199,8 +199,6 @@
  :plan
  [:map
   [:seon.fn/sym :seon.fn/sym]
-  [:seon.call-preparation/contract-t :seon.call-preparation/contract-t]
-  [:seon.call-preparation/basis-t :seon.call-preparation/basis-t]
   [:seon.call-preparation/empty? :seon.call-preparation/empty?]
   [:seon.call-preparation/arities :seon.call-preparation/arity-plans]
   [:seon.call-preparation/by-supplied-count
