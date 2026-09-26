@@ -32,6 +32,9 @@ re-filed; they are listed at the end.
 | 11 | `(ns x (:require [clojure.string :as str]))` followed by a use of `str/` in the same run refuses the whole run as "no analysis of str … fill the cache", records it as a core fault, and shows `null` for every later form. | Batch analysis before evaluation; the REPL reads and evaluates one form at a time. | evidence on [an-alias-required-by-an-earlier-form-of-a-batch…](../../seon/issues/an-alias-required-by-an-earlier-form-of-a-batch-refuses-later-forms-as-unanalyzed.md) |
 | 12 | `(do (in-ns 'my.issue) (defn …))` is refused by the definition authority. Top-level `in-ns` then `defn` in one run works. | Analysis attributes the `do` to the starting namespace. | evidence on [dynamic-in-ns-cannot-persist-definition-namespace](../../seon/issues/dynamic-in-ns-cannot-persist-definition-namespace.md) |
 | 13 | The auto-check generated an empty, schema-less database as `:seon.db/db` and reported `actual: [:seon.issue/id "0"]`. | Supplied inputs are generated instead of supplied by declared schema name. | evidence on [auto-check-reports-the-function-symbol-as-the-actual-value](../../seon/issues/auto-check-reports-the-function-symbol-as-the-actual-value.md) |
+| 14 | Error output diverges from `clojure.main` for every ordinary mistake. `(/ 1 0)`, `(inc "a")` and `(throw (ex-info "boom" {:a 1}))` show as "`seon.sci.kernel/failure-value` refused … got nil nil. Fix: <message>", with no class and no `ex-data`. An arity refusal prints its arglists as `(nil)`. `ClassCastException` cannot be named in `catch`. `*ns*` has no name. Side-by-side table in the issue. | The agent's own exception is framed as a platform refusal instead of printed as a value; the shown sentence is rebuilt from a different key than the producer filled; SCI's class allowlist omits common `java.lang` exceptions. | [agent-repl-error-output-diverges-from-clojure-main-for-every-ordinary-mistake](../../seon/issues/agent-repl-error-output-diverges-from-clojure-main-for-every-ordinary-mistake.md) |
+| 15 | A run in which one form's program change is refused (`ns-unmap` of a called function) shows that refusal as **every** form's result, including `doc` and `breaks`, the refactoring data the refusal exists for. It is stored as a core fault and carries a writer stack trace. | A run settles as one transaction, so a refused effect erases the other forms' shown values; declared agent refusals are recorded as faults. | [a-refused-run-settlement-replaces-every-forms-shown-result](../../seon/issues/a-refused-run-settlement-replaces-every-forms-shown-result.md) |
+| 16 | `breaks` proposes `(my.program/launch! …)`, which does not exist. `ns-unmap!`'s documented call refuses with "got nil nil" instead of naming the caller. Its `doc` example sits in `:body` and mentions "seam B". | Plan forms are written by hand and never resolved at the producer. | [breaks-plans-name-a-launch-function-that-does-not-exist](../../seon/issues/breaks-plans-name-a-launch-function-that-does-not-exist.md) |
 
 ## Smaller findings (not yet filed; one line each)
 
@@ -89,6 +92,16 @@ snapshot.
   Its failure locations read `fail AFn.java:154`, not the test's line. `(my.note/notes)` shows
   `:my.note/agent 34185`, a raw entity id. `(throw (ex-info "boom" {:a 1}))` loses its class and `ex-data`
   ([evidence](../../seon/issues/repl-parity-divergences.md)). `subvec` prints `#object` (evidence on #9).
+
+- **Cycle 3** (03:13–03:20Z, branch `dogfood-repl-opus-8`, archive 10d6fdff5, no restart). The program
+  deletion loop works when used in order: `breaks` names the caller, I redefined the caller, then
+  `(my.program/ns-unmap! 'user/helper)` removed the row and the Var, and `(caller 1)` answered `3`. Error
+  parity was compared against `clojure.main` 1.12.5 (#14). Turn times: first run on the new branch (two
+  `defn`s, one call, `dir`) **1,102 ms**; the refused-deletion run **1,904 ms**; the successful `ns-unmap!`
+  run 868 ms; everything else 74–339 ms. The branch is retired.
+  The require-then-use batch failure (#11) blocks the most common Clojure idiom. Once, a `require` made
+  in an earlier run whose other forms had failed was still unknown to the next run's analysis. A fresh
+  `require` alone then worked, and I could not isolate the cause.
 
 ### Cycle 1 change (unmerged): coverage for `my.plan/current`
 
