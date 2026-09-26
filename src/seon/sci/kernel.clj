@@ -3,8 +3,7 @@
 
   SCI calls the stable interrupt function at interpreted function-body and
   loop entrances. One process guard keeps per-thread arm state; an invocation
-  either owns a new arm or inherits the same SCI interpreter context's active
-  arm. Values are admitted before disarm. Host calls remain SCI's documented
+  either owns a new arm or inherits the arm already governing its thread. Values are admitted before disarm. Host calls remain SCI's documented
   interruption ceiling and are never described as hard-stoppable.
 
   THE ARM IS A VALUE AND TRAVELS WITH THE WORK. The thread-local slot is the
@@ -217,15 +216,9 @@
 (defn- new-armed
   "The arm VALUE: every counter, latch, and identity one evaluation needs,
   shared by whichever threads serve it. Nothing here is thread-local."
-  [ctx]
+  []
   (let [allocated-at-start (allocated-bytes)]
-    {::ctx ctx
-     ::arm-token (Object.)
-     ::armed-at (->> (.getStackTrace (Thread/currentThread))
-                     (drop 2)
-                     (take 12)
-                     (mapv str))
-     ::entries (AtomicLong. 0)
+    {::entries (AtomicLong. 0)
      ::sampled (long-array 1)
      ::host-interop-observations (AtomicLong. 0)
      ::adopted-allocated-bytes (AtomicLong. 0)
@@ -239,9 +232,9 @@
      ::measurable (not (neg? allocated-at-start))}))
 
 (defn- own-arm
-  [ctx guard time-limit-ms]
+  [guard time-limit-ms]
   (let [^ThreadLocal thread-arm (::thread-arm guard)
-        base (new-armed ctx)
+        base (new-armed)
         ;; The deadline as a value ON the arm, so work that BLOCKS can honour
         ;; it. The latch alone is reachable only from an interpreted function
         ;; entrance, and a thread parked in a host call makes none — which is
@@ -280,22 +273,6 @@
   [guard]
   (.get ^ThreadLocal (::thread-arm guard)))
 
-(defn- same-interpreter?
-  [armed ctx]
-  (identical? (:env (::ctx armed)) (:env ctx)))
-
-(defn- context-evidence
-  [ctx]
-  {::context-id (System/identityHashCode ctx)
-   ::interpreter-id (System/identityHashCode (:env ctx))})
-
-(defn- arm-evidence
-  [armed]
-  (merge {::arm-id (System/identityHashCode (::arm-token armed))
-          ::owner-thread-id (::owner-thread-id armed)
-          ::armed-at (::armed-at armed)}
-         (context-evidence (::ctx armed))))
-
 (defn- acquire-arm
   [ctx time-limit-ms]
   (let [guard (::guard ctx)]
@@ -307,44 +284,24 @@
                  {:seon.error.evidence/attribute ::guard
                   :seon.error.evidence/value :seon.error/unknown}}))))
     (if-let [armed (current-thread-arm guard)]
-      (do
-        (when-not (same-interpreter? armed ctx)
-          (let [existing (arm-evidence armed)
-                requested (context-evidence ctx)]
-            (throw
-             (ex-info
-              (str "A different SCI context is already armed on this thread. "
-                   "Existing arm " (::arm-id existing)
-                   " for interpreter " (::interpreter-id existing)
-                   " was armed at " (pr-str (::armed-at existing))
-                   "; requested interpreter " (::interpreter-id requested) ".")
-              (seon.error.refusal/diagnostic (java.util.Date.) ::arming 'seon.sci.kernel/acquire-arm
-               {::guard-observation
-               {:seon.error.evidence/attribute ::arm-id
-                :seon.error.evidence/value (::arm-id existing)}
-               ::existing-arm existing
-               ::requested-context requested})))))
-        {:interrupt-fn (::interrupt-fn guard)
-         ::built-in-calls (fn [] @(::built-in-calls armed))
-         ::stop! (constantly nil)
-         ::record #(record armed %)})
-      (own-arm ctx guard time-limit-ms))))
+      {:interrupt-fn (::interrupt-fn guard)
+       ::built-in-calls (fn [] @(::built-in-calls armed))
+       ::stop! (constantly nil)
+       ::record #(record armed %)}
+      (own-arm guard time-limit-ms))))
 
 (defn arm
   "Arm `ctx` on this thread and return its stop, record, and observers.
 
   ONE re-entrancy rule for every entrance, because a second rule is how the
-  two boundaries diverged: work inherits only the arm installed in THIS
-  thread's ThreadLocal and only when that arm names the same SCI interpreter
-  through its `:env` reference. Context maps carrying a scoped environment may
-  differ while still naming that same interpreter. A sibling thread sees no
-  current arm and therefore owns an independent one even when it evaluates the
-  same context concurrently. The outer deadline keeps governing nested work,
-  the returned `::stop!` is inert, and no second timer exists. A DIFFERENT SCI
-  interpreter context on an armed thread is refused, because one thread cannot
-  honestly serve two limits. A true `sci/fork` has a distinct `:env` reference
-  and remains different. `::built-in-calls` reports the governing arm's
-  observations either way.
+  two boundaries diverged: work inherits the arm installed in THIS thread's
+  ThreadLocal, whichever SCI context it evaluates in: the same interpreter, a
+  `sci/fork`, or another agent's context an evaluation deliberately opened. A
+  sibling thread sees no current arm and therefore owns an independent one
+  even when it evaluates the same context concurrently. The outer deadline
+  keeps governing nested work, the returned `::stop!` is inert, and no second
+  timer exists: one thread serves one limit, the one that admitted the outer
+  evaluation. `::built-in-calls` reports the governing arm's observations.
 
   THE THREAD IS NOT THE ARM. Work that leaves this thread carries the arm as
   a value (`current-arm`) and the receiving thread installs it for the extent
@@ -365,8 +322,8 @@
   an instrumented `arm` call could install thread state and then fail while
   validating its returned map, before the caller had received `stop!`.
   `work` receives the acquired arm so it can read the diagnostic record and
-  built-in observations. Nested work in the same interpreter inherits the
-  governing arm and its inert stop remains safe."
+  built-in observations. Nested work in any context inherits the governing
+  arm and its inert stop remains safe."
   {:malli/schema
    [:=> [:cat :seon.sci.eval/ctx
          :seon.sci.eval/time-limit-ms
@@ -395,7 +352,7 @@
 
 (def arm-generator
   "A real arm value — honest by constructing an instance."
-  (gen/fmap (fn [_] (new-armed nil)) (gen/return nil)))
+  (gen/fmap (fn [_] (new-armed)) (gen/return nil)))
 
 (defn deadline-remaining-ms
   "Milliseconds left on the arm governing this thread, or nil when unarmed.
@@ -452,11 +409,8 @@
   starting now. Hand it to the crossing under `:seon.sci.kernel/arm` exactly
   as a captured arm rides, and the thread that runs the work adopts it.
 
-  It keeps the submitting thread's SCI CONTEXT when there is one, so an
-  evaluation nested inside the detached work INHERITS this arm through `arm`
-  rather than being refused as a second context on an armed thread. The
-  context is the only thing carried over; nothing about the submitter's
-  limit or accounting is.
+  Nothing about the submitter's limit or accounting carries over; an
+  evaluation nested inside the detached work inherits this arm through `arm`.
 
   Because nothing owns the returned arm on a thread, nothing calls `stop!`
   for it: `release-arm!` cancels its deadline task when the work settles
@@ -465,8 +419,7 @@
   {:malli/schema [:=> [:cat :seon.sci.eval/time-limit-ms]
                   :seon.sci.kernel/arm]}
   [time-limit-ms]
-  (let [^ThreadLocal thread-arm (::thread-arm @process-guard)
-        base (new-armed (some-> (.get thread-arm) ::ctx))
+  (let [base (new-armed)
         armed (assoc base
                      ::deadline-nanos
                      (+ (::started-at base) (* (long time-limit-ms) 1000000)))]
@@ -525,6 +478,16 @@
           (if displaced
             (.set thread-arm displaced)
             (.remove thread-arm)))))))
+
+(defn future-call
+  "`clojure.core/future-call` carrying the arm governing this thread
+  (`current-arm`, `adopt-arm`): the future's interpreted work counts into the
+  evaluation's one entrance total and is cut by its one deadline, instead of
+  running unbounded on a pool thread. Unarmed callers get a plain future."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?]] [:fn clojure.core/future?]]}
+  [f]
+  (let [carried (current-arm)]
+    (clojure.core/future-call #(adopt-arm carried f))))
 
 (defn- without-interrupt-marker
   "One cause-chain link without SCI's private interrupt marker.
