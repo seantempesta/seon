@@ -12,7 +12,7 @@
              :evidence #{"docs/research/agent-platform/dogfood-dogfood-analyst-astra-2026-09-26.md"
                          "docs/research/agent-platform/dogfood-dogfood-newcomer-astra-2026-09-26.md"
                          "docs/seon/issues/a-raw-pull-inlines-nested-declared-render-text-past-the-floor.md"}}
- #:seon.task{:id "4e5a30acb8a3"
+ #:seon.task{:id "6e5637a4afc8"
              :name "throwable-safe-memoize-retains-classes"
              :kind :function
              :intent "seon.render.value/throwable-safe (render/value.clj:424) is clojure.core/memoize keyed by Class: unbounded, hand-rolled, never evicted. Every Throwable class it sees stays strongly reachable, and with it the DynamicClassLoader that defined it (an agent's defrecord or ex subclass evaluated in SCI or the JVM REPL). The idle heap showed 11,867 class loaders (heap-findings 2026-09-26), cause not yet attributed. Bound it as a cache kind keyed weakly by class, or compute it per call (four getMethod lookups)."
