@@ -319,3 +319,19 @@ measured them.
 - `bin/test-check default --ns seon.call-preparation-test`
 - Re-run the flows that failed: `seon.task/create!`, `my.program/accept-merge!` and `my.program/breaks` as root
   with no branch.
+
+## Resume 6 — caller-lint fixture (67be150a1); arming fix verified live on 9bbc3568e
+
+- **Arming fix verified live** on pid 20656 (9bbc3568e, containing 23a08e4ad). Root's SCI run of
+  `(my.program/breaks {:seon.program/subject 'seon.id/valid?})`, with no `:seon.db/db`, now answers the breakage map
+  (`:seon.program/kind :seon.program/callers …`, 113 ms) instead of refusing the supplied default. This boot did a full
+  republication: store→branch 25.3 s, ready 28.3 s. The loaded identity is the published commit.
+- **caller-lint-test:** each edit now goes through `support/revision` (the stored row's final value as the writer
+  reads it, digested by `seon.db/definition-digest-of`) instead of a raw assoc. `revision` answers a digest for all
+  three edits on live default. Not run as a test yet.
+
+**Root runs:**
+- `bin/test-check default --ns seon.fn.caller-lint-test`
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --test seon.cluster.publication-delta-test/schema-referrers-are-selected-for-arming-without-a-namespace-reload`
+- `bin/test-check default --ns seon.fn.analyzer-test`
