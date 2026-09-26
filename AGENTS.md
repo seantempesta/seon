@@ -218,6 +218,13 @@ Private experiments remain possible; local green never implies shared acceptance
 
 ## Laws for failure, execution and presentation
 
+- **One error shape, the only way** (owner 2026-09-26; audit error-delivery-audit-2026-09-26.md): an error is one flat map
+  under one named extension of `:seon.error/base` — producer fields, message, source location, and the whole cause chain
+  (class, message, `ex-data`, Seon frames per link); refusals add operation/member, expected, offending value and fix. It
+  holds REFERENCES, never copies: a database is its commit id/basis-t, a transaction its tx id, a context its agent and
+  branch, a large value one blob digest — never the database, a context, a projection or a request inlined. A failure after
+  evaluation is attached beside the unchanged result on the evaluation record. The same saved observation is what MCP replies
+  and Seon context show, printed by the one floor. Every other error path, wrapper, stringifier, cursor or copy is deleted.
 - **Declare errors as flat data.** Each error has one named schema over `:seon.error/base`;
   arities enumerate exact error alternatives. No general error predicate, copied union,
   registry-wide union or discriminator stamp. Deduplicate distinguishing content through
