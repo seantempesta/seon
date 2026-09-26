@@ -160,6 +160,9 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
     confinement; dead window-* schema declarations (two-step retirement).
 21. Face-concept elimination from the Astra audit (face-concept-audit-2026-09-26.md) as a scripted rename.
 22. Largest files: cluster.clj (~3.7k), sci/eval.clj, schema.clj, turn.clj — shrink assignments by responsibility.
+**E2. Agent-centric audit (agent-centric-audit-2026-09-26.md, 21 findings, ~1,474 net lines):** F06 transcript (−350) with
+the REPL-entry design; F01/F14/F03/F12 (deletion lane); F07–F09 with the test-request cost lane; F04/F05/F02 MCP transport
+after the REPL-entry stage; F10/F11 prompt regeneration with the render design; F18 write-back installer; F19/F20 operator.
 **F. Review debt (Astra).** P3b diff; 2(i) diff; R1 diff; roster slice; references-as-refs re-review status; harness S1.
 
 ### Operating checklist
