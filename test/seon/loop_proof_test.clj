@@ -14,6 +14,7 @@
             [seon.cluster.wake :as wake]
             [seon.config :as config]
             [seon.context-blocks-fixture :as fixture]
+            [seon.blob :as blob]
             [seon.db :as db]
             [seon.eval :as evaluation]
             [seon.env :as env]
@@ -195,10 +196,21 @@
              (let [recorded (set/difference (occurrences) occurrences-before)]
                (is (empty? recorded)
                    (pr-str {:seon.test/recorded-faults
-                            (mapv #(db/pull (db/db connection)
-                                            [:seon.error.occurrence/message
-                                             {:seon.error/_occurrences [:seon.error/layer :seon.error/operation]}]
-                                            %)
+                            (mapv (fn [occurrence]
+                                    (let [row (db/pull (db/db connection)
+                                                       [:seon.error.occurrence/message
+                                                        :seon.error.occurrence/proc-fn
+                                                        {:seon.error.occurrence/turn [:seon.turn/id]}
+                                                        {:seon.error.occurrence/data-blob
+                                                         [:seon.error.occurrence/blob-digest]}
+                                                        {:seon.error/_occurrences
+                                                         [:seon.error/layer :seon.error/operation :seon.error/frame]}]
+                                                       occurrence)
+                                          digest (get-in row [:seon.error.occurrence/data-blob
+                                                              :seon.error.occurrence/blob-digest])]
+                                      ;; the evidence holds the refused query and Datahike's cause
+                                      (cond-> row digest (assoc :seon.test/evidence
+                                                                (blob/get connection digest)))))
                                   recorded)})))
              (testing "a lost turn permit faults at the declared completion allowance"
                (let [entry (agent/armed routing "juniper")
@@ -878,8 +890,16 @@
                         (mapv result [:seon.test/pass-count :seon.test/fail-count :seon.test/error-count]))))
                (testing "the three exact live fenced replies evaluate through the ordinary proc"
                  ; Only reader/evaluation behavior is under test. The supplied
-                 ; single-order function is private fixture state, not a domain implementation.
-                 (submit "(def largest-customer first)")
+                 ; single-order function is fixture state, not a domain
+                 ; implementation; the entry gate admits a function only with
+                 ; a complete contract and a non-nilable return.
+                 (let [id (submit (str "(defn largest-customer \"The first order row.\" "
+                                       "{:malli/schema [:=> [:cat [:sequential {:min 1} :map]] :map]} "
+                                       "[rows] (first rows))"))
+                       turn-eid (:db/id (db/pull @connection [:db/id] [:seon.turn/id id]))
+                       defined (filterv #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
+                                        (evaluation/of-agent @connection "juniper"))]
+                   (is (= [nil] (mapv :seon.cluster.eval/error defined)) (pr-str defined)))
                  (doseq [{:seon.turn/keys [reply] original-id :seon.turn/id}
                          (edn/read-string (slurp "test/seon/reader_fences.edn"))]
                    (let [id (submit reply)
