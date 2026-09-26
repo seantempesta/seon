@@ -47,6 +47,9 @@ callers to an existing component/function/test that does the same thing better (
   differing digests = changed; reuse keys on digests.
 - **REPL niceties are not requirements** (owner 2026-09-26): every REPL result already has a reference id, so `*1`/`*2`/`*3`/`*e`
   and similar conveniences are dropped from scope; only what an agent needs to do its work counts as REPL parity.
+- **Caches** (owner 2026-09-26): every cache is `clojure.core.cache` (or another highly regarded library — Datahike's own
+  cache for Datahike), never hand-rolled; bounded with an eviction policy (LRU by default); its size is a configuration dial,
+  not a code constant. A cached SCI context is worth only the eval tax it saves — evict it rather than grow.
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
   agent's SCI world (disposable fork, cached by content digest) and prints form + result — the context is a `clojure.main`
