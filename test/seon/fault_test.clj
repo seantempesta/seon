@@ -6,6 +6,7 @@
             [datahike.writer]
             [datahike.writing]
             [seon.blob :as blob]
+            [seon.cluster :as cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.branch :as cluster.branch]
             [seon.cluster.registry :as registry]
@@ -26,7 +27,10 @@
 (defn- world
   "The environment a boundary already holds, for one fixture cluster."
   [connection cluster-name manifest]
-  (test-support/apply-config! connection cluster-name manifest)
+  ;; a member's world holds no agent it did not create; root is the shipped
+  ;; escalation owner, so the boundary's cluster and root are seeded as boot does
+  (test-support/seed-cluster! connection cluster-name manifest)
+  (cluster/seed-root-agent! connection cluster-name cluster/boot-process-identity)
   (env/environment {:seon.boot/cluster-name cluster-name
                     :seon.db/connection connection
                     :seon.sci.admit/caps (config/result-caps

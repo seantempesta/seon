@@ -66,7 +66,12 @@
        (is (schema/valid-candidate-value? projection :seon.sci.eval/row-acquisition-error observation))
        (is (not (schema/valid-candidate-value? projection :seon.sci.eval/acquisition-error observation)))
        (when (:seon.sci.eval/row-member observation)
-         (let [recording (error/recording database (commit-request observation {}))
+         ;; the producer names its declared schema (required since a86e93e21);
+         ;; the writer keeps that schema's distinguishing members
+         (let [recording (error/recording database
+                                          (commit-request observation
+                                                          {:seon.error/declared-schema
+                                                           :seon.sci.eval/row-acquisition-error}))
                report (test-support/transacted! connection (:seon.db/tx-data recording))
                root (db/pull (:db-after report) (error/observation-selector projection)
                              (:seon.error/ref recording))
