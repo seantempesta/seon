@@ -1,6 +1,7 @@
 (ns seon.db-test
   (:require [clojure.core.async :as async]
             [clojure.core.cache :as cache]
+            [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing use-fixtures]]
             [datahike.api :as d]
@@ -728,7 +729,8 @@
        (let [evidence (db/read-evidence
                        (mapv #(-> % (assoc :datahike.read/dependency-plan :all)
                                   (dissoc :seon.db/read-index-patterns))
-                             @captured))]
+                             @captured)
+                       {:seon.db/retain-read-results? true})]
          (test-support/transacted!
           connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "unrelated"})])
          (is (true? (db/read-evidence-current? @connection evidence))
@@ -738,6 +740,33 @@
           [[:db/add [:seon.cluster/name "evidence-all"] :seon.cluster/name "evidence-renamed"]])
          (is (false? (db/read-evidence-current? @connection evidence))
              "a changed result replays unequal"))))))
+
+(deftest stored-read-evidence-references-the-read-and-never-copies-its-request
+  ;; A request is code: `#"…"` is a host Pattern, which no stored value can
+  ;; hold. The evidence an evaluation stores keeps the dependency plan and
+  ;; revision; only process-local retained evidence keeps the request for its
+  ;; own replay.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/seed-cluster! connection "evidence-regex")
+     (let [captured (atom [])
+           query '[:find (count ?n) . :where [_ :seon.cluster/name ?n] [(str ?n) ?t] [(re-find #"regex" ?t)]]
+           answer (binding [db/*read-evidence-sink* captured] (db/q query @connection))
+           stored (db/read-evidence @captured)
+           retained (db/read-evidence @captured {:seon.db/retain-read-results? true})]
+       (is (= 1 answer))
+       (is (seq stored))
+       (is (not-any? #(find % :seon.db/read-request) stored))
+       (is (not-any? #(find % :seon.db/read-result-digest) stored))
+       (is (every? (schema/projection-validator (schema/handed-projection)
+                                                :seon.cluster.eval/read-evidence-entity)
+                   stored)
+           "stored evidence is a valid durable row")
+       (is (= stored (edn/read-string (pr-str stored)))
+           "stored evidence survives the EDN codec it is written through")
+       (is (some #(find % :seon.db/read-request) retained)
+           "retained evidence keeps its request for process-local replay")
+       (is (true? (db/read-evidence-current? @connection stored)))))))
 
 (deftest a-mistyped-pattern-value-refuses-as-a-read-and-as-a-replay
   ;; A quoted `'sym` inside a quoted query is the list `(quote sym)`. Replaying
@@ -757,7 +786,8 @@
                        :seon.db/read-request
                        {:seon.db/read-operation :q
                         :seon.db/query-request {:query query :args [::db/database]}}
-                       :seon.db/read-result nil}])]
+                       :seon.db/read-result nil}]
+                     {:seon.db/retain-read-results? true})]
        (is (= :db.type/symbol
               (get-in refused [:seon.error/data :seon.error/source ::db/value-type]))
            "the read refuses naming the installed value type")

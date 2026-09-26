@@ -920,9 +920,12 @@
 (defn read-evidence
   "Retain dependency revisions without retaining database values.
 
-  Process-local caches may explicitly retain stable read results for semantic
-  replay. The default omits them so evaluation evidence written as database
-  facts cannot inline read payloads."
+  Process-local caches may explicitly retain the read request and its stable
+  result for semantic replay. The default, the evidence an evaluation stores
+  as facts, holds neither: a request is code (a `#\"…\"` literal is a host
+  Pattern, not EDN), and the evaluation that owns this evidence already
+  references its source, whose preview `seon.turn/system-turn` compares by
+  shown value."
   {:malli/schema
    [:function
     [:=> [:cat [:vector :seon.db/captured-read]]
@@ -936,12 +939,12 @@
                source-position :seon.db/source-argument-position
                plan :datahike.read/dependency-plan
                :as entry}]
-           (let [request (:seon.db/read-request entry)
+           (let [retain? (:seon.db/retain-read-results? options)
+                 request (when retain? (:seon.db/read-request entry))
                  stable (when (and request (find entry :seon.db/read-result))
                           (stable-value (:seon.db/read-result entry)))
                  [replayable? stable-result]
-                 (when (and (:seon.db/retain-read-results? options)
-                            (bounded-read-request? request))
+                 (when (bounded-read-request? request)
                    stable)
                  result-digest (when stable (read-result-digest stable))]
            (cond->
@@ -960,8 +963,8 @@
                plan)
              :datahike.read/revision
              (dependency-revision database plan source-position)}
-             (:seon.db/read-request entry)
-             (assoc :seon.db/read-request (:seon.db/read-request entry))
+             request
+             (assoc :seon.db/read-request request)
 
              result-digest
              (assoc :seon.db/read-result-digest result-digest)
