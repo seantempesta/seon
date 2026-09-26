@@ -140,6 +140,13 @@ contract projections in seon.cache (schema/cache owner); F4 Malli fast path vs r
 JVM's config vocabulary to every retained branch (config owner); F6/F9 reply timing semantics + reload-keyed reply-bounds cache (repl owner).
 **Owner 2026-09-27 ~00:10Z: "understand wtf is going on" before small fixes** — astra-eval-trace (every ms of (inc 1) and a defn),
 eval-regression-history-opus (when evals were fast), defn-scan (why a defn changes the projection identity), derive-once design.
+**Joint order for derive-once + contracts-out (Astra bef6b105e REVISE; recommends corrected option A first):** 0 reconcile both
+designs' key/alias matrices; 1 independent local fixes (DONE: db P1/P1b/P4, turn P1/P2; render P1/P2 landed); 2–5 contracts-out S1–S4
+(complete central-cache compile key; convert every reader incl. its cache identity; shared affected-contract check at the final writer;
+remove contract ranges); 6 shrink-eval F1/F2 (store-owned loaded materialization); 7 corrected acquisition key + consumers; 8 optional
+report-local arity; 9–12 conditional B (program graph) only after measuring A. Contracts-out revised a3d6847a1 → Astra re-review running.
+**Konserve flush fix (b8d92d1):** Astra ACCEPT-AFTER-FIXES 05b2d0f5f (existing-key replacement, standalone immutable durability, Linux
+dir fsync) → commit-floor lane fixing; root pushes/pins after fork tests + re-measure.
 **Research running:** web-research-opus (Datahike/konserve commit latency, clojure-lsp/kondo incremental analysis, Clerk/Clay/nREPL
 eval pipelines, Malli instrumentation cost, Caffeine weighers); astra-review-eval-audit; astra-audit-today.
 
