@@ -11,6 +11,29 @@ design: docs/research/agent-platform/cache-central-design-2026-09-26.md (option 
 
 ## Broken or unproven first
 
+- **Fixed in `02fe65932`: HEAD `0fdfbcd8c` failed boot with an NPE in `seon.cache/configure!`.**
+  - **Cause:** `boot-dials` (`config/effective`) keeps only the dials the *store's* program declares, and that
+    program adopts the checkout's declarations only after boot. `apply-compiled!` had installed and written
+    `:seon.config.cache/max-bytes`, but `effective` dropped it.
+  - **Confirmed at the REPL on pid 81761**, a store at `8e4ac24c9` that predates the dial:
+    - the store's projection does not declare it;
+    - `effective` lacks it;
+    - the attribute is not installed.
+  - **Fix:** the process budget is acquired like `:seon.config.db/keep-history?`, from the compiled config boot
+    just applied. `zero-overlay-compilation-resolves-every-registered-config-attribute` proves the compiled
+    effective carries every declared dial. No nil guard was added.
+  - **The same class of failure is still open.** Any dial the checkout adds that boot reads through `boot-dials`
+    fails the same way: flow workload dials and the result caps. `dials` for `serve!` has the same exposure. At
+    boot `apply-compiled!` exact-reconciles this cluster's row to the compiled row, so reading boot's own dials
+    from `compiled-config` would give the same values plus new ones. That change is for root's ruling.
+  - **Regression not written, because it needs a real boot.** A store that predates a dial cannot be built in one
+    JVM: retracting the dial's declaration is refused, since the stored config composites (`:seon.config/effective`,
+    `:seon.config/entity`, `:seon.config/manifest`) name it. This was probed with `seon.db/with` on default.
+  - **Proposed platform test for root:**
+    1. Publish and boot a fresh root at a commit before `92b22cbf1`, then stop.
+    2. Boot the same root at HEAD.
+    3. Assert the boot completes and `(:seon.cache/max-bytes (seon.cache/status))` equals the compiled value.
+
 - **Default cannot boot current HEAD, and this lane did not cause it.** Root restarted default onto HEAD at 21:08Z.
   The boot of pid 80850 was refused during task indexing: "seon.program is refused: handle-mismatch".
   - The cause is task `0d8be4a76ab3` in `resources/seon/tasks/seon.program.edn`, added by contract-cost in
