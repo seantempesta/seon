@@ -51,4 +51,5 @@
              :intent "A test request's 8-datom overlay write takes 480-620 ms, 211 ms of it write-report-error; root runs pay 8-9 ms of it over 3 transactions. Make the checked writer's report validation cost follow the written datoms."
              :must-read #{seon.db/transact! seon.db/write-report-error}
              :evidence #{"docs/research/agent-platform/landing/fix-test-request-cost-2026-09-26.md"
-                         "docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"}}]
+                         "docs/research/agent-platform/landing/fix-write-cost-2026-09-26.md"
+                         "docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}]

@@ -143,4 +143,10 @@
              :kind :function
              :intent "On live e405f51be (one-commit A) every write an agent form makes on its branch refuses 'Nothing found for entity id [:seon.cluster.eval/id <this form>]': the evaluation's receipt lookup ref (seon.sci.eval/evaluate, receipt at eval.clj:4341-4343) names the evaluation row that is written only at settlement. It breaks (seon.db/transact! ...) at the REPL and every test run from the agent REPL (my.test/run-owned admission), so no agent can prove a change. Reproduced 2026-09-26 20:38Z and 20:46Z on branch merge-cut1-opus (evals 78f381684a44, 82cf53bace3b)."
              :must-read #{seon.sci.eval/evaluate}
-             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}
+ #:seon.task{:id "361088de3d56"
+             :name "program-change-check-scans-the-whole-history"
+             :kind :function
+             :intent "installation-covers-program-change? (install-evaluated-rows!, every defining batch) finds the entities written since the context's acquired program with [:find [?entity ...] :where [?entity]] over (db/since (db/history after) basis): an unbound pattern, so Datahike scans the whole EAVT history and filters by transaction (no transaction index exists). On default (pid 70849, 2026-09-26) the same query found 10 entities written in the last 3 transactions in 2,025 ms. It cost 1,636 ms of a 3,735 ms first contracted defn on a fresh MCP branch (pid 75849), 303-800 ms on warm branches, and 1,646-4,160 ms per test request whose members define functions. Cost must follow the written datoms: derive the program change from the settled reports' tx-data, or from attribute-bound reads of the program partition only."
+             :must-read #{seon.sci.eval/install-evaluated-rows!}
+             :evidence #{"docs/research/agent-platform/landing/perf-admit-tests-opus-2026-09-26.md"}}]
