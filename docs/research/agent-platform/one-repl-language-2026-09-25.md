@@ -424,12 +424,13 @@ new, undelivered or unknown fault, and MCP only encodes it as `isError`. A core 
 as the call's error value, never as an empty success. The bridge's window machinery retires in the same cut (P3m).
 The bridge never classifies or formats a fault.
 
-**Namespace continuation is per evaluation stage.** The explicit request namespace wins. Otherwise the starting
-namespace is the ending namespace of this agent's latest evaluation **of the same stage** on this branch (the
-default stage's evaluations carry no stage key). For SCI it must resolve to a namespace row through the existing
-pull (`agent.clj:665-677`), or the submission refuses naming it. For JVM it is a symbol (a host namespace need not be a
-row). A JVM ending namespace never continues an SCI run, or the reverse. With no prior evaluation of the stage, the
-request namespace, else `user` for JVM and the agent's assigned namespace for SCI.
+**A run starts in the agent's assigned namespace; the writer decides.** The run transaction refuses any other
+starting namespace (`:seon.turn/starting-namespace-changed`, `system-run-call`, `turn.clj:747-750`), so cross-run
+continuation is not the submitter's to choose: P3a's first version continued from the latest evaluation's ending
+namespace, and the writer refused its second run (default pid 87270: `(in-ns 'seon.id)` then a new run gave that
+refusal). Within a run each form continues where the previous one ended (the loop's `ending-ns`), so code moves with
+`in-ns`, as at a REPL. An explicit namespace other than the assignment reaches the writer and refuses by name. A JVM
+evaluation (P4) keeps its namespace in the evaluation stage, not in the run's starting namespace.
 
 **Busy, timeout and exit are the agent's.** The run transaction refuses a busy agent. Flow runs one transform at a
 time on the turn proc's thread (`agent.clj:525-545`); across graph replacement `arm!` refuses until the previous

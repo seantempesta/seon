@@ -426,8 +426,9 @@
 (defn- root-run-form
   "The prepl form that evaluates `source` as one ordinary run of root on the
   cluster's own branch (`seon.cluster.agent/evaluate-source!`), segmented as
-  code, and answers the settled run with its receipts in order. An explicit
-  namespace starts the run there; otherwise root continues where it ended."
+  code, and answers the settled run with its receipts in order. The run starts
+  in root's assigned namespace; the run writer refuses an explicit other one by
+  name, so code moves with `in-ns`, as at a REPL."
   {:malli/schema [:=> [:cat :string :string [:maybe :symbol] :boolean] :string]}
   [source cluster namespace-symbol read-only?]
   (pr-str
@@ -836,7 +837,7 @@
 
 (def tools
   [{:name "eval_clj"
-    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program row on the cluster. An explicit namespace starts the run there; otherwise root continues where its last evaluation ended. With a branch (made by the `branch` tool), SCI evaluates in that branch's retained context through the agent acquisition entrance: private SCI state, never program rows, no run or receipts, until `branch` retire releases it (a hosted branch agent replaces this). Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
+    :description "Evaluate exactly one Clojure form in a selected operator root, cluster, namespace, and mode; the returned MCP content renders directly into the calling agent/orchestrator context. JVM mode uses the live io-prepl; the session keeps no result (*1/*2/*3/*e stay nil), so bind what you need to a name. It binds no cluster custody; at a development REPL, (seon.cluster.boot/connection \"default\") supplies the explicit connection to pass to seon.db. SCI mode (`sci`) without a branch is ONE ORDINARY RUN OF ROOT on the cluster's own branch (seon.cluster.agent/evaluate-source!): the code is segmented as code (every form, several allowed), each form read and evaluated in root's context under the entry gate, settled as root's recorded evaluations, and answered as one event per evaluation with its saved shown text. A defn becomes a program row on the cluster. The run starts in root's own namespace (the run writer refuses another), so move with (in-ns ...) in the code. With a branch (made by the `branch` tool), SCI evaluates in that branch's retained context through the agent acquisition entrance: private SCI state, never program rows, no run or receipts, until `branch` retire releases it (a hosted branch agent replaces this). Oversized values settle into the selected cluster's blob tier and return a retrievable digest. Discovery derives from current advertisements and exact operating-system process identities on every call; the default session reconnects after JVM replacement."
     :inputSchema {:type "object"
                   :properties {:code {:type "string" :description "Clojure code. JVM mode and SCI with a branch evaluate exactly one form (wrap a sequence in (do ...)); SCI without a branch evaluates every form in order as one run."}
                                :root {:type "string" :description "Operator root path. Defaults to the repository root used by bin/seon."}

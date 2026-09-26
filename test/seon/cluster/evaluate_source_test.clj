@@ -12,9 +12,13 @@
             [seon.id :as id]
             [seon.test-support :as support]))
 
-(defn- shown [connection result]
-  (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
-        (drive/run-receipts (db/db connection) [(:seon.turn/id result)])))
+(defn- shown
+  "Each settled evaluation's shown text; a result with no run is asserted, never read."
+  [connection result]
+  (is (:seon.turn/id result) (pr-str result))
+  (when (:seon.turn/id result)
+    (mapv #(or (:seon.eval/shown %) (:seon.cluster.eval/error %))
+          (drive/run-receipts (db/db connection) [(:seon.turn/id result)]))))
 
 (deftest ^{:seon.test/long "Four ordinary agent runs, each a run transaction, one Flow turn and its settlement (measured 184-229 ms warm each on default, 2026-09-26), plus the agent's arming."
            :seon.test/long-ms 20000}
@@ -49,11 +53,15 @@
             (let [result (code "1\n#?(:clj 2 :cljs 3)\n(str *ns*)")]
               (is (:seon.turn/id result) (pr-str result))
               (is (= ["1" "2" (pr-str (str "my.agents." agent-id))] (shown connection result)))))
-          (testing "without a starting namespace the agent continues where its last evaluation ended"
+          (testing "a run starts in the agent's namespace; in-ns moves only the rest of that run"
             (is (= "\"seon.id\"" (last (shown connection (code "(in-ns 'seon.id)\n(str *ns*)"))))
                 "the run's own later form reads the namespace its earlier form entered")
-            (is (= ["\"seon.id\""] (shown connection (code "(str *ns*)")))
-                "the next run starts in the namespace a row names where the last one ended"))
+            (is (= [(pr-str (str "my.agents." agent-id))] (shown connection (code "(str *ns*)")))
+                "the next run starts in the assigned namespace again")
+            (is (= :seon.turn/starting-namespace-changed
+                   (:seon.turn/rule (agent/evaluate-source! (assoc request :seon.cluster.reply/text "(str *ns*)"
+                                                                   :seon.turn/starting-ns [:seon.ns/name 'seon.id]))))
+                "the run writer refuses another starting namespace by name"))
           (testing "the reply planner stays the default: a bare number is prose there"
             (is (:seon.cluster.reply/no-forms (agent/evaluate-source! (assoc request :seon.cluster.reply/text "1")))))
           (testing "a segmenter without the planner's contract refuses by name before any run"

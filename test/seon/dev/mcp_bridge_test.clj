@@ -434,9 +434,10 @@
     (is (not (contains? (get-in eval-tool [:inputSchema :properties])
                         :max_output_tokens)))
     (is (str/includes? (:description eval-tool)
-                       "MUTATES the cluster's shared SCI ctx"))
-    (is (str/includes? (:description eval-tool)
-                       "creates NO run or receipts"))
+                       "ONE ORDINARY RUN OF ROOT")
+        "branchless SCI is described as the agent run it is")
+    (is (not (str/includes? (:description eval-tool) "MUTATES the cluster's shared SCI ctx"))
+        "the retired shared-context evaluation is no longer advertised")
     (is (str/includes? (:description eval-tool)
                        "agent/orchestrator context"))
     (is (str/includes? (:description eval-tool)
@@ -447,7 +448,7 @@
     (is (contains? (get-in eval-tool [:inputSchema :properties]) :namespace))
     (is (str/includes? (get-in eval-tool [:inputSchema :properties :code
                                           :description])
-                       "Exactly one Clojure form"))))
+                       "SCI without a branch evaluates every form in order as one run"))))
 
 (deftest deleted-tool-name-is-an-unknown-tool
   (let [[response]
@@ -655,7 +656,8 @@
       (is (:seon.error/message (run "create" branch)) "an existing name refuses; never shared silently")
       (is (= "#'user/lane-mcp-probe" (sci "(defn lane-mcp-probe \"Add 41.\" {:malli/schema [:=> [:cat :int] :int]} [x] (+ x 41))" branch)))
       (is (= "42" (sci "(lane-mcp-probe 1)" branch)) "the retained branch context keeps the def")
-      (is (str/includes? (sci "(resolve 'user/lane-mcp-probe)") "nil") "the shared context never sees it")
+      (is (nil? ((requiring-resolve 'sci.core/resolve) (:seon.sci.eval/ctx (get instances cluster)) 'user/lane-mcp-probe))
+          "the shared context never sees it")
       (is (contains? (set (:seon.dev.mcp/branches (run "list" nil))) (keyword branch)))
       (is (:seon.dev.mcp/retired? (run "retire" branch)))
       (is (not (held)) "retire released the retained context")

@@ -112,14 +112,20 @@
           (testing "the agent's evaluation settled one replacement row on its branch"
             (is (not= (before callee)
                       (:seon.program/definition-digest (db/pull (db/db c-conn) [:seon.program/definition-digest] callee)))))
+          (testing "the parent head does not move before the merge"
+            (is (= (before callee)
+                   (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee)))))
           (let [proposal (source/prepare-merge! target store c issue)
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
+                _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
                 report (source/accept-merge! target store proposal)
-                merged (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))
+                _ (is (:db-after report) (pr-str report))]
+           ;; Each stage is asserted before the next reads it: a refused merge is
+           ;; shown as the merge's own value, never handed to write-back.
+           (when (:db-after report)
+           (let [merged (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))
                 request {:seon.db/connection h-conn :seon.source/accepted report :seon.fn/root root}
                 written (source/write-back! request)]
-            (is (true? (:seon.test/passed? proposal)) (:seon.source/tally proposal))
-            (is (:db-after report) (pr-str (select-keys report [:seon.error/message :seon.error/offending])))
             (testing "the exact span is written back and nothing else changes"
               (is (= [path] (:seon.source/changed-paths written)) (pr-str written))
               (is (= [callee] (get-in written [:seon.source/written :seon.source/replaced])))
@@ -130,7 +136,7 @@
               (is (= :file-changed (:seon.source/write-back-refused (source/write-back! request)))))
             (testing "a moved head refuses before any file is read"
               (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Written back"}])
-              (is (= :head-moved (:seon.source/write-back-refused (source/write-back! request))))))
+              (is (= :head-moved (:seon.source/write-back-refused (source/write-back! request))))))))
           (finally
             (agent/release-context! candidate))))
       (finally

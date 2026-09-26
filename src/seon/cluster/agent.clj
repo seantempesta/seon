@@ -596,8 +596,7 @@
   "A fresh routing entry: the process-local map atom arming rebuilds.
   `:seon.agent/armed` by agent id (the management view); `:seon.agent/channels` by
   recipient ENTITY id (the wake handler's one-lookup delivery);
-  `:seon.agent/fault-channel` set once when the cluster's fan-out stands, read by
-  every later arm; `:seon.flow/graph` the cluster graph, joined before it resumes,
+  `:seon.flow/graph` the cluster graph, joined before it resumes,
   read by oversight on every render path that holds this entry."
   {:malli/schema [:=> [:cat] :seon.agent/routing]}
   []
@@ -726,21 +725,6 @@
                     :seon.error/offending run-id
                     :seon.error/data {:seon.turn/id run-id}}))))))))))
 
-(defn- latest-ending-namespace
-  "The namespace `agent-id`'s latest evaluation ended in, when a namespace row
-  still names it: where a submission without a starting namespace continues."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.agent/id]
-                  [:or :nil :seon.ns/name :seon.db/error-result]]}
-  [database agent-id]
-  (let [rows (db/q '[:find ?at ?ordinal ?ending
-                     :in $ ?agent-id
-                     :where [?agent :seon.agent/id ?agent-id] [?run :seon.turn/agent ?agent]
-                     [?evaluation :seon.cluster.eval/run ?run] [?evaluation :seon.cluster.eval/at ?at]
-                     [?evaluation :seon.cluster.eval/ordinal ?ordinal]
-                     [?evaluation :seon.sci.eval/ending-ns ?ending] [_ :seon.ns/name ?ending]]
-                   database agent-id)]
-    (if (map? rows) rows (some-> (last (sort-by (fn [[at ordinal]] [(inst-ms at) ordinal]) rows)) (nth 2)))))
-
 (defn evaluate-source!
   "Evaluate `text` as one ordinary run of the agent and answer that run once it
   has settled: `submit-source!`, then the run's terminal fact awaited under the
@@ -750,11 +734,12 @@
   read once after it, so a run that closed before the listener saw it is not
   missed. At the bound the answer is the await's declared timeout carrying the
   run id: the run keeps its ownership, the agent stays busy until it settles,
-  and nothing replays. Without a starting namespace the agent continues in the
-  namespace its latest evaluation ended in, when a row still names it."
+  and nothing replays. The run starts in the agent's assigned namespace: the
+  run writer refuses any other (`:seon.turn/starting-namespace-changed`), and
+  a form moves the evaluation elsewhere with `in-ns`, as at a REPL."
   {:malli/schema [:=> [:cat :seon.agent/source-submission-request]
                   [:or :seon.agent/source-submission-result :seon.agent/source-submission-refused-error
-                   :seon.await/timeout-error :seon.db/error-result]]}
+                   :seon.await/timeout-error]]}
   [{handle :seon.turn.loop/cluster agent-id :seon.agent/id :as request}]
   (let [connection (:seon.db/connection handle)
         database @connection
@@ -763,11 +748,9 @@
         closed? #(when-let [id @run-id]
                    (some? (:seon.turn/closed-tx (db/pull % [:seon.turn/closed-tx] [:seon.turn/id id]))))
         listener (keyword "seon.cluster.agent" (str "evaluate-source-" (id/id)))
-        continuation (when-not (:seon.turn/starting-ns request) (latest-ending-namespace database agent-id))
         bound (:seon.config.agent/turn-completion-backstop-ms
                (config/effective database (:seon.cluster/name handle)))]
     (cond
-      (map? continuation) continuation
       (not (pos-int? bound))
       (seon.error.refusal/diagnostic (Date.) :seon.agent/source-submission `evaluate-source!
        {:seon.agent/refused-source-agent agent-id
@@ -778,8 +761,7 @@
       (do
         (d/listen connection listener (fn [report] (when (closed? (:db-after report)) (async/offer! closed true))))
         (try
-          (let [submitted (submit-source! (cond-> request
-                                            continuation (assoc :seon.turn/starting-ns [:seon.ns/name continuation])))]
+          (let [submitted (submit-source! request)]
             (if-not (:seon.turn/id submitted)
               submitted
               (do (reset! run-id (:seon.turn/id submitted))
@@ -1207,7 +1189,6 @@
                               :seon.cluster.wake/channel wake-ch
                               :seon.schedule/channel schedule-channel
                               :seon.turn.loop/completion completion
-                              :seon.agent/fault-channel (:seon.agent/fault-channel @routing)
                               :seon.agent/turn-backstop-state turn-backstop-state
                               :seon.config.agent/turn-completion-backstop-ms
                               turn-completion-backstop-ms
