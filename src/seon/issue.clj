@@ -639,7 +639,8 @@
 (defn tasks-tx
   "The writer's delta from stored tasks to the declared `files`, by handle. A touched
   task whose current declaration differs from the caller's `basis` refuses with base,
-  current and proposed (7.16); unchanged input is empty; a removed entry retracts."
+  current and proposed (7.16); unchanged input is empty; a removed entry retracts.
+  A runtime task (`:seon.task/created-by`) is outside every file's declaration."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/files :seon.task/basis] [:vector :seon.schema/value]]}
   [database files basis]
   (let [projection (db/carried-projection database)
@@ -649,7 +650,17 @@
     (when (read-error stored) (throw (ex-info (:seon.error/message stored) stored)))
     (when-let [id (some (fn [[id n]] (when (< 1 n) id)) (frequencies (map :seon.task/id proposed)))]
       (functions/task-refused! 'seon.issue/tasks-tx :duplicate-id (:seon.task/ns (by-id id)) id {}))
-    (task-delta projection stored by-id basis)))
+    ;; A runtime task (7.8, its writer recorded) is no file's declaration: never retracted here.
+    (task-delta projection (into {} (remove (comp :seon.task/created-by val)) stored) by-id basis)))
+
+(defn task-revision
+  "The reviewed revision of the task `handle` in `database`: seon.id/digest over its declaration; nil when absent."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.task/handle]
+                  [:or :nil :seon.task/revision :seon.db/invalid-read-error]]}
+  [database handle]
+  (let [stored (stored-tasks database :seon.task/id #{handle})]
+    (or (read-error stored)
+        (some->> (stored handle) (declaration (db/carried-projection database)) vector (id/digest 64)))))
 
 (defn adopt-tasks-tx
   "Reconcile the selected `handles` into a development database from the `rows` the
