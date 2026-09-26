@@ -151,7 +151,7 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 **NEXT (root, rewritten 2026-09-27 ~03:30Z; launch in order as lanes free; ≤3 editing lanes):** running: one-commit-a-opus (variant A
 then B — reply when applied, durability async, no in-between-state plumbing), render-specificity-audit-astra. Then: (1) merge cut 1
 (seon.task/create! 7.8, assignment, proposal gate; merge-task-design 91ba2e3f0); (2) arity rule (declared form wins); (3) docs parser
-slice (nextjournal/markdown in deps 9ce20359e; pilots 8d321a8ec); (4) render pairs per the audit (contract refusal first); (5) error
+slice (nextjournal/markdown in deps 9ce20359e; pilots 8d321a8ec); (4) render-specificity audit slices (0f7a8dda7): s1 errors + s2 floor RUNNING; then s3 evaluation/observation (turn.clj — after the commit lane), s4 transcript/message, s5 acquisition, s6 report/directory pairs, s7 MCP convergence; (5) error
 slices 5–8 + leftover producers; (6) M1 remainder; (7) cold-start and adoption-write cost tasks; (8) JFR waste hunt. Live: 36a3714b4.
 
 ### Operating checklist
