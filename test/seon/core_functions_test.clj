@@ -53,15 +53,16 @@
                         :seon.sci.eval/installations
                         [{:seon.program/row row :seon.sci.eval/evaluation result}]})))))
             check (fn [source]
-                    (let [candidate
+                    (let [request {:seon.sci.eval/ctx ctx :seon.db/db @connection
+                                   :seon.db/connection connection :seon.agent/id "core-functions"
+                                   :seon.cluster.eval/source source
+                                   :seon.test.accretion/gate-set []
+                                   :seon.sci.eval/time-limit-ms 10000
+                                   :seon.sci.admit/caps (config/result-caps config/defaults)
+                                   :seon.config/on-core-error :panic}
+                          candidate
                           (evaluation/evaluate-candidate
-                           {:seon.sci.eval/ctx ctx :seon.db/db @connection
-                            :seon.db/connection connection :seon.agent/id "core-functions"
-                            :seon.cluster.eval/source source
-                            :seon.test.accretion/gate-set []
-                            :seon.sci.eval/time-limit-ms 10000
-                            :seon.sci.admit/caps (config/result-caps config/defaults)
-                            :seon.config/on-core-error :panic})]
+                           (assoc request :seon.test.accretion/evaluation (evaluation/evaluate request)))]
                       (evaluation/auto-check-candidate
                        {:seon.sci.eval/ctx (:seon.test.accretion/candidate-ctx candidate)
                         :seon.db/db @connection

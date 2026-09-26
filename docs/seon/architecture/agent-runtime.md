@@ -156,9 +156,10 @@ or running unrelated inherited work. Cluster-qualified messages arriving after t
 fork reach the candidate's own message owner. Shared-only forwarding needs a separate
 custody/read-evidence proof; copying message facts is not that interface.
 
-The existing definition-time candidate fork stays until D1 supplies its complete
-replacement, including conflict-basis checks, invalid-candidate refusal and private
-state preservation. Candidate-local green is not automatic shared merge. D1 validates
+A definition evaluates once, in the agent's retained context; its install gate
+proves it in a fork of that context, and a refused install restores the context
+through the evaluation's own restoration. Candidate-local green is not automatic
+shared merge. D1 validates
 the combined program and B4 runs its exact definitions before explicit acceptance.
 
 After process failure, interrupted execution never resumes. Recovery closes open

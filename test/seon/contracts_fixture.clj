@@ -47,7 +47,7 @@
 (defn submit {:malli/schema [:=> [:cat :seon.db/connection :seon.sci.eval/ctx :seon.schema/value :string] [:tuple :map :seon.schema/value]]}
   [connection ctx _ source]
   (let [evaluation-request (request connection ctx source)
-        evaluated (sci-eval/evaluate-for-install evaluation-request)
+        evaluated (sci-eval/evaluate evaluation-request)
         value (:seon.sci.admit/value evaluated)]
     (when (:seon.cluster.eval/error evaluated)
       (is (some #(and (= :declared (:seon.render.selection.stage/name %))

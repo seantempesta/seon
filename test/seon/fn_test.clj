@@ -1772,7 +1772,7 @@
   (test-support/with-database
     (fn [connection]
       (let [database @connection
-            evaluate (production-callers database (quote seon.sci.eval/evaluate-for-install))
+            evaluate (production-callers database (quote seon.sci.eval/evaluate))
             sources (production-callers database
                                         (quote seon.turn/evaluate-sources))
             previews (production-callers database

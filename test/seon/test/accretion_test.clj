@@ -19,6 +19,12 @@
       (throw (ex-info "Auto-check fixture admission failed." result)))
     result))
 
+(defn- candidate!
+  "Evaluate `request`'s definition once in its context, then prove it in a fork."
+  [request]
+  (sci.eval/evaluate-candidate
+   (assoc request :seon.test.accretion/evaluation (sci.eval/evaluate request))))
+
 (deftest refused-install-feedback-is-complete-grouped-and-renderable
   (let [test-result
         (fn [test-symbol]
@@ -153,12 +159,15 @@
       (is (= (seon.fn/gate-set @connection 'fixture.gate/target)
              (seon.fn/tests-reaching @connection 'fixture.gate/target))))))
 
-(deftest candidate-tests-run-on-a-copy-on-write-turn-fork
+(deftest a-definition-evaluates-once-and-its-gate-proves-that-root
+  ;; CLASS (M2, 2026-09-26): the gate's world is a fork of the context that
+  ;; evaluated the definition, never a second evaluation chosen by reader
+  ;; syntax. `(do (defn f ...) (f 1))` and a top-level defn take one path: the
+  ;; root the gate tests is the root acceptance keeps, and a refused install
+  ;; restores the evaluating context through the evaluation's own restore.
   (test-support/with-database
     (fn [connection]
-      (admit!
-       connection
-       (test-support/agent-tx @connection "candidate-author" 'fixture.candidate))
+      (admit! connection (test-support/agent-tx @connection "candidate-author" 'fixture.candidate))
       (let [source (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)\n"
                         "(clojure.test/deftest green-test (clojure.test/is (= 2 (target 1))))\n"
                         "(clojure.test/deftest red-test (clojure.test/is (= 3 (target 1))))")]
@@ -167,119 +176,42 @@
                  (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/green-test] source {})
                  (test-support/program-row @connection [:seon.test/sym 'fixture.candidate/red-test] source {})]))
       (let [parent (test-support/fork-cluster-ctx connection)
-            ;; The parent holds the program its database holds, as a live
-            ;; agent context does. A stale parent is advanced by the fork's
-            ;; first evaluation (`evaluate` acquires `::base-ctx`), which
-            ;; replaces a definition whose row changed: adoption, not leakage.
             _ (sci.eval/acquire! {:seon.sci.eval/ctx parent :seon.db/db @connection})
-            _ (when-not (sci/find-ns parent 'fixture.candidate)
-                (sci/add-namespace! parent 'fixture.candidate {}))
-            _ (sci/binding [sci/ns (sci/create-ns 'fixture.candidate)]
-                (sci/eval-string*
-                 parent
-                 (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                      "target [x] x)")))
-            parent-var (sci/resolve parent 'fixture.candidate/target)
-            parent-root-bytes
-            (.getBytes
-             (binding [*print-meta* true]
-               (pr-str
-                (first
-                 (sci/var-root-data
-                  parent ['fixture.candidate/target]))))
-             java.nio.charset.StandardCharsets/UTF_8)
-            result
-            (sci.eval/evaluate-candidate
-             {:seon.sci.eval/ctx parent
-              :seon.db/db @connection
-              :seon.db/connection connection
-              :seon.agent/id "candidate-author"
-              :seon.cluster.eval/source
-              (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} "
-                   "target [x] (inc x))")
-              :seon.test.accretion/gate-set
-              ['fixture.candidate/green-test
-               'fixture.candidate/red-test]
-              :seon.sci.eval/time-limit-ms 2000
-              :seon.sci.admit/caps
-              (config/result-caps config/defaults)
-              :seon.config/on-core-error :panic})
-            candidate (:seon.test.accretion/candidate-ctx result)
-            results (:seon.test.accretion/results result)
-            parent-root-after
-            (.getBytes
-             (binding [*print-meta* true]
-               (pr-str
-                (first
-                 (sci/var-root-data
-                  parent ['fixture.candidate/target]))))
-             java.nio.charset.StandardCharsets/UTF_8)]
-        (testing "the candidate function and every gate test run"
-          (is (= ['fixture.candidate/green-test
-                  'fixture.candidate/red-test]
+            request (fn [source]
+                      {:seon.sci.eval/ctx parent :seon.db/db @connection
+                       :seon.db/connection connection :seon.agent/id "candidate-author"
+                       :seon.cluster.eval/ns [:seon.ns/name 'fixture.candidate]
+                       :seon.cluster.eval/source source
+                       :seon.test.accretion/gate-set ['fixture.candidate/green-test 'fixture.candidate/red-test]
+                       :seon.sci.eval/time-limit-ms 2000
+                       :seon.sci.admit/caps (config/result-caps config/defaults)
+                       :seon.config/on-core-error :panic})
+            held (sci/resolve parent 'fixture.candidate/target)
+            wrapped (request (str "(do (defn ^{:malli/schema [:=> [:cat :int] :int]} "
+                                  "target [x] (inc x)) (target 1))"))
+            evaluation (sci.eval/evaluate wrapped)
+            result (sci.eval/evaluate-candidate
+                    (assoc wrapped :seon.test.accretion/evaluation evaluation))
+            results (:seon.test.accretion/results result)]
+        (testing "a definition inside do is gated like a top-level one"
+          (is (= 2 (:seon.sci.admit/value evaluation)) (pr-str evaluation))
+          (is (= 'fixture.candidate/target
+                 (get-in evaluation [:seon.program/row :seon.fn/sym])))
+          (is (= ['fixture.candidate/green-test 'fixture.candidate/red-test]
                  (mapv :seon.test/sym results)))
-          (is (= [0 1] (mapv :seon.test/fail-count results)))
-          (is (= 2
-                 (sci/eval-string*
-                  candidate "(fixture.candidate/target 1)"))))
-        (testing "the parent retains byte-identical Var state"
-          (is (identical? parent-var
-                          (sci/resolve parent 'fixture.candidate/target)))
-          (is (java.util.Arrays/equals parent-root-bytes parent-root-after))
-          (is (= 1
-                 (sci/eval-string*
-                  parent "(fixture.candidate/target 1)"))))))))
-
-(deftest two-candidate-forks-of-one-base-keep-their-own-roots
-  ;; CLASS: a candidate installs into its fork only. Two forks of one acquired
-  ;; base install different roots for one symbol; the base keeps its Var, root
-  ;; bytes, program snapshot, installed set and environment, and each fork its own.
-  (test-support/with-database
-    (fn [connection]
-      (admit! connection
-              (test-support/agent-tx @connection "fork-author" 'fixture.forks))
-      (admit! connection
-              [(test-support/program-fn-row
-                @connection 'fixture.forks/target
-                "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)")])
-      (let [base (test-support/fork-cluster-ctx connection)
-            _ (sci.eval/acquire! {:seon.sci.eval/ctx base :seon.db/db @connection})
-            _ (when-not (sci/find-ns base 'fixture.forks)
-                (sci/add-namespace! base 'fixture.forks {}))
-            _ (sci/binding [sci/ns (sci/create-ns 'fixture.forks)]
-                (sci/eval-string*
-                 base "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] x)"))
-            root-bytes #(.getBytes (binding [*print-meta* true]
-                                     (pr-str (first (sci/var-root-data % ['fixture.forks/target]))))
-                                   java.nio.charset.StandardCharsets/UTF_8)
-            base-var (sci/resolve base 'fixture.forks/target)
-            [root-before snapshot installed environment]
-            [(root-bytes base) @(:seon.sci.kernel/program-snapshot base)
-             @(:seon.sci.kernel/installed-functions base) (env/of base)]
-            candidate
-            (fn [body]
-              (:seon.test.accretion/candidate-ctx
-               (sci.eval/evaluate-candidate
-                {:seon.sci.eval/ctx base :seon.db/db @connection
-                 :seon.db/connection connection :seon.agent/id "fork-author"
-                 :seon.cluster.eval/source
-                 (str "(defn ^{:malli/schema [:=> [:cat :int] :int]} target [x] " body ")")
-                 :seon.test.accretion/gate-set []
-                 :seon.sci.eval/time-limit-ms 2000
-                 :seon.sci.admit/caps (config/result-caps config/defaults)
-                 :seon.config/on-core-error :panic})))
-            inc-fork (candidate "(inc x)")
-            dec-fork (candidate "(dec x)")]
-        (is (some? base-var))
-        (is (identical? base-var (sci/resolve base 'fixture.forks/target)))
-        (is (java.util.Arrays/equals ^bytes root-before ^bytes (root-bytes base)))
-        (is (identical? snapshot @(:seon.sci.kernel/program-snapshot base)))
-        (is (identical? installed @(:seon.sci.kernel/installed-functions base)))
-        (is (identical? environment (env/of base)))
-        (is (not (identical? (sci/resolve inc-fork 'fixture.forks/target)
-                             (sci/resolve dec-fork 'fixture.forks/target))))
-        (is (= [1 2 0] (mapv #(sci/eval-string* % "(fixture.forks/target 1)")
-                             [base inc-fork dec-fork])))))))
+          (is (= [0 1] (mapv :seon.test/fail-count results)) (pr-str results)))
+        (testing "the gate proves the root the evaluating context holds"
+          (is (= 2 (sci/eval-string* (:seon.test.accretion/candidate-ctx result)
+                                     "(fixture.candidate/target 1)")))
+          (is (= 2 (sci/eval-string* parent "(fixture.candidate/target 1)"))))
+        (testing "a refused install restores the evaluating context"
+          (sci.eval/refuse-install wrapped evaluation
+                                   (accretion/install-refusal
+                                    (accretion/gate-report
+                                     {:seon.fn/sym 'fixture.candidate/target
+                                      :seon.test.accretion/results results})))
+          (is (identical? held (sci/resolve parent 'fixture.candidate/target)))
+          (is (= 1 (sci/eval-string* parent "(fixture.candidate/target 1)"))))))))
 
 (deftest a-gate-test-runs-with-its-authors-cluster-custody
   ;; A GATE TEST IS THE AUTHOR'S OWN WORK. It is evaluated in the candidate
@@ -302,7 +234,7 @@
                 {})])
       (let [parent (test-support/fork-cluster-ctx connection)
             result
-            (sci.eval/evaluate-candidate
+            (candidate!
              {:seon.sci.eval/ctx parent
               :seon.db/db @connection
               :seon.db/connection connection
@@ -340,7 +272,7 @@
       (let [parent (test-support/fork-cluster-ctx connection)
             candidate-request
             (fn [source]
-              (sci.eval/evaluate-candidate
+              (candidate!
                {:seon.sci.eval/ctx parent
                 :seon.db/db @connection
                 :seon.db/connection connection
@@ -431,7 +363,7 @@
       (admit! connection (test-support/agent-tx @connection "world-author" 'fixture.world))
       (let [parent (test-support/fork-cluster-ctx connection)
             check (fn [source]
-                    (let [candidate (sci.eval/evaluate-candidate
+                    (let [candidate (candidate!
                                      {:seon.sci.eval/ctx parent :seon.db/db @connection
                                       :seon.db/connection connection :seon.agent/id "world-author"
                                       :seon.cluster.eval/source source :seon.test.accretion/gate-set []

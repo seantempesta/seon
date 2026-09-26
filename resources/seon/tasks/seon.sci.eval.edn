@@ -41,7 +41,7 @@
              :name "install-gate-interprets-file-tests-in-sci"
              :kind :function
              :intent "The install gate re-evaluates every reaching file test's source in the candidate's SCI (run-candidate-test!), where the test's own requires do not resolve: a docstring-only defn of my.note/add! gated 4 tests, 0 passed, each 'Unable to resolve symbol: support/with-database'; an arity change of my.fs/write! failed 3 of 3, while my.test/check ran the same 3 tests green in 7,165 ms. It also runs compiled host test bodies under an SCI arm that cannot interrupt them, which drove the 14:20Z recursion to 10.2 GB. Needs the owner's reach-executor ruling (loose-threads section 11 Q1: run unchanged file tests as compiled Vars with the branch definition bound, interpret only differing rows, or gate only branch tests and leave file tests to merge)."
-             :must-read #{seon.sci.eval/evaluate-for-install seon.sci.eval/run-candidate-test! seon.turn/gate-function-install}
+             :must-read #{seon.sci.eval/evaluate-candidate seon.sci.eval/run-candidate-test! seon.turn/gate-function-install}
              :evidence #{"docs/research/agent-platform/dogfood-maintainer-opus-2026-09-26.md"
                          "docs/research/agent-platform/landing/fix-dogfood-api-2026-09-26.md"
                          "docs/research/agent-platform/landing/inv-heap-stuck-members-opus-2026-09-26.md"
@@ -50,7 +50,7 @@
              :name "a-registration-lets-a-later-redefinition-skip-its-gate"
              :kind :function
              :intent "A breaking defn installs without its gate when a seon.schema/register! came earlier in the same run; the same defn alone is refused by its gating test (952 ms run). A bad normalize-tags with two gating tests installed the same way. A skipped gate and a passing gate both print #'ns/name. A gate that cannot run must refuse, never admit."
-             :must-read #{seon.schema/register! seon.sci.eval/evaluate seon.sci.eval/evaluate-for-install}
+             :must-read #{seon.schema/register! seon.sci.eval/evaluate seon.turn/gate-function-install}
              :evidence #{"docs/research/agent-platform/dogfood-author-opus-2026-09-26.md"
                          "docs/seon/issues/a-schema-registration-earlier-in-a-run-lets-a-later-redefinition-install-ungated.md"}}
  #:seon.task{:id "85bb0e44a4b9"

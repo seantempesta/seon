@@ -72,10 +72,10 @@
   showed exactly how expensive disappeared evidence is.
 
   THE CLUSTER OWNS THE LIVE BASE CTX. Each agent retains its own context
-  and receives accepted base changes before later turns. The turn's install
-  entrance evaluates function declarations in a generation-aware candidate
-  fork; only accepted function roots enter the retained context. Ordinary
-  forms use that retained context directly. This raw form entrance uses a
+  and receives accepted base changes before later turns. Every form, a
+  function declaration included, evaluates once in that retained context;
+  the install gate proves a declaration in a fork of it and a refusal
+  restores the form's change (`refuse-install`). This raw form entrance uses a
   supplied context as given; cluster boot acquires the program-only base.
   When no ctx is supplied a fresh base is made for an isolated one-off.
 
@@ -4427,8 +4427,6 @@
                                 reader-error)))
             form (:seon.sci.reader/form event)
             namespace-unmap? (:seon.sci.reader/ns-unmap? event)
-            ;; The install entrance supplies a candidate for a function;
-            ;; ordinary forms receive the retained agent context directly.
             execution-ctx evaluation-ctx
             capture (context-capture execution-ctx)
             before-namespaces (::namespaces capture)
@@ -4587,8 +4585,7 @@
               ;; sequence dies at the time limit here rather than in the
               ;; receipt writer
               evaluation-record (record :ok)
-              ;; Capture exact evaluated roots. The install decision transfers
-              ;; accepted function roots and discards refused candidate roots.
+              ;; Capture exact evaluated roots; settlement installs rows from them.
               definitions
               (bindings execution-ctx namespace-name before-intern-values
                          source form (built-in-calls))
@@ -4626,11 +4623,10 @@
             (failure-result throwable)))))))))))))))
 
 (defn fork-candidate-ctx
-  "Fork one candidate through the generation-aware turn path.
+  "Fork the context that evaluated a declaration for its gate's proof.
 
-  This deliberately delegates to `fork-for-turn`; candidate code never calls
-  plain `sci/fork`; the candidate receives a separate context and cannot
-  modify the live agent's private bindings."
+  This deliberately delegates to `fork-for-turn`; the proof never calls
+  plain `sci/fork`, and its tests' private definitions stay in the fork."
   {:malli/schema [:=> [:cat :seon.test.accretion/candidate-context-request]
                   :seon.sci.eval/ctx]}
   [request]
@@ -4656,34 +4652,12 @@
     (advance-context-projection! ctx database next-projection)
     ctx))
 
-(defn evaluate-for-install
-  "Read once and evaluate function declarations in the existing candidate fork.
-  Other forms keep the retained context. The caller owns the install decision."
-  {:malli/schema
-   [:=> [:cat [:and :seon.sci.eval/request
-               :seon.test.accretion/candidate-context-request]]
-    :seon.sci.eval/evaluation]}
-  [{ctx :seon.sci.eval/ctx source :seon.cluster.eval/source
-    namespace-ref :seon.cluster.eval/ns :as request}]
-  (let [event (or (:seon.sci.eval/event request)
-                  (try
-                    (one-event source (second namespace-ref) ctx
-                               (get-in request [:seon.sci.admit/caps
-                                                :seon.config.eval.result/max-source]))
-                    (catch Throwable failure
-                      {:seon.sci.reader/error
-                       (kernel/failure-value
-                        {::kernel/time-limit-kind ::time-limit
-                         ::kernel/failure-kind ::evaluation-failed}
-                        failure (kernel/unarmed-record (System/nanoTime)))})))
-        candidate (when (:seon.fn/sym event) (fork-candidate-ctx request))
-        evaluation (evaluate (assoc request :seon.sci.eval/event event
-                                    :seon.sci.eval/ctx (or candidate ctx)))]
-    (cond-> evaluation
-      candidate (assoc :seon.test.accretion/candidate-ctx candidate))))
-
 (defn accept-candidate!
-  "Transfer an accepted function's evaluated root into the retained context."
+  "Arm an accepted function in the retained context that evaluated it.
+
+  The form ran once, in this context (`evaluate`), so its root is already
+  here; acceptance installs the contract. A failed install restores the
+  form's change through the evaluation's own `:seon.sci.eval/restore`."
   {:malli/schema
    [:=> [:cat [:map [:seon.sci.eval/ctx :seon.sci.eval/ctx]
                [:seon.db/db :seon.db/database-value]
@@ -4691,32 +4665,28 @@
     :seon.sci.eval/evaluation]}
   [{ctx :seon.sci.eval/ctx database :seon.db/db
     evaluation :seon.sci.eval/evaluation}]
-  (let [row (:seon.program/row evaluation)
-        ;; Acceptance changes the retained context before settlement, so the
-        ;; evaluation's restoration becomes this recipient's: a refused batch
-        ;; must undo the transfer, not the discarded candidate.
-        restore! (context-restoration ctx (context-capture ctx))]
-    (try
-      (transfer-evaluated-roots!
-       ctx [{:seon.program/row row :seon.sci.eval/evaluation evaluation}])
-      (install-candidate-function! ctx database row)
-      (catch Throwable failure
-        (if-let [unavailable (restore! nil failure)]
-          (throw (ex-info (:seon.error/message unavailable) unavailable failure))
-          (throw failure))))
-    (assoc evaluation
-           :seon.sci.admit/value (sci/resolve ctx (:seon.fn/sym row))
-           :seon.sci.eval/restore restore!)))
+  (try
+    (install-candidate-function! ctx database (:seon.program/row evaluation))
+    (catch Throwable failure
+      (if-let [unavailable ((:seon.sci.eval/restore evaluation) nil failure)]
+        (throw (ex-info (:seon.error/message unavailable) unavailable failure))
+        (throw failure))))
+  evaluation)
 
 (defn refuse-install
-  "Project the flat refusal as the evaluation result, discarding candidate roots."
+  "Project the flat refusal as the evaluation result. The refused form's
+  change is undone by its evaluation's own `:seon.sci.eval/restore`, the one
+  restoration admission, arming and settlement refusals use. The refusal is
+  the install gate's, or the writer's refusal of this form's row at
+  settlement (`seon.turn/settled-value`)."
   {:malli/schema
    [:=> [:cat :seon.sci.eval/request :seon.sci.eval/evaluation
-         :seon.test.accretion/install-refused-error]
+         [:or :seon.test.accretion/install-refused-error :seon.db/error-result :seon.turn/refused-error]]
     :seon.sci.eval/evaluation]}
   [request evaluation refusal]
-  (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings
-                 :seon.test.accretion/candidate-ctx :seon.eval/renderer)
+  (when-let [unavailable ((:seon.sci.eval/restore evaluation) nil (ex-info (:seon.error/message refusal) refusal))]
+    (throw (ex-info (:seon.error/message unavailable) unavailable)))
+  (merge (dissoc evaluation :seon.program/row :seon.sci.eval/bindings :seon.eval/renderer)
          (shown-result refusal request
                        (assoc (:seon.sci.admit/record evaluation)
                               :seon.eval/outcome :error))))
@@ -4786,59 +4756,46 @@
                     :seon.sci.eval/ctx ctx :seon.test/var test-var)))))))
 
 (defn evaluate-candidate
-  "Evaluate one durable function and every gate test in an isolated candidate.
+  "Prove one evaluated durable function: its seeded contract check, then every
+  gate test, in one fork of the retained context that evaluated it.
 
-  The returned test values are exactly `seon.test.runner/run-var!` reports.
-  All tests run even after a red result. A supplied candidate and evaluation
-  reuse the already evaluated definition; acceptance transfers only its root,
-  never the candidate context or the gate tests' private definitions."
+  The form ran once (`evaluate`); the fork holds that evaluated root, so the
+  proof runs the value acceptance keeps. The returned test values are exactly
+  `seon.test.runner/run-var!` reports. All tests run even after a red result.
+  The fork and the gate tests' private definitions are never transferred."
   {:malli/schema [:=> [:cat :seon.test.accretion/candidate-request]
                   :seon.test.accretion/candidate-result]}
   [{base-ctx :seon.sci.eval/ctx
     database :seon.db/db
     connection :seon.db/connection
     agent-id :seon.agent/id
-    source :seon.cluster.eval/source
     test-symbols :seon.test.accretion/gate-set
-    analyzed-row :seon.program/row
+    evaluation :seon.test.accretion/evaluation
     :as request}]
-  (let [ctx (or (:seon.test.accretion/candidate-ctx request)
-                (fork-candidate-ctx
+  (let [ctx (fork-candidate-ctx
              {:seon.sci.eval/ctx base-ctx
               :seon.db/db database
               :seon.db/connection connection
-              :seon.agent/id agent-id}))
-        evaluation
-        (or (:seon.test.accretion/evaluation request)
-            (evaluate (assoc request
-                         :seon.sci.eval/ctx ctx
-                         :seon.cluster.eval/source source)))
-        row (or analyzed-row (:seon.program/row evaluation))
-        evaluation (cond-> evaluation row (assoc :seon.program/row row))]
-    (if (or (:seon.cluster.eval/error evaluation)
-            (nil? (:seon.fn/sym row)))
-      {:seon.test.accretion/candidate-ctx ctx
-       :seon.test.accretion/evaluation evaluation
-       :seon.test.accretion/results []}
-      (do
-        (install-candidate-function! ctx database row)
-        (let [check
-              (when (and (:seon.config.test/auto-check-cases request)
-                         (:seon.test.accretion/seed request))
-                (accretion/auto-check
-                 (assoc request
-                        :seon.sci.eval/ctx ctx
-                        :seon.program/row row
-                        :seon.schema/projection (context-projection ctx))))]
-          (cond->
-           {:seon.test.accretion/candidate-ctx ctx
-            :seon.test.accretion/evaluation evaluation
-            ;; Auto-check is deliberately realized above this expression:
-            ;; the seeded contract probe precedes every example test.
-            :seon.test.accretion/results
-            (mapv (partial run-candidate-test! ctx database request)
-                  test-symbols)}
-            check (assoc :seon.test.accretion/auto-check check)))))))
+              :seon.agent/id agent-id})
+        row (or (:seon.program/row request) (:seon.program/row evaluation))]
+    (install-candidate-function! ctx database row)
+    (let [check
+          (when (and (:seon.config.test/auto-check-cases request)
+                     (:seon.test.accretion/seed request))
+            (accretion/auto-check
+             (assoc request
+                    :seon.sci.eval/ctx ctx
+                    :seon.program/row row
+                    :seon.schema/projection (context-projection ctx))))]
+      (cond->
+       {:seon.test.accretion/candidate-ctx ctx
+        :seon.test.accretion/evaluation (assoc evaluation :seon.program/row row)
+        ;; Auto-check is deliberately realized above this expression:
+        ;; the seeded contract probe precedes every example test.
+        :seon.test.accretion/results
+        (mapv (partial run-candidate-test! ctx database request)
+              test-symbols)}
+        check (assoc :seon.test.accretion/auto-check check)))))
 
 (defn auto-check-candidate
   "Run the seeded contract check against an already evaluated candidate."

@@ -3351,11 +3351,7 @@
             :seon.db/db database
             :seon.db/connection (:seon.db/connection cluster)
             :seon.agent/id agent-id
-            :seon.test.accretion/candidate-ctx
-            (:seon.test.accretion/candidate-ctx evaluation)
             :seon.test.accretion/evaluation evaluation
-            :seon.cluster.eval/source
-            (:seon.cluster.eval/source form)
             :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
             :seon.program/row analyzed-row
             :seon.test.accretion/gate-set test-symbols
@@ -3392,9 +3388,7 @@
            :seon.test.accretion/status
            (:seon.test.accretion/status check)
            :seon.test.accretion/report-edn (pr-str report)}
-          evaluation (merge (dissoc evaluation :seon.test.accretion/candidate-ctx)
-                            evidence
-                            {:seon.program/row analyzed-row})]
+          evaluation (merge evaluation evidence {:seon.program/row analyzed-row})]
       (if (:seon.test.accretion/install? report)
         (append-output (sci.eval/accept-candidate!
                         {:seon.sci.eval/ctx base-ctx :seon.db/db database
@@ -3402,9 +3396,8 @@
                        (:seon.test.accretion/advisories report))
         (sci.eval/refuse-install
          form evaluation (accretion/install-refusal report))))
-    (if (get-in evaluation [:seon.program/row :seon.fn/sym])
-      (dissoc evaluation :seon.program/row :seon.test.accretion/candidate-ctx)
-      (dissoc evaluation :seon.test.accretion/candidate-ctx))))
+    (cond-> evaluation
+      (get-in evaluation [:seon.program/row :seon.fn/sym]) (dissoc :seon.program/row))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; The proc
@@ -4893,7 +4886,7 @@
                  (if run-id (receipt-identity run-id ordinal)
                      (id/id [agent-id form]))
                  request
-                 (sci.eval/evaluate-for-install request)))
+                 (sci.eval/evaluate request)))
               evaluation (or (disposition-rule-error
                                (db/carried-projection database)
                                (:seon.cluster.eval/source form) namespace-name

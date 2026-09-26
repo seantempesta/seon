@@ -23,9 +23,10 @@
    :seon.config/on-core-error :panic})
 
 (deftest a-refused-batch-restores-the-context-that-accepted-a-candidate
-  ;; The ordinary turn path: evaluate-for-install forks a candidate, the gate
-  ;; accepts it into the retained context before settlement, and a settlement
-  ;; refusal calls each evaluation's restore (`turn/restore-evaluations!`).
+  ;; The ordinary turn path: the definition evaluates once in the retained
+  ;; context, the gate accepts it (arming its contract) before settlement, and
+  ;; a settlement refusal calls each evaluation's restore
+  ;; (`turn/restore-evaluations!`).
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
@@ -35,14 +36,12 @@
        (value (str "(defn caller \"D.\" " contract " [x] (base-f x))"))
        (let [held (get-in @(:env ctx) [:namespaces 'scratch.restoration 'base-f])
              snapshot @(:seon.sci.kernel/program-snapshot ctx)
-             candidate (sci.eval/evaluate-for-install
+             candidate (sci.eval/evaluate
                         (request ctx connection
                                  (str "(defn base-f \"D.\" " contract " [x] (* 100 x))")))
              accepted (sci.eval/accept-candidate!
                        {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
-                        :seon.sci.eval/evaluation
-                        (dissoc candidate :seon.test.accretion/candidate-ctx)})]
-         (is (some? (:seon.test.accretion/candidate-ctx candidate)))
+                        :seon.sci.eval/evaluation candidate})]
          (is (= 100 (value "(caller 1)")) "the accepted candidate reached the retained context")
          (is (nil? ((:seon.sci.eval/restore accepted))))
          (is (= 2 (value "(caller 1)")) "an affected caller runs the prior definition again")
@@ -52,9 +51,9 @@
          (is (= :input (:seon.instrument/check (value "(base-f \"a\")")))
              "the prior contract is still armed"))))))
 
-(deftest acceptance-that-throws-after-transfer-restores-the-recipient
-  ;; Astra e19adf392 finding 4: the recipient's restoration is captured before
-  ;; the transfer, and a throw before installation completes applies it.
+(deftest acceptance-that-throws-restores-the-evaluating-context
+  ;; Astra e19adf392 finding 4: the evaluation's own restoration, captured
+  ;; before the form ran, applies when installation throws.
   (support/with-database
    (fn [connection]
      (let [ctx (support/fork-cluster-ctx connection)
@@ -65,14 +64,12 @@
        (let [held (get-in @(:env ctx) [:namespaces 'scratch.restoration 'base-f])
              snapshot @(:seon.sci.kernel/program-snapshot ctx)
              installed @(:seon.sci.kernel/installed-functions ctx)
-             candidate (sci.eval/evaluate-for-install
+             candidate (sci.eval/evaluate
                         (request ctx connection
                                  (str "(defn base-f \"D.\" " contract " [x] (* 100 x))")))
              ;; An unreadable contract throws inside installation, after the
-             ;; candidate's root was transferred.
-             unreadable (-> candidate
-                            (dissoc :seon.test.accretion/candidate-ctx)
-                            (assoc-in [:seon.program/row :seon.fn/spec] "[:=> [:cat"))
+             ;; form's root was interned.
+             unreadable (assoc-in candidate [:seon.program/row :seon.fn/spec] "[:=> [:cat")
              thrown (try (sci.eval/accept-candidate!
                           {:seon.sci.eval/ctx ctx :seon.db/db (db/db connection)
                            :seon.sci.eval/evaluation unreadable})
