@@ -1995,3 +1995,11 @@
         (let [racing (doall (for [_ (range 8)] (future (table-product entry :same some? (derive! :same)))))]
           (is (every? #(= :same @%) racing) "concurrent misses all answer")
           (is (core-cache/has? @(:seon.schema/table entry) :same)))))))
+
+(deftest schema-scoped-admissions-are-the-schema-rows-of-the-loader's-admissions
+  ;; Contracts-out §3 (N5.1): the reader slice 4 switches to answers exactly the
+  ;; schema-key half of what the loader reads today.
+  (let [database (seon.db/db (:seon.db/connection (test-support/execution-handle nil)))
+        loader (#'schema/projection-admissions database)]
+    (is (= (into {} (filter (fn [[[attribute _] _]] (= :seon.schema/key attribute))) loader)
+           (#'schema/schema-scoped-admissions database)))))

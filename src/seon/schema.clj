@@ -2884,6 +2884,23 @@
                           (d/datoms database :avet attribute))))
           [:seon.schema/key :seon.fn/sym])))
 
+(defn- schema-scoped-admissions
+  "The admission of every schema declaration, read only for entities holding
+   `:seon.schema/key`: `{[:seon.schema/key k] {:seon.schema.admission/source s}}`.
+
+   Slice 1 lands it unused (contracts-out design §3, N5.1): while function
+   contracts are still projection inputs, [[projection-admissions]] must keep
+   reading function rows too. Slice 4 switches the loader and the content key
+   to this reader together with the contract range's removal."
+  {:malli/schema [:=> [:cat :seon.db/database-value] :map]}
+  [database]
+  (into {}
+        (keep (fn [datom]
+                (when-let [source (:v (first (d/datoms database :eavt (:e datom)
+                                                         :seon.schema.admission/source)))]
+                  [[:seon.schema/key (:v datom)] {:seon.schema.admission/source source}])))
+        (d/datoms database :avet :seon.schema/key)))
+
 (defn- deleted-predicate-functions
   "Refusing callables for the predicates stored rows name but the loaded files deleted.
 
