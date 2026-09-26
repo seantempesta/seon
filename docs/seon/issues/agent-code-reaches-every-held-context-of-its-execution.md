@@ -20,6 +20,11 @@ tags: [issue, custody, isolation, sci, agent, my-program]
   `my.*` function receiving `:my.program/context` can equally dereference every other entry: another agent's SCI
   context, its connection, its routing, and therefore its armed graph and mailbox.
 
+**Current state (30e6e8f75).** The context-state atom merged into the execution's roster (`:seon.agent/routing`,
+held contexts under `:seon.agent/contexts`), and the environment and `my.program/supplied-context` now carry that
+roster. Agent code therefore reaches the same held executions and, through the same value, the armed entries and
+mailbox channels. The acceptance below reads `:seon.agent/routing` for `:seon.agent/context-state`.
+
 ## Why it is a defect
 
 An agent's SCI world is its private universe (AGENTS "one JVM, many realities"). Prompt visibility grants no execution
