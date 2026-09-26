@@ -41,13 +41,13 @@ Anchors below name the Var and its line at the gitlink checked out on
 
 | Mechanism | Selected-revision source | Seon acceptance |
 |---|---|---|
-| Planner | `create-plan-via-ir` `reference-code/datahike/src/datahike/query.cljc:3438`; `get-or-create-plan` `:3509`; the `order-plan-ops` call in `reference-code/datahike/src/datahike/query/lower.cljc:1059`; `order-plan-ops` `reference-code/datahike/src/datahike/query/plan.cljc:1524-1663` | `test/seon/datahike_fork_test.clj:16-54` |
-| Result and plan caches | `*query-result-cache?*` `reference-code/datahike/src/datahike/query.cljc:71`; `q-with-evidence` `:128`; plan `query-cache` `:2412`; `clear-query-cache!` `:2519`; `query-cache-metrics` `:2647`; `query-cache-evidence` `:2656`; the result-cache bypass `:4658` | `reference-code/datahike/test/datahike/test/query_cache_test.cljc:85-119` |
-| Writer, listener completion and ordered persistence | `transact!` `reference-code/datahike/src/datahike/api/impl.cljc:30-42`; the writer loop `create-thread` `reference-code/datahike/src/datahike/writer.cljc:108`, `notify-listeners!` `:382`, `transact!` `:393`; `commit!` `reference-code/datahike/src/datahike/writing.cljc:423`, `merge-writer!` `:883`, `transact!` `:876` | `file-store-executes-ordered-multi-key-operations` `test/seon/cluster/store_test.clj:124`; `a-throwing-datahike-listener-cannot-strand-a-committed-write` `test/seon/db_test.clj:1321` |
-| Store create/reopen | `create-time-fixed-index-keys` `reference-code/datahike/src/datahike/connector.cljc:183`; `-connect-impl*` `:288` | `datahike-configuration` `src/seon/cluster/store.clj:152`; `open-store!` `:417`; `open-write-release-reopen-preserves-data` `test/seon/cluster/store_test.clj:137`; `create-settings-apply-only-to-fresh-stores` `:171` |
-| Branch identity and roster | `connection-id` `reference-code/datahike/src/datahike/store.cljc:44`; `branches` `reference-code/datahike/src/datahike/versioning.cljc:182`, `branch!` `:212`, `delete-branch!` `:279` | `open-store!` `src/seon/cluster/store.clj:417`; `open-branch!` `:538`; `open-branch-refuses-what-the-roster-refutes` `test/seon/cluster/store_test.clj:634` |
-| Schema removal | `reject-schema-removal-with-current-data` `reference-code/datahike/src/datahike/db/transaction.cljc:138`; `remove-schema` `:278` | `test/seon/schema_usage_guard_test.clj:152-483` (the schema-removal deftests) |
-| Final report validation | `validate-report` `reference-code/datahike/src/datahike/db/transaction.cljc:1224-1234`, invoked at `:1295`; optional `:tx-meta :datahike/validate-report`, nil accepts, a returned value rejects before writer admission | `missing-reference-diagnostics-describe-the-declared-value` `test/seon/db_test.clj:1539`; verification boundary in `docs/prds/steward-platform/research/write-admission-2026-09-17.md` |
+| Planner | `create-plan-via-ir` `reference-code/datahike/src/datahike/query.cljc:3451`; `get-or-create-plan` `:3522`; the `order-plan-ops` call in `reference-code/datahike/src/datahike/query/lower.cljc:1059`; `order-plan-ops` `reference-code/datahike/src/datahike/query/plan.cljc:1524-1663` | `test/seon/datahike_fork_test.clj:16-54` |
+| Result and plan caches | `*query-result-cache?*` `reference-code/datahike/src/datahike/query.cljc:71`; `q-with-evidence` `:128`; plan `query-cache` `:2412`; `clear-query-cache!` `:2519`; `query-cache-metrics` `:2647`; `query-cache-evidence` `:2656`; the result-cache bypass `:4671` | `reference-code/datahike/test/datahike/test/query_cache_test.cljc:85-119` |
+| Writer, listener completion and ordered persistence | `transact!` `reference-code/datahike/src/datahike/api/impl.cljc:30-42`; the writer loop `create-thread` `reference-code/datahike/src/datahike/writer.cljc:108`, `notify-listeners!` `:394`, `transact!` `:417`; `commit!` `reference-code/datahike/src/datahike/writing.cljc:436`, `merge-writer!` `:896`, `transact!` `:877` | `a-throwing-datahike-listener-cannot-strand-a-committed-write` `test/seon/db_test.clj:1393` |
+| Store create/reopen | `create-time-fixed-index-keys` `reference-code/datahike/src/datahike/connector.cljc:183`; `-connect-impl*` `:288` | `datahike-configuration` `src/seon/cluster/store.clj:154`; `open-store!` `:419`; `open-write-release-reopen-preserves-data` `test/seon/cluster/store_test.clj:178`; `create-settings-apply-only-to-fresh-stores` `:212` |
+| Branch identity and roster | `connection-id` `reference-code/datahike/src/datahike/store.cljc:44`; `branches` `reference-code/datahike/src/datahike/versioning.cljc:182`, `branch!` `:212`, `delete-branch!` `:279` | `open-store!` `src/seon/cluster/store.clj:419`; `open-branch!` `:540`; `open-branch-refuses-what-the-roster-refutes` `test/seon/cluster/store_test.clj:675` |
+| Schema removal | `reject-schema-removal-with-current-data` `reference-code/datahike/src/datahike/db/transaction.cljc:138`; `remove-schema` `:278` | `test/seon/schema_usage_guard_test.clj:173-583` (the schema-removal deftests) |
+| Final report validation | `validate-report` `reference-code/datahike/src/datahike/db/transaction.cljc:1224-1234`, invoked at `:1295`; optional `:tx-meta :datahike/validate-report`, nil accepts, a returned value rejects before writer admission | `missing-reference-diagnostics-describe-the-declared-value` `test/seon/db_test.clj:1652`; verification boundary in `docs/prds/steward-platform/research/write-admission-2026-09-17.md` |
 | Test launchers | `reference-code/datahike/bb.edn:46-51`; `reference-code/datahike/bb/src/tools/test.clj:8-13`; `reference-code/datahike/tests.edn:1-30` | `bin/test`; `test/seon/datahike_fork_test.clj:1-54` |
 
 ## Planner entry point
@@ -55,9 +55,9 @@ Anchors below name the Var and its line at the gitlink checked out on
 The query path is:
 
 1. `datahike.query/create-plan-via-ir` builds logical IR and lowers it
-   (`reference-code/datahike/src/datahike/query.cljc:3438`).
+   (`reference-code/datahike/src/datahike/query.cljc:3451`).
 2. `get-or-create-plan` wraps that function with the plan cache
-   (`reference-code/datahike/src/datahike/query.cljc:3509`).
+   (`reference-code/datahike/src/datahike/query.cljc:3522`).
 3. Lowering delegates operation ordering to
    `datahike.query.plan/order-plan-ops`
    (`reference-code/datahike/src/datahike/query/lower.cljc:1050-1061`;
@@ -110,7 +110,7 @@ surface:
   (`reference-code/datahike/src/datahike/query.cljc:128-163`).
 - Binding `*query-result-cache?*` false marks the call `:uncacheable` and
   bypasses result-cache reads and writes
-  (`reference-code/datahike/src/datahike/query.cljc:71-74`, `:4658`).
+  (`reference-code/datahike/src/datahike/query.cljc:71-74`, `:4671`).
 - `clear-query-cache!` replaces the result-cache LRU, while
   `query-cache-metrics` and `query-cache-evidence` report bounded occupancy and
   single-flight state
@@ -135,7 +135,7 @@ same form:
 ```
 
 Clojure's `:reload` flag forces the named lib to load again
-(`reference-code/clojure/src/clj/clojure/core.clj:6149-6205`). Hold the
+(`reference-code/clojure/src/clj/clojure/core.clj:6070-6126`). Hold the
 database value and probe form fixed so the before/after comparison isolates
 the code edit. The planner repair's recorded evidence used this exact
 before/reload/after shape
