@@ -151,11 +151,13 @@ floor. Agents change the program in REPL terms: `defn` inside the target namespa
 fully qualified name, and `my.program/ns-unmap!` / `my.program/remove-ns!` to delete; files are
 the write-back of accepted rows, not the working medium.
 
-**Merge** admits program rows onto an intermediate branch. Keep conflicts there for
-repair; same-identity conflicts become root tasks. Test the combined program: contracts,
-task tests and every current test reaching changed functions must pass; missing coverage
-refuses by name. The writer checks the tested head; only named root/owner acceptance
-advances the cluster pointer. **Write-back** uses that same gate, checks file bases,
+**Merge** is a root task (owner 2026-09-26). An agent proposes only after the tests naming its assigned task pass on its
+branch; the proposal becomes a merge task. Root works it holding both worlds — a merge branch forked from the cluster head
+and a copy of the agent's world — through the ordinary REPL, with easy tools to move and manipulate data between them, and
+chooses exactly what to take by identity from the diff value; the task never lists what to merge. Acceptance requires the
+task's tests to pass on the combined program plus whatever root chose to run, recorded as evidence; reaching-test counts are
+shown, not gated. Conflicts stay on the merge branch for repair. The writer checks the touched rows' digests; only root's
+acceptance advances the cluster pointer, and the agent's branch retires when its merge closes. **Write-back** uses that same gate, checks file bases,
 stages exact-span changes and reindexes to prove equivalent declarations before installation.
 Product agents use declared evaluation/adoption/test requests, never shell self-modification.
 Private experiments remain possible; local green never implies shared acceptance.
