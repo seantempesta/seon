@@ -58,6 +58,29 @@ definition, so after an incremental install they still call the JVM definition, 
 override. `database-provenance-…` now asserts the subset relation and compares roots outside the
 affected closure.
 
+## Round 5: call-preparation snapshot staleness, D7 / C10 (a44538acc)
+
+- Reproduced on isolated branches of default. With `current-snapshot` on one call-state,
+  reading `db1` then `db0` answered `db0` with `db1`'s snapshot: the added `probe.cp/f` was
+  prepared, and checked-through 536874744 was above `db0`'s basis 536874742. A sibling branch
+  without `f` also saw `f` prepared. `snapshot` answered both correctly.
+- `adopt`, `current-snapshot` and the call-state's `:snapshot` member are deleted.
+  `snapshot` looks up the completed snapshot by commit first (`[::snapshot commit-id]`), calls
+  its callees unarmed on the hook path, and the hook calls it. The call-state holds plans only.
+  `call_preparation.clj` +43 −90, test +42 −10.
+- Hook cost on default (pid 33919, scratch copy against the installed hook, 20k calls each,
+  callee outside `prepared-symbols`): 2.35-2.50 µs against 2.75-4.59 µs. Scratch runs of 11
+  snapshot, plan and branch members are all green. Regression:
+  `an-older-value-and-a-sibling-branch-read-their-own-snapshot`.
+- No hunk is needed in `sci/eval.clj` or `sci/kernel.clj`: `install` and `hook`'s signature
+  are unchanged.
+- Not done: the hook still supplies against the connection's head, not the evaluation's
+  `:seon.db/db`. Changing that decides read-your-writes inside one evaluation, which belongs to
+  the repl-entry-renders design §2.3. It is recorded in the issue.
+- Static checks: contracts-compile over `call_preparation.clj` 0 findings; resources-as-EDN
+  211/0.
+- Root runs: `bin/test-check default --ns seon.call-preparation-test`.
+
 ## Round 4: the seon.schema reloader and the one-argument program-fn-row (2a5375c3b, 324ae355a)
 
 - **The reloader, proven by reproduction.** `seon.schema/converged-predicate-var` ran
