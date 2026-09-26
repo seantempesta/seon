@@ -2,7 +2,7 @@
 type: design
 date: 2026-09-27
 author: defn-scan-opus
-status: revision 3 (Astra re-review N1-N5 of 3d48f13e8), for re-review; NOT implemented (owner: understand before changing; several files are held)
+status: revision 3 (Astra re-review N1-N5 of 3d48f13e8) + root retention ruling (§10), for re-review; NOT implemented (owner: understand before changing; several files are held)
 ruling: root 2026-09-27, option 1 of docs/research/agent-platform/landing/defn-scan-opus-2026-09-26.md
 review: docs/research/agent-platform/review-contracts-out-of-projection-2026-09-27.md (Astra, REVISE, R1-R7), all addressed below
 task: 12913e5cd6b0 a-function-contract-changes-the-schema-projection (resources/seon/tasks/seon.schema.edn; the subject mark on seon.schema/projection-ranges lands with S1)
@@ -127,8 +127,8 @@ namespace.
   is EDN (`canonical-definition` refuses callables), so this bypass affects host-only forms. Their count is
   measured in S1 as the difference between seam calls and `::function-contract` lookups, using existing profile
   counters; no new cache-status API is added.
-- **Weight and retention: a decision for root (§10).** A compiled contract retains its registry through its
-  options, and so the whole population. `(* 8192 arities)` does not bound that.
+- **Weight and retention (§10, root ruling):** contracts live in a bounded per-population table, not flat
+  `::function-contract` entries. The lookup above is that table's inner key, `[mode form admission-source bindings]`.
 
 ## 2. Every reader, and what each switches to (line numbers at `d1f6a37fb`)
 
@@ -351,37 +351,35 @@ It records:
   schema-resource change across the program-row writers, about half a day, and is not required for correctness.
 - **Fingerprint v4 forces one rebuild per store at adoption.**
 
-## 10. Decision for root: retention of compiled contracts (N2)
+## 10. Retention of compiled contracts (N2) — root ruling 2026-09-27: one bounded table per population
 
-A compiled contract retains its registry through its Malli options, and through it the whole shape population
-(schema forms compiled against it). Contract entries can therefore keep a population reachable after its projection
-entry is evicted, and the cache weighs each value only once when it is inserted (cache.clj:115-124, 155-164).
+A compiled contract retains its registry through its Malli options, and through it the whole shape population. The
+central cache weighs a value once, when it is inserted (cache.clj:115-124, 155-164). Contract entries must therefore
+never outlive an uncharged population.
 
-1. **Recommended: one population entry holding a bounded contract table.**
-   - `seon.cache/lookup ::contract-population population-key weigh derive`, where the value is a core.cache LRU
-     with a **contract-count dial** (a new config dial, default 512). The contracts inside are keyed
-     `[mode form admission-source bindings]`.
-   - The weight is the population's own weight (the `::projection` formula, `3700 × forms`) plus
-     `dial × 16 KB` as a charged ceiling per contract. A form over 16 KB of printed EDN is compiled but not
-     retained.
-   - Guarantee: a population and its contracts are charged together and evicted together, so no uncharged
-     population survives. Per-contract growth is bounded by the dial.
-   - Cost: about 25 lines plus one config dial (schema resource, config default); S1 measures the actual per-entry
-     retained size against the ceiling.
-   - Sacrifice: two-level lookup, and the inner LRU is per population.
-2. **Charge each contract the population conservatively.**
-   - Flat `seon.cache` entries, each weighted by its population weight plus its form size.
-   - Guarantee: always within budget.
-   - Cost: about 5 lines.
-   - Sacrifice: with 13 MB populations and the 512 MB dial, only about 38 contracts fit, so hit rates collapse and
-     arming recompiles.
-3. **No shared contract cache.**
-   - The seam compiles each time. Each consumer keeps the compiled value it was handed for the duration of the
-     operation (arming holds it in the wrapper, preparation in its plan).
-   - Guarantee: no retention question, and compiling `[:=> [:cat :int] :int]` is estimated below 1 ms.
-   - Cost: 0 cache lines.
-   - Sacrifice: render and supplier reads that need a contract per call (render output alternatives, snapshot
-     suppliers) compile per use. S1 would have to measure that frequency first.
+**Ruling (root, 2026-09-27, option 1).** One `seon.cache` entry per schema population holds that population's
+contract table.
+- **Lookup.** `seon.cache/lookup ::contract-population population-key weigh derive`, where `population-key` is §1's
+  population member: forms, schema admissions, pure predicate symbols and the complete binding map.
+- **The table.** The value is a core.cache LRU whose threshold is a **contract-count config dial** with default
+  512. The dial is declared once in the config schema resources and read at the arming or acquisition boundary; it
+  is never a code constant. Entries are keyed `[mode form admission-source bindings]` and each is retained only when
+  it is not a refusal.
+- **Weight.** The population weight (the `::projection` formula, `3700 × forms`) plus `dial × per-slot charge`.
+  The per-slot charge is **measured in S1** as the retained size of real compiled contracts, including large forms;
+  **16 KB is the ceiling to verify**. A contract whose measured retained size exceeds the slot charge is compiled
+  but not stored in the table.
+- **Guarantee.** A population and its contracts are charged together and evicted together, so no contract keeps an
+  uncharged population reachable. Growth within one population is bounded by the dial.
+- **Regressions (S1).**
+  - Many versions under one population stay within the dial.
+  - A large form over the slot charge is not stored.
+  - Several distinct populations are each charged once and evicted with their contracts.
+  - Eviction of the population entry releases its compiled contracts (a weak-reference probe).
+
+The alternatives considered were charging each contract the whole population (hit rates collapse at about 38
+contracts under 512 MB) and having no shared cache (per-use recompiles in render and supplier reads). Both were
+declined.
 
 ## 11. Composition with derive-once (`derive-once-design-2026-09-26.md`)
 
