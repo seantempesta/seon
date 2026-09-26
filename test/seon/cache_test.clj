@@ -59,7 +59,10 @@
       (is (= 3 @calls)))
     (testing "nil is never retained"
       (is (nil? (cache/lookup held ::nil 1 (constantly 1) (constantly nil) some?)))
-      (is (= 1 (cache/lookup held ::nil 1 (constantly 1) (constantly 1) some?))))))
+      (is (= 1 (cache/lookup held ::nil 1 (constantly 1) (constantly 1) some?))))
+    (testing "only retained values are held, by content key"
+      (is (= {1 :ok} (cache/retained held ::boom)))
+      (is (= {} (cache/retained held ::refusal))))))
 
 (deftest the-byte-budget-evicts-and-status-reports-it
   (let [held (cache/create 1000)]

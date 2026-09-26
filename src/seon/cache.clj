@@ -174,6 +174,23 @@
        @prior
        (do (.increment ^LongAdder (::hits c)) (join prior))))))
 
+(defn retained
+  "The retained values of `kind`, by content key: the completed entries only.
+
+  For diagnosis and retention tests; it walks every entry of the cache."
+  {:malli/schema [:function
+                  [:=> [:cat :qualified-keyword] [:map-of :seon.schema/value :seon.schema/value]]
+                  [:=> [:cat :seon.cache/cache :qualified-keyword]
+                   [:map-of :seon.schema/value :seon.schema/value]]]}
+  ([kind] (retained @process kind))
+  ([{::keys [^AsyncCache cache]} kind]
+   (into {}
+         (keep (fn [[[entry-kind content-key] ^CompletableFuture pending]]
+                 (when (and (= kind entry-kind) (.isDone pending) (not (.isCompletedExceptionally pending)))
+                   (let [{::keys [value thrown]} (.join pending)]
+                     (when-not thrown [content-key value])))))
+         (.asMap cache))))
+
 (defn status
   "The byte budget, the estimated bytes held, and per-kind counters.
 
