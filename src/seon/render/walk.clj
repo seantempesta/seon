@@ -385,27 +385,16 @@
                      (schema/current-projection))
         distance (long (get request :seon.render/distance 1))
         selector (root-selector database distance caps)
-        cache (:seon.schema.projection/compiled projection)
-        cache-key [:seon.render.walk/root-pull-plan
-                   (:seon.schema.projection/fingerprint projection)
-                   (DatabaseSchemaIdentity. (:schema (db/schema-database database)))
-                   selector]
-        candidate (delay
-                    {:seon.schema.projection/fingerprint
-                     (:seon.schema.projection/fingerprint projection),
-                     :seon.render.walk/selector selector,
-                     :datahike.pull/plan
-                     (pull-api/compile-pull-plan
-                       database
-                       selector)})
-        acquired (if cache
-                   (get
-                     (swap!
-                       cache
-                       #(if (contains? % cache-key) % (assoc % cache-key candidate)))
-                     cache-key)
-                   candidate)]
-    (assoc @acquired :seon.render/distance distance :seon.sci.admit/caps caps)))
+        plan (schema/projection-cache-value
+              projection
+              [:seon.render.walk/root-pull-plan
+               (:seon.schema.projection/fingerprint projection)
+               (DatabaseSchemaIdentity. (:schema (db/schema-database database)))
+               selector]
+              #(hash-map :seon.schema.projection/fingerprint (:seon.schema.projection/fingerprint projection)
+                         :seon.render.walk/selector selector
+                         :datahike.pull/plan (pull-api/compile-pull-plan database selector)))]
+    (assoc plan :seon.render/distance distance :seon.sci.admit/caps caps)))
 
 (defn- namespace-connections
   "Resolve observed namespace names for this walk without changing stored facts."
