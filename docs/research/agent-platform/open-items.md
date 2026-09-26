@@ -91,20 +91,15 @@ duplicates deleted. Unverified commits are debt. Two lessons from 2026-09-25: a 
 real values against the declared contract before committing); a new attribute must install before its first write on an
 EXISTING store (prove adoption on a branch of the live store, never only on a fresh one).
 
-### Platform state (2026-09-26 ~04:00Z)
-- Default: pid 76020, booted from the checkout at 8fa430cc6 on the existing store (all layers, ready 21 s — over the 10 s
-  start target; owed a profile row), no-provider true. Health "faulted" from 8 faults recorded before this boot (14c6292e,
-  f6d16919 and two `seon.db/transact!` signatures lead); none new.
-- P2-A (every top-level def a declaration) reverted (8fa430cc6, 39dae4235): boot's indexing tx referenced a declaration first
-  written in the same tx by lookup ref (`[:seon.fn/sym seon.cluster/*boot-progress!*]`). Re-land must use tempids at the one
-  producer and prove boot on a branch of the live store first.
-- Boot reads the working tree: a lane's half-edited file blocks boot ("Static program analysis found blocking errors").
-  Root parks uncommitted lane edits to `tmp/orchestrator/parked/<stamp>/` before a restart; lanes keep files analyzable.
-- Boot from zero works: boot fills a missing clj-kondo dependency analysis (71f14d1d4); call reach without functions 58e341cf3.
-  Open: `boot/stop!` marks running-instances with a bare Object that projection readers refuse (issue filed).
-- Adoption blockers seen, each fixed: `[:= {}]` read as properties (db51da2e7); reload refuses a retargeted alias (issue
-  filed); deleted paths in `--changed` (pass existing paths only); schema retirement (A/B two-step); attribute before schema.
-- Hook publication no longer publishes (`bin/seon-hook:12`).
+### Platform state (2026-09-27 ~06:30Z)
+- Default: pid 59671 at e405f51be (render s1–s3, one-commit A). `start --head` took 271 s total / ready 141 s (was 32 s):
+  refresh-source! 81 s ×3, call-with-projection 42 s ×51, transact! 10 s → perf-boot-opus. Open fault: ClassCastException in
+  seon.schema/valid-candidate-value?. Previous JVM: call-with-projection-state max 755 s (work or counted waiting — both defects).
+- Acceptance on branch accept-s3: `(/ 1 0)` ≈30 tokens with location; contract refusal ≈55 tokens naming member, expected,
+  got, fix. Trivial `(inc 1)` 310–506 ms (was 155 ms; A unmeasured yet); trivial defn 875 ms.
+- Found: a defn inside a top-level `do` is evaluated but never admitted (no row, contract unarmed, silent) → fix-do-defn-opus.
+- s3 evaluates render forms once when the shown text is saved, not lazily at context build (owner ruling pending; the AGENTS
+  render law still says lazy).
 
 ### Component status
 | Component | State |
@@ -122,16 +117,15 @@ EXISTING store (prove adoption on a branch of the live store, never only on a fr
 | Turns | local-provider turn 5/0 in bound; batched turn 3 fails (deletion lane); episode-limit loud fault green |
 | Concurrency | long suites not yet run; concurrency-test "Agent creation refused" unassigned |
 
-### Running lanes (read their landing notes)
-| Lane | Doing | Files |
-|---|---|---|
-| design-fast-harness-opus | harness S1 acquire-once landed (1985849f4); Astra review, then next slices | harness files in its landing |
-| design-one-pipeline-opus | P1 print-once landed (19fbb7901); committing P2a (reply splitter keeps `#?`, regex, `#inst` as code); P2 ruled: keep two passes, documented | reply.clj, turn_test, design doc |
-| design-lost-error-seams-opus | P0/P2 landed; escalate-to root default (178a67487); converting three tests; then P1 production: fault port + stop from a separate thread (Flow stop deadlock) | flow.clj, seon.flow.edn, flow/fault/armed/error tests |
-| design-references-as-refs-opus | Astra re-review of the reference design | design doc |
-| impl-index-point-free-defs-opus | P2-A re-land with tempid-safe references, proven on the live store | fn.clj indexing, entry-gate test |
-| impl-floor-fipp-opus | floor printer on fipp (one clipper; giant values as blob refs) | print.cljc, seon.print.edn, render/value.clj |
-| audit-face-concept (Astra) | eliminate "face" from code/schemas/docs; grounded rename where a concept is needed | face-concept-audit-2026-09-26.md |
+### Running lanes (read their landing notes; ledger rows are current)
+| Lane | Doing |
+|---|---|
+| one-commit-a-opus | measure A on e405f51be; commit B (reply when applied); blob permit gap; RESET NEEDED before B's numbers; keep B only if faster |
+| perf-boot-opus | restart/adoption cost, the 755 s projection-state row, the ClassCastException fault, move-to-head! catch |
+| fix-do-defn-opus | top-level `do` children as top-level forms; a def that escapes admission is loud |
+| eval-feedback-design-opus | design: general perf + loud misuse diagnostics in every agent eval reply (owner ask) |
+| cache-central-design-opus | design: one central cache for every cache (owner ask) |
+| merge-cut1-opus | merge-task-design slice 1: seon.task/create!, assignment, proposal gate |
 
 ### Designs (authorities; each revised in place)
 | Design | Verdict |
