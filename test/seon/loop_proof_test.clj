@@ -37,7 +37,7 @@
   (let [turn-eid (:db/id (db/pull database [:db/id] [:seon.turn/id (:seon.turn/id system)]))
         entries (filter #(= turn-eid (get-in % [:seon.cluster.eval/run :db/id]))
                         (evaluation/of-agent database "juniper"))
-        ctx (agent/acquire-context! handle "juniper")]
+        ctx (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))]
     (is (= 1 (count entries)))
     (doseq [entry entries
             :let [emission (repl/entity-emission (assoc entry :seon.db/db database))
@@ -192,7 +192,14 @@
                (await-settled!)
                (is (= 29 (turn/turns-left @connection "juniper")))
                (is (some #(> (:t %) basis) (evaluation/of-agent @connection "juniper"))))
-             (is (= occurrences-before (occurrences)) "the installer and both wakes record no core fault")
+             (let [recorded (set/difference (occurrences) occurrences-before)]
+               (is (empty? recorded)
+                   (pr-str {:seon.test/recorded-faults
+                            (mapv #(db/pull (db/db connection)
+                                            [:seon.error.occurrence/message
+                                             {:seon.error/_occurrences [:seon.error/layer :seon.error/operation]}]
+                                            %)
+                                  recorded)})))
              (testing "a lost turn permit faults at the declared completion allowance"
                (let [entry (agent/armed routing "juniper")
                      completion (:seon.turn.loop/completion entry)
@@ -225,7 +232,17 @@
              (finally
                (wake/unlisten! {:seon.cluster.wake/connection connection :seon.cluster.wake/key ::running-route})
                (async.flow/stop (::flow/graph armer))
-               (support/await-event! (:seon.turn.loop/completion handle) ::armer-stopped)
+               ;; the armer's exit is its executor's termination, not a
+               ;; channel event (seon.flow/join-graph!)
+               (is (nil? (flow/join-graph!
+                          {::flow/executor (::flow/executor armer)
+                           :seon.await/bound
+                           {:seon.await/config-attribute :seon.config.agent/turn-completion-backstop-ms
+                            :seon.await/config-value 5000
+                            :seon.await/deadline-nanos (+ (System/nanoTime) (* 5000 1000000))}
+                           :seon.await/diagnostic {:seon.error/layer ::running-fixture
+                                                   :seon.error/operation `running-fixture-settles-its-seeded-wake
+                                                   :seon.error/expected ::armer-exited}})))
                (doseq [id (keys (:seon.agent/armed @routing))]
                  (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))
                (d/unlisten connection ::running-fixture)
@@ -490,14 +507,18 @@
                                 [?message :seon.message/to ?agent]
                                 [?message :seon.message/content ?content]] @connection)))
                  (is (every? :seon.eval/shown saved))
-                 (let [agent-ctx (agent/acquire-context! handle "juniper")]
+                 ;; an acquisition is an execution handle; the agent's SCI
+                 ;; context is its :seon.sci.eval/ctx, retained across
+                 ;; acquisitions as one environment
+                 (let [agent-ctx (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))]
                    (doseq [entry saved
                            :let [result-handle (:seon.repl/handle (repl/entity-emission entry))]]
                      (is (some? (sci/resolve agent-ctx result-handle))
                          (str "stored system result resolves: " result-handle))
                      (is (= @(sci/resolve agent-ctx result-handle)
                             (sci/eval-form agent-ctx (list 'get-in result-handle [])))))
-                   (is (identical? agent-ctx (agent/acquire-context! handle "juniper"))))
+                   (is (identical? (:env agent-ctx)
+                                   (:env (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))))))
                  (is (not-any? :seon.cluster.eval/error saved))
                  (is (= 1 (count (set (map :seon.cluster.eval/run saved)))))
                  (is (= text (stored-text @connection)))
@@ -624,7 +645,7 @@
                                          (evaluation/of-agent @connection "juniper")))
                      _ (is (some? entry))
                      emission (repl/entity-emission (assoc entry :seon.db/db @connection))
-                     ctx (agent/acquire-context! handle "juniper")
+                     ctx (:seon.sci.eval/ctx (agent/acquire-context! handle "juniper"))
                      handle (:seon.repl/handle emission)
                      raw @(sci/resolve ctx handle)
                      shown (:seon.eval/shown entry)]
