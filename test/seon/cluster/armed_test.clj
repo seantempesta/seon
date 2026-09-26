@@ -231,7 +231,7 @@
           (is (nil? (:seon.cluster.eval/error definition)))
           (is (= 42 (:seon.sci.admit/value shared-call))
               "the committed agent resolves its left-cluster definition")
-          (is (= 'my.agents.root/shared-live (:seon.error/offending (:seon.sci.admit/value isolated-call))))
+          (is (= 'my.agents.root/shared-live (:seon.error/offending (:seon.sci.admit/value isolated-call)))
               "the right cluster cannot see the left cluster's definition"))
         (finally
           (boot/stop! right)
