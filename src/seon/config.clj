@@ -21,7 +21,6 @@
             [seon.reconcile :as reconcile]
             [seon.schema :as schema]
             [seon.schema.edn :as schema.edn]
-            [seon.cache]
             [seon.schema.datahike :as schema.datahike]
             [malli.core :as m]
             [malli.registry :as mr]
@@ -373,18 +372,11 @@
 
 (defn- declared-projection
   "The declaration projection of this JVM's schema resources: the one population
-  config compiles rows from, writes them with and reads them by.
-
-  Retained in the process cache under the packaged population itself (the one
-  map `packaged-forms` answers per archive, whose hash it caches), so a hit is
-  two lookups; rebuilding `declaration-projection`'s key walked every form
-  (~6.4 ms armed, 2026-09-26)."
+  config compiles rows from, writes them with and reads them by. One process
+  cache entry, the declaration-projection kind's own."
   {:malli/schema [:=> [:cat] :seon.schema/projection]}
   []
-  (let [forms (schema.edn/packaged-forms)]
-    (seon.cache/lookup ::declared-projection forms
-                       #(* schema/declaration-projection-bytes-per-form (count (:seon.schema.projection/forms %)))
-                       #(schema/declaration-projection forms))))
+  (schema/declaration-projection (schema.edn/packaged-forms)))
 
 (defn default-population
   "Read and admit the shipped initialization entity rows."

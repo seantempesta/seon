@@ -1349,11 +1349,13 @@
 ;;; keeps alive per counted unit, fitted offline (bench/seon/measure_cache_kinds.clj,
 ;;; one kind per fresh JVM; results in bench/seon/cache_kind_measurement.edn,
 ;;; 2026-09-27: declaration projection 8.9-9.1 MB / 3,549 forms; projection
-;;; 10.1 MB marginal over it, 19.5-19.9 MB with 2,371 contracts).
+;;; 10.1 MB marginal over it, 19.5-19.9 MB with 2,371 contracts; the
+;;; predicate Vars the packaged forms name, 5.1 KB / 72).
 ;;; test/seon/cache_calibration_test.clj holds each charge to its measurement.
 (def declaration-projection-bytes-per-form 2550)
 (def projection-bytes-per-form 2850)
 (def projection-bytes-per-contract 4050)
+(def declaration-predicates-bytes-per-entry 72)
 
 (defn declaration-projection
   "One immutable projection over the declaration population in hand.
@@ -1371,9 +1373,16 @@
     [:=> [:catn [::forms :map]] ::projection]]}
   ([] (declaration-projection (declaration-population)))
   ([forms]
-   (let [predicates (into {} (keep (fn [sym]
-                                    (when-let [f (runtime-predicate sym)] [sym f])))
-                          (into #{} (mapcat predicate-symbols-in) (vals forms)))]
+   (let [;; The predicate Vars the forms name: a function of the forms
+         ;; (a Var keeps its identity across a reload), so it is keyed by
+         ;; them. Walking every form for it cost ~6.4 ms armed per call.
+         predicates (seon.cache/lookup
+                     ::declaration-predicates forms
+                     #(* declaration-predicates-bytes-per-entry (count %))
+                     (fn []
+                       (into {} (keep (fn [sym]
+                                        (when-let [f (runtime-predicate sym)] [sym f])))
+                             (into #{} (mapcat predicate-symbols-in) (vals forms)))))]
      ;; A pure function of its forms and the predicate Vars they name: equal
      ;; inputs answer the built value from the process cache (~340 ms /
      ;; ~410 MB per packaged build, perf-profile 2026-09-26), weighed by

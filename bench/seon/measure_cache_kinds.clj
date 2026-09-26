@@ -75,6 +75,9 @@
           (retained-by #(#'schema.edn/resource-population schema.edn/default-resource))
           "seon.schema/declaration-projection"
           (retained-by #(schema/declaration-projection (into {} forms)))
+          "seon.schema/declaration-predicates"
+          (retained-by #(into {} (keep (fn [sym] (when-let [f (#'schema/runtime-predicate sym)] [sym f])))
+                              (into #{} (mapcat #'schema/predicate-symbols-in) (vals forms))))
           "seon.schema/projection"
           (retained-by #(schema/build-projection (into {} forms)))
           "seon.schema/projection-with-contracts"
@@ -83,7 +86,7 @@
           (let [built (schema/build-projection forms)] (retained-by #(program/shapes-in built))))
         counted (case kind
                   "seon.schema.edn/packaged-population" (count (:seon.schema.edn/declared-forms value))
-                  "seon.program/authored-shapes" (count value)
+                  ("seon.program/authored-shapes" "seon.schema/declaration-predicates") (count value)
                   (+ (count (:seon.schema.projection/forms value))
                      (count (:seon.schema.projection/function-contracts value))))
         prior (try (edn/read-string (slurp out-path)) (catch Throwable _ {}))
