@@ -86,3 +86,13 @@ dynamic caller loses coverage. Two things are wrong around it:
 The owners are the analyzer (`seon.fn.analyzer`) for the edge, and the entry gate (`seon.test.accretion`, via
 `seon.test`) for the executor.
 
+
+## 2026-09-26: third observation, the chain exhausted default's heap
+
+`seon.cluster.host-test/a-hosted-agent-proposes-a-merge-and-root-receives-it-on-the-cluster` quotes
+`'my.agents.host-probe/proposed-square` (host_test.clj:305), and its hosted agent defines that function. Each gate
+reruns the test in a new fixture world, which defines the function again, so the gate recursion has no bound. The
+live heap went from 0.94 GB to 10.2 GB in 2 minutes, with 24 nested gate threads. This is the cause of the 14:20Z
+OutOfMemoryError. Evidence:
+[default-ran-out-of-heap-while-a-timed-out-test-member-stayed-live](default-ran-out-of-heap-while-a-timed-out-test-member-stayed-live.md).
+Today's owner ruling ("call reach, never symbol mentions") settles the model question above.

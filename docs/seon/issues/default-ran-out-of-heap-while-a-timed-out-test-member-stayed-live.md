@@ -42,49 +42,78 @@ operator passes `<root>/data/heap` as an absolute path at launch.
 About 8.5 GB was allocated and retained within minutes of step 2. That is a
 runaway allocation or retention during the requests. It is not a slow leak.
 
-## The retention path to verify first
+## Cause, reproduced 2026-09-26 15:51Z (pid 13262, 61d207c3e)
 
-A member body that outlives its bound stays alive on purpose
-(`src/seon/test.clj:287-309`). The `FutureTask` closes over the member's
-custody: the branch connection with its Datahike `CachedStorage` node cache
-(`reference-code/datahike/src/datahike/index/persistent_set.cljc:461-468`,
-bounded by node count and not by bytes; see
-`the-index-cache-retains-4gb-of-expanded-schema-shape-forms.md`), the seeds
-and the SCI context. `watch-exit!` joins the thread and releases the member
-only after it exits.
+Lane inv-heap-stuck-members-opus ran `bin/test-check default --ns seon.cluster.host-test`
+alone under a sampler (`tmp/inv-heap-stuck-members-opus/`). It reproduced the runaway.
 
-Within one request, `seon.test/run` stops after an unfinished member
-(`src/seon/test.clj:2419-2424`, `:member-unfinished`). Nothing stops the next
-request, though. mcp-test and registry-test each built a new world while
-thread 1543 still held its world. AGENTS.md says "prevent overlap until exit",
-and here the process overlaps work across requests.
+| time | heap used | old regions (8 MB) | live `Datom` (post-GC histogram) |
+|---|---|---|---|
+| 15:51:32 (baseline) | 0.94 GB live | 122 | 3.77 M (151 MB) |
+| 15:51:52 | 1.9 GB | 235 | 9.40 M (376 MB) |
+| 15:52:13 | 3.8 GB | 455 | 20.3 M (811 MB) |
+| 15:52:59 | 7.9 GB | 894 | sampling stopped (7 GB rule) |
+| 15:53:34–15:54:28 | 10.2–10.5 GB of 10.24 | 1243–1280 | GC thrash; the JVM survived |
+| 15:58 | 1.8 GB live | 226 | 8.69 M (348 MB) |
 
-The stuck body itself (`test/seon/cluster/host_test.clj`, `propose-merge!` →
-`seon.test/changes`, `src/seon/test.clj:1769`) reads
-`seon.cluster.source/database` (`src/seon/cluster/source.clj:291-302`). Each
-call rebuilds `schema/projection-from-database` for the base commit. Nothing
-memoizes that in the function itself.
+The retainer is not one leaked world. It is **an unbounded chain of nested test
+worlds** made by the install gate.
 
-## Protocol (root runs it; no dump needed)
+1. The member's hosted agent runs `(defn proposed-square …)`
+   (`test/seon/cluster/host_test.clj:297`).
+2. Its install gate (`seon.turn/gate-function-install`, `src/seon/turn.clj:3291`)
+   selects `seon.fn/gate-set` of `my.agents.host-probe/proposed-square`. On
+   default that answers `[seon.cluster.host-test/a-hosted-agent-proposes-a-merge-and-root-receives-it-on-the-cluster]`,
+   the test itself. The edge is `:seon.fn/references`: the test quotes
+   `'my.agents.host-probe/proposed-square` as data (`host_test.clj:305`), and
+   `gate-set-in` walks references (`src/seon/fn.clj:1786`).
+3. The gate runs that host test in the agent's turn
+   (`seon.sci.eval/run-candidate-test!`, `src/seon/sci/eval.clj:4623`). The test
+   builds a new world (`support/with-database`, `with-host-world`), hosts a new
+   agent, and runs the same `defn`. Its `hosted-run!` awaits that run's close under
+   the 600 s turn backstop (`seon.cluster.agent/evaluate-source!`, `src/seon/cluster/agent.clj:793`).
+   The nested run's gate starts step 2 again, on another Flow thread.
 
-```
-PID=$(bin/seon status | grep -o ':seon.boot/pid [0-9]*' | head -1 | cut -d' ' -f2)
-tmp/platform-boot-heap-opus/heap-watch.sh $PID host 60 5 &
-bin/test-check default --test seon.cluster.host-test/a-hosted-agent-proposes-a-merge-and-root-receives-it-on-the-cluster
-# then, still sampling, one ordinary request:
-bin/test-check default --ns seon.cluster.registry-test
-```
+The thread dump at 15:52:23 (`threads-2-155223.json`, `threads-3.json`) shows 24
+virtual threads each at `gate-function-install → run-candidate-test! →
+with-host-world → hosted-run! → await`. Each holds one fixture world. The SCI arm
+cannot interrupt a compiled host test body, so no bound stops the chain. The member
+was recorded unfinished at 15:53:31, and its exit was recorded at 15:57:07. I did not determine which nested level failed
+first and unwound the chain.
 
-Compare `watch-host/histo-*.txt` against `tmp/platform-boot-heap-opus/histo-1.txt`.
-If `used` in `watch-host/heap.txt` rises past 6 GB, take
-`jcmd $PID GC.heap_dump -gz=1 <root>/data/heap/host-member.hprof.gz` before
-the JVM dies. This needs root's OK (it pauses the JVM). The dump would name
-the retainer.
+**The missing terminal event** is the hosted run's `:seon.turn/closed-tx`. The run
+cannot close before its install gate finishes, and the gate is running the member
+that waits for it.
+
+The existing class issue is
+[an-agent-definition-gate-runs-the-host-test-that-quotes-its-symbol-nested-in-its-own-fixture](an-agent-definition-gate-runs-the-host-test-that-quotes-its-symbol-nested-in-its-own-fixture.md).
+Today's owner ruling settles its model question: gate selection follows call reach,
+never symbol mentions. Owners: `seon.fn` (`gate-set-in`, fn.clj:1786) for the edge,
+and `seon.sci.eval`/`seon.turn` for running a compiled host test inside an agent's
+install gate without a bound that can stop it.
+
+## Second defect: later requests overlap a live body (fixed in `seon.test`)
+
+Before the fix, `admit-run` held only the live body's own test symbol
+(`src/seon/test.clj`, the `live` query). Any other request of the cluster was
+admitted and built its own world (`clean-request-handle`) beside the live one. At
+14:20Z, mcp-test and registry-test did this under the chain above.
+
+Now `admit-run` refuses at the writer with `:seon.test/member-unfinished`, naming the
+live test, while any body admitted in this JVM on the cluster has a
+`completed-tx` without a `terminated-tx`. `seon.test/run` builds its request
+world only after its first batch is admitted, so a refused request builds nothing.
+On real data, the new query named the member as-of tx 536871272 (inside the window)
+and returned `[]` at head, in 3.5 ms.
+
+Regression:
+`seon.test.one-request-test/no-body-of-a-cluster-starts-while-an-unexited-member-holds-its-world`.
+A request for the live test and a request for another test are both refused, and
+neither writes anything. Both run after the exit is recorded.
 
 ## Acceptance
 
-- The retainer is named from a histogram pair or a dump, with the owning path
-  given as `file:line`.
-- A member that does not exit cannot make later requests exhaust the heap.
-  Either admission refuses while an unfinished member holds its world, or that
-  world's retained size is bounded. One regression covers this.
+- [x] The retainer is named, with histograms and thread dumps, and the owning path is given as `file:line`.
+- [x] A member that does not exit cannot make later requests build more worlds (admission refuses).
+- [ ] The gate recursion is removed at its owners (`seon.fn` edge; the host-test executor in the gate). Until
+      then, one host-test request can still exhaust the heap by itself.

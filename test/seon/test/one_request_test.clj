@@ -170,15 +170,16 @@
 
 (deftest ^{:seon.test/long "An admission, two recordings and two requests on one fixture branch: 37.7 s measured at 0e53eb8b1 on a scratch cluster, dominated by the routed per-request acquisition and per-connection projection costs."
            :seon.test/long-ms 45000}
-  an-unexited-member-is-never-started-again-until-its-exit-is-recorded
+  no-body-of-a-cluster-starts-while-an-unexited-member-holds-its-world
   (support/with-database
    (fn [connection]
      (let [handle (support/execution-handle connection)
            test-symbol 'seon.id-test/an-evaluation-id-is-stable-short-and-a-symbol
+           other 'seon.id-test/printed-identity-ignores-the-callers-print-bindings
            request #(sut/run {:seon.test/execution (support/execution-handle connection)
                               :seon.test/recording-connection connection
                               :seon.test/policy :named
-                              :seon.test/identities #{test-symbol}})
+                              :seon.test/identities #{%}})
            database (db/db connection)
            admission (sut/selection-admission
                       {:seon.db/db database
@@ -206,10 +207,17 @@
          (is (not (:seon.error/at (exit!))) "an exit seen before the result exists is not a refusal")
          (is (nil? (exit-tx)) "and writes nothing: the result's own write carries its exit")
          (is (not (:seon.error/at (record! false))) "the unfinished member is recorded without its exit")
-         (let [held (request)]
-           (is (= [test-symbol] (:seon.test/pending held)) (sut/tally held))
-           (is (= 0 (:seon.test/executed-count held)) "the same test never starts beside a live body")
-           (is (false? (:seon.test/passed? held))))
+         ;; The live body keeps its world until it exits, so no request of
+         ;; its cluster is admitted meanwhile, for its own test or any other:
+         ;; worlds never pile up behind a body that does not exit (the
+         ;; 2026-09-26 OutOfMemoryError).
+         (doseq [requested [test-symbol other]]
+           (let [before (db/basis-t (db/db connection))
+                 held (request requested)]
+             (is (= :seon.test/member-unfinished (:seon.test/admission-refusal held)) (pr-str held))
+             (is (some #{test-symbol} (tree-seq coll? seq held)) "the refusal names the live body")
+             (is (not (contains? held :seon.test/results)) "no body started beside a live one")
+             (is (= before (db/basis-t (db/db connection))) "a refused admission writes nothing")))
          ;; The watcher's write is the exit only, never a re-sent outcome
          ;; (a changed outcome was refused as immutable and held the test).
          (let [written (exit!)]
@@ -218,9 +226,10 @@
            (is (some? recorded) "the observed exit is recorded")
            (is (not (:seon.error/at (exit!))))
            (is (= recorded (exit-tx)) "a second observation changes nothing")))
-       (let [after (request)]
-         (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
-         (is (true? (:seon.test/passed? after))))))))
+       (doseq [requested [test-symbol other]]
+         (let [after (request requested)]
+           (is (= 1 (:seon.test/executed-count after)) (sut/tally after))
+           (is (true? (:seon.test/passed? after)))))))))
 
 (deftest ^{:seon.test/long "One agent test definition, one row edit and one nested request on a fixture branch: 13.8 s measured on default's JVM (load 14.7): define 1.0 s, edit 0.2 s, member 0.06 s, the nested request's admission and recording 12.6 s (docs/seon/issues/a-data-only-commit-rebuilds-the-whole-sci-program.md)."
            :seon.test/long-ms 30000}
@@ -316,7 +325,7 @@
              (is (empty? (:seon.test.selection/unchanged old)))
              (is (= [test-symbol] (map :seon.test/sym (:seon.test.run/members old)))))))))))
 
-(deftest ^{:seon.test/long "Two requests over three agent tests on one fixture branch: the first is held for its whole 10 s bound by a member that runs until the bound fires (the stop being proved), which then runs to its own 15 s bound; the rest is definition and admission. Measured 38.5 s on default's JVM (2026-09-24) with a 20 s exit wait since removed."
+(deftest ^{:seon.test/long "Two requests over three agent tests on one fixture branch: the first is held for its whole 10 s bound by a member that runs until the bound fires (the stop being proved), which then runs to its own 15 s bound; the rest is definition and admission. Measured 38.5 s on default's JVM (2026-09-24) with a 20 s exit wait since removed; the second request now waits for B's recorded exit (at most B's remaining 5 s)."
            :seon.test/long-ms 60000}
   a-stopped-requests-unstarted-member-is-unknown-and-an-identical-request-reruns-it
   (support/with-database
@@ -358,10 +367,18 @@
          (is (= :member-unfinished stop) "the run names why it stopped")
          (is (str/includes? (:seon.error/message latest) "member-unfinished") (:seon.error/message latest))
          (is (false? (sut/verified? database unstarted)) "an unknown never verifies"))
-       ;; A test world holds the program, never the execution's data, so B is
-       ;; released by redefining it: the changed row reaches the next world.
-       ;; If its old body's exit is recorded by now B reruns and passes;
-       ;; otherwise it still holds and is pending. Either way C runs.
+       ;; B's old body keeps its world until SCI interrupts it at its own
+       ;; 15 s bound; no request of the cluster is admitted until the watcher
+       ;; records that exit. A test world holds the program, never the
+       ;; execution's data, so B is released by redefining it: the changed
+       ;; row reaches the next world, where B reruns and passes, and C runs.
+       (support/await-event! connection ::unfinished-body-exited
+                             (fn [database]
+                               (empty? (db/q '[:find [?m ...]
+                                               :where [?m :seon.test.member/completed-tx]
+                                                      (not [?m :seon.test.member/terminated-tx])]
+                                             database)))
+                             20000)
        (define-agent-test! handle
          (str "(clojure.test/deftest ^{:seon.test/long \"runs until the request bound fires\" :seon.test/long-ms 15000}"
               " b-runs-until-released (clojure.test/is true))"))

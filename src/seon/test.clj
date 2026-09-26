@@ -1164,6 +1164,8 @@
   carries the publisher's input digest and immutable tested provenance;
   selection is handed as immutable input. This function executes no test bodies. It checks the current program and custody,
   then reserves only members not already covered by matching admitted runs.
+  While a body of the cluster is not observed to exit, it refuses
+  (`:seon.test/member-unfinished`, naming that body's test).
   Concurrent requests see earlier reservations in the transaction database.
   An identical replay emits no evidence datoms; a changed replay refuses.
 
@@ -1323,27 +1325,28 @@
                                          [(>= ?order 0)]]
                                 database (vec runs) symbols jvm-started))
                          [])
-            ;; A body not observed to exit holds its test in every scope of
-            ;; its cluster. The program digest names a commit, so any write
-            ;; since that body's admission (its own recording) changes it.
-            live (if (or snapshot? (empty? symbols))
-                   []
-                   (let [since-start (selection-read!
-                                      (db/q '[:find [?run ...] :in $ ?cluster ?since
-                                              :where [?run :seon.test.run/cluster ?cluster]
-                                                     [?run :seon.test.run/selection-tx]
-                                                     [?run :seon.test.run/at ?at]
-                                                     [(compare ?at ?since) ?order]
-                                                     [(>= ?order 0)]]
-                                            database cluster-id jvm-started))]
-                     (selection-read!
-                      (db/q '[:find ?run ?member ?symbol :in $ [?run ...] [?symbol ...]
-                              :where [?run :seon.test.run/members ?member]
-                                     [?member :seon.test.member/symbol ?symbol]
-                                     [?member :seon.test.member/completed-tx]
-                                     (not [?member :seon.test.member/terminated-tx])]
-                            database (vec since-start) symbols))))
-            candidates (distinct (concat candidates live))
+            ;; A body not observed to exit keeps its world (branch, connection,
+            ;; node cache, context) until it exits, so no other body of its
+            ;; cluster is admitted meanwhile: worlds never pile up behind it.
+            _ (when-not snapshot?
+                (let [since-start (selection-read!
+                                   (db/q '[:find [?run ...] :in $ ?cluster ?since
+                                           :where [?run :seon.test.run/cluster ?cluster]
+                                                  [?run :seon.test.run/selection-tx]
+                                                  [?run :seon.test.run/at ?at]
+                                                  [(compare ?at ?since) ?order]
+                                                  [(>= ?order 0)]]
+                                         database cluster-id jvm-started))
+                      live (selection-read!
+                            (db/q '[:find [?symbol ...] :in $ [?run ...]
+                                    :where [?run :seon.test.run/members ?member]
+                                           [?member :seon.test.member/symbol ?symbol]
+                                           [?member :seon.test.member/completed-tx]
+                                           (not [?member :seon.test.member/terminated-tx])]
+                                  database (vec since-start)))]
+                  (when (seq live)
+                    (admission-refusal! :seon.test/member-unfinished run-id
+                                        :every-admitted-body-exited (vec (sort live))))))
             scope-of (memoize
                       (fn [run-eid]
                         (let [candidate (selection-read! (db/pull database selector run-eid))]
@@ -2203,8 +2206,9 @@
   on the recording connection, and the branch unlinked by
   `release-context!` after the body's thread exits. The request is bounded by
   `:seon.test/check-time-limit-ms` (request member or the cluster's dial); a
-  body still live at the bound fails, keeps its branch, and admits no further
-  body. Members reaching a destructive owner or declaring a file-backed fixture
+  body still live at the bound fails and keeps its branch; no further body of
+  its cluster is admitted, in this request or a later one, until it exits.
+  Members reaching a destructive owner or declaring a file-backed fixture
   are excluded in a JVM operating the development checkout, with the platform
   command. `:seon.test/passed?` is true only when every obligation has green
   evidence: exclusions, pending and unfinished members are unfulfilled."
@@ -2361,14 +2365,17 @@
                                                     (:seon.test.run/id batch-provenance)))})))
                 ;; Every request, a cluster's or an isolated attempt's, branches
                 ;; from its loaded program with boot's facts and its execution's
-                ;; differing program rows, never from its operational data.
-                request-handle (when (seq ordered)
-                                 (clean-request-handle execution recording cluster effective))
+                ;; differing program rows, never from its operational data. It is
+                ;; built by the first admitted batch: a refused admission builds none.
+                held-handle (volatile! nil)
+                request-handle! #(or @held-handle
+                                     (vreset! held-handle
+                                              (clean-request-handle execution recording cluster effective)))
                 ;; Once per request: the members an attempt evaluation serves,
                 ;; those whose own reach (the index `reach` read) names the
                 ;; effect owner, never the owner's whole reverse closure
                 ;; (1,539 names, 65-90 ms per request, 2026-09-26).
-                effect-reach (when request-handle
+                effect-reach (when (seq ordered)
                                (let [reaches (runner/reach-memberships database (vec ordered))]
                                  (if (:seon.error/at reaches)
                                    (throw (ex-info "Effect reach is unreadable." reaches))
@@ -2394,7 +2401,7 @@
                           (assoc outcome ::stopped (vec remaining) ::stop-cause :deadline)
                           (let [exited (volatile! false)
                                 {result :seon.test/result timings :seon.test/timings}
-                                (member-result request-handle since test-symbol (remaining-ms)
+                                (member-result (request-handle!) since test-symbol (remaining-ms)
                                                #(do (vreset! exited true) (record-exit! test-symbol %))
                                (contains? effect-reach test-symbol))]
                           ;; An unknown loaded program started nothing: this
@@ -2474,7 +2481,7 @@
                                 (recur (inc index) outcome))))))
                       outcome))
                   (finally
-                    (when request-handle
+                    (when-let [request-handle @held-handle]
                       (@release-context! request-handle)
                       ;; Sweeping the unlinked member branches is the maintenance
                       ;; owner's io work, off the request's path (its mark is ~850
