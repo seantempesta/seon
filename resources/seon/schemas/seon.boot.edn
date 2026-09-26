@@ -82,7 +82,10 @@
               {:optional true}
               :seon.agent/routing]
              [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+             [:seon.boot/layers {:optional true} :seon.boot/layers]
              [:seon.boot/stopping {:optional true} [:= true]]],
+            :layers [:vector {:description "Each boot layer with the cumulative milliseconds since the start began when it was first published, in acquisition order."}
+                     [:map [:seon.boot/layer :qualified-keyword] [:seon.boot/at-ms [:int {:min 0}]]]],
             :log-dir [:string {:min 1}],
             :overrides
             [:map
@@ -120,6 +123,7 @@
               {:optional true}
               :seon.boot/recovered-runs]
              [:seon.boot/ready-ms {:optional true} [:int {:min 0}]]
+             [:seon.boot/layers {:optional true} :seon.boot/layers]
              [:seon.instrument/instrumented
               {:optional true}
               [:int {:min 0}]]],

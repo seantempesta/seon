@@ -399,6 +399,28 @@
    :seon.boot/prepl-server listener
    :seon.boot/executors (cluster/root-executors)})
 
+(def boot-layers
+  "The layers a ready instance holds, in the order boot acquires them."
+  [:seon.boot/prepl-server :seon.store/store :seon.source/commit-id
+   :seon.store/branch :seon.boot/cluster-connection :seon.boot/config-result
+   :seon.sci.eval/ctx :seon.flow/work-launcher :seon.flow/graph
+   :seon.render.web/served])
+
+(defn boot-timeline
+  "`value` with each boot layer it holds and `prior` did not stamped at `at-ms`.
+
+  The timeline is cumulative milliseconds since the start began, in
+  acquisition order, so a layer's own cost is its difference from the one
+  before it."
+  {:malli/schema [:=> [:cat [:maybe :map] :seon.boot/instance [:int {:min 0}]] :seon.boot/instance]}
+  [prior value at-ms]
+  (let [added (filterv #(and (some? (get value %)) (nil? (get prior %))) boot-layers)]
+    (cond-> value
+      (seq added)
+      (update :seon.boot/layers (fnil into [])
+              (map (fn [layer] {:seon.boot/layer layer :seon.boot/at-ms at-ms}))
+              added))))
+
 (defn start!
   "Acquire a listener before the store; retain partial boot after any later refusal.
   A supplied listener was opened by the launcher's minimal core-only entry form."
@@ -415,9 +437,13 @@
                           (cond-> (diagnostic (ex-message cause) (or (ex-data cause) {}) :boot-failed cause)
                             instance (assoc :seon.boot/instance instance))
                           cause))
+        ;; Each publication stamps the boot layers it adds with the
+        ;; milliseconds since this start began (`boot-timeline`).
         publish! (fn [value]
-                   (swap! running-instances assoc name value)
-                   value)
+                   (let [value (boot-timeline (get @running-instances name) value
+                                              (quot (- (System/nanoTime) began) 1000000))]
+                     (swap! running-instances assoc name value)
+                     value))
         ;; The first value in the table is already an instance: acquiring the
         ;; listener under the claim lock leaves no window in which the table
         ;; holds a placeholder that its readers would have to filter.
@@ -466,10 +492,7 @@
   [instance]
   (let [connection (:seon.boot/cluster-connection instance)
         database (when (store/connection? connection) (db/db connection))
-        required [:seon.boot/prepl-server :seon.store/store :seon.source/commit-id
-                  :seon.store/branch :seon.boot/cluster-connection :seon.boot/config-result
-                  :seon.sci.eval/ctx :seon.flow/work-launcher :seon.flow/graph
-                  :seon.render.web/served]]
+        required boot-layers]
     (merge (:seon.boot/advertisement instance)
            {:seon.boot/missing-layers (filterv #(not (get instance %)) required)
             :seon.agent/count (or (when database
@@ -477,7 +500,7 @@
                                      (db/q '[:find (count ?a) . :where [?a :seon.agent/id _]] database))
                                    0)
             :seon.problems/problems (if database (problems/problems database {}) {})}
-           (select-keys instance [:seon.boot/ready-ms :seon.boot/recovered-runs])
+           (select-keys instance [:seon.boot/ready-ms :seon.boot/layers :seon.boot/recovered-runs])
            (select-keys (:seon.render.web/served instance) [:seon.render.web/url :seon.render.web/wanted-port]))))
 
 (defn stop!
