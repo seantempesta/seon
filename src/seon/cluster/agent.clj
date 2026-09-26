@@ -535,10 +535,15 @@
          (locking holder (.set holder (Thread/currentThread)))
          (try
            (turn/step state input message)
+           ;; the declared case: this transform was interrupted by its own
+           ;; stop (`interrupt-turn!`). Interrupted execution never resumes;
+           ;; the queued stop follows, so this is no fault.
+           (catch InterruptedException _
+             [state nil])
            (finally
              (locking holder
                (.set holder nil)
-               ;; the declared case: a stop's interrupt, already served
+               ;; a stop's interrupt, already served
                (Thread/interrupted)))))))))
 
 ;;; ---------------------------------------------------------------------------
