@@ -811,6 +811,19 @@
   [request]
   [[:db.fn/call #'db/absent-call [::id (::id request)] [[:db.fn/call #'system-run-call request]]]])
 
+(defn- system-run-if-admitted-call
+  "`system-run-call`, or nothing when the writer refuses the open by one of its
+  declared rules (admission closed at retirement, a run already open). A
+  refusal settlement carries this form of the open: when the first commit was
+  refused for the open itself, the refusal records its error and writes no run,
+  rather than refusing identically a second time."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.turn/system-run-request]
+                  :seon.store/transaction-data]}
+  [database request]
+  (try (system-run-call database request)
+       (catch clojure.lang.ExceptionInfo refused
+         (if (::rule (ex-data refused)) [] (throw refused)))))
+
 (defn append-generated-call
   "Append exactly one system-authored form to an open generated turn.
 
@@ -3743,17 +3756,30 @@
   run's open and frozen sources (`system-run-tx`) and its staged reply, so a
   source run is written in the ONE transaction that settles it. The writer
   applies the open first, so every run-dependent call after it sees the run."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster
-                       [:map [:seon.db/tx-data :seon.store/transaction-data]
-                        [:seon.blob/staged-writes {:optional true} [:vector :seon.blob/staged-write]]]]
-                  [:map [:seon.db/tx-data :seon.store/transaction-data]
-                   [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]}
-  [cluster transaction]
-  (let [submission (:seon.turn.loop/submission cluster)]
+  {:malli/schema [:function
+                  [:=> [:cat :seon.turn.loop/cluster
+                        [:map [:seon.db/tx-data :seon.store/transaction-data]
+                         [:seon.blob/staged-writes {:optional true} [:vector :seon.blob/staged-write]]]]
+                   [:map [:seon.db/tx-data :seon.store/transaction-data]
+                    [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]
+                  [:=> [:cat :seon.turn.loop/cluster
+                        [:map [:seon.db/tx-data :seon.store/transaction-data]
+                         [:seon.blob/staged-writes {:optional true} [:vector :seon.blob/staged-write]]]
+                        :boolean]
+                   [:map [:seon.db/tx-data :seon.store/transaction-data]
+                    [:seon.blob/staged-writes [:vector :seon.blob/staged-write]]]]]}
+  ([cluster transaction] (with-submission cluster transaction false))
+  ([cluster transaction refusal?]
+  (let [submission (:seon.turn.loop/submission cluster)
+        run-request (:seon.agent/run-request submission)
+        open (if (and refusal? run-request)
+               [[:db.fn/call #'db/absent-call [::id (::id run-request)]
+                 [[:db.fn/call #'system-run-if-admitted-call run-request]]]]
+               (:seon.db/tx-data submission))]
     (assoc transaction
-           :seon.db/tx-data (into (vec (:seon.db/tx-data submission)) (:seon.db/tx-data transaction))
+           :seon.db/tx-data (into (vec open) (:seon.db/tx-data transaction))
            :seon.blob/staged-writes (into (vec (:seon.blob/staged-writes submission))
-                                          (:seon.blob/staged-writes transaction)))))
+                                          (:seon.blob/staged-writes transaction))))))
 
 (defn- settle-batch!
   "Settle every evaluated form and all turn side effects in one transaction."
@@ -3971,7 +3997,8 @@
                                      :seon.turn/closed-tx "datomic.tx"}))]]
                   (vec (receipt-settle-batch-tx receipts)))
                 (:seon.db/tx-data recording))
-          :seon.blob/staged-writes (vec (:seon.blob/staged-writes recording))})
+          :seon.blob/staged-writes (vec (:seon.blob/staged-writes recording))}
+         true)
         outcome (blob/with-publication!
                  connection (:seon.blob/staged-writes transaction)
                  #(db/transact! connection {:tx-data (:seon.db/tx-data transaction)}))]
@@ -4024,22 +4051,22 @@
         ;; `phase`, so a host failure lands in the refusal arm below rather
         ;; than escaping with the run still open.
         commit
-        (fn [transaction]
-          (let [transaction (with-submission cluster transaction)]
+        (fn [transaction refusal?]
+          (let [transaction (with-submission cluster transaction refusal?)]
             (phase
              #(blob/with-publication!
                connection (:seon.blob/staged-writes transaction)
                (fn [] (db/transact!
                        connection
                        {:tx-data (:seon.db/tx-data transaction)}))))))
-        outcome (commit prepared)]
+        outcome (commit prepared false)]
     (if (:db-after outcome)
       (assoc prepared :seon.turn.loop/outcome outcome)
       (let [refusal
             (refusal-terminal-data
              cluster (db/db connection) now agent-id run-id process ordinal
              (:seon.turn.loop/receipt prepared) outcome)
-            refused (commit refusal)]
+            refused (commit refusal true)]
         (when-not (:db-after refused)
           (throw
            (ex-info "Terminal refusal settlement was refused."
@@ -5891,6 +5918,7 @@
                                      (and submission (not opened))
                                      (assoc :seon.turn.loop/submission
                                             {:seon.db/tx-data (submission-open-tx run-request)
+                                             :seon.agent/run-request run-request
                                              :seon.turn/sources (::sources run-request)
                                              :seon.ns/name (:seon.ns/name plan)}))
                                    :seon.turn.work/next next}
