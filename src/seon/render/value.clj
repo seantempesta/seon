@@ -708,7 +708,7 @@
     state))
 
 (defn- admit-chunk
-  {:malli/schema [:=> [:cat :map :map :map] :map]}
+  {:malli/schema [:=> [:cat :map :map :map] [:maybe :map]]}
   [state work context]
   (let [node (get-in state [:nodes (:id work)])
         to (min (:total node) (+ (:shown node) chunk-width) (:max-string context))
