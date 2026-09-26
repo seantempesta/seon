@@ -2868,7 +2868,15 @@
             "the test's quoted mention is stored")
         (is (not (contains? (set (seon.fn/tests-reaching @connection (quote sample.call-references/apply-target)))
                             (quote sample.call-references/quotes-only)))
-            "a test quoting a symbol is not a test of it")))))
+            "a test quoting a symbol is not a test of it")
+        (let [affected (fn [target] (:seon.fn/affected (seon.fn/reverse-closure {:seon.db/db @connection
+                                                                                 :seon.fn/seeds #{target}})))]
+          (is (contains? (affected (quote sample.call-references/apply-target))
+                         (quote sample.call-references/applied))
+              "a caller of a changed definition is in its closure")
+          (is (not (contains? (affected (quote sample.call-references/resolve-target))
+                              (quote sample.call-references/resolved)))
+              "a quoted mention reaches nothing: the closure an override interprets is call reach"))))))
 
 (deftest analyzer-edges-are-readable-symbols-or-no-edge
   (let [source

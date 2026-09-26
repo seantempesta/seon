@@ -1801,10 +1801,9 @@
   "Select tests through surviving named edges in one immutable database.
    Acquire identity and genuine declaration-ref joins once per operation."
   {:malli/schema [:=> [:cat :seon.db/database-value
-                       [:sequential :qualified-symbol] :boolean]
-                  [:or :seon.fn/reverse-closure-result
-                   [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
-  [database function-symbols union?]
+                       [:sequential :qualified-symbol]]
+                  [:or [:map-of :qualified-symbol :seon.fn/reverse-closure-result] :seon.db/invalid-read-error]]}
+  [database function-symbols]
   (let [identity-rows (db/q '[:find ?entity ?symbol
                              :where (or [?entity :seon.fn/sym ?symbol]
                                         [?entity :seon.test/sym ?symbol])] database)
@@ -1830,24 +1829,41 @@
                              {} (concat (map (fn [[caller target]]
                                                [caller (get identities target)]) declared)
                                         file-references handlers))]
-        (if union?
-          (gate-set-in database identities (set test-symbols) incoming function-symbols)
-          (reduce (fn [result function-symbol]
+        (reduce (fn [result function-symbol]
                   (let [selected (gate-set-in database identities (set test-symbols)
                                               incoming [function-symbol])]
                     (if (:seon.db/invalid-read selected)
                       (reduced selected)
                       (assoc result function-symbol selected))))
-                {} (distinct function-symbols)))))))
+                {} (distinct function-symbols))))))
 
-(defn reverse-closure
-  "Return affected function declarations and reaching tests from one reverse walk.
-   Reference and declared invocation edges conservatively participate, exactly as
-   they do in test selection. No result is retained beyond this database value."
-  {:malli/schema [:=> [:cat :seon.fn/gate-request]
-                  [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
-  [{database :seon.db/db seeds :seon.fn/seeds}]
-  (gate-sets-in database (vec seeds) true))
+(defn- read-or-throw!
+  "`value`, or a throw carrying it when it is a read refusal; a walk's reads
+  stop at the first refusal and its catch answers that refusal."
+  {:malli/schema [:=> [:cat :seon.schema/value] :seon.schema/value]}
+  [value]
+  (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
+
+(defn- identity-names
+  "`[attribute symbol]` of each identity entity in `entities`, in one bound query."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value [:sequential :int]]
+                  [:map-of :int [:tuple :keyword :qualified-symbol]]]}
+  [read! database entities]
+  (into {} (map (fn [[entity attribute named]] [entity [attribute named]]))
+        (read! (db/q '[:find ?entity ?attribute ?symbol :in $ [?entity ...] [?attribute ...]
+                       :where [?entity ?attribute ?symbol]]
+                     database (vec entities) [:seon.fn/sym :seon.test/sym]))))
+
+(defn- declared-callers
+  "The caller entities of each declared invocation target, keyed by its symbol."
+  {:malli/schema [:=> [:cat [:fn clojure.core/ifn?] :seon.db/database-value]
+                  [:map-of :qualified-symbol [:set :int]]]}
+  [read! database]
+  (let [edges (read! (declared-reference-edges database))
+        names (identity-names read! database (vec (mapcat identity edges)))]
+    (reduce (fn [incoming [caller target]]
+              (update incoming (second (names target)) (fnil conj #{}) caller))
+            {} edges)))
 
 (defn- call-reach
   "The tests exercising `seeds`: each test calling a seed or calling a function
@@ -1861,18 +1877,9 @@
                   [:or [:vector :seon.test/sym] :seon.db/invalid-read-error]]}
   [database seeds]
   (try
-    (let [read! (fn [value] (if (db/read-refusal? value) (throw (ex-info "Call reach unavailable." value)) value))
-          ;; `[attribute symbol]` of each identity entity, in one bound query.
-          named (fn [entities]
-                  (into {} (map (fn [[entity attribute symbol]] [entity [attribute symbol]]))
-                        (read! (db/q '[:find ?entity ?attribute ?symbol :in $ [?entity ...] [?attribute ...]
-                                       :where [?entity ?attribute ?symbol]]
-                                     database (vec entities) [:seon.fn/sym :seon.test/sym]))))
-          declared (let [edges (read! (declared-reference-edges database))
-                         names (named (mapcat identity edges))]
-                     (reduce (fn [incoming [caller target]]
-                               (update incoming (second (names target)) (fnil conj #{}) caller))
-                             {} edges))
+    (let [read! read-or-throw!
+          named (fn [entities] (identity-names read! database entities))
+          declared (declared-callers read! database)
           ;; Entities naming each target by `attribute`, one index read per pair.
           referrers (fn [attribute targets]
                       (into #{} (mapcat #(map :e (read! (db/datoms database :avet attribute %)))) targets))
@@ -1892,6 +1899,46 @@
     (catch clojure.lang.ExceptionInfo failure
       (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
 
+(defn reverse-closure
+  "The functions that transitively call `seeds`, and the tests exercising them.
+
+  `:seon.fn/affected` walks call reach to its fixed point: each function that
+  calls a seed or an already reached function through `:seon.fn/calls` or a
+  declared invocation edge, plus each seed that is a function row. A symbol
+  mention calls nothing (owner 2026-09-26), so a quoted `'a/b` reaches nothing:
+  on default a leaf's mention-inclusive closure was 530 functions and its call
+  closure 1 (perf-profile 2026-09-26). `:seon.fn/tests` is test selection's
+  answer for the same seeds ([[call-reach]]). One bound query per level; no
+  whole-program index."
+  {:malli/schema [:=> [:cat :seon.fn/gate-request]
+                  [:or :seon.fn/reverse-closure-result :seon.db/invalid-read-error]]}
+  [{database :seon.db/db seeds :seon.fn/seeds}]
+  (try
+    (let [read! read-or-throw!
+          seeds (vec seeds)
+          declared (declared-callers read! database)
+          functions (fn [entities]
+                      (into #{} (keep (fn [[_ [attribute named]]]
+                                        (when (= :seon.fn/sym attribute) named)))
+                            (identity-names read! database entities)))
+          present (set (read! (db/q '[:find [?symbol ...] :in $ [?symbol ...]
+                                      :where [_ :seon.fn/sym ?symbol]]
+                                    database seeds)))
+          affected
+          (loop [frontier seeds seen (set seeds) affected present]
+            (if (empty? frontier)
+              affected
+              (let [callers (into (set (read! (db/q '[:find [?caller ...] :in $ [?target ...]
+                                                      :where [?caller :seon.fn/calls ?target]]
+                                                    database frontier)))
+                                  (mapcat declared) frontier)
+                    fresh (vec (remove seen (functions callers)))]
+                (recur fresh (into seen fresh) (into affected fresh)))))
+          tests (read! (call-reach database seeds))]
+      {:seon.fn/affected affected :seon.fn/tests tests})
+    (catch clojure.lang.ExceptionInfo failure
+      (if (db/read-refusal? (ex-data failure)) (ex-data failure) (throw failure)))))
+
 (defn gate-sets
   "Select the tests exercising changed definitions (`call-reach`).
   The map arity seeds one frontier with all changed symbols. The positional arity
@@ -1907,7 +1954,7 @@
   ([{database :seon.db/db seeds :seon.fn/seeds}]
    (call-reach database (vec seeds)))
   ([database function-symbols]
-   (let [result (gate-sets-in database function-symbols false)]
+   (let [result (gate-sets-in database function-symbols)]
      (if (:seon.db/invalid-read result)
        result
        (into {} (map (fn [[sym closure]] [sym (:seon.fn/tests closure)])) result)))))
