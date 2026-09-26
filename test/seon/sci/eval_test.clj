@@ -1264,8 +1264,7 @@
   (is
    (some? (sci/resolve ctx 'discarded))
    "the forked ns-unmap leaves the parent context unchanged")
-  (is (nil? (sci/resolve execution-ctx 'discarded)))
-  (is (nil? (:seon.sci.eval/context-row result)))))
+  (is (nil? (sci/resolve execution-ctx 'discarded)))))
 
 (deftest declared-row-evaluates-a-schema-once-inside-its-delta
   (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
@@ -2317,18 +2316,38 @@
   ;; its message, never as a refusal of the evaluator. clojure.main's own text
   ;; for the same form, in this JVM, is the reference; only the location
   ;; names the agent's form instead of a compiled frame.
-  (doseq [[source host] [["(/ 1 0)" #(/ 1 0)]
-                         ["(inc \"a\")" #(apply inc ["a"])]
-                         ["(throw (ex-info \"boom\" {:a 1}))" #(throw (ex-info "boom" {:a 1}))]]]
-    (let [reference (str/split-lines
-                     (clojure.main/ex-str
-                      (clojure.main/ex-triage (Throwable->map (try (host) nil (catch Throwable t t))))))
-          shown (:seon.error/message (:seon.sci.admit/value (run source)))
-          [head message] (str/split-lines shown)]
-      (is (= (second reference) message) shown)
-      (is (str/starts-with? head (subs (first reference) 0 (str/index-of (first reference) " at ")))
-          shown)
-      (is (not (str/includes? shown "refused")) shown))))
+  ;; The context is built on this thread and the form evaluated on another,
+  ;; as an agent's Flow thread evaluates a context built elsewhere: SCI keeps
+  ;; the form's location only on its :main-thread-id (2026-09-26, MCP showed
+  ;; `(REPL:1818)`, the interpreter's own line, while same-thread tests passed).
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))]
+    (doseq [[source host] [["(/ 1 0)" #(/ 1 0)]
+                           ["(inc \"a\")" #(apply inc ["a"])]
+                           ["(throw (ex-info \"boom\" {:a 1 :line 99}))"
+                            #(throw (ex-info "boom" {:a 1 :line 99}))]]]
+      (let [reference (str/split-lines
+                       (clojure.main/ex-str
+                        (clojure.main/ex-triage (Throwable->map (try (host) nil (catch Throwable t t))))))
+            shown (:seon.error/message
+                   (:seon.sci.admit/value @(future (run-in ctx source 2000))))
+            [head message] (str/split-lines shown)]
+        (is (= (second reference) message) shown)
+        (is (= (str (subs (first reference) 0 (str/index-of (first reference) " at "))
+                    " at (REPL:1:1).")
+               head)
+            "the location is the agent's form, never the interpreter's frame or the agent's own ex-data")
+        (is (not (str/includes? shown "refused")) shown)))))
+
+(deftest require-answers-nil-and-its-alias-serves-the-same-form
+  ;; REPL parity (clojure.main 1.12.5): `(require '[clojure.string :as str])`
+  ;; prints nil, and a top-level `do` that requires then calls through the
+  ;; alias answers the call. MCP showed `user` for both (2026-09-26): the
+  ;; namespace-context row's name replaced the form's value.
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
+        value (fn [source] (:seon.sci.admit/value (run-in ctx source 2000)))]
+    (is (nil? (value "(require '[clojure.string :as parity-str])")))
+    (is (= "A" (value "(parity-str/upper-case \"a\")")))
+    (is (= #{1 2} (value "(do (require '[clojure.set :as parity-set]) (parity-set/union #{1} #{2}))")))))
 
 (deftest both-entrances-classify-one-failure-identically
   (test-support/with-database

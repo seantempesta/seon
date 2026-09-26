@@ -539,18 +539,24 @@
 
 (defn- execution-error-text
   "`clojure.main`'s own text for one exception an agent's code threw:
-  `ex-triage` names the root class and message, and SCI's location (the
-  form's line, column and file) stands where clojure.main names its compiled
-  frame, which here would be the interpreter's own."
+  `ex-triage` names the root class and message. SCI's location wrapper
+  (`:type :sci/error`, `sci/impl/utils.cljc:121-175`) names the form's line,
+  column and file; it stands where clojure.main names its compiled frame,
+  which here would be the interpreter's own. Only that wrapper is a location:
+  an agent's own `ex-data` is never read as one, and without the wrapper
+  `ex-triage`'s frame stands whole."
   {:malli/schema [:=> [:cat :seon.error/throwable] [:string {:min 1}]]}
   [throwable]
-  (let [{:keys [line column file]} (ex-data throwable)]
+  (let [data (ex-data throwable)
+        triage (main/ex-triage (Throwable->map throwable))]
     (str/trim
      (main/ex-str
-      (cond-> (dissoc (main/ex-triage (Throwable->map throwable)) :clojure.error/symbol)
-        true (assoc :clojure.error/source (or file "REPL"))
-        (int? line) (assoc :clojure.error/line line)
-        (int? column) (assoc :clojure.error/column column))))))
+      (if (isa? (:type data) :sci/error)
+        (-> (dissoc triage :clojure.error/symbol :clojure.error/line :clojure.error/column)
+            (assoc :clojure.error/source (or (:file data) "REPL"))
+            (cond-> (int? (:line data)) (assoc :clojure.error/line (:line data))
+                    (int? (:column data)) (assoc :clojure.error/column (:column data))))
+        triage)))))
 
 (defn failure-value
   "Preserve an existing structural refusal and accrete guard evidence.
