@@ -138,4 +138,9 @@
              :kind :function
              :intent "A top-level do's children are admitted one by one (top-level-evaluation), but an evaluation still settles one :seon.program/row, so (do (defn a ...) (defn b ...)) refuses as multiple-declarations-error at b's child and restores a, where Clojure defines both. Admitting both needs settlement (seon.turn) to carry a vector of rows per evaluation; until then the refusal is loud and names both."
              :must-read #{seon.sci.eval/top-level-evaluation seon.sci.eval/admit-program-change!}
-             :evidence #{"docs/research/agent-platform/landing/fix-do-defn-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/fix-do-defn-opus-2026-09-26.md"}}
+ #:seon.task{:name "agent-form-writes-name-an-unwritten-evaluation"
+             :kind :function
+             :intent "On live e405f51be (one-commit A) every write an agent form makes on its branch refuses 'Nothing found for entity id [:seon.cluster.eval/id <this form>]': the evaluation's receipt lookup ref (seon.sci.eval/evaluate, receipt at eval.clj:4341-4343) names the evaluation row that is written only at settlement. It breaks (seon.db/transact! ...) at the REPL and every test run from the agent REPL (my.test/run-owned admission), so no agent can prove a change. Reproduced 2026-09-26 20:38Z and 20:46Z on branch merge-cut1-opus (evals 78f381684a44, 82cf53bace3b)."
+             :must-read #{seon.sci.eval/evaluate}
+             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}]

@@ -10,4 +10,9 @@
              :kind :function
              :intent "A declared bridge failure answers with the whole Throwable->map printed, trace included: the repl-unavailable and session-lost answers (default restarting, 2026-09-26) each carried about 9,000 characters (about 2,800 tokens) of the bridge's own babashka interpreter frames around a one-line ex-info whose ex-data already names the failure, the cluster and the remedy. The frames are the bridge's, never the agent's or Seon's. A declared failure is its ex-data; the trace belongs only to an undeclared throwable."
              :must-read #{seon.dev.mcp/failure seon.dev.mcp/mcp-error}
-             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/eval-feedback-design-2026-09-26.md"}}
+ #:seon.task{:name "branch-eval-answers-no-events"
+             :kind :function
+             :intent "An MCP eval_clj SCI run on a branch intermittently answers :seon.dev.mcp/events [] although the evaluation settled and its shown text is saved (branch merge-cut1-opus 2026-09-26: evals fea1a8955086 shown a task-edges value, 4d2fab4f0f7d shown \"3\", and a refused my.test/check). Silence is read as nothing; the saved observation must be delivered."
+             :must-read #{seon.dev.mcp/failure}
+             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}]

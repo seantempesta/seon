@@ -54,4 +54,9 @@
              :kind :function
              :intent "Class usage marks a declaration host-bound from a copied SCI class list although the interpreter resolves every class; (java.util.Date.) refuses on later calls. Executability must come from the configured interpreter (Astra M1)."
              :must-read #{seon.fn/host-bound-callers seon.sci.eval/build-base-ctx}
-             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/agent-path-2-2026-09-26.md"}}
+ #:seon.task{:name "gate-sets-map-arity-gets-a-supplied-database"
+             :kind :function
+             :intent "(my.test/check {:seon.test/changed ['user/a-test]}) at a branch REPL refuses: seon.fn/gate-sets is called with [<db> {:seon.db/db <db> :seon.fn/seeds #{...}}] against its [:cat :seon.db/database-value [:sequential :seon.fn/sym]] arity, so a database is supplied in front of the map arity's own request (callers seon.test at test.clj:835 and :1066). Building that refusal then throws ClassCastException Keyword -> Map$Entry. Reproduced 2026-09-26 20:46Z on branch merge-cut1-opus."
+             :must-read #{seon.fn/gate-sets seon.test/run}
+             :evidence #{"docs/research/agent-platform/landing/merge-cut1-opus-2026-09-26.md"}}]
