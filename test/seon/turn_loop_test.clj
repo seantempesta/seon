@@ -329,7 +329,8 @@
            ;; The cluster's world exists before its handle reads its config.
            _ (test-support/seed-cluster! connection cluster-name)
            cluster (test-support/cluster-handle
-                   {:seon.db/connection connection
+                   {:seon.env/environment (test-support/environment cluster-name connection)
+                    :seon.db/connection connection
                     :seon.cluster/name cluster-name
                     :seon.db.process/id process
                     :seon.sci.eval/ctx
@@ -436,7 +437,8 @@
               {:seon.config.ai/model "before-apply"
                :seon.config.ai.backup/model "backup-before-apply"})
            cluster (test-support/cluster-handle
-                   {:seon.db/connection connection
+                   {:seon.env/environment (test-support/environment cluster-name connection)
+                    :seon.db/connection connection
                     :seon.cluster/name cluster-name
                     :seon.db.process/id process
                     :seon.sci.eval/ctx
@@ -594,7 +596,8 @@
         prepared
         (refusal-terminal-data
          (test-support/cluster-handle
-          {:seon.db/connection connection
+          {:seon.env/environment (test-support/environment "refused-phase" connection)
+          :seon.db/connection connection
           :seon.cluster/name "refused-phase"
           :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
           :seon.config.error/escalate-to escalate-to
@@ -737,7 +740,8 @@
               (terminal-data
                {:seon.turn.loop/cluster
                 (test-support/cluster-handle
-                 {:seon.db/connection connection
+                 {:seon.env/environment (test-support/environment "undisposed" connection)
+                  :seon.db/connection connection
                   :seon.cluster/name "undisposed"
                   :seon.db.process/id process
                   :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)})
@@ -915,7 +919,8 @@
       ;; The freeze already minted ordinal 0 with its start instant; there is
       ;; no separate receipt to start.
       (let [cluster (test-support/cluster-handle
-                    {:seon.db/connection connection
+                    {:seon.env/environment (test-support/environment "install-refusal" connection)
+                     :seon.db/connection connection
                      :seon.cluster/name "install-refusal"
                      :seon.sci.eval/ctx (test-support/fork-cluster-ctx connection)
                      :seon.db.process/id process
