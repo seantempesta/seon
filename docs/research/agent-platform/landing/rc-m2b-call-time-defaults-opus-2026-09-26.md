@@ -79,9 +79,7 @@ This lane adds both:
 - **Behaviour widened, and must be verified by root's runs.**
   - A host→host call inside an evaluation that omits a declared default is now supplied from the
     world. Before, only SCI→host calls were.
-  - A call outside any evaluation that omits a required supplied value now refuses by name: "No
-    evaluation is running on this thread … pass it explicitly". Before, it failed the callee's
-    arity or contract.
+  - (Withdrawn in follow-up 1: a call outside any evaluation is not prepared at all.)
 - **Left for M1 (root's 2026-09-26 note, eval.clj):**
   - `shown-result` still runs inside the evaluation's success `try`;
   - renderer `:seon.render.value/diagnostics` are not yet recorded as faults.
@@ -139,6 +137,46 @@ Lines, measured:
   (seon.sci.kernel/current-arm))` on branch `rc-m2b`.
 - **Checked live:** the cluster handle's context environment carries `:seon.agent/routing`,
   `:seon.store/store` and the cluster name, which `disposable-copy` hands the agent entrance.
+
+## Follow-up 1: acceptance refusal f962afd56382 (settlement spliced a refusal into tx-data)
+
+- **Reproduced** on MCP branch `rc-m2b-2` at 67b02c99f with a single
+  `(defn smoke-inc "Adds one." {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))`. The run failed
+  to settle: "Can't use tempid in '[:seon.error/expected "an available supplied default"]'".
+- **Cause, proven live.** Settlement runs on the turn thread after the arm has stopped. It calls
+  `(seon.turn/receipt-settle-tx request)`, the declared one-arity, through
+  `(mapcat receipt-settle-tx)` at turn.clj:1039.
+  - That count collides with the two-arity's shape with `:seon.db/db` elided. The ruling-41
+    dispatch decides on the first argument: a settle request is not a database, so it chose the
+    elided shape (live: `decided` → inserts `[:seon.db/db]`).
+  - No evaluation was running, so `prepare` returned its unavailable refusal as the call's value.
+    `mapcat` then spliced that map's entries into tx-data.
+- **The model error is mine.** 1b77876af made preparation author a value (a refusal) for a caller
+  that is not an evaluation. The old hook only ever prepared calls made by interpreted code.
+- **Fix at the producer.** `preparing` does nothing when `(world)` is nil: the arguments reach the
+  callee's contract as given. The nil-world branch in `prepare` is deleted, so `prepare` requires
+  an environment again. Preparation never authors a value for host work that no evaluation makes:
+  the Datahike writer, listeners, settlement, boot.
+- **Regression:** `host-work-outside-an-evaluation-keeps-its-declared-arity`. With no world,
+  `probe-shortcut "a" "b"` runs its declared arity; inside an evaluation the same call still gets
+  its elided database. The unavailable-custody test now asserts that an unprepared call outside
+  an evaluation is refused by the callee's own arity contract, with the body never entered.
+- **Still open, owner decision (not changed).** 28 armed functions have such a count collision,
+  among them `receipt-settle-tx`, `seon.issue/adopt!` and `seon.sci.eval/projection-state`.
+  - Inside an evaluation, a host→host call to one of them with a non-database first argument is
+    re-routed to the elided shape. SCI callers always were.
+  - Smallest principled alternative: at a collision, the declared arity wins whenever its own input
+    schema accepts the call. That changes ruling #41's `probe-shortcut "a" "b"` expectation.
+- **The +32 datoms.**
+  - The disposable copy writes nothing to the agent's branch. `registry/branch!` only calls
+    `d/branch!` on the store; `acquire-context!` with a nil agent id transacts nothing on the
+    parent. Gate writes land on the copy's branch.
+  - Measured on `rc-m2b-2`: a count inside one form changes by 0. Between two runs it changes by
+    26, which is the settlement of the previous run (turn, receipt, row).
+  - Root's +32 was counted within one multi-form run, after earlier forms had been recorded. So
+    it is that run's own recording of forms 1–3, not auto-check writes.
+  - Control for root: the same run with the defn replaced by `(def smoke-inc (fn [x] (inc x)))`.
+    It should show the same delta if the gate writes nothing.
 
 ## Root runs (after the two patches, the commit, and RESET)
 

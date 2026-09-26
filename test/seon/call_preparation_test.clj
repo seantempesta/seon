@@ -701,13 +701,33 @@
                    (:seon.call-preparation/target-symbol refused))
                 "naming the call it refused")
             (is (zero? @entered) "the body never ran without its database"))
-          (testing "outside any evaluation there is no world: a call that needs
-                    one refuses by name instead of running unprepared"
+          (testing "a call no evaluation makes is not prepared: the callee's
+                    own contract answers for the arguments it was given"
             (reset! entered 0)
-            (is (= :seon.db/db
-                   (:seon.call-preparation/unavailable-key
-                    ((var probe-received-database?) "a"))))
+            (is (= 1 (:seon.instrument/declared-arity-count
+                      (test-support/refusal-data #((var probe-received-database?) "a"))))
+                "its contract refuses the arity it was called with")
             (is (zero? @entered)))))))))
+
+(deftest ^{:seon/tasks #{"0261d4d9bbe6"}}
+  host-work-outside-an-evaluation-keeps-its-declared-arity
+  ;; CLASS (acceptance run, 2026-09-26, error f962afd56382): settlement on the
+  ;; turn thread called `(seon.turn/receipt-settle-tx request)`, the declared
+  ;; one-arity. Its count collides with the two-arity's shape with the
+  ;; database elided, and `request` is not a database, so preparation chose
+  ;; the elided shape, had no world to supply from, and returned its
+  ;; unavailable refusal as the call's value; `mapcat` spliced that map's
+  ;; entries into tx-data. A call no evaluation makes is never prepared.
+  (test-support/with-database
+   (fn [connection]
+     (test-support/transacted! connection database-rows)
+     (arm-probes! @connection)
+     (is (nil? (kernel/world-ctx)) "this test body serves no evaluation")
+     (is (= :two-labels ((var probe-shortcut) "a" "b"))
+         "the declared arity runs with the arguments given")
+     (let [ctx (probe-ctx connection connection)]
+       (is (= :supplied-database (probe ctx "probe-shortcut \"a\" \"b\""))
+           "the same call inside an evaluation still gets its elided database")))))
 
 (deftest a-compiled-first-party-call-is-prepared
   (testing "positional, map-key, caller-wins, supplied-nil, undeclared and

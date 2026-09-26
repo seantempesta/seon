@@ -956,9 +956,7 @@
 (defn prepare
   "Prepare one call's arguments against its plan, or refuse as a value.
 
-  `environment` is the calling evaluation's world; nil means no evaluation
-  runs on this thread, so a value that must be supplied is unavailable by
-  name (pass it explicitly) and an optional one stays absent.
+  `environment` is the calling evaluation's world.
 
   An unavailable-error names a supplier that could not produce a value;
   an invalid-supplied-value-error names a value outside its declared schema;
@@ -969,7 +967,7 @@
   Caller presence is tested by argument occupancy and `contains?`, never
   truthiness: a supplied nil reaches ordinary Malli input validation."
   {:malli/schema
-   [:=> [:cat :seon.call-preparation/snapshot [:maybe :seon.env/environment]
+   [:=> [:cat :seon.call-preparation/snapshot :seon.env/environment
          [:maybe :seon.call-preparation/plan] :seon.schema/arguments]
     [:or :seon.schema/arguments :seon.call-preparation/ambiguous-call-error :seon.call-preparation/unavailable-error :seon.call-preparation/invalid-supplied-value-error]]}
   [current environment plan-value arguments]
@@ -1006,11 +1004,7 @@
         ;; the argument vector.
         (let [absent (Object.)
               value-for (fn [slot]
-                          (let [produced (if environment
-                                           (supply current environment slot sym)
-                                           (unavailable sym slot
-                                                        {:seon.error/message
-                                                         "No evaluation is running on this thread, so no world supplies it; pass it explicitly."}))
+                          (let [produced (supply current environment slot sym)
                                 unavailable? (and (map? produced) (:seon.call-preparation/unavailable-key produced))]
                             (cond
                               ;; Optional is a declared absence: the call runs without the key.
@@ -1050,7 +1044,13 @@
   (`seon.instrument` reads it from the kernel arm), never the environment of
   the context the function was created in. Prepared arguments enter
   `wrapped`, whose contract validates them; a refusal is the call's value and
-  the callee is never entered."
+  the callee is never entered.
+
+  A call no evaluation makes (host work on a thread serving no arm: Datahike's
+  writer calling a transaction function, a listener, boot) has no world to
+  supply from, so it is not prepared: its arguments reach `wrapped` as given
+  and the callee's own contract answers for them. Preparation never authors a
+  value for a caller that is not an evaluation."
   {:malli/schema [:=> [:cat :seon.call-preparation/snapshot :seon.call-preparation/plan
                        [:fn clojure.core/ifn?] [:fn clojure.core/ifn?]]
                   [:fn clojure.core/ifn?]]}
@@ -1059,7 +1059,9 @@
   ;; `prepare` unarmed; the wrapped contract still validates what it returns.
   (let [prepare-call (mi/-f->original prepare)]
     (fn [& arguments]
-      (let [prepared (prepare-call current (world) plan-value (vec arguments))]
-        (if (vector? prepared)
-          (apply wrapped prepared)
-          prepared)))))
+      (if-let [environment (world)]
+        (let [prepared (prepare-call current environment plan-value (vec arguments))]
+          (if (vector? prepared)
+            (apply wrapped prepared)
+            prepared))
+        (apply wrapped arguments)))))
