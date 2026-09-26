@@ -189,7 +189,7 @@ volatile in one thread is Clojure's sanctioned accumulator. Capture atoms that s
 | N not state | 54 resolve delays, 4 generators, 3 predicate registrations, 2 constants | out of scope |
 
 So at the level of long-lived places, the count is about 64 across a 90,130-line `src`/`script` tree. Everything durable
-already lives in Datahike, and nearly every derived value already follows the "memoize of an immutable value" law. What
+already lives in Datahike except one recording decision, and nearly every derived value already follows the "memoize of an immutable value" law. What
 remains unowned is the live-object layer.
 
 ## 5. The one right owner, per category, and whether it can be centralized
