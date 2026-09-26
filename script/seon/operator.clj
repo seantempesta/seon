@@ -362,10 +362,18 @@
      (catch Throwable cause#
        {:seon.error/message (ex-message cause#) :seon.error/cause (Throwable->map cause#)})))
 
-(defn- launch-form [request port]
+(def ^:private program-classes-directory
+  "Our compiled classes for one committed archive, inside it: keyed by the
+  commit the archive is, pruned with it (`prune-archives!`)."
+  ".program-classes")
+
+(defn- launch-form [request port source]
   ;; Only Clojure core loads before opening and reporting the diagnostic REPL.
   ;; The second callback value is terminal boot evidence, never a file poll;
   ;; a move reads the branch heads first, as the value between them.
+  ;; A first launch on an archive writes the classes its program load compiles
+  ;; anyway into a staging directory, promoted whole on success; the next
+  ;; launch prepends it (`start-classpath`) and loads instead of compiling.
   (pr-str
    `(do
       (require '~'clojure.core.server '~'clojure.java.io)
@@ -382,10 +390,25 @@
         (with-open [callback# (java.net.Socket. "127.0.0.1" ~port)
                     writer# (~'clojure.java.io/writer callback#)]
           (.write writer# (str (pr-str coordinates#) "\n")) (.flush writer#)
-          (let [heads# ~(some-> (:seon.operator/capture-heads request) head-capture-form)
+          (let [final# (java.io.File. ~source ~program-classes-directory)
+                staging# (when-not (.isDirectory final#)
+                           (java.io.File. ~source (str ~program-classes-directory ".staging-"
+                                                       (:seon.boot/pid identity#))))
+                _# (some-> staging# .mkdirs)
+                [heads# loaded#]
+                (binding [*compile-path* (if staging# (.getPath staging#) *compile-path*)
+                          *compile-files* (boolean staging#)]
+                  [~(some-> (:seon.operator/capture-heads request) head-capture-form)
+                   (try (require '~'seon.cluster.boot) nil (catch Throwable cause# cause#))])
+                _# (when staging#
+                     (if (or loaded# (.isDirectory final#))
+                       (doseq [file# (reverse (file-seq staging#))] (.delete ^java.io.File file#))
+                       (java.nio.file.Files/move (.toPath staging#) (.toPath final#)
+                                                 (into-array java.nio.file.CopyOption
+                                                             [java.nio.file.StandardCopyOption/ATOMIC_MOVE]))))
                 _# (when heads# (.write writer# (str (pr-str heads#) "\n")) (.flush writer#))
                 result# (try
-                          (require '~'seon.cluster.boot)
+                          (some-> loaded# throw)
                           ((resolve '~'seon.cluster.boot/request!)
                            (assoc '~(dissoc request :seon.operator/capture-heads)
                                   :seon.boot/prepl-server listener#))
@@ -518,12 +541,18 @@
            :seon.dev-cache/selection-ms (quot (- (System/nanoTime) started) 1000000))))
 
 (defn- start-classpath
-  "The `-Scp` argument prepending a hit's classes to `source`'s own classpath, or nothing."
+  "The `-Scp` argument prepending the archive's own compiled classes and a
+  dependency hit's classes to `source`'s own classpath, or nothing."
   {:malli/schema [:=> [:cat :string :map] [:maybe :string]]}
   [source classes]
-  (when (= :hit (:seon.dev-cache/status classes))
-    (str (:seon.dev-cache/path classes) java.io.File/pathSeparator
-         (str/trim (command! ["clojure" "-Spath" "-M:dev:test"] source runtime-probe-bound-ms)))))
+  (let [program (io/file source program-classes-directory)
+        prefix (cond-> []
+                 (.isDirectory program) (conj (.getCanonicalPath program))
+                 (= :hit (:seon.dev-cache/status classes)) (conj (:seon.dev-cache/path classes)))]
+    (when (seq prefix)
+      (str/join java.io.File/pathSeparator
+                (conj prefix (str/trim (command! ["clojure" "-Spath" "-M:dev:test"] source
+                                                 runtime-probe-bound-ms)))))))
 
 (defn- record-cache-reference!
   "Record the child JVM's use of a cache directory, so `dev-cache/reap` keeps it
@@ -577,13 +606,15 @@
                       (dependency-classes (repository-root) source environment)
                       {:seon.dev-cache/status :skipped
                        :seon.dev-cache/reason :nuke-reads-no-derived-state})
+            program-classes? (.isDirectory (io/file source program-classes-directory))
             classpath (start-classpath source classes)
             argv (cond-> ["clojure"]
                    classpath (into ["-Scp" classpath])
                    true (into [(str "-J-Dseon.operator.root=" root)
                                (str "-J-Dseon.repository.root=" source)
                                (str "-J-XX:HeapDumpPath=" (.getCanonicalPath heap))
-                               "-M:dev:test" "-e" (launch-form request (.getLocalPort callback))]))
+                               "-M:dev:test" "-e" (launch-form request (.getLocalPort callback)
+                                                                 (.getCanonicalPath (io/file source)))]))
             builder (doto (ProcessBuilder. ^java.util.List argv)
                       (.directory (io/file source))
                       (.redirectErrorStream true)
@@ -643,6 +674,8 @@
             ;; ahead of the outcome (`-main` prints the outcome's headline first).
             (let [dumps (heap-dumps root)]
               (cond-> {:seon.operator/value (cond-> (assoc value :seon.dev-cache/dependency-classes classes
+                                                           ;; Whether this launch loaded the archive's own classes.
+                                                           :seon.operator/program-classes? program-classes?
                                                            :seon.operator/log (str log))
                                               (seq dumps) (assoc :seon.operator/heap-dumps dumps))
                        :seon.boot/advertisement coordinates}
