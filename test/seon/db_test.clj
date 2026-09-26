@@ -847,10 +847,12 @@
            (db/read-evidence @captured
                              {:seon.db/retain-read-results? true})]
        (is (map? original))
-       (is (not-any? #(find % :seon.db/read-result) durable)
-           "default evidence cannot inline read payloads into evaluation facts")
-       (is (every? #(= 64 (count (:seon.db/read-result-digest %))) durable)
-           "durable pull evidence retains only a fixed-size result digest")
+       ;; b96d6e684: stored evidence references its read; only process-local
+       ;; retained evidence keeps the request, result and digest for replay.
+       (is (not-any? #(or (find % :seon.db/read-result) (find % :seon.db/read-result-digest)) durable)
+           "default evidence cannot inline read payloads or their digests into evaluation facts")
+       (is (every? #(= 64 (count (:seon.db/read-result-digest %))) process-local)
+           "process-local pull evidence retains a fixed-size result digest")
        (is (every? #(find % :seon.db/read-result) process-local)
            "the explicit process-local cache retains stable replay values")
        (test-support/transacted!
@@ -859,8 +861,6 @@
                       [{:seon.message/id "semantic-replay-unrelated"
                         :seon.message/to [:seon.agent/id "db-test-recipient"]
                         :seon.message/content "unrelated"}]))
-       (is (true? (db/read-evidence-current? @connection durable))
-           "an equal wildcard replay survives an unrelated transaction")
        (is (true? (db/read-evidence-current? @connection process-local))
            "an equal bounded replay keeps the process-local read current")
        (test-support/transacted! connection
@@ -890,30 +890,14 @@
        (let [captured (atom [])]
          (binding [db/*read-evidence-sink* captured]
            (db/pull @connection '[*] subject))
-         (let [evidence (db/read-evidence @captured)]
-           (is (= 64 (count (:seon.db/read-result-digest (first evidence))))
-               "nil and large pull results both retain a digest")
+         (let [evidence (db/read-evidence @captured)
+               retained (db/read-evidence @captured {:seon.db/retain-read-results? true})]
+           (is (= 64 (count (:seon.db/read-result-digest (first retained))))
+               "nil and large pull results both retain a process-local digest")
            (is (< (count (pr-str evidence)) 2000)
                "durable evidence size does not scale with the pull result")
-           (when (= :seon.message/id (first subject))
-             (test-support/transacted!
-                          connection
-                          [{:seon.cluster.eval/id "digest-persistence"
-                            :seon.cluster.eval/run "datomic.tx"
-                            :seon.cluster.eval/ordinal 0
-                            :seon.cluster.eval/at #inst "2026-09-09T00:00:00Z"
-                            :seon.cluster.eval/read-evidence
-                            [(assoc (first evidence) :db/id "digest-persistence/0")]}])
-             (is (= (:seon.db/read-result-digest (first evidence))
-                    (get-in
-                     (db/pull
-                      @connection
-                      '[{:seon.cluster.eval/read-evidence
-                         [:seon.db/read-result-digest]}]
-                      [:seon.cluster.eval/id "digest-persistence"])
-                     [:seon.cluster.eval/read-evidence 0
-                      :seon.db/read-result-digest]))
-                 "the fixed-size digest survives the durable component codec"))))))))
+           (is (not-any? #(find % :seon.db/read-result-digest) evidence)
+               "stored evidence carries no result digest (b96d6e684)")))))))
 
 (deftest process-local-replay-declines-unbounded-and-opaque-read-results
   (test-support/with-database
@@ -2195,9 +2179,16 @@
            widened (assoc namespace-row :seon.ns/refers
                           #{{:seon.ns.refer/local 'is :seon.ns.refer/target-ns 'clojure.test
                              :seon.ns.refer/target-name 'is}})
-           row (test-support/program-fn-row database 'sample.context/f "(defn f [x] x)")
+           ;; The digest keeps only the resolver context a definition uses
+           ;; (9b6df1ff4): `f` calls the refer's target, `g` uses nothing.
+           row (test-support/program-fn-row database 'sample.context/f "(defn f [x] (is x))"
+                                            {:seon.fn/calls #{'clojure.test/is}})
+           unused (test-support/program-fn-row database 'sample.context/g "(defn g [x] x)")
            digested #(assoc row :seon.program/definition-digest (db/definition-digest-of projection row %))]
        (is (= (:seon.program/definition-digest row) (:seon.program/definition-digest (digested namespace-row))))
+       (is (= (db/definition-digest-of projection unused namespace-row)
+              (db/definition-digest-of projection unused widened))
+           "a refer the definition does not use leaves its digest unchanged")
        (is (= :seon.program/definition-digest
               (:seon.error/member (db/transact! connection [namespace-row (digested widened)]))))
        (test-support/transacted! connection [namespace-row (digested namespace-row)])))))
@@ -2211,8 +2202,12 @@
   (test-support/with-database
    (fn [connection]
      (let [namespace-row (test-support/namespace-row (db/db connection) 'sample.rederive)
-           row (test-support/program-fn-row (db/db connection) 'sample.rederive/f "(defn f [x] x)")
-           _ (test-support/transacted! connection [namespace-row row])
+           ;; `f` uses the namespace the require adds; `g` uses nothing, so
+           ;; its digest keeps (9b6df1ff4: only the used resolver context).
+           row (test-support/program-fn-row (db/db connection) 'sample.rederive/f "(defn f [x] (clojure.set/union x))"
+                                            {:seon.fn/calls #{'clojure.set/union}})
+           unused (test-support/program-fn-row (db/db connection) 'sample.rederive/g "(defn g [x] x)")
+           _ (test-support/transacted! connection [namespace-row row unused])
            required (program/declaration-row (db/carried-projection (db/db connection))
                                              {:seon.ns/name 'sample.rederive :seon.ns/requires #{'clojure.set}
                                               :seon.ns/source "(ns sample.rederive (:require [clojure.set]))"}
@@ -2224,7 +2219,10 @@
                              (:db/id (db/pull database [:db/id] [:seon.ns/name 'sample.rederive])))]
        (is (not= (:seon.program/definition-digest row) (:seon.program/definition-digest stored)))
        (is (= (db/definition-digest-of (db/carried-projection database) row stored-namespace)
-              (:seon.program/definition-digest stored)))))))
+              (:seon.program/definition-digest stored)))
+       (is (= (:seon.program/definition-digest unused)
+              (:seon.program/definition-digest (db/pull database [:seon.program/definition-digest]
+                                                        [:seon.fn/sym 'sample.rederive/g]))))))))
 
 (deftest render-declarations-require-their-final-function-row
   (test-support/with-database
