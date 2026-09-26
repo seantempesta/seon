@@ -1190,11 +1190,13 @@
       (let [agent-id "quiescent-failed-transform"
             timeout-ms 100
             completion (async/chan 1)
-            fault-channel (async/chan 1)
+            backstop-state (atom nil)
             cluster (assoc (handle connection ctx "quiescent-failed-transform")
+                           ;; the bound records its fault in this world
+                           :seon.env/environment
+                           (test-support/environment "quiescent-failed-transform" connection)
                            :seon.turn.loop/completion completion
-                           :seon.agent/fault-channel fault-channel
-                           :seon.agent/turn-backstop-state (atom nil)
+                           :seon.agent/turn-backstop-state backstop-state
                            :seon.config.agent/turn-completion-backstop-ms
                            timeout-ms)]
         (test-support/transacted!
@@ -1226,14 +1228,20 @@
               _ (is (= "turn transform escaped" (ex-message escaped)))
               _ (is (= :seon.agent/ready (async/poll! completion))
                     "the failed transform released its lifecycle permit")
-              fault
+              ;; the live backstop fires after the permit is released and
+              ;; hands its failure to the channel disarm joins
+              failure
               (test-support/await-event!
-               fault-channel ::quiescent-transform-backstop)]
-          (is (string? (:seon.agent/turn-completion-backstop (ex-data (::flow/ex fault)))))
+               (:seon.agent/failure-channel @backstop-state)
+               ::quiescent-transform-backstop)]
+          (is (string? (:seon.agent/turn-completion-backstop (ex-data failure))))
           (is (= :seon.agent/turn-transform
-                 (get-in (ex-data (::flow/ex fault))
-                         [:seon.error/operation])))
-          (is (= agent-id (:seon.agent/id fault))))))))
+                 (:seon.error/operation (ex-data failure))))
+          (is (seq (db/q '[:find ?o :in $ ?agent
+                           :where [?o :seon.error.occurrence/message ?m]
+                                  [(clojure.string/includes? ?m ?agent)]]
+                         (db/db connection) agent-id))
+              "the fired bound is one stored core fault, not a channel message"))))))
 
 (deftest install-gate-failure-closes-with-a-durable-diagnostic
   (with-connection
@@ -1860,18 +1868,17 @@
                 armer-graph (flow/create-flow
                              {:procs
                               {:seon.agent/armer
-                               {:proc (flow/process #'agent/armer-step
-                                                    {:workload :io})
-                                :args {:seon.turn.loop/cluster armer-handle
-                                       :seon.agent/routing routing}}}
+                               ;; the production seam: its loop failures are
+                               ;; recorded by the proc's own fault port
+                               {:proc (seon.flow/var-process
+                                       #'agent/armer-step :io
+                                       {:seon.env/environment @test-environment
+                                        :seon.turn.loop/cluster armer-handle
+                                        :seon.agent/routing routing})}}
                               :conns []
                               :io-exec (cluster/projection-executor
                                         (:seon.sci.eval/projection-state ctx))})
-                armer-started (flow/start armer-graph)
-                _ (seon.flow/join-error-fanout!
-                   {:seon.flow/started armer-started
-                    :seon.flow/fault-channel (:seon.agent/fault-channel @routing)
-                    :seon.flow/tag {}})
+                _ (flow/start armer-graph)
                 _ (flow/resume armer-graph)
                 created (atom [])
                 message-count (atom 0)
@@ -1950,10 +1957,9 @@
                                                        :seon.test/created @created
                                                        :seon.test/armer
                                                        (flow/ping-proc armer-graph :seon.agent/armer)
-                                                       :seon.test/fault
-                                                       (some-> (async/poll! (:seon.agent/fault-channel @routing))
-                                                               ::flow/ex ex-data
-                                                               (select-keys [:seon.error/message]))}
+                                                       :seon.test/faults
+                                                       (db/q '[:find [?m ...] :where [_ :seon.error.occurrence/message ?m]]
+                                                             @connection)}
                                                       failure)))))
                     (throw
                      (ex-info "The routing watch closed before every agent armed."

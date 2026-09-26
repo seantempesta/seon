@@ -38,9 +38,7 @@
   (support/seed-cluster! connection cluster-name)
   (let [ctx (support/fork-cluster-ctx connection cluster-name)
         environment (support/environment cluster-name connection)
-        routing (support/attempt-routing connection)
-        faults (async/chan (async/sliding-buffer 16))]
-    (swap! routing assoc :seon.agent/fault-channel faults)
+        routing (support/attempt-routing connection)]
     (with-open [launcher (support/closeable
                           (flow/start-work-launcher!
                            {:seon.env/environment environment
@@ -67,13 +65,7 @@
                                                  :seon.agent/routing routing}
                                                 environment))}}
                      :conns []
-                     :io-exec (:seon.flow/executor handle)}
-                    :seon.flow/joins
-                    {::faults
-                     #(flow/join-error-fanout!
-                       {:seon.flow/started (:seon.flow/started %)
-                        :seon.flow/fault-channel faults
-                        :seon.flow/tag {}})}})
+                     :io-exec (:seon.flow/executor handle)}})
             route-key (keyword (str *ns*) cluster-name)]
         (wake/route! {:seon.cluster.wake/connection connection
                       :seon.cluster.wake/channels #(agent/channels routing)
@@ -83,12 +75,10 @@
                       :seon.cluster.wake/render-channel
                       (:seon.render/context-channel handle)
                       :seon.render.web/interest (atom #{})
-                      :seon.cluster.wake/fault-channel faults
                       :seon.cluster.wake/key route-key})
         (try
           (body {:seon.turn.loop/cluster handle
-                 :seon.agent/routing routing
-                 :seon.agent/fault-channel faults})
+                 :seon.agent/routing routing})
           (finally
             (wake/unlisten! {:seon.cluster.wake/connection connection
                              :seon.cluster.wake/key route-key})
@@ -97,8 +87,7 @@
                                   ::armer-stopped)
             (doseq [id (keys (:seon.agent/armed @routing))]
               (agent/disarm! {:seon.agent/routing routing :seon.agent/id id}))
-            (doseq [channel [faults
-                             (:seon.cluster.wake/channel handle)
+            (doseq [channel [(:seon.cluster.wake/channel handle)
                              (:seon.render/context-channel handle)
                              (:seon.turn.loop/completion handle)]]
               (async/close! channel))))))))
@@ -118,8 +107,7 @@
    (fn [connection]
      (running-cluster
       connection "late-arming"
-      (fn [{handle :seon.turn.loop/cluster routing :seon.agent/routing
-            faults :seon.agent/fault-channel}]
+      (fn [{handle :seon.turn.loop/cluster routing :seon.agent/routing}]
         (is (= #{:seon.agent/id} (wake/arming-attributes (db/db connection)))
             "agent identity is the declared arming attribute")
         (is (nil? (wake/declarations-refusal (db/db connection)))
@@ -147,7 +135,10 @@
                                              [:seon.agent/id "late-worker"])))))
           (is (seq (evaluation/of-agent (db/db connection) "late-worker"))
               "and its turn loop advanced without a boot or a hand arm")
-          (is (nil? (async/poll! faults)) "with no fault on the way")))))))
+          ;; each proc records its own faults: none is stored
+          (is (empty? (db/q '[:find ?error :where [?error :seon.error/signature]]
+                            (db/db connection)))
+              "with no core fault recorded")))))))
 
 (deftest starting-an-issue-leaves-one-unanswered-wake-its-first-reply-answers
   ;; The second half of the same blocker: an armed worker still never took
