@@ -409,3 +409,119 @@ test/seon/cluster/mcp_test.clj, this note.
 - Row 2(i) has not started. Its file list and prerequisites are in the reply
   to root. Nothing prerequisite exists yet: `seon.render/units` (building
   block S3) is not in the tree.
+
+## Round 5: row 2(i), the selection activation (`65bf078ec`, `7eb1219f3`, `5112657ad`, `bc1021402`, `260fed262`)
+
+### Open first
+
+1. **Three reds sit in tests outside the ledger.** They assert the retired EDN
+   elision face in AI text:
+   - `test/seon/instrument_test.clj:718-721` (`:seon.print/bound-by …`,
+     `:seon.print/omitted 37`, `:seon.render.data/total 40`);
+   - `test/seon/test/runner_test.clj:51` and `:83`;
+   - `test/seon/test_runner_test.clj:427`.
+
+   Each needs the one-face assertion (`…N` plus the legend). Their files need
+   a grant.
+2. **Default boot state.** Default PID 2530 sits with missing layers
+   (`seon.sci.eval/ctx`, flow, web), and MCP JVM projection of any return
+   value fails with "The MCP config read has no cluster projection state". The
+   probes below printed to `*out*` for that reason. `65bf078ec` made the
+   rendered-token ceiling an optional dial, as root asked.
+3. **Not yet done in 2(i):**
+   - the MCP conversion (`cluster.clj` is held for the pipeline lane): shared AI
+     text, the stored selection tree, and `get_value` over
+     `seon.render.walk/continue`;
+   - with it, deleting `window`, `display-value`, `pager`, `stable-entries`,
+     `counted-size` and the print-node artifact functions.
+
+   The `floor`/`bounded-text` bodies are kept: they print first-party frames
+   for panics and test failures, and the design's "no frames" rule applies to
+   the generic floor. Replacing them needs an owner ruling on panic output.
+4. **Nested renderer prose** still prints as an escaped string inside a raw
+   value (round 2, item 6).
+5. **Allocation:**
+   - production bounds, forms map at 15,000 tokens: 22.8 MB → 10.1 MB (−55%);
+   - uncapped 45,000-character selection: about 13 KB per admitted node (78 MB
+     for the forms map, 67 MB for 5,121 nodes of a 100,000-member vector).
+     That is the cost of the persistent node map and sorted queue that give
+     rollback by value. Cutting it needs a transient commit after a
+     charge-only trial, which is another design step.
+6. **Armed cost has not been measured.** Default runs a committed snapshot
+   without these commits. The battery (`tmp/impl-floor-on-fipp/battery.clj`)
+   reruns armed after adoption.
+
+### What changed
+
+- **`7eb1219f3`** (+594/−631 source):
+  - the selection (classification table, skeletons, shell queue, exact
+    charge) replaces `value-node`/`value-node*`, `ordered-head`,
+    `attribute-value`/`reference-identity` and `print/fit` with its family;
+  - the one cut face and one legend;
+  - held order;
+  - scalars print their classified text;
+  - `mcp_test:80`'s redefinition becomes an assertion.
+
+  Tests now read cuts from the tree. Retired: reshaped plan/component/ref
+  faces, realizing prints, the canonical re-sort, and dir as a floor cut (it is
+  its declared renderer's text now).
+- **`5112657ad`** (render.clj +47/−132): one `declared-projection` question
+  per reached map replaces the print-node projection walk (`project-node*`,
+  `project-entry`, `project-children`, `bounded-error-node`).
+- **`bc1021402`**: `shown-result` reads `:seon.instrument/check` only through
+  `keyword-entry`: an exact small persistent map, keys compared by identity.
+- **`260fed262`**: `seon.render.walk/continue` (node designator, path,
+  absolute offset). It returns a `:gone` continuation error for an evicted
+  result. `prepare` honours the cursor's offset and roots cut paths at the
+  cursor's path.
+
+### Measured: the 28 design cases, before (default's installed prepare, armed) and after (the working tree, unarmed scratch)
+
+| value | tokens | chars before → after | ms before → after | MB before → after |
+|---|---|---|---|---|
+| three-branch | 128 | 577 → 385 | 3.7 → 1.7 | 3.6 → 0.6 |
+| agent row | 150 | 405 → 477 | 10.1 → 2.5 | 15.8 → 1.2 |
+| agent row | 600 | 405 → 1,911 | 23.0 → 3.2 | 32.3 → 4.3 |
+| agent row | 15,000 | 12,417 → 12,227 | 22.5 → 15.7 | 58.7 → 25.5 |
+| forms | 15,000 | 4,465 → 6,010 | 6.6 → 5.9 | 22.8 → 10.1 |
+| error row | 600 | 525 → 1,910 | 2.2 → 1.1 | 5.8 → 2.0 |
+| test run | 15,000 | 15,967 → 15,962 | 11.7 → 10.8 | 47.0 → 21.7 |
+| Throwable | 15,000 | 2,230 → 307 | 3.0 → 0.3 | 11.6 → 0.7 |
+| `{:a (vec (range 100000)) …}` | 150 | 401 → 240 | 0.6 → 0.5 | 2.4 → 0.9 |
+
+The other 19 rows are in the session log; every "after" is at or under its
+budget. At 128 tokens, before, only one of the three branches showed its text
+(577 characters, over the 384-character budget). After, all three show a
+prefix within the budget. The Throwable is now type, message and data per
+link; frames are no longer acquired by the generic floor. The agent row at 150
+tokens, after:
+
+```
+{:db/id 33229,
+ :seon.agent/branch :cluster-default,
+ :seon.agent/id "root",
+ :seon.agent/namespace {:db/id 33223},
+ :seon.agent/plan {:db/id 33230, :my.plan/agent {:db/id 33229}},
+ :seon.agent/runtime
+   {:db/id 33232,
+    :seon.runtime/agent {:db/id 33229},
+    :seon.runtime/trigger {:db/id 33754},
+    :seon.runtime/turns [{…8} {…11} {…9} {…9} {…9} …30]},
+ …1}
+;; …N = N more, …+N = N more characters, …? = not yet realized. Not retrievable: the value has no result handle.
+```
+
+### Root runs
+
+```
+bin/test-check default --ns seon.print-test
+bin/test-check default --ns seon.render.value-test
+bin/test-check default --ns seon.render.transcript-test
+bin/test-check default --ns seon.render.web-test
+bin/test-check default --ns seon.problems-test
+bin/test-check default --ns seon.loop-proof-test
+bin/test-check default --ns seon.mcp-test
+bin/test-check default --ns seon.render-coverage-test
+bin/test-check default --ns seon.render-test
+bin/test-check default --ns seon.sci.eval-test
+```
