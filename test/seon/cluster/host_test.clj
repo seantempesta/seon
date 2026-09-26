@@ -108,9 +108,21 @@
             hosted (host-on! handle branch "mcp/solo")
             parent-commit (db/commit-id (db/db connection))
             probe [:seon.fn/sym (symbol (str host-ns) "host-probe")]]
+        (is (= branch (:seon.agent/branch (db/pull (db/db connection) [:seon.agent/branch] [:seon.agent/id "mcp/solo"])))
+            "hosting's one allowed parent write: the agent's home row names its branch")
         (is (= ["#'my.agents.host-probe/host-probe"]
                (hosted-run! hosted "(defn host-probe \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")))
         (is (= ["2"] (hosted-run! hosted "(host-probe 1)")) "the agent's next run calls its def")
+        (let [note-id (str "host-note-" (id/id))]
+          (hosted-run! hosted (pr-str (list 'seon.db/transact!
+                                            {:tx-data [{:my.note/id note-id :my.note/agent [:seon.agent/id "mcp/solo"]
+                                                        :my.note/content "written by a hosted form"}]})))
+          (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
+            (is (some? (db/q '[:find ?r . :in $ ?note-id :where [?n :my.note/id ?note-id] [?n :my.note/content _ ?tx]
+                               [?tx :seon.db/receipt ?r]] database note-id))
+                "a form's own elided write lands on the branch, naming its evaluation")
+            (is (nil? (db/q '[:find ?n . :in $ ?note-id :where [?n :my.note/id ?note-id]] (db/db connection) note-id))
+                "and never on the parent")))
         (let [database @(get-in hosted [:seon.turn.loop/cluster :seon.db/connection])]
           (is (= branch (get-in database [:config :branch])))
           (is (some? (:db/id (db/pull database [:db/id] probe))) "the row is on the branch"))

@@ -1955,15 +1955,23 @@
   The report's own datoms name what it wrote (a settlement is one
   transaction), and each changed component's owning parents are joined through
   the history index from those few children. A value acquired before some other
-  commit (another writer, or the form's own durable writes) is not covered: the
-  next acquisition derives from the head, as for any unknown change. Cost:
+  commit (another writer, or the form's own durable writes), or a report whose
+  after-value also holds a later transaction of its writer batch, is not
+  covered: the next acquisition derives from the head, as for any unknown
+  change. Cost:
   proportional to the settlement's datoms, never to the store's history (task
   361088de3d56: the since-history scan took 2,025 ms to find 10 entities)."
   {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/transaction-report
                        [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection]
                   [:or :nil :boolean]]}
   [before report installations projection]
-  (when (= (db/basis-t before) (db/basis-t (:db-before report)))
+  ;; Datahike's writer hands every report of a batch the batch's final value
+  ;; as :db-after (datahike/writer.cljc:229-264), so the report's datoms name
+  ;; everything between :db-before and :db-after only when :db-after ends at
+  ;; the report's own transaction, on the acquired value's branch.
+  (when (and (= (db/basis-t before) (db/basis-t (:db-before report)))
+             (= (get-in before [:config :branch]) (get-in report [:db-before :config :branch]))
+             (= (db/basis-t (:db-after report)) (:tx (first (:tx-data report)))))
     (let [after (:db-after report)
           identities (set (map (comp program/row-identity :seon.program/row)
                                installations))

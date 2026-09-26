@@ -116,7 +116,7 @@
                   [:map [:seon.test.accretion/arguments :seon.schema/arguments]
                    [:seon.test.accretion/actual :seon.schema/value]
                    [:seon.test.accretion/expected :string]
-                   [:seon.test.accretion/explanation [:or :nil :string]]
+                   [:seon.test.accretion/explanation {:optional true} :seon.test.accretion/explanation]
                    [:seon.test.accretion/pass? :boolean]]]}
   [request output-schema arguments]
   (let [invocation
@@ -136,12 +136,13 @@
                       (= :output (:seon.instrument/check returned)))
         actual (if (= :output (:seon.instrument/check returned)) (:seon.error/offending returned) returned)
         explanation (when returned? (m/explain output-schema actual))]
-    {:seon.test.accretion/arguments arguments
-     :seon.test.accretion/actual actual
-     :seon.test.accretion/expected (pr-str (m/form output-schema))
-     :seon.test.accretion/explanation
-     (when explanation (pr-str (me/humanize explanation)))
-     :seon.test.accretion/pass? (and returned? (nil? explanation))}))
+    ;; A call that threw has no returned value to explain: its whole error is
+    ;; the actual, and an absent explanation is no key, never nil.
+    (cond-> {:seon.test.accretion/arguments arguments
+             :seon.test.accretion/actual actual
+             :seon.test.accretion/expected (pr-str (m/form output-schema))
+             :seon.test.accretion/pass? (and returned? (nil? explanation))}
+      explanation (assoc :seon.test.accretion/explanation (pr-str (me/humanize explanation))))))
 
 (defn- supplied-registry
   "Generators for the supplied defaults this candidate's world holds.

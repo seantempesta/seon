@@ -5866,8 +5866,11 @@
                       ;; write or the settlement (`submission-open-tx`).
                       run-request (:seon.agent/run-request submission)
                       plan (when submission
+                             ;; only the writer's declared refusals answer the
+                             ;; caller; anything else escapes whole to the fault route
                              (try (system-run-plan database run-request)
-                                  (catch clojure.lang.ExceptionInfo refused (ex-data refused))))
+                                  (catch clojure.lang.ExceptionInfo refused
+                                    (if (::rule (ex-data refused)) (ex-data refused) (throw refused)))))
                       ;; A reply large enough to be a staged blob opens its run
                       ;; in its own commit, publishing the blob with it.
                       opened (when (and plan (not (:seon.error/at plan))
