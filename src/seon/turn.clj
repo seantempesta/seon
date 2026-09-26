@@ -4907,17 +4907,17 @@
       (if-let [source (first remaining)]
         (let [form (assoc source :seon.cluster.eval/ns
                           [:seon.ns/name namespace-name])
-              ;; The run as its settlement will leave it: each later form reads
-              ;; the earlier forms' declarations, rebuilt only when another
-              ;; writer moved the value they were applied to.
+              ;; The run as its settlement will leave it: this form reads the
+              ;; earlier forms' declarations, applied only here, where a form
+              ;; needs them (never after the last form), and only the rows not
+              ;; yet applied unless another write moved the value under them.
               latest (or snapshot (db/db connection))
+              rows (into [] (keep #(get-in % [:seon.sci.eval/evaluation :seon.program/row])) results)
+              [commit-id applied-db applied] working
               [_ database :as working]
-              (if (= (db/commit-id latest) (first working))
-                working
-                [(db/commit-id latest)
-                 (reduce with-settled
-                         latest
-                         (keep #(get-in % [:seon.sci.eval/evaluation :seon.program/row]) results))])
+              (if (and working (= (db/commit-id latest) commit-id))
+                [commit-id (reduce with-settled applied-db (subvec rows applied)) (count rows)]
+                [(db/commit-id latest) (reduce with-settled latest rows) (count rows)])
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
                                   (:seon.config.eval/time-limit-ms cluster))
@@ -5018,9 +5018,7 @@
               (recur (next remaining) (inc ordinal)
                      (or (:seon.sci.eval/ending-ns evaluation) namespace-name)
                      results
-                     (cond-> working
-                       (:seon.program/row evaluation)
-                       (update 1 with-settled (:seon.program/row evaluation)))))))
+                     working))))
         results))))
 
 (defn preview-sources
