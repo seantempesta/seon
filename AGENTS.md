@@ -261,8 +261,8 @@ root.
   humans through the browser share the same selection, node tree and cut retrieval; only the final face differs.
   Save exact shown text, select whole prompt units, never clip HTML or historical units again. Keep query-work
   bounds and deadlines separate; elisions name bound, count, path and requery, with floor hits counted. Derive
-  missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly output and estimate its
-  tokens.
+  missing profiles at entry or refuse explicitly. Build minimal infrastructure. Report ugly output, and state the size of anything an agent
+  sees in estimated tokens, never bytes or characters.
 
 ## Proof and performance
 
