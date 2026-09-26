@@ -26,6 +26,8 @@ running system: a specification or source citation is not evidence of installati
 - **Fix the producer, not each symptom.** Verify the cause before naming it. A workaround,
   exemption, fallback or patch elsewhere means return to the data flow and find the owner.
 - **Prefer values to places.** Derive from held immutable values; arguments/channels remove hidden order.
+  Atoms are a smell (owner 2026-09-26): state lives in its owner's value (database facts, the Flow proc's state, the SCI
+  context, the dependency's cache), colocated, never scattered atoms; an atom needs a stated reason no owner holds it.
 - **Grow by accretion.** Require no more, promise no less: open maps, validated declared members,
   optional additions and new names for changed semantics.
 - **Make failure local and loud.** Each part must fail without corrupting its neighbours
