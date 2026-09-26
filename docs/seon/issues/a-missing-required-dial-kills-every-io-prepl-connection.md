@@ -44,6 +44,31 @@ reconciles `config/default.edn` before the prepl opens.
    the same publication carries its shipped decision (`config/default.edn`)
    — the intermediate-edit class, decided at the admission seam.
 
+## The same class refuses boot (2026-09-26)
+
+`bin/seon start --head` at 2f380a4d6 stood default (pid 2530) without
+`:seon.sci.eval/ctx`, `:seon.flow/work-launcher`, `:seon.flow/graph` and
+`:seon.render.web/served`. 0f54105f5 made `:seon.print/rendered-token-ceiling`
+a required dial (`:seon.config/dial true`, no `:seon.config/optional`). The
+restart runs HEAD's host contracts, armed from the packaged projection, but the
+existing cluster keeps its un-adopted schema rows until `move-to-head!` adopts
+after readiness. In those rows the ceiling is not a dial. So
+`stand-cluster-runtime!`'s `config/effective` returns a map without it, and the
+armed output contract of `seon.config/effective-in` refuses it (config.clj:828).
+It is the only missing key: `m/explain` of the packaged `:seon.config/effective`
+over default's value gives one `:malli.core/missing-key`. The consumers already
+treat the dial as absent-safe (render.clj:92, print.cljc `fit`,
+render/value.clj:964). The declaration is the producer. Adding
+`:seon.config/optional true` to the ceiling in `resources/seon/schemas/seon.print.edn`
+fixed it when `derive-config-forms` was run on the packaged forms in default's
+JVM. With the fix, default's value validates, the stored 50000 validates and 0
+is refused. The request went to the file's owner lane. The operator hid this
+cause as "No dispatch macro for: '". Commit 89bd68e0c fixed that.
+
+Fix shape 3 still closes the class. A publication that adds a required dial
+must declare it optional or give it `:seon.config/default` until every cluster
+has adopted it. Otherwise a restart must adopt before it stands the runtime.
+
 Related: `one-lanes-intermediate-edit-refuses-adoption-for-every-lane`,
 `a-failing-turn-write-refires-without-bound-and-fills-the-store` (the dial
 that exposed it).
