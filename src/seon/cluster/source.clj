@@ -911,9 +911,11 @@
         :else
         (let [s (keyword (str "merge-" (id/id)))
               write! (fn [execution]
-                       (let [written (db/transact! (:seon.db/connection execution) {:tx-data tx})]
-                         (when (:seon.error/at written) (throw (ex-info "The merge delta was refused." written)))
-                         (into delta (map #(vector :seon.test/sym (:seon.test/sym %))) (:seon.issue/tests subject))))
+                       (let [written (db/transact! (:seon.db/connection execution) {:tx-data tx})
+                             ;; The writer re-derives a merged namespace's declarations: their tests run too.
+                             touched (when-not (:seon.error/at written) (fn/report-identities written))]
+                         (run! #(when (:seon.error/at %) (throw (ex-info "The merge delta was refused." %))) [written touched])
+                         (into (into delta touched) (map #(vector :seon.test/sym (:seon.test/sym %))) (:seon.issue/tests subject))))
               gate ((requiring-resolve 'seon.cluster/candidate-gate!) source held-store s write! (constantly #{}))
               run (:seon.source/gate-run gate)
               ;; Missing coverage refuses by name: every issue test is a member.
