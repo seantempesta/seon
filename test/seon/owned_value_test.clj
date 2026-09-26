@@ -142,7 +142,12 @@
             arity (get (:tempids staged) "arity")
             report (d/with (:db-after staged)
                            [[:db/add :db/current-tx :seon.fn/sym `a-transaction-entity-root-reaches-the-arity-gate]
-                            [:db/add :db/current-tx :seon.fn/arities arity]])
+                            [:db/add :db/current-tx :seon.fn/arities arity]
+                            ;; A function row requires its digest (09-25); the
+                            ;; owning walk validates the root's value, not the
+                            ;; digest's correctness (`write-digest-error`).
+                            [:db/add :db/current-tx :seon.program/definition-digest
+                             (apply str (repeat 64 "0"))]])
             transaction (get (:tempids report) :db/current-tx)]
         (is (some? projection))
         (is (every? #(= transaction (:e %))

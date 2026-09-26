@@ -166,31 +166,50 @@
        (is (= "" (str warnings)))))))
 
 (deftest uncarried-read-reports-one-projection-fallback-per-call
+  ;; A read takes its projection from the value it reads: a value holding
+  ;; declaration rows derives it with nothing handed, and only a value with
+  ;; no declaration rows (a cold construction boundary) refuses by name,
+  ;; once per call.
   (test-support/with-database
    (fn [connection]
      (let [database @connection
-           validate-refusal (schema/projection-validator
-                             (schema/handed-projection) :seon.schema/validation-refusal)
            ids (d/q '[:find [?function ...]
                       :where [?function :seon.fn/sym my.message/send]]
                     database)]
        (is (seq ids))
        (without-handed-projection
         (fn []
-          (dotimes [_ 2]
-            (let [warnings (java.io.StringWriter.)
-                  rows (binding [*err* warnings]
-                         (db/pull-many database
-                                       @#'sci.eval/program-documentation-selector ids))
-                  lines (str/split-lines (str warnings))]
-              (is (validate-refusal rows))
-              (is (= :seon.schema/projection (:seon.schema/expected-value rows)))
-              (is (= {:seon.db/operation 'seon.db/pull-many}
-                     (:seon.schema/refused-value rows)))
-              (is (= 1 (count lines)))
-              (is (str/includes? (first lines)
-                                 "seon.db/projection-fallback caller= seon.db/pull-many"))
-              (is (str/includes? (first lines) "count=1"))))))))))
+          (let [warnings (java.io.StringWriter.)
+                rows (binding [*err* warnings]
+                       (db/pull-many database
+                                     @#'sci.eval/program-documentation-selector ids))]
+            (is (= (count ids) (count rows)) (pr-str rows))
+            (is (= "" (str warnings))
+                "a value that declares its program derives its own projection"))))
+       (let [configuration {:store {:backend :memory :id (random-uuid)} :schema-flexibility :write}
+             _ (d/create-database configuration)
+             bare (d/connect configuration)
+             validate-refusal (schema/projection-validator
+                               (db/carried-projection database) :seon.schema/validation-refusal)]
+    (try
+      (d/transact bare [{:db/ident :sample.bare/id :db/valueType :db.type/string
+                         :db/cardinality :db.cardinality/one :db/unique :db.unique/identity}])
+      (without-handed-projection
+       (fn []
+         (dotimes [_ 2]
+           (let [warnings (java.io.StringWriter.)
+                 refusal (binding [*err* warnings]
+                           (db/pull @bare '[*] [:sample.bare/id "absent"]))
+                 lines (str/split-lines (str warnings))]
+             (is (validate-refusal refusal) (pr-str refusal))
+             (is (= :seon.schema/projection (:seon.schema/expected-value refusal)))
+             (is (= 'seon.db/pull (:seon.db/refused-read-operation refusal)))
+             (is (= 1 (count lines)))
+             (is (str/includes? (first lines) "seon.db/projection-fallback"))
+             (is (str/includes? (first lines) "count=1"))))))
+      (finally
+        (d/release bare)
+        (d/delete-database configuration))))))))
 
 (deftest temporal-reads-use-the-carried-origins-projection
   (test-support/with-database
@@ -1037,7 +1056,11 @@
                  (is (every? #((schema/projection-validator (schema/handed-projection) :seon.db/read-evidence) %)
                              evidence)
                      "no view shape may violate read-evidence's contract")
-                 (is (true? (db/read-evidence-current? database evidence))
+                 ;; A since or history view has no committed revision, so only
+                 ;; replay can prove it; since b96d6e684 only process-local
+                 ;; retained evidence keeps the request to replay.
+                 (is (true? (db/read-evidence-current?
+                             database (db/read-evidence @captured {:seon.db/retain-read-results? true})))
                      "the very value that produced the evidence is current"))))))))))
 
 (deftest an-as-of-view-is-keyed-on-its-own-fixed-point
@@ -1782,7 +1805,8 @@
                 data (:seon.error/data refused)]
             (is (some? (:db-after explicit))
                 "the writing cluster's own connection still commits")
-            (is (some? (:db-after elided))
+            ;; The elided arity answers resolved changes, not a report (07ed79283).
+            (is (int? (::db/tx elided))
                 "the elided arity still commits through the writing custody")
             (is (schema/valid-candidate-value? (schema/handed-projection)
                                               :seon.db.write/validation-refusal refused))
@@ -2240,7 +2264,11 @@
                       :seon.render/property :seon.render/ai
                       :seon.render/function renderer}]]
        (is (string? (:seon.db.write.attempt/request-id refusal)) (pr-str refusal))
-       (is (= expected (get-in refusal [:seon.error/data :seon.render/declarations])))
+       ;; The final value's projection refuses first (e6b559711 judges a
+       ;; report by the declarations it leaves; `render-contract-refusal!`
+       ;; names a renderer with no declared contract), before the writer's
+       ;; own render-target check.
+       (is (= renderer (get-in refusal [:seon.error/data :seon.render/function])) (pr-str refusal))
        (is (= basis (:max-tx @connection)))
        (test-support/transacted!
         connection
@@ -2360,12 +2388,12 @@
      (let [database @connection
            replay (mi/-f->original @#'db/replay-read)
            unknown (replay database
-                           {:seon.db/read-operation :seon.db/not-an-operation})
-           data (:seon.error/data unknown)]
+                           {:seon.db/read-operation :seon.db/not-an-operation})]
+       ;; One flat error: member and offending sit on the refusal itself.
        (is (= :seon.db/not-an-operation (:seon.db.read/unknown-read-operation unknown)))
-       (is (= :seon.db/read-operation (:seon.error/member data)))
+       (is (= :seon.db/read-operation (:seon.error/member unknown)))
        (is (= :seon.db/not-an-operation
-              (:seon.error/offending data)))))))
+              (:seon.error/offending unknown)))))))
 
 (deftest pull-checks-only-the-caller-named-schema
   (test-support/with-database
@@ -2687,8 +2715,11 @@
                                                   sources)))))
                          (db/read-evidence @captured))]
        (is (not (contains? (:schema @connection) uninstalled)))
+       ;; A new function row moves `:seon.fn/sym` (a revision of a stored row
+       ;; writes only the attributes it changes).
        (test-support/transacted!
-        connection [(test-support/revision @connection [:seon.fn/sym 'seon.db/transact!] {:seon.fn/doc "moved"})])
+        connection [(test-support/namespace-row (db/db connection) 'sample.witness)
+                    (test-support/program-fn-row (db/db connection) 'sample.witness/f "(defn f [x] x)")])
        (is (seq widened))
        (is (false? (db/read-evidence-current? @connection widened)))
        (is (= [:seon.fn/sym] (distinct (map :a (db/read-evidence-changes @connection widened basis))))
@@ -2732,7 +2763,9 @@
                                                     :seon.dev.mcp.artifact/digest (digest 2)}])
            _ (binding [db/*read-evidence-sink* captured]
                (db/pull @connection selector entity))
-           evidence (db/read-evidence @captured)
+           ;; Replay needs the request, which only process-local retained
+           ;; evidence keeps (b96d6e684).
+           evidence (db/read-evidence @captured {:seon.db/retain-read-results? true})
            replays (atom 0)
            replay @#'seon.db/replay-read
            current? (fn [] (reset! replays 0)

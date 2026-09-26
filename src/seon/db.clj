@@ -1056,6 +1056,7 @@
           :seon.error/operation 'seon.db/replay-read
           :seon.error/member :seon.db/read-operation
           :seon.error/expected :seon.db/read-operation
+          :seon.error/offending (:seon.db/read-operation request)
           :seon.error/data {:seon.db/read-request request}}) assoc :seon.error/declared-schema :seon.db/invalid-read-error)))))
 
 (defn- index-pattern-change
