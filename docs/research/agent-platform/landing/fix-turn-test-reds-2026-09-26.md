@@ -1,6 +1,6 @@
 ---
 type: landing
-status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a); tests owed to root
+status: landed (rounds 1-3 accepted; round 4 374e918b7, 29abfed1a, 4e703c93a; round 5 d421b6e1a; round 6 48a345bc1); tests owed to root
 lane: fix-turn-test-reds-opus
 created: 2026-09-26
 ---
@@ -288,6 +288,53 @@ bin/test-check default --test seon.render.web-debug-test/outline-origin-survives
 bin/test-check default --ns seon.issue-deletion-test
 ```
 
+## Round 6 (root run verify-1510 at real HEAD 052552039, which contains every commit above)
+
+### Against my fixes first
+
+None of the 1510 reds is a regression from these commits, and none repeats my classes. `grep` over db-, fn-,
+error-, program-, turn-, test-runner- and test.runner-test finds no digest, `missing-component-schema` or
+`unowned-entity` refusal. The one hit is web-debug's identity-alias case, below; its fixture logic is the same
+before and after the `schema-rows` move. web-debug `outline-origin-…` is now green (round 5).
+
+Exposed (not caused) by my fixture fixes: db-test `arity-components-and-callers-are-checked-in-the-final-state`
+(:1986) now gets past its fixture write, which the digest class refused before. REPL: the arity edit
+(min/max 2 on a callee whose caller calls with 1) commits. `arity-comparison` does produce the candidate
+`[sample.arity/caller [sample.arity/target 1]]`, and `declared-arity-bounds` gives `#{{:min 2 :max 2}}`, yet
+`db/arity-mismatches` over the edited value reports `[]`. The gate drops the candidate after the comparison
+(prepared arities from the callee's compiled contract, `[:=> [:cat :int] :int]`, still admit 1). Owner: the
+arity gate in src/seon/db.clj. Either the prepared-arity rule changed (retired assumption in the test) or the
+gate misses a declared-arity edit; this needs its owner's ruling.
+
+### Fixed
+
+- `48a345bc1`: web-debug `turn-details-use-the-loop-opening-and-exact-segments`. Its fixture fault request
+  lacked `:seon.error/declared-schema`, required by `seon.error/recording` since 6fbfe21cb/375a56048. It now
+  names `:seon.error/normalization-error`, as the turn-test fault fixtures do. REPL: the recording is admitted.
+  Static check: 0 findings.
+
+### Dependency-analysis class (fn-test; root asked me to take it): environmental, not reproduced
+
+"clj-kondo holds no analysis of seon.db / seon.effect" (`seon.fn/host-bound-callers` →
+`unresolved-macro-refusal`, fn.clj:1011, from a9449b7c3 F7). On the current default (pid 25654),
+`seon.fn/rows` over fn-test's own `writer-fixture-source` in a fresh fixture root answers 5 rows with no
+refusal, and so does a one-file root calling `seon.db/q`. The 1510 JVM's analysis lacked those namespaces; the
+current one has them. No code change. Rerun fn-test on the current JVM. If it recurs, run
+`(seon.fn.analyzer/analyze-dependencies!)` at that JVM's REPL first, then compare `::analyzer/unanalyzed-namespaces`
+for the fixture root between the two JVMs.
+
+### Classified, other owners
+
+| Red | Class | Owner |
+|---|---|---|
+| web-debug `block-reference-headers-link-identities-…` :702/:739 | `{::identity-alias "aliased-reference"}` is refused `unowned-entity`. The alias schema `::identity-alias :seon.agent/id` installs without `:db/unique` (`malli->datahike-attr-in` answers `{:db/valueType :db.type/string :db/cardinality :db.cardinality/one}` for the alias, where `:seon.agent/id` itself has `:db.unique/identity`), so the entity has no identity. Either a named-schema alias should carry its target's identity (seon.schema.datahike), or the test should declare the identity directly. | schema.datahike owner |
+| web-debug `the-outline-toggle-serves-the-exact-stored-shown-text` :1027 | no `seon-eval-thinking` node in the outline | render/transcript owner |
+| db-test `a-function-body-write-reads-its-basis-projection` (57.8 ms > 10 ms), `a-write-naming-another-clusters-branch…`, `an-unknown-read-operation-…` (no `:seon.db/read-operation` member), `nested-native-reports-…` (report keys), `uncarried-read-reports-one-projection-fallback…` | seon.db read/write owners; not fixture classes | db owners |
+| error-test ×4 | worker-global drift (concurrently loaded namespaces) and occurrence-owner assertions | lost-error-seams |
+| program-test `indexed-and-evaluated-declarations-are-the-same-entities` | 5.3 s against the 5 s bound | harness/cost |
+| turn-test | :1550 waits for the Datahike fix; :782 the refreshed-reads set gains `seon.error/for-agent`; durations are the harness class; :2292 is the print-owner terminal half | Datahike lane, turn/rereads owner, harness, pipeline |
+| test-runner-test, test.runner-test | `seon.render.value/admit-chunk` returns nil where its contract promises a map (value.clj:787) | floor printer lane |
+
 ## Deleted / net lines
 
 | Commit | Files | + | − |
@@ -303,6 +350,7 @@ bin/test-check default --ns seon.issue-deletion-test
 | 29abfed1a | test_support, error_test, db_test, web_debug_test | 43 | 25 |
 | 4e703c93a | fn_test | 2 | 3 |
 | d421b6e1a | db.clj, db_test, web_debug_test | 47 | 11 |
+| 48a345bc1 | web_debug_test | 1 | 0 |
 
 Net across seven code commits: src +5/−3 (program.cljc), tests +160/−142. The additions are mostly comments stating the owning rule at each fixture. Deleted: three hand-built `analyze-form` row paths in turn_test (≈45 lines). Added: the
 `held-handle` agent-id guard, the docstring note and the custody wrapper.
