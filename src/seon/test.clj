@@ -911,6 +911,19 @@
                                           (requested-reached (first entry)))))) tests)
             _ (doseq [symbol identities :when (not (get eligible symbol))]
                 (refuse! :seon.test/identity-unresolved "The requested test is not eligible." symbol))
+            ;; A named change's reaching test the eligibility rule drops is
+            ;; missing coverage: it refuses by name, never an empty verdict.
+            _ (when-let [dropped (seq (sort (keep (fn [[test-symbol entity :as entry]]
+                                                    (when (and (requested-reached test-symbol)
+                                                               (not (get eligible test-symbol))
+                                                               (not (excluded? entry))
+                                                               (not (one entity :seon.test/long)))
+                                                      test-symbol))
+                                                  tests)))]
+                (refuse! :seon.test/coverage-unknown
+                         (str "These tests reach the named change but are neither agent-authored, under a test root, "
+                              "nor named, so this request cannot run them.")
+                         (vec dropped)))
             _ (doseq [ns-symbol namespaces
                       :when (not-any? #(= ns-symbol (one (one % :seon.test/ns) :seon.ns/name)) (vals tests))]
                 (refuse! :seon.test/namespace-unresolved "The requested namespace has no eligible tests." ns-symbol))
@@ -2133,8 +2146,21 @@
         :seon.sci.eval/interpretation-reason "its branch contract differs from the loaded program's"})
       :else
       (let [before (set (all-ns))
-            _ (run! require fresh)
+            ;; A namespace that cannot load (no file, or a compile error) is a
+            ;; declared refusal naming it, with its whole cause, never an escape.
+            unloadable (some (fn [namespace-name]
+                               (try (require namespace-name) nil
+                                    (catch Exception failure [namespace-name failure])))
+                             fresh)
             interns (for [n (remove before (all-ns)) s (keys (ns-interns n))] (symbol (str n) (str s)))]
+        (if-let [[namespace-name failure] unloadable]
+          (seon.error.refusal/diagnostic (java.util.Date.) :seon.test/execution `arm-first-loads!
+           {:seon.error/message (str "Test namespace " namespace-name " cannot load: "
+                                     (or (ex-message failure) (.getName (class failure))))
+            :seon.error/expected "a test namespace that loads"
+            :seon.error/offending namespace-name
+            :seon.error/throwable failure
+            :seon.test/not-runnable (str namespace-name)})
         (schema/call-with-projection
          projection
          #(instrument/apply!
@@ -2144,7 +2170,7 @@
                     :seon.instrument/changed-identities (into #{} (map (fn [sym] [:seon.fn/sym sym])) interns)}
              evidence-bytes (assoc :seon.config.error/max-evidence-bytes evidence-bytes)
              (:seon.flow/commit-fault! snapshot)
-             (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! snapshot)))))))))
+             (assoc :seon.flow/commit-fault! (:seon.flow/commit-fault! snapshot))))))))))
 
 (defn run
   "Answer one test request on the execution value it names.

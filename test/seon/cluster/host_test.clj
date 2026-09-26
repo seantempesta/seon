@@ -354,3 +354,26 @@
           (is (= ["3"] (hosted-run! hosted "(+ 1 2)")))
           (is (= [(pr-str (seon.id/digest 8 [:x]))] (hosted-run! hosted "(seon.id/digest 8 [:x])"))
               "the row the branch did not author runs the loaded Var"))))))
+
+(deftest a-named-change-reached-only-by-an-ineligible-test-refuses-by-name
+  ;; Before, the eligibility filter dropped the reaching test and the request
+  ;; answered passed? false with no members, no reason and no run record.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [branch (branch!)
+            execution (agent/acquire-context! handle nil {:seon.agent/branch branch})
+            connection (:seon.db/connection execution)]
+        (try
+          (db/call-with-custody {:seon.db/connection connection}
+            #(do (support/transacted! connection
+                   [(support/program-fn-row (db/db connection) 'my.agents.host-probe/dropped-callee
+                                            "(defn dropped-callee \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")])
+                 ;; A file-less core test: neither agent-authored, under a test root, nor named.
+                 (support/transacted! connection
+                   [(support/program-row (db/db connection) [:seon.test/sym 'my.agents.host-probe/dropped-check]
+                                         "(clojure.test/deftest dropped-check (clojure.test/is (= 2 (dropped-callee 1))))"
+                                         {:seon.schema.admission/source :core})])))
+          (finally (agent/release-context! execution)))
+        (let [hosted (host-on! handle branch "mcp/dropped")
+              shown (first (hosted-run! hosted "(let [r (my.test/check {:seon.test/changed ['my.agents.host-probe/dropped-callee]})] [(:seon.test/selection-refusal r) (:seon.error/offending r)])"))]
+          (is (= "[:seon.test/coverage-unknown [my.agents.host-probe/dropped-check]]" shown) shown))))))
