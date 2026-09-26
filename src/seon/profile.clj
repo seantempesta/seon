@@ -170,28 +170,30 @@
 ;;; ---------------------------------------------------------------------------
 
 (defn snapshot?
-  "True for the counter snapshot `begin` takes."
+  "True for the counter snapshot `begin` takes: the live cells it read and
+  their calls and nanos, `[calls0 nanos0 calls1 nanos1 ...]` in one long array."
   {:malli/schema [:=> [:cat :seon.schema/value] :boolean]}
   [value]
-  (instance? IdentityHashMap value))
+  (boolean (and (map? value)
+                (vector? (::cells value))
+                (some-> (::sums value) class .isArray))))
 
 (defn begin
   "Mark the start of an operation: its clock and every cell's calls and total.
 
-  The snapshot is keyed by each cell's call counter. It is built here in one
-  pass over the live cells, calling no other armed function, so its cost is
-  proportional to the number of cells and nothing else."
+  One pass over the live cells, calling no other armed function, fills one
+  primitive array beside the vector of cells it read: its cost is proportional
+  to the number of cells, with two longs each and no per-cell allocation."
   {:malli/schema [:=> [:cat] :seon.profile/mark]}
   []
-  (let [snapshot (IdentityHashMap.)]
-    (locking live
-      (doseq [member live]
-        (let [^LongAdder calls (:seon.profile/call-counter member)]
-          (.put snapshot calls
-                (long-array [(.sum calls)
-                             (.sum ^LongAdder (:seon.profile/total-counter member))])))))
+  (let [held (locking live (vec live))
+        sums (long-array (* 2 (count held)))]
+    (dotimes [i (count held)]
+      (let [member (nth held i)]
+        (aset sums (* 2 i) (.sum ^LongAdder (:seon.profile/call-counter member)))
+        (aset sums (inc (* 2 i)) (.sum ^LongAdder (:seon.profile/total-counter member)))))
     {:seon.profile/started-ns (System/nanoTime)
-     :seon.profile/snapshot snapshot}))
+     :seon.profile/snapshot {::cells held ::sums sums}}))
 
 (defn- growth-line
   {:malli/schema [:=> [:cat :seon.profile/growth] :string]}
@@ -209,18 +211,26 @@
   concurrent work on other threads is included. No growth means the time was
   spent in unarmed code or waiting."
   {:malli/schema [:=> [:cat :seon.profile/mark [:int {:min 1}]] :seon.profile/explanation]}
-  [{started :seon.profile/started-ns before :seon.profile/snapshot} limit]
+  [{started :seon.profile/started-ns {held ::cells ^longs sums ::sums} :seon.profile/snapshot} limit]
   (let [elapsed-ms (quot (- (System/nanoTime) started) 1000000)
+        ;; Cells are matched by identity (a LongAdder is a Number, which a
+        ;; Clojure map would compare by value); a cell installed after
+        ;; `begin` starts from zero.
+        position (let [index (IdentityHashMap.)]
+                   (dotimes [i (count held)]
+                     (.put index (:seon.profile/call-counter (nth held i)) i))
+                   index)
+        prior (fn [member offset]
+                (if-let [i (.get position (:seon.profile/call-counter member))]
+                  (aget sums (+ (* 2 (long i)) (long offset)))
+                  0))
         growth (into []
                      (comp
                       (keep (fn [member]
-                              (let [^longs prior (or (.get ^IdentityHashMap before
-                                                           (:seon.profile/call-counter member))
-                                                     (long-array 2))
-                                    calls (- (.sum ^LongAdder (:seon.profile/call-counter member))
-                                             (aget prior 0))
+                              (let [calls (- (.sum ^LongAdder (:seon.profile/call-counter member))
+                                             (long (prior member 0)))
                                     total (- (.sum ^LongAdder (:seon.profile/total-counter member))
-                                             (aget prior 1))]
+                                             (long (prior member 1)))]
                                 (when (pos? calls)
                                   (merge (select-keys member [:seon.profile/sym :seon.profile/digest
                                                             :seon.profile/scope :seon.profile/context])
