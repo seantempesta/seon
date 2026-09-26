@@ -65,7 +65,11 @@
               [:seon.error/obligation {:optional true} :seon.error/obligation]],
              :occurrence-count [:int {:min 1}],
              :reason
-             [:enum :failover],
+             [:enum
+              :your-run
+              :no-attributable-agent
+              :recurring
+              :failover],
              :op :keyword,
              :data-edn :string,
              :refusal-value
@@ -284,9 +288,7 @@
               [:seon.error/throwable-class :seon.error/throwable-class]
               [:seon.error/message {:optional true} :seon.error/message]
               [:seon.error/data {:optional true} :seon.error/data]
-              [:seon.error/frames {:optional true} :seon.error/frames]
-              [:seon.error/suppressed {:optional true} :seon.error/suppressed]],
-             :suppressed [:vector {:min 1 :description "The chains of the throwables a link suppressed (Throwable.addSuppressed): a cleanup failure kept beside the primary, which no cause link reaches."} [:ref :seon.error/chain]],
+              [:seon.error/frames {:optional true} :seon.error/frames]],
              :chain [:vector {:min 1 :description "The whole cause chain of a recorded Throwable, outermost to root. Evidence, not an attribute: it rides the observation and its admitted evidence content."} :seon.error/link],
              :exception-class [:symbol {:description "Throwable class as data; throwable-class retains the historical string evidence."}],
              :regressions [:set :seon.db/ref],
