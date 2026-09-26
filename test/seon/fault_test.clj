@@ -168,9 +168,12 @@
   (doseq [mode [:record :panic]]
     (test-support/with-database
      (fn [connection]
-       (let [environment (world connection (str "fault-unknown-" (name mode))
-                                {:seon.config/on-core-error mode
-                                 :seon.config.db/write-time-limit-ms 25})
+       (let [cluster-name (str "fault-unknown-" (name mode))
+             environment (world connection cluster-name {:seon.config/on-core-error mode})
+             ;; the bound is for the fault's write alone: set last, so the
+             ;; world's own seeding writes never run under it
+             _ (test-support/apply-config! connection cluster-name
+                                           {:seon.config.db/write-time-limit-ms 25})
              before (db/basis-t @connection)
              entered (atom 0)
              started (CountDownLatch. 1)
