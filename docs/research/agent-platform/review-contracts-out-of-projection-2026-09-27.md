@@ -3,13 +3,269 @@ type: design-review
 date: 2026-09-27
 status: complete; design revision required
 reviewer: Astra
-design-commit: ccab0b3a8
-source-baseline: d1f6a37fb0f56b35a0d6c5a6e7cb7453e815d9ad
+design-commit: a3d6847a123dda476c11adbdbd56c23b23de9e9a
+source-baseline: bef6b105e75291f555de4500f8abeb9dc74a45a2
 verdict: REVISE
 task: 12913e5cd6b0
 ---
 
 # Review: contracts outside the schema projection
+
+## Revised-design verdict — a3d6847a1
+
+**REVISE.** The revision completes the reader inventory, separates contract-derived keys, and puts the proposed
+check at the final writer. The remaining issues are concrete: the cache key omits bindings behind named schemas;
+Var-schema resolution and retention need correction; the reference repair lacks a scope-aware traversal and
+migration boundary; writer selection omits function-admission-only changes; and S1 changes admission acquisition
+before legacy consumers retire. The separation remains the recommended direction. This is a design verdict,
+not approval of an installed implementation.
+
+In this section, **D** means `docs/research/agent-platform/contracts-out-of-projection-design-2026-09-27.md` at
+`a3d6847a1`; **DO** means `docs/research/agent-platform/derive-once-design-2026-09-26.md` at `2ef8385b0`.
+Source citations use `bef6b105e75291f555de4500f8abeb9dc74a45a2`; the inspected source files remained unchanged
+during this review. Malli remains `43c6dca8d2d8df3162b13725939954807be4a4ed`, Datahike
+`67b00071e020a7ccf310985d01b28128cdadec34`. The latest defn-scan landing section at this design commit concerns
+digest refusals (`landing/defn-scan-opus-2026-09-26.md:249-280`); the R1–R7 changes are specified in D itself.
+The initial review below retains its original source baseline, `d1f6a37fb0`, and historical evidence.
+
+### Disposition of R1–R7
+
+| Finding | Disposition | Revised design evidence and remaining condition |
+|---|---|---|
+| R1: reader migration | Resolved at design level | D:141-162 includes `apply!`, `arm-plan`, `contract-findings`, the six public-query call sites, and threading through `source-producer?`. D:252-254 names the candidate/default/arming regressions. This is an inventory finding; N5 still governs loadable implementation. |
+| R2: derived keys and supplier snapshot | Resolved at design level | D:146-156 deletes symbol-only arity/output keys and explicitly adds supplier spec and admission reads; D:255-258 covers historical, branch, absent/present and report-snapshot cases. Reuse remains conditional on fixing the underlying seam key in N1. |
+| R3: compile inputs and retention | Partially resolved | D:79-126 fixes mode, direct bindings, provenance, malformed reads and central-cache ownership. Reached schema bindings and actual Var inputs remain unspecified; the stated weight and default retention do not establish the claimed bound. N1–N2. |
+| R4: references and fact integrity | Partially resolved | D:190-200 gives the right canonical-scope comparison and requires fact equality; D:214-215 selects both schema closures. The current fold cannot implement that traversal by changing one predicate, and old facts must be repaired before the index becomes authoritative. N3. |
+| R5: final writer and renderer coherence | Partially resolved | D:219-233 places one checker on `:db-after`, shares early calls, and removes the constructor callback. Its trigger is too narrow and renderer selection must include contracts whose referenced shapes changed. N4. |
+| R6: loadable slices | Partially resolved | D:149-151,250,268-272 correctly delays producer removal and includes the resource/tests. D:237-239 moves admission scoping too early; D:97 names a private upper-layer function from the schema seam. N5. |
+| R7: acquisition and cost claims | Resolved in the final-state design; measurement pending | D:174-181 scopes both acquisition and the content key, retaining conservative revision misses. D:93-98 and D:273-319 distinguish validation-base reuse, loads, table derivations and per-mode compiles. Move activation to S4 (N5), and treat the approximately 4 ms scoped join as an estimate, not a measured upper bound. Timing reconciliation follows. |
+
+### N1 — Complete the resolved inputs through named schemas and Var-schema values
+
+D:106-119 names only forms/admissions/purity in `population`, and predicates directly named by the contract in
+`bindings`. A named schema can contain a predicate without that predicate appearing in the contract. Two shape
+registries can therefore have equal proposed keys and different validators. This is a supported constructor
+input: `schema.clj:2332-2339` explicitly puts resolved predicate bindings in the existing projection cache key;
+`projection-registry` compiles those bindings at `schema.clj:536-562`.
+
+Concrete witness: forms `{:review/value [:fn review/p]}`, identical admissions/purity, and contract
+`[:=> [:cat :review/value] :int]`. Resolve `review/p` to `int?` in one registry and `string?` in the other. Direct
+contract bindings are empty in both. A read-only Malli probe returned input acceptance `[true false]` versus
+`[false true]` for `[1]` and `["x"]`, while the proposed key components were equal (0.318 ms body, 5 ms MCP event).
+This proves the missing registry input, not execution of the proposed seam.
+
+Include the resolved bindings that the reached canonical schema population actually compiled against, as well
+as direct contract/local-registry bindings. Using the population's complete binding map is a simpler first cut
+than another dependency index. A later content identity may compress these inputs only after establishing the
+same guarantee. Preserve live invocation of the same predicate Var; changing its root need not force a new
+validator. Replacing that Var or a branch callable must distinguish the compiled world.
+
+The Var-schema clause also names the wrong input type. `mr/var-registry` resolves **Var objects**, not symbols
+(`reference-code/malli/src/malli/registry.cljc:67-71`). A read-only probe returned nil for the symbol
+`clojure.core/*clojure-version*` and its map value for the Var. Host `:malli/schema` can contain such objects;
+calling the seam's input “canonical EDN” does not describe that existing armed path. Resolve the actual Var
+inputs, including further Var-schema references reached through their values, and compile from that same
+captured resolution. Keying a dereferenced value but compiling against the live Var registry leaves a check/use
+gap. Leaving these exceptional host forms uncached is also viable and smaller. State how nested non-EDN schema
+objects are handled; their own options survive `m/schema` (`malli/core.cljc:2605-2639`).
+
+### N2 — Bound retained inputs and retain only successful, symbol-independent products
+
+Moving contract versions into `seon.cache` fixes the former unbounded holder ownership. However,
+`8192 × arity-count` (D:100-101) ignores the size of the authored form, local registries, resolved schemas and
+the population retained through a compiled contract's options. A single arity can contain an arbitrarily large
+form. Multiple distinct populations can remain reachable from contract entries after the projection entries
+evict. The existing cache weighs only the supplied value once (`cache.clj:115-124,155-164`), so the estimate must
+account for retained keys and registry graphs, conservatively if necessary. S1 should measure variable form
+sizes and distinct populations, not only many tiny versions under one shared projection.
+
+The proposed four-argument `lookup` defaults to `some?` retention (`cache.clj:145-146`): a returned validation
+refusal is a retained value. Such a refusal has no arities, so the proposed weight can be zero; repeated rejected
+forms would have no byte-budget charge. D:115 excludes unresolved-symbol failures but must exclude **all**
+refusals explicitly. The omitted symbol is safe only for successful compiled products with no symbol/source
+identity. Refusals name the requested identity (`schema.clj:1532-1542`), and stored arity rows include function
+identity and source bindings (`program.cljc:1024-1071,1100-1123`); neither belongs in this symbol-free cache.
+
+Keep a reusable validation base limited to immutable population products. Do not move its per-operation
+`reference-advisories` basic cache (`schema.clj:2033-2055`) into an indefinitely growing holder, or capture one
+predicate overlay's bindings in a holder shared by another. The proposed `uncached-var-schema` status counter
+(D:118-119) is not an installed cache API: `cache/status` exposes only hits, misses, evictions, bytes and load-ms
+(`cache.clj:194-214`). Either price a declared diagnostic addition or use existing evidence.
+
+### N3 — Use scope at traversal time and repair existing reference facts before relying on them
+
+The identity comparison in D:190-192 is appropriate for compiled canonical registries. A read-only probe of the
+original shadowing example found canonical-object equality **false** at local `:review/a` and **true** at reached
+`:review/b`; the old walker still returned `#{:review/a}` (0.220 ms body, 4 ms MCP event).
+
+It is not one predicate change in the existing fold. `compiled-references` receives only a set of canonical
+names (`schema.clj:64-79`), so it must also receive the canonical registry or compiled declarations. Its traversal
+options receive **only the reference name** (`malli/core.cljc:2012-2019,2092-2096`), while `fold-walk` invokes its
+node callback after traversing children (`schema/internal.cljc:18-36`). Changing the node's emitted item cannot
+make an already-pruned local child appear. State the scope-aware traversal using Malli's actual walker/deref
+seams, preserving a scoped recursion guard. Malli's built-in `::walked-refs` is name-based; nested scopes reusing
+a recursive name need a specific counterexample probe. The existing scoped reference identity in
+`schema/internal.cljc:47-54` is a useful local precedent, not a replacement walker already installed.
+
+The previous 2,355-contract comparison used the **old** walker. It cannot certify facts for the corrected walker.
+D:200 must include an explicit one-time comparison/repair of existing contracts before S3 trusts the index,
+using the canonical writer and final candidate population. Checking only subsequently changed specs leaves old
+shadowed references invisible to schema-change selection. Future integrity selection must also reach function
+owners when arity/reference children alone are changed or retracted; root-link datoms need not change then.
+Use the writer's existing before/after owning-root discovery (`db.clj:4482-4487`) instead of another owner index.
+
+### N4 — Complete final-writer selection and distinguish contract facts from prepared descriptors
+
+The final-report location and absence of a constructor callback are correct. The “only when” list at D:220-221
+omits a change to `:seon.schema.admission/source` **on a function row**. A core-to-agent admission change can
+make the unchanged contract fail completeness or purity; the existing replacement includes
+`function-admission-changes` in affected functions (`schema.clj:2673-2678`). After R7 scopes the projection read,
+no projection miss can incidentally recheck that change. Add both admission assertions and retractions to the
+checker selection, resolving ownership in before and after values. Include descendant-only fact edits from N3.
+
+Renderer coherence depends on compiled shapes, not only literal renderer contract edits. For example, a
+renderer taking named schema `:review/input` can stop accepting an unchanged declaring schema when only
+`:review/input` changes. Step 2 selects that renderer's contract; mere compile/admission still succeeds. Step 3
+must recheck render relations for those affected contracts too, and for transitively affected declaring schemas,
+as well as direct relation edits/removals. The comparison reads both compiled sides at
+`schema.clj:1892-1908`. State this selection explicitly within the same checker.
+
+Finally, D:197-199's equality check needs a declared comparison value. `call-preparation/arity-facts` produces
+runtime slot descriptors, including compiled schemas (`call_preparation.clj:125-157`); it does not produce the
+stored arity rows, which include source signature matching, IDs, argument bindings and refs
+(`program.cljc:1033-1123`). Keep that source-dependent derivation in `program/contract-facts`, accepting the
+already compiled contract. Compare its canonical stored fields at the writer. Share the decision with early
+entrances using explicit candidate inputs; avoid re-entering a checked `db/with` from its own final checker.
+
+### N5 — Correct the two remaining slice-order/load boundaries
+
+1. **Activate schema-only admission acquisition in S4, not S1.** D:237-239 calls the scoped admission edit
+   additive, but `projection-admissions` is already called by `projection-from-rows`
+   (`schema.clj:2863-2874`). S1's scoping would drop core provenance from function rows while S1–S3 still load
+   contracts, causing the loader to default them to agent admission. Scoping `declaration-content-key` early
+   likewise makes function-admission-only changes invisible to its content key while they remain projection
+   inputs. An unused new helper may land in S1; switch both existing owners with the S4 range/resource cut.
+2. **Do not make `seon.schema` require `seon.call-preparation`.** D:97 invokes its private `arity-facts`, but
+   `call_preparation.clj:37-47` already requires schema and db. A direct call/require does not load as written.
+   The smaller composition is for the schema seam to return the compiled contract and schema-level facts;
+   preparation derives its own descriptors from that value under the complete contract key, and program derives
+   stored rows with source inputs. If a helper moves instead, name the move and convert all callers in S1.
+
+With those changes, the intended order is sound: S1 adds the pure seam and reference fix; S2 migrates consumers
+without changing legacy producer/admission behavior; S3 repairs reference facts and installs the final checker;
+S4 switches producers, acquisition, resource, fingerprint and retired APIs/tests together. D:149-151 and D:259-261
+should explicitly place early checker calls in S3, since the reader table names them before they exist. This is
+a source-level ordering assessment; no slice has been loaded or tested in this review.
+
+### Reconcile approximately 100 ms with 250–300 ms of a steady approximately 600 ms defn
+
+These figures have different scopes and baselines; neither should be subtracted as a proven speedup.
+
+| Evidence | What it establishes |
+|---|---|
+| `eval-trace-2026-09-26.md:32-45,51-71,262-270` | First defn on pid 89341, archive `bb07fdf08`: 70.437 ms across two loads and 32.852 ms across six contract-projection calls; 13.840 ms projection-build is nested. Counters are inclusive and lack parent/thread spans. Approximately 100 ms is a summary of these named calls, not all consequences of new projection identity. |
+| `landing/shrink-db-opus-2026-09-26.md:87-121` | Later pid 17853, `15e6a31c4`, after P1/P4: a second contracted defn on its branch measured 643 ms. The attributed 250–300 ms includes candidate projection work, writer acquisition and rebuilt tables, and post-commit installation/preparation. It is a cross-phase causal estimate, not the same pair of counters. |
+
+Both support eliminating projection churn. Direct construction/load time and downstream misses are different
+costs, and the latter can make the affected total larger. The earlier trace itself records post-commit
+content-projection at 74.218 ms, including a 51.416 ms load, in another run (`eval-trace:330-334`).
+
+Precision is limited: shrink-db's coarse phase figures sum to approximately 585 ms against 643 ms end to end;
+its approximately 130 ms writer phase includes arity work as well as projection work, while the named
+`validate-write-report` counter was 53 ms. Its JFR window had only 30 execution samples. Do not count the entire
+215 ms evaluation or 150 ms post-commit phase as removable, add overlapping counters, or add 250–300 ms to
+the earlier 100 ms. Durability, analysis, contract compilation, gate work and source/arity checks remain.
+
+Update D:29-44,302-308 to describe approximately 100 ms as the older direct-call evidence and 250–300 ms as the
+newer estimated affected work including downstream derivations. The scoped admission content read is a further
+cost to measure. Keep D's parent/change replay, with separate first-new-symbol and steady-new-symbol samples,
+contract replacement/body-only/delete cases, stage timing, loads, table misses, allocations, compiles per mode
+and retained memory. No fixed final latency or 250–300 ms saving is established yet.
+
+### Composition with derive-once
+
+The two designs overlap; their projection cuts must be one integration decision. DO:141-143,224-239 retains a
+contracts map attached to the base and a `[forms-digest contracts-digest]` projection identity. D:49-64 instead
+removes contracts from the projection. Prefer D's selected shape-only boundary for these consumers; retire DO's
+`assoc-in [:contracts sym]` recipe rather than shipping both representations. DO's table-sharing and bounded
+cache migration still apply to the remaining shape products.
+
+DO's `[forms-digest contract-form-digest]` key is shorthand insufficient for D's two modes, admission source,
+resolved registry bindings and Var-schema cases (N1). One shared contract-cache owner must preserve those
+inputs. A forms digest is useful only if it includes schema admissions and the actual binding semantics;
+predicate code-closure digests alone do not identify distinct branch callables. The fuller key can land before
+V23 exists; it needs no second graph or digest owner.
+
+DO slice 3 (`DO:345`) overlaps D S1–S4, and DO slice 5 (`DO:347`) replaces call-arity gate derivation in the same
+writer. Keep `program-relation-error` as the one relation authority and compose the arity algorithm there or
+beside it in the existing final gate; do not create another acceptance path. Corrected contract-reference facts
+are a prerequisite for DO's contract→schema graph edges. Sequence held files through root. The graph's general
+soundness, incremental algorithm and render-cache guarantees belong to the separate review; none is approved
+here. Savings from these overlapping cuts must be measured once, not added across plans.
+
+### Re-review evidence and limits
+
+`bin/seon status` and MCP `runtime_status` selected default pid **20656**, start
+`2026-09-26T22:20:53.537Z`, archive `9bbc3568edf72598b3d0c418e8b93c0e6c0c5a11`. The operator command said
+“OK”, but readiness lacked the database connection, SCI context, graph and served web layer; MCP called it
+degraded with unknown health. This foreign readiness boundary prevents fresh live-database measurements and
+does not prevent reviewing the design. No cause is inferred from missing readiness.
+
+Three serial, read-only MCP JVM forms used explicit root `/Users/sean/src/seon`, cluster `default`, session
+`contracts-rereview`. The first found loaded schema/Malli namespaces but **no** `function-contract` or
+`program-relation-error` Var (0.010 ms body, 3 ms event). The next two used local Malli schemas for the N1/N3
+witnesses; they neither defined Vars nor wrote database facts. Their complete MCP envelopes returned values,
+with no diagnostic event. The witness constructions are specified above; no proposed API was exercised.
+No tests, restarts, branches, publication, adoption, source edits, allocation measurement or heap measurement
+were performed. Only this review file is changed and committed. The next step is revision of N1–N5 and the
+cross-design boundary, followed by the already specified implementation proofs when implementation is authorized.
+
+Exact witness forms (line wrapping only; the key equality compares the specified inputs, while compilation
+demonstrates the differing registry behavior):
+
+```clojure
+(let [started (System/nanoTime)
+      forms {:review/value [:fn 'review/p]}
+      population [forms {:review/value {:seon.schema.admission/source :core}} #{'review/p}]
+      contract [:=> [:cat :review/value] :int]
+      compile-with (fn [p]
+                     (malli.core/function-schema
+                      contract
+                      {:registry (malli.registry/composite-registry
+                                  {:review/value (malli.core/schema [:fn p])}
+                                  (malli.core/default-schemas))}))
+      a (compile-with int?) b (compile-with string?)
+      accepts (fn [c v] (malli.core/validate (:input (malli.core/-function-info c)) v))
+      registry (malli.registry/var-registry)]
+  {:same-proposed-key (= [:shape contract :core population {} {}]
+                         [:shape contract :core population {} {}])
+   :a-inputs [(accepts a [1]) (accepts a ["x"])]
+   :b-inputs [(accepts b [1]) (accepts b ["x"])]
+   :var-registry-symbol (malli.registry/schema registry 'clojure.core/*clojure-version*)
+   :var-registry-var-is-map (map? (malli.registry/schema registry #'clojure.core/*clojure-version*))
+   :ms (/ (- (System/nanoTime) started) 1e6)})
+
+(let [started (System/nanoTime)
+      registry (malli.registry/composite-registry
+                {:review/a (malli.core/schema :int) :review/b (malli.core/schema :string)}
+                (malli.core/default-schemas))
+      compiled (malli.core/schema [:schema {:registry {:review/a :review/b}} :review/a]
+                                  {:registry registry})
+      nodes (seon.schema.internal/fold-walk
+             compiled
+             (fn [node _]
+               (when-let [ref (when (malli.core/-ref-schema? node) (malli.core/-ref node))]
+                 [{:ref ref
+                   :canonical-object?
+                   (identical? (malli.registry/schema (:registry (malli.core/options node)) ref)
+                               (malli.registry/schema registry ref))}]))
+             {:malli.core/walk-schema-refs true :malli.core/walk-refs true})]
+  {:old-references (seon.schema/compiled-references compiled #{:review/a :review/b})
+   :nodes nodes :string-valid? (malli.core/validate compiled "x")
+   :ms (/ (- (System/nanoTime) started) 1e6)})
+```
+
+## Initial verdict — ccab0b3a8 (historical)
 
 **REVISE.** Separating function contracts from the data-schema projection addresses the measured cause. The
 proposed cut is not yet safe: three production readers are missing, contract-derived caches would become stale,
