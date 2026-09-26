@@ -1075,7 +1075,8 @@
   {:malli/schema [:=> [:cat :seon.schema/value :seon.error/throwable :seon.render.data/path]
                   :seon.render.value/projection]}
   [value failure path]
-  (let [text (str (bounded-text value (:floor-chars text-limits)) "\n" (diagnostic-line path failure 0))]
+  (let [value-text (bounded-text value (:floor-chars text-limits))
+        text (str value-text "\n" (diagnostic-line path failure 0))]
     {:seon.render.value/tree {::print/face ::print/projected :seon.render/output :seon.render/ai ::print/value text}
      :seon.render.value/options (print/default-options)
      :seon.render.value/truncated? true
