@@ -104,6 +104,19 @@
                [:seon.source/base-commit-id :seon.source/commit-id]
                [:seon.source/commit-id :seon.source/commit-id]
                [:seon.test.run/id {:optional true} :seon.test.run/id]],
+              :proposal
+              [:map {:description "A prepared merge accept-merge! takes: the tested intermediate branch, its run and verdict, the digest each merged declaration held on the destination, and the candidate's commit."}
+               [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
+               [:seon.test/passed? :boolean] [:seon.source/tally :string]
+               [:seon.source/expected-digests :seon.source/expected-digests]
+               [:parents [:set :seon.source/commit-id]]],
+              :candidate-bytes [:and {:description "The proven file bytes a write-back installs."} :seon.source/file-bytes],
+              :proof-rows [:sequential {:description "Each written declaration with its row before and after the merge (absent: nil)."}
+                           [:tuple :seon.program/declaration-identity [:maybe :map] [:maybe :map]]],
+              :proof
+              [:map {:description "A write-back proven before installation: the file, the bytes it was analyzed from, the candidate and its rows."}
+               [:seon.source/path :seon.source/path] [:seon.source/base-digest :seon.source/base-digest]
+               [:seon.source/candidate-bytes :seon.source/candidate-bytes] [:seon.source/proof-rows :seon.source/proof-rows]],
               :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
               :expected-digests
               [:map-of {:description "The digest each merged declaration held on the destination when the merge was prepared; a merge's basis."}

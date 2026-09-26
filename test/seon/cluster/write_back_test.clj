@@ -229,3 +229,85 @@
       (finally
         (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
         (support/delete-recursively! root)))))
+
+(defn- merge-world!
+  "The fixture file indexed onto H and a lane C where the agent submits
+  `forms` (each a function of the fixture namespace) with an issue naming its
+  test `test-name`; calls `body` with the world, then retires C and every
+  branch `body` conj'd onto `:made`, and deletes the root."
+  [label test-name forms body]
+  (let [target (support/execution-handle nil)
+        store (:seon.store/store target)
+        h-conn (:seon.db/connection target)
+        suffix (id/id)
+        fixture-ns (symbol (str label suffix ".core"))
+        root (str "tmp/" label "-test-" suffix)
+        file (io/file root (str "src/" label suffix "/core.clj"))
+        issue (str label "-" suffix)
+        c (keyword (str label "-c-" suffix))
+        made (volatile! [c])]
+    (io/make-parents file)
+    (spit file (fixture-source fixture-ns))
+    (try
+      (let [rows (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})
+            _ (support/transacted! h-conn (fn/reconcile-tx (db/db h-conn) rows (mapv program/row-identity rows)))
+            _ (registry/branch! {:seon.store/store store :seon.store/branch c
+                                 :seon.cluster.registry/from (db/commit-id (db/db h-conn))})
+            candidate (agent/acquire-context! target nil {:seon.agent/branch c})
+            c-conn (:seon.db/connection candidate)]
+        (try
+          (with-agent! c-conn (:seon.cluster/name target) (str label suffix) fixture-ns
+            (fn [request] (doseq [form forms] (submit! request (form fixture-ns)))))
+          (support/transacted! c-conn [{:seon.issue/id issue :seon.issue/title label :seon.issue/status :open
+                                        :seon.issue/severity :cleanup :seon.issue/problem label
+                                        :seon.issue/tests #{[:seon.test/sym (symbol (str fixture-ns) test-name)]}}])
+          (body {:target target :store store :c c :issue issue :root root :file file :fixture-ns fixture-ns :made made})
+          (finally (agent/release-context! candidate))))
+      (finally
+        (doseq [b @made] (registry/retire-branch! {:seon.store/store store :seon.store/branch b}))
+        (support/delete-recursively! root)))))
+
+(deftest ^{:seon.test/long "One agent turn on C and one prepare-merge! whose file proof (one analysis of a one-file fixture) refuses before the gate runs."
+           :seon.test/long-ms 30000}
+  a-declaration-naming-an-unrequired-namespace-refuses-at-prepare-before-any-test-runs
+  ;; The dogfood class: the agent's SCI world resolves `clojure.set/union`
+  ;; unrequired, so the merge gate passed and only write-back refused.
+  (merge-world! "wbreq" "set-check"
+                [(fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
+                (fn [{:keys [target store c issue root file made]}]
+                  (let [before (slurp file)
+                        refused (source/prepare-merge! target store c issue nil root)]
+                    (some->> (:seon.source/candidate refused) (vswap! made conj))
+                    (is (= :not-analyzable (:seon.source/write-back-refused refused)) (pr-str refused))
+                    (is (not (:seon.source/candidate refused)) "no intermediate branch, no test run")
+                    (is (= before (slurp file)))))))
+
+(deftest ^{:seon.test/long "Two agent turns on C, one prepare-merge! (file proof, then a nested seon.test/run; 60 s is merge-test's measured bound) and two analyses of a one-file fixture."
+           :seon.test/long-ms 90000}
+  a-require-added-at-the-repl-merges-and-writes-back-its-ns-form
+  ;; Namespaces are program rows: the agent's `ns` form adds a require, the
+  ;; merge carries that row with the declaration that needs it, and write-back
+  ;; splices the `ns` form's span; the namespace's other declarations are
+  ;; re-derived under it, so the reindexed file equals the merged program.
+  (let [ns-form #(str "(ns " % "\n  \"Write-back fixture.\"\n  (:require [clojure.set]))")]
+    (merge-world!
+     "wbns" "set-check"
+     [ns-form (fn [_] "(clojure.test/deftest set-check (clojure.test/is (= #{1 2} (clojure.set/union #{1} #{2}))))")]
+     (fn [{:keys [target store issue c root file fixture-ns made]}]
+       (let [h-conn (:seon.db/connection target)
+             check [:seon.test/sym (symbol (str fixture-ns) "set-check")]
+             namespace-row [:seon.ns/name fixture-ns]
+             proposal (source/prepare-merge! target store c issue #{check} root)
+             _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
+             _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
+             accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))]
+         (is (= #{check namespace-row} (:seon.program/identities accepted)) (pr-str accepted))
+         (when (:seon.source/commit-id accepted)
+           (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
+                 reindexed (digests (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]}))]
+             (is (= [namespace-row] (get-in written [:seon.source/written :seon.source/replaced])) (pr-str written))
+             (is (str/starts-with? (slurp file) (ns-form fixture-ns)))
+             (is (= reindexed
+                    (digests (db/pull-many (db/db h-conn) [:seon.fn/sym :seon.test/sym :seon.ns/name :seon.program/definition-digest]
+                                           (vec (keys reindexed)))))
+                 "the file reindexed from disk declares the merged program"))))))))
