@@ -45,6 +45,8 @@ callers to an existing component/function/test that does the same thing better (
   own forms, in the agent's env, recorded the same way — ONE SYSTEM (no transient/unrecorded render path). (3) *Boot reads the
   committed archive*, never the working tree. (4) *Change detection is by digest*: updating a definition updates its digest;
   differing digests = changed; reuse keys on digests.
+- **REPL niceties are not requirements** (owner 2026-09-26): every REPL result already has a reference id, so `*1`/`*2`/`*3`/`*e`
+  and similar conveniences are dropped from scope; only what an agent needs to do its work counts as REPL parity.
 - **AI renders are REPL entries, evaluated; HTML renders are hiccup** (owner 2026-09-26, refining the same-day "text"
   ruling). An AI render returns `;;` comments and forms; the one REPL path evaluates each form read-only in the viewing
   agent's SCI world (disposable fork, cached by content digest) and prints form + result — the context is a `clojure.main`
