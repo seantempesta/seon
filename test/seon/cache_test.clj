@@ -83,3 +83,15 @@
       (is (<= 17 (:seon.cache/evictions big)))
       (is (= weighted-bytes (:seon.cache/bytes big))
           "the per-kind bytes follow insertions and evictions"))))
+
+(deftest a-zero-weight-value-still-counts-against-the-budget
+  ;; Astra audit F3: Caffeine never evicts a zero-weight entry by size, so a
+  ;; weigh function answering 0 (an empty population) retained without bound.
+  (let [held (cache/create 2000)]
+    (dotimes [i 50]
+      (cache/lookup held ::empty i (constantly 0) (constantly i) some?))
+    (settle held)
+    (let [{:seon.cache/keys [weighted-bytes kinds]} (cache/status held)]
+      (is (<= weighted-bytes 2000))
+      (is (< (count (cache/retained held ::empty)) 50))
+      (is (pos? (get-in kinds [::empty :seon.cache/evictions]))))))

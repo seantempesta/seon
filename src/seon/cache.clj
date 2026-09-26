@@ -112,6 +112,12 @@
   (let [{::keys [value thrown]} (.join pending)]
     (if thrown (throw thrown) value)))
 
+;; Every retained entry weighs at least its own key, future and map node:
+;; Caffeine never evicts a zero-weight entry by size (Caffeine.weigher,
+;; 3.2.4), so a weigh function answering 0 (an empty population) would retain
+;; without bound (Astra audit F3, 2026-09-26).
+(def ^:private entry-bytes 256)
+
 (defn lookup
   "The value `derive-fn` computes for `[kind content-key]`, derived once per key.
 
@@ -156,7 +162,7 @@
                            (try
                              (let [value (derive-fn)
                                    keep? (and (some? value) (boolean (retain? value)))
-                                   weight (if keep? (long (weigh value)) 0)]
+                                   weight (if keep? (+ entry-bytes (long (weigh value))) 0)]
                                (.add ^LongAdder (::load-nanos c) (- (System/nanoTime) started))
                                (if keep?
                                  (.add ^LongAdder (::bytes c) weight)
