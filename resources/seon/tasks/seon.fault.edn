@@ -1,0 +1,6 @@
+[#:seon.task{:id "6b8d26a16ce7"
+             :name "delete-panic-record-policy-branch"
+             :kind :function
+             :intent "The REPL path is total (AGENTS.md ee4044ff8, owner 2026-09-26: the production path was always the one path). Delete the :seon.config/on-core-error dial and every :panic/:record branch (~20 files: fault, db panic-on-core-error?, instrument, sci.eval, kernel, admit, render, effect, config, eval.drive, accretion, six schemas, config/default.edn) in one scripted sweep; faults are always recorded and delivered beside the result; a graph stops only when its own execution cannot continue or storage fails."
+             :must-read #{seon.fault/fault!}
+             :evidence #{"AGENTS.md"}}]
