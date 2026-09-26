@@ -265,6 +265,13 @@ Private experiments remain possible; local green never implies shared acceptance
   from latest evidence before a turn; append changed reads, never replay writes/effects or
   rewrite history. Compaction clears evaluations and regenerates the opening. Archive
   agents; preserve task/agent identity on loud, resumable budget exhaustion.
+- **Three points, and cost decides** (owner 2026-09-26). (1) The ORIGINAL value may hold everything many functions use; keep
+  it whole (by reference) — never trim it for presentation. (2) A RENDER FUNCTION is schema-specific by definition: it knows it
+  turns one schema into AI forms, so all specific selection lives there ("for this schema, show these fields"). (3) Evaluating a
+  render's forms renders nested values by their own render function, else by the default VALUE RENDERER (the floor), which gets
+  only GENERAL improvements (budget, shape, laziness, cycles, references) — never a schema-specific branch. Cost order: pulling
+  unused data is waste; showing an agent irrelevant data costs more (every turn); re-touching cached data costs more than
+  leaving it — so invest in a good render function instead.
 - **Render ordinary values totally.** Per face, the first match wins: the value's own
   `:seon.render/ai` or `:seon.render/html` key (the master override: a renderer symbol, an inline
   function, or rendered data); a render function whose contract fits the value, defined in the
