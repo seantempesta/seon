@@ -848,14 +848,27 @@
 
 (defn program-fn-row
   "A complete indexed declaration, or an explicitly analyzed agent fixture.
-   The one-argument form returns the canonical source artifact's actual row.
+   The one-argument form re-indexes the declaration's own file through
+   publication's incremental path (`seon.fn/rows` with that one changed path,
+   against the world the executing member acquired): the canonical file row
+   with its file provenance and stored digest, in 25-300 ms, instead of the
+   whole-checkout manifest (12.8-15 s cold, refused on the dev roots).
    Synthetic definitions require the database so the production analyzer owns
    their resolver context and producing digest; `overrides` are digested in."
   ([function-symbol]
-   (or (some #(when (= function-symbol (:seon.fn/sym %)) %)
-             (mapcat :seon.fn.file/rows (:seon.fn.manifest/artifacts @source-manifest)))
-       (throw (ex-info "A synthetic fixture definition requires its database and source."
-                       {:seon.fn/sym function-symbol}))))
+   (let [world (:seon.db/db (execution-handle db/*conn*))
+         path (get-in (db/pull world [{:seon.fn/file [:seon.fn.file/relative-path]}]
+                               [:seon.fn/sym function-symbol])
+                      [:seon.fn/file :seon.fn.file/relative-path])]
+     (or (when path
+           (some #(when (= function-symbol (:seon.fn/sym %)) %)
+                 (seon.fn/rows {:seon.fn/roots seon.fn/source-roots
+                                :seon.fn/changed-paths #{path}
+                                :seon.source/previous-database world})))
+         (throw (ex-info "The executing member's world indexes no file defining this declaration; a synthetic fixture definition requires its database and source."
+                         {:seon.error/operation 'seon.test-support/program-fn-row
+                          :seon.error/expected :seon.fn/file
+                          :seon.error/offending function-symbol})))))
   ([database function-symbol source]
    (program-row database [:seon.fn/sym function-symbol] source {}))
   ([database function-symbol source overrides]

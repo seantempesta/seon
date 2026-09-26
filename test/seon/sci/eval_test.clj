@@ -166,14 +166,7 @@
                           :seon.agent/id "s3-fixture"
                           :seon.ns/name 'my.agents.s3-fixture}))
      (let [before (db/db connection)
-           ;; The indexed row, analyzed from the world's stored source through
-           ;; the production path (0.3 s); the one-argument form built the
-           ;; whole-checkout manifest (15 s cold).
-           canonical (test-support/program-fn-row
-                      before 'seon.id/valid?
-                      (:seon.fn/source (db/pull before [:seon.fn/source]
-                                                [:seon.fn/sym 'seon.id/valid?]))
-                      {:seon.schema.admission/source :core})
+           canonical (test-support/program-fn-row 'seon.id/valid?)
            original (merge (db/pull before '[*] [:seon.fn/sym 'seon.id/valid?])
                            canonical)
            initial (eval/base-ctx before)
