@@ -277,3 +277,45 @@ its store→branch ms):
 **Root runs after the restart:**
 - `bin/test-check default --ns seon.cluster.program-change-test`
 - `bin/test-check default --ns seon.fn.publication-cache-test --include-long`
+
+## Resume 5 — supplied defaults missing after boot (fixed), task 3452b9f07046 (fixed); 23a08e4ad; RESET NEEDED
+
+**Broken, found and fixed: armed wrappers supplied no defaults after a boot.** This was my regression. It surfaced
+through fa6f8e8b0 and the root is older.
+- `arm-host-program!` compiled every wrapper against `schema/declaration-projection (schema.edn/packaged-forms)`.
+  Those are schema resources only, with no function contract, so `call-preparation/arm-plan` found no contract for
+  any Var.
+- Live default (pid 17853): **0 of 2,174** armed Vars get a plan against that projection, and **821** against the
+  published commit's carried projection. The supplied-default snapshot itself was present and equal to the live one.
+- Before fa6f8e8b0, the post-boot adoption re-armed everything against the carried projection and hid this. My skip
+  exposed it.
+- Fix: `published-program` returns the commit's projection, and boot hands it to `arm-host-program!`. That is one
+  commit, one arming, no reload and no second arming. F10's single commit is now also the arming projection.
+- Regression: `seon.cluster.program-change-test/a-booted-wrapper-supplies-its-declared-defaults` calls
+  `my.program/breaks` with no `:seon.db/db` inside a test member.
+
+**Task 3452b9f07046 (fixed).** clj-kondo reports no `:meta` for a `#:malli{:schema ...}` attribute map, which is
+what `pr-str` prints. `parsed-facts` now reads such maps from its one parse, by position, and `analyze` fills
+`:meta` only where kondo gave none. Scratch copy check: namespaced map, docstring plus namespaced map, plain map,
+and no map all come out right. The subject mark is removed.
+
+**Boot toward 10 s, ranked from measurements:**
+- Full-republication boot (15e6a31): store→branch 24.2 s. Of that, warm analysis is ~9 s (kondo 3.6 s, our
+  derivation ~5.5 s), contract rows ~2.8 s and the reconcile transaction ~5 s; the rest is JIT-cold multiplier.
+- Unchanged-program restart (pid 69326, a34078273): store→branch 0.58 s, ready **6.3 s** after boot start. The layers
+  after that are config-result +1.6 s, SCI ctx +2.1 s and flow graph +1.2 s. JVM launch and operator phases are not
+  measured here.
+
+I made no speed change in this resume; the correctness regressions came first. If the operator's unchanged-restart
+total is not near-instant, the first targets are the 2.1 s ctx build and the 1.6 s config layer. I have not yet
+measured them.
+
+**Root runs after the restart** (the analyzer changed, so expect one full republication; report store→branch ms):
+- `bin/test-check default --ns seon.cluster.program-change-test`
+- `bin/test-check default --test seon.cluster.publication-delta-test/schema-referrers-are-selected-for-arming-without-a-namespace-reload`
+- `bin/test-check default --ns seon.fn.analyzer-test`
+- `bin/test-check default --ns seon.fn.caller-lint-test`
+- `bin/test-check default --test seon.instrument-test/boot-arming-arms-every-loaded-contract-with-its-definition-digest`
+- `bin/test-check default --ns seon.call-preparation-test`
+- Re-run the flows that failed: `seon.task/create!`, `my.program/accept-merge!` and `my.program/breaks` as root
+  with no branch.
