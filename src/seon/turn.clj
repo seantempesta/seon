@@ -3466,27 +3466,17 @@
 (defn- analyze-submitted
   "Analyze a pass's declarations; a failure becomes the phase's flat refusal.
 
-  A failure declaring `:seon.fn/dependency-analysis-missing-error` is the
-  platform's fault, not the author's mistake: it is stored and delivered
-  (`seon.fault/fault!`, whose `:panic` throws to this turn's caller) before the
-  pass records it, so the agent is never asked to correct it."
-  {:malli/schema [:=> [:cat :seon.turn.loop/cluster :seon.agent/id :seon.db/database-value
-                       [:vector :map]]
+  Every analysis refusal, `:seon.fn/dependency-analysis-missing-error`
+  included, is returned on the form that earned it: the run settles and
+  closes with it. Routing it through `seon.fault/fault!` panicked this turn's
+  step before settlement and left the run open with nothing recorded (its
+  declared schema does not extend `:seon.error/base`, so the fault itself
+  could not be stored)."
+  {:malli/schema [:=> [:cat :seon.db/database-value [:vector :map]]
                   [:or [:vector [:tuple :map [:maybe :seon.program/row]]]
                    :seon.fn/namespace-unresolvable-error :seon.turn.loop/phase-failed-error]]}
-  [cluster agent-id database requests]
-  (try
-    (seon.fn/analyze-forms database requests)
-    (catch clojure.lang.ExceptionInfo failure
-      (when (= :seon.fn/dependency-analysis-missing-error
-               (:seon.error/declared-schema (meta (ex-data failure))))
-        (fault/fault! (env/of cluster) failure
-                      {:seon.error/layer :seon.turn/phase
-                       :seon.error/operation 'seon.fn/analyze-forms
-                       :seon.db.process/id (:seon.db.process/id cluster)
-                       :seon.agent/id agent-id
-                       :seon.error/declared-schema :seon.fn/dependency-analysis-missing-error}))
-      (phase #(throw failure)))))
+  [database requests]
+  (phase #(seon.fn/analyze-forms database requests)))
 
 (defn- closing-settlement?
   "True when this settlement closes the ordinary turn.
@@ -5054,20 +5044,32 @@
                       evaluations)}))
             ;; Only declarations are analyzed: an ordinary form's static
             ;; call edges are not program rows, and its receipt asserts none.
+            ;; The run's database predates this batch's namespace declarations.
+            ;; A declaration is analyzed against the namespace row an earlier
+            ;; form of the batch declared (its `ns` aliases), as SCI evaluated
+            ;; it, else the stored one (`seon.fn/runtime-analysis-batch`).
             submitted
-            (into []
-                  (keep-indexed
-                   (fn [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]
-                     (when-let [row (:seon.program/row evaluation)]
-                       [index
-                        {:seon.cluster.eval/source (:seon.cluster.eval/source form)
-                         :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
-                         :seon.program/row row}])))
-                  evaluated)
+            (:submitted
+             (reduce
+              (fn [{namespaces :namespaces :as batch}
+                   [index {form :seon.turn.loop/admitted-form evaluation :seon.sci.eval/evaluation}]]
+                (if-let [row (:seon.program/row evaluation)]
+                  (let [declared (or (:seon.fn/sym row) (:seon.test/sym row))
+                        namespace-row (some->> declared namespace symbol (get namespaces))]
+                    (cond-> (update batch :submitted conj
+                                    [index
+                                     (cond-> {:seon.cluster.eval/source (:seon.cluster.eval/source form)
+                                              :seon.cluster.eval/ns (:seon.cluster.eval/ns form)
+                                              :seon.program/row row}
+                                       namespace-row (assoc :seon.fn/namespace-row namespace-row))])
+                      (:seon.ns/name row) (assoc-in [:namespaces (:seon.ns/name row)] row)))
+                  batch))
+              {:namespaces {} :submitted []}
+              (map-indexed vector evaluated)))
             analyzed
             (cond
               (:seon.turn.loop/phase-failed evaluated) evaluated
-              (seq submitted) (analyze-submitted cluster agent-id database (mapv second submitted))
+              (seq submitted) (analyze-submitted database (mapv second submitted))
               :else [])]
         (if (or (:seon.turn.loop/phase-failed analyzed)
                 (:seon.fn/namespace-unresolvable analyzed))

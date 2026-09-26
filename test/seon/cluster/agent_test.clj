@@ -444,6 +444,49 @@
             (stop-database-events! connection events)
             (disarm-all! routing)))))))
 
+(deftest a-run-defining-with-an-alias-its-own-ns-form-required-settles
+  ;; Issue an-alias-required-by-an-earlier-form-of-a-batch: settlement analyzed
+  ;; the batch against the run's starting namespace row, refused `str/` as an
+  ;; unanalyzed dependency, and routed that refusal as a panicking core fault
+  ;; that could not be stored: the run never closed and the agent stayed busy.
+  (with-connection
+    (fn [connection ctx]
+      (let [routing (armory connection)
+            events (database-events connection)]
+        (test-support/transacted! connection [(config-row "alias-batch" {}) (agent-row connection "alias-batch")])
+        (try
+          (arm-one! connection ctx routing "alias-batch" "alias-batch")
+          (let [submit! (fn [text]
+                          (let [run-id (:seon.turn/id
+                                        (agent/submit-source!
+                                         {:seon.turn.loop/cluster (handle connection ctx "alias-batch")
+                                          :seon.agent/routing routing
+                                          :seon.agent/id "alias-batch"
+                                          :seon.cluster.reply/text text}))
+                                database (await-database-state!
+                                          connection (:seon.cluster.agent-test/events events)
+                                          #(some? (:seon.turn/closed-tx
+                                                   (db/pull % [:seon.turn/closed-tx]
+                                                            [:seon.turn/id run-id]))))]
+                            (db/q '[:find [?shown ...]
+                                    :in $ ?run-id
+                                    :where [?run :seon.turn/id ?run-id]
+                                    [?evaluation :seon.cluster.eval/run ?run]
+                                    [?evaluation :seon.cluster.eval/ordinal 3]
+                                    [?evaluation :seon.eval/shown ?shown]]
+                                  database run-id)))]
+            (is (= ["\"Q\""]
+                   (submit! (str "(ns alias.batch (:require [clojure.string :as str]))\n"
+                                 "(defn a1 {:malli/schema [:=> [:cat :string] :string]} [x] (str/upper-case x))\n"
+                                 "(defn b1 {:malli/schema [:=> [:cat :string] :string]} [x] (a1 x))\n"
+                                 "(b1 \"q\")")))
+                "the run settles and closes with the caller's value")
+            (is (= ["2"] (submit! "(+ 1 1)\n(+ 1 1)\n(+ 1 1)\n(+ 1 1)"))
+                "the agent admits its next run"))
+          (finally
+            (stop-database-events! connection events)
+            (disarm-all! routing)))))))
+
 (deftest system-source-submission-uses-the-ordinary-durable-run
   (with-connection
     (fn [connection ctx]
