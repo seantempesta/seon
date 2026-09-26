@@ -181,8 +181,30 @@ costs 8 µs against 120 µs.
   bound. It is a first `carried-projection` call on a speculative value, including builder resolution. The
   identity assertion passes. Root decides whether the bound or the path moves.
 
-**Not yet proven.** The after-run waits for root's restart. Default was unreachable for over 10 minutes after
-4998d3fa1.
+**After-run.** Pid 36107 runs b32060df4, which includes 4998d3fa1.
+
+| Run | Executed | Result |
+|---|---:|---|
+| Root's db-test, run c83dfcafa26a | 91 | pass 599, fail 4, error 1; **2 red of 94** (was 13) |
+| My db-test, run faa27a672207 | 2 (92 reused) | the same 2 reds |
+
+The 2 remaining reds:
+
+1. `nested-native-reports-admit-bounded-reference-identities`, open as described above. 931d02212 makes its
+   assertions print the admitted value, so the next run shows the `::projection-error` message.
+2. `transaction-success-and-refusal-shapes-are-declared` (NEW in this run). `seon.fn/contract-findings` refuses its
+   own return value:
+
+   > refused return value at [2778 :seon.fn.contract/form]: expected must be a parseable, EDN-readable Malli form,
+   > got a lookup-ref vector
+
+   The call comes from `call_preparation.clj:1066`. The producer and its contract are in fn.clj (perf-boot lane), not
+   db.clj.
+
+**owned-value-test was still red** after 4998d3fa1: a function root requires more keys than the digest (analyzed-source
+digest, admission source, namespace, and an arity with order and arity text). 04fc0af02 copies a stored row's own facts
+and first arity onto the transaction entity. Probed on pid 36107: the walk answers `#{:seon.fn/sym}`. It needs the next
+restart.
 
 ## Checks
 
