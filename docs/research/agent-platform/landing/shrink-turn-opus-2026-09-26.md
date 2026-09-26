@@ -229,3 +229,19 @@ The columns are pass / fail / error.
 - **TIMEBOUND.** `recovery-preserves-terminal-receipts-exactly` (7.8 s), `transitions-agree-with-the-model`
   (13.3 s) and `prompt-and-call-resolve-once…` (7.6 s), all against a 5 s bound.
 - **STALE, needs a ruling.** `virtual-turns-…` has per-transaction datom counts from before `55b5b580f`.
+
+### Root ruling on virtual-turns: its datom-count assertions are deleted
+
+Its per-transaction datom-count assertions (`[16 6]`, `[30 14]`, 2 transactions, 44 datoms) are deleted, together
+with the listener state and printlns that recorded them. The behaviour they stood for is covered once by
+`seon.cluster.evaluate-source-test`, "the run is written in the one transaction that settles it; submission
+commits nothing": the run's open, its evaluation and its close share one transaction, and the basis advances by
+exactly one commit.
+
+**Routed to other owners (root):**
+- config visibility → the cache lane, fixed in `b6913c392`;
+- "Worker-global state changed" → shrink-test;
+- the error-recording escalation → root;
+- the hand-built prompt refusal → task `1bf47dae6f04`.
+
+After the next restart I re-run `seon.turn-test` and `seon.turn-loop-test` once.
