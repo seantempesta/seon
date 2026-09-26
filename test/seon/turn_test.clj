@@ -600,8 +600,8 @@
          (submit "a")
          ;; `(+ 1 1)` reads nothing, so its evaluation carries no read
          ;; evidence datom (ca17618c0: a form's sink covers only its own reads).
-         (is (= [16 5 2] (mapv :seon.test/datoms @transactions))
-             "the cold turn is open, evaluations, close, with no empty schedule recovery")
+         (is (= [16 6] (mapv :seon.test/datoms @transactions))
+             "the cold turn is open, then its evaluations with the close folded into that settlement (close-folded-call), with no empty schedule recovery")
          (println {:seon.test/virtual-turn-transactions (count @transactions)
                    :seon.test/virtual-turn-datoms @transactions})
          (submit "b")
@@ -651,9 +651,10 @@
                      :seon.test/transactions measured
                      :seon.test/transaction-count (count measured)
                      :seon.test/datom-count (reduce + (map :seon.test/datoms measured))})
-           (is (= [30 13 2] (mapv :seon.test/datoms measured)))
-           (is (= 3 (count measured)))
-           (is (= 45 (reduce + (map :seon.test/datoms measured))))
+           (is (= [30 14] (mapv :seon.test/datoms measured))
+               "open, then one settlement carrying the three receipts and the folded close")
+           (is (= 2 (count measured)))
+           (is (= 44 (reduce + (map :seon.test/datoms measured))))
            (is (= 1 (count (turn/receipt-settle-batch-tx
                             (mapv (fn [ordinal]
                                     {::turn/id turn-id

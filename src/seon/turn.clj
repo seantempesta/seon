@@ -2357,6 +2357,25 @@
 ;;; Routed-problem settlement — derived, never stored
 ;;; ---------------------------------------------------------------------------
 
+
+(defn close-folded-call
+  "Close a replied run inside the settlement that gave its last form a terminal
+  fact, decided at the writer on the value after the batch's receipts, so a
+  trivial run commits twice rather than three times. A generated run (no reply
+  size), a run with a form still to evaluate, and an agent holding an issue keep
+  the separate close pass: the issue's tests must see the settled rows first."
+  {:malli/schema [:=> [:cat :seon.db/database-value
+                       [:map [::id ::id] [:seon.agent/id :seon.agent/id]]]
+                  :seon.store/transaction-data]}
+  [database {run-id ::id agent-id :seon.agent/id}]
+  (let [run (db/pull database [::reply-size ::closed-tx] [::id run-id])]
+    (if (or (not (::reply-size run))
+            (::closed-tx run)
+            (next-ordinal database run-id)
+            (db/q '[:find ?issue . :in $ ?id :where [?agent :seon.agent/id ?id]
+                    [?issue :seon.issue/agent ?agent]] database agent-id))
+      []
+      (close-call database {::id run-id}))))
 (defn problem-id
   "The receipt identity naming one form's derived problem."
   {:malli/schema [:=> [:cat :seon.turn/id
@@ -3629,12 +3648,17 @@
         {:seon.blob/staged-writes
          (into [] (mapcat :seon.blob/staged-writes) prepared)
          :seon.db/tx-data
-         (into
-          (into (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared))
-                (mapcat :seon.db/tx-data)
-                prepared)
-          (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
-          (distinct (map :seon.agent/id requests)))}
+         (-> (into (receipt-settle-batch-tx (mapv :seon.turn.loop/receipt prepared))
+                   (mapcat :seon.db/tx-data)
+                   prepared)
+             ;; The close precedes plan/settle-call, as in close-turn; a
+             ;; settlement that already closes the turn needs no fold.
+             (cond-> (not (some closing-settlement? prepared))
+               (into (map (fn [[agent-id run-id]]
+                            [:db.fn/call #'close-folded-call {::id run-id :seon.agent/id agent-id}]))
+                     (distinct (map (juxt :seon.agent/id :seon.turn/id) requests))))
+             (into (map (fn [agent-id] [:db.fn/call #'plan/settle-call agent-id]))
+                   (distinct (map :seon.agent/id requests))))}
         ;; `with-publication!` IS TOTAL OVER AN EMPTY VECTOR — it calls the
         ;; commit directly — so the caller has no branch to get wrong. The
         ;; branch this replaced handed `(seq …)`, a `ChunkedSeq`, where the
@@ -5075,7 +5099,9 @@
                     :seon.db/db (:db-after outcome)
                     :seon.sci.eval/installations installations}))
                 (if (or (:seon.turn.loop/settled last-prepared)
-                        (:seon.turn.loop/undisposed? last-prepared))
+                        (:seon.turn.loop/undisposed? last-prepared)
+                        ;; a folded close (close-folded-call) closed it in the settlement
+                        (::closed-tx (db/pull (:db-after outcome) [::closed-tx] [::id run-id])))
                   (report :closed (count gated))
                   (report :released (count gated)))))))))))
 (defn- close-turn
