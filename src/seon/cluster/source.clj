@@ -795,6 +795,45 @@
       (let [reached (into (set (:seon.fn/affected closure)) (:seon.fn/tests closure))]
         (into #{} (filter (fn [[_ value]] (reached value))) selection)))))
 
+(defn- held-digests
+  "The definition digest `database` holds for each of `identities`,
+  `:seon.program/absent` where it declares none: what a merge or write-back
+  compares, so writes to other rows never stale it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/identity-set] :seon.source/expected-digests]}
+  [database identities]
+  (into {} (map (fn [[attribute value :as identity]]
+                  [identity (or (db/q '[:find ?digest . :in $ ?a ?v
+                                        :where [?e ?a ?v] [?e :seon.program/definition-digest ?digest]]
+                                      database attribute value)
+                                :seon.program/absent)]))
+        identities))
+
+(defn- moved-digests
+  "The members of `expected` whose digest `held` disagrees with."
+  {:malli/schema [:=> [:cat :seon.source/expected-digests :seon.source/expected-digests] [:vector :seon.program/declaration-identity]]}
+  [expected held]
+  (vec (sort-by str (filter #(not= (expected %) (held %)) (keys expected)))))
+
+(defn- declarations-held-tx
+  "Transaction data that refuses, inside the writer, unless every declaration
+  of `expected` still holds its expected digest: the merge's basis is the rows
+  it replaces, never the head's t. The refusal names each moved row with both
+  digests."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.source/expected-digests] [:= []]]}
+  [database expected]
+  (let [held (held-digests database (set (keys expected)))
+        moved (moved-digests expected held)]
+    (when (seq moved)
+      (throw (ex-info "A merged declaration changed on the destination after the merge was prepared."
+                      (seon.error.refusal/diagnostic
+                       (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
+                       {:seon.error/message (str "The destination changed " (str/join ", " (map pr-str moved))
+                                                 " after the merge was prepared; prepare it again.")
+                        :seon.error/member :seon.source/expected-digests
+                        :seon.error/expected (select-keys expected moved)
+                        :seon.error/offending (select-keys held moved)}))))
+    []))
+
 (defn prepare-merge!
   "Test `candidate`'s function and test changes since its merge base with
   `source`'s head H on a fresh branch S of H through the save gate, with the
@@ -812,13 +851,15 @@
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id]
                    [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                           [:seon.test/passed? :boolean] [:seon.source/tally :string]
-                          [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+                          [:seon.source/expected-digests :seon.source/expected-digests]
+                          [:parents [:set :seon.source/commit-id]]]
                     :seon.program/three-way :seon.error/value]]
                   [:=> [:cat :seon.agent/context-source :seon.store/store :seon.store/branch :seon.issue/id
                         [:maybe :seon.program/identity-set]]
                    [:or [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
                           [:seon.test/passed? :boolean] [:seon.source/tally :string]
-                          [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+                          [:seon.source/expected-digests :seon.source/expected-digests]
+                          [:parents [:set :seon.source/commit-id]]]
                     :seon.program/three-way :seon.error/value]]]}
   ([source held-store candidate issue] (prepare-merge! source held-store candidate issue nil))
   ([source held-store candidate issue selection]
@@ -870,25 +911,33 @@
             (seq unselected) (refuse "The gate answered none of these issue tests." unselected)
             :else (assoc (select-keys gate [:seon.test/passed? :seon.source/tally])
                          :seon.source/candidate s :seon.test.run/id (:seon.test.run/id run)
-                         :datahike/expected-basis-t (db/basis-t head) :parents #{c-id}))))
+                         :seon.source/expected-digests (held-digests head delta) :parents #{c-id}))))
       (finally (run! #(when-not (:seon.error/at %) (d/release-materialized-db %)) [base branch]))))))
 
 (defn accept-merge!
   "Merge exactly the program tested by `prepare-merge!`'s proposal into
   `source`: the named run on S complete, every member green, every added or
-  replaced function reached by one, and S's program unwritten since. The writer
-  refuses a moved head (expected basis-t) before any datom lands; the merge
-  commit's parents add the candidate and S's head. A task handle the merged
-  program names with no task admitted on the head refuses, by handle and holder."
+  replaced function reached by one, and S's program unwritten since. The
+  writer refuses, before any datom lands, a merged declaration whose digest on
+  the head moved from the proposal's `:seon.source/expected-digests`; writes to
+  other rows never stale it. The merge commit's parents add the candidate and
+  S's head. A task handle the merged program names with no task admitted on the
+  head refuses, by handle and holder. Answers the accepted merge `write-back!`
+  takes: its identities, the commit before it, its merge commit and the run.
+
+  Example:
+  (accept-merge! source store proposal)"
   {:malli/schema [:=> [:cat :seon.agent/context-source :seon.store/store
                        [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
-                        [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]]
-                  [:or :seon.db/transaction-report :seon.source/test-evidence-error :seon.error/value]]}
-  [source held-store {s :seon.source/candidate run-id :seon.test.run/id basis :datahike/expected-basis-t
+                        [:seon.source/expected-digests :seon.source/expected-digests]
+                        [:parents [:set :seon.source/commit-id]]]]
+                  [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value]]}
+  [source held-store {s :seon.source/candidate run-id :seon.test.run/id expected :seon.source/expected-digests
                       merged :parents}]
   (let [e-id (registry/branch-commit-id {:seon.store/store held-store :seon.store/branch s})
         tested (commit-database held-store e-id)
         head (db/db (:seon.db/connection source))
+        delta (set (keys expected))
         refuse (fn [message offending]
                  (seon.error.refusal/diagnostic (java.util.Date.) :seon.source/merge 'seon.cluster.source/accept-merge!
                   {:seon.error/message message
@@ -902,17 +951,13 @@
                                      [?m :seon.test.member/symbol ?sym]] tested run-id))
             green-ids ((requiring-resolve 'seon.test/green-members) tested (vec (keys members)))
             green (set (vals (select-keys members green-ids)))
-            ;; S forked from H at `basis`: comparable on S's own lineage.
-            delta (program/changed-identities basis tested {:seon.program/max-datoms 10000})
-            uncovered (when (set? delta)
-                        ;; A retracted function has nothing to cover: its surviving
-                        ;; callers are the writer's refs and the run's reaching tests.
-                        (for [[a f] delta :when (= :seon.fn/sym a)
-                              :when (:db/id (db/pull tested [:db/id] [a f]))
-                              :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f))
+            ;; A retracted function has nothing to cover: its surviving
+            ;; callers are the writer's refs and the run's reaching tests.
+            uncovered (for [[a f] delta :when (= :seon.fn/sym a)
+                            :when (:db/id (db/pull tested [:db/id] [a f]))
+                            :when (not-any? green (fn/gate-sets {:seon.db/db tested :seon.fn/seeds #{f}}))] f)
             tx (when (seq delta) (replacement tested head delta))
-            ;; Decided on `head`; the write's expected basis-t refuses a moved head.
-            dangling (when (set? delta) ((requiring-resolve 'seon.issue/candidate-dangling) tested head delta))]
+            dangling ((requiring-resolve 'seon.issue/candidate-dangling) tested head delta)]
         (cond
           (not= s (or (:seon.test.run/tested-branch run) (:seon.test.run/branch run)))
           (refuse "The named run was not recorded on the tested branch." run)
@@ -921,14 +966,20 @@
           (refuse "Every member of the named run must be green." (vec (vals (apply dissoc members green-ids))))
           (not (false? ((requiring-resolve 'seon.test.runner/program-written-since?) tested (:seon.test.run/basis-t run))))
           (refuse "The tested program changed after the named run." (:seon.test.run/basis-t run))
-          (not (set? delta)) delta
           (seq uncovered) (refuse "A replaced function reaches no green test of the named run." (vec uncovered))
           (:seon.error/at tx) tx
           (empty? tx) (refuse "The destination already holds the tested rows." (vec delta))
           (:seon.error/at dangling) dangling
           (seq dangling) (refuse "The merged program names tasks the destination has not admitted." dangling)
-          :else (db/transact! (:seon.db/connection source)
-                              {:tx-data tx :datahike/expected-basis-t basis :parents (conj merged e-id)})))
+          :else
+          (let [report (db/transact! (:seon.db/connection source)
+                                     {:tx-data (into [[:db.fn/call declarations-held-tx expected]] tx)
+                                      :parents (conj merged e-id)})]
+            (if (:db-after report)
+              {:seon.program/identities delta :seon.test.run/id run-id
+               :seon.source/base-commit-id (db/commit-id (:db-before report))
+               :seon.source/commit-id (db/commit-id (:db-after report))}
+              report))))
       (finally (d/release-materialized-db tested)))))
 
 ;;; ---------------------------------------------------------------------------
@@ -1001,28 +1052,16 @@
                     database namespace-name)]
     (when (= 1 (count files)) (first files))))
 
-(defn write-back!
-  "Write the function and test changes of `accepted` (`accept-merge!`'s report
-  on `connection`) into their one source file under `root`: a replaced
-  declaration's recorded byte span takes its accepted source, a retracted one's
-  span (and the blank lines before it) goes, and an added one is appended to its
-  namespace's file.
-
-  Proven before installation. Refuses by reason unless the branch head is still
-  the accepted commit; every change names one file (a replaced or retracted
-  declaration by its before-state, an added one by its namespace's file) and
-  every before-state a span holding its source; the file's bytes are the ones its
-  declarations were analyzed from; and the ordinary analyzer (`seon.fn/analyze-rows`
-  over the candidate text) reindexes the candidate to exactly the file's
-  declarations after the merge, every other one unchanged. The disk bytes are
-  checked again, then the candidate is installed by an atomic rename. Publishing
-  the changed path stays with the publication owner."
-  {:malli/schema [:=> [:cat :seon.source/write-back-request]
+(defn- write-back-commits
+  "`write-back!` between the accepted merge's `before` and `after` commits."
+  {:malli/schema [:=> [:cat :seon.db/connection :seon.source/accepted :seon.db/database-value
+                       :seon.db/database-value :seon.fn/root]
                   [:or :seon.source/written :seon.source/write-back-error]]}
-  [{connection :seon.db/connection report :seon.source/accepted root :seon.fn/root}]
-  (let [before (:db-before report) after (:db-after report)
-        changed (program/changed-identities before after {:seon.program/max-datoms 10000})
-        identities (when (set? changed) (vec (sort-by str changed)))
+  [connection accepted before after root]
+  (let [identities (vec (sort-by str (:seon.program/identities accepted)))
+        merged (held-digests after (set identities))
+        held (held-digests (db/db connection) (set identities))
+        moved (moved-digests merged held)
         pull (fn [database identity]
                (let [row (db/pull database [:db/id :seon.fn/sym :seon.test/sym :seon.fn/form-span :seon.fn/source
                                             :seon.test/source :seon.program/definition-digest
@@ -1055,9 +1094,11 @@
         refuse (fn [reason message evidence]
                  (write-back-refusal reason message (cond-> evidence path (assoc :seon.source/path path))))]
     (cond
-      (not (set? changed)) changed
-      (not= (db/commit-id (db/db connection)) (db/commit-id after))
-      (refuse :head-moved "The branch head moved after the accepted merge." {:seon.error/offending (db/commit-id after)})
+      (seq moved)
+      (refuse :row-changed (str "The branch changed " (str/join ", " (map pr-str moved))
+                                " after the merge was accepted; merge that change before writing back.")
+              {:seon.error/member :seon.source/accepted
+               :seon.error/expected (select-keys merged moved) :seon.error/offending (select-keys held moved)})
       (empty? identities) (refuse :no-replacement "The accepted merge changed no declaration." {})
       (or (not= 1 (count files)) (nil? path) (some (comp nil? :seon.fn/form-span) before-rows)
           (some (fn [[_ _ now]] (and now (nil? (source-of now)))) rows))
@@ -1070,17 +1111,24 @@
       (refuse :span-mismatch "A recorded span no longer holds its declaration's source." {})
       :else
       (let [candidate (spliced base-bytes (edits))
-            reindexed (declaration-digests
-                       (fn/analyze-rows {:seon.fn/root (str root) :seon.fn/roots [relative-root]
-                                         :seon.fn/changed-paths #{path}
-                                         :seon.fn.analyzer/sources {(.getCanonicalPath file)
-                                                                    (String. ^bytes candidate "UTF-8")}}))
+            ;; The analyzer refuses blocking findings by throwing (`seon.fn/assert-clean-analysis!`):
+            ;; a declaration valid at the REPL may name a namespace its file does not require.
+            analyzed (try (fn/analyze-rows {:seon.fn/root (str root) :seon.fn/roots [relative-root]
+                                            :seon.fn/changed-paths #{path}
+                                            :seon.fn.analyzer/sources {(.getCanonicalPath file)
+                                                                       (String. ^bytes candidate "UTF-8")}})
+                          (catch clojure.lang.ExceptionInfo failure
+                            (if (:seon.fn/index-refused (ex-data failure)) (ex-data failure) (throw failure))))
+            reindexed (when (sequential? analyzed) (declaration-digests analyzed))
             expected (merge (apply dissoc (file-digests before path) identities)
                             (declaration-digests (keep #(nth % 2) rows)))
             differing (vec (sort-by str (filter #(not= (get expected %) (get reindexed %))
                                                 (into (set (keys expected)) (keys reindexed)))))
             kind (fn [pick] (vec (keep (fn [[identity was now]] (when (pick was now) identity)) rows)))]
         (cond
+          (not reindexed)
+          (refuse :not-analyzable "The candidate file does not analyze cleanly; its namespace form may lack a require the accepted declarations use."
+                  {:seon.error/offending (:seon.fn/findings analyzed)})
           (seq differing)
           (refuse :not-equivalent "The reindexed candidate does not declare exactly the accepted program."
                   {:seon.error/offending differing})
@@ -1097,3 +1145,36 @@
                                    :seon.source/retracted (kind #(and %1 (not %2)))}}
             (catch Exception failure
               (refuse :install-failed "The proven candidate could not be installed." {:seon.error/throwable failure}))))))))
+
+(defn write-back!
+  "Write the function and test changes of `accepted` (`accept-merge!`'s
+  accepted merge on `connection`'s branch) into their one source file under
+  `root`: a replaced declaration's recorded byte span takes its accepted
+  source, a retracted one's span (and the blank lines before it) goes, and an
+  added one is appended to its namespace's file.
+
+  Proven before installation. Refuses by reason unless each written
+  declaration still holds, on the branch head, the digest the merge commit gave
+  it (other writes never stale it); every change names one file (a replaced or
+  retracted declaration by its state before the merge, an added one by its
+  namespace's file) and every before-state a span holding its source; the
+  file's bytes are the ones its declarations were analyzed from; and the
+  ordinary analyzer (`seon.fn/analyze-rows` over the candidate text) reindexes
+  the candidate to exactly the file's declarations after the merge, every other
+  one unchanged. The disk bytes are checked again, then the candidate is
+  installed by an atomic rename. Publishing the changed path stays with the
+  publication owner.
+
+  Example:
+  (write-back! {:seon.db/connection connection :seon.source/accepted accepted :seon.fn/root \"/checkout\"})"
+  {:malli/schema [:=> [:cat :seon.source/write-back-request]
+                  [:or :seon.source/written :seon.source/write-back-error]]}
+  [{connection :seon.db/connection accepted :seon.source/accepted root :seon.fn/root}]
+  (let [[before after] (map #(d/commit-as-db connection (% accepted))
+                            [:seon.source/base-commit-id :seon.source/commit-id])]
+    (try
+      (if (some nil? [before after])
+        (write-back-refusal :commit-absent "The accepted merge's commits are unavailable in this store."
+                            {:seon.error/offending (select-keys accepted [:seon.source/base-commit-id :seon.source/commit-id])})
+        (write-back-commits connection accepted before after root))
+      (finally (run! #(some-> % d/release-materialized-db) [before after])))))

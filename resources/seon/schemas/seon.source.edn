@@ -98,7 +98,16 @@
                 [:seon.source/commit-id :seon.source/commit-id]]],
               :publish-result [:or :seon.source/published :seon.source/publication-error],
               :file-bytes [:fn {:error/message "must be a byte array"} clojure.core/bytes?],
-              :accepted [:and {:description "The transaction report of the accepted merge whose replacements are written back."} :seon.db/transaction-report],
+              :accepted
+              [:map {:description "An accepted merge: the declarations it merged, the branch commit before it, its merge commit and the run that tested it."}
+               [:seon.program/identities :seon.program/identity-set]
+               [:seon.source/base-commit-id :seon.source/commit-id]
+               [:seon.source/commit-id :seon.source/commit-id]
+               [:seon.test.run/id {:optional true} :seon.test.run/id]],
+              :base-commit-id [:uuid {:description "The branch's commit a merge was transacted onto."}],
+              :expected-digests
+              [:map-of {:description "The digest each merged declaration held on the destination when the merge was prepared; a merge's basis."}
+               :seon.program/declaration-identity :seon.program/digest-or-absence],
               :write-back-request
               [:map
                [:seon.db/connection :seon.db/connection]
@@ -106,7 +115,7 @@
                [:seon.fn/root :seon.fn/root]],
               :write-back-refused
               [:enum {:description "Why a write-back installed nothing."}
-               :head-moved :no-replacement :one-file :file-absent :file-changed :span-mismatch :not-equivalent :install-failed],
+               :row-changed :commit-absent :no-replacement :one-file :file-absent :file-changed :span-mismatch :not-analyzable :not-equivalent :install-failed],
               :write-back-error
               [:and :seon.error/base
                [:map [:seon.source/write-back-refused :seon.source/write-back-refused]

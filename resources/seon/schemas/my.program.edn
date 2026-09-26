@@ -4,7 +4,8 @@
   [:my.program/base-ctx :seon.sci.eval/ctx]
   [:seon.cluster/name {:optional true} :seon.cluster/name]
   [:seon.store/store {:optional true} :seon.store/store]
-  [:seon.agent/routing {:optional true} :seon.agent/routing]]
+  [:seon.agent/routing {:optional true} :seon.agent/routing]
+  [:seon.env/environment {:optional true} :seon.env/environment]]
  :my.program/read-request [:map [:seon.db/db :seon.db/database-value]]
  :my.program/subject-request
  [:map [:seon.db/db :seon.db/database-value]
@@ -26,12 +27,12 @@
  :my.program/merge-proposal
  [:map [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
   [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
-  [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+  [:seon.source/expected-digests :seon.source/expected-digests] [:parents [:set :seon.source/commit-id]]]
  :my.program/accept-request
  [:map [:my.program/context :my.program/context]
   [:seon.source/candidate :seon.store/branch] [:seon.test.run/id :seon.test.run/id]
   [:seon.test/passed? {:optional true} :boolean] [:seon.source/tally {:optional true} :string]
-  [:datahike/expected-basis-t :int] [:parents [:set :seon.source/commit-id]]]
+  [:seon.source/expected-digests :seon.source/expected-digests] [:parents [:set :seon.source/commit-id]]]
  :my.program/held-branch
  [:keyword {:description "The branch a context refused the cluster's own custody holds."}]
  :my.program/custody-refused-error

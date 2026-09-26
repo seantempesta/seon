@@ -452,7 +452,7 @@
         (is (= [(str [:my.program/context branch])]
                (hosted-run! hosted (str "((juxt :seon.error/member :my.program/held-branch) (my.program/accept-merge! "
                                         "{:seon.source/candidate :tested :seon.test.run/id \"run\" "
-                                        ":datahike/expected-basis-t 1 :parents #{}}))"))))))))
+                                        ":seon.source/expected-digests {} :parents #{}}))"))))))))
 
 (deftest a-refused-install-is-its-receipts-error
   ;; Before, a gate-refused install settled its refusal as shown text only, with

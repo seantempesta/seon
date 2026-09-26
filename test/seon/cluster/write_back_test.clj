@@ -128,13 +128,15 @@
           (let [proposal (source/prepare-merge! target store c issue)
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
-                report (source/accept-merge! target store proposal)
-                _ (is (:db-after report) (pr-str report))]
+                accepted (source/accept-merge! target store proposal)
+                _ (is (:seon.source/commit-id accepted) (pr-str accepted))]
            ;; Each stage is asserted before the next reads it: a refused merge is
            ;; shown as the merge's own value, never handed to write-back.
-           (when (:db-after report)
+           (when (:seon.source/commit-id accepted)
            (let [merged (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))
-                request {:seon.db/connection h-conn :seon.source/accepted report :seon.fn/root root}
+                request {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root}
+                ;; Before, any write after the accept (root's own recorded run) refused as a moved head.
+                _ (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Merged"}])
                 written (source/write-back! request)]
             (testing "the exact span is written back and nothing else changes"
               (is (= [path] (:seon.source/changed-paths written)) (pr-str written))
@@ -144,9 +146,12 @@
               (is (= (assoc before callee merged) (digests (fn/analyze-rows {:seon.fn/root root :seon.fn/roots ["src"]})))))
             (testing "a second write of the same acceptance refuses: the file is no longer its base"
               (is (= :file-changed (:seon.source/write-back-refused (source/write-back! request)))))
-            (testing "a moved head refuses before any file is read"
-              (support/transacted! h-conn [{:seon.issue/id issue :seon.issue/title "Written back"}])
-              (is (= :head-moved (:seon.source/write-back-refused (source/write-back! request))))))))
+            (testing "a later change to a written row refuses by name with both digests, before any file is read"
+              (support/transacted! h-conn (support/replacement-tx (db/db h-conn) callee "(defn callee [x] (+ 1 x))" {}))
+              (let [now (:seon.program/definition-digest (db/pull (db/db h-conn) [:seon.program/definition-digest] callee))]
+                (is (= [:row-changed {callee merged} {callee now}]
+                       ((juxt :seon.source/write-back-refused :seon.error/expected :seon.error/offending)
+                        (source/write-back! request)))))))))
           (finally
             (agent/release-context! candidate))))
       (finally
@@ -202,10 +207,10 @@
           (let [proposal (source/prepare-merge! target store c issue #{added-fn added-test})
                 _ (some->> (:seon.source/candidate proposal) (vswap! made conj))
                 _ (is (true? (:seon.test/passed? proposal)) (pr-str proposal))
-                report (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
-                _ (is (:db-after report) (pr-str report))]
-            (when (:db-after report)
-              (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted report :seon.fn/root root})
+                accepted (when (:seon.test/passed? proposal) (source/accept-merge! target store proposal))
+                _ (is (:seon.source/commit-id accepted) (pr-str accepted))]
+            (when (:seon.source/commit-id accepted)
+              (let [written (source/write-back! {:seon.db/connection h-conn :seon.source/accepted accepted :seon.fn/root root})
                     text (slurp file)]
                 (testing "both additions are appended to the namespace's file, the rest untouched"
                   (is (= #{added-fn added-test} (set (get-in written [:seon.source/written :seon.source/added]))) (pr-str written))

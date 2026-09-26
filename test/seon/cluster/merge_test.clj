@@ -54,27 +54,36 @@
           (is (false? (:seon.test/passed? red)) (pr-str red))
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store red))))
           (is (= before (db/commit-id (db/db h-conn))))))
-      (testing "green: accept merges exactly the tested rows with lineage H C E"
+      (testing "green: accept merges exactly the tested rows with lineage H C E; another row's write never stales it"
         (let [_ (write! c-conn [(fn-row c-conn "merge-callee" "(defn merge-callee [] (* 1 1))")])
-              stale (prepare)
-              moved (write! h-conn [{:seon.issue/id issue :seon.issue/title "Merge again"}])
-              refused (source/accept-merge! target store stale)
-              _ (is (= :transaction/stale-basis (get-in refused [:seon.error/data :error])) (pr-str refused))
-              _ (is (= moved (db/commit-id (db/db h-conn))) "a stale head takes zero datoms")
               green (prepare)
+              ;; Before, any head write (a turn, an evaluation, this title) refused as a stale basis-t.
+              h (write! h-conn [{:seon.issue/id issue :seon.issue/title "Merge again"}])
               tested (digest c-conn "merge-callee")
-              h (db/commit-id (db/db h-conn))
               _ (write! c-conn [(fn-row c-conn "merge-callee" "(defn merge-callee [] 3)")])
               e (registry/branch-commit-id {:seon.store/store store :seon.store/branch (:seon.source/candidate green)})
-              report (source/accept-merge! target store green)]
+              accepted (source/accept-merge! target store green)]
           (is (true? (:seon.test/passed? green)) (:seon.source/tally green))
-          (is (:db-after report) (pr-str report))
+          (is (= {:seon.program/identities #{[:seon.fn/sym (sym "merge-callee")]} :seon.test.run/id (:seon.test.run/id green)
+                  :seon.source/base-commit-id h :seon.source/commit-id (db/commit-id (db/db h-conn))}
+                 accepted)
+              "a plain value naming what merged, never a transaction report")
           (is (= tested (digest h-conn "merge-callee")) "the tested replacement, not C's later edit")
           (is (= #{h (first (:parents green)) e} (set (:datahike/parents (:meta (db/db h-conn))))))
           (is (= :seon.source/merge (:seon.error/layer (source/accept-merge! target store green)))
               "the merged proposal has nothing left to merge")))
-      (testing "a head replacement of the same function is a conflict"
-        (write! h-conn [(fn-row h-conn "merge-callee" "(defn merge-callee [] (- 2 1))")])
+      (testing "a head change to a merged row refuses by name with both digests; then it is a conflict"
+        (write! c-conn [(fn-row c-conn "merge-callee" "(defn merge-callee [] (- 3 2))")])
+        (let [proposal (prepare)
+              callee [:seon.fn/sym (sym "merge-callee")]
+              expected (digest h-conn "merge-callee")
+              moved (write! h-conn [(fn-row h-conn "merge-callee" "(defn merge-callee [] (- 2 1))")])
+              refused (source/accept-merge! target store proposal)]
+          (is (true? (:seon.test/passed? proposal)) (:seon.source/tally proposal))
+          (is (= [:seon.source/expected-digests {callee expected} {callee (digest h-conn "merge-callee")}]
+                 ((juxt :seon.error/member :seon.error/expected :seon.error/offending) refused))
+              (pr-str refused))
+          (is (= moved (db/commit-id (db/db h-conn))) "the refused merge takes zero datoms"))
         (is (seq (:seon.program/conflict (prepare)))))
       (finally
         (cluster.agent/release-context! candidate)

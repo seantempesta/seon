@@ -15,7 +15,10 @@
             [seon.cluster.branch :as cluster.branch]
             [seon.cluster.message :as message]
             [seon.cluster.registry :as registry]
+            [seon.cluster.process :as cluster.process]
             [seon.cluster.source :as source]
+            [seon.fault :as fault]
+            [seon.flow :as work]
             [seon.test]))
 
 (defn- read-result
@@ -422,7 +425,8 @@
     (if (and ctx base connection)
       (merge {:seon.sci.eval/ctx ctx :my.program/base-ctx base
               :seon.db/connection connection
-              :seon.cluster/name (:seon.boot/cluster-name environment)}
+              :seon.cluster/name (:seon.boot/cluster-name environment)
+              :seon.env/environment environment}
              (select-keys environment [:seon.store/store :seon.agent/routing]))
       (seon.error.refusal/diagnostic (java.util.Date.) :seon.program/write 'my.program/supplied-context
        {:seon.program/missing-context-members (into #{} (keep (fn [[member value]] (when-not value member)))
@@ -517,22 +521,43 @@
 
 (defn accept-merge!
   "Merge exactly the program `prepare-merge!` tested into my cluster
-  (`seon.cluster.source/accept-merge!`), then unlink the tested branch. Answers
-  the transaction report `write-back!` takes. Only the cluster's own custody
+  (`seon.cluster.source/accept-merge!`) and answer the accepted merge
+  `write-back!` takes: the merged identities, the commit before it, its merge
+  commit and the run. Refuses only when a merged declaration itself changed
+  since the prepare, naming it with both digests. The tested branch is unlinked
+  afterwards as detached io work, off this call. Only the cluster's own custody
   (root) accepts.
 
   Example:
   (def accepted (my.program/accept-merge! proposal))"
   {:malli/schema [:=> [:cat :my.program/accept-request]
-                  [:or :seon.db/transaction-report :seon.source/test-evidence-error :seon.error/value
+                  [:or :seon.source/accepted :seon.source/test-evidence-error :seon.error/value
                    :my.program/custody-refused-error]]}
   [{context :my.program/context tested :seon.source/candidate :as proposal}]
   (or (cluster-custody 'my.program/accept-merge! context)
       (let [store (:seon.store/store context)
-            report (source/accept-merge! context store (dissoc proposal :my.program/context))]
-        (when (:db-after report)
-          (registry/retire-branch! {:seon.store/store store :seon.store/branch tested}))
-        report)))
+            accepted (source/accept-merge! context store (dissoc proposal :my.program/context))
+            environment (:seon.env/environment context)
+            retire! #(registry/retire-branch! {:seon.store/store store :seon.store/branch tested})]
+        ;; Unlinking takes the store's roster permit, which a running
+        ;; collection holds for seconds: the launcher's io work, off this call.
+        (when (and (:seon.source/commit-id accepted)
+                   (not (some-> (:seon.flow/work-launcher environment)
+                                (work/submit!
+                                 {:seon.env/environment environment :seon.flow/workload :io
+                                  :seon.flow/submission-id (str "retire-" (name tested))
+                                  :seon.flow/work-fn (fn [_] (retire!))
+                                  :seon.flow/complete!
+                                  (fn [{failure :seon.flow/throwable}]
+                                    (when failure
+                                      (fault/fault! environment failure
+                                                    {:seon.error/layer :seon.program/write
+                                                     :seon.error/operation 'my.program/accept-merge!
+                                                     :seon.db.process/id (cluster.process/id (cluster.process/current-identity))}))
+                                    nil)}))))
+          ;; No launcher accepting work (a closing cluster): unlink here.
+          (retire!))
+        accepted)))
 
 (defn write-back!
   "Write an accepted merge's declarations into their source file under `root`
