@@ -192,11 +192,15 @@
         connection (:seon.db/connection member)
         agent-id (str "attempt-" (id/id)) turn-id (str agent-id "-turn")
         cluster-name (:seon.cluster/name member)
-        failed (some #(let [written (db/transact! connection %)] (when (:seon.error/at written) written))
-                     [(agent {:seon.agent/id agent-id :seon.ns/name (symbol (namespace test-symbol))
-                              :seon.cluster/name cluster-name :seon.agent/branch (:seon.agent/branch member)})
-                      (turn {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
-                             :seon.turn/opened-tx "datomic.tx"})])
+        ;; One transaction: Datahike applies its operations in order, so the
+        ;; turn's lookup of the agent resolves the agent written before it
+        ;; (each write is a whole validated commit, 350-440 ms on a member branch).
+        written (db/transact! connection
+                              (into (agent {:seon.agent/id agent-id :seon.ns/name (symbol (namespace test-symbol))
+                                            :seon.cluster/name cluster-name :seon.agent/branch (:seon.agent/branch member)})
+                                    (turn {:seon.turn/id turn-id :seon.turn/agent [:seon.agent/id agent-id]
+                                           :seon.turn/opened-tx "datomic.tx"})))
+        failed (when (:seon.error/at written) written)
         effective (when-not failed (config/effective (db/db connection) cluster-name))
         ctx (:seon.sci.eval/ctx member)]
     (cond failed failed
