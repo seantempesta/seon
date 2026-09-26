@@ -527,8 +527,8 @@
            (is (not ((schema/projection-validator (schema/handed-projection) :seon.instrument/contract-error) (ex-data thrown)))
                "a bound firing is never reported as a contract violation")
            (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) outcome))
-           (is (= :time (get-in outcome [:seon.error/data :seon.sci.admit/record :seon.eval/outcome]))
-               "the evaluation boundary retains the deadline's actual outcome"))
+           (is (some? (:seon.sci.kernel/guard-observation outcome))
+               "the evaluation boundary names the fired deadline guard's observation"))
          (finally ((:seon.sci.kernel/stop! armed))))))))
 
 (deftest a-sci-only-arity-miss-names-its-program-graph-arglists

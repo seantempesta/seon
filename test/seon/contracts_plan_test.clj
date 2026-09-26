@@ -68,7 +68,7 @@
   [connection handle routing]
   (let [[saved refusal] (fixture/submit connection handle routing "my.web/no-such-fetch")
         shown (:seon.eval/shown saved)]
-    (is (some? (:seon.sci.kernel/guard-observation refusal)))
+    (is (= 'my.web/no-such-fetch (:seon.error/offending refusal)))
     (is (str/includes? shown "my.web/no-such-fetch") shown)
     (is (str/includes? shown "Fix: Define or require this symbol.") shown)
     (is (< (tokens/estimate shown) 150) shown)

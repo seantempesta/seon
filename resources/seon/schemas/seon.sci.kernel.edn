@@ -10,7 +10,9 @@
                    [:seon.sci.kernel/time-limit-kind :qualified-keyword]
                    [:seon.sci.kernel/failure-kind :qualified-keyword]],
 
- ; Additive error declaration manifest, 2026-09-18.
+ ; A kernel error: an agent's own exception from seon.sci.kernel/failure-value
+ ; (its class, message, chain and SCI stacktrace; no bookkeeping), or a kernel
+ ; guard's refusal, which names the guard's observation.
 
  :seon.sci.kernel/error
  [:and
@@ -18,7 +20,7 @@
  :seon.error/base
  [:map
   {:seon.db/attributes true}
-  [:seon.sci.kernel/guard-observation
+  [:seon.sci.kernel/guard-observation {:optional true}
    :seon.sci.kernel/guard-observation]]]
 
  :seon.sci.kernel/pool :string

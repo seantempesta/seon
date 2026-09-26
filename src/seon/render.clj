@@ -992,8 +992,8 @@
       output (assoc :seon.render.unknown/output output)
       (qualified-symbol? (:seon.error/operation failure))
       (assoc :seon.render.unknown/refused-operation (:seon.error/operation failure))
-      (string? (:seon.sci.eval/throwable data))
-      (assoc :seon.render.unknown/throwable (:seon.sci.eval/throwable data))
+      (symbol? (:seon.error/exception-class failure))
+      (assoc :seon.render.unknown/throwable (str (:seon.error/exception-class failure)))
       (vector? call-id) (assoc :seon.render.unknown/call call-id))))
 
 (defn unknown
