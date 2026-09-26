@@ -82,6 +82,13 @@
       {:seon.turn.loop/cluster handle :seon.agent/routing roster :seon.agent/id agent-id
        ::execution execution :seon.flow/graph graph :seon.flow/executor executor})))
 
+(defn hosted
+  "The host running on `branch` under `cluster-handle`, or nil when none is."
+  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/branch] [:maybe ::host]]}
+  [cluster-handle branch]
+  (some-> (get-in @(:seon.agent/routing cluster-handle) [:seon.agent/children branch])
+          deref ::host deref))
+
 (defn host!
   "Host `agent-id` on the existing `branch`, once per branch execution.
 
@@ -92,20 +99,16 @@
   and `:seon.agent/routing`)."
   {:malli/schema [:=> [:cat ::request] ::host]}
   [{cluster-handle :seon.turn.loop/cluster branch :seon.agent/branch :as request}]
-  (let [execution (agent/acquire-context! cluster-handle nil {:seon.agent/branch branch})
-        roster (:seon.agent/routing execution)
-        claim (::host (swap! roster update ::host #(or % (delay (start! request execution)))))]
-    (try @claim
-         (catch Throwable failure
-           (swap! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host))))
-           (throw failure)))))
-
-(defn hosted
-  "The host running on `branch` under `cluster-handle`, or nil when none is."
-  {:malli/schema [:=> [:cat :seon.agent/context-source :seon.agent/branch] [:maybe ::host]]}
-  [cluster-handle branch]
-  (some-> (get-in @(:seon.agent/routing cluster-handle) [:seon.agent/children branch])
-          deref ::host deref))
+  ;; A running host answers from the roster; reacquiring the branch per call
+  ;; measured 409 ms warm against 240 ms for the first host (default, 2026-09-26).
+  (or (hosted cluster-handle branch)
+      (let [execution (agent/acquire-context! cluster-handle nil {:seon.agent/branch branch})
+            roster (:seon.agent/routing execution)
+            claim (::host (swap! roster update ::host #(or % (delay (start! request execution)))))]
+        (try @claim
+             (catch Throwable failure
+               (swap! roster (fn [held] (cond-> held (identical? claim (::host held)) (dissoc ::host))))
+               (throw failure))))))
 
 (defn retire!
   "Retire a host: close its agent's admission in one transaction, then stop.
