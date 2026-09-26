@@ -127,13 +127,15 @@
        (is (true? (db/read-evidence-current? (db/db connection) evidence)))
        (is (nil? (:seon.cluster.eval/error defined)) (pr-str defined))
        (is (= 'fixture.own-functions/identity-number (:seon.fn/sym row)))
-       (let [written (db/transact! connection
+       (let [written-on (db/db connection)
+             written (db/transact! connection
                                    [(support/namespace-row @connection 'fixture.own-functions)
                                     (program/canonical-row row)])]
          (is (:db-after written) (pr-str written))
          (when (:db-after written)
            (evaluation/install-evaluated-rows!
             {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
+             :seon.sci.eval/written-on written-on
              :seon.sci.eval/installations
              [{:seon.program/row row :seon.sci.eval/evaluation defined}]})))
        (is (false? (db/read-evidence-current? (db/db connection) evidence)))

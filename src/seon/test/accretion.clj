@@ -370,10 +370,14 @@
         orientation
         (str "Gate: " test-count " tests · " passed-count
              " passed · " failed-count " failed · auto-check "
-             (:seon.test.accretion/executed-count check) "/"
-             (:seon.test.accretion/case-count check) " · install "
+             (if check
+               (str (:seon.test.accretion/executed-count check) "/"
+                    (:seon.test.accretion/case-count check))
+               "not run")
+             " · install "
              (if refused? "refused" "ready"))]
-    {:seon.fn/sym function-symbol
+    (cond->
+     {:seon.fn/sym function-symbol
      :seon.test.accretion/orientation orientation
      :seon.test.accretion/test-count test-count
      :seon.test.accretion/test-pass-count passed-count
@@ -381,8 +385,9 @@
      :seon.test.accretion/failure-groups grouped
      :seon.test.accretion/advisories
      (advisories function-symbol test-results check)
-     :seon.test.accretion/auto-check check
-     :seon.test.accretion/install? (not refused?)}))
+     :seon.test.accretion/install? (not refused?)}
+      ;; a gate that ran no seeded check reports none: no key, never nil
+      check (assoc :seon.test.accretion/auto-check check))))
 
 (defn install-refusal
   "The attribute-shaped error value for one refused function install."

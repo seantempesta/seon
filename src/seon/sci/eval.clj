@@ -1931,7 +1931,7 @@
                        (merge metadata (select-keys (meta installed)
                                                     [:sci/generation :ns]))))))))
 
-(declare base-bindings acquisition-attributes program-basis revision-basis)
+(declare base-bindings acquired-database?)
 
 (defn acquired-program
   "Return the database and refusal report actually acquired by this context.
@@ -1949,41 +1949,30 @@
 
 (defn- installation-covers-program-change?
   "True when everything the settlement `report` changed since the context's
-  acquired value `before` is one of `installations` or leaves its program row
+  acquired program is one of `installations` or leaves its program row
   canonically equal.
 
-  The report's own datoms name what it wrote (a settlement is one
-  transaction), and each changed component's owning parents are joined through
-  the history index from those few children. A value acquired before some other
-  commit (another writer, or the form's own durable writes), or a report whose
-  after-value also holds a later transaction of its writer batch, is not
-  covered: the next acquisition derives from the head, as for any unknown
-  change. Cost:
-  proportional to the settlement's datoms, never to the store's history (task
-  361088de3d56: the since-history scan took 2,025 ms to find 10 entities)."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.db/transaction-report
+  Three facts, each from its owner: `written-on`, the committed value the
+  write started from, is the report's `:db-before` (equal basis on one branch:
+  no commit between them); the context acquired `written-on`'s program
+  (`acquired-database?`, which follows a branch to its parent's recorded
+  basis); and the report's `:db-after` ends at its own transaction (Datahike's
+  writer hands every report of a batch the batch's final value,
+  datahike/writer.cljc:229-264). Then the report's datoms name every change,
+  and each changed component's owning parents join through the history index
+  from those few children. Anything else is not covered: the next acquisition
+  derives from the head, as for any unknown change. Cost: proportional to the
+  settlement's datoms, never to the store's history (task 361088de3d56)."
+  {:malli/schema [:=> [:cat :seon.sci.eval/ctx :seon.db/database-value :seon.db/transaction-report
                        [:sequential [:map [:seon.program/row :seon.program/row]]] :seon.schema/projection]
                   [:or :nil :boolean]]}
-  [before report installations projection]
-  ;; Datahike's writer hands every report of a batch the batch's final value
-  ;; as :db-after (datahike/writer.cljc:229-264), so the report's datoms name
-  ;; everything between :db-before and :db-after only when :db-after ends at
-  ;; the report's own transaction, on the acquired value's branch.
-  (when (and (let [after-acquired (:db-before report)]
-               ;; the settlement starts from the acquired program: the same value,
-               ;; or a later committed one whose acquisition-attribute revisions
-               ;; are unchanged (receipts, turns, messages only; `acquired-database?`)
-               (or (= (db/basis-t before) (db/basis-t after-acquired))
-                   ;; a report's :db-before is the writer's value, with no commit
-                   ;; id but the connection's attribute revisions (`revision-basis`)
-                   (let [attributes (acquisition-attributes projection)
-                         basis #(program-basis (revision-basis %) attributes)
-                         acquired (basis before)]
-                     (and (:datahike.cache/connection-id acquired)
-                          (= acquired (basis after-acquired))))))
-             (= (get-in before [:config :branch]) (get-in report [:db-before :config :branch]))
-             (= (db/basis-t (:db-after report)) (:tx (first (:tx-data report)))))
-    (let [after (:db-after report)
+  [ctx written-on report installations projection]
+  (when (and (= (db/basis-t written-on) (db/basis-t (:db-before report)))
+             (= (get-in written-on [:config :branch]) (get-in report [:db-before :config :branch]))
+             (= (db/basis-t (:db-after report)) (:tx (first (:tx-data report))))
+             (acquired-database? ctx written-on))
+    (let [before written-on
+          after (:db-after report)
           identities (set (map (comp program/row-identity :seon.program/row)
                                installations))
           shapes (program/shapes-in projection)
@@ -2034,6 +2023,8 @@
       [:seon.sci.eval/ctx :seon.sci.eval/ctx]
       [:seon.db/db :seon.db/database-value]
       [:seon.db/transaction-report {:optional true} :seon.db/transaction-report]
+      ;; the committed value the report's write started from, on its connection
+      [:seon.sci.eval/written-on {:optional true} :seon.db/database-value]
       [:seon.sci.eval/agent-ctx {:optional true} :seon.sci.eval/ctx]
       [:seon.sci.eval/installations
        [:vector
@@ -2045,6 +2036,7 @@
     db :seon.db/db
     installations :seon.sci.eval/installations
     report :seon.db/transaction-report
+    written-on :seon.sci.eval/written-on
     agent-ctx :seon.sci.eval/agent-ctx}]
   (transfer-evaluated-roots! ctx installations)
     (let [installed (:installed
@@ -2086,13 +2078,12 @@
       installations))]
       (when-let [snapshot (::base-bindings agent-ctx)]
         (reset! snapshot (base-bindings ctx)))
-      (when-let [before (:seon.db/db (acquired-program ctx))]
-        (when (and report
-                   (every? :seon.sci.eval/installed installed)
-                   (installation-covers-program-change?
-                    before report installations (context-projection ctx)))
-          (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
-            (swap! (::kernel/program-snapshot target) assoc :seon.db/db db))))
+      (when (and report written-on
+                 (every? :seon.sci.eval/installed installed)
+                 (installation-covers-program-change?
+                  ctx written-on report installations (context-projection ctx)))
+        (doseq [target (cond-> [ctx] agent-ctx (conj agent-ctx))]
+          (swap! (::kernel/program-snapshot target) assoc :seon.db/db db)))
       installed))
 
 (defn- classpath-locatable?

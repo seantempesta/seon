@@ -54,7 +54,8 @@
            declaration (program/declaration-row (seon.schema/handed-projection) (:seon.program/row evaluation) :all :agent)]
        (is (nil? (:seon.cluster.eval/error evaluation)) (pr-str evaluation))
        (is (string? (:seon.program/analyzed-source-digest declaration)))
-       (let [written (test-support/transacted! connection [declaration])
+       (let [written-on (db/db connection)
+             written (test-support/transacted! connection [declaration])
              database (db/db connection)
              request {:seon.db/db database :seon.db/connection connection
                       :seon.test/identity 'seon.test-test/admitted-fileless-test
@@ -67,6 +68,7 @@
              "resolution never mutates the stale context into acquiring")
          (sci.eval/install-evaluated-rows!
           {:seon.sci.eval/ctx ctx :seon.db/db database :seon.db/transaction-report written
+           :seon.sci.eval/written-on written-on
            :seon.sci.eval/installations
            [{:seon.program/row declaration :seon.sci.eval/evaluation evaluation}]})
          (let [resolved (sut/resolve-test (assoc request :seon.sci.eval/ctx ctx))]
@@ -85,9 +87,11 @@
                                       [:seon.test/sym core-symbol])
                               [:seon.fn/file :db/id])
                  override (assoc declaration :seon.fn/file file)]
-             (let [overridden (test-support/transacted! connection [override])]
+             (let [override-on (db/db connection)
+                   overridden (test-support/transacted! connection [override])]
                (sci.eval/install-evaluated-rows!
                 {:seon.sci.eval/ctx ctx :seon.db/db (:db-after overridden) :seon.db/transaction-report overridden
+                 :seon.sci.eval/written-on override-on
                  :seon.sci.eval/installations
                 [{:seon.program/row override :seon.sci.eval/evaluation evaluation}]}))
              (let [resolved (sut/resolve-test

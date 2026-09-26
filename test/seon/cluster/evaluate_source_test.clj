@@ -27,8 +27,8 @@
   [result]
   (turn/receipt-identity (:seon.turn/id result) 0))
 
-(deftest ^{:seon.test/long "Eight ordinary agent runs, each one Flow pass and its one settlement commit (measured 184-229 ms warm each on default under two commits, 2026-09-26), plus the agent's arming and one stopped run."
-           :seon.test/long-ms 20000
+(deftest ^{:seon.test/long "Fourteen ordinary agent runs (three defining, one gated redefinition, a writing form, a renderer fault), each one Flow pass and its settlement commit, plus arming and one stopped run: green in under 20 s on a quiet JVM, 32.4 s measured under concurrent test load on default (b32060df4, 2026-09-26; settlement commits ~120-150 ms each there)."
+           :seon.test/long-ms 40000
            :seon/tasks #{"d741e6812a31" "62c45543598c" "c9e0cde3edb3"}}
   code-evaluates-as-one-ordinary-run-of-its-agent
   (let [target (support/execution-handle nil)

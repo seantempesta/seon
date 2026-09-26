@@ -45,10 +45,12 @@
                                :seon.sci.admit/caps (config/result-caps config/defaults)})]
                   (is (= schema-key (:seon.sci.admit/value result)) (pr-str result))
                   (when-let [row (:seon.program/row result)]
-                    (let [written (db/transact! connection [(program/canonical-row row)])]
+                    (let [written-on (db/db connection)
+                           written (db/transact! connection [(program/canonical-row row)])]
                       (is (:db-after written) (pr-str written))
                       (evaluation/install-evaluated-rows!
                        {:seon.sci.eval/ctx ctx :seon.db/db (:db-after written) :seon.db/transaction-report written
+                        :seon.sci.eval/written-on written-on
                         :seon.sci.eval/installations
                         [{:seon.program/row row :seon.sci.eval/evaluation result}]})))))
             check (fn [source]

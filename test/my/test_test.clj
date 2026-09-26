@@ -46,10 +46,12 @@
                  (program/declaration-row (seon.schema/handed-projection) (:seon.program/row declared) :all :agent))]
        (is (nil? (:seon.cluster.eval/error declared)) (pr-str declared))
        (is (map? row) (pr-str declared))
-       (let [written (support/transacted! connection [row])]
+       (let [written-on (db/db connection)
+             written (support/transacted! connection [row])]
          (evaluation/install-evaluated-rows!
           {:seon.sci.eval/ctx base :seon.sci.eval/agent-ctx ctx
            :seon.db/db (:db-after written) :seon.db/transaction-report written
+           :seon.sci.eval/written-on written-on
            :seon.sci.eval/installations
            [{:seon.program/row row :seon.sci.eval/evaluation declared}]}))
        (let [first-result (first (support/agent-value ctx "(my.test/run)" 'my.agents.owner))

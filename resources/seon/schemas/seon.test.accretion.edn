@@ -85,6 +85,7 @@
                          [:seon.test.accretion/advisories
                           :seon.test.accretion/advisories]
                          [:seon.test.accretion/auto-check
+                          {:optional true}
                           :seon.test.accretion/auto-check]
                          [:seon.test.accretion/install?
                           :seon.test.accretion/install?]],
