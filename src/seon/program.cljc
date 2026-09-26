@@ -1280,12 +1280,14 @@
           :else candidate)
         row-shapes (shapes-in projection)
         candidate (canonical-row row-shapes candidate)
+        ;; Only a namespace or schema digest is its row alone. A function or
+        ;; test digest includes its namespace's resolver context, which this
+        ;; stage does not hold: `seon.db/definition-digest-of` supplies it, and
+        ;; an undigested row refuses at the writer by the missing key.
         candidate
         (if (and candidate
                  (or (:seon.ns/name candidate)
-                     (:seon.fn/sym candidate)
-                     (:seon.schema/key candidate)
-                     (:seon.test/sym candidate))
+                     (:seon.schema/key candidate))
                  (nil? (:seon.program/definition-digest candidate)))
           (assoc candidate :seon.program/definition-digest
                  (definition-digest candidate))

@@ -830,7 +830,12 @@
           ;; Expected data is literal. It is not produced by another path that
           ;; shares `seon.program`'s canonicalizer.
           (let [row (program/declaration-row (seon.schema/handed-projection) event :all :agent)]
-            (is (= 64 (count (:seon.program/definition-digest row))))
+            ;; A schema or namespace digest is its row alone. A function or
+            ;; test digest needs its namespace's resolver context, which only
+            ;; `seon.db/definition-digest-of` holds, so this stage mints none.
+            (if (or (:seon.schema/key expected) (:seon.ns/name expected))
+              (is (= 64 (count (:seon.program/definition-digest row))))
+              (is (not (contains? row :seon.program/definition-digest))))
             (is (= expected (dissoc row :seon.program/definition-digest))))
           (if (= "private uncontracted function" label)
             (is (nil? (program/declaration-row (seon.schema/handed-projection) event :contracted :agent)))
