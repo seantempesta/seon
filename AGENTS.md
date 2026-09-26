@@ -262,6 +262,8 @@ Private experiments remain possible; local green never implies shared acceptance
   Optimize for the 99%, not the crash (owner 2026-09-26): a form's result is returned as soon as its settlement is
   applied in order; durability follows asynchronously (one commit per form). A crash may lose the newest not-yet-durable
   forms — acceptable, because recovery closes what was lost and the agent redoes it; never slow every form to guard it.
+  Scope: only an agent form's own evaluation settlement is async; merges, write-back, tasks, config, schema adoption,
+  boot/publication records, fault recording, branch lifecycle and deliveries to root stay durable before their caller is answered.
 - **Derive wakes and completion.** Use listened datoms and a qualifying ordinary reply's
   basis; openings/system-only turns answer nothing. Handling is separate, message subject
   is literal, `:seon.message/from` marks inside wakes. Refresh each distinct changed read
