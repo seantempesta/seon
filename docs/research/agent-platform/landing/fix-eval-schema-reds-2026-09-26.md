@@ -58,6 +58,29 @@ definition, so after an incremental install they still call the JVM definition, 
 override. `database-provenance-…` now asserts the subset relation and compares roots outside the
 affected closure.
 
+## Round 7: HEAD 2e0d7c35f did not boot, caused by 6f0fe3f23 (fixed in fab0afaa1; RESTART NEEDED)
+
+- **Cause.** 6f0fe3f23 made `:seon.config.maintenance/collect?` non-optional and gave it
+  `:seon.config/default true`. `config/default.edn`, the one shipped-decisions document, still
+  decided it `:seon.config/absent`, and the document wins: `validate-default-decisions` merges it
+  after the registration defaults. `derive-config-forms` (`schema/edn.clj:32-60`) turned the
+  non-optional dial into a required key of `:seon.config/effective`. So `seon.config/defaults`
+  (`config.clj:566-571`) refused at namespace load with "Configuration requires a value for each
+  required configuration key", and every namespace requiring `seon.config` failed to compile.
+  Reproduced by compiling HEAD's resource and document from disk: `:required-absent` on
+  `collect?`.
+- **Fix.** The document decides `true`. The dial stays `:seon.config/optional` (absent or false
+  turns collection off) and carries no second default. Regression
+  `seon.config-test/the-shipped-decisions-satisfy-every-required-dial`, through `checkout-effective`.
+- **Why the pre-commit checks missed it.** Contracts-compile and resources-as-EDN never compile
+  `seon.config/defaults`, and my REPL check composed the edited dial over the loaded JVM's
+  already-derived forms, not over the checkout's raw resources plus `config/default.edn`.
+  **Proposed preamble text:** "PRE-COMMIT: a change to a config dial, `:seon.config/optional`,
+  a registration default or `config/default.edn` also runs
+  `(seon.config-test/checkout-effective "<checkout>")` at the REPL. It compiles the checkout's
+  resources and shipped document from disk through `seon.config`'s own compiler. Anything but an
+  effective map blocks the commit."
+
 ## Round 6: storage collection (C14) and the durability issues (aaa9f9629); cluster-handle config (4d163db4b)
 
 - **Diagnosis.** The store grew because collection never ran. Its one runtime caller is the
