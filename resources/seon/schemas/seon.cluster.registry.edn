@@ -26,6 +26,7 @@
                          [:seon.store/store :seon.store/store]
                          [:seon.store/branch :seon.store/branch]],
                         :roster [:set :keyword],
+                        :retired [:set :seon.store/branch],
                         :swept [:int {:min 0}],
                         :key-count [:int {:min 0}],
                         :candidates [:set [:or :keyword :uuid :string]],

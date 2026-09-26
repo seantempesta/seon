@@ -180,6 +180,10 @@
                             (cluster/refresh-source! (:seon.boot/root config)))]
             (when (:seon.error/at published)
               (throw (ex-info (:seon.error/message published) published))))
+        ;; Before any branch is acquired: a dead process's branches are no
+        ;; one's to release, and each would root its data forever.
+        instance (publish! (assoc instance :seon.cluster.registry/retired
+                                  (registry/retire-unclaimed! store #{source/current-branch})))
         store-id (get-in @(:seon.store/connection-object store)
                          [:config :store :id])
         cluster-branch (registry/cluster-branch cluster-name)

@@ -606,3 +606,35 @@
                            {:seon.store/store opened
                             :seon.cluster.registry/from :nowhere
                             :seon.store/branch :cluster-nowhere})))))))))
+
+(deftest boot-retires-only-branches-no-fact-claims
+  ;; A dead process's branches have no owner left to release them, so each
+  ;; would root its data forever (90 of 99 roster branches, 2026-09-26). The
+  ;; claims are facts: the cluster branch, each open agent row's branch on it,
+  ;; and the caller's declared branches. A fork inherits the cluster's name
+  ;; row, so it must not read as a cluster; a connected branch is never taken.
+  (with-source-store
+    (fn [opened]
+      (registry/ensure-cluster! (cluster-request opened "alice"))
+      (let [cluster (registry/cluster-branch "alice")
+            fork! #(registry/branch! {:seon.store/store opened
+                                      :seon.cluster.registry/from cluster
+                                      :seon.store/branch %})
+            _ (run! fork! [:agent-open :agent-closed :agent-orphan :agent-held])
+            connection (store/open-branch! opened cluster)
+            held (store/open-branch! opened :agent-held)]
+        (try
+          (test-support/transacted!
+           connection
+           {:tx-data [{:seon.agent/id "open" :seon.agent/branch :agent-open}
+                      {:seon.agent/id "closed" :seon.agent/branch :agent-closed
+                       :seon.agent/admission-closed-tx "datomic.tx"}]})
+          (is (= #{:agent-closed :agent-orphan}
+                 (registry/retire-unclaimed! opened #{source-branch})))
+          (is (= #{:db source-branch cluster :agent-open :agent-held}
+                 (registry/roster opened)))
+          (is (= #{} (registry/retire-unclaimed! opened #{source-branch}))
+              "a second pass finds nothing")
+          (finally
+            (d/release held)
+            (d/release connection)))))))

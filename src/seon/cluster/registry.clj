@@ -369,6 +369,50 @@
         (throw failure))))
   nil)
 
+(defn- cluster-claims
+  "The branches `branch` claims when it is a cluster branch, else nil: itself
+  and the branch of every agent row on it whose admission is open.
+  A cluster branch is one whose own `:seon.cluster/name` row names it through
+  `cluster.branch/cluster-branch`. A fork inherits its cluster's name row, so
+  the comparison, never the branch's spelling, tells a cluster from its forks."
+  {:malli/schema [:=> [:cat :seon.store/connection-object :seon.store/branch]
+                  [:maybe [:set :seon.store/branch]]]}
+  [connection branch]
+  (let [db (d/branch-as-db connection branch)]
+    (try
+      ;; a query, not an index read: `:db` and `:current-src` install no
+      ;; `:seon.cluster/name`, and `d/datoms` refuses an unknown attribute
+      (when (some #(= branch (cluster.branch/cluster-branch %))
+                  (d/q '[:find [?name ...] :where [_ :seon.cluster/name ?name]] db))
+        (into #{branch}
+              (d/q '[:find [?branch ...]
+                     :where [?agent :seon.agent/branch ?branch]
+                     (not [?agent :seon.agent/admission-closed-tx])]
+                   db)))
+      (finally (d/release-materialized-db db)))))
+
+(defn retire-unclaimed!
+  "Retire every roster branch no fact claims and no connection here holds.
+
+  Answers the retired set.
+
+  An execution-owned branch is otherwise unlinked only by its owner's release,
+  so a branch whose process died stays a collection root forever. Claims are
+  `claimed` (the caller's declared branches, e.g. `:current-src`), the main
+  `:db`, every cluster branch and each open agent row's branch on it
+  (`cluster-claims`). Boot calls this before it acquires any branch: a merge
+  candidate, a checkpoint or an MCP branch never hosted is not claimed by a
+  fact and does not survive a restart."
+  {:malli/schema [:=> [:cat :seon.store/store [:set :seon.store/branch]]
+                  :seon.cluster.registry/retired]}
+  [store claimed]
+  (let [connection (:seon.store/connection-object store)
+        branches (roster store)
+        claims (into (conj claimed :db) (mapcat #(cluster-claims connection %)) branches)
+        unclaimed (into #{} (remove #(or (claims %) (branch-connected? store %))) branches)]
+    (run! #(retire-branch! {:seon.store/store store :seon.store/branch %}) unclaimed)
+    unclaimed))
+
 (defn- blob-digest-attributes
   [db]
   (let [forms
