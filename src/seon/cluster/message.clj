@@ -348,7 +348,7 @@
 
 (defn render-html
   "`:seon.render/html` — one message, with the same facts as its AI twin."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (let [database (get unit :seon.db/db)

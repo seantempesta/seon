@@ -319,7 +319,7 @@
 
 (defn node-id
   "Stable element id for one root selector and `get-in` path."
-  {:malli/schema [:=> [:cat :seon.render/db-unit :seon.render.data/path]
+  {:malli/schema [:=> [:cat :seon.render/unit :seon.render.data/path]
                   [:or :string :seon.render.value/missing-root-identity-error]]}
   [unit path]
   (let [root-address
@@ -730,7 +730,7 @@
   producer failed. A failure never replaces the value: the node prints as the
   data it is and the failure is shown once beside it (AGENTS.md, the REPL
   path is total)."
-  {:malli/schema [:=> [:cat :seon.render/db-unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
+  {:malli/schema [:=> [:cat :seon.render/unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
   [unit value path output]
   (when (and (keyword-lookup? value) (:seon.sci.eval/ctx unit)
              (not (get-in unit [:seon.render.value/options :seon.render.value/structural?])))
@@ -1099,10 +1099,10 @@
   record as a core fault."
   {:malli/schema
    [:function
-    [:=> [:cat :seon.render/db-unit]
+    [:=> [:cat :seon.render/unit]
      [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
       :seon.render.value/insufficient-floor-budget-error]]
-    [:=> [:cat :seon.render/db-unit :seon.render/output]
+    [:=> [:cat :seon.render/unit :seon.render/output]
      [:or :nil :seon.render.value/projection :seon.render.value/missing-root-identity-error
       :seon.render.value/insufficient-floor-budget-error]]]}
   ([unit]
@@ -1273,7 +1273,7 @@
 
 (defn render-ai
   "Render any floor unit through the admitted text sink."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
   [unit]
@@ -1281,7 +1281,7 @@
 
 (defn render-html
   "Render any floor unit through the admitted hiccup sink."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.render.value/missing-root-identity-error
                    :seon.render.value/insufficient-floor-budget-error]]}
   [unit]

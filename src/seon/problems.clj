@@ -530,12 +530,16 @@
   projection for `{}`, so there is nothing to render and no cheerful
   empty state to maintain. The BLOCK renders the healthy case, because
   only the block knows a surface has to occupy space either way."
-  {:malli/schema [:=> [:cat :seon.problems/problems] :seon.render/hiccup]}
-  [found]
+  {:malli/schema [:function
+                  [:=> [:cat :seon.problems/problems] :seon.render/hiccup]
+                  [:=> [:cat :seon.problems/problems [:maybe :seon.db/database-value]] :seon.render/hiccup]]}
+  ([found] (html-report found nil))
+  ([found database]
   [:div {:class "seon-problems"}
    (family-section "failed tests"
      (for [entry (:seon.problems/failed-tests found)]
-       [:li (test-render/render-html {:seon.render/value entry})]))
+       [:li (test-render/render-html (cond-> {:seon.render/value entry}
+                                        database (assoc :seon.db/db database)))]))
    (family-section "test evidence unknown"
      (for [entry (:seon.problems/failed-tests-unknown found)]
        (row "error" (:seon.error/message entry)
@@ -576,18 +580,18 @@
     (map stale-var-html (:seon.problems/stale-vars found)))
    (family-section
     "missing models"
-    (map missing-model-html (:seon.problems/missing-models found)))])
+    (map missing-model-html (:seon.problems/missing-models found)))]))
 
 (defn block
   "Derive the problems block from its supplied database value."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [found (problems (:seon.db/db unit) {})]
     (if (empty? found)
       [:div {:class "seon-problems seon-problems-healthy"}
        [:span {:class "seon-problems-healthy-mark"} "◆"]
        [:span "nothing is wrong"]]
-      (html-report found))))
+      (html-report found (:seon.db/db unit)))))
 
 (defn ai-prose
   "`:seon.render/ai` — concise steering, derived from the families.

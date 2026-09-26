@@ -407,7 +407,7 @@
   "One history value as the value renderer's text, the one clipping spot.
   Without an SCI context the renderer skips declared pairs and prints the
   value structurally (`seon.render.value/value-node*`)."
-  {:malli/schema [:=> [:cat :seon.render/db-unit [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A transcript history value is an arbitrary Clojure value; the value renderer owns its presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or :string :seon.render.value/missing-root-identity-error :seon.render.value/insufficient-floor-budget-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A transcript history value is an arbitrary Clojure value; the value renderer owns its presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}]] [:or :string :seon.render.value/missing-root-identity-error :seon.render.value/insufficient-floor-budget-error]]}
   [unit value]
   ;; Transcript values are immutable history entries. Give the shared value
   ;; floor an explicit, content-stable block identity when this internal
@@ -723,13 +723,13 @@
 
 (defn render-ai
   "Render one agent's bounded messages and faithful REPL session."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :string]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :string]}
   [unit]
   (let [{::keys [pinned entries]} (projection unit)]
     (ai-output pinned entries)))
 
 (defn- selected-run-identities
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :map]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :map]}
   [unit]
   (let [db (:seon.db/db unit)
         agent (:seon.turn/agent unit)
@@ -749,7 +749,7 @@
 
 (defn- missing-selected-run
 
-  {:malli/schema [:=> [:cat :seon.render/db-unit :map] :seon.render.transcript/request-error]}
+  {:malli/schema [:=> [:cat :seon.render/unit :map] :seon.render.transcript/request-error]}
   [unit identities]
   (let [observation
         (vary-meta (seon.error.refusal/diagnostic (java.util.Date.) :seon.render.transcript/render 'seon.render.transcript/missing-selected-run
@@ -763,7 +763,7 @@
 
 (defn render-run-ai
   "Render only the selected turn's state and evaluations."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :string :seon.render.transcript/error-result]]}
   [unit]
   (let [{run-id ::selected-run-id agent-id ::selected-agent-id
@@ -808,7 +808,7 @@
    Use supplied in-memory evaluations when present, otherwise query stored
    evaluations. Both use the same result formatting. This function neither
    executes source nor persists it."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:vector :map]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:vector :map]]}
   [unit]
   (let [db (:seon.db/db unit)
         agent-id (:seon.agent/id unit)
@@ -845,7 +845,7 @@
 
 (defn render-html
   "Render the same bounded transcript with stable block and entry ids."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [{::keys [pinned entries]} (projection unit)]
     ;; Reasoning is joined only after the shared projection, so it changes
@@ -879,7 +879,7 @@
 
 (defn render-run-html
   "Show the selected turn's header, state and evaluations."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.render.transcript/error-result]]}
   [unit]
   (let [{run-id ::selected-run-id agent-id ::selected-agent-id
@@ -999,7 +999,7 @@
 
 (defn- runtime-owner
 
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.agent/id :seon.render.transcript/request-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.agent/id :seon.render.transcript/request-error]]}
   [unit]
   (let [runtime (or (:seon.render/value unit) unit)
         owner (:seon.runtime/agent runtime)
@@ -1021,7 +1021,7 @@
 
 (defn render-runtime-ai
   "Read my runtime trigger and listens without observing turn-history churn."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/source :seon.render.transcript/error-result]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.render.transcript/error-result]]}
   [unit]
   (let [agent-id (runtime-owner unit)]
     (if (:seon.render.transcript/refused-member agent-id) agent-id
@@ -2072,7 +2072,7 @@
 
 (defn render-captured-prefix
   "The captured history bytes, excluding the turn owner's changing frame."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :nil :string :seon.db/error-result]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :nil :string :seon.db/error-result]]}
   [{database :seon.db/db turn-id :seon.turn/id agent-id :seon.agent/id}]
   (let [text (db/q '[:find ?text . :in $ ?id
                      :where [?t :seon.turn/id ?id] [?c :seon.context.capture/run ?t]
@@ -2403,7 +2403,7 @@
 
 (defn render-runtime-html
   "Show transaction times, message triggers, listens, and newest-first turns."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:or :seon.render/hiccup :seon.render.transcript/error-result]]}
   [unit]
   (let [agent-id (runtime-owner unit)

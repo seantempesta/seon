@@ -648,12 +648,17 @@
         ;; asks for the whole value.
         :status (cond-> (merge identity
                               {:seon.operator/clusters
-                               (mapv (fn [[n _]]
-                                       (let [observation (cluster/mcp-runtime-observation n)]
+                               (mapv (fn [[n instance]]
+                                       (let [observation (cluster/mcp-runtime-observation n)
+                                             connection (:seon.boot/cluster-connection instance)]
                                          (if (:seon.operator/verbose? request)
                                            observation
+                                           ;; The operator's request has no evaluation
+                                           ;; world: the cluster hands its own database.
                                            (cluster/runtime-observation-ai
-                                            {:seon.render/value observation}))))
+                                            (cond-> {:seon.render/value observation}
+                                              (store/connection? connection)
+                                              (assoc :seon.db/db (db/db connection)))))))
                                      @running-instances)})
                   (:seon.operator/verbose? request)
                   (assoc :seon.operator/footprint (fs/footprint (str (io/file root "data")))))

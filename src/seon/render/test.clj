@@ -39,7 +39,7 @@
 
 (defn render-ai
   "Read a test's assertion entities and named changed dependencies."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/source]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/source]}
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity)
         text (str "Test " test-name ": " (state entity)
@@ -90,7 +90,7 @@
 
 (defn render-html
   "Render assertion claims and links to source sites and changed functions."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [entity (evidence unit) test-name (:seon.test/sym entity)]
     [:section {:class "seon-family-entry seon-test"}

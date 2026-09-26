@@ -200,7 +200,7 @@
 
 (defn render-ai
   "`:seon.render/ai` — source reading one exact cluster before formatting it."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:maybe :seon.render/source]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:maybe :seon.render/source]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
     (pr-str
@@ -215,7 +215,7 @@
 
 (defn render-html
   "`:seon.render/html` — one readable cluster card."
-  {:malli/schema [:=> [:cat :seon.render/db-unit]
+  {:malli/schema [:=> [:cat :seon.render/unit]
                   [:maybe :seon.render/hiccup]]}
   [unit]
   (when-let [name (:seon.cluster/name unit)]
@@ -431,12 +431,15 @@
                ;; is the held value, whose cuts advertise no continuation.
                projection
                (render.value/prepare
-                {:seon.render/value (if (and artifact-backed? connection)
-                                      (render.value/artifact-value artifact)
-                                      value)
-                 :seon.render/profile profile
-                 :seon.render.value/root [:seon.blob/digest content-digest]
-                 :seon.sci.admit/caps caps})
+                (cond-> {:seon.render/value (if (and artifact-backed? connection)
+                                              (render.value/artifact-value artifact)
+                                              value)
+                         :seon.render/profile profile
+                         :seon.render.value/root [:seon.blob/digest content-digest]
+                         :seon.sci.admit/caps caps}
+                  ;; A JVM evaluation has no evaluation world: the unit's
+                  ;; required database is the cluster's own, handed here.
+                  connection (assoc :seon.db/db (db/db connection))))
                projected-node (:seon.render.value/tree projection)
                ;; THE BLOB IS THE WHOLE RECORD. The content-addressed tier
                ;; already stores the value by digest and `get_value` reads it

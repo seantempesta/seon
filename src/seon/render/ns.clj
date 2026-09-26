@@ -143,7 +143,7 @@
   "Render one task: intent, done-when proofs, subjects and must-reads.
 
   Neighbours are names; the last form is the call that expands the edges."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
   [unit]
   (let [{:seon.task/keys [id kind intent must-read] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
@@ -160,7 +160,7 @@
 
 (defn task-html
   "Render one task as a card: intent, proofs, subjects, must-reads, evidence."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
   [unit]
   (let [{:seon.task/keys [id kind intent must-read evidence] task-name :seon.task/name task-ns :seon.task/ns}
         (or (:seon.render/value unit) unit)
@@ -212,7 +212,7 @@
 
 (defn- function-neighbours
   "The program functions among `calls`, and the functions calling `function-name`."
-  {:malli/schema [:=> [:cat :seon.render/db-unit :qualified-symbol [:maybe [:or [:set :symbol] [:sequential :symbol]]]]
+  {:malli/schema [:=> [:cat :seon.render/unit :qualified-symbol [:maybe [:or [:set :symbol] [:sequential :symbol]]]]
                   [:or [:tuple [:vector :symbol] [:vector :symbol]] :seon.db/invalid-read-error]]}
   [unit function-name calls]
   (let [database (:seon.db/db unit)
@@ -227,7 +227,7 @@
 
 (defn function-ai
   "Render a function node: its authored source, then its callees and callers by name."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
   [unit]
   (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source spec :seon.fn/spec calls :seon.fn/calls}
         (or (:seon.render/value unit) unit)
@@ -249,7 +249,7 @@
 
 (defn function-html
   "Render a function node: its doc, authored source, callees and callers."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
   [unit]
   (let [{function-name :seon.fn/sym doc :seon.fn/doc source :seon.fn/source calls :seon.fn/calls} (or (:seon.render/value unit) unit)
         neighbours (when (pos? (node-distance unit)) (function-neighbours unit function-name calls))
@@ -272,7 +272,7 @@
   pair shows less (`shown-functions`). A query joining every function row
   exceeded the read budget even for an empty namespace (0.2 ms here, measured
   on default 2026-09-26)."
-  {:malli/schema [:=> [:cat :seon.render/db-unit :symbol] [:or [:vector :symbol] :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit :symbol] [:or [:vector :symbol] :seon.db/invalid-read-error]]}
   [unit namespace-name]
   (let [found (db/pull (:seon.db/db unit)
                        [{[:seon.fn/_ns :limit nil] [:seon.fn/sym :seon.fn/private?]}]
@@ -297,7 +297,7 @@
 
 (defn render-ai
   "Render a namespace node: its declaration, public functions by name, `dir`."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/source :seon.db/invalid-read-error]]}
   [unit]
   (let [{namespace-name :seon.ns/name doc :seon.ns/doc source :seon.ns/source requires :seon.ns/requires}
         (or (:seon.render/value unit) unit)
@@ -312,7 +312,7 @@
 
 (defn render-html
   "Render a namespace node: its doc, requires and public functions by name."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
+  {:malli/schema [:=> [:cat :seon.render/unit] [:or :seon.render/hiccup :seon.db/invalid-read-error]]}
   [unit]
   (let [{namespace-name :seon.ns/name doc :seon.ns/doc requires :seon.ns/requires} (or (:seon.render/value unit) unit)
         members (when (pos? (node-distance unit)) (public-functions unit namespace-name))

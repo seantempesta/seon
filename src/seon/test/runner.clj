@@ -112,10 +112,13 @@
   (if (instance? Throwable reported-value)
     (value/floor reported-value)
     (value/render-ai
-     {:seon.render/value reported-value
-      :seon.render.value/root 'seon.test.runner/assertion
-      :seon.render/profile (or (:seon.render/profile options)
-                               (:seon.render/profile (report-options)))})))
+     (cond-> {:seon.render/value reported-value
+              :seon.render.value/root 'seon.test.runner/assertion
+              :seon.render/profile (or (:seon.render/profile options)
+                                       (:seon.render/profile (report-options)))}
+       ;; The runner's own custody, when the body has one: the unit's
+       ;; required database, handed where no evaluation world supplies it.
+       db/*conn* (assoc :seon.db/db (db/db db/*conn*))))))
 
 (defn- message-text
   "An assertion's `is` message as shown in the gate log. A string within the

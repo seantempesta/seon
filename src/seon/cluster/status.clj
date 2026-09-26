@@ -172,7 +172,7 @@
 
 (defn render-html
   "Show the same cluster observation as labeled data."
-  {:malli/schema [:=> [:cat :seon.render/db-unit] :seon.render/hiccup]}
+  {:malli/schema [:=> [:cat :seon.render/unit] :seon.render/hiccup]}
   [unit]
   (let [value (snapshot unit)]
     [:section {:class "seon-cluster-status"}
