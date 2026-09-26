@@ -42,4 +42,9 @@
              :kind :function
              :intent "A boot resume publication runs before arm-host-program!, so no profile cell observes it and refresh-source!'s explain-slow says nothing; *source-progress!* is bound nowhere (report-source-progress! is a no-op outside tests), so its phase lines vanish. The 132 s store->branch layer of the e405f51be boot could only be split by replaying the publication on a scratch branch (tmp/perf-boot-opus/replay.clj). Carry the boot publication's phase milliseconds in its result and the instance's readiness."
              :must-read #{seon.cluster/refresh-source! seon.cluster/populate-source!}
-             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/perf-boot-opus-2026-09-26.md"}}
+ #:seon.task{:name "the-save-gate-cannot-prove-a-commit"
+             :kind :function
+             :intent "Every JVM runs a committed archive (data/source/<sha>), so `bin/test-check default --gate --changed-path <checkout file>` refuses at seon.cluster/publication-paths (cluster.clj:2954, 'Changed paths lie outside the JVM's source directory') and a lane cannot prove a change on default before landing. Measured 2026-09-27 by shrink-web-opus (tmp/shrink-web-opus/gate-s1p2.out). The gate should take a commit (a lane's commit or HEAD) and publish from its archive, running the reaching tests on a candidate branch and adopting only on green, so prove-before-land works under the archive law without restarting default."
+             :must-read #{seon.cluster/publication-paths seon.cluster/refresh-source!}
+             :evidence #{"tmp/shrink-web-opus/gate-s1p2.out"}}]
