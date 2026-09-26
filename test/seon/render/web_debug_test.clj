@@ -281,6 +281,7 @@
                  (let [recorded (error/recording @connection
                                   {:seon.error/source {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.web-debug-test/fixture :seon.error/operation 'seon.render.web-debug-test/turn-details-use-the-loop-opening-and-exact-segments :seon.render/refused-member :seon.render/output
                                                        :seon.error/message "Known fixture fault."}
+                                   :seon.error/declared-schema :seon.error/normalization-error
                                    :seon.error/id "panel-fault" :seon.error/at (java.util.Date.)
                                    :seon.error/process cluster/boot-process-identity
                                    :seon.sci.admit/caps (config/result-caps (support/effective-config))
