@@ -1,6 +1,7 @@
 (ns seon.cluster.mcp-test
   "The MCP surface shares Seon's admitted print-node value chain."
   (:require [clojure.core.async :as async]
+            [seon.ai.tokens :as tokens]
             [clojure.edn :as edn]
             [clojure.string :as str]
             [clojure.test :refer [deftest is testing]]
@@ -118,8 +119,13 @@
                        \x))
         nested-value {:rows (vec (range 50000)) :text oversized-string}
         result (projected cluster-name effective nested-value)]
-    (is (< (utf8-size result) 8192)
-        "nested collection and string bulk cannot escape the value window")
+    ;; A raw value is bounded by the profile's token budget (owner
+    ;; 2026-09-26: the budget is chosen by provenance; raw values are tight).
+    ;; The retired 8,192-byte window predates the one budget.
+    (is (<= (tokens/estimate (pr-str (:seon.dev.mcp/value result)))
+            (:seon.config.render.agent/token-budget effective))
+        "nested collection and string bulk cannot escape the profile's budget")
+    (is (< (utf8-size result) (utf8-size nested-value)))
     (is (true? (:seon.dev.mcp/windowed? result)))
     (is (string? (:seon.blob/digest result)))))
 
@@ -146,8 +152,8 @@
                                     "(apply str (repeat 1048576 \\x))")
         result (projected cluster-name effective evaluation true false)
         text (get-in result [:seon.dev.mcp/value :seon.dev.mcp/text])]
-    (is (< (utf8-size result) 8192)
-        "a scalar face is bounded by the same window as structural values")
+    (is (<= (tokens/estimate text) (:seon.config.render.agent/token-budget effective))
+        "a scalar face is bounded by the same profile budget as structural values")
     (is (= (:seon.eval/shown evaluation) text))
     (is (false? (:seon.dev.mcp/windowed? result)))
     (is (not (contains? result :seon.blob/digest))
@@ -155,8 +161,11 @@
 
 (deftest ordinary-mcp-results-always-use-the-explicit-mcp-profile
   (let [cluster-name "mcp-unconditional-fit-test"
+        ;; A budget the 116 rows exceed, so members of nested rows are cut
+        ;; too; at the default budget 32 whole rows fit (13,506 characters).
         effective (assoc config/defaults
-                         :seon.config.eval.result/blob-threshold 1000000)
+                         :seon.config.eval.result/blob-threshold 1000000
+                         :seon.config.render.agent/token-budget 1000)
         text (apply str (repeat 36 \x))
         result (projected cluster-name effective (observed-query-shape))
         face (:seon.dev.mcp/value result)
