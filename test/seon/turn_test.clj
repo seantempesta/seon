@@ -230,8 +230,11 @@
            evidence #(get-in % [:seon.sci.eval/evaluation :seon.cluster.eval/read-evidence])]
        (is (= "2" (get-in pure [:seon.sci.eval/evaluation :seon.eval/shown])))
        (is (empty? (evidence pure)) "a form that reads nothing records no read")
-       (is (= ['{:find [?name .] :where [[_ :seon.agent/id ?name]]}]
-              (mapv #(get-in % [:seon.db/read-request :seon.db/query-request :query])
+       ;; Stored evidence names the read's dependency plan, never a copy of
+       ;; its request (b96d6e684): the form's one query reads one attribute.
+       (is (= [#{:seon.agent/id}]
+              (mapv #(into #{} (mapcat :datahike.query.source/attributes)
+                           (get-in % [:datahike.read/dependency-plan :datahike.query.dependency/sources]))
                     (evidence reading)))
            "a form's one query is its one read")))))
 

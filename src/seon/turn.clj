@@ -1344,6 +1344,24 @@
                  (program/exact-replacement-tx existing row))
                ))))))
 
+(defn- settled-value
+  "The value `row`'s settlement leaves on `database`: its writer transaction
+  data (`row-tx`) applied through `seon.db/with`, never committed; the
+  writer's refusal when settlement would refuse it."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row]
+                  [:or :seon.db/database-value :seon.db/error-result :seon.turn/refused-error]]}
+  [database row]
+  (try (db/with database (row-tx database {:seon.program/row row} row))
+       (catch clojure.lang.ExceptionInfo refusal (ex-data refusal))))
+
+(defn- with-settled
+  "`database` with `row` settled, or unchanged when settlement refuses it:
+  that refusal is the refused form's, which the run's settlement names."
+  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row] :seon.db/database-value]}
+  [database row]
+  (let [value (settled-value database row)]
+    (if (:seon.error/at value) database value)))
+
 (def ^:private receipt-terminal-attributes
   [:seon.eval/shown
    :seon.eval/origin
@@ -3806,17 +3824,35 @@
                              :seon.turn/id run-id})
         value (:seon.error/value recording)
         serialized (:seon.eval/shown (final-shown cluster (db/db connection) agent-id value))
+        ;; The form whose declaration the program refuses, found as settlement
+        ;; applies the rows in order (the run's working value); nil when no
+        ;; declaration is refused, and then the refusal is every form's.
+        refused (reduce (fn [database {receipt :seon.turn.loop/receipt}]
+                          (let [value (some->> (:seon.program/row receipt) (settled-value database))]
+                            (cond (nil? value) database
+                                  (:seon.error/at value) (reduced (:seon.cluster.eval/ordinal receipt))
+                                  :else value)))
+                        (db/db connection) prepared)
+        refused (when (int? refused) refused)
         receipts
         (mapv
          (fn [entry]
-           (-> (:seon.turn.loop/receipt entry)
-               ;; `evaluation-terminal-data` already projected and staged the
-               ;; durable def values. Re-projecting raw in-memory defs here
-               ;; discarded those values and made a refused definition
-               ;; unrestorable on the next turn.
-               (dissoc :seon.program/row)
-               (assoc :seon.eval/shown serialized
-                      :seon.cluster.eval/error (:seon.error/message value))))
+           ;; THE REFUSAL SETTLES ON THE RECEIPT'S IDENTITY ALONE. The refused
+           ;; batch may have been refused for any value the receipt carried
+           ;; (its read evidence, output, defs); writing them again refuses
+           ;; again and leaves the run open forever (dogfood #4). Each other
+           ;; form keeps its own shown text; the refused form, or every form
+           ;; when none is named, shows the refusal. No declaration settles.
+           (let [receipt (:seon.turn.loop/receipt entry)
+                 own? (and refused (not= refused (:seon.cluster.eval/ordinal receipt)))]
+             (cond-> (select-keys receipt [:seon.turn/id :seon.db.process/id :seon.cluster.eval/ordinal
+                                           :seon.cluster.eval/ns :seon.sci.eval/ending-ns])
+               own? (merge (select-keys receipt [:seon.eval/shown :seon.cluster.eval/error]))
+               (and own? (:seon.program/row receipt))
+               (assoc :seon.cluster.eval/error
+                      (str "Not settled: this run's program change was refused at form " refused "."))
+               (not own?) (assoc :seon.eval/shown serialized
+                                 :seon.cluster.eval/error (:seon.error/message value)))))
          prepared)
         transaction
         ;; Same writer decision as `refusal-terminal-data`: the batch's
@@ -4733,15 +4769,6 @@
        :seon.error/message "(my.agent/done) must be the last form of your reply; a disposition cannot precede another reply form."
        :seon.error/data {:seon.cluster.eval/source source}}))))
 
-(defn- settled-value
-  "The value `row`'s settlement leaves on `database`: its writer transaction
-  data (`row-tx`) applied through `seon.db/with`, never committed. A refusal
-  throws: settlement refuses the same row."
-  {:malli/schema [:=> [:cat :seon.db/database-value :seon.program/row] :seon.db/database-value]}
-  [database row]
-  (let [value (db/with database (row-tx database {:seon.program/row row} row))]
-    (if (:seon.error/at value) (throw (ex-info (str (:seon.error/message value)) value)) value)))
-
 (defn evaluate-sources
   "Evaluate ordered sources in one fork without settling or staging them.
 
@@ -4794,7 +4821,7 @@
               (if (= (db/commit-id latest) (first working))
                 working
                 [(db/commit-id latest)
-                 (reduce settled-value latest
+                 (reduce with-settled latest
                          (keep #(get-in % [:seon.sci.eval/evaluation :seon.program/row]) results))])
               captured (atom [])
               _ (await-turn-part! cluster :seon.sci.eval/evaluation
@@ -4892,7 +4919,7 @@
                      results
                      (cond-> working
                        (:seon.program/row evaluation)
-                       (update 1 settled-value (:seon.program/row evaluation)))))))
+                       (update 1 with-settled (:seon.program/row evaluation)))))))
         results))))
 
 (defn preview-sources

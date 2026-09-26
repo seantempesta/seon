@@ -315,3 +315,17 @@
             shown (first (hosted-run! hosted (str "(let [r (my.test/check {:seon.test/changed ['my.plan-test/a-changed-title-is-an-ordinary-fact-update]})] "
                                                   "[(:seon.test/passed? r) (mapv (juxt :seon.test/sym :seon.test/error-count :seon.test/failure-message) (:seon.test/results r))])")))]
         (is (= "[true [[my.plan-test/a-changed-title-is-an-ordinary-fact-update 0 nil]]]" shown) shown)))))
+
+(deftest a-refused-settlement-is-its-forms-refusal-and-the-run-closes
+  ;; Before, one refused declaration replaced every form's shown text with the
+  ;; refusal; a refusal for a value the receipt could not store left the run open.
+  (with-host-world {}
+    (fn [{:keys [handle branch!]}]
+      (let [hosted (host-on! handle (branch!) "mcp/refused")]
+        (hosted-run! hosted "(defn refused-helper \"Add one.\" {:malli/schema [:=> [:cat :int] :int]} [x] (inc x))")
+        (hosted-run! hosted "(defn refused-caller \"Call the helper.\" {:malli/schema [:=> [:cat :int] :int]} [x] (refused-helper x))")
+        (let [shown (hosted-run! hosted "(+ 1 2)\n(ns-unmap 'my.agents.host-probe 'refused-helper)\n(+ 3 4)")]
+          (is (= "3" (first shown)) (pr-str shown))
+          (is (re-find #"surviving referrers" (str (second shown))) "the refusal is the deleting form's")
+          (is (= "7" (last shown)) "the other forms keep their own results"))
+        (is (= ["2"] (hosted-run! hosted "(refused-caller 1)")) "the run closed and the next run is admitted")))))
