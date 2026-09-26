@@ -499,7 +499,8 @@
               :seon.error/member :seon.sci.admit/caps
               :seon.error/expected :seon.sci.admit/caps
               :seon.error/offending caps})]
-        (throw (ex-info (:seon.error/message failure) failure))))
+        (throw (ex-info (:seon.error/message failure)
+                        (with-meta failure {:seon.error/declared-schema :seon.instrument/registration-error})))))
       (let [wrapped (binding [*compiling-contract* true]
                       (compiled-wrapper projection function-symbol
                                         (edn/read-string spec-edn) original caps
@@ -539,18 +540,16 @@
 
 (def ^:dynamic ^:private *compiling-contract* false)
 
-(defn- expected-shape
-  "The identity of the schema a value failed: a digest of its authored form
-  (`schema/canonical-definition` reads bound predicates back to their names)."
-  {:malli/schema [:=> [:cat :seon.schema/projection [:fn malli.core/schema?]] :seon.error/expected-shape]}
-  [projection compiled]
-  (seon.id/digest 64 [(schema/canonical-definition (m/form compiled)
-                                                   (schema/predicate-functions-in projection))]))
-
 (defn- boundary-refusal
-  "Construct boundary evidence independently of the body's output contract."
-  {:malli/schema [:=> [:cat :map :seon.sci.admit/caps :qualified-keyword :map [:vector :map]] :seon.instrument/refusal-result]}
-  [projection caps kind data arities]
+  "Construct boundary evidence independently of the body's output contract.
+
+  `:seon.error/expected-shape` is the identity of the arm that refused as the
+  producer declared it: this function, the ordinal of the arity its contract
+  declares (`::arity-ordinal`, fixed when the wrapper was armed) and the
+  check. It is never re-derived from the compiled schema the value failed: a
+  compiled predicate is a callable, not a name."
+  {:malli/schema [:=> [:cat :seon.sci.admit/caps :qualified-keyword :map [:vector :map]] :seon.instrument/refusal-result]}
+  [caps kind data arities]
   (let [base (merge (violation caps kind (assoc data ::boundary? true))
                     {:seon.error/at (java.util.Date.)
                      :seon.error/layer :seon.instrument/invocation
@@ -574,7 +573,7 @@
         ;; 34,518 bytes over MCP (2026-09-26). Values stay values; the
         ;; floor printer bounds them at the edge.
         (assoc base :seon.instrument/check check
-               :seon.error/expected-shape (expected-shape projection (get data check))
+               :seon.error/expected-shape (seon.id/digest 64 [(:fn-name data) (::arity-ordinal data) check])
                :seon.error/location {:seon.error.location/length 0})))))
 
 (defn- compiled-wrapper
@@ -596,7 +595,13 @@
                             (:seon.schema.projection/registry projection)
                             (mr/var-registry))}
         compiled (or retained (m/schema bound options))
-        arities (mapv m/-function-info (m/-function-schema-arities compiled))
+        arity-schemas (vec (m/-function-schema-arities compiled))
+        arities (mapv m/-function-info arity-schemas)
+        ;; Malli reports the arity schema that refused (`:schema`), one of
+        ;; these objects (malli core.cljc:2229-2240, :2305).
+        arity-ordinal (fn [data]
+                        (first (keep-indexed #(when (identical? %2 (:schema data)) %1)
+                                             arity-schemas)))
         ;; Read on the refusal path only, so an absent refusal schema is a
         ;; minimal refusal at the call, not an arming failure.
         refusal? (delay ((mi/-f->original schema/projection-cache-value)
@@ -630,7 +635,8 @@
                                :seon.error/expected (m/form (if (= :arity arm) (:schema data)
                                                                 (get data arm (:schema data))))
                                :seon.error/message (str function-symbol " " kind
-                                                        ": the refusal could not be built.")
+                                                        ": the refusal could not be built: "
+                                                        (ex-message failure))
                                :seon.error/throwable failure}
                         offending (assoc :seon.error/offending (val offending))))]))
         ;; A BOUND FIRING IS ITS OWN REPORT: explaining re-checks the value, so
@@ -644,8 +650,10 @@
                     (do (reraise-bound! (:exception data))
                         (minimal kind data (:exception data)))
                     (try
-                      (let [value (boundary-refusal projection caps kind
-                                                    (assoc data :fn-name function-symbol) arities)]
+                      (let [value (boundary-refusal caps kind
+                                                    (assoc data :fn-name function-symbol
+                                                           ::arity-ordinal (arity-ordinal data))
+                                                    arities)]
                         (if (@refusal? value)
                           [(if (= :malli.core/invalid-arity kind)
                              :seon.instrument/arity-error :seon.instrument/contract-error) value]

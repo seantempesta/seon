@@ -412,15 +412,6 @@
                   (and (vector? form) (= :maybe (first form))) (element form)
                   (internal/entity-schema? definition) attribute))))))
 
-(defn- error-alternatives
-  "The alternatives an error value satisfies among its own operation's
-  declared returns (`:seon.error/operation`); nil when that is uncontracted."
-  {:malli/schema [:=> [:cat :seon.schema/projection :map] [:maybe [:vector :qualified-keyword]]]}
-  [projection value]
-  (let [operation (:seon.error/operation value)]
-    (when (qualified-symbol? operation)
-      (satisfied-alternatives projection operation value))))
-
 (defn head-function
   "The contracted function a top-level call form names: its head symbol
   resolved in `namespace-name` of `ctx`. Macros, locals, literals and interop
@@ -494,9 +485,9 @@
         (producer-argument request)))))
 
 (defn- declared-producers
-  "The renderers `value`'s declared identity names for `output`: the
-  alternatives its own error operation returns, else the returns of the root
-  call's contracted function, else its owning row schema. Distinct producers."
+  "The renderers `value`'s declared identity names for `output`: an error's
+  producer-declared schema, else the returns of the root call's contracted
+  function, else its owning row schema. Distinct producers."
   {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :map :seon.schema/value :seon.render/output]
                   [:vector :qualified-symbol]]}
   [projection request value output]
@@ -512,12 +503,16 @@
       ;; An attribute request stays about that attribute: its own pair.
       (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
       (not (map? value)) []
-      (and (:seon.error/at value) (qualified-symbol? (:seon.error/operation value)))
-      ;; The satisfied alternative's pair, else the error base pair. The
-      ;; operation names the boundary that raised or recorded the error, not a
-      ;; function that returned it; whether a return is declared is decided at
-      ;; the producer by its armed output contract, never again here.
-      (let [found (pairs (error-alternatives projection value))]
+      (:seon.error/at value)
+      ;; The identity its producer declared (`:seon.error/declared-schema` on
+      ;; the value's metadata, where the thrower attached it), else the
+      ;; alternative the root call's function declares it returns, else the
+      ;; error base pair. `:seon.error/operation` names where an error was
+      ;; raised, not what returned it, so it selects nothing.
+      (let [declared (:seon.error/declared-schema (meta value))
+            found (pairs (cond declared [declared]
+                               (and function (identical? value (render-value request)))
+                               (satisfied-alternatives projection function value)))]
         (if (seq found) found (pairs [:seon.error/base])))
       (and function (identical? value (render-value request)))
       (pairs (satisfied-alternatives projection function value))

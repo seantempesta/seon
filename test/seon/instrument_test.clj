@@ -1524,7 +1524,8 @@
                    :seon.sci.kernel/guard (:seon.sci.kernel/guard options))]
     ;; A refusal its schema rejects is the minimal base (A1-8b): the rejection
     ;; is the root of its chain, never the thrown message.
-    (is (= "seon.instrument-test/refusal-drift :malli.core/invalid-input: the refusal could not be built."
+    (is (= (str "seon.instrument-test/refusal-drift :malli.core/invalid-input: the refusal could not be built: "
+                "Instrumentation constructed an invalid refusal.")
            (ex-message thrown)))
     (is (= "Instrumentation constructed an invalid refusal."
            (:seon.error/message (peek (:seon.error/chain (ex-data thrown))))))

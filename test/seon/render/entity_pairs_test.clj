@@ -153,10 +153,10 @@
        (is (not (str/includes? page "seon.id/id"))
            page)))))
 
-(deftest declared-identity-and-producer-lookups-name-their-owners
+(deftest ^{:seon/tasks #{"15a0784f82d5"}} declared-identity-and-producer-lookups-name-their-owners
   ;; Slices 0a/0b of the one render path: ownership is the identity
   ;; attribute's declared row schema over a closed key set, and an error's
-  ;; alternatives are its own operation's declared returns.
+  ;; renderer follows the schema its producer declared.
   (let [projection (schema/handed-projection)
         owner #(#'render/entity-owner projection %)
         ambiguous (#'render/ambiguity 'entity-pairs.fixture :seon.render/ai
@@ -171,20 +171,18 @@
              :seon.fn.file/relative-path}
            (set program/identity-attributes))
         "data identity owners do not become program families")
-    (is (= [:seon.render/ambiguous-error] (#'render/error-alternatives projection ambiguous)))
-    (is (nil? (#'render/error-alternatives
-               projection (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
-        "an uncontracted operation names no alternatives")
-    (let [declared #(#'render/declared-producers projection {} % :seon.render/ai)]
-      (is (= ['seon.error/render-ai] (declared ambiguous)) "the satisfied alternative's pair")
-      (is (= ['seon.error/render-ai]
-             (declared (dissoc ambiguous :seon.render/candidates :seon.error/data)))
-          (str "an error its operation's declared returns do not describe composes the base pair: "
-               "the operation names where it was raised, and the producer's armed output "
-               "contract, not rendering, decides a return's declaration"))
+    (let [declared #(#'render/declared-producers projection {} % :seon.render/ai)
+          identified (with-meta ambiguous {:seon.error/declared-schema :seon.render/ambiguous-error})]
+      (is (= ['seon.error/render-ai] (declared identified)) "the producer-declared schema's pair")
+      (is (= ['seon.error/elision-prose]
+             (declared (with-meta ambiguous {:seon.error/declared-schema :seon.render.walk/elided-error})))
+          "the producer's declaration selects, never a guess from the value's members")
+      (is (= ['seon.error/render-ai] (declared ambiguous))
+          "an error without a declared identity composes the base pair")
       (is (= ['seon.error/render-ai]
              (declared (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
-          "an uncontracted operation composes the base pair"))))
+          (str "the operation names where an error was raised, not a function that "
+               "returned it, so it selects no renderer")))))
 
 (deftest an-inline-face-overrides-the-schema-default-for-just-that-face
   ;; A value's own :seon.render/ai or :seon.render/html is the highest
