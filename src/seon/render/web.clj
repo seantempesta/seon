@@ -2994,8 +2994,10 @@
              connection
              {:tx-data [[:db.fn/call #'message/inbound-tx request]]
               :tx-meta (inbound-tx-meta (db/db connection) process id)})]
+        ;; `db/transact!` answers a report (it has `:db-after`) or its
+        ;; declared refusal; nothing else is success.
         (cond
-          (not (or (:seon.db/invalid-read result) (:seon.schema/expected-value result) (:seon.db.write.attempt/request-id result)))
+          (:db-after result)
           {:status 204 :headers {} :body nil}
 
           (get-in result [:seon.db.write/attempt :seon.db.write.attempt/completion-unavailable])
@@ -3151,11 +3153,18 @@
       (assoc :seon.db/connection connection)))
 
 (defn- page-response
-  {:seon.fn/external-sink :html-response
+  {:seon/tasks #{"0be9b4c92c56"}
+   :seon.fn/external-sink :html-response
    :seon.fn/projection-boundary :seon.render/html}
   [service
    agent-id]
-  (let [page (current-page service (db/db (:seon.store/connection-object service)) agent-id)
+  (let [database (db/db (:seon.store/connection-object service))]
+    (if (:seon.error/at database)
+      ;; a refused read answers as that refusal, never as a page's database
+      {:status 503
+       :headers {"content-type" "text/plain; charset=utf-8"}
+       :body (value/bounded-text (:seon.error/message database))}
+      (let [page (current-page service database agent-id)
             stream-html (get page stream-strip-id)
             unit-html (vals (dissoc page stream-strip-id))]
         {:status 200
@@ -3165,7 +3174,7 @@
                    :seon.render/page
                    [(transcript/render-agent-header
                      (session-controls
-                      (debug-turn-request (db/db (:seon.store/connection-object service))
+                      (debug-turn-request database
                                           (:seon.store/connection-object service) agent-id
                                           (:seon.sci.admit/caps service)
                                           (assoc service ::transcript/debug? false))))
@@ -3175,7 +3184,7 @@
                            unit-html)
                      (hiccup/raw stream-html)]]
                    :seon.render.web/feed-url
-                   (route/path ::route/feed {:id agent-id})})}))
+                   (route/path ::route/feed {:id agent-id})})}))))
 
 (defn- debug-turn-response
   ([service agent-id turn-id] (debug-turn-response service agent-id turn-id false))
@@ -3771,9 +3780,23 @@
                                        :wrap same-origin-middleware}}})
         route-handler (ring/ring-handler router not-found)]
     (fn [request]
-      (schema/call-with-projection
-       (sci.kernel/context-projection (:seon.sci.eval/ctx service))
-       #(route-handler request)))))
+      ;; EVERY THROW ANSWERS HERE. One escaping to http-kit is logged by its
+      ;; printStackTrace, which prints the whole ex-data unbounded (the
+      ;; 2026-09-26 OOM, task 80f54dd48aef). The request is this entrance's
+      ;; own execution: record the fault and answer the bounded floor text.
+      (try
+        (schema/call-with-projection
+         (sci.kernel/context-projection (:seon.sci.eval/ctx service))
+         #(route-handler request))
+        (catch Throwable failure
+          (try (entrance-fault! (env/of (:seon.sci.eval/ctx service)) failure
+                                :seon.render.web/request 'seon.render.web/handler)
+               (catch Throwable unrecorded
+                 (log/warn (str "seon.render.web: a request fault could not be recorded\n"
+                                (value/floor unrecorded)))))
+          {:status 500
+           :headers {"content-type" "text/plain; charset=utf-8"}
+           :body (value/floor failure)})))))
 
 ;;; ---------------------------------------------------------------------------
 ;;; Lifecycle

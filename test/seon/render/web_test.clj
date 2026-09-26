@@ -2120,6 +2120,23 @@ handle))}}
             (is (= expected-status (:status response)))
             (is (= (:seon.error/message result) (:body response)))))))))
 
+(deftest a-route-throw-answers-a-bounded-500-inside-the-handler
+  ;; Task 80f54dd48aef: a throw escaping the handler reached http-kit's
+  ;; unbounded printer. A form body that is not a stream makes
+  ;; `decode-form`'s slurp throw a real IllegalArgumentException.
+  (support/with-database
+    (fn [connection]
+      (support/seed-cluster! connection "web-handler-throw")
+      (let [response ((web/handler (service-request connection {}))
+                      {:request-method :post
+                       :uri (str "/agent/" agent-id "/message")
+                       :headers {}
+                       :body 42})]
+        (is (= 500 (:status response)))
+        (is (str/includes? (:body response) "IllegalArgumentException"))
+        (is (<= (count (:body response))
+                (inc (:floor-chars @#'value/text-limits))))))))
+
 (deftest start-refuses-a-flat-process-write-before-binding
   (support/with-database
     (fn [connection]

@@ -6,11 +6,6 @@
              :evidence #{"docs/research/agent-platform/landing/debug-context-page-2026-09-26.md"
                          "docs/research/agent-platform/landing/mem-idle-2026-09-26.md"
                          "docs/research/agent-platform/perf-profile-2026-09-26.md"}}
- #:seon.task{:name "a-handler-throw-reaches-http-kits-unbounded-printer"
-             :kind :function
-             :intent "A throw from a route escapes seon.render.web/handler to http-kit, which logs it with printStackTrace: ExceptionInfo.toString prints the whole ex-data with no bound, outside the floor printer. On 2026-09-26 an instrument refusal's offending web request (holding the agent roster atom) printed to 2^31 chars and killed default (pid 12212, OutOfMemoryError: Requested array size exceeds VM limit). Every throw answers inside the handler: a fault at its boundary and a bounded error response through the one error renderer."
-             :must-read #{seon.render.web/handler seon.render.web/start!}
-             :evidence #{"docs/research/agent-platform/landing/oom-array-opus-2026-09-27.md"}}
  #:seon.task{:name "a-page-renders-with-a-refused-database"
              :kind :function
              :intent "page-response reads (db/db connection) of a released connection and passes the refusal map on as :seon.db/db, so transcript/render-agent-header refuses its input instead of the page answering the read refusal. It happened when seon.render.web-test's server kept serving after its cluster's connection was released (member two-tabs-each-get-their-own-complete-paint left unexited). A read refusal answers the request as that refusal; a server outliving its cluster's connection is the second defect."

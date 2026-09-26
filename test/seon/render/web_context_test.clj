@@ -141,10 +141,25 @@
            (let [after (#'web-test/fetch server "/agent/root")]
              (is (identical? snapshot @(:seon.sci.kernel/program-snapshot ctx)))
              (is (= 200 (.statusCode after)))
-             (let [status-renderer "seon.cluster.status/render-html"]
-               (is (= (dissoc initial status-renderer)
-                      (dissoc @calls status-renderer))
-                   "unchanged rendering dependencies retain every other renderer")
+             (let [status-renderer "seon.cluster.status/render-html"
+                   ;; A read whose dependency is `:all` attributes has no
+                   ;; revision proof, and retained evidence carries no read
+                   ;; result to replay (owner ruling 2026-09-26: re-render,
+                   ;; never replay), so any commit makes its block a
+                   ;; candidate, and a candidate block re-derives the page,
+                   ;; whose fleet table takes the live fleet as its argument.
+                   all-read (into #{"seon.oversight/html-table"}
+                                  (keep (fn [call]
+                                          (when (some #(= :all (get-in % [:datahike.read/revision
+                                                                          :datahike.read/attributes]))
+                                                      (:seon.render.call/read-evidence call))
+                                            (str (get-in call [:seon.render.call/static-evidence
+                                                               :seon.render.call/producer])))))
+                                  (vals (get-in @(render/shared-cache ctx)
+                                                [:seon.render.web/calls "root"])))]
+               (is (= (apply dissoc initial status-renderer all-read)
+                      (apply dissoc @calls status-renderer all-read))
+                   "renderers with revision-proved reads keep their calls")
                (is (= 1 (get initial status-renderer))
                    "the first page renders the cluster observation")
                (is (= 2 (get @calls status-renderer))
