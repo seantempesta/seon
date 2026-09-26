@@ -1080,6 +1080,7 @@
      :seon.render.value/options (print/default-options)
      :seon.render.value/truncated? true
      :seon.render.value/text text
+     :seon.render.value/value-text value-text
      :seon.render.value/html [:div {:class "seon-data-panel"} [:pre text]]
      :seon.render.value/diagnostics [failure]}))
 
@@ -1165,7 +1166,8 @@
                    (:seon.print/hiccup emitted)
                    (when diagnostic [:div {:class "seon-render-unavailable"} diagnostic])]}
            (seq failed)
-           (assoc :seon.render.value/diagnostics (mapv :diagnostic failed))
+           (assoc :seon.render.value/diagnostics (mapv :diagnostic failed)
+                  :seon.render.value/value-text text)
            (:seon.render.call/selected-producer selected)
            (assoc :seon.render.call/selected-producer
                   (:seon.render.call/selected-producer selected))))))))
