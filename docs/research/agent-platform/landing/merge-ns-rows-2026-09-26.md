@@ -2,7 +2,7 @@
 type: landing
 lane: merge-ns-rows-opus
 created: 2026-09-26
-status: committed 97826db63, unadopted; RESET NEEDED (adoption); two root patches; one producer decision for root (three options below)
+status: committed 97826db63 + 6f5fe6abb, unadopted; scope patch applied (d111c309e); root patches digest-rederive + require-ns-source pending; RESET NEEDED; lane stopped
 ---
 # merge-ns-rows: namespace rows merge and write back
 
@@ -134,6 +134,9 @@ RESET NEEDED (adopt 97826db63 + patches). Then:
 bin/test-check default --test seon.contracts-compile-test/every-declared-contract-compiles-against-the-packaged-projection
 bin/test-check default --test seon.schema.edn-test/every-packaged-schema-resource-reads-as-edn
 bin/test-check default --test seon.program-test/changed-identities-scope-the-digest-maps-to-one-change
+bin/test-check default --test seon.db-test/a-namespace-row-change-re-derives-its-declarations-digests
+bin/test-check default --test seon.db-test/one-owner-digests-a-definition-with-its-stored-namespace
+bin/test-check default --test seon.sci.eval-test/require-context-rows-carry-namespace-symbols
 bin/test-check default --ns seon.cluster.merge-test
 bin/test-check default --ns seon.cluster.write-back-test
 bin/test-check default --ns seon.cluster.source-test
@@ -141,69 +144,91 @@ bin/test-check default --test seon.cluster.host-test/root-reads-a-branch-agents-
 ```
 
 Expected: `write-back-test/a-declaration-naming-an-unrequired-namespace-refuses-at-prepare-before-any-test-runs`
-green now; `write-back-test/a-require-added-at-the-repl-merges-and-writes-back-its-ns-form` **red
-until the producer decision lands** (its last assertion is the stale-digest class).
+green now; `write-back-test/a-require-added-at-the-repl-merges-and-writes-back-its-ns-form` green once digest-rederive.patch is applied.
 
-## Milestone finish (root, after the patches, option 1 and adoption; do not run before)
+## Round 2 (root ruling: option 1; `require` must update the namespace row)
 
-The branch agent adds the require by evaluating the whole `ns` form (issue 2). The merged test
-(`my.plan-test/current-refuses-an-unknown-agent-by-name`) is already on the cluster since the
-stranded merge; the write-back carries it with the namespace row from base
-`6ab7ec38-bee7-5781-9bb7-c118831a2698` (test absent there; `plan_test.clj`'s recorded digest
-`1eddf6b0…` must still equal the disk bytes).
+Commits: 6f5fe6abb (my file). Patches for root (`git apply -p0 --check` passes on HEAD d111c309e+):
 
-1. MCP `eval_clj`, mode `sci`, no branch (root) — an issue on the cluster before the branch forks:
+- **`tmp/merge-ns-rows/digest-rederive.patch`** — `src/seon/db.clj` +34/−5, `test/seon/db_test.clj` +24.
+  `prepared-write` (the one writer request, so `transact!` and `seon.db/with` both) appends
+  `[:db.fn/call namespace-digests-tx projection namespaces written]` when the transaction writes a
+  namespace row (a top-level map with `:seon.ns/name` and its digest). Datahike runs it on the
+  in-transaction value (`reference-code/datahike/src/datahike/db/transaction.cljc:1171`); it
+  re-derives, with the writer's own reader (`declaration-value` + `definition-digest-of`), every
+  function and test of that namespace whose stored digest differs, except declarations the same
+  transaction writes (those keep the writer's refusal, so `one-owner-digests-a-definition-with-its-stored-namespace`
+  still holds). Regression `a-namespace-row-change-re-derives-its-declarations-digests`.
+  REPL (unarmed copy, `tmp/merge-ns-rows/scratch-rederive.clj`): `my.plan-test` + `[my.plan]` →
+  the transaction re-derives 32 rows in 8.6 ms (whole `d/with`), and all 32 digests plus the
+  namespace's equal the analyzer's reindex of the spliced file (32/32).
+- **`tmp/merge-ns-rows/require-ns-source.patch`** — `src/seon/sci/eval.clj` +37/−5,
+  `test/seon/sci/eval_test.clj` +4. The producer is `namespace-context-row` (`sci/eval.clj:1160`
+  at HEAD), called from `unmap-row` for a form that changes SCI's namespace table without
+  declaring (`require`, `alias`, `refer`, `import`); it stored the evaluated form as
+  `:seon.ns/source`. New `namespace-source`: a `require`'s new libspecs are spliced into the
+  stored `ns` form's `:require` clause, one per line, aligned with the clause (edamame's
+  locations; every other byte stays exact); no stored `ns` form → `(ns name\n  (:require …))`;
+  any other form keeps the stored `ns` form. `unmap-row` receives the current database instead
+  of the source. REPL: `(require '[my.plan])` on `my.plan-test` gives exactly the stored form
+  plus `\n            [my.plan]` before its closing parens; an already-required libspec returns
+  the stored form unchanged; all outputs conform to `:clojure.core.specs.alpha/ns-form`.
+  Limitation: `alias`/`refer`/`import` at the REPL change the facts but keep the stored `ns` text
+  (write-back's proof then refuses `:not-equivalent`, loudly).
+- **`merge` (6f5fe6abb)**: the gate also runs the tests of every declaration the writer
+  re-derived on S (`seon.fn/report-identities` of the S transaction), per the ruling that tests
+  reaching the namespace rerun.
+- Contract check over source.clj plus both patched files (checkout projection, absolute paths):
+  0 findings.
 
+**Whole finish, simulated read-only on the live store** (the branch = head plus the agent's
+namespace change with re-derivation; the scope patch live): `changed-identities` = 33 (namespace
++ 32 re-derived); `replacement` of the namespace onto head + re-derivation; prepare's
+`proven-file` → proven, the namespace replaced (554 ms); write-back's `proven-file` from base
+`6ab7ec38…` with the namespace and the stranded test → proven, 1 replaced + 1 added (479 ms). The
+candidate differs from `test/my/plan_test.clj` by exactly `\n            [my.plan]` in the `ns`
+form and the appended test (+364 characters).
+
+## Milestone finish (root, after both patches, adoption and the owner's nuke; do not run before)
+
+The nuke removes the stranded merge (the test is in no file), so this is the milestone whole, as an
+agent: branch → `require` + `deftest` at the REPL → merge → write-back. All MCP.
+
+1. `eval_clj`, mode `sci`, no branch (root) — the issue on the cluster, so the branch forks with it
+   (an issue cannot yet cite a test only the branch holds; the gate runs the added test as a change):
    ```clojure
    (def milestone (my.issue/add! {:seon.agent/id "root" :seon.issue/severity :cleanup
-                                  :seon.issue/title "my.plan-test requires my.plan"
-                                  :seon.issue/problem "The merged test calls my.plan/current; its namespace does not require my.plan."
-                                  :seon.issue/tests #{[:seon.test/sym 'my.plan-test/current-refuses-an-unknown-agent-by-name]}}))
+                                  :seon.issue/title "my.plan refuses an unknown agent by name"
+                                  :seon.issue/problem "my.plan/current names a missing agent in its refusal; prove it with a test."}))
    (:seon.issue/id milestone)
    ```
-
-2. MCP `branch` create `milestone-plan-ns`.
-3. MCP `eval_clj`, mode `sci`, branch `milestone-plan-ns`:
-
+2. `branch` create `milestone-plan`.
+3. `eval_clj`, mode `sci`, branch `milestone-plan`, namespace `my.plan-test`, two calls:
    ```clojure
-   (ns my.plan-test
-     "The agent-owned plan component tree, its derivation, and its two projections."
-     (:require [clojure.edn :as edn]
-               [clojure.string :as str]
-               [clojure.test :refer [deftest is testing]]
-               [my.plan]
-               [seon.plan :as plan]
-               [seon.config :as config]
-               [seon.db :as db]
-               [seon.error :as error]
-               [seon.env :as env]
-               [seon.render :as render]
-               [seon.schema]
-               [seon.sci.eval :as sci.eval]
-               [seon.test-support :as support]))
+   (require '[my.plan])
    ```
-
-4. MCP `eval_clj`, mode `sci`, no branch (root), one run:
-
    ```clojure
-   (def proposal (my.program/prepare-merge! {:seon.store/branch :milestone-plan-ns
+   (clojure.test/deftest current-refuses-an-unknown-agent-by-name
+     (let [refusal (my.plan/current {:seon.db/db (seon.db/db) :seon.agent/id "an-agent-that-does-not-exist"})]
+       (clojure.test/is (= "an-agent-that-does-not-exist" (:my.plan/missing-agent-id refusal)))
+       (clojure.test/is (= :seon.agent/id (:my.plan/refused-member refusal)))))
+   ```
+4. `eval_clj`, mode `sci`, no branch (root), one run:
+   ```clojure
+   (def proposal (my.program/prepare-merge! {:seon.store/branch :milestone-plan
                                              :seon.issue/id "<the id from step 1>"
-                                             :seon.program/identities #{[:seon.ns/name 'my.plan-test]}
+                                             :seon.program/identities #{[:seon.test/sym 'my.plan-test/current-refuses-an-unknown-agent-by-name]}
                                              :seon.fn/root "/Users/sean/src/seon"}))
    (def accepted (my.program/accept-merge! proposal))
-   (my.program/write-back!
-    {:seon.source/accepted (assoc accepted
-                                  :seon.program/identities #{[:seon.ns/name 'my.plan-test]
-                                                             [:seon.test/sym 'my.plan-test/current-refuses-an-unknown-agent-by-name]}
-                                  :seon.source/base-commit-id #uuid "6ab7ec38-bee7-5781-9bb7-c118831a2698")
-     :seon.fn/root "/Users/sean/src/seon"})
+   (my.program/write-back! {:seon.source/accepted accepted :seon.fn/root "/Users/sean/src/seon"})
    ```
-
-   Expected: the proposal passes (file proven before its tests), accept answers `#{[:seon.ns/name my.plan-test]}`,
-   write-back answers `{:seon.source/changed-paths ["test/my/plan_test.clj"]
-   … :replaced [[:seon.ns/name my.plan-test]] :added [[:seon.test/sym …current-refuses…]]}`.
-5. Bytes: `git diff test/my/plan_test.clj` is exactly `+            [my.plan]` in the `ns` form and
-   the appended test; then MCP `branch` retire `milestone-plan-ns`, commit that path, publish.
+   Expected: the selected test carries its namespace row (selection closure); the file is proven
+   before the gate; the gate runs the test and the tests of the 31 re-derived declarations;
+   `accepted` names `#{[:seon.ns/name my.plan-test] [:seon.test/sym …current-refuses…]}`;
+   write-back answers `{:seon.source/changed-paths ["test/my/plan_test.clj"] … :replaced
+   [[:seon.ns/name my.plan-test]] :added [[:seon.test/sym …current-refuses…]]}`.
+5. Bytes: `git diff test/my/plan_test.clj` is exactly the `[my.plan]` line in the `ns` form plus the
+   appended test. Then `branch` retire `milestone-plan`, commit that path, publish.
 
 Released paths: src/seon/cluster/source.clj, src/my/program.clj, resources/seon/schemas/{my.program,seon.source}.edn,
 test/seon/cluster/{write_back,merge,source}_test.clj, .agents/skills/repl/SKILL.md. Disposable: the JVM scratch
