@@ -1246,11 +1246,10 @@
   {:malli/schema
    [:=> [:cat :seon.db/database-value] [:vector :qualified-keyword]]}
   [database]
-  (->> (:schema (schema-database database))
-       (keep (fn [[attribute properties]]
-               (when (and (qualified-keyword? attribute)
-                          (= :db.unique/identity (:db/unique properties)))
-                 attribute)))
+  ;; Datahike's reverse schema already holds the set (`rschema`,
+  ;; datahike/db/utils.cljc:380): no scan of every installed attribute.
+  (->> (:db.unique/identity (dbi/-rschema (schema-database database)))
+       (filter qualified-keyword?)
        (sort-by str)
        vec))
 
@@ -3540,7 +3539,8 @@
    EAVT supplies every child; AVET discovers owners without pull's 1,000 cap.
    Returns the refusal, or on success every changed arity-bearing root's
    identity attributes as `::changed-identity-attributes`, the arity gate's input."
-  {:malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
+  {:seon/tasks #{"4bb788513862"}
+   :malli/schema [:=> [:cat :seon.schema/projection :seon.db/transaction-report
                        ;; Datahike's `:schema` also maps each attribute's entity
                        ;; id to its ident, so the plans carry integer keys too.
                        [:map-of [:or :keyword :int] :map] [:set :qualified-keyword]]
