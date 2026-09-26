@@ -21,4 +21,10 @@
              :kind :namespace
              :intent "Instrumentation and Malli's function-schema registration are process-global (2,098 installed wrappers; instrument/apply! and malli.instrument change them for every test member), so the test runner must keep the ambient snapshot, drift and restore family and a member can damage shared Vars. Make wrappers and registrations per context so the C2 family (ambient-snapshot, restore-live-cluster-schema!, schema-restore-drift, run-vars!'s drift branch) can go in one cut."
              :must-read #{seon.instrument/apply! seon.test.runner/ambient-snapshot}
-             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"}}]
+             :evidence #{"docs/research/agent-platform/landing/delete-r8-r6-r10-2026-09-26.md"}}
+ #:seon.task{:id "a57e8b27de67"
+             :name "contract-refusal-carries-wrapper-bookkeeping"
+             :kind :function
+             :intent "An agent's contract refusal reaches it with the wrapper's bookkeeping beside operation/expected/offending/problems: :seon.instrument/arglists, arity, arm, caller (\"sci.lang.Var (lang.cljc:217)\", the interpreter, never the author), check, fn (= operation), malli, problem-count, :seon.error/expected-shape and data-blob digests, :seon.error/doc, shown and result-id (~2.5 KB for one refused argument). Keep operation, expected, offending, problems (fix) and member; the rest is derivable from the operation's row or is evaluation evidence. The kernel side (err-minimal-opus) already drops the evaluator's frames and the duplicated link message."
+             :must-read #{seon.instrument/compiled-wrapper seon.sci.kernel/failure-value}
+             :evidence #{"docs/research/agent-platform/landing/err-minimal-opus-2026-09-26.md"}}]

@@ -26,6 +26,7 @@
             [seon.db :as db]
             [seon.env :as env]
             [seon.error :as error]
+            [seon.error.refusal :as error.refusal]
             [seon.fn :as seon.fn]
             [seon.instrument :as instrument]
             [seon.id]
@@ -2300,6 +2301,52 @@
             "the location is the agent's form, never the interpreter's frame or the agent's own ex-data")
         (is (not (str/includes? shown "refused")) shown)))))
 
+;; tmp/orchestrator/smoke-6-2026-09-26.md: (/ 1 0) reached the agent as ~3 KB
+;; — the wrapper ExceptionInfo beside the real class, 30+ JVM frames of the
+;; evaluator, and the evaluation's bookkeeping. The wanted shape is
+;; clojure.main's two lines plus the chain and SCI's author location.
+(deftest an-agents-own-exception-is-minimal-complete-data
+  (let [ctx (eval/build-base-ctx (seon.schema/handed-projection))
+        value (fn [source] (:seon.sci.admit/value @(future (run-in ctx source 2000))))
+        machinery? (fn [[class-name]]
+                     (some #(str/starts-with? (str class-name) %)
+                           ["seon.sci." "seon.turn" "seon.call_preparation" "seon.render" "seon.schema" "seon.db"]))
+        divide (value "(/ 1 0)")
+        thrown (value "(throw (ex-info \"boom\" {:a 1}))")]
+    (is (= 'java.lang.ArithmeticException (:seon.error/exception-class divide))
+        "the class the author's code threw, never SCI's location wrapper")
+    (is (= "Execution error (ArithmeticException) at (REPL:1:1).\nDivide by zero"
+           (:seon.error/message divide)))
+    (is (= [{:seon.error/throwable-class "java.lang.ArithmeticException"
+             :seon.error/message "Divide by zero"}]
+           (:seon.error/chain divide))
+        "no evaluator frame: the author's location is SCI's stacktrace")
+    (is (= '[user 1 1] (peek (:seon.sci.eval/stacktrace divide))))
+    (is (not-any? #(contains? divide %)
+                  [:seon.error/data :seon.sci.kernel/guard-observation :seon.error/frame])
+        "duration, allocation and outcome stay on the evaluation record")
+    (is (< (count (pr-str divide)) 600) (pr-str divide))
+    (is (= [{:a 1}] (keep :seon.error/data (:seon.error/chain thrown)))
+        "an ex-info shows its data on its link")
+    (is (not-any? machinery? (mapcat :seon.error/frames (:seon.error/chain thrown))))
+    (testing "a contract refusal keeps operation, expected, offending and fix"
+      ;; the armed compiled function called from interpreted code, as an
+      ;; agent calls a program function
+      (let [host (sci/init {:namespaces {'h {'ff error.refusal/frame-function}}})
+            refused (kernel/failure-value
+                     {::kernel/time-limit-kind ::time-limit ::kernel/failure-kind ::failed}
+                     (try (sci/eval-string* host "(h/ff \"x\")") nil (catch Throwable t t))
+                     {:seon.eval/fn-entries 0 :seon.eval/host-interop-count 0 :seon.eval/duration-ms 1
+                      :seon.eval/allocated-bytes -1 :seon.eval/outcome :error})]
+        (is (= 'seon.error.refusal/frame-function (:seon.error/operation refused)) (pr-str refused))
+        (is (= :symbol (:seon.error/expected refused)))
+        (is (= ["x"] (:seon.error/offending refused)))
+        (is (some :seon.error/fix (:seon.error/problems refused)))
+        (is (not-any? machinery? (mapcat :seon.error/frames (:seon.error/chain refused))))
+        (is (not (contains? (:seon.error/data refused) :seon.sci.admit/record)))
+        (is (not-any? #(= (:seon.error/message refused) (:seon.error/message %)) (:seon.error/chain refused))
+            "the refusal's message is said once")))))
+
 (deftest require-answers-nil-and-its-alias-serves-the-same-form
   ;; REPL parity (clojure.main 1.12.5): `(require '[clojure.string :as str])`
   ;; prints nil, and a top-level `do` that requires then calls through the
@@ -2345,20 +2392,18 @@
        (testing "an agent mistake"
          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) evaluated-throw))
          (is ((schema/projection-validator (schema/handed-projection) :seon.sci.kernel/error) invoked-throw))
-         (is (= 'user/probe-throw (get-in invoked-throw [:seon.error/data :seon.fn/sym])))
+         (is (= 'user/probe-throw (:seon.error/offending invoked-throw)))
          (is (str/ends-with? (:seon.error/message evaluated-throw) "\nboom"))
          (is (str/starts-with? (:seon.error/message invoked-throw)
                                "Invocation of user/probe-throw failed: Execution error (ExceptionInfo) at ("))
-         (is (= "clojure.lang.ExceptionInfo"
-                (:seon.sci.eval/throwable (:seon.error/data evaluated-throw))
-                (:seon.sci.eval/throwable (:seon.error/data invoked-throw)))
-             "one classifier, so the same evidence rides both faces")
-         (is (every? #(contains? (:seon.error/data evaluated-throw) %)
-                     [:seon.sci.eval/throwable :seon.sci.admit/record]))
-         (is (every? #(contains? (:seon.error/data invoked-throw) %)
-                     [:seon.sci.eval/throwable :seon.sci.admit/record
-                      :seon.fn/sym])
-             "the invocation entrance adds only its subject"))
+         (is (= 'clojure.lang.ExceptionInfo
+                (:seon.error/exception-class evaluated-throw)
+                (:seon.error/exception-class invoked-throw))
+             "one classifier: both faces name the class the author threw")
+         (is (= [{:a 1}] (keep :seon.error/data (:seon.error/chain evaluated-throw)))
+             "the author's ex-data rides its link, once")
+         (is (not-any? #(contains? % :seon.error/data) [evaluated-throw invoked-throw])
+             "the evaluation's bookkeeping stays on its record, never in the error"))
        (testing "the one deadline"
          (doseq [failure [evaluated-cut invoked-cut]]
            (is (not-any? #(and (map? %) (contains? % :sci.impl/interrupt))
@@ -2372,12 +2417,9 @@
               (:seon.error/message invoked-cut)
               "Invocation of user/probe-spin failed: Ran out of time after")
              "one message shape, prefixed only by the subject")
-         (is (= :time (:seon.eval/outcome
-                       (:seon.sci.admit/record
-                        (:seon.error/data evaluated-cut)))))
-         (is (= :time (:seon.eval/outcome
-                       (:seon.sci.admit/record
-                        (:seon.error/data invoked-cut))))))))))
+         (doseq [failure [evaluated-cut invoked-cut]]
+           (is (int? (get-in failure [:seon.sci.kernel/guard-observation :seon.error.evidence/value]))
+               "the fired deadline guard's observation is the cut's evidence")))))))
 
 (deftest an-existing-refusal-is-not-wrapped-or-duplicated
   (test-support/with-database
@@ -2400,12 +2442,12 @@
     (is (= "inner failure" (:seon.error/message failure)))
     (is ((schema/projection-validator (schema/handed-projection) :seon.agent/error) failure))
     (is (= "inner-observed" (:seon.agent/error-agent-id failure)))
-    (is (= :error
-           (get-in failure [:seon.error/data
-                            :seon.sci.admit/record
-                            :seon.eval/outcome])))
-    (is (not (contains? (:seon.error/data failure) :seon.sci.eval/data))
-        "the refusal is not copied back into itself as throwable ex-data")
+    (is (not (contains? failure :seon.error/data))
+        "neither the refusal nor the evaluation's bookkeeping is copied back into it")
+    (is (= [{:seon.error/throwable-class "clojure.lang.ExceptionInfo"
+             :seon.error/message "result renderer exploded"}]
+           (mapv #(dissoc % :seon.error/frames) (:seon.error/chain failure)))
+        "the link carrying the refusal names its class and its own message only")
     (is (not= :nested-refusal
               (:seon.error/member (:seon.error/data failure))))))))
 
@@ -2442,8 +2484,8 @@
        (is (= 'user/never-defined
               (get-in invoked [:seon.sci.kernel/guard-observation
                                :seon.error.evidence/value])))
-       (is (some? (:seon.sci.admit/record (:seon.error/data invoked)))
-           "a preserved refusal still gains the boundary's own evidence")))))
+       (is (not (contains? (:seon.error/data invoked) :seon.sci.admit/record))
+           "a preserved refusal gains no bookkeeping; the record holds it")))))
 
 (deftest
   a-set-print-length-survives-to-the-turns-next-form

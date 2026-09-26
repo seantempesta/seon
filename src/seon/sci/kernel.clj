@@ -686,18 +686,31 @@
                        line column])))
          (try (sci/stacktrace throwable) (catch Exception _ nil)))))
 
+(defn- author-throwable
+  "The exception the author's code threw: `throwable` past SCI's location
+  wrappers (`sci-location?`), which only copy it with the form's position."
+  {:malli/schema [:=> [:cat :seon.error/throwable] :seon.error/throwable]}
+  [throwable]
+  (let [data (ex-data throwable)]
+    (if (and (isa? (:type data) :sci/error) (contains? data :sci.impl/callstack) (ex-cause throwable))
+      (recur (ex-cause throwable))
+      throwable)))
+
 (defn failure-value
-  "Preserve an existing structural refusal and accrete guard evidence.
-  Otherwise return the kernel declared-schema with the observed evaluation duration;
-  the complete diagnostic record retains whether the deadline fired.
-  This error-handling normalizer preserves any producer error under the bare base contract.
-  Either way the value carries the whole author cause chain once, without
-  SCI's location wrapper, and the author's source location as
-  `:seon.sci.eval/stacktrace`; a JVM frame is kept only where it is
-  first-party, since an interpreted throw's own frame is the interpreter's.
-  A core fault already recorded by this propagation (its receipt anywhere in the
-  cause chain, `seon.fault/carried-receipt`) is rethrown, never turned into an
-  ordinary evaluation value: its panic reaches the caller."
+  "The minimal complete error for a failure of an agent's evaluation, the
+  way `clojure.main` reports it (`ex-triage`/`ex-str`, main.clj:219-300):
+  the class and message the author's code threw, never SCI's location
+  wrapper; the whole cause chain once, each link's message and `ex-data`
+  (worlds referenced); the author's source location as
+  `:seon.sci.eval/stacktrace` (SCI's own). This producer declares every
+  failure it sees an agent's own exception or refusal, so a link keeps only
+  the frames of first-party host code the form called
+  (`seon.error.refusal/called-frames`), never the evaluator that ran it.
+  The evaluation's duration, allocation and outcome stay on its record.
+  An existing structural refusal is preserved with the chain around it.
+  A core fault already recorded by this propagation (its receipt anywhere in
+  the cause chain, `seon.fault/carried-receipt`) is rethrown, never turned
+  into an ordinary evaluation value: its panic reaches the caller."
   {:malli/schema
    [:=> [:cat :seon.sci.kernel/failure-request [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "A kernel failure can carry any thrown or returned value; normalization must preserve evidence of an unrecognized failure.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.sci.admit/record]
     :seon.error/base]}
@@ -706,17 +719,16 @@
    diagnostic-record]
   (when (fault/carried-receipt throwable) (throw throwable))
   (let [timed-out? (= :time (:seon.eval/outcome diagnostic-record))
+        author (author-throwable throwable)
         ;; The whole cause chain, read once, without SCI's location copies.
         links (error.refusal/without-links
-               (mapv without-interrupt-marker (error.refusal/chain throwable))
+               (mapv without-interrupt-marker
+                     (error.refusal/chain author (schema/handed-projection) error.refusal/called-frames))
                sci-location?)
-        throwable-data (:seon.error/data (first links))
+        failing-symbol (:sci.impl/symbol (ex-data author))
         location (stacktrace throwable)
-        evidence (cond-> {:seon.sci.eval/throwable (.getName (class throwable))
-                          :seon.sci.admit/record diagnostic-record}
-                   subject (assoc :seon.fn/sym subject))
         located (fn [error]
-                  (cond-> error
+                  (cond-> (assoc error :seon.error/exception-class (symbol (.getName (class author))))
                     (seq links) (assoc :seon.error/chain links)
                     location (assoc :seon.sci.eval/stacktrace location)
                     (and (:seon.error/frame error)
@@ -724,38 +736,47 @@
                     (dissoc :seon.error/frame)))
         existing (error.refusal/refusal throwable)]
     (if (and (map? existing) (contains? existing :seon.error/at) (contains? existing :seon.error/layer) (contains? existing :seon.error/operation)) ;; debt: seon.error.refusal/refusal declares the generic :seon.error/base output (:seon.error/value's target) alongside its declared-schemas.
-      ;; The refusal is already the boundary value. Accrete this boundary's
-      ;; one new observation and the chain around it; the link that carried
-      ;; the refusal as its ex-data names it by class and message only.
+      ;; The refusal is already the boundary value, with the chain around
+      ;; it; the link that carried the refusal as its ex-data names it by
+      ;; class only (its message is the refusal's own).
       (let [own? #(= (select-keys % [:seon.error/at :seon.error/operation])
-                     (select-keys existing [:seon.error/at :seon.error/operation]))]
-        (cond-> (located (update existing :seon.error/data (fn [data] (merge (or data {}) evidence))))
+                     (select-keys existing [:seon.error/at :seon.error/operation]))
+            own-link (fn [link]
+                       (cond-> (dissoc link :seon.error/data)
+                         (= (:seon.error/message link) (:seon.error/message existing))
+                         (dissoc :seon.error/message)))]
+        (cond-> (located existing)
           (seq links)
-          (assoc :seon.error/chain (mapv #(if (own? (:seon.error/data %)) (dissoc % :seon.error/data) %) links))
+          (assoc :seon.error/chain (mapv #(if (own? (:seon.error/data %)) (own-link %) %) links))
           (not (string? (:seon.error/message existing)))
           (assoc :seon.error/message
                  (or (ex-message throwable) "The operation was refused."))))
       (located
        (seon.error.refusal/diagnostic (java.util.Date.) :seon.sci.kernel/evaluation 'seon.sci.kernel/failure-value
-       (merge
-       {:seon.sci.kernel/guard-observation {:seon.error.evidence/attribute :seon.eval/duration-ms
-         :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)}
-        :seon.error/message (or (:seon.error/message existing)
-          (cond->> (if timed-out?
-                     (str "Ran out of time after "
-                          (:seon.eval/duration-ms diagnostic-record) "ms.")
-                     (execution-error-text throwable))
-            subject (str "Invocation of " subject " failed: ")))
-        :seon.error/data (cond-> evidence
-                           (:sci.impl/symbol throwable-data)
-                           (assoc :seon.sci.eval/symbol (:sci.impl/symbol throwable-data)))
-        ;; An agent's own exception is an ordinary value, not a refusal:
-        ;; it names no expected requirement it failed.
-        :seon.error/throwable throwable}
-        ;; Absent, never stored nil: a failure without a failing symbol or
-        ;; subject (a reader error) names no offending value.
-        (when-let [offending (or (:sci.impl/symbol throwable-data) subject)]
-          {:seon.error/offending offending})))))))
+       (cond->
+        {:seon.error/message
+         (or (:seon.error/message existing)
+         (cond->> (if timed-out?
+                    (str "Ran out of time after "
+                         (:seon.eval/duration-ms diagnostic-record) "ms.")
+                    (execution-error-text throwable))
+           subject (str "Invocation of " subject " failed: ")))}
+         ;; An agent's own exception is an ordinary value, not a refusal:
+         ;; it names no expected requirement it failed. Its class and chain
+         ;; are the author's (`located`), so no Throwable is handed over.
+         ;; SCI's unresolved symbol: the evidence the correction reads
+         ;; (`seon.error`'s unresolved-symbol fix).
+         failing-symbol
+         (assoc :seon.error/data {:seon.sci.eval/symbol failing-symbol})
+         ;; The deadline guard fired: its observation is the evidence.
+         timed-out?
+         (assoc :seon.sci.kernel/guard-observation
+                {:seon.error.evidence/attribute :seon.eval/duration-ms
+                 :seon.error.evidence/value (:seon.eval/duration-ms diagnostic-record)})
+         ;; Absent, never stored nil: a failure without a failing symbol or
+         ;; subject (a reader error) names no offending value.
+         (or failing-symbol subject)
+         (assoc :seon.error/offending (or failing-symbol subject))))))))
 
 (defn unarmed-record
   "The diagnostic record for a failure that never reached an arm."
