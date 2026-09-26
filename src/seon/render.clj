@@ -22,7 +22,6 @@
             [seon.env :as env]
             [seon.id :as id]
             [seon.error :as error]
-            [seon.print :as print]
             [seon.render.hiccup :as hiccup]
             [seon.render.value :as render.value]
             [seon.schema :as schema]
@@ -87,7 +86,7 @@
       (:seon.config.render.agent/max-children effective)
       :seon.render.profile/composition
       (:seon.config.render.agent/composition effective)}
-      ;; The provenance ceiling (seon.print/fit); absent before a store
+      ;; The provenance ceiling (the floor's selection); absent before a store
       ;; adopts the dial, and then fit uses its declared default.
       (:seon.print/rendered-token-ceiling effective)
       (assoc :seon.print/rendered-token-ceiling
@@ -1151,82 +1150,34 @@
   (or (and (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value)) ;; debt: seon.sci.kernel/invoke declares :seon.error/value through its admitted result.
       ((schema/projection-validator projection output) value)))
 
-(declare project-node*)
+(defn declared-projection
+  "The declared render pair's answer for one value the floor reached, or nil.
 
-(defn- project-entry
-  [request output path entry]
-  (if (vector? entry)
-    (mapv (fn [index child]
-            (project-node* request output (conj path index) child
-                           (admit/semantic-value child)))
-          (range)
-          entry)
-    entry))
-
-(defn- project-children
-  [request output path children]
-  (mapv (fn [index child]
-          (project-node* request output (conj path index) child
-                         (admit/semantic-value child)))
-        (range)
-        children))
-
-(defn- bounded-error-node
-  [request error]
-  (:seon.sci.admit/print-node
-   (admit/admit-value
-    (merge (select-keys request [:seon.db/db :seon.sci.eval/ctx
-                                 :seon.schema/projection :seon.env/environment
-                                 :seon.sci.eval/projection-state])
-           {:seon.sci.admit/value error
-     :seon.sci.admit/caps (:seon.sci.admit/caps request)
-     :seon.sci.admit/interrupt-fn (fn [])
-     :seon.config/on-core-error (:seon.config/on-core-error request)}))))
-
-(defn- project-node*
-  [request output path node value]
-  ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE. `:seon.render/unit`
-  ;; declares neither — the floor's own entry points take a bare value — and
-  ;; `seon.sci.kernel/context-projection` declares a ctx, so reading the key
-  ;; unguarded turned every ctx-less floor render into a thrown contract
-  ;; violation at the one boundary §2.4 requires a value from.
-  ;; `request-projection` is total over that: no projection anywhere means no
-  ;; declared-producer projection, which `registered-layout` in
-  ;; `seon.render.value` already says the same way, and which the selection
-  ;; below already treats as "nothing declared".
+  The floor (`seon.render.value`) asks this for each map it reaches, with the
+  map's path on the request. The answer is `{:seon.print/node n}` for a
+  producer's rendered output (a `:seon.print/projected` node), or
+  `{:seon.error/value e}` for a refusal, unknown or failed producer, which
+  the floor then selects as an ordinary value. A selected producer's output is
+  terminal: it is never fed back into selection."
+  {:malli/schema
+   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render/output]
+    [:maybe :map]]}
+  [request value output]
+  ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE: no projection anywhere
+  ;; means nothing is declared, and nothing is selected.
   (let [projection (request-projection request)
-        ;; AN ATTRIBUTE SCOPES THE REQUEST'S SUBJECT, NOT THE NODES
-        ;; BENEATH IT. The value renderer hands every child node the
-        ;; parent's request, so an attribute-scoped render would
-        ;; otherwise ask each nested value to answer for an attribute
-        ;; nobody asked it about, and its own declared shape would never
-        ;; be consulted. The subject is the node at the empty path.
+        ;; AN ATTRIBUTE SCOPES THE REQUEST'S SUBJECT, NOT THE VALUES BENEATH
+        ;; IT: a nested value answers for its own declared shape.
         request (cond-> request
-                  (seq path) (dissoc :seon.render.walk/attribute))
-        ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A
-        ;; producer that renders its value THROUGH the floor —
-        ;; `seon.ai/attempt-html` calls `render.value/render-html` for
-        ;; an attempt's ordinary facts — hands the floor the very value
-        ;; whose schema selected it. The floor's `prepare` projects that
-        ;; value, selection answers `seon.ai/attempt-html` again, and
-        ;; the chain never returns. Measured 2026-08-07: the render
-        ;; proc's virtual thread past 1024 frames of
-        ;; project-node → attempt-html → prepare → project-node, so its
-        ;; transform never ended, its `::flow/stop` transition never
-        ;; ran, and the completion `disarm-agents!` joins never arrived.
-        ;; `invoke-selected` records what it is running, so the cycle is
-        ;; unconstructable rather than depth-capped; a refused node
-        ;; falls through to its children, which is what the delegating
-        ;; producer asked for.
+                  (seq (:seon.render.data/path request)) (dissoc :seon.render.walk/attribute))
+        ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A producer that
+        ;; renders its value through the floor hands the floor the very value
+        ;; whose schema selected it; `invoke-selected` records what it is
+        ;; running, so the cycle is unconstructable rather than depth-capped
+        ;; (measured 2026-08-07: 1024 frames of project-node → attempt-html →
+        ;; prepare → project-node before this rule).
         rendering (:seon.render/rendering request #{})
-        ;; NO PROJECTION MEANS NOTHING IS DECLARED, AND NOTHING IS
-        ;; SELECTED. Both halves of selection ask the projection a
-        ;; question — which shapes this value matches, and whether the
-        ;; producer's output satisfies the output schema — so a request
-        ;; carrying no ctx has no question to ask and the ordinary print
-        ;; node is the answer. Every request that names a producer
-        ;; explicitly is a `:seon.render/call-request`, which declares its
-        ;; ctx.
+        refused? #(or (:seon.render/refused-member %) (:seon.render/candidates %) (:seon.render.unknown/reason %))
         selected (when (and projection (map? value))
                    (if-let [explicit (explicit-value value output)]
                      (val explicit)
@@ -1234,7 +1185,7 @@
         selected (when-not (or (contains? rendering selected)
                                (and (= output :seon.render/ai)
                                     selected
-                                    (or (not (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected)))
+                                    (or (not (refused? selected))
                                         (seq (get-in selected [:seon.error/data :seon.render/candidates])))
                                     (some
                                      #(source-producer?
@@ -1246,64 +1197,28 @@
                                        [selected]))))
                    selected)]
     (cond
-      (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected)) (bounded-error-node request selected)
-
-      (and selected (not (qualified-symbol? selected)))
-      {:seon.print/face :seon.print/projected
-       :seon.render/output output
-       :seon.print/value (inline-rendered (assoc request :seon.render/value value) output selected)}
-
-      selected
-      ;; A NESTED PRODUCER THAT DID NOT RETURN SAYS SO. Falling back to the
-      ;; unprojected node here was the same absence-reads-as-health defect the
-      ;; walk had one level up: the bound fired, the node silently changed
-      ;; shape, and nothing named the producer that broke.
+      (nil? selected) nil
+      (refused? selected) {:seon.error/value selected}
+      (not (qualified-symbol? selected))
+      {:seon.print/node {:seon.print/face :seon.print/projected
+                         :seon.render/output output
+                         :seon.print/value (inline-rendered (assoc request :seon.render/value value) output selected)}}
+      :else
+      ;; A NESTED PRODUCER THAT DID NOT RETURN SAYS SO; an output outside
+      ;; the face's contract is not shown as though it were.
       (let [node-request (assoc request :seon.render/value value)
             result (invoke-selected node-request selected)
-            rendered (:seon.sci.admit/value result)]
-        (if-let [unavailable (invocation-unknown node-request output selected
-                                                 result)]
-          (bounded-error-node request unavailable)
-          (if (valid-projection? projection output rendered)
-            (if (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered) (:seon.render/refused-member rendered))
-              node
-              {:seon.print/face :seon.print/projected
-               :seon.render.call/selected-producer selected
-               :seon.render/output output
-               :seon.print/value rendered})
-            node)))
-
-      :else
-      (case (:seon.print/face node)
-        (:seon.print/vector :seon.print/list :seon.print/set)
-        (update node :seon.print/items
-                #(project-children request output path %))
-
-        (:seon.print/map :seon.print/record)
-        (update node :seon.print/entries
-                #(mapv (fn [index entry]
-                         (project-entry request output (conj path index)
-                                        entry))
-                       (range)
-                       %))
-
-        :seon.print/throwable
-        (update node :seon.print/value
-                #(project-node* request output
-                                (conj path :seon.print/throwable) %
-                                (admit/semantic-value %)))
-
-        node))))
-
-(defn project-node
-  "Apply explicit/schema producer precedence recursively to one print node.
-
-  A selected producer's output is terminal projection data: it is never fed
-  back into selection. Admission remains wholly owned by the guarded kernel."
-  {:malli/schema
-   [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.print/node :seon.render/output] :seon.print/node]}
-  [request value node output]
-  (project-node* request output [] node value))
+            rendered (:seon.sci.admit/value result)
+            unavailable (invocation-unknown node-request output selected result)]
+        (cond
+          unavailable {:seon.error/value unavailable}
+          (and (valid-projection? projection output rendered) (not (refused? rendered))
+               (not (:seon.render/invalid-output rendered)))
+          {:seon.print/node {:seon.print/face :seon.print/projected
+                             :seon.render.call/selected-producer selected
+                             :seon.render/output output
+                             :seon.print/value rendered}}
+          :else nil)))))
 
 (defn- invoke-producer
 

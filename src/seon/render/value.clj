@@ -23,8 +23,8 @@
   (delay (requiring-resolve 'seon.render/agent-render-profile)))
 (defonce ^:private config-defaults
   (delay (requiring-resolve 'seon.config/defaults)))
-(defonce ^:private render-project-node
-  (delay (requiring-resolve 'seon.render/project-node)))
+(defonce ^:private render-declared-projection
+  (delay (requiring-resolve 'seon.render/declared-projection)))
 
 
 ;;; THE PROJECTION-FREE TOTAL CORE: bounded text of any value and any Throwable,
@@ -667,10 +667,10 @@
   [before id width state]
   (settle before state id width))
 
-(defn- declared-node
-  "A declared render pair's print node for a reached map, or nil (design §2):
-  the value's identity projection first, then the render pairs its path and
-  identity name."
+(defn- declared
+  "What the render pairs say about a reached map (design §2): nil, the
+  producer's print node `{::print/node n}`, or a value to select in its
+  place `{:value v}` (its identity projection, or a producer's refusal)."
   {:malli/schema [:=> [:cat :seon.render/unit :seon.schema/value :seon.render.data/path :seon.render/output] [:maybe :map]]}
   [unit value path output]
   (when (and (map? value) (:seon.sci.eval/ctx unit)
@@ -684,22 +684,26 @@
                       (let [form (get (:seon.schema.projection/forms projection) (:seon.schema/key identity))]
                         (when (and (vector? form) (map? (second form)))
                           (:seon.schema/identity-projection (second form)))))
-          skeleton {::print/face ::print/map ::print/entries []}
-          projected (try
-                      (@render-project-node
-                       (cond-> (assoc unit :seon.render.data/path path)
-                         projector (assoc :seon.render/value value :seon.render.call/function projector))
-                       value skeleton output)
-                      (catch Throwable failure
-                        {::print/face ::print/string ::print/value (floor failure)}))]
-      (when (not= skeleton projected) projected))))
+          answer (try
+                   (@render-declared-projection
+                    (cond-> (assoc unit :seon.render.data/path path)
+                      projector (assoc :seon.render/value value :seon.render.call/function projector))
+                    value output)
+                   (catch Throwable failure
+                     {::print/node {::print/face ::print/string ::print/value (floor failure)}}))]
+      (cond
+        (::print/node answer) answer
+        (:seon.error/value answer) {:value (:seon.error/value answer)}
+        identity {:value value}))))
 
 (defn- make-node
   "A node for `value` reached at `path`, classified, with its flat width."
   {:malli/schema [:=> [:cat :map :seon.schema/value :int :int :seon.render.data/path [:maybe :int] :map] :map]}
   [context value id depth path parent position]
   (let [{:keys [unit output ceiling identity-attributes]} context
-        declared (declared-node unit value path output)
+        answer (declared unit value path output)
+        declared (::print/node answer)
+        value (if (contains? answer :value) (:value answer) value)
         base {:id id :depth depth :path path :parent parent :indent (:indent position 0)
               :outside (:outside position) :kids [] :n 0 :sum 0}
         node (if declared
