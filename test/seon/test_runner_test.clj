@@ -27,7 +27,7 @@
         right (io/file root "right.clj")
         digest (fn [file]
                  (let [sha (java.security.MessageDigest/getInstance "SHA-256")]
-                   (#'dependency-digest/digest-file! sha file)
+                   (#'dependency-digest/digest-bytes! sha (slurp file))
                    (vec (.digest sha))))]
     (try
       (spit left "(ns fixture)\n")
