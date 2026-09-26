@@ -2,7 +2,7 @@
 type: landing
 lane: merge-cut1-opus
 design: docs/research/agent-platform/merge-task-design-2026-09-26.md §1 (slice 1), review F3
-status: STOPPED at the size rule — slice 1 written, uncommitted, patch in tmp/merge-cut1-opus/; root picks an option below
+status: landed — owner chose option 2; 9c825ba11 (1a), d8742ab1f (1b, with host_test); RESET NEEDED
 ---
 # merge-cut1-opus — the merge task (slice 1)
 
@@ -21,9 +21,8 @@ Owned and committed by this lane:
 - `resources/seon/tasks/*.edn` — unfixed findings only.
 - this landing note.
 
-Held elsewhere, handed to root as patches under `tmp/merge-cut1-opus/`:
-- `test/seon/cluster/host_test.clj` (host.clj's tests, held by one-commit-a-opus) — the two existing
-  proposal tests converted and the slice-1 regressions added.
+- `test/seon/cluster/host_test.clj` — released by one-commit-a to this lane; the patch was applied and committed
+  in 1b.
 
 ## Broken first
 
@@ -131,3 +130,26 @@ proposal view schema beside its stored row, and the runtime-task reconciliation 
 
 Unproven by any regression: legacy-issue resolution; delivery failure recoverable from facts (it is by
 construction: facts commit before the message).
+
+## Landed (owner chose option 2)
+
+- **9c825ba11 (1a):** `seon.task.edn`, `src/seon/issue.clj`, `src/seon/task.clj`, `src/my/issue.clj`.
+- **d8742ab1f (1b):** `src/my/program.clj`, `my.program.edn`, `test/seon/cluster/host_test.clj`. Both commits
+  load in order (1a's `my.program` is the old one and needs nothing from 1b).
+- **Pre-commit checks:**
+  - Task ids: every explicit id in the three task files I touched equals `seon.issue/task-handle` evaluated in
+    the JVM (pid 75849): 0 mismatches over 36 entries. My three entries carry no hand-minted id, and no source
+    or test hardcodes one (the tests call `task-handle`).
+  - `clj-kondo --lint src script test`: 0 errors.
+  - Contracts compile over the five changed code files: 0 findings; the 3,542 packaged schema forms read.
+- **RESET NEEDED**: the schema adoption for the new `:seon.task/*` attributes.
+
+**Proofs waiting on task c9e0cde3edb3** (agent-form writes naming an unwritten evaluation; owner deciding). The
+following cannot pass until it is resolved, and I did not work around it:
+- all of `an-agent-creates-a-task-at-its-repl-and-it-is-a-cluster-task`, which writes from an agent form;
+- all of `a-proposal-waits-for-its-assigned-tasks-proofs-then-reaches-root`, where the agent-form `create!`,
+  the proof run's admission and the proposal write all write during a form;
+- the converted `a-message-is-no-proposal-and-only-roots-custody-accepts`, whose `my.message/send` also writes
+  from a form.
+
+The static checks do not wait on it.
