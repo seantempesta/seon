@@ -3141,6 +3141,94 @@
                   (db/db connection) [[:seon.ns/name 'my.agents.steward-cycle]])]
         (is (= [[:seon.agent/id "steward-cycle"]] (map :seon.ns/steward rows)))))))
 
+(deftest computed-and-point-free-defs-are-declarations-their-referrers-keep
+  ;; P2-A: clj-kondo reports every def/defonce; a computed initializer has no
+  ;; arglists. Changing a literal def to a computed one once dropped its row
+  ;; while referrers still named it.
+  (let [root (fixture-root)
+        source (fn [handle]
+                 (str "(ns sample.value-def)\n"
+                      "(declare pending)\n"
+                      "(def ^:private handle " handle ")\n"
+                      "(def point-free (comp inc inc))\n"
+                      "(defonce registry (atom {}))\n"
+                      "(defn user-of [] [(:a handle) (point-free 1) @registry])\n"))
+        rows-for (fn [handle]
+                   (write-source! root "sample/value_def.clj" (source handle))
+                   (seon.fn/rows {:seon.fn/roots [(.getPath root)]}))
+        by-sym (fn [rows] (into {} (keep #(when-let [s (:seon.fn/sym %)] [s %])) rows))]
+    (try
+      (let [literal (rows-for "{:a 1}")
+            computed (rows-for "(assoc {} :a 1)")
+            found (by-sym computed)]
+        (is (= '#{sample.value-def/handle sample.value-def/point-free
+                  sample.value-def/registry sample.value-def/user-of}
+               (set (keys found)))
+            "every def is a row; `declare` interns no body")
+        (is (true? (:seon.fn/constant? (get (by-sym literal) 'sample.value-def/handle))))
+        (is (= {:seon.fn/arglists "()" :seon.fn/calls #{'clojure.core/assoc}
+                :seon.fn/defined-by 'clojure.core/def :seon.fn/private? true}
+               (select-keys (get found 'sample.value-def/handle)
+                            [:seon.fn/arglists :seon.fn/calls :seon.fn/constant?
+                             :seon.fn/defined-by :seon.fn/private? :seon.fn/spec]))
+            "a computed def has no arities or contract; its initializer's calls are its edges")
+        (is (= #{'clojure.core/comp} (:seon.fn/calls (get found 'sample.value-def/point-free))))
+        (is (= 'clojure.core/defonce (:seon.fn/defined-by (get found 'sample.value-def/registry))))
+        (test-support/with-database
+          (fn [connection]
+            (test-support/transacted! connection (seon.fn/reconcile-tx (db/db connection) literal []))
+            (test-support/transacted!
+             connection
+             (seon.fn/reconcile-tx (db/db connection) computed (mapv program/row-identity literal)))
+            (let [database (db/db connection)]
+              (is (= {:seon.fn/source "(def ^:private handle (assoc {} :a 1))"}
+                     (db/pull database [:seon.fn/source :seon.fn/constant?]
+                              [:seon.fn/sym 'sample.value-def/handle]))
+                  "the literal-to-computed change adopts in place")
+              (is (contains? (set (:seon.fn/references
+                                   (db/pull database [:seon.fn/references]
+                                            [:seon.fn/sym 'sample.value-def/user-of])))
+                             'sample.value-def/handle))))))
+      (finally (test-support/delete-recursively! root)))))
+
+(deftest a-caller-files-findings-name-its-value-defs-rows
+  ;; The *boot-progress!* class (boot 2026-09-26): an unchanged caller file's
+  ;; reanalyzed findings attribute a lint to its computed private def, so that
+  ;; def's row must already be the analyzer's own row. A callee signature change
+  ;; selects the caller; its findings then reconcile against that row.
+  (let [prefix (str "pfd" (id/id))
+        root (io/file "tmp" (str "fn-test-" prefix))
+        directory (str "src/" prefix)
+        callee (fn [body] (str "(ns " prefix ".callee)\n(defn produce " body ")\n"))
+        request {:seon.fn/root (.getCanonicalPath root) :seon.fn/roots ["src"]}]
+    (try
+      (spit (doto (io/file root directory "callee.clj") io/make-parents) (callee "[] 1"))
+      (spit (io/file root directory "caller.clj")
+            (str "(ns " prefix ".caller (:require [" prefix ".callee :as callee]))\n"
+                 "(def ^:private progress (constantly nil))\n"
+                 "(defn run [] (callee/produce))\n"))
+      (test-support/with-database
+        (fn [connection]
+          (test-support/transacted! connection (seon.fn/analyze-rows request))
+          (let [value-def (symbol (str prefix ".caller") "progress")
+                published (db/db connection)
+                _ (spit (io/file root directory "callee.clj") (callee "([] 1) ([x] x)"))
+                selected (assoc request :seon.source/previous-database published
+                                        :seon.fn/changed-paths #{(str directory "/callee.clj")})
+                result (test-support/refusal-data
+                        #(seon.fn/index! (assoc selected :seon.db/connection connection
+                                                         :seon.program/rows (seon.fn/analyze-rows selected))))
+                database (db/db connection)
+                row (db/pull database [:db/id :seon.fn/defined-by] [:seon.fn/sym value-def])]
+            (is (= 'clojure.core/def (:seon.fn/defined-by row)) "the computed def is the analyzer's row")
+            (is (= test-support/committed result) (pr-str result))
+            (is (some #(= (:db/id row) (get-in % [:seon.lint/fn :db/id]))
+                      (db/q '[:find [(pull ?lint [{:seon.lint/fn [:db/id]}]) ...] :in $ ?path
+                              :where [?file :seon.fn.file/relative-path ?path] [?lint :seon.lint/file ?file]]
+                            database (str directory "/caller.clj")))
+                "the caller's reanalyzed finding names the value def's row"))))
+      (finally (test-support/delete-recursively! root)))))
+
 (deftest an-analyzer-launch-loaded-as-other-bytes-reanalyzes-everything
   ;; The loaded analyzer's identity derives from what this JVM loaded, never
   ;; from the prior head's rows alone (seon.cluster/launched-analyzer).
