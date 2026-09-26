@@ -32,6 +32,8 @@
   (delay (requiring-resolve 'seon.config/defaults)))
 (defonce ^:private render-declared-projection
   (delay (requiring-resolve 'seon.render/declared-projection)))
+(defonce ^:private render-viewer
+  (delay (requiring-resolve 'seon.render/viewer)))
 
 
 ;;; THE PROJECTION-FREE TOTAL CORE: bounded text of any value and any Throwable,
@@ -46,7 +48,7 @@
   ;; Measured 2026-09-23, armed on default: a three-link chain holding a
   ;; 1e6-char string, a 1e5 vector, (range), an atom and a throwing toString
   ;; renders 1,339 chars in 345 us.
-  {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 6 :suppressed 3 :floor-chars 8192})
+  {:chars 400 :items 8 :depth 3 :entries 12 :links 8 :frames 10 :suppressed 3 :floor-chars 8192})
 
 (def ^:private text-full
   (doto (Exception. "bounded text limit reached") (.setStackTrace (make-array StackTraceElement 0))))
@@ -125,22 +127,26 @@
       (recur (.getCause ^Throwable link) (conj seen link)))))
 
 (defn- link-lines
-  "One link's lines: class and message, ex-data entries, first-party frames and
-  suppressed throwables; a link whose accessors throw prints its class and the failure's."
+  "One link's lines: class and message, ex-data entries, the frames nearest the
+  throw and suppressed throwables, each list counting what it leaves out; a
+  link whose accessors throw prints its class and the failure's."
   {:malli/schema [:=> [:cat :seon.error/throwable] [:vector :string]]}
   [^Throwable link]
   (let [{:keys [entries frames suppressed]} text-limits
         frame (fn [^StackTraceElement f]
                 [(symbol (.getClassName f)) (symbol (.getMethodName f)) (str (.getFileName f)) (long (.getLineNumber f))])]
     (try
-      (into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
-            (concat
-             (for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
-             (when (> (bounded-count (inc entries) (ex-data link)) entries) ["  … further ex-data entries"])
-             (for [[class-name _ file line] (take frames (filter refusal/first-party-frame? (map frame (.getStackTrace link))))]
-               (str "  at " (clojure.lang.Compiler/demunge (str class-name)) " (" file ":" line ")"))
-             (for [^Throwable other (take suppressed (.getSuppressed link))]
-               (str "  suppressed " (.getName (class other)) ": " (bounded-text (ex-message other))))))
+      (let [trace (vec (.getStackTrace link))]
+        (into [(str (.getName (class link)) ": " (bounded-text (ex-message link)))]
+              (concat
+               (for [[k v] (take entries (ex-data link))] (str "  " (bounded-text k) " " (bounded-text v)))
+               (when (> (bounded-count (inc entries) (ex-data link)) entries) ["  … further ex-data entries"])
+               (for [[class-name _ file line] (map frame (take frames trace))]
+                 (str "  at " (clojure.lang.Compiler/demunge (str class-name)) " (" file ":" line ")"))
+               (when (> (count trace) frames)
+                 [(str "  … " (- (count trace) frames) " further frames")])
+               (for [^Throwable other (take suppressed (.getSuppressed link))]
+                 (str "  suppressed " (.getName (class other)) ": " (bounded-text (ex-message other)))))))
       (catch Throwable failure
         [(str (.getName (class link)) " #unprintable[" (.getName (class failure)) "]")]))))
 
@@ -148,9 +154,9 @@
   "An unhandled Throwable as bounded text from the Throwable alone.
 
   One block of `link-lines` per cause. The leaf an error's rendering degrades to, never a
-  stored member. It keeps Seon's first-party frames
-  ([[seon.error.refusal/first-party-frame?]]): panics and test failures keep the
-  whole cause (AGENTS.md, root ruling 2026-09-26).
+  stored member. Its selection is general — the frames nearest each throw, with
+  a count of the rest — and which frames matter is the error pair's to say
+  (AGENTS.md, three points).
 
   ## Edge cases
 
@@ -746,20 +752,14 @@
       (catch Throwable failure {:diagnostic failure}))))
 
 (defn- diagnostic-line
-  "One line naming a presentation failure beside the value it did not replace."
+  "One line naming a presentation failure beside the value it did not replace:
+  the failure itself as bounded data (a Throwable as its class, message and
+  ex-data per link). What a failure means is its own render pair's to say."
   {:malli/schema [:=> [:cat :seon.render.data/path [:or :seon.error/throwable :map] :int] :string]}
   [path failure further]
-  (let [text (if (instance? Throwable failure)
-               (str (.getName (class failure)) ": " (ex-message failure))
-               ;; A typed unknown names its producer; what refused it is
-               ;; the guarded invocation's own error, its offending value.
-               (str (some-> (:seon.render.unknown/producer failure) (str " "))
-                    (:seon.error/message failure)
-                    (some->> (keyword-entry (:seon.error/offending failure) :seon.error/message) (str " "))))
-        limit (:chars text-limits)]
-    (str ";; renderer failed at " (pr-str path) ", value printed as data: "
-         (if (> (count text) limit) (str (subs text 0 limit) "…") text)
-         (when (pos? further) (str " (and " further " further renderer failures)")))))
+  (str ";; renderer failed at " (pr-str path) ", value printed as data: "
+       (bounded-text (if (instance? Throwable failure) (throwable-value failure) failure))
+       (when (pos? further) (str " (and " further " further renderer failures)"))))
 
 (defn- make-node
   "A node for `value` reached at `path`, classified, with its flat width."
@@ -1122,7 +1122,13 @@
                        (assoc :seon.print/width 0))
              legend (legend-text profile)
              database (:seon.db/db unit)
-             context {:unit unit :output output :profile profile
+             ;; Nested selection reads the one profile this value prints
+             ;; under and the one viewer, derived here once per value.
+             selecting? (and (:seon.sci.eval/ctx unit)
+                             (not (get-in unit [:seon.render.value/options :seon.render.value/structural?])))
+             context {:unit (cond-> (assoc unit :seon.render/profile profile)
+                              selecting? (merge (@render-viewer unit)))
+                      :output output :profile profile
                       :requery (select-keys profile [:seon.print/requery-id :seon.print/requery-refusal])
                       :identity-attributes (if database (set (db/identity-attributes database)) #{})
                       :width (:seon.print/width options)
@@ -1136,7 +1142,8 @@
                       :ceiling (tokens/estimate-chars (or (:seon.print/rendered-token-ceiling profile)
                                                           (:seon.print/rendered-token-ceiling (print/default-options))))}
              state (select-nodes (:seon.render/value unit) context)]
-         (if (:seon.error/at state)
+         ;; The selection answers its node state or its budget refusal.
+         (if-not (:nodes state)
            state
        (let [cut? (boolean (some more? (vals (:nodes state))))
              failed (sort-by :id (filter :diagnostic (vals (:nodes state))))
@@ -1171,7 +1178,9 @@
                   :seon.render.value/value-text text)
            (:seon.render.call/selected-producer selected)
            (assoc :seon.render.call/selected-producer
-                  (:seon.render.call/selected-producer selected))))))))
+                  (:seon.render.call/selected-producer selected))
+           (:seon.render.call/source-output? selected)
+           (assoc :seon.render.call/source-output? true)))))))
        (catch Throwable failure
          (plain-projection (:seon.render/value unit) failure path))))))
 
@@ -1252,7 +1261,8 @@
 (defn- render-prepared
   [unit output]
   (let [projection (prepare unit output)]
-    (if (:seon.error/at projection)
+    ;; A projection holds its tree; prepare's refusals do not.
+    (if-not (:seon.render.value/tree projection)
       projection
       (if (= output :seon.render/html)
         (render-html-data projection)

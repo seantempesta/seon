@@ -175,9 +175,10 @@
       (is (= ['seon.error/elision-prose]
              (declared (with-meta ambiguous {:seon.error/declared-schema :seon.render.walk/elided-error})))
           "the producer's declaration selects, never a guess from the value's members")
-      (is (= ['seon.error/render-ai] (declared ambiguous))
-          "an error without a declared identity composes the base pair")
-      (is (= ['seon.error/render-ai]
+      (is (= [] (declared ambiguous))
+          (str "an error nobody declared is data for the floor: its members never select "
+               "(owner 2026-09-26, no error-specific dispatch)"))
+      (is (= []
              (declared (assoc ambiguous :seon.error/operation 'entity-pairs.fixture/none)))
           (str "the operation names where an error was raised, not a function that "
                "returned it, so it selects no renderer")))))

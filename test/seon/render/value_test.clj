@@ -957,6 +957,27 @@
        (is (str/ends-with? shown "(and 1 further renderer failures)") shown)
        (is (= 2 (count (:seon.render.value/diagnostics prepared))))))))
 
+(deftest selection-is-one-rule-at-every-depth
+  ;; Render-specificity audit slice 2 (owner 2026-09-26: "No specific 'if
+  ;; s/error/' shit"): the floor asks the one `render/selection` for every
+  ;; map it reaches. A producer's declared schema selects its pair at the root
+  ;; and nested in a vector or map alike; an error nobody declared is data,
+  ;; printed whole by the floor, and its members select nothing.
+  (support/with-database
+   (fn [connection]
+     (let [database (db/db connection)
+           refusal (db/pull database '[*] [:no.such/attr 1])
+           undeclared (vary-meta refusal dissoc :seon.error/declared-schema)
+           text #(:seon.render.value/text (value/prepare (render-request connection %)))
+           sentence "cannot read uninstalled attribute :no.such/attr"]
+       (is (= :seon.db/invalid-read-error (:seon.error/declared-schema (meta refusal))))
+       (is (str/includes? (text refusal) sentence) (text refusal))
+       (is (str/includes? (text [refusal]) sentence) (text [refusal]))
+       (is (str/includes? (text {:k [1 refusal]}) sentence) (text {:k [1 refusal]}))
+       (is (str/starts-with? (text undeclared) "{") (text undeclared))
+       (is (str/includes? (text [undeclared]) ":seon.error/operation seon.db/pull")
+           (text [undeclared]))))))
+
 (deftest ^{:seon/tasks #{"135d92ea1308"}} a-map-that-cannot-hold-keywords-prints-as-clojure-prints-it
   ;; Smoke 2026-09-26: `(sorted-map 'b 2 'a 1)` printed a ClassCastException
   ;; from the renderer's keyword lookup in place of the map. Only a map

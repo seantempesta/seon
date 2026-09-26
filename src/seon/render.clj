@@ -260,22 +260,19 @@
              selected))
 
 (defn- source-return?
+  "Does one declared output admit REPL entries (`:seon.render/source` or
+  source blocks)? Its other alternatives are the producer's own business."
   [output]
-  (letfn [(branches [output]
-            (case output
-              (:seon.render/source :seon.render/source-blocks) #{:source}
-              (:nil :seon.error/value) #{}
-              (case (when (vector? output) (first output))
-                (:maybe :or) (into #{} (mapcat branches)
-                                   (cond-> (rest output)
-                                     (map? (second output)) rest))
-                #{:other})))]
-    (= #{:source} (branches output))))
+  (case output
+    (:seon.render/source :seon.render/source-blocks) true
+    (boolean (when (and (vector? output) (#{:maybe :or} (first output)))
+               (some source-return? (rest output))))))
 
 (defn- source-producer?
-  "Read source intent from input-compatible indexed return contracts.
-  Only a named producer has indexed contracts; a value's own inline
-  function or rendered data never reads as source."
+  "Read source intent from input-compatible indexed return contracts: a
+  producer whose every matching return admits REPL entries. Only a named
+  producer has indexed contracts; a value's own inline function or rendered
+  data never reads as source."
   [projection selected arguments]
   (and (qualified-symbol? selected)
        (let [outputs (schema/function-matching-outputs-in
@@ -362,7 +359,7 @@
 
 (defn- named-alternatives
   "The named schemas `form` admits, flattened through `:or`/`:maybe`/`:and`
-  and named unions, without `:seon.error/base`."
+  and named unions."
   {:malli/schema [:=> [:cat :seon.schema/projection :seon.schema/value] [:vector :qualified-keyword]]}
   [projection form]
   (let [forms (:seon.schema.projection/forms projection)
@@ -374,7 +371,41 @@
                                     (branches (conj seen form) named))))
                      (and (vector? form) (#{:or :maybe :and} (first form)))
                      (mapcat #(branches seen %) (remove map? (rest form)))))]
-    (into [] (comp (remove #{:seon.error/base}) (distinct)) (branches #{} form))))
+    (into [] (distinct) (branches #{} form))))
+
+(defn- canonical-name
+  "The named schema `schema-key` is: the last name of its alias chain."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] :qualified-keyword]}
+  [projection schema-key]
+  (let [forms (:seon.schema.projection/forms projection)]
+    (loop [k schema-key seen #{}]
+      (let [form (get forms k)]
+        (if (and (qualified-keyword? form) (not (seen form))) (recur form (conj seen k)) k)))))
+
+(defn- refined-names
+  "The named schemas `schema-key` refines: its `:and` parents and their
+  parents through aliases, once per projection."
+  {:malli/schema [:=> [:cat :seon.schema/projection :qualified-keyword] [:set :qualified-keyword]]}
+  [projection schema-key]
+  (schema/projection-cache-value
+   projection [::refined-names schema-key]
+   (fn []
+     (let [forms (:seon.schema.projection/forms projection)]
+       (loop [pending (list (canonical-name projection schema-key)) seen #{}]
+         (if-let [k (first pending)]
+           (let [form (get forms k)
+                 named-parents (when (and (vector? form) (= :and (first form)))
+                           (map #(canonical-name projection %) (filter qualified-keyword? (rest form))))]
+             (recur (into (rest pending) (remove seen) named-parents) (into seen named-parents)))
+           seen))))))
+
+(defn- most-specific
+  "The satisfied schemas no other satisfied schema refines: a value that
+  satisfies a schema and its parent is the schema's, whatever the family."
+  {:malli/schema [:=> [:cat :seon.schema/projection [:sequential :qualified-keyword]] [:vector :qualified-keyword]]}
+  [projection schema-keys]
+  (let [named (into [] (comp (map #(canonical-name projection %)) (distinct)) schema-keys)]
+    (filterv (fn [k] (not-any? #(contains? (refined-names projection %) k) named)) named)))
 
 (defn- output-alternatives
   "The named schemas one contracted function declares it returns, once per
@@ -499,56 +530,38 @@
         (producer-argument request)))))
 
 (defn- declared-producers
-  "The renderers `value`'s declared identity names for `output`: an error's
-  producer-declared schema, else the returns of the root call's contracted
-  function, else its owning row schema. Distinct producers."
+  "The renderers `value`'s declared identity names for `output`, the same way
+  for every schema: the schema its producer declared on the value's metadata
+  (`:seon.error/declared-schema`, the producers' declaration key), else the
+  most specific return alternative of the root call's contracted function it
+  satisfies, else the one its reaching attribute names, else its owning row
+  schema at any depth. A value nobody declared is data for the floor; its
+  members never select. Distinct producers."
   {:malli/schema [:=> [:cat [:maybe :seon.schema/projection] :map :seon.schema/value :seon.render/output]
                   [:vector :qualified-symbol]]}
   [projection request value output]
   (let [registry (:seon.schema.projection/registry projection)
         function (:seon.render.call/function request)
         pairs (fn [schema-keys]
-                (into [] (comp (keep #(when-let [s (mr/schema registry %)]
-                                      (get (or (internal/entity-properties s) (m/properties s)) output)))
-                               (filter qualified-symbol?) (distinct))
-                      schema-keys))]
+                (not-empty
+                 (into [] (comp (keep #(when-let [s (mr/schema registry %)]
+                                         (get (or (internal/entity-properties s) (m/properties s)) output)))
+                                (filter qualified-symbol?) (distinct))
+                       (most-specific projection schema-keys))))
+        satisfied (fn [schema-keys] (filterv #((schema/projection-validator projection %) value) schema-keys))]
     (cond
       (nil? projection) []
       ;; An attribute request stays about that attribute: its own pair.
       (attribute-scoped? request) (into [] (keep identity) [(attribute-producer projection request output)])
       (not (render.value/keyword-lookup? value)) []
-      (:seon.error/at value)
-      ;; The identity its producer declared (`:seon.error/declared-schema` on
-      ;; the value's metadata, where the thrower attached it), else the
-      ;; alternative the root call's function declares it returns, else the
-      ;; error base pair. `:seon.error/operation` names where an error was
-      ;; raised, not what returned it, so it selects nothing.
-      (let [declared (:seon.error/declared-schema (meta value))
-            found (pairs (cond declared [declared]
-                               (and function (identical? value (render-value request)))
-                               (satisfied-alternatives projection function value)))]
-        (if (seq found) found (pairs [:seon.error/base])))
-      (and function (identical? value (render-value request)))
-      (pairs (satisfied-alternatives projection function value))
-      ;; An attribute request stays an attribute request (AGENTS.md): an
-      ;; entity nested in a value keeps its pulled shape, so its identity
-      ;; owner's pair claims only a root value. A nested value takes only the
-      ;; pair its reaching attribute declares (a component's schema).
-      :else (pairs (or (when (empty? (:seon.render.data/path request))
-                         (some-> (entity-owner projection value (:seon.db/db request)) vector))
-                       (some->> (attribute-identity projection (:seon.render.data/path request))
-                                (named-alternatives projection)
-                                (filterv #((schema/projection-validator projection %) value))))))))
-
-(defn- declared-producer
-  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.render/output]
-                  [:or :nil :qualified-symbol :seon.render/ambiguous-error]]}
-  [projection request value output]
-  (let [declared (declared-producers projection request value output)]
-    (cond
-      (attribute-scoped? request) (attribute-producer projection request output)
-      (= 1 (count declared)) (first declared)
-      (seq declared) (ambiguity nil output declared))))
+      :else
+      (or (some-> (:seon.error/declared-schema (meta value)) vector pairs)
+          (when (and function (identical? value (render-value request)))
+            (pairs (satisfied-alternatives projection function value)))
+          (some->> (attribute-identity projection (:seon.render.data/path request))
+                   (named-alternatives projection) satisfied pairs)
+          (some-> (entity-owner projection value (:seon.db/db request)) vector pairs)
+          []))))
 
 (def ^:private selection-stage-order
   [:explicit-value :namespace :declared :floor])
@@ -636,27 +649,38 @@
                 (db/pull [{:seon.agent/namespace [:seon.ns/name]}] [:seon.agent/id agent-id])
                 (get-in [:seon.agent/namespace :seon.ns/name])))))
 
+(defn viewer
+  "The viewing agent's namespace and its public functions, the namespace
+  stage's candidates. A floor render derives them once per value and carries
+  them on its unit, so every node it reaches asks the same question cheaply."
+  {:malli/schema [:=> [:cat :map] [:map [:seon.render/namespace {:optional true} :seon.render/namespace]
+                                    [:seon.render/viewer-functions [:vector :qualified-symbol]]]]}
+  [request]
+  (let [namespace-name (viewing-namespace request)
+        ctx (:seon.sci.eval/ctx request)]
+    (cond-> {:seon.render/viewer-functions
+             (if (and namespace-name ctx) (sci.kernel/public-functions-in ctx namespace-name) [])}
+      namespace-name (assoc :seon.render/namespace namespace-name))))
+
 (defn- namespace-stage
   "The viewing agent's own render functions (owner, 2026-09-25): a public
   function of its namespace whose contract accepts this render argument and
   returns OUTPUT's face. Candidates are sorted; more than one is refused."
   [request projection output]
-  (let [namespace-name (viewing-namespace request)
+  (let [{namespace-name :seon.render/namespace candidates :seon.render/viewer-functions}
+        (if (find request :seon.render/viewer-functions) request (viewer request))
         output-schema (case output :seon.render/html :seon.render/hiccup output)
-        argument (producer-argument request)
-        evidence (if-not (and namespace-name (:seon.sci.eval/ctx request))
-                   []
-                   (into [] (comp (filter #(= namespace-name (symbol (namespace %)))) (distinct)
-                                  (map (fn [candidate]
-                                         (if (or (schema/function-accepts-and-returns-in?
-                                                  projection candidate [argument] output-schema)
-                                                 (and (= :seon.render/ai output)
-                                                      (source-producer? projection candidate [argument])))
-                                           (selection-candidate candidate)
-                                           {:seon.render.selection.candidate/producer candidate
-                                            :seon.render.selection.candidate/status :rejected
-                                            :seon.render.selection.candidate/reason :no-same-arity-match}))))
-                         (sort-by str (sci.kernel/public-functions-in (:seon.sci.eval/ctx request) namespace-name))))
+        argument (delay (producer-argument request))
+        evidence (mapv (fn [candidate]
+                         (if (or (schema/function-accepts-and-returns-in?
+                                  projection candidate [@argument] output-schema)
+                                 (and (= :seon.render/ai output)
+                                      (source-producer? projection candidate [@argument])))
+                           (selection-candidate candidate)
+                           {:seon.render.selection.candidate/producer candidate
+                            :seon.render.selection.candidate/status :rejected
+                            :seon.render.selection.candidate/reason :no-same-arity-match}))
+                       candidates)
         compatible (into [] (comp (filter #(= :compatible (:seon.render.selection.candidate/status %)))
                                   (map :seon.render.selection.candidate/producer))
                          evidence)]
@@ -1147,16 +1171,6 @@
                (:seon.render.call/id request)
                (assoc :seon.render.call/id (:seon.render.call/id request))))))
 
-(defn- invoked
-  "One producer's returned value, or the typed unknown that replaces it."
-  {:malli/schema [:=> [:cat :map :seon.render/output [:or :qualified-symbol [:fn clojure.core/fn?]]]
-                  [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
-
-  [request output selected]
-  (let [result (invoke-selected request selected)]
-    (or (invocation-unknown request output selected result)
-        (:seon.sci.admit/value result))))
-
 (defn- invalid-output
   "The observation for a selected renderer whose output is outside `output`'s face."
   {:malli/schema [:=> [:cat :seon.render/output :seon.schema/value] :seon.render/error-result]}
@@ -1175,121 +1189,127 @@
               :seon.error/offending rendered}
              assoc :seon.error/declared-schema :seon.render/invalid-output-error))
 
-(defn- valid-projection?
-  [projection output value]
-  (or (and (:seon.error/at value) (:seon.error/layer value) (:seon.error/operation value)) ;; debt: seon.sci.kernel/invoke declares :seon.error/value through its admitted result.
-      ((schema/projection-validator projection output) value)))
+(defn- face-valid?
+  "Is `rendered` on `output`'s face: AI text or source blocks, Hiccup, a form?"
+  {:malli/schema [:=> [:cat :seon.schema/projection :seon.render/output :seon.schema/value] :boolean]}
+  [projection output rendered]
+  (boolean
+   (case output
+     :seon.render/ai (or (string? rendered)
+                         ((schema/projection-validator projection :seon.render/source-blocks) rendered))
+     :seon.render/html (hiccup/hiccup? rendered)
+     ((schema/projection-validator projection :seon.render/form) rendered))))
+
+(defn- declared-return?
+  "Does the selected producer's contract declare returning `rendered` for
+  the argument it received? The producer declares its refusals; the value's
+  shape never does."
+  {:malli/schema [:=> [:cat :seon.schema/projection :map :seon.schema/value :seon.schema/value] :boolean]}
+  [projection request selected rendered]
+  (boolean
+   (and (qualified-symbol? selected)
+        (some #(m/validate % rendered {:registry (:seon.schema.projection/registry projection)})
+              (schema/function-matching-outputs-in
+               projection selected [(render-invocation-argument projection request selected)])))))
+
+(defn- produce
+  "Run one selected producer: `{:face r}` for a return on `output`'s face, else
+  `{:failure f}` — the typed unknown when the guarded invocation did not
+  return, the refusal its contract declares as it is, else the invalid-output
+  observation. The invocation outcome and the contract decide, never the
+  returned value's members."
+  {:malli/schema [:=> [:cat :map :seon.render/output [:or :qualified-symbol [:fn clojure.core/fn?]]] :map]}
+  [request output selected]
+  (let [projection (request-projection request)
+        result (invoke-selected request selected)
+        rendered (:seon.sci.admit/value result)]
+    (if-let [unavailable (invocation-unknown request output selected result)]
+      {:failure unavailable}
+      (cond
+        (face-valid? projection output rendered) {:face rendered}
+        (declared-return? projection request selected rendered) {:failure rendered}
+        :else {:failure (invalid-output output rendered)}))))
+
+(defn- selection-refusal
+  "The refusal one selection decision ended in, else nil: a refused profile
+  consults no stage; an ambiguous stage selects its ambiguity error."
+  {:malli/schema [:=> [:cat :seon.render/selection] [:maybe :seon.error/value]]}
+  [decision]
+  (let [consulted (remove #(= :not-consulted (:seon.render.selection.stage/status %))
+                          (:seon.render.selection/stages decision))]
+    (when (or (empty? consulted)
+              (= :ambiguous (:seon.render.selection.stage/status (last consulted))))
+      (:seon.render.selection/selected decision))))
 
 (defn declared-projection
-  "The declared render pair's answer for one value the floor reached, or nil.
+  "The selected renderer's answer for one value the floor reached, or nil.
 
   The floor (`seon.render.value`) asks this for each map it reaches, with the
-  map's path on the request. The answer is `{:seon.print/node n}` for a
-  producer's rendered output (a `:seon.print/projected` node), or
-  `{:seon.error/value e}` for a refusal, unknown or failed producer, which
-  the floor then selects as an ordinary value. A selected producer's output is
-  terminal: it is never fed back into selection."
+  map's path on the request. Selection is the ONE `selection` every render
+  call makes — the value's own face, the viewing agent's namespace, the
+  declared pair, the floor — at the root and at every depth. The answer is
+  nil when the floor itself is selected, `{:seon.print/node n}` for a
+  producer's output on the face, or `{:seon.error/value e}` for a refused
+  selection or a producer that failed, which the floor shows beside the
+  value it did not replace. A selected producer's output is terminal: it is
+  never fed back into selection."
   {:malli/schema
    [:=> [:cat :map [:any {:seon.schema.admission/exemption :seon.schema.admission/polymorphic-boundary, :seon.schema.admission/reason "The value renderer and its projections operate on arbitrary Clojure results, including scalar and nil results; the render profile owns presentation bounds.", :gen/elements [nil false 0 "" :k [] {}]}] :seon.render/output]
     [:maybe :map]]}
   [request value output]
-  ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE: no projection anywhere
-  ;; means nothing is declared, and nothing is selected.
-  (let [projection (request-projection request)
-        ;; AN ATTRIBUTE SCOPES THE REQUEST'S SUBJECT, NOT THE VALUES BENEATH
-        ;; IT: a nested value answers for its own declared shape.
-        request (cond-> request
-                  (seq (:seon.render.data/path request)) (dissoc :seon.render.walk/attribute))
-        ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK. A producer that
-        ;; renders its value through the floor hands the floor the very value
-        ;; whose schema selected it; `invoke-selected` records what it is
-        ;; running, so the cycle is unconstructable rather than depth-capped
-        ;; (measured 2026-08-07: 1024 frames of project-node → attempt-html →
-        ;; prepare → project-node before this rule).
-        rendering (:seon.render/rendering request #{})
-        refused? #(or (:seon.render/refused-member %) (:seon.render/candidates %) (:seon.render.unknown/reason %))
-        selected (when (and projection (render.value/keyword-lookup? value))
-                   (if-let [explicit (explicit-value value output)]
-                     (val explicit)
-                     (declared-producer projection request value output)))
-        selected (when-not (or (contains? rendering selected)
-                               (and (= output :seon.render/ai)
-                                    selected
-                                    (or (not (refused? selected))
-                                        (seq (get-in selected [:seon.error/data :seon.render/candidates])))
-                                    (some
-                                     #(source-producer?
-                                       projection %
-                                       [(producer-argument
-                                         (assoc request :seon.render/value value))])
-                                     (if (seq (get-in selected [:seon.error/data :seon.render/candidates]))
-                                       (get-in selected [:seon.error/data :seon.render/candidates])
-                                       [selected]))))
-                   selected)]
+  ;; AN ATTRIBUTE SCOPES THE REQUEST'S SUBJECT, NOT THE VALUES BENEATH IT: a
+  ;; nested value answers for its own declared shape.
+  ;; A NESTED VALUE IS ITS OWN SUBJECT AT DISTANCE ZERO: its renderer
+  ;; expands no edges of its own inside another value, and the root's
+  ;; reference (`:seon.repl/handle`, `:seon.render.value/root`) names the
+  ;; root, never this value.
+  (let [request (cond-> (assoc request :seon.render/value value :seon.render/output output)
+                  (seq (:seon.render.data/path request))
+                  (-> (dissoc :seon.render.walk/attribute :seon.repl/handle :seon.render.value/root)
+                      (assoc :seon.render/distance 0)))
+        ;; A RENDER UNIT NEED NOT CARRY A CTX OR A DATABASE: no projection
+        ;; anywhere means nothing is declared, and nothing is selected.
+        projection (request-projection request)
+        decision (when projection (selection request))
+        selected (:seon.render.selection/selected decision)
+        refusal (when decision (selection-refusal decision))]
     (cond
-      (nil? selected) nil
-      (refused? selected) {:seon.error/value selected}
+      (nil? decision) nil
+      refusal {:seon.error/value refusal}
+      ;; A PRODUCER IS NEVER RE-ENTERED INSIDE ITS OWN WALK: `invoke-selected`
+      ;; records what is rendering, so a producer that hands its own value to
+      ;; the floor reaches the floor (measured 2026-08-07: 1024 frames before
+      ;; this rule).
+      (or (= selected (floor-producer request output))
+          (contains? (:seon.render/rendering request #{}) selected))
+      nil
       (not (or (qualified-symbol? selected) (fn? selected)))
       {:seon.print/node {:seon.print/face :seon.print/projected
                          :seon.render/output output
-                         :seon.print/value (inline-rendered (assoc request :seon.render/value value) output selected)}}
+                         :seon.print/value (inline-rendered request output selected)}}
       :else
-      ;; A NESTED PRODUCER THAT DID NOT RETURN SAYS SO; an output outside
-      ;; the face's contract is not shown as though it were.
-      (let [node-request (assoc request :seon.render/value value)
-            result (invoke-selected node-request selected)
-            rendered (:seon.sci.admit/value result)
-            unavailable (invocation-unknown node-request output selected result)]
-        (cond
-          unavailable {:seon.error/value unavailable}
-          ;; A returned error (a refusal, an invalid output) is the
-          ;; renderer's failure, shown beside the value, never its face.
-          (some? (render.value/keyword-entry rendered :seon.error/at)) {:seon.error/value rendered}
-          (valid-projection? projection output rendered)
+      ;; A source producer's REPL entries are its face: the REPL path that
+      ;; prints this value evaluates their forms, told so by the node.
+      (let [{face :face failure :failure :as answer} (produce request output selected)
+            blocks (:seon.render/source-blocks face)]
+        (if (contains? answer :face)
           {:seon.print/node (cond-> {:seon.print/face :seon.print/projected
                                      :seon.render/output output
-                                     :seon.print/value rendered}
-                              (qualified-symbol? selected) (assoc :seon.render.call/selected-producer selected))}
-          :else {:seon.error/value (invalid-output output rendered)})))))
-
-(defn- invoke-producer
-
-  {:malli/schema [:=> [:cat :map :seon.render/output :qualified-keyword] [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
-  [request output output-schema]
-  (let [selected (or (:seon.render.call/selected-producer request)
-                     (producer request output output-schema))]
-    (cond
-      (or (:seon.render/refused-member selected) (:seon.render/candidates selected) (:seon.render.unknown/reason selected))
-      selected
-      (or (qualified-symbol? selected) (fn? selected)) (invoked request output selected)
-      :else (inline-rendered request output selected))))
+                                     :seon.print/value (if blocks (clojure.string/join "\n\n" (map :seon.render/source blocks)) face)}
+                              (qualified-symbol? selected) (assoc :seon.render.call/selected-producer selected)
+                              (and (= output :seon.render/ai) (source-producer? projection selected [(producer-argument request)]))
+                              (assoc :seon.render.call/source-output? true))}
+          {:seon.error/value failure})))))
 
 (defn- raw-output
   {:malli/schema [:=> [:cat :seon.render/call-request :seon.render/output :seon.schema/value]
-                  [:or :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
+                  [:or :nil :seon.render/rendered :seon.render/source-blocks :seon.render/error-result]]}
   [request output selected]
   (if-not (or (qualified-symbol? selected) (fn? selected))
     ;; A value's own rendered data is its face as given.
     (inline-rendered request output selected)
-    (let [projection (request-projection request)
-          rendered (invoked request output selected)
-          ;; Optional source/observation contracts declare absence explicitly.
-          ;; An ordinary text renderer returning nil has violated its contract.
-          declared-absence?
-          (and (nil? rendered) (qualified-symbol? selected)
-               (some #(m/validate % nil {:registry (:seon.schema.projection/registry projection)})
-                     (schema/function-matching-outputs-in
-                      projection selected
-                      [(render-invocation-argument projection request selected)])))
-          failed? (or (:seon.render.unknown/reason rendered) (:seon.render/invalid-output rendered)
-                      (:seon.render/refused-member rendered))]
-      (if (case output
-            :seon.render/ai (or declared-absence? (string? rendered) failed?
-                                (valid-projection? projection :seon.render/source-blocks rendered))
-            :seon.render/html (or declared-absence? failed? (hiccup/hiccup? rendered))
-            :seon.render/form (valid-projection? projection :seon.render/form rendered))
-        rendered
-        (invalid-output output rendered)))))
+    (let [{face :face failure :failure :as answer} (produce request output selected)]
+      (if (contains? answer :face) face failure))))
 
 (defn render-ai
   "Render one value as text through the unique selected live SCI Var."
@@ -1392,22 +1412,9 @@
     (if (:seon.render/refused-member profile)
       profile
       (let [request (assoc request :seon.render/profile profile)
-            projection (request-projection request)
-            rendered (invoke-producer request :seon.render/form
-                                      :seon.render/form)]
-        (if (valid-projection? projection :seon.render/form rendered)
-          rendered
-          (let [observation
-                (vary-meta {:seon.error/fix "Inspect the supplied value or continue from the reported traversal subject."
-                 :seon.error/at (Date.)
-                 :seon.error/layer :seon.render/output
-                 :seon.error/operation 'seon.render/render-form-value
-                 :seon.render/invalid-output :form
-                 :seon.error/message "The selected form renderer did not return a form."
-                 :seon.error/data {:seon.render/output rendered}
-                 :seon.error/expected "a value satisfying the requested render output"
-                 :seon.error/offending rendered} assoc :seon.error/declared-schema :seon.render/invalid-output-error)]
-            observation))))))
+            decision (selection (assoc request :seon.render/output :seon.render/form))]
+        (or (selection-refusal decision)
+            (raw-output request :seon.render/form (:seon.render.selection/selected decision)))))))
 
 (defn render-call
   "Reuse one retained projection while its input, code, and reads are current."

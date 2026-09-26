@@ -40,6 +40,7 @@
                     [:map
                      [:seon.render.value/tree :seon.render.value/tree]
                      [:seon.render.call/selected-producer {:optional true} :qualified-symbol]
+                     [:seon.render.call/source-output? {:optional true :description "The selected producer returned REPL entries: the REPL path printing this value evaluates their forms."} :boolean]
                      [:seon.render.value/truncated?
                       :seon.render.value/truncated?]
                      [:seon.render.value/text :seon.render.value/text]

@@ -171,7 +171,7 @@
 (deftest form-output-validation-is-the-declared-open-shape
   (support/with-database
    (fn [connection]
-     (let [valid? #'render/valid-projection?
+     (let [valid? #'render/face-valid?
            projection (kernel/context-projection
                        (support/fork-cluster-ctx connection))
            entry {:seon.repl/comment "; think"
@@ -182,6 +182,7 @@
                    [entry {:seon.repl/form '(dir 'my.turn)}]))
        (is (not (valid? projection :seon.render/form
                         {:seon.repl/comment "; no act"})))
-       (is (valid? projection :seon.render/form
+       ;; A refusal is its producer's declared return, never a form.
+       (is (not (valid? projection :seon.render/form
                    {:seon.error/at (java.util.Date. 0) :seon.error/layer :seon.render.history-test/fixture :seon.error/operation 'seon.render.history-test/form-output-validation-is-the-declared-open-shape :seon.render/refused-member :seon.render/output
-                    :seon.error/message "failed"}))))))
+                    :seon.error/message "failed"})))))))

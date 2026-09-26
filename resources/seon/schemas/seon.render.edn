@@ -17,6 +17,7 @@
                                 :seon.render/context-change-request],
               :context-change-result [:map [:seon.db/db :seon.db/database-value]],
               :ai [:or :qualified-symbol :string],
+              :viewer-functions [:vector :qualified-symbol],
               :call-request
               [:map
                #:seon.render{:ai seon.render.value/render-ai,
