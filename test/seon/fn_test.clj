@@ -1332,6 +1332,30 @@
                                     (program/program-attributes
                                      (db/carried-projection database)))))))))))
 
+(deftest a-contract-finding-records-the-authored-form-never-a-bound-callable
+  ;; A compiled slot carries the Var its `[:fn sym]` predicate was bound to;
+  ;; the finding named `#'clojure.core/ifn?` and the report refused its own
+  ;; return value (contracts-out slice 1 red, 2026-09-27).
+  (test-support/with-database
+    (fn [connection]
+      (let [database (db/db connection)]
+        (transact-fixture!
+         connection
+         [(test-support/namespace-row @connection 'sample.authored-findings)
+          (test-support/program-fn-row
+           database 'sample.authored-findings/maybe-callable
+           "(defn maybe-callable {:malli/schema [:=> [:cat] [:maybe [:fn clojure.core/ifn?]]]} [] nil)")])
+        (let [findings (seon.fn/contract-findings (db/db connection))
+              mine (filterv #(= 'sample.authored-findings/maybe-callable (:seon.fn/sym %)) findings)]
+          (is (sequential? findings) "the report validates its own return value")
+          (is (= [[:maybe [:fn 'clojure.core/ifn?]]]
+                 (mapv :seon.fn.contract/form
+                       (filter #(= :seon.fn.contract.finding/maybe (:seon.fn.contract/finding %)) mine))))
+          (is (not-any? #(some (fn [value] (or (var? value) (fn? value)))
+                               (tree-seq coll? seq (:seon.fn.contract/form %)))
+                        findings)
+              "every recorded form is authored data"))))))
+
 (deftest contract-findings-ranks-each-incomplete-function-contract
   (test-support/with-database
     (fn [connection]

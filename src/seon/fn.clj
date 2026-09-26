@@ -2105,6 +2105,18 @@
      (when (db/read-refusal? specs) specs)
      (when (db/read-refusal? caller-counts) caller-counts)
      (let [stored-attributes (set (schema.datahike/database-attributes-core-in projection))
+           ;; A compiled slot carries the callables its predicates were bound to
+           ;; (`schema/compilable-form`); a finding records the AUTHORED form, so
+           ;; each bound callable reads back as the symbol it was bound from.
+           predicate-names (into {} (map (fn [[predicate callable]] [callable predicate]))
+                                 (schema/predicate-functions-in projection))
+           authored (fn [form]
+                      (walk/postwalk
+                       (fn [value]
+                         (cond (var? value) (symbol value)
+                               (and (fn? value) (contains? predicate-names value)) (get predicate-names value)
+                               :else value))
+                       form))
            specs (into {} specs)
            caller-counts (into {} caller-counts)
            structural-findings
@@ -2168,7 +2180,7 @@
                     {})]
                (mapv (fn [[finding form]]
                        {:seon.fn.contract/position position
-                        :seon.fn.contract/form form
+                        :seon.fn.contract/form (authored form)
                         :seon.fn.contract/finding finding})
                      (concat permissive structural unguarded unstorable))))
            arity-findings
