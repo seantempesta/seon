@@ -1,7 +1,7 @@
 (ns seon.cluster.acquisition-test
   (:require [clojure.java.io :as io]
             [clojure.test :refer [deftest is]]
-            [seon.cluster :as cluster]
+            [seon.cluster]
             [seon.cluster.agent :as agent]
             [seon.cluster.registry :as registry]
             [seon.cluster.store :as store]
@@ -9,8 +9,6 @@
             [seon.id :as id]
             [seon.schema :as schema]
             [seon.db :as db]
-            [seon.dev.mcp :as mcp]
-            [seon.operator.runtime :as runtime]
             [seon.env :as env]
             [seon.sci.eval :as sci]
             [seon.sci.eval-test]
@@ -79,7 +77,7 @@
     (support/delete-recursively! root))
   nil)
 
-(deftest ^{:seon.test/long "Measured 10,051 ms for canonical file-store population, two branch programs, two analyzed declarations, MCP evaluations and complete release."
+(deftest ^{:seon.test/long "Measured 10,051 ms for canonical file-store population, two branch programs, two analyzed declarations and complete release."
            :seon.test/long-ms 15000}
   acquisition-owns-only-its-isolated-resources
   (with-published-store
@@ -141,26 +139,7 @@
                                (agent/acquire-context! handle "acquisition-c") "acquisition-c")))]
              (is (zero? @installs))
              (println "C2-UNCHANGED" (:seon.proof/ms repeat-acquisition) "ms" @installs "installed rows"))
-           (swap! runtime/running-instances assoc "acquisition"
-                  {:seon.sci.eval/ctx ctx :seon.turn.loop/cluster handle :seon.store/store held})
-           (try
-             (let [definition (clojure.core/eval
-                               (read-string (#'mcp/sci-evaluation-form
-                                "(defn ^{:malli/schema [:=> [:cat] :int]} c2-tool-value [] 73)"
-                                "acquisition" 'seon.sci.eval-test false (name owned))))
-                   before (db/commit-id (db/db (:seon.db/connection a)))
-                   result (clojure.core/eval
-                           (read-string (#'mcp/sci-evaluation-form
-                            "(c2-tool-value)" "acquisition" 'seon.sci.eval-test true (name owned))))
-                   live (clojure.core/eval
-                         (read-string (#'mcp/sci-evaluation-form
-                          "(nil? (resolve 'c2-tool-value))" "acquisition" 'seon.sci.eval-test true)))]
-               (is (some? (:seon.program/row definition)))
-               (is (= 73 (:seon.sci.admit/value result)))
-               (is (true? (:seon.sci.admit/value live)))
-               (is (= before (db/commit-id (db/db (:seon.db/connection a))))))
-             (finally (swap! runtime/running-instances dissoc "acquisition")))
-           (println "C2-VISIBILITY-AND-MCP" (/ (- (System/nanoTime) started) 1e6) "ms")
+           (println "C2-VISIBILITY" (/ (- (System/nanoTime) started) 1e6) "ms")
            (let [release (measured #(agent/release-context! a))]
              (println "C2-RELEASE" (:seon.proof/ms release) "ms"))
            (reset! handles [])

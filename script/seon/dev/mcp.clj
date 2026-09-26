@@ -389,6 +389,8 @@
   explicit other one by name, so code moves with `in-ns`, as at a REPL."
   {:malli/schema [:=> [:cat :string :string [:maybe :symbol] :boolean [:maybe :string] :string] :string]}
   [source cluster namespace-symbol read-only? branch session-id]
+  ;; One syntax-quote builds the custody branch and its body, so `handle#` and
+  ;; `instance#` name the same bindings in both.
   (pr-str
    `(do
       ((requiring-resolve 'seon.cluster/project-next-prepl-value!)
@@ -402,16 +404,16 @@
            :seon.error/message ~(str "Cluster '" cluster "' has a live JVM REPL, but its agents are not armed; "
                                      "SCI evaluation is unavailable.")
            :seon.dev.mcp/cluster ~cluster}
-          (let [custody# ~(if branch
-                            `(select-keys
-                              ((requiring-resolve 'seon.cluster.host/host!)
-                               {:seon.turn.loop/cluster (assoc handle# :seon.store/store (:seon.store/store instance#))
-                                :seon.agent/branch ~(keyword branch)
-                                :seon.agent/id ~(str "mcp/" session-id)
-                                :seon.ns/name '~(or namespace-symbol 'user)})
-                              [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
-                            `{:seon.turn.loop/cluster handle# :seon.agent/routing (:seon.agent/routing handle#)
-                              :seon.agent/id "root"})
+          (let [custody# (if ~(some? branch)
+                           (select-keys
+                            ((requiring-resolve 'seon.cluster.host/host!)
+                             {:seon.turn.loop/cluster (assoc handle# :seon.store/store (:seon.store/store instance#))
+                              :seon.agent/branch ~(some-> branch keyword)
+                              :seon.agent/id ~(str "mcp/" session-id)
+                              :seon.ns/name '~(or namespace-symbol 'user)})
+                            [:seon.turn.loop/cluster :seon.agent/routing :seon.agent/id])
+                           {:seon.turn.loop/cluster handle# :seon.agent/routing (:seon.agent/routing handle#)
+                            :seon.agent/id "root"})
                 result# ((requiring-resolve 'seon.cluster.agent/evaluate-source!)
                          (cond-> (assoc custody# :seon.agent/segmenter 'seon.cluster.reply/code-sources
                                         :seon.cluster.reply/text ~source)

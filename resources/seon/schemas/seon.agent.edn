@@ -50,6 +50,7 @@
                       [:seon.agent/id :seon.agent/id]
                       [:seon.agent/branch :seon.agent/branch]
                       [:seon.agent/archived-tx {:optional true} :seon.agent/archived-tx]
+                      [:seon.agent/admission-closed-tx {:optional true} :seon.agent/admission-closed-tx]
                       [:seon.agent/namespace
                        {:optional true}
                        :seon.agent/namespace]
