@@ -500,6 +500,38 @@ with allocation and retained memory: branch creation, first and warm acquisition
 arm, a warm one- and two-form hosted run, sibling concurrency and retirement. The writer regression of §2.10 is the
 fix-write-cost lane's.
 
+**Hosting, round 3: stopped for the owner.** Astra's re-review (2258b63f7) accepts the custody choice, the branch-local
+SCI and projection, and the deletion credit, and keeps five findings open. Root's direction for this round: host and
+admission state is a database fact the writer checks; the live graph belongs to Flow, held by the constructor's
+returned value and passed to retire; no routing atom stores it. Checked at the REPL (default pid 94554):
+
+- **Admission as a fact is small and sound.** The run writer already decides a run's legality in one place
+  (`system-run-call`, `turn.clj:727-750`, which refused the continuation in fdbc9afdf); one admission attribute on the
+  session's agent row, checked there and in `plan-call`, makes retirement one transaction that closes admission, after
+  which the writer refuses every run by name. A submission that committed first is the run retirement then awaits.
+- **The live handles are the problem.** Every armed graph lives in the routing atom today: default's routing holds
+  `:seon.agent/armed {"root" …}`, `:seon.agent/channels {33229 …}` (33229 is root's entity id), `:seon.flow/graph`,
+  `::arming` and `::stopping` (`agent.clj:1149-1225`, `:1359-1406`). `arm!`, `disarm!`, `stop-graph!` and
+  `release-context!` all read and swap it. The one cross-call lookup that justifies it is wake delivery:
+  `wake/route!`'s Datahike listener, on the listener thread and outside every Flow graph, calls its `channels`
+  function to find a recipient's mailbox by entity id (`wake.clj:489-535`). For a one-agent host that lookup
+  needs no atom (the listener can close over the one mailbox), but `arm!` and the stop protocol cannot run without
+  one, and `wake/route!` sends an unknown recipient to an armer channel the host would have no consumer for.
+  So an atom-free host means changing the agent lifecycle owner itself, for every agent, which is well over 100
+  lines and crosses the seams and Flow owners.
+
+Three options, simplest first:
+
+| Option | Guarantee | Cost | Sacrifice |
+|---|---|---|---|
+| (a) Refuse branch SCI until the lifecycle carries its state in values | MCP evaluation is only ever an ordinary agent run; no bridge evaluator remains: `sci-evaluation-form` (43 lines), its dispatch (7) and the bridge's held-context release (about 20) go | about +12 / −70 source | lanes lose REPL work on their own branch through MCP until (c); they keep branchless root runs, JVM mode and `bin/test-check` on a branch |
+| **(b) Admission as a writer-checked fact, the existing lifecycle for the live graph (recommended)** | transaction-safe admission and retirement (one transaction closes it; the writer refuses later runs); the hosted agent armed by the existing `arm!` on the acquired execution's own routing, the atom's stated reason being wake delivery's cross-call lookup above; the branch's `wake/route!` listener with the host's channels function; retirement joins through the existing `stop-graph!`, retryable because admission, not a retained stop delay, carries the closed state | about +95 / −70 source (admission attribute and writer checks about 20, host about 35, listener about 15, bridge about 25), tests about +120 | keeps the routing atom, for which the owner must accept the stated reason; a message to another agent on the hosted branch still goes to the armer channel, so the host refuses creating a second agent there instead |
+| (c) An atom-free agent lifecycle, then (b)'s host | the atoms law applied to every agent: routing, arming and stopping state in the execution value and Flow proc state, `wake/route!` fed a channels function closed over values, one lifecycle for cluster and hosted agents | about +200 / −150 across `agent.clj`, `wake.clj`, `cluster.clj` and `turn.clj`, its own design and review first | the longest path to a lane working on its own branch; cross-owner with the seams and Flow lanes |
+
+**Price corrections** (Astra finding 7): option A's slices sum to +502 / −537 / −35 source on the revised rows (P1
++40/−26, P2 +55/−25, P3a +197/−21, P3b +85/−87, P3m +45/−100, P4 +80/−278); B to +664 / −537 / +127; C to +774 / −808
+/ −34, before tests and unpriced owner work. P3a's complete commit was +268 / −21 including schema and tests.
+
 **What the bridge keeps:** transport, discovery, sessions, and adapters for `runtime_status`, `branch` and `get_value`
 that call owners and encode their answers. `runtime_status`'s observation already renders through its declared AI face (79d052d15). The `branch` tool's
 refusals divide by owner (P5, folded into P3): "agents hold this branch" is custody and joins P3's retirement; "the
@@ -982,9 +1014,9 @@ entrance itself is the render plan's unpriced cut.
 
 | Option | Slices | Guarantee | Added / deleted / net | Sacrifice |
 |---|---|---|---|---|
-| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +285 / −567 / **−282** | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
-| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +447 / −567 / **−120** | as A; tests outside the composition until P6 |
-| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +557 / −838 / **−281** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −194) |
+| A. MCP evaluations become agent runs, read once and printed once (a partial migration) | P1 + P2 + P3 + P3m + P4 | every MCP evaluation is a run; faults arrive as errors; the MCP printer, summary, window, forms and status printer are gone | +502 / −537 / **−35** (revised rows; see §2.6 price corrections) | no retrieval beyond the budget for results produced after P4 (typed unavailable); `get_value` reads only older artifacts; nothing lands in files |
+| **B. A plus a landable replacement (recommended as the first dogfood milestone, labelled partial)** | A + S5 | as A, and one replacement lands REPL → merge → one file | +664 / −537 / **+127** | as A; tests outside the composition until P6 |
+| C. The full one-path milestone | B + P7 + P6 | MCP is transport, custody and stage choice only; tests enter the composition | +774 / −808 / **−34** | waits for the render plan's continuation entrance; C1's credit is conditional (without it −194) |
 
 B is recommended as the first dogfood milestone: it lands the owner's MCP law and the dogfood path without waiting
 for the continuation entrance, and it is labelled partial until P7 and P6 land. All three wait on the refresh cut and,
@@ -1019,7 +1051,7 @@ Revision 2's own row numbers 11.x-13.x collided with them and are withdrawn. Wha
 | 7.6 | clarify | Settlement's "diff removes the id from its subjects" is the id's removal from the accepted replacement's attribute map, merged and written back with it (D1) |
 | 7.13 | new | **Write-back is proven before exposure:** accepted replacement rows are spliced into one candidate, proven equal by the ordinary analyzer in memory, fenced by both heads and the file digest, published ordinarily and checked by digest; a failure restores only an unmodified candidate and reports accepted-but-not-written |
 | 8.6 | revise | An MCP JVM evaluation is a run of root's with the JVM evaluator stage, recorded and printed like any evaluation; `mode "host"` names the unrecorded diagnostic prepl, chosen by the caller, never as a fallback (§2.6, Q1) |
-| 8.8 | new | **An MCP evaluation is a run of root's under explicit custody:** on the cluster's branch, or on a lane branch, as the session's own agent hosted there (P3b); custody selected on every call; completion by listening before submitting, then rechecking by run id; namespace continuation per evaluation stage, the explicit namespace winning; retirement disarms only what the session armed and never releases custody before actual exit; faults arrive as errors in the reply |
+| 8.8 | new | **An MCP evaluation is an ordinary run of an agent under explicit custody:** root's on the cluster's branch; on a lane branch, the session's own hosted agent (option (b) of §2.6's round 3) or a refusal (option (a)); the run starts in the agent's assigned namespace (the writer's rule); completion by listening before submitting, then rechecking by run id; faults arrive as errors in the reply |
 | 1.16 | new | **The REPL path is one composition of stage values.** `evaluate-sources` segments, reads each form once, evaluates, finalizes, prints once and builds the record; a submission names its segmenter and evaluation stage as qualified symbols whose declared contracts are the stage schemas by name; record and print are not choosable; the lifecycle owner persists (§2.0) |
 | 1.17 | new | **Code is segmented as code.** An entrant submitting code (MCP, files, generated forms) uses `code-segments`; the reply planner is only for model replies (§0.4, §2.2) |
 | 8.9 | new | **Errors and faults reference the world.** Every error the pipeline produces or returns carries commit id, agent and branch, run or evaluation id and blob digests, never a database value, context, request or connection (§2.4) |
