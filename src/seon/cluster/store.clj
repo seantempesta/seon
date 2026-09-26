@@ -178,7 +178,13 @@
               ; path, or a reopen — or another spelling of the same
               ; directory — would present itself as a different store.
               :id (java.util.UUID/nameUUIDFromBytes
-                   (.getBytes ^String path "UTF-8"))}
+                   (.getBytes ^String path "UTF-8"))
+              ; Datahike writes index nodes and the commit record (new,
+              ; content-addressed, immutable) before the branch head that
+              ; names them, so konserve may make them durable at the head's
+              ; barrier: two drive flushes per commit instead of one pair per
+              ; key on macOS (docs/research/agent-platform/commit-floor-2026-09-26.md).
+              :config {:defer-immutable-sync? true}}
       :writer {:backend :self}
       :keep-history? keep-history?
       :fuse-index-roots? true
