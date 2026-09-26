@@ -3461,9 +3461,14 @@
                               :gen/elements [nil false 0 "" :k [] {}]}]]
                   :seon.sci.eval/shown]}
   [cluster database agent-id value]
+  ;; The ctx, time limit and error dial are the evaluation path's render world:
+  ;; without the ctx the value renderer selects no declared pair.
   (sci.eval/shown-result value {:seon.db/db database :seon.db/connection (:seon.db/connection cluster)
                                 :seon.agent/id agent-id :seon.boot/cluster-name (:seon.cluster/name cluster)
-                                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)}
+                                :seon.sci.admit/caps (:seon.sci.admit/caps cluster)
+                                :seon.sci.eval/ctx (:seon.sci.eval/ctx cluster)
+                                :seon.sci.eval/time-limit-ms (:seon.config.eval/time-limit-ms cluster)
+                                :seon.config/on-core-error (:seon.config/on-core-error cluster)}
                          nil))
 
 (defn- evaluation-terminal-data
