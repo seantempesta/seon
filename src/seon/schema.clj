@@ -764,7 +764,7 @@
           :seon.schema/definitions {schema-key definition}
           :seon.error/throwable failure})))))
 
-(declare canonical-data-string canonical-value-string)
+(declare canonical-data-string)
 
 (defn- portable-string-hash [s]
   (.hashCode ^String s))
@@ -772,49 +772,46 @@
 (defn- framed [tag payload]
   (str tag (count payload) ":" payload))
 
-(defn- canonical-coll-string [tag values]
-  (framed tag (apply str (map canonical-value-string values))))
-
 (defn- canonical-value-string
+  "The canonical encoding of `value`. It recurses through a local function, so
+  the armed wrapper runs once per value, never once per node."
   {:malli/schema [:=> [:cat :seon.schema/value] :string]}
   [value]
-  (cond
-    (nil? value) "n"
-    (true? value) "b1"
-    (false? value) "b0"
-    (keyword? value) (framed "k" (str value))
-    (symbol? value) (framed "y" (str value))
-    (string? value) (framed "s" value)
-    (number? value) (framed "d" (str value))
-    (vector? value) (canonical-coll-string "v" value)
-    (set? value) (canonical-coll-string
-                   "t" (sort (map canonical-value-string value)))
-    (map? value)
-    (canonical-coll-string
-      "m"
-      (sort (map (fn [[k v]]
-                   (str (canonical-value-string k)
-                        (canonical-value-string v)))
-                 value)))
-    (sequential? value) (canonical-coll-string "q" value)
-    ; EDN literals `seon.db/stable-value` admits as stable read data
-    ; (`src/seon/db.clj:422-424`). Rejecting them made every read result
-    ; carrying a `:db/instant` or a commit id undigestable, so the agent
-    ; history's retained read could never prove itself current and ANY
-    ; commit re-walked it (2026-09-16). Their tags are new, so no
-    ; fingerprint that encoded before this change encodes differently.
-    (instance? java.util.Date value)
-    (framed "i" (str (.getTime ^java.util.Date value)))
-    (instance? java.time.Instant value)
-    (framed "i" (str (.toEpochMilli ^java.time.Instant value)))
-    (uuid? value) (framed "u" (str value))
-    (char? value) (framed "c" (str value))
-    :else
-    (throw (ex-info "Schema projection fingerprint contains non-EDN data."
-                    {:seon.schema/error
-                     :seon.schema/noncanonical-projection-data
-                     :seon.schema/value value
-                     :seon.schema/noncanonical-projection-data true}))))
+  (letfn [(coll [tag values]
+            (framed tag (apply str (map encode values))))
+          (encode [value]
+            (cond
+              (nil? value) "n"
+              (true? value) "b1"
+              (false? value) "b0"
+              (keyword? value) (framed "k" (str value))
+              (symbol? value) (framed "y" (str value))
+              (string? value) (framed "s" value)
+              (number? value) (framed "d" (str value))
+              (vector? value) (coll "v" value)
+              (set? value) (coll "t" (sort (map encode value)))
+              (map? value)
+              (coll "m" (sort (map (fn [[k v]] (str (encode k) (encode v))) value)))
+              (sequential? value) (coll "q" value)
+              ; EDN literals `seon.db/stable-value` admits as stable read data
+              ; (`src/seon/db.clj:422-424`). Rejecting them made every read result
+              ; carrying a `:db/instant` or a commit id undigestable, so the agent
+              ; history's retained read could never prove itself current and ANY
+              ; commit re-walked it (2026-09-16). Their tags are new, so no
+              ; fingerprint that encoded before this change encodes differently.
+              (instance? java.util.Date value)
+              (framed "i" (str (.getTime ^java.util.Date value)))
+              (instance? java.time.Instant value)
+              (framed "i" (str (.toEpochMilli ^java.time.Instant value)))
+              (uuid? value) (framed "u" (str value))
+              (char? value) (framed "c" (str value))
+              :else
+              (throw (ex-info "Schema projection fingerprint contains non-EDN data."
+                              {:seon.schema/error
+                               :seon.schema/noncanonical-projection-data
+                               :seon.schema/value value
+                               :seon.schema/noncanonical-projection-data true}))))]
+    (encode value)))
 
 
 (defn canonical-data-string

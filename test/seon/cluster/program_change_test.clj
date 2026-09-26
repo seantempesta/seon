@@ -4,7 +4,8 @@
   makes it unknown (`:program-unknown`, never green or red). A failed adoption
   leaves the program unknown until one records. Every test injects its own
   identity atom; the JVM's `seon.sci.eval/loaded-identity` is never touched."
-  (:require [clojure.test :refer [deftest is testing]]
+  (:require [clojure.string :as str]
+            [clojure.test :refer [deftest is testing]]
             [seon.cluster :as cluster]
             [seon.db :as db]
             [seon.schema :as schema]
@@ -155,3 +156,14 @@
     (is (nil? (cluster/loaded-commit database commit (assoc published (key (first published)) "other bytes")))
         "one loaded file with other bytes names nothing: adoption reloads")
     (is (nil? (cluster/loaded-commit database commit {})) "nothing loaded names nothing")))
+
+(deftest the-loaded-program-inputs-include-every-arming-input
+  ;; Arming reads the loaded source files AND the packaged schema resources
+  ;; (contracts and supplied defaults compile from both), so the boot shortcut
+  ;; compares both against the one commit it armed (audit F10).
+  (let [inputs (@#'cluster/loaded-program-digests)
+        paths (set (keys inputs))]
+    (is (some #(str/starts-with? % "resources/seon/schemas/") paths)
+        "every packaged schema resource is an input")
+    (is (contains? paths "src/seon/cluster.clj") "a loaded first-party namespace is an input")
+    (is (every? string? (vals inputs)))))

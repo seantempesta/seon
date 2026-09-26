@@ -74,15 +74,15 @@
            ;; Every contracted Var this JVM has loaded is armed once here,
            ;; with its profiling cell and definition digest; adoption later
            ;; re-arms only changed identities (`cluster/refresh-source!`).
+           ;; ONE published commit: armed here and named loaded below.
+           published-commit (:seon.source/commit-id (source/current (:seon.store/store instance)))
            host-arming (cluster/arm-host-program!
-                        (assoc (cluster/published-program (:seon.store/store instance))
+                        (assoc (cluster/published-program (:seon.store/store instance) published-commit)
                                :seon.db/db (db/db connection))
                         boot-dials (:seon.flow/commit-fault! arm-request))
            ;; Launched on the published files and armed against them: the JVM
            ;; runs that commit, so the adoption after boot writes rows only.
-           _ (cluster/name-loaded-program!
-              (:seon.store/store instance)
-              (:seon.source/commit-id (source/current (:seon.store/store instance))))
+           _ (cluster/name-loaded-program! (:seon.store/store instance) published-commit)
            instance (publish! (assoc instance :seon.instrument/applied host-arming))
            bare-ctx
            (if base-ctx

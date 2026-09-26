@@ -235,6 +235,20 @@
   (str (.relativize (.toPath (.getCanonicalFile (io/file directory)))
                     (.toPath (io/file (absolute-path directory path))))))
 
+(defn canonical-relative-path
+  "`path` relative to `directory` when both are already canonical: a pure
+  path operation, no filesystem read. Anything else (a relative path, a path
+  outside `directory`) answers [[relative-path]]'s filesystem result.
+
+  Costs: none for a canonical path under `directory`; [[relative-path]]'s
+  two canonicalizations otherwise."
+  {:malli/schema [:=> [:cat :string :string] :string]}
+  [directory path]
+  (if (and (.isAbsolute (io/file path))
+           (str/starts-with? path (str directory java.io.File/separator)))
+    (subs path (inc (count directory)))
+    (relative-path directory path)))
+
 (defn- normalized-path
   ^Path [path]
   (.normalize (.toAbsolutePath (.toPath (io/file path)))))

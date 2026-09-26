@@ -571,10 +571,31 @@
          (not (pos? (compare start position)))
          (neg? (compare position end)))))
 
+(defn- span-index
+  "`spans` in start order (stable), for [[innermost-span]]."
+  [spans]
+  (vec (sort-by (juxt :row :col) spans)))
+
 (defn- innermost-span
-  [spans entry]
-  (last (sort-by (juxt :row :col)
-                (filter #(contains-position? % entry) spans))))
+  "The containing span of `entry` that starts last in the start-ordered `index`
+  (among equal starts, the last in the spans' order): a binary search for the
+  spans starting at or before `entry`, then a walk back to the first that
+  contains it. Proportional to log n plus the spans passed over, not to every
+  span of the file for every usage."
+  [index entry]
+  (let [position [(:row entry) (:col entry)]
+        starting (loop [low 0 high (count index)]
+                   (if (< low high)
+                     (let [middle (quot (+ low high) 2)
+                           span (nth index middle)]
+                       (if (pos? (compare [(:row span) (:col span)] position))
+                         (recur low middle)
+                         (recur (inc middle) high)))
+                     low))]
+    (loop [i (dec starting)]
+      (when-not (neg? i)
+        (let [span (nth index i)]
+          (if (contains-position? span entry) span (recur (dec i))))))))
 
 (defn- attributed-usages
   "Join implementation bodies to their dispatch identities using kondo spans.
@@ -590,10 +611,11 @@
                      (:symbols analysis))
         usages (into (into (vec (:var-usages analysis)) quoted)
                      (:java-class-usages analysis))
-        definitions (group-by :filename
-                              (remove #(= 'clojure.core/declare (:defined-by->lint-as %))
-                                      (:var-definitions analysis)))
-        calls (group-by :filename (filter :arity usages))
+        definitions (update-vals (group-by :filename
+                                           (remove #(= 'clojure.core/declare (:defined-by->lint-as %))
+                                                   (:var-definitions analysis)))
+                                 span-index)
+        calls (update-vals (group-by :filename (filter :arity usages)) span-index)
         methods (keep (fn [usage]
                         (when (:defmethod usage)
                           (when-let [span (innermost-span (get calls (:filename usage)) usage)]
@@ -603,7 +625,7 @@
         implementations (map #(assoc % :from (:protocol-ns %)
                                       :from-var (:method-name %))
                              (:protocol-impls analysis))
-        spans (group-by :filename (concat methods implementations))
+        spans (update-vals (group-by :filename (concat methods implementations)) span-index)
         var-quotes (group-by :filename (:var-quotes analysis))]
     (mapv (fn [usage]
             (if-let [span (innermost-span (get spans (:filename usage)) usage)]
@@ -635,12 +657,18 @@
                   [:map [:seon.fn.analyzer/var-quotes [:vector :map]]
                    [:seon.fn.analyzer/require-forms [:vector :map]]
                    [:seon.fn.analyzer/literal-defs [:set [:tuple :int :int]]]
-                   [:seon.fn.analyzer/task-maps-after-name [:set [:tuple :int :int]]]]]}
+                   [:seon.fn.analyzer/task-maps-after-name [:set [:tuple :int :int]]]
+                   [:seon.fn.analyzer/mentioned-symbols [:set :qualified-symbol]]]]}
   [filename source]
-  (let [nodes (tree-seq (comp seq :children) :children
-                        (binding [kondo.reader/*reader-exceptions* (atom [])]
-                          (kondo.utils/parse-string-all source)))]
-    {::var-quotes
+  (let [root (binding [kondo.reader/*reader-exceptions* (atom [])]
+               (kondo.utils/parse-string-all source))
+        nodes (tree-seq (comp seq :children) :children root)]
+    {;; Every qualified symbol the file's top-level forms carry as data, from
+     ;; this one parse (the program's `mentioned` symbols, seon.fn).
+     ::mentioned-symbols
+     (into #{} (comp (map kondo.utils/sexpr) (mapcat #(tree-seq coll? seq %)) (filter qualified-symbol?))
+           (:children root))
+     ::var-quotes
      (into [] (comp (filter #(= :var (:tag %)))
                     (map #(assoc (meta %) :filename filename))) nodes)
      ::require-forms
@@ -740,6 +768,7 @@
      [::keywords [:vector :map]]
      [::findings [:vector :map]]
      [::unanalyzed-namespaces [:set :symbol]]
+     [::mentioned-symbols [:set :qualified-symbol]]
      [::cache [:map [::examined :int] [::stale [:vector :map]]
                [::rebuilt [:vector :string]]]]]]}
   [{::keys [paths sources cache-root config-root]}]
@@ -787,8 +816,11 @@
                             (parsed-facts filename
                                           (or (get sources (analyzed-source-path filename))
                                               stdin-source (slurp filename)))]))
-                    (distinct (map :filename (concat (:var-usages raw-analysis)
-                                                     (:var-definitions raw-analysis)))))
+                    ;; Every captured source is parsed here, once: its facts
+                    ;; and its mentioned symbols (`::mentioned-symbols`).
+                    (distinct (concat (when mirror-root lint-paths)
+                                      (map :filename (concat (:var-usages raw-analysis)
+                                                             (:var-definitions raw-analysis))))))
         raw-analysis (update raw-analysis :var-definitions
                              (fn [definitions]
                                (mapv (fn [entry]
@@ -841,6 +873,7 @@
           (sort-by entry-order)
           vec)
      ::unanalyzed-namespaces (unanalyzed-namespaces (::cache-root result) raw-analysis)
+     ::mentioned-symbols (into #{} (mapcat ::mentioned-symbols) (vals spans))
      ;; Which cache entries the analysis found stale and rebuilt: the
      ;; publication's cache-miss count.
      ::cache (::cache result)})))

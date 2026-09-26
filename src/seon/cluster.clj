@@ -2344,6 +2344,21 @@
   ;; captures (`source/path-digests`).
   (source/path-digests (fs/source-directory) (loaded-namespace-paths)))
 
+(defn- loaded-program-digests
+  "The digests of every input this JVM's arming read: each loaded first-party
+  source file (launch bytes win over the disk for the namespaces loaded before
+  this one) and every packaged schema resource, which compile the contracts
+  and supplied defaults `arm-host-program!` arms."
+  {:malli/schema [:=> [:cat] :seon.source/relative-file-digests]}
+  []
+  (let [directory (fs/source-directory)
+        resources (filterv #(str/starts-with? % "resources/seon/schemas/")
+                           (source/discover-paths directory source-roots))]
+    (merge (source/path-digests
+            directory
+            (into resources (remove #(contains? launched-source-digests %)) (loaded-namespace-paths)))
+           launched-source-digests)))
+
 (defn loaded-commit
   "The loaded identity naming `commit-id` when `loaded` has its published bytes.
 
@@ -2378,12 +2393,7 @@
     (if-not database
       @sci.eval/loaded-identity
       (try
-        (if-let [loaded (loaded-commit database commit-id
-                                       (merge (source/path-digests
-                                               (fs/source-directory)
-                                               (filterv #(not (contains? launched-source-digests %))
-                                                        (loaded-namespace-paths)))
-                                              launched-source-digests))]
+        (if-let [loaded (loaded-commit database commit-id (loaded-program-digests))]
           (sci.eval/advance-loaded-identity! sci.eval/loaded-identity loaded)
           @sci.eval/loaded-identity)
         (finally (d/release-materialized-db database))))))
@@ -2468,18 +2478,20 @@
                (finally (d/release-materialized-db database))))))))
 
 (defn published-program
-  "The published source program's definition digests and program namespaces.
+  "The definition digests and program namespaces of the published `commit-id`.
 
   The loaded Vars derive from the files, which is what the published program
-  (`source/current`) indexes; a cluster branch may retain an older program.
+  indexes; a cluster branch may retain an older program. Boot reads
+  `source/current` once and hands the same commit here and to
+  [[name-loaded-program!]].
   Program namespaces are those whose file row lies under the `src/` source
   root; test namespaces load when a test request needs them."
-  {:malli/schema [:=> [:cat :seon.store/store]
+  {:malli/schema [:=> [:cat :seon.store/store :seon.source/commit-id]
                   [:map
                    [:seon.profile/definition-digests :seon.profile/definition-digests]
                    [:seon.cluster/program-namespaces [:vector :symbol]]]]}
-  [store]
-  (let [published (source/database store (:seon.source/commit-id (source/current store)))]
+  [store commit-id]
+  (let [published (source/database store commit-id)]
     (try
       {:seon.profile/definition-digests (definition-digests published)
        :seon.cluster/program-namespaces

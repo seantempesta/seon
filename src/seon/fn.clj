@@ -1666,10 +1666,10 @@
 
 (defn- artifact
   [row-shapes directory file root context rows findings]
-  (let [canonical-path (fs/relative-path directory (.getCanonicalPath ^java.io.File file))
+  (let [canonical-path (fs/canonical-relative-path directory (.getCanonicalPath ^java.io.File file))
         file-row (cond-> {:seon.fn.file/relative-path canonical-path
                           :seon.fn.file/digest (:seon.fn.file/digest context)}
-                   root (assoc :seon.fn.file/relative-root (fs/relative-path directory root)))
+                   root (assoc :seon.fn.file/relative-root (fs/canonical-relative-path directory root)))
         file-row (cond-> file-row
                    (some :seon.fn/unresolved-references rows)
                    (assoc :seon.fn/unresolved-references
@@ -1682,13 +1682,13 @@
                 (if (and (vector? value)
                          (= :seon.fn.file/relative-path (first value))
                          (= 2 (count value)))
-                  [:seon.fn.file/relative-path (fs/relative-path directory (second value))]
+                  [:seon.fn.file/relative-path (fs/canonical-relative-path directory (second value))]
                   value))
               rows)
         findings (mapv (fn [finding]
                          (-> finding
                              (assoc :seon.fn.finding/relative-path
-                                    (fs/relative-path directory (::analyzer/filename finding)))
+                                    (fs/canonical-relative-path directory (::analyzer/filename finding)))
                              (dissoc ::analyzer/filename)))
                        findings)
         canonical-rows
@@ -2658,12 +2658,11 @@
                              ::analyzer/config-root (str (io/file directory analyzer/config-directory))}
                       cache-root (assoc ::analyzer/cache-root cache-root)))
           _ (assert-clean-analysis! analysis (first-party-function-symbols analysis))
-          values (mapcat #(map kondo.utils/sexpr
-                               (:children (kondo.utils/parse-string-all (:text %))))
-                         (vals contexts))
           schema-values (keep forms (into #{} (mapcat val) (keywords-by-holder analysis)))
-          mentioned (into #{} (filter qualified-symbol?)
-                          (mapcat #(tree-seq coll? seq %) (concat values schema-values)))
+          ;; The sources' own symbols come from the analyzer's one parse.
+          mentioned (into (::analyzer/mentioned-symbols analysis)
+                          (comp (mapcat #(tree-seq coll? seq %)) (filter qualified-symbol?))
+                          schema-values)
           known (when database
                   (db/q '[:find [?symbol ...] :in $ [?symbol ...]
                           :where [_ :seon.fn/sym ?symbol]]
@@ -2845,14 +2844,24 @@
         projection (analysis-projection request prior-projection (some-> selected set))
         cache-root (or (::analyzer/cache-root request)
                        (str (io/file directory analyzer/config-directory ".cache")))
+        ;; Only the names the selected files declared: the namespaces whose
+        ;; resolver entries are superseded and the definitions a removal
+        ;; guard compares, never the files' whole rows.
         previous (if (and database selected)
-                   (file-rows database (vec selected) :seon.fn/file) [])
-        _ (when (:seon.error/at previous)
+                   (db/q '[:find ?attribute ?value
+                           :in $ [?path ...] [?attribute ...]
+                           :where [?file :seon.fn.file/relative-path ?path]
+                                  [?row :seon.fn/file ?file]
+                                  [?row ?attribute ?value]]
+                         database (vec selected) [:seon.ns/name :seon.fn/sym])
+                   [])
+        _ (when (map? previous)
             (throw (ex-info (:seon.error/message previous) previous)))
-        _ (analyzer/forget-namespaces! cache-root (into #{} (keep :seon.ns/name) previous))
+        previous-names (fn [attribute] (into #{} (keep (fn [[a v]] (when (= attribute a) v))) previous))
+        _ (analyzer/forget-namespaces! cache-root (previous-names :seon.ns/name))
         artifacts (analyzed-artifacts projection roots directory
                      (mapv #(.getCanonicalPath ^java.io.File %) files) database cache-root captured)
-        removed (set/difference (into #{} (keep :seon.fn/sym) previous)
+        removed (set/difference (previous-names :seon.fn/sym)
                                (into #{} (comp (mapcat :seon.fn.file/rows) (keep :seon.fn/sym)) artifacts))
         ;; A removed definition's edges live on its CALLERS, and an invoker's
         ;; edges derive from the whole declaration population. Recompute the
